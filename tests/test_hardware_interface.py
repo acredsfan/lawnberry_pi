@@ -114,6 +114,9 @@ class TestI2CManager:
     
     async def test_device_health_tracking(self):
         """Test device health is properly tracked"""
+        # Reset singleton to ensure clean state
+        I2CManager._instance = None
+        
         manager = I2CManager()
         await manager.initialize()
         

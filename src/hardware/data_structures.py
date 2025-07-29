@@ -1,6 +1,6 @@
 """Standardized data structures for sensor readings"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Dict, Any
 import asyncio
@@ -13,22 +13,18 @@ class SensorReading:
     sensor_id: str
     value: Any
     unit: str
-    quality: float = 1.0  # 0.0 to 1.0, 1.0 = perfect
-    metadata: Optional[Dict[str, Any]] = None
-
-    def __post_init__(self):
-        if self.metadata is None:
-            self.metadata = {}
+    quality: float
+    metadata: Optional[Dict[str, Any]]
 
 
 @dataclass
 class I2CDeviceReading(SensorReading):
     """I2C device reading with address info"""
     i2c_address: int
-    register: Optional[int] = None
+    register: Optional[int]
 
 
-@dataclass
+@dataclass  
 class SerialDeviceReading(SensorReading):
     """Serial device reading with port info"""
     port: str
@@ -51,11 +47,7 @@ class CameraFrame:
     height: int
     format: str
     data: bytes
-    metadata: Optional[Dict[str, Any]] = None
-
-    def __post_init__(self):
-        if self.metadata is None:
-            self.metadata = {}
+    metadata: Optional[Dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -63,6 +55,22 @@ class ToFReading(I2CDeviceReading):
     """Time-of-Flight sensor reading in millimeters"""
     distance_mm: int
     range_status: str = "valid"
+
+
+@dataclass
+class PowerReading(I2CDeviceReading):
+    """Power monitor reading"""
+    voltage: float  # V
+    current: float  # A
+    power: float    # W
+
+
+@dataclass
+class EnvironmentalReading(I2CDeviceReading):
+    """Environmental sensor reading (BME280)"""
+    temperature: float  # °C
+    humidity: float     # %
+    pressure: float     # hPa
 
 
 @dataclass
@@ -83,22 +91,6 @@ class GPSReading(SerialDeviceReading):
     accuracy: float  # meters
     satellites: int
     fix_type: str  # 'none', '2d', '3d', 'rtk'
-
-
-@dataclass
-class PowerReading(I2CDeviceReading):
-    """Power monitor reading"""
-    voltage: float  # V
-    current: float  # A
-    power: float    # W
-
-
-@dataclass
-class EnvironmentalReading(I2CDeviceReading):
-    """Environmental sensor reading (BME280)"""
-    temperature: float  # °C
-    humidity: float     # %
-    pressure: float     # hPa
 
 
 @dataclass
