@@ -1,77 +1,70 @@
-# Hardware Interface Layer Configuration
-
-# I2C Configuration
+camera:
+  buffer_size: 5
+  device_path: /dev/video0
+  fps: 30
+  height: 1080
+  width: 1920
+gpio:
+  pins:
+    blade_direction: 25
+    blade_enable: 24
+    tof_left_interrupt: 6
+    tof_left_shutdown: 22
+    tof_right_interrupt: 12
+    tof_right_shutdown: 23
 i2c:
   bus_number: 1
   devices:
-    tof_left: 0x29
-    tof_right: 0x30
-    power_monitor: 0x40
-    environmental: 0x76
-    display: 0x3c
-
-# Serial Device Configuration
-serial:
-  devices:
-    robohat:
-      port: "/dev/ttyACM1"
-      baud: 115200
-      timeout: 1.0
-    gps:
-      port: "/dev/ttyACM0"
-      baud: 38400
-      timeout: 1.0
-    imu:
-      port: "/dev/ttyAMA4"
-      baud: 3000000
-      timeout: 0.1
-
-# GPIO Pin Configuration
-gpio:
-  pins:
-    tof_left_shutdown: 22
-    tof_right_shutdown: 23
-    tof_left_interrupt: 6
-    tof_right_interrupt: 12
-    blade_enable: 24
-    blade_direction: 25
-
-# Camera Configuration
-camera:
-  device_path: "/dev/video0"
-  width: 1920
-  height: 1080
-  fps: 30
-  buffer_size: 5
-
-# Plugin Configuration
+    display: 60
+    environmental: 118
+    power_monitor: 64
+    tof_left: 41
+    tof_right: 48
+logging_level: INFO
 plugins:
-  - name: "tof_left"
-    enabled: true
-    parameters:
-      i2c_address: 0x29
-      shutdown_pin: 22
-      interrupt_pin: 6
-      
-  - name: "tof_right"
-    enabled: true
-    parameters:
-      i2c_address: 0x30
-      shutdown_pin: 23
-      interrupt_pin: 12
-      
-  - name: "power_monitor"
-    enabled: true
-    parameters:
-      i2c_address: 0x40
-      channel: 1
-      
-  - name: "robohat"
-    enabled: true
-    parameters: {}
-
-# System Configuration
-logging_level: "INFO"
+- enabled: true
+  name: tof_left
+  parameters:
+    i2c_address: 41
+    interrupt_pin: 6
+    shutdown_pin: 22
+- enabled: true
+  name: tof_right
+  parameters:
+    i2c_address: 48
+    interrupt_pin: 12
+    shutdown_pin: 23
+- enabled: true
+  name: power_monitor
+  parameters:
+    channel: 1
+    i2c_address: 64
+- enabled: true
+  name: robohat
+  parameters: {}
+- enabled: true
+  name: sensor1
+  parameters: {}
+- enabled: true
+  name: sensor2
+  parameters: {}
+- enabled: true
+  name: test_sensor
+  parameters: {}
 retry_attempts: 3
 retry_base_delay: 0.1
 retry_max_delay: 5.0
+serial:
+  devices:
+    gps:
+      baud: 38400
+      port: /dev/ttyACM0
+      timeout: 1.0
+    imu:
+      baud: 3000000
+      port: /dev/ttyAMA4
+      timeout: 0.1
+    robohat:
+      baud: 115200
+      port: /dev/ttyACM1
+      timeout: 1.0
