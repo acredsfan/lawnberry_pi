@@ -29,10 +29,10 @@ class EnvironmentSetup:
                 'required': True
             },
             'REACT_APP_GOOGLE_MAPS_API_KEY': {
-                'description': 'Google Maps API key for web UI',
+                'description': 'Google Maps API key for web UI (optional - falls back to OpenStreetMap)',
                 'url': 'https://console.cloud.google.com/apis/credentials',
                 'validation': self._validate_google_maps_key,
-                'required': True
+                'required': False
             },
             'JWT_SECRET_KEY': {
                 'description': 'JWT secret for web authentication',
@@ -300,13 +300,16 @@ class EnvironmentSetup:
             return False, f"Network error during validation: {str(e)}"
     
     def _validate_google_maps_key(self, api_key: str) -> Tuple[bool, str]:
-        """Validate Google Maps API key"""
-        if not api_key or len(api_key) < 10:
-            return False, "API key too short"
+        """Validate Google Maps API key with comprehensive error handling"""
+        if not api_key or api_key.strip() == 'your_google_maps_api_key_here':
+            return False, "API key not configured - using OpenStreetMap fallback"
+        
+        if len(api_key) < 10:
+            return False, "API key too short - check your configuration"
         
         # Basic format check - Google API keys start with AIza
         if not api_key.startswith('AIza'):
-            return False, "Google API keys typically start with 'AIza'"
+            return False, "Google API keys typically start with 'AIza' - verify your key"
         
         # Test with a simple geocoding request
         try:
@@ -320,17 +323,28 @@ class EnvironmentSetup:
             
             if response.status_code == 200:
                 data = response.json()
-                if data.get('status') == 'OK':
-                    return True, "API key validated successfully"
-                elif data.get('status') == 'REQUEST_DENIED':
-                    return False, "API key denied - check restrictions"
+                status = data.get('status')
+                
+                if status == 'OK':
+                    return True, "Google Maps API key validated successfully"
+                elif status == 'REQUEST_DENIED':
+                    error_msg = data.get('error_message', 'API key denied')
+                    return False, f"API key denied: {error_msg}. Check API restrictions and billing account."
+                elif status == 'OVER_QUERY_LIMIT':
+                    return False, "API quota exceeded. Check your Google Cloud billing and quota limits."
+                elif status == 'INVALID_REQUEST':
+                    return False, "Invalid API request format. This shouldn't happen - contact support."
                 else:
-                    return False, f"API error: {data.get('status')}"
+                    return False, f"API validation failed with status: {status}"
+            elif response.status_code == 403:
+                return False, "API key forbidden (403). Check billing account and API enablement."
+            elif response.status_code == 400:
+                return False, "Bad request (400). API key may be malformed."
             else:
-                return False, f"HTTP error: {response.status_code}"
+                return False, f"HTTP error {response.status_code}. Check network connectivity."
                 
         except requests.RequestException as e:
-            return False, f"Network error during validation: {str(e)}"
+            return False, f"Network error during validation: {str(e)}. System will use OpenStreetMap fallback."
     
     def _validate_jwt_secret(self, secret: str) -> Tuple[bool, str]:
         """Validate JWT secret key"""

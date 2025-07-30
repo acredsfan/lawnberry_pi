@@ -177,3 +177,32 @@ export interface NavigationState {
   }>
   coverage: Array<{ lat: number; lng: number; covered: boolean }>
 }
+
+export type MapProvider = 'google' | 'openstreetmap'
+
+export type MapUsageLevel = 'high' | 'medium' | 'low'
+
+export interface MapConfig {
+  provider: MapProvider
+  usageLevel: MapUsageLevel
+  apiKey?: string
+  defaultCenter: { lat: number; lng: number }
+  defaultZoom: number
+  enableCaching: boolean
+  offlineMode: boolean
+}
+
+export interface MapError {
+  type: 'api_key_invalid' | 'quota_exceeded' | 'network_error' | 'billing_error' | 'generic'
+  message: string
+  provider: MapProvider
+  canFallback: boolean
+}
+
+export interface MapState {
+  isLoading: boolean
+  error: MapError | null
+  currentProvider: MapProvider
+  isOffline: boolean
+  cacheStatus: 'empty' | 'partial' | 'full'
+}

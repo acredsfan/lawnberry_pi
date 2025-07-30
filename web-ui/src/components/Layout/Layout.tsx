@@ -1,6 +1,6 @@
 import React from 'react'
 import { Box, AppBar, Toolbar, Typography, IconButton, Drawer, List, ListItem, ListItemIcon, ListItemText, Badge, useTheme, useMediaQuery } from '@mui/material'
-import { Menu as MenuIcon, Dashboard as DashboardIcon, Navigation as NavigationIcon, Settings as SettingsIcon, PhotoCamera as TrainingIcon, Notifications as NotificationsIcon, Emergency as EmergencyIcon } from '@mui/icons-material'
+import { Menu as MenuIcon, Dashboard as DashboardIcon, Navigation as NavigationIcon, Map as MapIcon, Settings as SettingsIcon, PhotoCamera as TrainingIcon, Notifications as NotificationsIcon, Warning as EmergencyIcon } from '@mui/icons-material'
 import { useSelector, useDispatch } from 'react-redux'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { RootState } from '../../store/store'
@@ -31,6 +31,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: DashboardIcon, path: '/dashboard' },
     { id: 'navigation', label: 'Navigation', icon: NavigationIcon, path: '/navigation' },
+    { id: 'maps', label: 'Maps', icon: MapIcon, path: '/maps' },
     { id: 'training', label: 'Training', icon: TrainingIcon, path: '/training' },
     { id: 'settings', label: 'Settings', icon: SettingsIcon, path: '/settings' },
   ]

@@ -102,6 +102,47 @@ class TestEnvironmentSecurity:
             cache_manager = CacheManager()
             assert cache_manager.redis_password is None
     
+    def test_google_maps_api_validation(self):
+        """Test Google Maps API key validation and fallback behavior"""
+        from scripts.setup_environment import EnvironmentSetup
+        
+        setup = EnvironmentSetup()
+        
+        # Test with no API key (should indicate fallback)
+        valid, message = setup._validate_google_maps_key("")
+        assert not valid
+        assert "OpenStreetMap fallback" in message
+        
+        # Test with placeholder key
+        valid, message = setup._validate_google_maps_key("your_google_maps_api_key_here")
+        assert not valid
+        assert "not configured" in message
+        
+        # Test with malformed key
+        valid, message = setup._validate_google_maps_key("invalid_key")
+        assert not valid
+        assert "AIza" in message
+        
+        # Test with properly formatted key (will fail without real key, but format should pass)
+        test_key = "AIza" + "x" * 35  # Proper format but fake key
+        valid, message = setup._validate_google_maps_key(test_key)
+        # Should fail validation but not due to format
+        assert not valid
+        # Message should not mention format issues
+        assert "AIza" not in message
+    
+    def test_environment_setup_google_maps_optional(self):
+        """Test that environment setup treats Google Maps as optional"""
+        from scripts.setup_environment import EnvironmentSetup
+        
+        setup = EnvironmentSetup()
+        
+        # Verify Google Maps is marked as optional
+        maps_config = setup.required_vars.get('REACT_APP_GOOGLE_MAPS_API_KEY', {})
+        assert maps_config.get('required') is False
+        assert "optional" in maps_config.get('description', '').lower()
+        assert "fallback" in maps_config.get('description', '').lower()
+    
     def test_config_files_no_sensitive_data(self):
         """Test that config files don't contain sensitive data"""
         # Test weather.yaml

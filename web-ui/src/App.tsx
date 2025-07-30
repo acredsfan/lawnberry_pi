@@ -9,6 +9,7 @@ import { setWeatherData } from './store/slices/weatherSlice'
 import Layout from './components/Layout/Layout'
 import Dashboard from './pages/Dashboard'
 import Navigation from './pages/Navigation'
+import Maps from './pages/Maps'
 import Settings from './pages/Settings'
 import Training from './pages/Training'
 import Logo from './components/Logo'
@@ -156,6 +157,7 @@ const App: React.FC = () => {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/navigation" element={<Navigation />} />
+          <Route path="/maps" element={<Maps />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/training" element={<Training />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

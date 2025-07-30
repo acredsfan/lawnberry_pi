@@ -213,7 +213,7 @@ sudo reboot
 ```bash
 # Create directory and download
 cd /home/pi
-git clone https://github.com/acredsfan/lawnberry-pi.git
+git clone https://github.com/your-repo/lawnberry-pi.git
 cd lawnberry-pi
 
 # Make installation script executable
@@ -266,13 +266,65 @@ LOG_LEVEL=INFO
 5. Copy your default API key
 6. Paste into `.env` file as `OPENWEATHER_API_KEY`
 
-#### Google Maps API Key (Free tier available)
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create new project or select existing one
-3. Enable "Maps JavaScript API"
-4. Go to "Credentials" → "Create Credentials" → "API Key"
-5. Copy the API key
-6. Paste into `.env` file as `REACT_APP_GOOGLE_MAPS_API_KEY`
+#### Google Maps API Key (Optional - Free tier available)
+
+**Note**: Google Maps API is optional. If not configured, LawnBerryPi will automatically use OpenStreetMap as a fallback with full functionality.
+
+**Step-by-step Google Maps API setup**:
+
+1. **Create Google Cloud Account**
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Sign in with your Google account
+   - Accept terms of service if prompted
+
+2. **Create or Select Project**
+   - Click "Select a project" dropdown at the top
+   - Click "New Project" or select existing project
+   - Enter project name (e.g., "LawnBerryPi Maps")
+   - Click "Create"
+
+3. **Enable Required APIs**
+   - Go to "APIs & Services" → "Library"
+   - Search for and enable these APIs:
+     - **Maps JavaScript API** (required for map display)
+     - **Geocoding API** (required for address search)
+     - **Places API** (optional, for enhanced location search)
+
+4. **Create API Key**
+   - Go to "APIs & Services" → "Credentials"
+   - Click "Create Credentials" → "API Key"
+   - Copy the generated API key
+   - **Important**: Click "Restrict Key" for security
+
+5. **Configure API Key Restrictions** (Recommended for security)
+   - **Application restrictions**: Select "HTTP referrers"
+   - Add your LawnBerryPi domains:
+     - `http://localhost:3000/*` (for local development)
+     - `http://[your-pi-ip]:3000/*` (replace with your Pi's IP)
+     - `https://[your-domain]/*` (if using custom domain)
+   - **API restrictions**: Select "Restrict key"
+   - Choose: Maps JavaScript API, Geocoding API, Places API
+
+6. **Set Up Billing** (Required even for free tier)
+   - Go to "Billing" in Google Cloud Console
+   - Add a billing account (credit card required)
+   - **Note**: Free tier includes $200 monthly credit, sufficient for personal use
+   - Set up billing alerts to avoid unexpected charges
+
+7. **Configure in LawnBerryPi**
+   - Add API key to `.env` file as `REACT_APP_GOOGLE_MAPS_API_KEY`
+   - Set usage level: `REACT_APP_GOOGLE_MAPS_USAGE_LEVEL=medium`
+
+**Cost Management Options**:
+- **Low usage**: Updates every 10 seconds, basic features only
+- **Medium usage**: Updates every 5 seconds, all features (recommended)
+- **High usage**: Real-time updates, maximum quality (higher API usage)
+
+**Troubleshooting Common Issues**:
+- **"API key denied"**: Check API restrictions and billing account
+- **"Quota exceeded"**: Check usage limits in Google Cloud Console
+- **"Billing required"**: Add billing account even for free tier usage
+- **Map not loading**: System automatically falls back to OpenStreetMap
 
 ## Step 4: Initial Configuration and Testing
 

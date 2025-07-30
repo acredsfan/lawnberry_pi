@@ -1,5 +1,6 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import { MowerStatus, Schedule, MowingPattern, YardBoundary } from '../../types'
+import { Boundary } from '../../services/boundaryService'
 
 interface MowerState {
   status: MowerStatus | null
@@ -7,6 +8,7 @@ interface MowerState {
   schedules: Schedule[]
   patterns: MowingPattern[]
   boundaries: YardBoundary[]
+  yardBoundaries: Boundary[]
   currentSchedule: string | null
   currentPattern: string | null
   emergencyStop: boolean
@@ -16,6 +18,8 @@ interface MowerState {
     timestamp: number
     result: 'success' | 'error' | 'pending'
   }>
+  boundaryLoading: boolean
+  boundaryError: string | null
 }
 
 const initialState: MowerState = {
@@ -47,24 +51,38 @@ const initialState: MowerState = {
     {
       id: 'waves',
       name: 'Waves', 
-      description: 'Curved wave pattern',
+      description: 'Sinusoidal wave pattern for natural appearance and excellent coverage',
       type: 'waves',
-      parameters: { spacing: 0.4, angle: 30 }
+      parameters: { 
+        amplitude: 0.75,
+        wavelength: 8.0,
+        base_angle: 0,
+        spacing: 0.4,
+        overlap: 0.1 
+      }
     },
     {
       id: 'crosshatch',
       name: 'Crosshatch',
-      description: 'Overlapping perpendicular lines',
+      description: 'Overlapping perpendicular lines for maximum coverage and cut quality',
       type: 'crosshatch',
-      parameters: { spacing: 0.3, angle: 45, overlap: 0.1 }
+      parameters: { 
+        first_angle: 45,
+        second_angle: 135,
+        spacing: 0.3,
+        overlap: 0.1 
+      }
     }
   ],
   boundaries: [],
+  yardBoundaries: [],
   currentSchedule: null,
   currentPattern: null,
   emergencyStop: false,
   lastCommand: null,
-  commandHistory: []
+  commandHistory: [],
+  boundaryLoading: false,
+  boundaryError: null
 }
 
 const mowerSlice = createSlice({
@@ -158,5 +176,7 @@ export const {
   addCommand,
   updateCommandResult
 } = mowerSlice.actions
+
+// Additional boundary management actions will be added via thunks
 
 export default mowerSlice.reducer

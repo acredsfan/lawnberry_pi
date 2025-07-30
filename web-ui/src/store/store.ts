@@ -4,6 +4,7 @@ import weatherReducer from './slices/weatherSlice'
 import settingsReducer from './slices/settingsSlice'
 import navigationReducer from './slices/navigationSlice'
 import uiReducer from './slices/uiSlice'
+import mapReducer from './slices/mapSlice'
 
 export const store = configureStore({
   reducer: {
@@ -12,6 +13,7 @@ export const store = configureStore({
     settings: settingsReducer,
     navigation: navigationReducer,
     ui: uiReducer,
+    map: mapReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

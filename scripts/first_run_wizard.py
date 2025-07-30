@@ -284,12 +284,38 @@ class FirstRunWizard:
             if response != 'y':
                 return True
         
+        # Provide Maps API guidance
+        print("\n🗺️  Google Maps API Configuration")
+        print("━" * 50)
+        print("Google Maps API is OPTIONAL for enhanced mapping features.")
+        print("If not configured, LawnBerryPi will use OpenStreetMap automatically.")
+        print("\nBenefits of Google Maps:")
+        print("  • High-quality satellite imagery")
+        print("  • Advanced geocoding and address search")
+        print("  • Enhanced location services")
+        print("\nGoogle Maps requires:")
+        print("  • Google Cloud account (free)")
+        print("  • Billing account setup (free tier available)")
+        print("  • API key configuration")
+        print("\n📖 See docs/installation-guide.md for detailed setup instructions")
+        
+        maps_choice = input("\nDo you want to configure Google Maps API now? (y/N): ").strip().lower()
+        
         try:
             setup = EnvironmentSetup()
-            success = setup.run_setup(interactive=True)
+            
+            if maps_choice == 'y':
+                print("\n🔧 Running full environment setup with Google Maps...")
+                success = setup.run_setup(interactive=True)
+            else:
+                print("\n🔧 Running environment setup (Google Maps skipped)...")
+                print("You can configure Google Maps later using: python3 scripts/setup_environment.py")
+                success = setup.run_setup(interactive=True)
             
             if success:
                 print("\n✅ Environment variables configured successfully!")
+                if maps_choice != 'y':
+                    print("🗺️  Using OpenStreetMap for mapping (Google Maps can be added later)")
             else:
                 print("\n❌ Environment setup failed")
                 print("You can run setup later with: python3 scripts/setup_environment.py")

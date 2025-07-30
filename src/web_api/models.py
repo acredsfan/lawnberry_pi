@@ -4,9 +4,12 @@ API request/response models with validation for all endpoints.
 """
 
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Union
-from pydantic import BaseModel, Field, validator
+from typing import List, Optional, Dict, Any, Union
 from enum import Enum
+
+from pydantic import BaseModel, Field, validator
+
+from .utils import sanitize_string
 
 
 # Enums
@@ -198,12 +201,40 @@ class NoGoZone(BaseAPIModel):
         return v
 
 
+class HomeLocationType(str, Enum):
+    """Predefined home location types"""
+    CHARGING_STATION = "charging_station"
+    STORAGE_LOCATION = "storage_location"
+    MAINTENANCE_AREA = "maintenance_area"
+    CUSTOM = "custom"
+
+
+class HomeLocation(BaseAPIModel):
+    """Home location definition with type and coordinates"""
+    id: str
+    name: str
+    type: HomeLocationType
+    custom_type: Optional[str] = None  # Used when type is CUSTOM
+    position: Position
+    is_default: bool = False
+    description: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    @validator('custom_type')
+    def validate_custom_type(cls, v, values):
+        if values.get('type') == HomeLocationType.CUSTOM and not v:
+            raise ValueError('custom_type is required when type is CUSTOM')
+        return v
+
+
 class MapData(BaseAPIModel):
     """Complete map data"""
     boundaries: List[Boundary] = Field(default_factory=list)
     no_go_zones: List[NoGoZone] = Field(default_factory=list)
-    home_position: Optional[Position] = None
-    charging_spots: List[Position] = Field(default_factory=list)
+    home_position: Optional[Position] = None  # Deprecated, use home_locations
+    home_locations: List[HomeLocation] = Field(default_factory=list)
+    charging_spots: List[Position] = Field(default_factory=list)  # Deprecated
     coverage_map: Optional[Dict[str, Any]] = None
 
 
@@ -316,4 +347,60 @@ class PaginatedResponse(BaseAPIModel):
     def calculate_pages(cls, v, values):
         total = values.get('total', 0)
         size = values.get('size', 20)
-        return (total + size - 1) // size if total > 0 else 1
+        return max(1, (total + size - 1) // size) if total > 0 else 1
+
+
+# Progress Tracking Models
+class PathPoint(TimestampedModel):
+    """Point in mowing path history"""
+    position: Position
+    activity: str = Field(default="idle")  # idle, moving, mowing, turning, avoiding
+    heading: float = Field(ge=0, lt=360, default=0)
+    speed: float = Field(ge=0, default=0)
+    battery_level: float = Field(ge=0, le=100, default=0)
+
+
+class MowingSession(BaseAPIModel):
+    """Mowing session data"""
+    session_id: str
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    total_area: float = Field(ge=0, default=0)
+    covered_area: float = Field(ge=0, default=0)
+    coverage_percentage: float = Field(ge=0, le=100, default=0)
+    time_elapsed: int = Field(ge=0, default=0)  # seconds
+    estimated_time_remaining: Optional[int] = None  # seconds
+    battery_used: float = Field(ge=0, le=100, default=0)
+    average_speed: float = Field(ge=0, default=0)
+    distance_traveled: float = Field(ge=0, default=0)
+    efficiency: float = Field(ge=0, le=100, default=0)
+    current_activity: str = Field(default="idle")
+    pattern_id: Optional[str] = None
+    boundary_id: Optional[str] = None
+
+
+class ProgressUpdate(TimestampedModel):
+    """Real-time progress update"""
+    session_id: str
+    position: Position
+    coverage_percentage: float = Field(ge=0, le=100)
+    time_elapsed: int = Field(ge=0)
+    battery_level: float = Field(ge=0, le=100)
+    current_activity: str
+    estimated_time_remaining: Optional[int] = None
+
+
+class CoverageArea(BaseAPIModel):
+    """Coverage area polygon"""
+    coordinates: List[Position]
+    area: float = Field(ge=0)
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+
+class PathHistory(BaseAPIModel):
+    """Complete path history for a session"""
+    session_id: str
+    points: List[PathPoint]
+    total_distance: float = Field(ge=0, default=0)
+    start_time: datetime
+    end_time: Optional[datetime] = None

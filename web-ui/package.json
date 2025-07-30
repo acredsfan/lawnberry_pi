@@ -19,6 +19,8 @@
     "typescript": "^4.9.0",
     "recharts": "^2.8.0",
     "@googlemaps/js-api-loader": "^1.16.0",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1",
     "date-fns": "^2.30.0",
     "react-query": "^3.39.0",
     "react-dropzone": "^14.2.0"
@@ -28,6 +30,7 @@
     "vite": "^4.4.0",
     "vite-plugin-pwa": "^0.16.0",
     "@types/googlemaps": "^3.43.0",
+    "@types/leaflet": "^1.9.8",
     "eslint": "^8.45.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",

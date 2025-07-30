@@ -613,6 +613,143 @@ If hardware seems unresponsive:
 
 ---
 
+## Google Maps API Issues
+
+### Map Not Loading or Shows Errors
+
+**Symptoms**: Web UI shows map errors, falls back to OpenStreetMap, or displays "API key" messages.
+
+**Solutions**:
+
+1. **Check API Key Configuration**:
+   ```bash
+   # Verify API key is set in environment
+   grep REACT_APP_GOOGLE_MAPS_API_KEY .env
+   # Should show your API key (not the placeholder)
+   ```
+
+2. **Validate API Key Format**:
+   - Google API keys start with "AIza"
+   - Should be 39 characters long
+   - No spaces or special characters except hyphens
+
+3. **Test API Key**:
+   ```bash
+   # Run environment setup to validate key
+   python3 scripts/setup_environment.py
+   ```
+
+### API Key Denied Errors
+
+**Error**: "REQUEST_DENIED" or "API key denied"
+
+**Solutions**:
+
+1. **Check API Restrictions**:
+   - Go to Google Cloud Console → Credentials
+   - Click on your API key
+   - Verify HTTP referrer restrictions include your Pi's IP
+   - Add: `http://[your-pi-ip]:3000/*`
+
+2. **Verify Enabled APIs**:
+   - Go to Google Cloud Console → APIs & Services → Library
+   - Ensure these APIs are enabled:
+     - Maps JavaScript API
+     - Geocoding API
+     - Places API (optional)
+
+3. **Check Billing Account**:
+   - Even free tier requires valid billing account
+   - Go to Google Cloud Console → Billing
+   - Verify billing account is active
+
+### Quota Exceeded Errors
+
+**Error**: "OVER_QUERY_LIMIT" or quota exceeded messages
+
+**Solutions**:
+
+1. **Check Usage Level**:
+   ```bash
+   # Set lower usage level in .env
+   echo "REACT_APP_GOOGLE_MAPS_USAGE_LEVEL=low" >> .env
+   ```
+
+2. **Monitor API Usage**:
+   - Go to Google Cloud Console → APIs & Services → Dashboard
+   - Check daily/monthly quota usage
+   - Consider increasing quotas if needed
+
+3. **Implement Cost Controls**:
+   - Set up billing alerts in Google Cloud
+   - Use "low" usage level for cost optimization
+   - System automatically falls back to OpenStreetMap
+
+### Billing or Payment Issues
+
+**Error**: Billing-related error messages
+
+**Solutions**:
+
+1. **Verify Payment Method**:
+   - Go to Google Cloud Console → Billing
+   - Check payment method is valid and current
+   - Update expired credit cards
+
+2. **Check Account Status**:
+   - Ensure billing account is not suspended
+   - Resolve any outstanding payment issues
+   - Contact Google Cloud billing support if needed
+
+3. **Use Free Tier Effectively**:
+   - $200/month credit covers typical residential use
+   - Monitor usage in Google Cloud Console
+   - Set up billing alerts for cost control
+
+### Network or Connectivity Issues
+
+**Error**: Network timeouts or connection failures
+
+**Solutions**:
+
+1. **Test Internet Connection**:
+   ```bash
+   # Test connection to Google Maps API
+   curl -s "https://maps.googleapis.com/maps/api/geocode/json?address=test&key=YOUR_KEY"
+   ```
+
+2. **Check Firewall Settings**:
+   - Ensure outbound HTTPS (port 443) is allowed
+   - Test from Pi's network location
+   - Consider proxy settings if applicable
+
+3. **Automatic Fallback**:
+   - System automatically uses OpenStreetMap on Google Maps failures
+   - No user action required for fallback
+   - Check web UI for fallback status messages
+
+### OpenStreetMap Fallback Issues
+
+**Symptoms**: Maps working but performance seems slow or features missing
+
+**Solutions**:
+
+1. **Verify Fallback Status**:
+   - Check web UI Maps page for current provider
+   - Should show "OpenStreetMap" when Google Maps unavailable
+
+2. **Optimize Fallback Performance**:
+   - Reduce usage level for better performance
+   - Clear browser cache and reload
+   - Check network bandwidth for tile loading
+
+3. **Re-enable Google Maps**:
+   - Resolve Google Maps API issues above
+   - Refresh web UI to retry Google Maps connection
+   - System will automatically switch back when available
+
+---
+
 ## When to Seek Help
 
 Contact support if you encounter:
