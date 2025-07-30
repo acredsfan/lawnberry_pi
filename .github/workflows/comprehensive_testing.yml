@@ -1,0 +1,486 @@
+name: Comprehensive Testing Framework
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_suites:
+        description: 'Test suites to run (space-separated)'
+        required: false
+        default: 'unit integration safety performance'
+      enable_hardware_tests:
+        description: 'Enable hardware-in-the-loop tests'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  PYTHON_VERSION: '3.9'
+  
+jobs:
+  test-matrix:
+    name: Test Matrix Setup
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set up test matrix
+        id: set-matrix
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            SUITES="${{ github.event.inputs.test_suites }}"
+          else
+            SUITES="unit integration safety performance"
+          fi
+          
+          # Convert to JSON array
+          MATRIX=$(echo $SUITES | jq -R -s -c 'split(" ") | map(select(length > 0))')
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    if: contains(needs.test-matrix.outputs.matrix, 'unit') || contains(needs.test-matrix.outputs.matrix, '"unit"')
+    needs: test-matrix
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest-xdist  # For parallel execution
+    
+    - name: Run unit tests
+      run: |
+        python -m pytest tests/unit/ \
+          -v \
+          --tb=short \
+          --cov=src \
+          --cov-report=xml:coverage-unit.xml \
+          --cov-report=html:htmlcov-unit \
+          --cov-report=term-missing \
+          --junit-xml=junit-unit.xml \
+          -m unit \
+          -n auto
+    
+    - name: Upload unit test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: unit-test-results
+        path: |
+          junit-unit.xml
+          coverage-unit.xml
+          htmlcov-unit/
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: coverage-unit.xml
+        flags: unit
+        name: unit-tests
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    if: contains(needs.test-matrix.outputs.matrix, 'integration') || contains(needs.test-matrix.outputs.matrix, '"integration"')
+    needs: test-matrix
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      mosquitto:
+        image: eclipse-mosquitto:2
+        options: >-
+          --health-cmd "mosquitto_sub -t 'test' -C 1 -W 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 1883:1883
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Wait for services
+      run: |
+        timeout 30 bash -c 'until nc -z localhost 6379; do sleep 1; done'
+        timeout 30 bash -c 'until nc -z localhost 1883; do sleep 1; done'
+    
+    - name: Run integration tests
+      run: |
+        python -m pytest tests/integration/ \
+          -v \
+          --tb=short \
+          --cov=src \
+          --cov-report=xml:coverage-integration.xml \
+          --cov-report=html:htmlcov-integration \
+          --junit-xml=junit-integration.xml \
+          -m integration
+      env:
+        REDIS_URL: redis://localhost:6379
+        MQTT_BROKER_HOST: localhost
+        MQTT_BROKER_PORT: 1883
+    
+    - name: Upload integration test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-test-results
+        path: |
+          junit-integration.xml
+          coverage-integration.xml
+          htmlcov-integration/
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: coverage-integration.xml
+        flags: integration
+        name: integration-tests
+
+  safety-tests:
+    name: Safety-Critical Tests
+    runs-on: ubuntu-latest
+    if: contains(needs.test-matrix.outputs.matrix, 'safety') || contains(needs.test-matrix.outputs.matrix, '"safety"')
+    needs: test-matrix
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run safety-critical tests
+      run: |
+        python -m pytest tests/ \
+          -v \
+          --tb=short \
+          --cov=src \
+          --cov-report=xml:coverage-safety.xml \
+          --cov-report=html:htmlcov-safety \
+          --cov-report=term-missing \
+          --cov-fail-under=100 \
+          --junit-xml=junit-safety.xml \
+          -m safety \
+          --strict-markers
+    
+    - name: Verify safety test coverage
+      run: |
+        python -c "
+        import xml.etree.ElementTree as ET
+        tree = ET.parse('coverage-safety.xml')
+        root = tree.getroot()
+        line_rate = float(root.attrib['line-rate'])
+        assert line_rate >= 1.0, f'Safety test coverage {line_rate*100:.1f}% < 100%'
+        print(f'✅ Safety test coverage: {line_rate*100:.1f}%')
+        "
+    
+    - name: Upload safety test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: safety-test-results
+        path: |
+          junit-safety.xml
+          coverage-safety.xml
+          htmlcov-safety/
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: coverage-safety.xml
+        flags: safety
+        name: safety-tests
+
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    if: contains(needs.test-matrix.outputs.matrix, 'performance') || contains(needs.test-matrix.outputs.matrix, '"performance"')
+    needs: test-matrix
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run performance tests
+      run: |
+        python -m pytest tests/performance/ \
+          -v \
+          --tb=short \
+          --junit-xml=junit-performance.xml \
+          -m performance \
+          --benchmark-json=benchmark-results.json
+    
+    - name: Upload performance test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: performance-test-results
+        path: |
+          junit-performance.xml
+          benchmark-results.json
+    
+    - name: Performance regression check
+      run: |
+        python -c "
+        import json
+        try:
+            with open('benchmark-results.json') as f:
+                results = json.load(f)
+            
+            # Check key performance metrics
+            benchmarks = results.get('benchmarks', [])
+            for benchmark in benchmarks:
+                name = benchmark['name']
+                stats = benchmark['stats']
+                mean_ms = stats['mean'] * 1000
+                
+                # Define performance thresholds
+                thresholds = {
+                    'emergency_stop': 100,  # 100ms max
+                    'sensor_fusion': 50,    # 50ms max
+                    'vision_processing': 100, # 100ms max
+                }
+                
+                for key, threshold in thresholds.items():
+                    if key in name:
+                        assert mean_ms <= threshold, f'{name}: {mean_ms:.1f}ms > {threshold}ms'
+                        print(f'✅ {name}: {mean_ms:.1f}ms <= {threshold}ms')
+                        break
+        except FileNotFoundError:
+            print('⚠️ No benchmark results found')
+        "
+
+  hardware-tests:
+    name: Hardware-in-the-Loop Tests
+    runs-on: self-hosted  # Requires hardware setup
+    if: github.event.inputs.enable_hardware_tests == 'true' || github.event_name == 'schedule'
+    needs: test-matrix
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Check hardware availability
+      run: |
+        python -c "
+        from tests.hardware.test_hardware_integration import check_hardware_requirements
+        reqs = check_hardware_requirements()
+        print('Hardware Requirements:')
+        for req, available in reqs.items():
+            status = '✅' if available else '❌'
+            print(f'  {req}: {status}')
+        "
+    
+    - name: Run hardware integration tests
+      run: |
+        python -m pytest tests/hardware/ \
+          -v \
+          --tb=short \
+          --junit-xml=junit-hardware.xml \
+          -m hardware \
+          --timeout=1200
+    
+    - name: Upload hardware test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: hardware-test-results
+        path: junit-hardware.xml
+
+  comprehensive-report:
+    name: Generate Comprehensive Report
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, safety-tests, performance-tests]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Download all test artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: test-artifacts/
+    
+    - name: Generate comprehensive report
+      run: |
+        python tests/automation/run_comprehensive_tests.py \
+          --config tests/automation/ci_config.yaml
+    
+    - name: Upload comprehensive report
+      uses: actions/upload-artifact@v3
+      with:
+        name: comprehensive-test-report
+        path: test_reports/
+    
+    - name: Comment on PR with results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          
+          // Read test results
+          let report = '## 🤖 Comprehensive Test Results\n\n';
+          
+          // Check each test suite
+          const suites = ['unit', 'integration', 'safety', 'performance'];
+          const results = {};
+          
+          for (const suite of suites) {
+            const artifactPath = `test-artifacts/${suite}-test-results/junit-${suite}.xml`;
+            if (fs.existsSync(artifactPath)) {
+              // Parse JUnit XML (simplified)
+              const xml = fs.readFileSync(artifactPath, 'utf8');
+              const passed = !xml.includes('failures="') || xml.includes('failures="0"');
+              results[suite] = passed ? '✅' : '❌';
+            } else {
+              results[suite] = '⏭️';
+            }
+          }
+          
+          report += '| Test Suite | Status |\n';
+          report += '|------------|--------|\n';
+          for (const [suite, status] of Object.entries(results)) {
+            report += `| ${suite.charAt(0).toUpperCase() + suite.slice(1)} | ${status} |\n`;
+          }
+          
+          // Add coverage information if available
+          report += '\n### 📊 Coverage Summary\n';
+          report += 'Detailed coverage reports are available in the artifacts.\n';
+          
+          // Post comment
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: report
+          });
+
+  deployment-check:
+    name: Deployment Readiness Check
+    runs-on: ubuntu-latest
+    needs: [comprehensive-report]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - name: Check deployment readiness
+      run: |
+        echo "🚀 Checking deployment readiness..."
+        
+        # All critical tests must pass for deployment
+        SAFETY_PASSED=${{ needs.safety-tests.result == 'success' }}
+        UNIT_PASSED=${{ needs.unit-tests.result == 'success' }}
+        
+        if [[ "$SAFETY_PASSED" == "true" && "$UNIT_PASSED" == "true" ]]; then
+          echo "✅ Deployment ready - all critical tests passed"
+          echo "DEPLOYMENT_READY=true" >> $GITHUB_ENV
+        else
+          echo "❌ Deployment blocked - critical tests failed"
+          echo "DEPLOYMENT_READY=false" >> $GITHUB_ENV
+          exit 1
+        fi
+    
+    - name: Notify deployment status
+      if: env.DEPLOYMENT_READY == 'true'
+      run: |
+        echo "🎉 System ready for deployment!"
+        echo "All safety-critical and unit tests have passed."

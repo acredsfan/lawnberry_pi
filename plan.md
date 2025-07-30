@@ -28,25 +28,29 @@ It is designed to be efficient, safe, and easy to use.
 - Optional RC control via RoboHAT and External RC Receiver
 - Obstacle detection and identification via 1x Raspberry Pi Camera and OpenCV
 - Enhanced obstacle detection/identification with Google Coral TPU Accelerator
+- User friendly setup script to allow fast and easy configuration so that the mower can be deployed quickly
 
 ## Hardware
 - Raspberry Pi 4 Model B 16GB RAM
-- RoboHAT
+- RoboHAT (modified with RP2040-Zero)
 - 2x VL53L0X ToF Sensors (Front Left and Front Right)
 - 1x BNO085 IMU
 - 1x Raspberry Pi Camera
 - 1x SparkFun GPS-RTK-SMA kit (RTK corrections via ODOT's Ohio Real Time Network)
-- 1x BME280
-- 2x Cytron MDDRC10 motor driver
+- 1x BME280 Environmental Sensor
+- 1x Cytron MDDRC10 motor driver
 - 2x 12V Worm Gear DC Motors
-- 2x Hall Effect Sensors and Magenets on Wheeels
-- MakerFocus SSD1306 integrated on RoboHAT for displaying status
-- 997 DC Motor with IBT-4 driver
+- 2x Hall Effect Sensors and Magnets on Wheels
+- MakerFocus SSD1306 OLED Display (integrated on RoboHAT)
+- 997 DC Motor with IBT-4 driver (blade control)
 - 30ah LiFePO4 battery
 - 30W Solar Panel and 20A Solar Charge Controller
-- Optional RC control via RoboHAT and External RC Receiver
-- 1x INA3221 for power monitoring
-- 1x 12/24V to 5V DC-DC Converter to Power RPi
+- Serial Wombat I2C Breakout Board (with built-in pull-up resistors)
+- Google Coral TPU Accelerator (USB connection)
+- Optional RC Receiver for manual control
+- 1x INA3221 Triple-Channel Power Monitor
+- 1x 12/24V to 5V DC-DC Buck Converter for Raspberry Pi power
+- Power distribution bar for 12V components
 
 ## Software
 - Raspberry Pi OS (64-bit)
@@ -123,6 +127,31 @@ It is designed to be efficient, safe, and easy to use.
 | MakerFocus SSD1306   | i2c        | 0x3c             | n/a       |
 | Raspberry Pi Camera  | CSI        | /dev/video0      | n/a       |
 
+## Power System Architecture
+```
+30W Solar Panel
+       │
+       ▼
+20A Charge Controller
+       │
+       ▼
+30Ah LiFePO4 Battery ──┬── Power Distribution Bar (12V)
+                       │                  │
+                       │                  ├── 2x Drive Motors (12V)
+                       │                  ├── Blade Motor (12V)
+                       │                  └── Buck Converter (12V→5V)
+                       │                            │
+                       │                            ▼
+                       │                    Raspberry Pi (5V)
+                       │                            │
+                       │                            ├── All 3.3V Components
+                       │                            ├── RoboHAT (5V)
+                       │                            ├── i2c Sensors via Serial Wombat
+                       │                            └── Google Coral TPU
+                       │
+                       └── INA3221 (Power Monitoring)
+```
+
 ## UI Features
 - Monitor Camera Feed and All Sensor Data
 - Monitor Battery Status
@@ -144,6 +173,12 @@ It is designed to be efficient, safe, and easy to use.
 - Collision detection via IMU
 - Geofenced operation via UI yard boundary setting and RTK GPS
 - Emergency shutdown if anomolies detected
+
+## Other Notes
+- INA3221 Power Monitoring:
+    - INA3221 Channel 1 is for the solar panel
+    - INA3221 Channel 2 is currently not used
+    - INA3221 Channel 3 is for the battery
 
 ## Future Additions
 - Power management via RP2040 power shutdown when battery is low

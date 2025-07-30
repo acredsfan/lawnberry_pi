@@ -108,6 +108,8 @@ class HardwareInterface:
             return 'imu_sensor'
         elif 'environmental' in name or 'bme' in name:
             return 'environmental_sensor'
+        elif 'weather' in name:
+            return 'weather_service'
         else:
             return 'generic_sensor'
     

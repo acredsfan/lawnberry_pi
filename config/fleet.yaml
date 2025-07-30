@@ -1,0 +1,300 @@
+# Fleet Management Configuration
+# Configuration for multi-device deployment and management
+
+fleet:
+  # Fleet management settings
+  enabled: false
+  server_url: "https://fleet.lawnberry.com/api/v1"
+  api_key: ""  # Set via environment variable LAWNBERRY_FLEET_API_KEY
+  
+  # Device identification
+  device_id: ""  # Auto-generated if empty
+  device_name: ""  # Human-readable device name
+  
+  # Synchronization settings
+  sync_interval: 300  # 5 minutes
+  heartbeat_interval: 60  # 1 minute
+  offline_threshold: 600  # 10 minutes
+  
+  # Deployment coordination
+  max_concurrent_deployments: 5
+  wave_delay_seconds: 300  # 5 minutes between waves
+  health_threshold: 0.8  # Minimum health score for deployment
+  
+  # Device grouping and waves
+  default_group: "production"
+  deployment_wave: 3  # 1-5, where 1 is earliest (canary)
+  
+  groups:
+    production:
+      description: "Production devices"
+      auto_deploy_security: true
+      auto_deploy_bug_fixes: true
+      auto_deploy_features: false
+      auto_deploy_config: true
+      
+      # Wave distribution percentages
+      wave_distribution:
+        canary: 0.05    # 5% - Wave 1
+        early: 0.15     # 15% - Wave 2  
+        standard: 0.60  # 60% - Wave 3
+        late: 0.15      # 15% - Wave 4
+        final: 0.05     # 5% - Wave 5
+      
+      # Deployment policies
+      policies:
+        require_health_check: true
+        rollback_on_failure: true
+        max_failure_rate: 0.1  # 10%
+        deployment_window:
+          start: "02:00"  # 2 AM
+          end: "06:00"    # 6 AM
+        
+    staging:
+      description: "Staging and test devices"
+      auto_deploy_security: true
+      auto_deploy_bug_fixes: true
+      auto_deploy_features: true
+      auto_deploy_config: true
+      
+      wave_distribution:
+        canary: 0.20    # 20%
+        early: 0.30     # 30%
+        standard: 0.50  # 50%
+        late: 0.0       # 0%
+        final: 0.0      # 0%
+        
+      policies:
+        require_health_check: false
+        rollback_on_failure: true
+        max_failure_rate: 0.2  # 20%
+        deployment_window:
+          start: "00:00"  # Any time
+          end: "23:59"
+          
+    development:
+      description: "Development and testing devices"
+      auto_deploy_security: true
+      auto_deploy_bug_fixes: true
+      auto_deploy_features: true
+      auto_deploy_config: true
+      
+      wave_distribution:
+        canary: 1.0     # 100% immediate
+        early: 0.0
+        standard: 0.0
+        late: 0.0
+        final: 0.0
+        
+      policies:
+        require_health_check: false
+        rollback_on_failure: false
+        max_failure_rate: 1.0  # 100% - allow all failures
+        deployment_window:
+          start: "00:00"  # Any time
+          end: "23:59"
+  
+  # Health monitoring
+  health:
+    check_interval: 300  # 5 minutes
+    metrics_retention: 168  # 1 week in hours
+    
+    thresholds:
+      cpu_warning: 80.0
+      cpu_critical: 95.0
+      memory_warning: 80.0
+      memory_critical: 95.0
+      disk_warning: 85.0
+      disk_critical: 95.0
+      temperature_warning: 70.0
+      temperature_critical: 80.0
+      
+    # Health score calculation weights
+    score_weights:
+      uptime: 0.2
+      cpu_usage: 0.2
+      memory_usage: 0.2
+      error_rate: 0.2
+      deployment_success: 0.2
+  
+  # Communication settings
+  communication:
+    timeout: 30  # seconds
+    max_retries: 3
+    retry_delay: 5  # seconds
+    
+    # Compression for large payloads
+    compression:
+      enabled: true
+      threshold: 1024  # bytes
+      algorithm: "gzip"
+    
+    # Authentication
+    auth:
+      method: "bearer_token"  # or "api_key", "certificate"
+      token_refresh_interval: 3600  # 1 hour
+  
+  # Data collection and reporting
+  telemetry:
+    enabled: true
+    collection_interval: 300  # 5 minutes
+    
+    # Data to collect
+    collect:
+      system_metrics: true
+      deployment_status: true
+      error_logs: true
+      performance_data: true
+      location_data: false  # Privacy setting
+      
+    # Data retention
+    retention:
+      local_days: 7
+      server_days: 30
+      
+    # Privacy controls
+    privacy:
+      anonymize_location: true
+      anonymize_logs: false
+      opt_out_analytics: false
+  
+  # Security settings
+  security:
+    verify_server_certificate: true
+    require_mutual_tls: false
+    
+    # Certificate paths
+    certificates:
+      ca_cert: "/opt/lawnberry/certs/fleet_ca.pem"
+      client_cert: "/opt/lawnberry/certs/fleet_client.pem"
+      client_key: "/opt/lawnberry/certs/fleet_client_key.pem"
+    
+    # API security
+    api_security:
+      rate_limit: 100  # requests per minute
+      require_signature: true
+      allowed_ips: []  # Empty = allow all
+  
+  # Deployment strategies
+  deployment_strategies:
+    blue_green:
+      enabled: true
+      health_check_delay: 30  # seconds
+      traffic_split_increment: 10  # percent
+      rollback_threshold: 0.05  # 5% error rate
+      
+    canary:
+      enabled: true
+      canary_percentage: 5  # Start with 5%
+      increment_percentage: 10
+      promotion_delay: 300  # 5 minutes
+      success_threshold: 0.95  # 95% success rate
+      
+    rolling:
+      enabled: true
+      batch_size: 1  # Number of devices per batch
+      batch_delay: 60  # seconds between batches
+      max_unavailable: 1  # Max devices down simultaneously
+  
+  # Alerting and notifications
+  alerting:
+    enabled: true
+    
+    # Alert channels
+    channels:
+      email:
+        enabled: false
+        recipients: []
+        
+      webhook:
+        enabled: false
+        url: ""
+        
+      mqtt:
+        enabled: true
+        topic: "lawnberry/fleet/alerts"
+        
+    # Alert conditions
+    conditions:
+      deployment_failure:
+        enabled: true
+        threshold: 1  # Any failure
+        
+      high_failure_rate:
+        enabled: true
+        threshold: 0.1  # 10%
+        time_window: 3600  # 1 hour
+        
+      device_offline:
+        enabled: true
+        threshold: 900  # 15 minutes
+        
+      health_degradation:
+        enabled: true
+        threshold: 0.7  # Health score below 70%
+  
+  # Local device settings
+  local:
+    # Device capabilities
+    capabilities:
+      - "autonomous_mowing"
+      - "solar_charging"
+      - "obstacle_avoidance"
+      - "weather_monitoring"
+      
+    # Hardware specifications
+    hardware:
+      model: "lawnberry-v1"
+      cpu_cores: 4
+      memory_gb: 4
+      storage_gb: 32
+      
+    # Location information (if enabled)
+    location:
+      latitude: null
+      longitude: null
+      timezone: "UTC"
+      region: ""
+      
+    # Operational parameters
+    operation:
+      max_concurrent_tasks: 3
+      max_memory_usage: 0.8  # 80% of available
+      max_cpu_usage: 0.8     # 80% of available
+      
+  # Backup and recovery
+  backup:
+    enabled: true
+    
+    # What to backup before deployments
+    backup_items:
+      - "configuration"
+      - "user_data"
+      - "maps"
+      - "logs"
+      
+    # Backup retention
+    retention:
+      local_backups: 5
+      remote_backups: 10
+      
+    # Backup location
+    local_backup_path: "/var/lib/lawnberry/fleet_backups"
+    
+  # Logging
+  logging:
+    level: "INFO"
+    max_file_size: "10MB"
+    max_files: 5
+    
+    # Log destinations
+    destinations:
+      - "file"
+      - "syslog"
+      - "fleet_server"  # If enabled
+      
+    # Log filtering
+    filters:
+      exclude_patterns:
+        - "heartbeat"
+        - "routine_metrics"

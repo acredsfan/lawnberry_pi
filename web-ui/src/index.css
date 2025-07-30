@@ -1,0 +1,147 @@
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Loading states */
+.skeleton {
+  animation: skeleton-loading 1s linear infinite alternate;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-color: hsl(200, 20%, 80%);
+  }
+  100% {
+    background-color: hsl(200, 20%, 95%);
+  }
+}
+
+/* Map container styles */
+.map-container {
+  height: 100%;
+  width: 100%;
+  position: relative;
+}
+
+/* Camera feed styles */
+.camera-feed {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.camera-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Responsive design utilities */
+@media (max-width: 768px) {
+  .hide-mobile {
+    display: none !important;
+  }
+}
+
+@media (min-width: 769px) {
+  .show-mobile {
+    display: none !important;
+  }
+}
+
+/* PWA specific styles */
+.pwa-install-prompt {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  z-index: 1300;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+/* Chart container styles */
+.chart-container {
+  height: 300px;
+  width: 100%;
+  margin: 16px 0;
+}
+
+/* Emergency button styles */
+.emergency-stop {
+  background-color: #d32f2f !important;
+  color: white !important;
+  font-weight: bold !important;
+  box-shadow: 0 4px 8px rgba(211, 47, 47, 0.3) !important;
+}
+
+.emergency-stop:hover {
+  background-color: #b71c1c !important;
+  box-shadow: 0 6px 12px rgba(211, 47, 47, 0.4) !important;
+}
+
+/* Status indicator styles */
+.status-indicator {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.status-online {
+  background-color: #4caf50;
+  box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
+}
+
+.status-offline {
+  background-color: #f44336;
+}
+
+.status-warning {
+  background-color: #ff9800;
+}

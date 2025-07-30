@@ -1,0 +1,55 @@
+[Unit]
+Description=Lawnberry Communication System (MQTT)
+Documentation=https://github.com/lawnberry/communication-system
+After=network.target mosquitto.service
+Wants=mosquitto.service
+Requires=mosquitto.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=lawnberry
+Group=lawnberry
+WorkingDirectory=/opt/lawnberry
+Environment=PYTHONPATH=/opt/lawnberry
+Environment=LAWNBERRY_ENV=production
+ExecStart=/opt/lawnberry/venv/bin/python -m src.communication.service_manager
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+StartLimitBurst=5
+
+# Resource limits
+MemoryLimit=256M
+CPUQuota=50%
+TasksMax=100
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictRealtime=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Performance settings
+Nice=-5
+IOSchedulingClass=1
+IOSchedulingPriority=4
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawnberry-communication
+
+# Watchdog
+WatchdogSec=30
+NotifyAccess=main
+
+[Install]
+WantedBy=multi-user.target
+Also=mosquitto.service

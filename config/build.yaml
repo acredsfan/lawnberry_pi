@@ -1,0 +1,144 @@
+# Build System Configuration
+# Configuration for automated build and packaging system
+
+build:
+  # Build directories
+  build_dir: "/tmp/lawnberry_build"
+  output_dir: "/opt/lawnberry/builds"
+  source_dir: "/opt/lawnberry"
+  
+  # Default build settings
+  compression_level: 6
+  include_tests: false
+  include_docs: true
+  sign_packages: true
+  run_tests: true
+  validate_config: true
+  
+  # Package settings
+  max_package_size: 104857600  # 100MB
+  allowed_extensions: [".tar.gz", ".zip"]
+  
+  # File inclusion/exclusion
+  exclude_patterns:
+    - "*.pyc"
+    - "__pycache__"
+    - ".git"
+    - ".pytest_cache"
+    - "tests/coverage"
+    - "*.log"
+    - ".env"
+    - "node_modules"
+    - "*.tmp"
+    - ".DS_Store"
+    - "Thumbs.db"
+  
+  required_files:
+    - "src/"
+    - "config/"
+    - "requirements.txt"
+    - "README.md"
+  
+  # Build types
+  build_types:
+    release:
+      compression_level: 9
+      include_tests: false
+      include_docs: true
+      sign_package: true
+      run_tests: true
+      validate_config: true
+      
+    debug:
+      compression_level: 3
+      include_tests: true
+      include_docs: true
+      sign_package: false
+      run_tests: true
+      validate_config: true
+      
+    staging:
+      compression_level: 6
+      include_tests: false
+      include_docs: true
+      sign_package: true
+      run_tests: true
+      validate_config: true
+      
+    development:
+      compression_level: 1
+      include_tests: true
+      include_docs: false
+      sign_package: false
+      run_tests: false
+      validate_config: false
+  
+  # Testing configuration
+  testing:
+    test_suites:
+      - "unit"
+      - "integration"
+      - "safety"
+    
+    coverage_thresholds:
+      overall: 85.0
+      safety_critical: 100.0
+    
+    timeout: 600  # 10 minutes
+    
+    pytest_args:
+      - "--tb=short"
+      - "--cov=src"
+      - "--cov-report=json:coverage.json"
+      - "--junit-xml=test_results.xml"
+  
+  # Validation settings
+  validation:
+    config_validation: true
+    dependency_check: true
+    security_scan: false
+    
+    required_configs:
+      - "system.yaml"
+      - "hardware.yaml"
+      - "safety.yaml"
+      - "deployment.yaml"
+  
+  # Signing configuration
+  signing:
+    enabled: true
+    key_path: "/opt/lawnberry/keys/deployment_private.pem"
+    algorithm: "RSA-PSS"
+    hash_algorithm: "SHA256"
+  
+  # Build cleanup
+  cleanup:
+    cleanup_on_success: true
+    cleanup_on_failure: false
+    keep_build_logs: true
+    max_build_history: 50
+  
+  # Notification settings
+  notifications:
+    build_start: false
+    build_success: true
+    build_failure: true
+    
+    channels:
+      - "build_log"
+      - "mqtt"
+  
+  # Performance settings
+  performance:
+    parallel_builds: false
+    max_build_time: 1800  # 30 minutes
+    resource_limits:
+      max_memory: "2GB"
+      max_cpu_percent: 80.0
+  
+  # Metadata
+  metadata:
+    include_git_info: true
+    include_build_info: true
+    include_dependency_info: true
+    include_test_results: true

@@ -369,6 +369,13 @@ class PluginManager:
             "power_monitor": PowerMonitorPlugin,
             "robohat": RoboHATPlugin
         }
+        
+        # Add weather service plugin if available
+        try:
+            from ..weather.weather_plugin import WeatherPlugin
+            self._builtin_plugins["weather_service"] = WeatherPlugin
+        except ImportError:
+            self.logger.warning("Weather service plugin not available")
     
     async def load_plugin(self, plugin_name: str, plugin_type: str, 
                          config: PluginConfig) -> bool:

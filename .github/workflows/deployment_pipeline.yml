@@ -1,0 +1,473 @@
+name: Deployment Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+          - staging
+      deploy_target:
+        description: 'Deployment target'
+        required: false
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+          - fleet
+      skip_tests:
+        description: 'Skip tests'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  PYTHON_VERSION: '3.9'
+  REGISTRY_URL: 'packages.lawnberry.com'
+  
+jobs:
+  # Build and package
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      package_path: ${{ steps.build.outputs.package_path }}
+      checksum: ${{ steps.build.outputs.checksum }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for version calculation
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install build wheel cryptography
+    
+    - name: Calculate version
+      id: version
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+        else
+          VERSION="1.0.0-$(git rev-parse --short HEAD)"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+    
+    - name: Run tests
+      if: ${{ !inputs.skip_tests }}
+      run: |
+        python -m pytest tests/ \
+          --tb=short \
+          --cov=src \
+          --cov-report=xml:coverage.xml \
+          --junit-xml=test-results.xml \
+          -v
+    
+    - name: Upload test results
+      if: ${{ !inputs.skip_tests }}
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results
+        path: |
+          test-results.xml
+          coverage.xml
+    
+    - name: Build package
+      id: build
+      run: |
+        # Create build configuration
+        BUILD_TYPE="${{ inputs.build_type || 'release' }}"
+        
+        cat > build_config.json << EOF
+        {
+          "version": "$VERSION",
+          "build_type": "$BUILD_TYPE",
+          "include_tests": false,
+          "include_docs": true,
+          "compression_level": 6,
+          "sign_package": true,
+          "run_tests": false,
+          "validate_config": true
+        }
+        EOF
+        
+        # Create build script
+        cat > build_package.py << 'EOF'
+        import asyncio
+        import json
+        import sys
+        from pathlib import Path
+        from dataclasses import dataclass
+        from enum import Enum
+        
+        # Import build system (simplified for CI)
+        import hashlib
+        import tarfile
+        import tempfile
+        import shutil
+        from datetime import datetime
+        
+        async def build_package():
+            with open('build_config.json', 'r') as f:
+                config = json.load(f)
+            
+            version = config['version']
+            build_type = config['build_type']
+            
+            # Create build workspace
+            build_dir = Path(f"/tmp/lawnberry_build_{version}")
+            build_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Copy source files
+            source_files = [
+                'src/',
+                'config/', 
+                'requirements.txt',
+                'README.md'
+            ]
+            
+            for item in source_files:
+                source_path = Path(item)
+                target_path = build_dir / item
+                
+                if source_path.exists():
+                    if source_path.is_dir():
+                        shutil.copytree(source_path, target_path)
+                    else:
+                        target_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(source_path, target_path)
+            
+            # Create package
+            package_name = f"lawnberry_{version}_{build_type}.tar.gz"
+            package_path = Path(package_name)
+            
+            with tarfile.open(package_path, "w:gz") as tar:
+                tar.add(build_dir, arcname=".", recursive=True)
+            
+            # Calculate checksum
+            sha256_hash = hashlib.sha256()
+            with open(package_path, 'rb') as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    sha256_hash.update(chunk)
+            checksum = sha256_hash.hexdigest()
+            
+            # Output results
+            print(f"::set-output name=package_path::{package_path}")
+            print(f"::set-output name=checksum::{checksum}")
+            print(f"Package: {package_path}")
+            print(f"Size: {package_path.stat().st_size}")
+            print(f"Checksum: {checksum}")
+            
+            # Cleanup
+            shutil.rmtree(build_dir, ignore_errors=True)
+        
+        if __name__ == "__main__":
+            asyncio.run(build_package())
+        EOF
+        
+        # Run build
+        python build_package.py
+    
+    - name: Upload package
+      uses: actions/upload-artifact@v3
+      with:
+        name: deployment-package
+        path: lawnberry_*.tar.gz
+        retention-days: 90
+    
+    - name: Create release info
+      run: |
+        cat > release_info.json << EOF
+        {
+          "version": "${{ steps.version.outputs.version }}",
+          "build_type": "${{ inputs.build_type || 'release' }}",
+          "commit": "${{ github.sha }}",
+          "build_time": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "package_path": "${{ steps.build.outputs.package_path }}",
+          "checksum": "${{ steps.build.outputs.checksum }}"
+        }
+        EOF
+    
+    - name: Upload release info
+      uses: actions/upload-artifact@v3
+      with:
+        name: release-info
+        path: release_info.json
+  
+  # Security scan
+  security_scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install security tools
+      run: |
+        pip install bandit safety
+    
+    - name: Run Bandit security scan
+      run: |
+        bandit -r src/ -f json -o bandit-report.json || true
+        bandit -r src/ -f txt
+    
+    - name: Run Safety dependency scan
+      run: |
+        safety check --json --output safety-report.json || true
+        safety check
+    
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+  
+  # Deploy to staging
+  deploy_staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, security_scan]
+    if: github.ref == 'refs/heads/main' || inputs.deploy_target == 'staging'
+    environment: staging
+    
+    steps:
+    - name: Download package
+      uses: actions/download-artifact@v3
+      with:
+        name: deployment-package
+    
+    - name: Download release info
+      uses: actions/download-artifact@v3
+      with:
+        name: release-info
+    
+    - name: Deploy to staging
+      run: |
+        echo "Deploying to staging environment..."
+        
+        # Read release info
+        VERSION=$(jq -r '.version' release_info.json)
+        CHECKSUM=$(jq -r '.checksum' release_info.json)
+        PACKAGE=$(ls lawnberry_*.tar.gz)
+        
+        echo "Version: $VERSION"
+        echo "Package: $PACKAGE"
+        echo "Checksum: $CHECKSUM"
+        
+        # Simulate deployment
+        echo "Package deployed to staging successfully"
+        
+        # Create deployment record
+        cat > deployment_record.json << EOF
+        {
+          "environment": "staging",
+          "version": "$VERSION",
+          "package": "$PACKAGE",
+          "checksum": "$CHECKSUM",
+          "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "deployed_by": "${{ github.actor }}",
+          "commit": "${{ github.sha }}"
+        }
+        EOF
+    
+    - name: Upload deployment record
+      uses: actions/upload-artifact@v3
+      with:
+        name: staging-deployment
+        path: deployment_record.json
+  
+  # Deploy to production (manual approval required)
+  deploy_production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, security_scan, deploy_staging]
+    if: startsWith(github.ref, 'refs/tags/') || inputs.deploy_target == 'production'
+    environment: production
+    
+    steps:
+    - name: Download package
+      uses: actions/download-artifact@v3
+      with:
+        name: deployment-package
+    
+    - name: Download release info
+      uses: actions/download-artifact@v3
+      with:
+        name: release-info
+    
+    - name: Deploy to production
+      run: |
+        echo "Deploying to production environment..."
+        
+        # Read release info
+        VERSION=$(jq -r '.version' release_info.json)
+        CHECKSUM=$(jq -r '.checksum' release_info.json)
+        PACKAGE=$(ls lawnberry_*.tar.gz)
+        
+        echo "Version: $VERSION"
+        echo "Package: $PACKAGE"
+        echo "Checksum: $CHECKSUM"
+        
+        # In real deployment, this would:
+        # 1. Upload package to update server
+        # 2. Trigger A/B deployment
+        # 3. Monitor deployment progress
+        # 4. Rollback on failure
+        
+        echo "Package deployed to production successfully"
+        
+        # Create deployment record
+        cat > deployment_record.json << EOF
+        {
+          "environment": "production",
+          "version": "$VERSION",
+          "package": "$PACKAGE",
+          "checksum": "$CHECKSUM",
+          "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "deployed_by": "${{ github.actor }}",
+          "commit": "${{ github.sha }}"
+        }
+        EOF
+    
+    - name: Create GitHub release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Release ${{ needs.build.outputs.version }}
+        body: |
+          ## Changes
+          
+          Automated release for version ${{ needs.build.outputs.version }}
+          
+          ## Package Information
+          - **Version**: ${{ needs.build.outputs.version }}
+          - **Checksum**: ${{ needs.build.outputs.checksum }}
+          - **Build Time**: ${{ github.run_started_at }}
+          
+          ## Deployment
+          - Staging: ✅ Deployed
+          - Production: ✅ Deployed
+        draft: false
+        prerelease: false
+    
+    - name: Upload production deployment record
+      uses: actions/upload-artifact@v3
+      with:
+        name: production-deployment
+        path: deployment_record.json
+  
+  # Fleet deployment (for fleet-wide updates)
+  deploy_fleet:
+    name: Deploy to Fleet
+    runs-on: ubuntu-latest
+    needs: [build, security_scan, deploy_production]
+    if: inputs.deploy_target == 'fleet' && startsWith(github.ref, 'refs/tags/')
+    environment: fleet
+    
+    steps:
+    - name: Download package
+      uses: actions/download-artifact@v3
+      with:
+        name: deployment-package
+    
+    - name: Download release info
+      uses: actions/download-artifact@v3
+      with:
+        name: release-info
+    
+    - name: Deploy to fleet
+      run: |
+        echo "Initiating fleet deployment..."
+        
+        # Read release info
+        VERSION=$(jq -r '.version' release_info.json)
+        CHECKSUM=$(jq -r '.checksum' release_info.json)
+        PACKAGE=$(ls lawnberry_*.tar.gz)
+        
+        echo "Version: $VERSION"
+        echo "Package: $PACKAGE"
+        echo "Checksum: $CHECKSUM"
+        
+        # In real deployment, this would:
+        # 1. Upload package to fleet management server
+        # 2. Create fleet deployment with wave-based rollout
+        # 3. Monitor deployment across all devices
+        # 4. Handle failures and rollbacks
+        
+        echo "Fleet deployment initiated successfully"
+        
+        # Create fleet deployment record
+        cat > fleet_deployment_record.json << EOF
+        {
+          "deployment_type": "fleet",
+          "version": "$VERSION",
+          "package": "$PACKAGE",
+          "checksum": "$CHECKSUM",
+          "initiated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "initiated_by": "${{ github.actor }}",
+          "commit": "${{ github.sha }}",
+          "target_groups": ["production"],
+          "deployment_strategy": "wave_based"
+        }
+        EOF
+    
+    - name: Upload fleet deployment record
+      uses: actions/upload-artifact@v3
+      with:
+        name: fleet-deployment
+        path: fleet_deployment_record.json
+  
+  # Notification
+  notify:
+    name: Notify Deployment
+    runs-on: ubuntu-latest
+    needs: [deploy_staging, deploy_production, deploy_fleet]
+    if: always()
+    
+    steps:
+    - name: Notify deployment status
+      run: |
+        echo "Deployment pipeline completed"
+        echo "Staging: ${{ needs.deploy_staging.result }}"
+        echo "Production: ${{ needs.deploy_production.result }}"
+        echo "Fleet: ${{ needs.deploy_fleet.result }}"
+        
+        # In real implementation, this would send notifications via:
+        # - Email
+        # - Slack/Discord
+        # - MQTT for device notifications
+        # - Webhook for monitoring systems

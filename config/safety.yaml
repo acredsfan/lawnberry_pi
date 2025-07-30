@@ -1,0 +1,284 @@
+# Safety Monitoring System Configuration
+
+# Core Safety Parameters
+safety:
+  # Emergency Response
+  emergency_response_time_ms: 100     # Target emergency response time
+  safety_update_rate_hz: 20           # Regular safety monitoring rate
+  emergency_update_rate_hz: 50        # Emergency detection rate
+  
+  # Safety Zones and Distances
+  person_safety_radius_m: 3.0         # Stop distance when person detected
+  pet_safety_radius_m: 1.5            # Stop distance when pet detected
+  general_safety_distance_m: 0.3      # General obstacle safety distance
+  emergency_stop_distance_m: 0.15     # Emergency stop distance
+  
+  # Tilt and Drop Detection
+  max_safe_tilt_deg: 15.0             # Maximum safe tilt angle
+  critical_tilt_deg: 25.0             # Critical tilt requiring immediate stop
+  min_ground_clearance_m: 0.05        # Minimum safe ground clearance
+  
+  # Environmental Safety
+  min_operating_temp_c: 5.0           # Minimum operating temperature
+  max_operating_temp_c: 40.0          # Maximum operating temperature
+  humidity_rain_threshold: 95.0       # Humidity % indicating rain
+  
+  # Boundary Enforcement
+  boundary_safety_margin_m: 1.0       # Safety margin from boundaries
+  gps_accuracy_threshold_m: 2.0       # Only trust GPS readings better than this
+  
+  # Feature Enables
+  enable_weather_safety: true         # Enable weather-based safety
+  enable_vision_safety: true          # Enable computer vision safety
+  enable_boundary_enforcement: true   # Enable GPS boundary enforcement
+
+# Emergency Actions Configuration
+emergency_actions:
+  # High Priority Actions (executed immediately and concurrently)
+  high_priority:
+    - action_id: "stop_motors"
+      action_type: "STOP_MOTORS"
+      priority: 1
+      timeout_ms: 50
+      description: "Stop all motor movement immediately"
+      mqtt_topic: "lawnberry/motors/emergency_stop"
+      
+    - action_id: "disable_blade"
+      action_type: "DISABLE_BLADE"
+      priority: 1
+      timeout_ms: 50
+      description: "Disable cutting blade immediately"
+      mqtt_topic: "lawnberry/blade/emergency_disable"
+  
+  # Medium Priority Actions
+  medium_priority:
+    - action_id: "alert_all_systems"
+      action_type: "ALERT"
+      priority: 2
+      timeout_ms: 100
+      description: "Alert all systems of emergency"
+      mqtt_topic: "lawnberry/system/emergency_alert"
+      
+    - action_id: "safe_position"
+      action_type: "SAFE_POSITION"
+      priority: 3
+      timeout_ms: 200
+      description: "Move to safe position if possible"
+      mqtt_topic: "lawnberry/navigation/safe_position"
+  
+  # Low Priority Actions
+  low_priority:
+    - action_id: "system_shutdown"
+      action_type: "SHUTDOWN"
+      priority: 10
+      timeout_ms: 5000
+      description: "Initiate safe system shutdown"
+      mqtt_topic: "lawnberry/system/shutdown"
+
+# Hazard Detection Configuration
+hazard_detection:
+  # Object Detection Patterns
+  hazard_patterns:
+    person:
+      safety_radius: 3.0
+      threat_level: "CRITICAL"
+      response_action: "immediate_stop"
+      alert_message: "Person detected in safety zone"
+    
+    child:
+      safety_radius: 4.5              # Larger safety zone for children
+      threat_level: "CRITICAL"
+      response_action: "immediate_stop"
+      alert_message: "Child detected - immediate stop required"
+    
+    pet:
+      safety_radius: 1.5
+      threat_level: "HIGH"
+      response_action: "stop_and_wait"
+      alert_message: "Pet detected in safety zone"
+    
+    dog:
+      safety_radius: 2.0
+      threat_level: "HIGH"
+      response_action: "stop_and_wait"
+      alert_message: "Dog detected in safety zone"
+    
+    cat:
+      safety_radius: 1.0
+      threat_level: "MEDIUM"
+      response_action: "slow_approach"
+      alert_message: "Cat detected nearby"
+    
+    vehicle:
+      safety_radius: 5.0
+      threat_level: "HIGH"
+      response_action: "stop_and_assess"
+      alert_message: "Vehicle detected in area"
+    
+    bicycle:
+      safety_radius: 3.0
+      threat_level: "HIGH"
+      response_action: "stop_and_wait"
+      alert_message: "Bicycle detected"
+    
+    large_obstacle:
+      safety_radius: 0.5
+      threat_level: "MEDIUM"
+      response_action: "navigate_around"
+      alert_message: "Large obstacle detected"
+    
+    water_hazard:
+      safety_radius: 1.0
+      threat_level: "HIGH"
+      response_action: "avoid_area"
+      alert_message: "Water hazard detected"
+  
+  # Object Tracking
+  object_tracking:
+    tracking_timeout_s: 3.0           # Remove objects not seen for this time
+    velocity_history_window_s: 3.0    # Time window for velocity calculation
+    approaching_velocity_threshold: 0.1 # m/s threshold for approaching objects
+  
+  # Detection Performance
+  detection_performance:
+    confidence_threshold: 0.5         # Minimum confidence for detections
+    false_positive_tolerance: 0.05    # Maximum acceptable false positive rate
+    response_time_target_ms: 50       # Target detection response time
+
+# Boundary Monitoring Configuration
+boundary_monitoring:
+  # GPS Configuration
+  gps:
+    accuracy_threshold_m: 2.0         # Only trust GPS readings better than this
+    min_satellites: 6                 # Minimum satellites for reliable position
+    position_timeout_s: 5.0           # Timeout for GPS position updates
+  
+  # Boundary Types
+  boundary_types:
+    yard_boundary:
+      safety_margin_m: 1.0            # Safety margin from yard boundary
+      violation_severity: "HIGH"       # Severity of boundary violations
+      
+    no_go_zone:
+      safety_margin_m: 0.5            # Safety margin from no-go zones
+      violation_severity: "HIGH"       # Severity of no-go zone violations
+  
+  # Zone Management
+  zone_management:
+    max_zones: 20                     # Maximum number of no-go zones
+    zone_expire_check_interval_s: 60  # Check for expired zones every minute
+    auto_cleanup_expired: true        # Automatically remove expired zones
+
+# Performance Monitoring
+performance:
+  # Response Time Targets
+  response_times:
+    emergency_stop_ms: 100            # Emergency stop response time
+    hazard_detection_ms: 50           # Hazard detection response time
+    boundary_check_ms: 100            # Boundary violation check time
+    safety_status_update_ms: 50       # Safety status update time
+  
+  # Metrics Collection
+  metrics:
+    collect_response_times: true      # Collect response time metrics
+    collect_detection_accuracy: true  # Collect detection accuracy metrics
+    collect_false_positive_rate: true # Collect false positive rate
+    metrics_retention_hours: 24       # Keep metrics for 24 hours
+  
+  # Alerts for Performance Issues
+  performance_alerts:
+    slow_response_threshold_ms: 150   # Alert if response time exceeds this
+    high_false_positive_rate: 0.1     # Alert if false positive rate exceeds this
+    low_detection_accuracy: 0.85      # Alert if detection accuracy falls below this
+
+# Communication Configuration
+communication:
+  # MQTT Topics
+  mqtt_topics:
+    # Incoming sensor data
+    sensors:
+      gps: "lawnberry/sensors/gps"
+      imu: "lawnberry/sensors/imu"
+      tof_left: "lawnberry/sensors/tof_left"
+      tof_right: "lawnberry/sensors/tof_right"
+      weather: "lawnberry/sensors/weather"
+      vision_detections: "lawnberry/vision/detections"
+      vision_alerts: "lawnberry/vision/alerts"
+    
+    # Outgoing safety messages
+    safety:
+      status: "lawnberry/safety/status"
+      emergency: "lawnberry/safety/emergency"
+      boundary_violation: "lawnberry/safety/boundary_violation"
+      hazard_alert: "lawnberry/safety/hazard_alert"
+    
+    # Emergency controls
+    emergency:
+      stop: "lawnberry/emergency/stop"
+      acknowledge: "lawnberry/emergency/acknowledge"
+      reset: "lawnberry/emergency/reset"
+    
+    # System commands
+    commands:
+      emergency: "lawnberry/commands/emergency"
+      safety_override: "lawnberry/commands/safety_override"
+      safety_test: "lawnberry/safety/test"
+  
+  # Message Configuration
+  message_config:
+    emergency_qos: 2                  # Highest QoS for emergency messages
+    safety_qos: 1                     # High QoS for safety messages
+    status_qos: 0                     # Standard QoS for status messages
+    retain_safety_status: true        # Retain safety status messages
+    retain_emergency_alerts: true     # Retain emergency alerts
+
+# Logging Configuration
+logging:
+  # Log Levels
+  levels:
+    safety_service: "INFO"
+    emergency_controller: "INFO"
+    hazard_detector: "INFO"
+    boundary_monitor: "INFO"
+  
+  # Log Files
+  files:
+    safety_main: "/var/log/lawnberry/safety.log"
+    emergency_events: "/var/log/lawnberry/emergency.log"
+    boundary_violations: "/var/log/lawnberry/boundary.log"
+    hazard_detections: "/var/log/lawnberry/hazards.log"
+  
+  # Log Rotation
+  rotation:
+    max_size_mb: 10
+    backup_count: 5
+    compress_old: true
+  
+  # Event Logging
+  event_logging:
+    log_all_detections: false         # Log all object detections (high volume)
+    log_safety_status_changes: true   # Log safety status changes
+    log_emergency_events: true        # Log all emergency events
+    log_boundary_violations: true     # Log boundary violations
+    log_performance_metrics: true     # Log performance metrics
+
+# Testing and Validation
+testing:
+  # Test Modes
+  simulation_mode: false              # Use simulated sensor data
+  hardware_in_loop: false             # Hardware-in-the-loop testing
+  mock_gps: false                     # Use mock GPS data for testing
+  mock_vision: false                  # Use mock vision detections for testing
+  
+  # Test Scenarios
+  test_scenarios:
+    emergency_response_test: true     # Enable emergency response testing
+    boundary_violation_test: true     # Enable boundary violation testing
+    hazard_detection_test: true       # Enable hazard detection testing
+    false_positive_test: true         # Enable false positive testing
+  
+  # Performance Validation
+  performance_validation:
+    validate_response_times: true     # Validate response time requirements
+    validate_detection_accuracy: true # Validate detection accuracy requirements
+    generate_test_reports: true       # Generate test performance reports

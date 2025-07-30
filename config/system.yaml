@@ -1,0 +1,142 @@
+# Lawnberry System Configuration
+# Master configuration for system integration and service orchestration
+
+system:
+  name: "lawnberry-mower"
+  version: "1.0.0"
+  environment: "production"
+  log_level: "INFO"
+  max_cpu_percent: 80.0
+  max_memory_percent: 75.0
+  health_check_interval: 5.0
+  service_start_timeout: 30.0
+  data_directory: "/var/lib/lawnberry"
+  log_directory: "/var/log/lawnberry"
+
+# Service Configuration
+services:
+  communication:
+    critical: true
+    restart_policy: "always"
+    max_restarts: 5
+    restart_delay: 2.0
+    timeout: 30.0
+    dependencies: []
+    
+  data_management:
+    critical: true
+    restart_policy: "always"
+    max_restarts: 3
+    restart_delay: 5.0
+    timeout: 30.0
+    dependencies: ["communication"]
+    
+  hardware:
+    critical: true
+    restart_policy: "always"
+    max_restarts: 3
+    restart_delay: 3.0
+    timeout: 30.0
+    dependencies: ["communication", "data_management"]
+    
+  safety:
+    critical: true
+    restart_policy: "always"
+    max_restarts: 5
+    restart_delay: 1.0
+    timeout: 30.0
+    dependencies: ["hardware", "sensor_fusion", "communication"]
+    
+  sensor_fusion:
+    critical: false
+    restart_policy: "on-failure"
+    max_restarts: 3
+    restart_delay: 5.0
+    timeout: 30.0
+    dependencies: ["hardware", "communication"]
+    
+  weather:
+    critical: false
+    restart_policy: "on-failure"
+    max_restarts: 2
+    restart_delay: 10.0
+    timeout: 30.0
+    dependencies: ["communication", "data_management"]
+    
+  power_management:
+    critical: false
+    restart_policy: "always"
+    max_restarts: 3
+    restart_delay: 5.0
+    timeout: 30.0
+    dependencies: ["hardware", "communication"]
+    
+  vision:
+    critical: false
+    restart_policy: "on-failure"
+    max_restarts: 2
+    restart_delay: 10.0
+    timeout: 30.0
+    dependencies: ["hardware", "communication"]
+    
+  web_api:
+    critical: false
+    restart_policy: "always"
+    max_restarts: 3
+    restart_delay: 5.0
+    timeout: 30.0
+    dependencies: ["communication", "data_management"]
+
+# Health Monitoring Configuration
+monitoring:
+  enabled: true
+  service_check_interval: 5.0
+  resource_check_interval: 10.0
+  metrics_retention_days: 30
+  
+  alert_thresholds:
+    cpu_percent: 90.0
+    memory_percent: 85.0
+    disk_percent: 90.0
+    temperature_celsius: 75.0
+    service_restart_count: 3
+    
+  circuit_breaker:
+    failure_threshold: 3
+    timeout_seconds: 30.0
+    half_open_max_calls: 5
+
+# State Management
+state_management:
+  persistence_enabled: true
+  state_file: "/var/lib/lawnberry/system_state.json"
+  backup_states: true
+  max_history_entries: 1000
+
+# Configuration Management
+configuration:
+  hot_reload_enabled: true
+  backup_enabled: true
+  backup_directory: "/var/lib/lawnberry/config_backups"
+  validation_enabled: true
+  
+# Security Settings
+security:
+  enable_audit_logging: true
+  log_sensitive_data: false
+  certificate_directory: "/etc/lawnberry/certs"
+  
+# Performance Tuning
+performance:
+  max_concurrent_tasks: 100
+  task_timeout_seconds: 300
+  memory_cleanup_interval: 3600
+  log_rotation_size_mb: 100
+  log_retention_days: 30
+
+# Integration Settings
+integration:
+  mqtt_bridge_enabled: true
+  web_socket_enabled: true
+  rest_api_enabled: true
+  diagnostics_enabled: true

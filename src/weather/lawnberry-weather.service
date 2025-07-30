@@ -1,0 +1,56 @@
+[Unit]
+Description=Lawnberry Weather Integration Service
+Documentation=https://github.com/lawnberry/weather-integration
+After=lawnberry-communication.service lawnberry-data.service
+Requires=lawnberry-communication.service lawnberry-data.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=lawnberry
+Group=lawnberry
+WorkingDirectory=/opt/lawnberry
+Environment=PYTHONPATH=/opt/lawnberry
+Environment=LAWNBERRY_ENV=production
+ExecStart=/opt/lawnberry/venv/bin/python -m src.weather.weather_service
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=2
+
+# Resource limits
+MemoryLimit=256M
+CPUQuota=50%
+TasksMax=50
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictRealtime=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Network access for API calls
+PrivateNetwork=false
+
+# Performance settings
+Nice=5
+IOSchedulingClass=2
+IOSchedulingPriority=4
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawnberry-weather
+
+# Watchdog
+WatchdogSec=60
+NotifyAccess=main
+
+[Install]
+WantedBy=multi-user.target

@@ -69,6 +69,11 @@ plugins:
   - name: "robohat"
     enabled: true
     parameters: {}
+    
+  - name: "weather_service"
+    enabled: true
+    parameters:
+      config_path: "config/weather.yaml"
 
 # System Configuration
 logging_level: "INFO"

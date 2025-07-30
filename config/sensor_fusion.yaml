@@ -1,0 +1,225 @@
+# Sensor Fusion Engine Configuration
+
+# Performance Requirements
+performance:
+  localization:
+    update_rate_hz: 10              # Navigation update rate
+    safety_update_rate_hz: 20       # Safety-critical update rate
+    target_accuracy_m: 0.10         # 10cm position accuracy requirement
+    max_latency_ms: 100             # Maximum localization latency
+  
+  obstacle_detection:
+    update_rate_hz: 10              # Obstacle detection rate
+    safety_update_rate_hz: 20       # Safety obstacle detection rate
+    target_accuracy: 0.95           # 95% detection accuracy requirement
+    max_latency_ms: 50              # Maximum detection latency
+    min_detection_distance_m: 0.30  # Minimum obstacle detection range
+    max_detection_distance_m: 5.0   # Maximum obstacle detection range
+  
+  safety:
+    update_rate_hz: 20              # Safety monitoring rate
+    emergency_update_rate_hz: 50    # Emergency detection rate
+    max_response_time_ms: 200       # Maximum safety response time
+    emergency_response_time_ms: 100 # Emergency response target
+
+# Localization System Configuration
+localization:
+  # GPS Configuration
+  gps:
+    port: "/dev/ttyACM0"
+    baud_rate: 38400
+    rtk_enabled: true
+    min_satellites: 6
+    rtk_accuracy_threshold_m: 0.05
+  
+  # IMU Configuration
+  imu:
+    port: "/dev/ttyAMA4"
+    baud_rate: 3000000
+    calibration_required: true
+    update_rate_hz: 100
+  
+  # Kalman Filter Parameters
+  kalman_filter:
+    process_noise:
+      position: 0.01              # m/s² position process noise
+      velocity: 0.1               # m/s² velocity process noise
+      orientation: 0.01           # rad/s orientation process noise
+      angular_velocity: 0.1       # rad/s² angular velocity process noise
+    
+    measurement_noise:
+      gps_position: 0.05          # meters GPS measurement noise
+      imu_orientation: 0.01       # rad IMU orientation noise
+      encoder_velocity: 0.1       # m/s encoder velocity noise
+  
+  # Coordinate System
+  coordinate_system:
+    reference_frame: "local_cartesian"
+    auto_set_reference: true      # Set reference point on first RTK fix
+
+# Obstacle Detection Configuration
+obstacle_detection:
+  # ToF Sensor Configuration
+  tof_sensors:
+    left:
+      i2c_address: 0x29
+      position: [-0.15, 0.2, 0.1]  # x, y, z position relative to robot center
+      max_range_m: 2.0
+      min_range_m: 0.05
+    
+    right:
+      i2c_address: 0x30
+      position: [0.15, 0.2, 0.1]   # x, y, z position relative to robot center
+      max_range_m: 2.0
+      min_range_m: 0.05
+  
+  # Computer Vision Configuration
+  computer_vision:
+    enabled: true
+    camera_device: "/dev/video0"
+    resolution: [1920, 1080]
+    fps: 30
+    detection_models:
+      - "efficientdet_d0"         # Primary model for Coral TPU
+      - "opencv_cascade"          # Fallback CPU model
+  
+  # Detection Parameters
+  detection:
+    confidence_threshold: 0.5
+    safety_distance_threshold_m: 0.3
+    obstacle_fusion_threshold_m: 0.5    # Distance for fusing ToF and CV detections
+    tracking_timeout_s: 2.0             # Remove obstacles not seen for this time
+    
+  # Obstacle Classification
+  classification:
+    person_detection_enabled: true
+    pet_detection_enabled: true
+    static_object_detection: true
+    dynamic_object_tracking: true
+
+# Safety Monitoring Configuration
+safety:
+  # Tilt Detection
+  tilt:
+    max_safe_angle_deg: 15.0      # Maximum safe tilt angle
+    critical_angle_deg: 25.0      # Critical tilt requiring immediate stop
+  
+  # Drop Detection
+  drop:
+    min_ground_clearance_m: 0.05  # Minimum safe ground clearance
+    tof_downward_enabled: false   # Downward-facing ToF sensors (if available)
+  
+  # Collision Detection
+  collision:
+    acceleration_threshold_g: 2.0  # G-force threshold for collision detection
+    history_window_s: 1.0         # Time window for acceleration analysis
+  
+  # Environmental Safety
+  environment:
+    min_operating_temp_c: 5.0     # Minimum operating temperature
+    max_operating_temp_c: 40.0    # Maximum operating temperature
+    rain_detection_enabled: true
+    humidity_rain_threshold: 95.0  # Humidity % indicating rain
+  
+  # Proximity Safety
+  proximity:
+    person_safety_radius_m: 3.0   # Stop distance when person detected
+    pet_safety_radius_m: 1.5      # Stop distance when pet detected
+    general_safety_distance_m: 0.3 # General obstacle safety distance
+    emergency_stop_distance_m: 0.15 # Emergency stop distance
+
+# Hardware Integration
+hardware:
+  # Sensor Health Monitoring
+  health_monitoring:
+    enabled: true
+    check_interval_s: 5.0
+    failure_threshold: 5          # Consecutive failures before marking unhealthy
+    success_rate_threshold: 0.8   # Minimum success rate for healthy status
+  
+  # Device Timeouts
+  timeouts:
+    gps_timeout_s: 2.0
+    imu_timeout_s: 1.0
+    tof_timeout_s: 1.0
+    camera_timeout_s: 1.0
+  
+  # Recovery Procedures
+  recovery:
+    auto_restart_enabled: true
+    max_restart_attempts: 3
+    restart_backoff_s: 5.0
+
+# Communication Configuration
+communication:
+  # MQTT Topics
+  mqtt_topics:
+    sensors:
+      localization: "lawnberry/sensors/localization"
+      obstacles: "lawnberry/sensors/obstacles"
+      safety_status: "lawnberry/safety/status"
+      health_metrics: "lawnberry/sensors/health"
+      performance: "lawnberry/sensors/performance"
+    
+    safety:
+      emergency: "lawnberry/safety/emergency"
+      obstacle_alert: "lawnberry/safety/obstacle_alert"
+      pose_safety: "lawnberry/safety/pose"
+    
+    commands:
+      emergency_stop: "lawnberry/commands/emergency"
+  
+  # Message Configuration
+  messages:
+    retain_safety_status: true
+    qos_emergency: 2              # Highest QoS for emergency messages
+    qos_safety: 1                 # High QoS for safety messages
+    qos_telemetry: 0              # Standard QoS for telemetry
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  performance_logging: true
+  safety_event_logging: true
+  sensor_data_logging: false     # Disable to reduce storage usage
+  
+  log_files:
+    main: "/var/log/lawnberry/sensor_fusion.log"
+    performance: "/var/log/lawnberry/performance.log"
+    safety: "/var/log/lawnberry/safety.log"
+  
+  rotation:
+    max_size_mb: 10
+    backup_count: 5
+
+# Testing and Validation
+testing:
+  # Test Modes
+  simulation_mode: false          # Use simulated sensor data
+  hardware_in_loop: false         # Hardware-in-the-loop testing
+  
+  # Validation Thresholds
+  validation:
+    position_accuracy_test_m: 0.10
+    obstacle_detection_accuracy: 0.95
+    safety_response_time_ms: 200
+    
+  # Test Data
+  test_data_path: "/opt/lawnberry/test_data/"
+  ground_truth_available: false
+
+# Debug and Development
+debug:
+  enabled: false
+  verbose_sensor_data: false
+  performance_profiling: false
+  memory_monitoring: false
+  
+  # Debug Outputs
+  save_debug_images: false
+  debug_data_path: "/tmp/lawnberry_debug/"
+  
+  # Development Features
+  mock_sensors: false            # Use mock sensor data
+  bypass_safety: false          # NEVER enable in production
+  reduced_update_rates: false    # Reduce rates for debugging
