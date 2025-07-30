@@ -213,7 +213,7 @@ sudo reboot
 ```bash
 # Create directory and download
 cd /home/pi
-git clone https://github.com/your-repo/lawnberry-pi.git
+git clone https://github.com/acredsfan/lawnberry-pi.git
 cd lawnberry-pi
 
 # Make installation script executable
