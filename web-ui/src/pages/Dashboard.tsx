@@ -113,12 +113,18 @@ const Dashboard: React.FC = () => {
                 <Grid item xs={6} sm={3}>
                   <Box display="flex" alignItems="center" gap={1}>
                     <LocationIcon fontSize="small" />
-                    <Typography variant="body2">
-                      {status?.position ? 
-                        `${status.position.lat.toFixed(6)}, ${status.position.lng.toFixed(6)}` :
-                        'No GPS'
-                      }
-                    </Typography>
+                    <Box>
+                      <Typography variant="body2">
+                        {status?.position ? 
+                          `${status.position.lat.toFixed(6)}, ${status.position.lng.toFixed(6)}` :
+                          'No Location'
+                        }
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {status?.location_source === 'gps_hardware' ? 'GPS' : 
+                         status?.location_source === 'config_fallback' ? 'Config' : 'Unknown'}
+                      </Typography>
+                    </Box>
                   </Box>
                   <Typography variant="caption" color="text.secondary">
                     Position

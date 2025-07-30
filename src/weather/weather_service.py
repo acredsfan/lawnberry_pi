@@ -1,19 +1,24 @@
 """
 Weather Service Integration for LawnBerry Pi Autonomous Mower
-Provides Google Weather API integration for enhanced weather awareness and scheduling optimization
+Provides OpenWeather API integration for enhanced weather awareness and scheduling optimization
 """
 
 import asyncio
 import logging
 import json
 import time
+import os
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, cast
 from dataclasses import dataclass, asdict
 from enum import Enum
 import aiohttp
 import yaml
 from pathlib import Path
+from dotenv import load_dotenv
+
+from ..location import LocationCoordinator, LocationData
+from ..communication import MQTTClient
 
 # Weather data structures
 @dataclass
@@ -78,21 +83,43 @@ class MowingConditions:
 
 class WeatherService:
     """
-    Weather service providing Google Weather API integration
+    Weather service providing OpenWeather API integration
     for enhanced weather awareness and scheduling optimization
     """
     
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, mqtt_client: MQTTClient, config_path: Optional[str] = None):
+        # Load environment variables
+        load_dotenv()
+        
         self.logger = logging.getLogger(__name__)
+        self.mqtt_client = mqtt_client
         self.config_path = Path(config_path) if config_path else Path("config/weather.yaml")
         self.config = self._load_config()
+        
+        # Initialize location coordinator
+        self.location_coordinator = LocationCoordinator(mqtt_client, config_path)
+        
+        # Get API key from environment variable only (no config fallback for security)
+        self.api_key = os.getenv('OPENWEATHER_API_KEY')
+        if not self.api_key:
+            self.logger.error("OPENWEATHER_API_KEY environment variable is required but not set.")
+            raise ValueError("Missing required environment variable: OPENWEATHER_API_KEY")
+        
+        # API configuration
+        self.api_base_url = self.config.get('api_base_url', 'https://api.openweathermap.org/data/2.5')
         
         # State
         self._current_weather: Optional[WeatherCondition] = None
         self._forecast_data: List[WeatherForecast] = []
         self._active_alerts: List[WeatherAlert] = []
-        self._last_api_call = 0
+        self._last_api_call = 0.0
+        self._last_forecast_call = 0.0
+        self._last_alerts_call = 0.0
         self._cache_duration = 300  # 5 minutes
+        
+        # Rate limiting
+        self._api_calls_count = 0
+        self._api_calls_reset_time = time.time() + 60  # Reset every minute
         
         # Session for HTTP requests
         self._session: Optional[aiohttp.ClientSession] = None
@@ -237,9 +264,47 @@ class WeatherService:
         if not self._initialized:
             return []
         
-        # This would integrate with weather alert APIs
-        # For now, return cached alerts
+        # Check cache first
+        now = time.time()
+        if (self._active_alerts and 
+            now - self._last_alerts_call < self._cache_duration):
+            return self._active_alerts
+        
+        # Fetch fresh alerts
+        alerts = await self._fetch_weather_alerts()
+        if alerts is not None:
+            self._active_alerts = alerts
+            self._last_alerts_call = now
+        
         return self._active_alerts
+    
+    async def _fetch_weather_alerts(self) -> Optional[List[WeatherAlert]]:
+        """Fetch weather alerts from OpenWeather API"""
+        if not self._session or not self.api_key:
+            return None
+        
+        # Check rate limiting
+        if not self._check_rate_limit():
+            self.logger.warning("API rate limit exceeded, using cached alerts")
+            return None
+        
+        try:
+            # Get coordinates from location coordinator
+            lat, lon = self.location_coordinator.get_current_coordinates()
+            
+            # OpenWeather One Call API for alerts (requires subscription for historical/alerts)
+            # For free tier, we'll use a simple implementation
+            # In production, you might want to use weather alerts from other sources
+            
+            # For now, return empty list since alerts require One Call API subscription
+            # This can be extended when using a paid OpenWeather plan
+            self.logger.info("Weather alerts require OpenWeather One Call API subscription")
+            return []
+            
+        except Exception as e:
+            self.logger.error(f"Failed to fetch weather alerts: {e}")
+        
+        return None
     
     async def evaluate_mowing_conditions(self, 
                                        local_sensor_data: Optional[Dict] = None) -> MowingConditions:
@@ -391,78 +456,229 @@ class WeatherService:
         return None, None
     
     async def _fetch_current_weather(self) -> Optional[WeatherCondition]:
-        """Fetch current weather from Google Weather API"""
-        if not self._session:
+        """Fetch current weather from OpenWeather API"""
+        if not self._session or not self.api_key:
+            return None
+        
+        # Check rate limiting
+        if not self._check_rate_limit():
+            self.logger.warning("API rate limit exceeded, using cached data")
             return None
         
         try:
-            # This is a simplified example - actual Google Weather API integration
-            # would require proper API endpoints and authentication
-            lat = self.config['location']['latitude']
-            lon = self.config['location']['longitude']
-            api_key = self.config['api_key']
+            # Get coordinates from location coordinator
+            lat, lon = self.location_coordinator.get_current_coordinates()
             
-            # Example API call (replace with actual Google Weather API)
-            url = f"https://api.weather.gov/points/{lat},{lon}"
+            # OpenWeather Current Weather API
+            url = f"{self.api_base_url}/weather"
+            params = {
+                'lat': lat,
+                'lon': lon,
+                'appid': self.api_key,
+                'units': 'metric'  # Use metric units (Celsius, m/s, etc.)
+            }
             
-            async with self._session.get(url) as response:
+            async with self._session.get(url, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
-                    
-                    # Parse weather data (this is example data structure)
-                    return WeatherCondition(
-                        timestamp=datetime.now(),
-                        temperature=20.0,  # Parse from API response
-                        humidity=65.0,
-                        precipitation=0.0,
-                        wind_speed=3.5,
-                        wind_direction=180,
-                        pressure=1013.25,
-                        visibility=10.0,
-                        uv_index=5.0,
-                        cloud_cover=25.0,
-                        condition_code="partly_cloudy",
-                        condition_text="Partly Cloudy"
-                    )
+                    self._increment_api_calls()
+                    return self._parse_current_weather(data)
+                elif response.status == 401:
+                    self.logger.error("OpenWeather API authentication failed - check API key")
+                elif response.status == 404:
+                    self.logger.error("Location not found in OpenWeather API")
+                elif response.status == 429:
+                    self.logger.warning("OpenWeather API rate limit exceeded")
+                else:
+                    self.logger.error(f"OpenWeather API error: {response.status}")
         
         except Exception as e:
             self.logger.error(f"Failed to fetch current weather: {e}")
         
         return None
     
+    def _parse_current_weather(self, data: Dict[str, Any]) -> WeatherCondition:
+        """Parse OpenWeather API current weather response"""
+        main = data.get('main', {})
+        weather = data.get('weather', [{}])[0]
+        wind = data.get('wind', {})
+        clouds = data.get('clouds', {})
+        sys = data.get('sys', {})
+        
+        # Convert visibility from meters to kilometers
+        visibility = data.get('visibility', 10000) / 1000.0
+        
+        # Calculate precipitation rate (OpenWeather gives 1h or 3h totals)
+        rain = data.get('rain', {})
+        snow = data.get('snow', {})
+        precipitation = rain.get('1h', 0) + snow.get('1h', 0)  # mm/hour
+        
+        return WeatherCondition(
+            timestamp=datetime.now(),
+            temperature=main.get('temp', 0),
+            humidity=main.get('humidity', 0),
+            precipitation=precipitation,
+            wind_speed=wind.get('speed', 0),
+            wind_direction=wind.get('deg', 0),
+            pressure=main.get('pressure', 1013.25),
+            visibility=visibility,
+            uv_index=0,  # UV index requires separate API call
+            cloud_cover=clouds.get('all', 0),
+            condition_code=weather.get('main', 'unknown').lower(),
+            condition_text=weather.get('description', 'Unknown').title()
+        )
+    
+    def _check_rate_limit(self) -> bool:
+        """Check if we can make an API call within rate limits"""
+        current_time = time.time()
+        
+        # Reset counter every minute
+        if current_time >= self._api_calls_reset_time:
+            self._api_calls_count = 0
+            self._api_calls_reset_time = current_time + 60
+        
+        # Check if we're under the rate limit (60 calls per minute for free tier)
+        max_calls_per_minute = self.config.get('api_rate_limit', {}).get('calls_per_minute', 60)
+        return self._api_calls_count < max_calls_per_minute
+    
+    def _increment_api_calls(self):
+        """Increment the API call counter"""
+        self._api_calls_count += 1
+    
     async def _fetch_forecast(self, days: int) -> Optional[List[WeatherForecast]]:
-        """Fetch weather forecast from Google Weather API"""
-        if not self._session:
+        """Fetch weather forecast from OpenWeather API"""
+        if not self._session or not self.api_key:
+            return None
+        
+        # Check rate limiting
+        if not self._check_rate_limit():
+            self.logger.warning("API rate limit exceeded, using cached forecast data")
             return None
         
         try:
-            # Example forecast data - replace with actual API integration
-            forecast_data = []
-            base_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            # Get coordinates from location coordinator
+            lat, lon = self.location_coordinator.get_current_coordinates()
             
-            for i in range(days):
-                forecast_date = base_date + timedelta(days=i)
-                forecast_data.append(WeatherForecast(
-                    date=forecast_date,
-                    temp_high=25.0 + i,
-                    temp_low=15.0 + i,
-                    precipitation_chance=10.0,
-                    precipitation_amount=0.0,
-                    wind_speed=4.0,
-                    condition_code="sunny",
-                    condition_text="Sunny",
-                    sunrise=forecast_date.replace(hour=6, minute=30),
-                    sunset=forecast_date.replace(hour=19, minute=45),
-                    uv_index=6.0,
-                    humidity=60.0
-                ))
+            # OpenWeather 5-day/3-hour Forecast API
+            url = f"{self.api_base_url}/forecast"
+            params = {
+                'lat': lat,
+                'lon': lon,
+                'appid': self.api_key,
+                'units': 'metric'
+            }
             
-            return forecast_data
+            async with self._session.get(url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    self._increment_api_calls()
+                    return self._parse_forecast_data(data, days)
+                elif response.status == 401:
+                    self.logger.error("OpenWeather API authentication failed - check API key")
+                elif response.status == 404:
+                    self.logger.error("Location not found in OpenWeather API")
+                elif response.status == 429:
+                    self.logger.warning("OpenWeather API rate limit exceeded")
+                else:
+                    self.logger.error(f"OpenWeather API forecast error: {response.status}")
         
         except Exception as e:
             self.logger.error(f"Failed to fetch weather forecast: {e}")
         
         return None
+    
+    def _parse_forecast_data(self, data: Dict[str, Any], days: int) -> List[WeatherForecast]:
+        """Parse OpenWeather API forecast response into daily forecasts"""
+        forecast_list = data.get('list', [])
+        
+        # Group forecasts by day
+        daily_forecasts: Dict[Any, Dict[str, Any]] = {}
+        
+        for item in forecast_list:
+            dt = datetime.fromtimestamp(item['dt'])
+            date_key = dt.date()
+            
+            if date_key not in daily_forecasts:
+                daily_forecasts[date_key] = {
+                    'temps': [],
+                    'humidity': [],
+                    'wind_speeds': [],
+                    'conditions': [],
+                    'precipitation': 0.0,
+                }
+            
+            main = item.get('main', {})
+            weather = item.get('weather', [{}])[0]
+            wind = item.get('wind', {})
+            rain = item.get('rain', {})
+            snow = item.get('snow', {})
+            
+            day_data = daily_forecasts[date_key]
+            cast(List[float], day_data['temps']).append(main.get('temp', 0.0))
+            cast(List[float], day_data['humidity']).append(main.get('humidity', 0.0))
+            cast(List[float], day_data['wind_speeds']).append(wind.get('speed', 0.0))
+            cast(List[Dict[str, str]], day_data['conditions']).append({
+                'code': weather.get('main', 'unknown').lower(),
+                'text': weather.get('description', 'Unknown').title()
+            })
+            
+            # Accumulate precipitation (3-hour periods)
+            precip_3h = rain.get('3h', 0.0) + snow.get('3h', 0.0)
+            day_data['precipitation'] = cast(float, day_data['precipitation']) + precip_3h
+        
+        # Convert to WeatherForecast objects
+        result: List[WeatherForecast] = []
+        for date_key in sorted(daily_forecasts.keys())[:days]:
+            day_data = daily_forecasts[date_key]
+            
+            temps = cast(List[float], day_data['temps'])
+            humidity_vals = cast(List[float], day_data['humidity'])
+            wind_speeds = cast(List[float], day_data['wind_speeds'])
+            conditions = cast(List[Dict[str, str]], day_data['conditions'])
+            precipitation = cast(float, day_data['precipitation'])
+            
+            if not temps:
+                continue
+            
+            # Calculate daily statistics
+            temp_high = max(temps)
+            temp_low = min(temps)
+            avg_humidity = sum(humidity_vals) / len(humidity_vals)
+            avg_wind = sum(wind_speeds) / len(wind_speeds)
+            
+            # Use most common condition
+            condition_counts: Dict[Tuple[str, str], int] = {}
+            for condition in conditions:
+                key = (condition['code'], condition['text'])
+                condition_counts[key] = condition_counts.get(key, 0) + 1
+            
+            most_common = max(condition_counts.items(), key=lambda x: x[1])
+            condition_code, condition_text = most_common[0]
+            
+            # Estimate precipitation chance (simplified)
+            precipitation_chance = min(100.0, precipitation * 10)
+            
+            # Create sunrise/sunset times (approximate)
+            forecast_date = datetime.combine(date_key, datetime.min.time())
+            sunrise = forecast_date.replace(hour=6, minute=30)
+            sunset = forecast_date.replace(hour=19, minute=30)
+            
+            result.append(WeatherForecast(
+                date=forecast_date,
+                temp_high=temp_high,
+                temp_low=temp_low,
+                precipitation_chance=precipitation_chance,
+                precipitation_amount=precipitation,
+                wind_speed=avg_wind,
+                condition_code=condition_code,
+                condition_text=condition_text,
+                sunrise=sunrise,
+                sunset=sunset,
+                uv_index=5.0,  # Would need separate UV API call
+                humidity=avg_humidity
+            ))
+        
+        return result
     
     def _trim_weather_history(self):
         """Trim weather history to maximum days"""
@@ -541,3 +757,13 @@ class WeatherService:
             'best_mowing_hours': sorted(best_hours),
             'data_points': len(recent_history)
         }
+
+    async def start(self):
+        """Start the weather service and location coordinator"""
+        self.logger.info("Starting weather service")
+        await self.location_coordinator.start()
+    
+    async def stop(self):
+        """Stop the weather service and location coordinator"""
+        self.logger.info("Stopping weather service")
+        await self.location_coordinator.stop()

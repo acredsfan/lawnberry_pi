@@ -20,7 +20,7 @@ broker:
   auth:
     enabled: false
     username: "lawnberry"
-    password: "secure_password_change_me"
+    # Password is loaded from MQTT_PASSWORD environment variable (required when auth is enabled)
   
   # TLS encryption (disabled for local development)
   tls:
@@ -181,7 +181,7 @@ integration:
   cloud_logging:
     enabled: false
     endpoint: null
-    api_key: null
+    # API key is loaded from environment variable (required when cloud logging is enabled)
     batch_size: 100
     flush_interval: 300  # seconds
 

@@ -6,6 +6,7 @@ Handles fleet-wide updates, device grouping, and coordinated deployments
 import asyncio
 import logging
 import json
+import os
 import aiohttp
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -84,7 +85,12 @@ class FleetManager:
         
         # Fleet server communication
         self.fleet_server_url = self.config.get('server_url', '')
-        self.fleet_api_key = self.config.get('api_key', '')
+        
+        # Get API key from environment variable only (no config fallback for security)
+        self.fleet_api_key = os.getenv('LAWNBERRY_FLEET_API_KEY')
+        if self.config.get('enabled', False) and not self.fleet_api_key:
+            logger.error("LAWNBERRY_FLEET_API_KEY environment variable is required when fleet management is enabled.")
+            raise ValueError("Missing required environment variable: LAWNBERRY_FLEET_API_KEY")
         
         # Device grouping
         self.device_groups = self.config.get('groups', {})

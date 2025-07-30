@@ -1,60 +1,113 @@
-# Hardware Interface Layer
+# LawnBerryPi - Autonomous Lawn Mower System
 
-A comprehensive hardware abstraction layer for the autonomous lawn mower project, providing safe, shared access to all hardware components through a modular plugin architecture.
+![LawnBerryPi Logo](LawnBerryPi_logo.png)
 
-## Features
+LawnBerryPi is a comprehensive autonomous lawn mower system built on Raspberry Pi. It combines advanced navigation, intelligent scheduling, and safety systems to provide autonomous lawn care for residential properties.
 
-### Core Components
-- **I2C Manager**: Thread-safe singleton managing shared I2C bus access
-- **Serial/UART Manager**: Handle multiple serial devices with proper locking
-- **Camera Manager**: Exclusive camera access with frame buffering
-- **GPIO Manager**: Centralized GPIO pin control and monitoring
+## 🌟 Key Features
 
-### Modular Architecture
-- **Plugin System**: Component-based architecture for easy sensor addition
-- **Hot-Swap Support**: Dynamic loading/unloading without system restart
-- **Configuration-Driven**: Hardware components defined in YAML/JSON config
-- **Driver Abstraction**: Standardized interface for different sensor types
+### 🤖 Autonomous Operation
+- **GPS Navigation**: RTK-GPS with centimeter accuracy for precise boundary following
+- **Intelligent Mowing Patterns**: Multiple patterns optimized for different yard types
+- **Obstacle Avoidance**: Advanced sensor fusion for safe navigation
+- **Weather Integration**: Automatic scheduling based on weather conditions
 
-### Safety & Reliability
-- **Exponential Backoff**: Retry logic with jitter for robust communication
-- **Health Monitoring**: Automatic device health tracking and recovery
-- **Failsafe Mechanisms**: Graceful handling of hardware failures
-- **Concurrent Access**: Thread-safe operations using asyncio locks
+### 🛡️ Safety First
+- **Multiple Emergency Stop Methods**: Web interface, physical sensors, and manual controls
+- **Comprehensive Safety Systems**: Tilt detection, blade guards, and perimeter monitoring
+- **Child and Pet Safety**: Automatic detection and response protocols
+- **Real-time Monitoring**: Live camera feed and sensor data
 
-## Hardware Support
+### 📱 Smart Control
+- **Web-based Interface**: Responsive design accessible from any device
+- **Real-time Dashboard**: Live status, camera feed, and system monitoring
+- **Flexible Scheduling**: Weather-aware scheduling with multiple patterns
+- **Mobile Optimization**: Progressive Web App for smartphone control
 
-### I2C Devices
-- **VL53L0X ToF Sensors**: Distance measurement (addresses 0x29, 0x30)
-- **INA3221 Power Monitor**: Voltage/current monitoring (address 0x40)
-- **BME280 Environmental**: Temperature/humidity/pressure (address 0x76)
-- **SSD1306 Display**: OLED display control (address 0x3c)
+### 🔧 Professional Features
+- **Modular Hardware Architecture**: Plugin-based system for easy expansion
+- **Advanced Diagnostics**: Comprehensive hardware monitoring and testing
+- **Fleet Management**: Multi-mower coordination and centralized control
+- **AI Training Capabilities**: Custom object detection and yard learning
 
-### Serial Devices
-- **RoboHAT Controller**: Motor control via /dev/ttyACM1 (115200 baud)
-- **GPS Module**: Position data via /dev/ttyACM0 (38400 baud)
-- **BNO085 IMU**: Orientation data via /dev/ttyAMA4 (3M baud)
+## 📖 Documentation
 
-### GPIO Pins
-- **ToF Control**: Shutdown pins (GPIO 22, 23), interrupt pins (GPIO 6, 12)
-- **Blade Control**: Enable/direction pins (GPIO 24, 25)
+**New users start here**: [📋 Installation Guide](docs/installation-guide.md)
 
-### Camera
-- **Raspberry Pi Camera**: /dev/video0 with configurable resolution/framerate
+### 🚀 Getting Started
+- **[Installation Guide](docs/installation-guide.md)** - Complete step-by-step installation
+- **[First-Time Setup](docs/first-time-setup.md)** - Configure your LawnBerryPi for your yard
+- **[User Manual](docs/user-manual.md)** - Comprehensive operating instructions
+- **[Safety Guide](docs/safety-guide.md)** - ⚠️ **Read before operating** - Essential safety information
+
+### 🔧 Operation & Maintenance
+- **[Troubleshooting Guide](docs/troubleshooting-guide.md)** - Solve common problems
+- **[Maintenance Guide](docs/maintenance-guide.md)** - Keep your system running optimally
+- **[Quick Reference](docs/quick-reference/)** - Printable cards and checklists
+
+### 📚 Complete Documentation
+Visit the **[Documentation Index](docs/README.md)** for all available guides, references, and technical information.
+
+## 🏗️ System Architecture
+
+### Hardware Components
+- **Raspberry Pi 4** (16GB RAM) - Main computing platform
+- **RoboHAT with RP2040** - Motor control and sensor interface
+- **RTK-GPS Module** - Centimeter-accurate positioning
+- **Environmental Sensors** - Weather monitoring and safety
+- **Camera System** - Object detection and monitoring
+- **LiFePO4 Battery** - Reliable power with solar charging
+- **Drive Motors** - 12V worm gear motors with precision control
+
+### Software Architecture
+- **Modular Python Backend** - Microservices design with asyncio
+- **React Web Interface** - Responsive PWA with real-time updates
+- **Real-time Communication** - WebSocket integration for live monitoring
+- **Weather Integration** - OpenWeather API with intelligent scheduling
+- **Safety Systems** - Multi-layered protection and emergency response
 
 ## Installation
 
+LawnBerry Pi features comprehensive installation automation with hardware detection and guided setup.
+
+### 🚀 Quick Start (Recommended)
+
+For first-time installation on a fresh Raspberry Pi:
+
 ```bash
-# Install dependencies
-pip install asyncio smbus2 pyserial opencv-python RPi.GPIO pyyaml
+# Clone the repository
+git clone <repository-url> lawnberry
+cd lawnberry
 
-# Clone repository
-git clone <repository-url>
-cd lawnberry-pi
+# Run the enhanced installer
+bash scripts/install_lawnberry.sh
 
-# Install package
-pip install -e .
+# Optional: Run the first-time setup wizard
+python3 scripts/first_run_wizard.py
 ```
+
+### ✨ Installation Features
+
+- 🔍 **Automatic Hardware Detection** - Scans and configures connected sensors, GPS, camera, and controllers
+- 🔑 **Environment Setup** - Secure API key configuration with validation
+- 💾 **Database Initialization** - Automated SQLite and Redis setup
+- 🧪 **System Testing** - Comprehensive connectivity and functionality tests
+- 🧙 **First-Run Wizard** - User-friendly guided setup for beginners
+
+### 📋 Available Scripts
+
+- `scripts/install_lawnberry.sh` - Main installation script with hardware detection
+- `scripts/first_run_wizard.py` - Interactive setup wizard for new users
+- `scripts/hardware_detection.py` - Standalone hardware detection and testing
+- `scripts/setup_environment.py` - Environment variable and API key configuration
+- `scripts/update_lawnberry.sh` - System updates with configuration preservation
+- `scripts/uninstall_lawnberry.sh` - Clean system removal
+
+### 📚 Installation Documentation
+
+- **Installation Scripts:** [scripts/README.md](scripts/README.md) - Detailed script documentation
+- **Installation Guide:** [docs/installation-guide.md](docs/installation-guide.md) - Complete setup instructions
+- **Hardware Guide:** [docs/hardware-overview.md](docs/hardware-overview.md) - Hardware requirements and connections
 
 ## Quick Start
 

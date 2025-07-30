@@ -1,10 +1,36 @@
 #!/bin/bash
 set -e
 
-# Lawnberry System Integration Installation Script
-# Installs systemd services and sets up system integration
+# Legacy Lawnberry System Integration Installation Script
+# This script is deprecated. Use the enhanced installer instead.
 
-echo "Installing Lawnberry System Integration..."
+echo "============================================================"
+echo "NOTICE: This installation script has been superseded"
+echo "============================================================"
+echo ""
+echo "Please use the enhanced installation system instead:"
+echo "  bash scripts/install_lawnberry.sh"
+echo ""
+echo "The new installer includes:"
+echo "  • Automatic hardware detection"
+echo "  • Environment variable setup"
+echo "  • Database initialization"
+echo "  • First-run wizard"
+echo "  • Comprehensive system testing"
+echo ""
+echo "Would you like to run the enhanced installer now?"
+read -p "Run enhanced installer? (Y/n): " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$|^$ ]]; then
+    exec bash scripts/install_lawnberry.sh "$@"
+else
+    echo "Installation cancelled."
+    echo "You can run it later with: bash scripts/install_lawnberry.sh"
+    exit 0
+fi
+
+# Legacy installation code below (only runs if enhanced installer is not available)
+echo "Enhanced installer not found - falling back to legacy installation..."
 
 # Check if running as root
 if [[ $EUID -eq 0 ]]; then

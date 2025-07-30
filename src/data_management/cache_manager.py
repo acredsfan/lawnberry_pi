@@ -6,6 +6,7 @@ High-performance caching with Redis integration
 import asyncio
 import json
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional, Union, Set
 from datetime import datetime, timedelta
@@ -26,7 +27,9 @@ class CacheManager:
         self.redis_host = config.get('host', 'localhost')
         self.redis_port = config.get('port', 6379)
         self.redis_db = config.get('db', 0)
-        self.redis_password = config.get('password')
+        
+        # Get Redis password from environment variable (no config fallback for security)
+        self.redis_password = os.getenv('REDIS_PASSWORD')
         
         # Connection pool
         self.redis_pool: Optional[redis.ConnectionPool] = None

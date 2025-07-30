@@ -5,7 +5,7 @@ fleet:
   # Fleet management settings
   enabled: false
   server_url: "https://fleet.lawnberry.com/api/v1"
-  api_key: ""  # Set via environment variable LAWNBERRY_FLEET_API_KEY
+  # API key is loaded from LAWNBERRY_FLEET_API_KEY environment variable (required when enabled)
   
   # Device identification
   device_id: ""  # Auto-generated if empty

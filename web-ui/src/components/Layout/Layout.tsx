@@ -8,6 +8,7 @@ import { toggleSidebar, setSidebarOpen, openModal } from '../../store/slices/uiS
 import { setEmergencyStop } from '../../store/slices/mowerSlice'
 import ConnectionStatus from '../ConnectionStatus/ConnectionStatus'
 import EmergencyButton from '../EmergencyButton/EmergencyButton'
+import Logo from '../Logo'
 
 interface LayoutProps {
   children: React.ReactNode
@@ -53,9 +54,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const drawer = (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Toolbar>
-        <Typography variant="h6" noWrap component="div" color="primary" fontWeight="bold">
-          Lawnberry
-        </Typography>
+        <Logo size={32} showText={true} />
       </Toolbar>
       
       <List sx={{ flexGrow: 1 }}>
@@ -113,13 +112,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             aria-label="open drawer"
             edge="start"
             onClick={handleDrawerToggle}
-            sx={{ mr: 2 }}
+            sx={{ mr: 2, display: { md: sidebarOpen ? 'none' : 'block' } }}
           >
             <MenuIcon />
           </IconButton>
           
+          <Box sx={{ display: { xs: 'none', md: sidebarOpen ? 'none' : 'flex' }, mr: 2 }}>
+            <Logo size={36} showText={true} />
+          </Box>
+          
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            {menuItems.find(item => item.path === location.pathname)?.label || 'Lawnberry Control'}
+            {menuItems.find(item => item.path === location.pathname)?.label || 'Dashboard'}
           </Typography>
 
           <IconButton color="inherit" onClick={() => dispatch(openModal('settings'))}>

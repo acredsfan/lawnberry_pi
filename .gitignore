@@ -1,1 +1,131 @@
-/.mypy_cache
+# =============================================================================
+# LawnBerry Pi .gitignore
+# =============================================================================
+
+# Environment files (NEVER commit these!)
+.env
+.env.*
+!.env.example
+
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.mypy_cache/
+
+# Testing artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Node.js artifacts (web-ui dependencies and build outputs)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.pnpm-debug.log*
+dist/
+.vite/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+
+# Logs and temporary files
+*.log
+logs/
+*.tmp
+*.temp
+temp/
+
+# Database files (local development databases)
+*.db
+*.sqlite
+*.sqlite3
+dump.rdb
+*.db-journal
+
+# Configuration overrides that might contain sensitive data
+config/local.yaml
+config/*_local.yaml
+config/*.local.yaml
+*_local.yaml
+*_local.yml
+local_*.yaml
+local_*.yml
+
+# Deployment and build artifacts
+*.tar.gz
+*.zip
+deployment_packages/
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# System files
+.directory
+*.lnk
+
+# Runtime files
+*.pid
+*.sock
+
+# Backup files
+*.bak
+*.backup
+*~
+.#*
+#*#
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Development environment specific
+.python-version
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/

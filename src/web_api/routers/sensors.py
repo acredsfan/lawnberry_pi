@@ -218,28 +218,28 @@ async def get_current_location(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """Get current GPS location"""
+    """Get current location with source information"""
     mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
     
     if not mqtt_bridge or not mqtt_bridge.is_connected():
         raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
     
-    # Get GPS data from cache
-    gps_data = mqtt_bridge.get_cached_data("sensors/gps/data")
+    # Get location data from location coordinator
+    location_data = mqtt_bridge.get_cached_data("location/current")
     
-    if not gps_data:
-        raise NotFoundError("gps_data", "No current GPS data available")
-    
-    location = gps_data.get("value", {})
+    if not location_data:
+        raise NotFoundError("location_data", "No current location data available")
     
     return {
-        "latitude": location.get("latitude", 0.0),
-        "longitude": location.get("longitude", 0.0),
-        "altitude": location.get("altitude", 0.0),
-        "accuracy": location.get("accuracy", 0.0),
-        "timestamp": gps_data.get("timestamp", datetime.utcnow().isoformat()),
-        "satellite_count": location.get("satellites", 0),
-        "fix_quality": location.get("fix_quality", "unknown")
+        "latitude": location_data.get("latitude", 0.0),
+        "longitude": location_data.get("longitude", 0.0),
+        "altitude": location_data.get("altitude", 0.0),
+        "accuracy": location_data.get("accuracy", 0.0),
+        "timestamp": location_data.get("timestamp", datetime.utcnow().isoformat()),
+        "satellite_count": location_data.get("satellites", 0),
+        "fix_quality": location_data.get("fix_type", "unknown"),
+        "source": location_data.get("source", "unknown"),
+        "health_status": location_data.get("health_status", "unknown")
     }
 
 

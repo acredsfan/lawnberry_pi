@@ -19,7 +19,7 @@ async def get_map_data(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """Get complete map data"""
+    """Get complete map data with current location"""
     mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
     
     if not mqtt_bridge or not mqtt_bridge.is_connected():
@@ -28,11 +28,20 @@ async def get_map_data(
     # Get map data from cache
     boundaries_data = mqtt_bridge.get_cached_data("maps/boundaries")
     coverage_data = mqtt_bridge.get_cached_data("maps/coverage")
+    location_data = mqtt_bridge.get_cached_data("location/current")
+    
+    # Get current position for map centering
+    current_position = None
+    if location_data:
+        current_position = Position(
+            latitude=location_data.get("latitude", 0.0),
+            longitude=location_data.get("longitude", 0.0)
+        )
     
     return MapData(
         boundaries=[],  # Would parse from boundaries_data
         no_go_zones=[],
-        home_position=None,
+        home_position=current_position,
         charging_spots=[],
         coverage_map=coverage_data
     )

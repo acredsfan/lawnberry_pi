@@ -11,20 +11,20 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg}']
       },
       manifest: {
-        name: 'Lawnberry Mower Control',
-        short_name: 'Lawnberry',
-        description: 'Autonomous Lawn Mower Control Interface',
-        theme_color: '#4caf50',
-        background_color: '#ffffff',
+        name: 'LawnBerryPi Control',
+        short_name: 'LawnBerryPi',
+        description: 'LawnBerryPi - Autonomous Lawn Mower Control Interface',
+        theme_color: '#2E7D32',
+        background_color: '#FAFAFA',
         display: 'standalone',
         icons: [
           {
-            src: 'pwa-192x192.png',
+            src: 'assets/LawnBerryPi_logo.png',
             sizes: '192x192',
             type: 'image/png'
           },
           {
-            src: 'pwa-512x512.png',
+            src: 'assets/LawnBerryPi_logo.png',
             sizes: '512x512',
             type: 'image/png'
           }

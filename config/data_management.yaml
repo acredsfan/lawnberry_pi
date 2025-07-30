@@ -5,7 +5,7 @@ redis:
   host: "localhost"
   port: 6379
   db: 0
-  password: null
+  # Password is loaded from REDIS_PASSWORD environment variable (optional)
   
   # Cache TTL settings (seconds)
   default_ttl: 300        # 5 minutes

@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard'
 import Navigation from './pages/Navigation'
 import Settings from './pages/Settings'
 import Training from './pages/Training'
+import Logo from './components/Logo'
 import { webSocketService } from './services/websocket'
 import { usePerformanceMonitor } from './hooks/usePerformanceMonitor'
 
@@ -131,15 +132,19 @@ const App: React.FC = () => {
         justifyContent="center"
         alignItems="center"
         height="100vh"
-        gap={2}
+        gap={3}
+        sx={{ backgroundColor: 'background.default' }}
       >
-        <CircularProgress size={60} />
-        <Typography variant="h6" color="primary">
-          Initializing Lawnberry Control...
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Connecting to mower system
-        </Typography>
+        <Logo size={80} showText={true} />
+        <CircularProgress size={48} thickness={4} />
+        <Box textAlign="center">
+          <Typography variant="h6" color="primary" gutterBottom>
+            Initializing LawnBerryPi Control...
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Connecting to mower system
+          </Typography>
+        </Box>
       </Box>
     )
   }

@@ -1,14 +1,15 @@
 # Weather Service Configuration for LawnBerry Pi Autonomous Mower
 
-# Google Weather API Configuration
-api_key: ""  # Set your Google Weather API key here
+# OpenWeather API Configuration
+# API key is loaded from OPENWEATHER_API_KEY environment variable (required)
+api_base_url: "https://api.openweathermap.org/data/2.5"
 location:
   latitude: 40.7128   # Set your location coordinates
   longitude: -74.0060
 
-# API Usage Limits
+# API Usage Limits (OpenWeather Free Plan: 1000 calls/day, 60 calls/minute)
 api_rate_limit:
-  calls_per_hour: 100
+  calls_per_minute: 60
   calls_per_day: 1000
 
 # Cache Settings
