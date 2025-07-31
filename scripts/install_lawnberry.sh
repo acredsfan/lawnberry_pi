@@ -84,19 +84,38 @@ check_system() {
         log_info "Operating System: $os_info"
     fi
     
-    # Check Python version
+    # Check Python version - Bookworm compatibility
     if command -v python3 >/dev/null 2>&1; then
         python_version=$(python3 --version)
         log_info "Python: $python_version"
         
-        # Check if Python 3.8+
-        if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" 2>/dev/null; then
-            log_error "Python 3.8 or higher is required"
-            exit 1
+        # Check if Python 3.11+ (Bookworm requirement)
+        if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
+            log_warning "Python 3.11+ recommended for Raspberry Pi OS Bookworm"
+            log_info "Minimum Python 3.8 detected - some optimizations may not be available"
+            if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" 2>/dev/null; then
+                log_error "Python 3.8 or higher is required"
+                exit 1
+            fi
+        else
+            log_success "Python 3.11+ detected - Bookworm optimized features available"
         fi
     else
         log_error "Python 3 is not installed"
         exit 1
+    fi
+    
+    # Check Raspberry Pi OS version - Bookworm preferred
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        log_info "OS: $PRETTY_NAME"
+        if [[ "$VERSION_CODENAME" == "bookworm" ]]; then
+            log_success "Raspberry Pi OS Bookworm detected - fully supported"
+        elif [[ "$VERSION_CODENAME" == "bullseye" ]]; then
+            log_warning "Raspberry Pi OS Bullseye detected - consider upgrading to Bookworm"
+        else
+            log_warning "Unrecognized OS version - Bookworm recommended for best compatibility"
+        fi
     fi
     
     # Check available memory

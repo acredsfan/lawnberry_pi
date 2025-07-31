@@ -265,14 +265,58 @@ const Maps: React.FC = () => {
                     zoom={mapConfig.defaultZoom}
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
+                    boundaries={boundaries.map(b => ({
+                      id: b.id,
+                      name: b.name,
+                      coordinates: b.coordinates.map(c => ({ lat: c.latitude, lng: c.longitude })),
+                      type: 'boundary' as const
+                    }))}
+                    noGoZones={noGoZones.map(z => ({
+                      id: z.id,
+                      name: z.name,
+                      coordinates: z.coordinates.map(c => ({ lat: c.latitude, lng: c.longitude })),
+                      type: 'no-go' as const
+                    }))}
+                    homeLocation={homeLocations[0] ? {
+                      lat: homeLocations[0].coordinates.latitude,
+                      lng: homeLocations[0].coordinates.longitude
+                    } : undefined}
+                    robotPosition={robotPosition}
+                    isDrawingMode={false}
+                    drawingType="boundary"
+                    showMowingProgress={status?.state === 'mowing'}
+                    mowingPath={status?.coverage ? [] : []} // TODO: Get actual mowing path from status
+                    coveredAreas={[]} // TODO: Get actual covered areas from status
+                    onBoundaryComplete={(coordinates) => {
+                      // Handle new boundary creation
+                      boundaryService.createBoundary({
+                        name: `Boundary ${boundaries.length + 1}`,
+                        coordinates: coordinates.map(c => ({ latitude: c.lat, longitude: c.lng })),
+                        isActive: true
+                      }).then(() => loadBoundaries());
+                    }}
+                    onNoGoZoneComplete={(coordinates) => {
+                      // Handle new no-go zone creation
+                      noGoZoneService.createNoGoZone({
+                        name: `No-Go Zone ${noGoZones.length + 1}`,
+                        coordinates: coordinates.map(c => ({ latitude: c.lat, longitude: c.lng })),
+                        isActive: true
+                      }).then(() => loadNoGoZones());
+                    }}
+                    onHomeLocationSet={(coordinates) => {
+                      // Handle home location setting
+                      homeLocationService.createHomeLocation({
+                        name: 'Home Base',
+                        coordinates: { latitude: coordinates.lat, longitude: coordinates.lng },
+                        type: 'charging_station',
+                        isActive: true
+                      }).then(() => loadHomeLocations());
+                    }}
                     onProviderChange={(provider) => {
                       console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
-                    }}
-                    onMapReady={(map) => {
-                      mapRef.current = map;
                     }}
                     style={{ height: '100%' }}
                   />

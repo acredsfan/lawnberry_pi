@@ -6,6 +6,7 @@ import numpy as np
 from typing import Optional, List, Dict, Any, Tuple
 from pathlib import Path
 import time
+import json
 
 try:
     from pycoral.utils import edgetpu
@@ -41,22 +42,34 @@ class CoralTPUManager:
         async with self._initialization_lock:
             try:
                 if not CORAL_AVAILABLE:
-                    self.logger.warning("Coral TPU libraries not available")
+                    self.logger.warning("Coral TPU libraries not available - ensure pycoral is installed")
                     return False
                 
                 # Check if TPU is available
                 tpu_devices = edgetpu.list_edge_tpus()
                 if not tpu_devices:
-                    self.logger.warning("No Coral TPU devices found")
+                    self.logger.warning("No Coral TPU devices found - check USB connection")
                     return False
                 
-                self.logger.info(f"Found {len(tpu_devices)} Coral TPU device(s)")
+                self.logger.info(f"Found {len(tpu_devices)} Coral TPU device(s): {[d['type'] for d in tpu_devices]}")
                 
                 # Load model
                 model_path = Path(model_path)
                 if not model_path.exists():
                     self.logger.error(f"Model file not found: {model_path}")
+                    # Try to find custom models
+                    custom_models = list(Path("models/custom").glob("*.tflite"))
+                    if custom_models:
+                        self.logger.info(f"Available custom models: {[m.name for m in custom_models]}")
                     return False
+                
+                # Load custom model metadata if available
+                metadata_path = Path(str(model_path).replace('.tflite', '.json'))
+                custom_metadata = {}
+                if metadata_path.exists():
+                    with open(metadata_path, 'r') as f:
+                        custom_metadata = json.load(f)
+                    self.logger.info(f"Loaded custom model metadata: {custom_metadata.get('model_info', {}).get('name', 'Unknown')}")
                 
                 # Create TPU interpreter
                 self._interpreter = tflite.Interpreter(
@@ -70,28 +83,38 @@ class CoralTPUManager:
                 input_details = self._interpreter.get_input_details()
                 output_details = self._interpreter.get_output_details()
                 
+                # Use custom metadata if available
+                model_info = custom_metadata.get('model_info', {})
                 self._model_info = ModelInfo(
-                    name=model_path.stem,
-                    version="1.0",
+                    name=model_info.get('name', Path(model_path).stem),
+                    version=model_info.get('version', "1.0"),
                     path=str(model_path),
-                    accuracy=0.0,  # Will be updated during operation
-                    inference_time_ms=0.0,
-                    tpu_optimized=True,
+                    accuracy=model_info.get('accuracy', 0.0),
+                    inference_time_ms=model_info.get('inference_time_ms', 0.0),
+                    tpu_optimized=model_info.get('tpu_optimized', True),
                     created_at=time.time(),
                     metadata={
                         'input_shape': input_details[0]['shape'].tolist(),
                         'output_count': len(output_details),
                         'input_dtype': str(input_details[0]['dtype']),
-                        'quantized': input_details[0]['dtype'] != np.float32
+                        'quantized': input_details[0]['dtype'] != np.float32,
+                        'custom_classes': custom_metadata.get('classes', {}),
+                        'performance_metrics': custom_metadata.get('performance_metrics', {}),
+                        'lawn_optimized': 'lawn' in model_info.get('description', '').lower()
                     }
                 )
                 
                 self._tpu_available = True
-                self.logger.info(f"Coral TPU initialized with model: {model_path}")
+                self.logger.info(f"Coral TPU initialized successfully!")
+                if self._model_info:
+                    self.logger.info(f"Model: {self._model_info.name} v{self._model_info.version}")
+                    self.logger.info(f"Input shape: {self._model_info.metadata['input_shape']}")
+                    self.logger.info(f"Lawn-optimized: {self._model_info.metadata['lawn_optimized']}")
                 return True
                 
             except Exception as e:
                 self.logger.error(f"Failed to initialize Coral TPU: {e}")
+                self.logger.error("Please check: 1) TPU is connected via USB, 2) pycoral is installed, 3) Model file exists")
                 self._tpu_available = False
                 return False
     
@@ -312,7 +335,7 @@ class CPUFallbackManager:
         self.logger = logging.getLogger(__name__)
         self.config = config
         self._interpreter = None
-        self._model_info = None
+        self._model_info: Optional[Dict[str, Any]] = None
         
     async def initialize(self, model_path: str) -> bool:
         """Initialize CPU-based TensorFlow Lite interpreter"""
@@ -322,11 +345,30 @@ class CPUFallbackManager:
                 self.logger.error(f"Model file not found: {model_path}")
                 return False
             
+            # Load custom model metadata if available
+            metadata_path = Path(str(model_path).replace('.tflite', '.json'))
+            custom_metadata = {}
+            if metadata_path.exists():
+                with open(metadata_path, 'r') as f:
+                    custom_metadata = json.load(f)
+                self.logger.info(f"Loaded custom model metadata for CPU fallback")
+            
             # Create CPU interpreter
             self._interpreter = tflite.Interpreter(model_path=str(model_path))
             self._interpreter.allocate_tensors()
             
+            # Store model info
+            model_info = custom_metadata.get('model_info', {})
+            self._model_info = {
+                'name': model_info.get('name', Path(model_path).stem),
+                'version': model_info.get('version', "1.0"),
+                'lawn_optimized': 'lawn' in model_info.get('description', '').lower(),
+                'custom_classes': custom_metadata.get('classes', {})
+            }
+            
             self.logger.info(f"CPU fallback initialized with model: {model_path}")
+            if self._model_info:
+                self.logger.info(f"Model: {self._model_info['name']} (CPU mode)")
             return True
             
         except Exception as e:

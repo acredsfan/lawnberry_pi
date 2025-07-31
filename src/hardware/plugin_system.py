@@ -53,6 +53,142 @@ class HardwarePlugin(ABC):
     async def initialize(self) -> bool:
         """Initialize the hardware component"""
         pass
+
+    async def set_rc_mode(self, mode: str) -> bool:
+        """Set RC control mode"""
+        if not self._initialized:
+            if not await self.initialize():
+                return False
+        
+        valid_modes = ["emergency", "manual", "assisted", "training"]
+        if mode not in valid_modes:
+            self.logger.error(f"Invalid RC mode: {mode}")
+            return False
+        
+        try:
+            serial_manager = self.managers["serial"]
+            success = await serial_manager.write_command("robohat", f"rc_mode={mode}")
+            
+            if success:
+                self.rc_mode = mode
+                await self.health.record_success()
+                self.logger.info(f"RC mode set to: {mode}")
+            else:
+                await self.health.record_failure()
+            
+            return success
+            
+        except Exception as e:
+            await self.health.record_failure()
+            self.logger.error(f"Failed to set RC mode: {e}")
+            return False
+    
+    async def enable_rc_control(self, enabled: bool = True) -> bool:
+        """Enable or disable RC control"""
+        if not self._initialized:
+            if not await self.initialize():
+                return False
+        
+        try:
+            serial_manager = self.managers["serial"]
+            command = "rc=enable" if enabled else "rc=disable"
+            success = await serial_manager.write_command("robohat", command)
+            
+            if success:
+                self.rc_enabled = enabled
+                await self.health.record_success()
+                self.logger.info(f"RC control {'enabled' if enabled else 'disabled'}")
+            else:
+                await self.health.record_failure()
+            
+            return success
+            
+        except Exception as e:
+            await self.health.record_failure()
+            self.logger.error(f"Failed to set RC control state: {e}")
+            return False
+    
+    async def set_blade_control(self, enabled: bool) -> bool:
+        """Control blade motor"""
+        if not self._initialized:
+            if not await self.initialize():
+                return False
+        
+        try:
+            serial_manager = self.managers["serial"]
+            command = "blade=on" if enabled else "blade=off"
+            success = await serial_manager.write_command("robohat", command)
+            
+            if success:
+                self.blade_enabled = enabled
+                await self.health.record_success()
+                self.logger.info(f"Blade {'enabled' if enabled else 'disabled'}")
+            else:
+                await self.health.record_failure()
+            
+            return success
+            
+        except Exception as e:
+            await self.health.record_failure()
+            self.logger.error(f"Failed to control blade: {e}")
+            return False
+    
+    async def get_rc_status(self) -> Optional[Dict[str, Any]]:
+        """Get comprehensive RC control status"""
+        if not self._initialized:
+            if not await self.initialize():
+                return None
+        
+        try:
+            serial_manager = self.managers["serial"]
+            success = await serial_manager.write_command("robohat", "get_rc_status")
+            
+            if success:
+                # Read status response
+                line = await serial_manager.read_line("robohat", timeout=1.0)
+                if line and line.startswith("[STATUS]"):
+                    # Parse status response
+                    import ast
+                    status_str = line.replace("[STATUS] ", "")
+                    status = ast.literal_eval(status_str)
+                    
+                    await self.health.record_success()
+                    return status
+            
+            await self.health.record_failure()
+            return None
+            
+        except Exception as e:
+            await self.health.record_failure()
+            self.logger.error(f"Failed to get RC status: {e}")
+            return None
+    
+    async def configure_rc_channel(self, channel: int, function: str) -> bool:
+        """Configure RC channel function mapping"""
+        if not self._initialized:
+            if not await self.initialize():
+                return False
+        
+        try:
+            serial_manager = self.managers["serial"]
+            command = f"rc_config={channel},{function}"
+            success = await serial_manager.write_command("robohat", command)
+            
+            if success:
+                if channel in self.channel_config:
+                    self.channel_config[channel]["function"] = function
+                await self.health.record_success()
+                self.logger.info(f"RC channel {channel} configured for {function}")
+            else:
+                await self.health.record_failure()
+            
+            return success
+            
+        except Exception as e:
+            await self.health.record_failure()
+            self.logger.error(f"Failed to configure RC channel: {e}")
+            return False
+
     
     @abstractmethod
     async def read_data(self) -> Optional[SensorReading]:
@@ -243,7 +379,21 @@ class PowerMonitorPlugin(HardwarePlugin):
 
 
 class RoboHATPlugin(HardwarePlugin):
-    """RoboHAT controller plugin"""
+    """Enhanced RoboHAT controller plugin with RC control support"""
+    
+    def __init__(self, config: PluginConfig, managers: Dict[str, Any]):
+        super().__init__(config, managers)
+        self.rc_mode = "emergency"
+        self.rc_enabled = True
+        self.blade_enabled = False
+        self.channel_config = {
+            1: {"function": "steer", "min": 1000, "max": 2000, "center": 1500},
+            2: {"function": "throttle", "min": 1000, "max": 2000, "center": 1500},
+            3: {"function": "blade", "min": 1000, "max": 2000, "center": 1500},
+            4: {"function": "speed_adj", "min": 1000, "max": 2000, "center": 1500},
+            5: {"function": "emergency", "min": 1000, "max": 2000, "center": 1500},
+            6: {"function": "mode_switch", "min": 1000, "max": 2000, "center": 1500},
+        }
     
     @property
     def plugin_type(self) -> str:
@@ -252,9 +402,9 @@ class RoboHATPlugin(HardwarePlugin):
     @property
     def required_managers(self) -> List[str]:
         return ["serial"]
-    
+
     async def initialize(self) -> bool:
-        """Initialize RoboHAT connection"""
+        """Initialize RoboHAT connection with RC control support"""
         async with self._lock:
             if self._initialized:
                 return True
@@ -263,13 +413,15 @@ class RoboHATPlugin(HardwarePlugin):
                 serial_manager = self.managers["serial"]
                 await serial_manager.initialize_device("robohat")
                 
-                # Send initial command to verify connection
-                await serial_manager.write_command("robohat", "rc=disable")
+                # Send initial commands to configure RC system
+                await serial_manager.write_command("robohat", "rc=enable")
+                await asyncio.sleep(0.1)
+                await serial_manager.write_command("robohat", f"rc_mode={self.rc_mode}")
                 await asyncio.sleep(0.1)
                 
                 self._initialized = True
                 await self.health.record_success()
-                self.logger.info("RoboHAT initialized")
+                self.logger.info(f"RoboHAT initialized with RC mode: {self.rc_mode}")
                 return True
                 
             except Exception as e:

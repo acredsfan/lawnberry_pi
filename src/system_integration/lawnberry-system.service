@@ -35,19 +35,36 @@ RestrictRealtime=true
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
 
-# Performance settings
+# Performance settings - Bookworm optimized
 Nice=-10
 IOSchedulingClass=1
 IOSchedulingPriority=2
+CPUAccounting=true
+CPUWeight=200
 
 # Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=lawnberry-system
 
-# Watchdog
+# Watchdog - Enhanced for Bookworm
 WatchdogSec=60
 NotifyAccess=main
+TimeoutStartSec=90
+TimeoutStopSec=30
+
+# Bookworm-specific optimizations
+PrivateUsers=false
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target

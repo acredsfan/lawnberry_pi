@@ -19,7 +19,7 @@ from .config import get_settings
 from .auth import get_current_user, AuthManager
 from .routers import (
     system, sensors, navigation, patterns, 
-    configuration, maps, weather, power, websocket, progress
+    configuration, maps, weather, power, websocket, progress, rc_control
 )
 from .middleware import RateLimitMiddleware, RequestLoggingMiddleware
 from .mqtt_bridge import MQTTBridge
@@ -126,6 +126,7 @@ def create_app() -> FastAPI:
     app.include_router(weather.router, prefix="/api/v1/weather", tags=["weather"])
     app.include_router(power.router, prefix="/api/v1/power", tags=["power"])
     app.include_router(progress.router, prefix="/api/v1/progress", tags=["progress"])
+    app.include_router(rc_control.router, prefix="/api/v1/rc", tags=["rc_control"])
     app.include_router(websocket.router, prefix="/ws", tags=["websocket"])
     
     # Store start time

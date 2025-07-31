@@ -55,11 +55,12 @@ bash scripts/install_lawnberry.sh --help
 ```
 
 **Requirements:**
-- Raspberry Pi OS (Bullseye or newer recommended)
-- Python 3.8+
+- **Raspberry Pi OS Bookworm (REQUIRED)** - 64-bit version
+- **Python 3.11+** (included with Bookworm)
 - Internet connection for package downloads
-- At least 2GB free disk space
-- 1GB+ RAM recommended
+- At least 4GB free disk space (8GB+ recommended)
+- **4GB+ RAM recommended** (16GB optimal for full features)
+- Raspberry Pi 4 Model B (other models may have limited functionality)
 
 ### Hardware Detection
 

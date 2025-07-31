@@ -79,8 +79,14 @@ For first-time installation on a fresh Raspberry Pi:
 git clone <repository-url> lawnberry
 cd lawnberry
 
-# Run the enhanced installer
+# Run the Bookworm-optimized installer
 bash scripts/install_lawnberry.sh
+
+# The installer will:
+# - Detect Raspberry Pi OS Bookworm and enable optimizations
+# - Install Python 3.11 specific dependencies
+# - Configure systemd services with enhanced security
+# - Set up hardware interfaces with improved drivers
 
 # Optional: Run the first-time setup wizard
 python3 scripts/first_run_wizard.py

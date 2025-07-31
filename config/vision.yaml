@@ -21,9 +21,11 @@ safety:
   
 # Model Settings
 models:
-  primary_model_path: "models/efficientdet_d0.tflite"
-  backup_model_path: "models/mobilenet_ssd.tflite"
+  primary_model_path: "models/custom/lawn_obstacles_v1.tflite"
+  backup_model_path: "models/efficientdet_d0.tflite"
   model_update_check_interval: 3600  # Check for model updates every hour
+  custom_models_path: "models/custom"
+  enable_model_auto_update: true
   
 # Training Settings
 training:

@@ -31,10 +31,10 @@ This guide will walk you through the complete installation of your LawnBerryPi a
    - Go to [rpi.org](https://www.raspberrypi.com/software/)
    - Download and install Raspberry Pi Imager for your computer
 
-2. **Flash Raspberry Pi OS**
-   - Insert your SD card into your computer
+2. **Flash Raspberry Pi OS Bookworm (REQUIRED)**
+   - Insert your SD card into your computer (32GB+ recommended)
    - Open Raspberry Pi Imager
-   - Click "CHOOSE OS" → "Raspberry Pi OS (64-bit)"
+   - Click "CHOOSE OS" → "Raspberry Pi OS (64-bit)" → **Ensure Bookworm is selected**
    - Click "CHOOSE STORAGE" and select your SD card
    - **Important**: Click the gear icon (⚙️) for advanced options:
      - ✅ Enable SSH (set password: `lawnberry`)

@@ -1,8 +1,11 @@
 # Hardware Interface Layer Configuration
 
-# I2C Configuration
+# I2C Configuration - Bookworm optimized
 i2c:
   bus_number: 1
+  clock_speed: 400000  # Increased for better performance on Bookworm
+  timeout: 2.0         # Enhanced timeout for stability
+  retry_count: 3       # Improved error handling
   devices:
     tof_left: 0x29
     tof_right: 0x30
@@ -36,13 +39,19 @@ gpio:
     blade_enable: 24
     blade_direction: 25
 
-# Camera Configuration
+# Camera Configuration - Bookworm optimized with picamera2
 camera:
   device_path: "/dev/video0"
   width: 1920
   height: 1080
   fps: 30
   buffer_size: 5
+  # Bookworm-specific optimizations
+  use_picamera2: true
+  auto_exposure: true
+  auto_white_balance: true
+  hardware_acceleration: true
+  preview_size: [640, 480]  # For efficient preview
 
 # Plugin Configuration
 plugins:
@@ -75,8 +84,22 @@ plugins:
     parameters:
       config_path: "config/weather.yaml"
 
-# System Configuration
+# System Configuration - Bookworm optimized
 logging_level: "INFO"
 retry_attempts: 3
 retry_base_delay: 0.1
 retry_max_delay: 5.0
+
+# Bookworm-specific performance settings
+performance:
+  cpu_affinity: true        # Enable CPU affinity for critical processes
+  memory_optimization: true # Enable memory optimization features
+  async_io_optimization: true # Enable async I/O optimizations
+  hardware_scheduling: enhanced # Use enhanced hardware scheduling
+
+# Python 3.11 optimizations
+python:
+  version: "3.11"
+  async_optimizations: true
+  error_handling: enhanced
+  memory_management: optimized
