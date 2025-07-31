@@ -639,3 +639,184 @@ class CPUFallbackManager:
     def is_available(self) -> bool:
         """Check if CPU fallback is available"""
         return self._interpreter is not None
+
+
+    async def get_comprehensive_status(self) -> Dict[str, Any]:
+        """Get comprehensive TPU status including device information"""
+        try:
+            status = {
+                'tpu_available': self._tpu_available,
+                'operational': self._health_status.get('operational', False),
+                'temperature': self._health_status.get('temperature', 0.0),
+                'power_draw': self._health_status.get('power_draw', 0.0),
+                'utilization': self._health_status.get('utilization', 0.0),
+                'error_count': self._health_status.get('error_count', 0),
+                'health_status': 'healthy' if self.is_available() else 'offline',
+                'last_inference_time': self._health_status.get('last_check', None),
+                'current_model': self._model_info.name if self._model_info else None,
+                'device_info': self._model_info.metadata.get('tpu_device_info', {}) if self._model_info else {}
+            }
+            
+            if CORAL_AVAILABLE and self._tpu_available:
+                # Get real-time TPU device info
+                from pycoral.utils import edgetpu
+                tpu_devices = edgetpu.list_edge_tpus()
+                if tpu_devices:
+                    status['device_info'].update(tpu_devices[0])
+            
+            return status
+            
+        except Exception as e:
+            self.logger.error(f"Error getting comprehensive status: {e}")
+            return {
+                'tpu_available': False,
+                'operational': False,
+                'error_message': str(e)
+            }
+
+    async def run_comprehensive_benchmark(self) -> Dict[str, Any]:
+        """Run comprehensive TPU performance benchmark"""
+        if not self.is_available():
+            return {
+                'error': 'TPU not available for benchmarking',
+                'benchmark_completed': False
+            }
+        
+        try:
+            self.logger.info("Starting TPU comprehensive benchmark...")
+            benchmark_start = time.time()
+            
+            # Create test frames of different sizes
+            test_frames = [
+                np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8),
+                np.random.randint(0, 255, (320, 320, 3), dtype=np.uint8),
+                np.random.randint(0, 255, (512, 512, 3), dtype=np.uint8)
+            ]
+            
+            benchmark_results = {
+                'benchmark_completed': True,
+                'benchmark_duration': 0.0,
+                'frame_sizes_tested': [(224, 224), (320, 320), (512, 512)],
+                'inference_times': {},
+                'throughput_fps': {},
+                'memory_usage': {},
+                'errors_encountered': 0
+            }
+            
+            # Test each frame size
+            for i, frame in enumerate(test_frames):
+                size_key = f"{frame.shape[0]}x{frame.shape[1]}"
+                times = []
+                errors = 0
+                
+                # Run 20 inference cycles for each size
+                for cycle in range(20):
+                    try:
+                        start_time = time.time()
+                        
+                        # Run inference (simulate with actual processing)
+                        if self._interpreter:
+                            input_details = self._interpreter.get_input_details()
+                            processed_frame = self._preprocess_frame(frame, input_details[0]['shape'][1:3])
+                            
+                            self._interpreter.set_tensor(input_details[0]['index'], processed_frame)
+                            self._interpreter.invoke()
+                            
+                            # Get output (don't process, just measure timing)
+                            output_details = self._interpreter.get_output_details()
+                            self._interpreter.get_tensor(output_details[0]['index'])
+                        
+                        inference_time = (time.time() - start_time) * 1000  # Convert to ms
+                        times.append(inference_time)
+                        
+                    except Exception as e:
+                        self.logger.warning(f"Benchmark error for size {size_key}, cycle {cycle}: {e}")
+                        errors += 1
+                        benchmark_results['errors_encountered'] += 1
+                
+                if times:
+                    avg_time = sum(times) / len(times)
+                    min_time = min(times)
+                    max_time = max(times)
+                    
+                    benchmark_results['inference_times'][size_key] = {
+                        'average_ms': round(avg_time, 2),
+                        'min_ms': round(min_time, 2),
+                        'max_ms': round(max_time, 2),
+                        'std_dev': round(np.std(times), 2) if len(times) > 1 else 0.0
+                    }
+                    
+                    benchmark_results['throughput_fps'][size_key] = round(1000.0 / avg_time, 1)
+                
+                # Memory usage simulation (would use actual monitoring in production)
+                benchmark_results['memory_usage'][size_key] = {
+                    'estimated_mb': round(frame.nbytes / (1024 * 1024), 2)
+                }
+            
+            benchmark_results['benchmark_duration'] = round(time.time() - benchmark_start, 2)
+            
+            # Overall performance assessment
+            avg_times = [times['average_ms'] for times in benchmark_results['inference_times'].values()]
+            if avg_times:
+                overall_avg = sum(avg_times) / len(avg_times)
+                benchmark_results['overall_performance'] = {
+                    'average_inference_ms': round(overall_avg, 2),
+                    'meets_50ms_target': overall_avg < 50.0,
+                    'performance_grade': self._calculate_performance_grade(overall_avg)
+                }
+            
+            self.logger.info(f"TPU benchmark completed in {benchmark_results['benchmark_duration']}s")
+            return benchmark_results
+            
+        except Exception as e:
+            self.logger.error(f"Benchmark failed: {e}")
+            return {
+                'error': f'Benchmark failed: {str(e)}',
+                'benchmark_completed': False
+            }
+
+    def _calculate_performance_grade(self, avg_inference_ms: float) -> str:
+        """Calculate performance grade based on inference time"""
+        if avg_inference_ms < 20:
+            return 'Excellent'
+        elif avg_inference_ms < 35:
+            return 'Good'
+        elif avg_inference_ms < 50:
+            return 'Fair'
+        else:
+            return 'Poor'
+
+    async def load_custom_model(self, model_path: str) -> bool:
+        """Load a custom model for TPU inference"""
+        try:
+            model_path = Path(model_path)
+            if not model_path.exists():
+                self.logger.error(f"Custom model not found: {model_path}")
+                return False
+            
+            # Re-initialize with new model
+            success = await self.initialize(str(model_path))
+            if success:
+                self.logger.info(f"Successfully loaded custom model: {model_path.name}")
+            
+            return success
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load custom model {model_path}: {e}")
+            return False
+
+    def get_model_info(self) -> Optional[Dict[str, Any]]:
+        """Get information about the currently loaded model"""
+        if not self._model_info:
+            return None
+        
+        return {
+            'name': self._model_info.name,
+            'version': self._model_info.version,
+            'path': self._model_info.path,
+            'accuracy': self._model_info.accuracy,
+            'inference_time_ms': self._model_info.inference_time_ms,
+            'tpu_optimized': self._model_info.tpu_optimized,
+            'created_at': self._model_info.created_at,
+            'metadata': self._model_info.metadata
+        }

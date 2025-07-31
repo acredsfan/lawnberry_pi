@@ -116,15 +116,37 @@ class VisionManager:
             self.logger.error(f"Error stopping vision processing: {e}")
     
     async def _processing_loop(self):
-        """Main vision processing loop"""
-        self.logger.info("Vision processing loop started")
+        """Optimized main vision processing loop with performance enhancements"""
+        self.logger.info("Vision processing loop started with performance optimizations")
+        
+        # Performance optimization variables
+        frame_skip_counter = 0
+        target_fps = 30
+        frame_time_target = 1.0 / target_fps
+        processing_times = []
         
         while self._processing_active:
             try:
-                loop_start_time = time.time()
+                loop_start_time = time.perf_counter()
                 
-                # Get and process frame
-                vision_frame = await self.camera_processor.get_processed_frame(self._processing_mode)
+                # Dynamic frame skipping under high load
+                current_load = psutil.cpu_percent()
+                if current_load > 80 and frame_skip_counter % 2 == 0:
+                    frame_skip_counter += 1
+                    await asyncio.sleep(0.001)  # Small sleep to prevent CPU spinning
+                    continue
+                
+                frame_skip_counter += 1
+                
+                # Get and process frame with timeout
+                try:
+                    vision_frame = await asyncio.wait_for(
+                        self.camera_processor.get_processed_frame(self._processing_mode),
+                        timeout=0.05  # 50ms timeout for frame processing
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning("Frame processing timeout - skipping frame")
+                    continue
                 
                 if vision_frame:
                     # Run object detection

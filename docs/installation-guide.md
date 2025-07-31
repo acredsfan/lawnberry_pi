@@ -20,8 +20,9 @@ This guide will walk you through the complete installation of your LawnBerryPi a
 ### Time Required
 - Initial setup: 2-3 hours
 - Hardware assembly: 1-2 hours (if not pre-assembled)
-- Software installation: 30-45 minutes
-- Testing and calibration: 30 minutes
+- Software installation: 30-60 minutes (includes Bookworm optimizations)
+- Testing and calibration: 30-45 minutes
+- Total: 4-6 hours for complete setup
 
 ## Step 1: Raspberry Pi OS Setup
 
