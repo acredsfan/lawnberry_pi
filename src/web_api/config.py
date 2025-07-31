@@ -97,6 +97,27 @@ class DatabaseSettings(BaseSettings):
     class Config:
         env_prefix = "DATABASE_"
 
+class GoogleMapsSettings(BaseSettings):
+    """Google Maps API settings"""
+    api_key: Optional[str] = Field(default=None, env="REACT_APP_GOOGLE_MAPS_API_KEY")
+    usage_level: str = Field(default="medium", env="REACT_APP_GOOGLE_MAPS_USAGE_LEVEL")
+    cost_alert_threshold: float = Field(default=50.0, env="GOOGLE_MAPS_COST_ALERT_THRESHOLD")
+    
+    # Cache settings
+    geocoding_cache_ttl: int = Field(default=604800, env="GOOGLE_MAPS_GEOCODING_CACHE_TTL")  # 7 days
+    reverse_geocoding_cache_ttl: int = Field(default=86400, env="GOOGLE_MAPS_REVERSE_CACHE_TTL")  # 1 day
+    places_cache_ttl: int = Field(default=21600, env="GOOGLE_MAPS_PLACES_CACHE_TTL")  # 6 hours
+    tiles_cache_ttl: int = Field(default=2592000, env="GOOGLE_MAPS_TILES_CACHE_TTL")  # 30 days
+    
+    def is_available(self) -> bool:
+        """Check if Google Maps API is properly configured"""
+        return bool(self.api_key and self.api_key != "your_google_maps_api_key_here")
+    
+    class Config:
+        env_prefix = "GOOGLE_MAPS_"
+
+
+
 
 class RateLimitSettings(BaseSettings):
     """Rate limiting settings"""
@@ -143,6 +164,7 @@ class Settings(BaseSettings):
     auth: AuthSettings = Field(default_factory=AuthSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    google_maps: GoogleMapsSettings = Field(default_factory=GoogleMapsSettings)
     rate_limit: RateLimitSettings = Field(default_factory=RateLimitSettings)
     
     class Config:

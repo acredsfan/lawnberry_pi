@@ -4,6 +4,7 @@ Main sensor fusion engine that coordinates localization, obstacle detection, and
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 import numpy as np
@@ -278,26 +279,92 @@ class SensorFusionEngine:
                 await asyncio.sleep(1.0)
     
     async def _performance_monitoring_loop(self):
-        """Monitor system performance against requirements"""
+        """Monitor system performance against requirements with enhanced optimization"""
+        performance_window = []
+        latency_measurements = []
+        
         while self._running:
             try:
-                # Update current state from subsystems
+                start_time = time.perf_counter()
+                
+                # Update current state from subsystems with timing
                 await self._update_current_state()
                 
-                # Check performance requirements
+                # Measure sensor fusion latency
+                fusion_start = time.perf_counter()
                 performance_report = await self._evaluate_performance()
+                fusion_latency = (time.perf_counter() - fusion_start) * 1000  # ms
                 
-                # Log performance issues
+                # Track latency measurements
+                latency_measurements.append(fusion_latency)
+                if len(latency_measurements) > 100:
+                    latency_measurements.pop(0)
+                
+                # Apply real-time optimizations if latency exceeds target
+                if fusion_latency > self.target_safety_response_time * 0.4:  # 80ms threshold
+                    await self._apply_realtime_optimizations()
+                
+                # Enhanced performance logging with optimization triggers
                 await self._log_performance_issues(performance_report)
                 
-                # Publish performance metrics
+                # Publish enhanced performance metrics
                 await self._publish_performance_metrics(performance_report)
                 
-                await asyncio.sleep(10.0)  # Performance check every 10 seconds
+                # Adaptive sleep based on system load
+                total_loop_time = (time.perf_counter() - start_time) * 1000
+                sleep_time = max(1.0, 5.0 - total_loop_time / 1000.0)
+                await asyncio.sleep(sleep_time)
                 
             except Exception as e:
                 logger.error(f"Error in performance monitoring loop: {e}")
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(1.0)  # Faster recovery
+    
+    async def _apply_realtime_optimizations(self):
+        """Apply real-time optimizations when latency exceeds targets"""
+        try:
+            # Force garbage collection to free memory
+            import gc
+            gc.collect()
+            
+            # Reduce update rates temporarily if needed
+            if hasattr(self, '_high_latency_mode'):
+                return  # Already in optimization mode
+            
+            self._high_latency_mode = True
+            
+            # Apply optimizations by temporarily reducing update frequencies
+            if self.localization_system:
+                # Temporarily reduce localization update rate
+                original_rate = getattr(self.localization_system, 'update_rate', 10)
+                self.localization_system.update_rate = max(5, int(original_rate * 0.8))
+            
+            if self.obstacle_detection_system:
+                # Store original settings for restoration
+                self._original_obstacle_rate = getattr(self.obstacle_detection_system, 'update_rate', 10)
+                self.obstacle_detection_system.update_rate = max(5, int(self._original_obstacle_rate * 0.8))
+            
+            logger.warning("Applied real-time optimizations due to high latency")
+            
+            # Reset optimization mode after 30 seconds
+            asyncio.create_task(self._reset_optimization_mode())
+            
+        except Exception as e:
+            logger.error(f"Failed to apply real-time optimizations: {e}")
+    
+    async def _reset_optimization_mode(self):
+        """Reset optimization mode after timeout"""
+        await asyncio.sleep(30)
+        if hasattr(self, '_high_latency_mode'):
+            delattr(self, '_high_latency_mode')
+            
+            # Restore original update rates
+            if self.localization_system and hasattr(self, '_original_localization_rate'):
+                self.localization_system.update_rate = getattr(self, '_original_localization_rate', 10)
+            
+            if self.obstacle_detection_system and hasattr(self, '_original_obstacle_rate'):
+                self.obstacle_detection_system.update_rate = getattr(self, '_original_obstacle_rate', 10)
+            
+            logger.info("Restored normal operation mode")
     
     async def _collect_health_metrics(self) -> SensorHealthMetrics:
         """Collect health metrics from all sensors and subsystems"""
