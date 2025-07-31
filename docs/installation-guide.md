@@ -218,14 +218,14 @@ git clone https://github.com/your-repo/lawnberry-pi.git
 cd lawnberry-pi
 
 # Make installation script executable
-chmod +x install_system_integration.sh
+sudo chmod +x scripts/install_lawnberry.sh
 ```
 
 ### 3.2 Install System Dependencies
 
 ```bash
 # Run the automated installation script
-./install_system_integration.sh
+./scripts/install_lawnberry.sh
 
 # This script will:
 # - Install Python dependencies
