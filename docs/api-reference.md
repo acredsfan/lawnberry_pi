@@ -2,8 +2,9 @@
 
 **Version:** 1.0  
 **Base URL:** `http://localhost:8000/api/v1`  
-**Authentication:** Required for all endpoints  
-**Last Updated:** December 2024
+**Authentication:** Token-based with role-based access control  
+**Last Updated:** December 2024  
+**WebSocket:** `ws://localhost:8001/ws` for real-time updates
 
 ## Overview
 

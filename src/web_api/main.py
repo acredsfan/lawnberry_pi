@@ -19,7 +19,7 @@ from .config import get_settings
 from .auth import get_current_user, AuthManager
 from .routers import (
     system, sensors, navigation, patterns, 
-    configuration, maps, weather, power, websocket, progress, rc_control
+    configuration, maps, weather, power, websocket, progress, rc_control, google_maps
 )
 from .middleware import RateLimitMiddleware, RequestLoggingMiddleware
 from .mqtt_bridge import MQTTBridge
@@ -40,6 +40,21 @@ async def lifespan(app: FastAPI):
     logger = logging.getLogger(__name__)
     logger.info("Starting web API backend...")
     
+    # Initialize Redis client for caching
+    try:
+        import aioredis
+        redis_client = aioredis.from_url(
+            f"redis://{settings.redis.host}:{settings.redis.port}/{settings.redis.db}",
+            password=settings.redis.password,
+            max_connections=settings.redis.max_connections
+        )
+        await redis_client.ping()
+        app.state.redis_client = redis_client
+        logger.info("Redis client initialized successfully")
+    except Exception as e:
+        logger.warning(f"Redis initialization failed: {e}. Caching will be disabled.")
+        app.state.redis_client = None
+    
     # Initialize MQTT bridge
     mqtt_bridge = MQTTBridge(settings.mqtt)
     await mqtt_bridge.connect()
@@ -57,6 +72,12 @@ async def lifespan(app: FastAPI):
     # Cleanup
     logger.info("Shutting down web API backend...")
     await mqtt_bridge.disconnect()
+    
+    # Close Redis connection
+    if hasattr(app.state, 'redis_client') and app.state.redis_client:
+        await app.state.redis_client.close()
+        logger.info("Redis client closed")
+    
     logger.info("Web API backend shutdown complete")
 
 
@@ -123,6 +144,7 @@ def create_app() -> FastAPI:
     app.include_router(patterns.router, prefix="/api/v1/patterns", tags=["patterns"])
     app.include_router(configuration.router, prefix="/api/v1/config", tags=["configuration"])
     app.include_router(maps.router, prefix="/api/v1/maps", tags=["maps"])
+    app.include_router(google_maps.router, prefix="/api/v1/google-maps", tags=["google-maps"])
     app.include_router(weather.router, prefix="/api/v1/weather", tags=["weather"])
     app.include_router(power.router, prefix="/api/v1/power", tags=["power"])
     app.include_router(progress.router, prefix="/api/v1/progress", tags=["progress"])

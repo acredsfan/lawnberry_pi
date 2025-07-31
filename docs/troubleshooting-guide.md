@@ -7,11 +7,13 @@ This guide helps you diagnose and fix common issues with your LawnBerryPi system
 Before diving into specific problems, run through this quick checklist:
 
 - [ ] **Power**: Is the system powered on and LED indicators lit?
-- [ ] **Network**: Can you access the web interface?
+- [ ] **Network**: Can you access the web interface at `http://[pi-ip]:8080`?
 - [ ] **GPS**: Does the dashboard show GPS lock with coordinates?
 - [ ] **Battery**: Is battery charge above 20%?
 - [ ] **Weather**: Are current conditions suitable for mowing?
 - [ ] **Emergency Stop**: Is the emergency stop button released?
+- [ ] **Services**: Are all systemd services running? (`sudo systemctl status lawnberry-*`)
+- [ ] **Logs**: Check recent error messages in `/var/log/lawnberry/`
 
 ## Problem Categories
 
