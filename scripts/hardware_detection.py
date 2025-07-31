@@ -50,6 +50,19 @@ try:
 except ImportError:
     gpiozero = None
 
+# Coral TPU detection imports
+try:
+    import pycoral.utils.edgetpu as edgetpu
+    PYCORAL_AVAILABLE = True
+except ImportError:
+    PYCORAL_AVAILABLE = False
+
+try:
+    import tflite_runtime.interpreter as tflite
+    TFLITE_AVAILABLE = True
+except ImportError:
+    TFLITE_AVAILABLE = False
+
 
 class DetectionConfidence(Enum):
     """Confidence levels for hardware detection"""
@@ -164,10 +177,11 @@ class EnhancedHardwareDetector:
         
         detection_tasks = [
             self._detect_i2c_devices_enhanced(),
-            self._detect_serial_devices_enhanced(),
+            self._detect_serial_devices_enhanced(), 
             self._detect_camera_enhanced(),
             self._detect_gpio_capability_enhanced(),
             self._detect_system_info_enhanced(),
+            self._detect_coral_tpu_enhanced(),
         ]
         
         results = await asyncio.gather(*detection_tasks, return_exceptions=True)
@@ -1183,6 +1197,300 @@ class EnhancedHardwareDetector:
         
         return results
     
+    async def _detect_coral_tpu_enhanced(self) -> Dict[str, HardwareDetectionResult]:
+        """Enhanced Coral TPU detection with Pi OS Bookworm compatibility"""
+        results = {}
+        
+        try:
+            self.logger.info("Detecting Coral TPU hardware and software compatibility...")
+            
+            # 1. Check OS compatibility (Pi OS Bookworm + Python 3.11+)
+            os_compatible, os_details = self._check_pi_os_bookworm_compatibility()
+            
+            # 2. Check hardware presence
+            hardware_present, hardware_details = self._detect_coral_hardware()
+            
+            # 3. Check software installation
+            software_status, software_details = self._check_coral_software_status()
+            
+            # 4. Determine installation strategy
+            installation_strategy = self._determine_coral_installation_strategy(
+                os_compatible, hardware_present, software_status
+            )
+            
+            # Create detection result
+            overall_detected = os_compatible and (hardware_present or software_status['system_packages'])
+            confidence = self._calculate_coral_confidence(
+                os_compatible, hardware_present, software_status
+            )
+            
+            details = {
+                'os_compatibility': os_details,
+                'hardware_detection': hardware_details,
+                'software_status': software_details,
+                'installation_strategy': installation_strategy,
+                'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+                'recommended_packages': self._get_recommended_coral_packages(os_compatible)
+            }
+            
+            alternative_options = []
+            if not hardware_present:
+                alternative_options.append("CPU fallback available with tflite-runtime")
+            if not os_compatible:
+                alternative_options.append("Legacy installation methods for older OS versions")
+            if software_status['pip_packages']:
+                alternative_options.append("System package installation recommended over pip")
+            
+            results['coral_tpu'] = HardwareDetectionResult(
+                component_name='coral_tpu',
+                detected=overall_detected,
+                confidence=confidence,
+                details=details,
+                alternative_options=alternative_options,
+                requires_user_confirmation=installation_strategy.get('requires_user_input', False)
+            )
+            
+            self.logger.info(f"Coral TPU detection completed: {confidence.value} confidence")
+            
+        except Exception as e:
+            self.logger.error(f"Coral TPU detection failed: {e}")
+            results['coral_tpu'] = HardwareDetectionResult(
+                component_name='coral_tpu',
+                detected=False,
+                confidence=DetectionConfidence.UNKNOWN,
+                details={'error': str(e)},
+                alternative_options=['CPU fallback with tflite-runtime'],
+                requires_user_confirmation=False
+            )
+        
+        return results
+    
+    def _check_pi_os_bookworm_compatibility(self) -> Tuple[bool, Dict[str, Any]]:
+        """Check Pi OS Bookworm and Python 3.11+ compatibility"""
+        details = {}
+        compatible = True
+        
+        try:
+            # Check OS release
+            with open('/etc/os-release', 'r') as f:
+                os_release = f.read()
+            
+            is_bookworm = 'VERSION_CODENAME=bookworm' in os_release
+            details['os_codename'] = 'bookworm' if is_bookworm else 'other'
+            details['is_bookworm'] = is_bookworm
+            
+            # Check Python version
+            python_version = (sys.version_info.major, sys.version_info.minor)
+            python_compatible = python_version >= (3, 11)
+            details['python_version'] = f"{python_version[0]}.{python_version[1]}"
+            details['python_compatible'] = python_compatible
+            
+            # Check architecture
+            import platform
+            arch = platform.machine()
+            arch_compatible = arch in ['aarch64', 'armv7l', 'x86_64']
+            details['architecture'] = arch
+            details['arch_compatible'] = arch_compatible
+            
+            compatible = is_bookworm and python_compatible and arch_compatible
+            details['overall_compatible'] = compatible
+            
+            if compatible:
+                self.logger.info("Pi OS Bookworm + Python 3.11+ compatibility confirmed")
+            else:
+                self.logger.warning(f"Compatibility issues: Bookworm={is_bookworm}, Python3.11+={python_compatible}, Arch={arch_compatible}")
+                
+        except Exception as e:
+            self.logger.error(f"OS compatibility check failed: {e}")
+            compatible = False
+            details['error'] = str(e)
+        
+        return compatible, details
+    
+    def _detect_coral_hardware(self) -> Tuple[bool, Dict[str, Any]]:
+        """Detect Coral TPU hardware presence"""
+        details = {}
+        hardware_found = False
+        
+        try:
+            # Check USB devices for Coral USB Accelerator
+            usb_devices = []
+            try:
+                result = subprocess.run(['lsusb'], capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    usb_output = result.stdout
+                    # Google Coral USB Accelerator: Vendor ID 18d1, Product ID 9302
+                    if '18d1:9302' in usb_output:
+                        usb_devices.append('Coral USB Accelerator')
+                        hardware_found = True
+                    # Check for other Google devices
+                    for line in usb_output.split('\n'):
+                        if '18d1:' in line:
+                            usb_devices.append(line.strip())
+            except Exception as e:
+                self.logger.warning(f"USB device detection failed: {e}")
+            
+            details['usb_devices'] = usb_devices
+            
+            # Check PCIe devices for Coral PCIe cards
+            pcie_devices = []
+            try:
+                result = subprocess.run(['lspci'], capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    pcie_output = result.stdout
+                    # Google Edge TPU PCIe: Vendor ID 1ac1
+                    for line in pcie_output.split('\n'):
+                        if '1ac1:' in line:
+                            pcie_devices.append(line.strip())
+                            hardware_found = True
+            except Exception as e:
+                self.logger.warning(f"PCIe device detection failed: {e}")
+            
+            details['pcie_devices'] = pcie_devices
+            
+            # Check for Edge TPU device nodes
+            device_nodes = []
+            try:
+                import glob
+                apex_devices = glob.glob('/dev/apex_*')
+                device_nodes.extend(apex_devices)
+                if apex_devices:
+                    hardware_found = True
+            except Exception as e:
+                self.logger.warning(f"Device node detection failed: {e}")
+            
+            details['device_nodes'] = device_nodes
+            
+            # Try to detect using pycoral if available
+            if PYCORAL_AVAILABLE:
+                try:
+                    edge_tpus = edgetpu.list_edge_tpus()
+                    details['pycoral_devices'] = [str(tpu) for tpu in edge_tpus]
+                    if edge_tpus:
+                        hardware_found = True
+                        self.logger.info(f"PyCoral detected {len(edge_tpus)} Edge TPU device(s)")
+                except Exception as e:
+                    details['pycoral_error'] = str(e)
+            
+            details['hardware_detected'] = hardware_found
+            
+        except Exception as e:
+            self.logger.error(f"Hardware detection failed: {e}")
+            details['error'] = str(e)
+        
+        return hardware_found, details
+    
+    def _check_coral_software_status(self) -> Tuple[Dict[str, bool], Dict[str, Any]]:
+        """Check current Coral software installation status"""
+        status = {
+            'system_packages': False,
+            'pip_packages': False,
+            'tflite_runtime': False
+        }
+        details = {}
+        
+        try:
+            # Check system packages
+            try:
+                result = subprocess.run(
+                    ['dpkg', '-l', 'python3-pycoral'], 
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0 and 'ii' in result.stdout:
+                    status['system_packages'] = True
+                    details['system_pycoral'] = 'installed'
+                else:
+                    details['system_pycoral'] = 'not_installed'
+            except Exception as e:
+                details['system_check_error'] = str(e)
+            
+            # Check Edge TPU runtime
+            try:
+                result = subprocess.run(
+                    ['dpkg', '-l'], 
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0:
+                    if 'libedgetpu1-std' in result.stdout or 'libedgetpu1-max' in result.stdout:
+                        details['edgetpu_runtime'] = 'installed'
+                    else:
+                        details['edgetpu_runtime'] = 'not_installed'
+            except Exception as e:
+                details['runtime_check_error'] = str(e)
+            
+            # Check pip packages
+            details['pip_pycoral'] = 'not_available' if not PYCORAL_AVAILABLE else 'available'
+            status['pip_packages'] = PYCORAL_AVAILABLE
+            
+            # Check tflite-runtime
+            details['tflite_runtime'] = 'not_available' if not TFLITE_AVAILABLE else 'available'
+            status['tflite_runtime'] = TFLITE_AVAILABLE
+            
+        except Exception as e:
+            self.logger.error(f"Software status check failed: {e}")
+            details['error'] = str(e)
+        
+        return status, details
+    
+    def _determine_coral_installation_strategy(self, os_compatible: bool, hardware_present: bool, software_status: Dict[str, bool]) -> Dict[str, Any]:
+        """Determine the best installation strategy for Coral packages"""
+        strategy = {
+            'method': 'none',
+            'requires_user_input': False,
+            'install_runtime': False,
+            'install_packages': False,
+            'fallback_available': True
+        }
+        
+        if not os_compatible:
+            strategy['method'] = 'unsupported'
+            strategy['reason'] = 'Pi OS Bookworm and Python 3.11+ required'
+            return strategy
+        
+        # Default behavior: Install Coral packages on compatible systems
+        if os_compatible:
+            if not software_status['system_packages']:
+                strategy['method'] = 'system_packages'
+                strategy['install_packages'] = True
+                strategy['requires_user_input'] = True  # Ask about runtime frequency
+                strategy['install_runtime'] = True
+                strategy['reason'] = 'Install system packages on compatible system'
+            else:
+                strategy['method'] = 'already_installed'
+                strategy['reason'] = 'System packages already installed'
+        
+        # Alternative methods if primary fails
+        if software_status['pip_packages'] and not software_status['system_packages']:
+            strategy['alternative_method'] = 'pip_cleanup_recommended'
+            strategy['alternative_reason'] = 'Migrate from pip to system packages'
+        
+        return strategy
+    
+    def _calculate_coral_confidence(self, os_compatible: bool, hardware_present: bool, software_status: Dict[str, bool]) -> DetectionConfidence:
+        """Calculate confidence level for Coral detection"""
+        if not os_compatible:
+            return DetectionConfidence.LOW
+        
+        if software_status['system_packages'] and hardware_present:
+            return DetectionConfidence.HIGH
+        elif software_status['system_packages'] or hardware_present:
+            return DetectionConfidence.MEDIUM
+        elif os_compatible:
+            return DetectionConfidence.MEDIUM
+        else:
+            return DetectionConfidence.LOW
+    
+    def _get_recommended_coral_packages(self, os_compatible: bool) -> List[str]:
+        """Get recommended package installation commands"""
+        if not os_compatible:
+            return []
+        
+        return [
+            'sudo apt-get update',
+            'sudo apt-get install -y python3-pycoral',
+            'sudo apt-get install -y libedgetpu1-std'  # or libedgetpu1-max
+        ]
+
     def _test_i2c_address(self, bus, address: int) -> bool:
         """Test if device responds at I2C address"""
         try:

@@ -1,0 +1,39 @@
+# LawnBerryPi Optional Hardware Dependencies
+# Additional hardware-specific packages for extended functionality
+# Install only if specific hardware is detected or requested by user
+
+# Advanced Camera Features
+libcamera>=0.0.5; sys_platform == "linux"
+picamera>=1.13; sys_platform == "linux" and python_version < "3.9"
+
+# Additional Sensor Support
+w1thermsensor>=2.0.1,<3.0.0; sys_platform == "linux"
+adafruit-circuitpython-dht>=3.7.0,<4.0.0; sys_platform == "linux"
+adafruit-circuitpython-gps>=3.9.0,<4.0.0; sys_platform == "linux"
+adafruit-circuitpython-lsm9ds1>=2.1.0,<3.0.0; sys_platform == "linux"
+
+# GPS and Navigation
+gpsd-py3>=0.3.0,<1.0.0; sys_platform == "linux"
+haversine>=2.8.0,<3.0.0
+
+# Advanced GPIO and PWM
+adafruit-circuitpython-pca9685>=3.4.0,<4.0.0; sys_platform == "linux"
+adafruit-circuitpython-motor>=3.4.0,<4.0.0; sys_platform == "linux"
+adafruit-circuitpython-servokit>=1.3.0,<2.0.0; sys_platform == "linux"
+
+# Weather Station Hardware
+adafruit-circuitpython-bmp280>=3.2.0,<4.0.0; sys_platform == "linux"
+adafruit-circuitpython-sht31d>=2.3.0,<3.0.0; sys_platform == "linux"
+
+# Bluetooth and Wireless
+pybluez>=0.23; sys_platform == "linux"
+bluepy>=1.3.0,<2.0.0; sys_platform == "linux"
+
+# Audio Processing (for alerts/notifications)
+pygame>=2.5.0,<3.0.0
+pydub>=0.25.1,<1.0.0
+
+# Additional ML/AI Libraries
+tensorflow>=2.13.0,<3.0.0; platform_machine != "aarch64"
+torch>=2.0.0,<3.0.0; platform_machine != "aarch64"
+torchvision>=0.15.0,<1.0.0; platform_machine != "aarch64"

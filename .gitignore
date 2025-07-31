@@ -129,3 +129,4 @@ env/
 ENV/
 env.bak/
 venv.bak/
+solar_charge_calculator.py

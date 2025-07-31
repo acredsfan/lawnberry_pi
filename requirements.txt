@@ -1,5 +1,9 @@
-# LawnBerryPi Dependencies - Optimized for Raspberry Pi OS Bookworm
+# LawnBerryPi Core Dependencies - Optimized for Raspberry Pi OS Bookworm
 # Requires Python 3.11+ (Bookworm default: Python 3.11.2)
+# 
+# NOTE: Coral TPU packages (pycoral, tflite-runtime[coral]) are NOT included here.
+# They should be installed via system packages (python3-pycoral) on Pi OS Bookworm.
+# See requirements-coral.txt for pip-based fallback installation if system packages fail.
 
 # Data Management System Dependencies
 redis>=4.5.0,<6.0.0
@@ -7,28 +11,10 @@ aiosqlite>=0.19.0,<1.0.0
 pyyaml>=6.0,<7.0.0
 asyncio-mqtt>=0.13.0,<1.0.0
 
-# Testing Framework Dependencies
-pytest>=7.0.0,<8.0.0
-pytest-asyncio>=0.21.0,<1.0.0
-pytest-cov>=4.1.0,<5.0.0
-pytest-mock>=3.11.0,<4.0.0
-pytest-benchmark>=4.0.0,<5.0.0
-pytest-html>=3.2.0,<4.0.0
-pytest-xdist>=3.3.0,<4.0.0
-coverage>=7.3.0,<8.0.0
-factory-boy>=3.3.0,<4.0.0
-hypothesis>=6.82.0,<7.0.0
-freezegun>=1.2.0,<2.0.0
-responses>=0.23.0,<1.0.0
-aioresponses>=0.7.4,<1.0.0
-
 # Computer Vision System Dependencies - Bookworm optimized
 opencv-python>=4.8.0,<5.0.0
 numpy>=1.21.0,<2.0.0
-tflite-runtime>=2.13.0,<3.0.0
-# Coral TPU dependencies (install separately if TPU available)
-pycoral>=2.0.0,<3.0.0
-tflite-runtime[coral]>=2.13.0,<3.0.0
+tflite-runtime>=2.13.0,<3.0.0; sys_platform == "linux"
 pillow>=9.0.0,<11.0.0
 scikit-image>=0.19.0,<1.0.0
 scikit-learn>=1.3.0,<2.0.0
@@ -36,14 +22,14 @@ pandas>=1.5.0,<3.0.0
 
 # Hardware interface dependencies - Pi 4B compatible
 pyserial>=3.5,<4.0.0
-RPi.GPIO>=0.7.1,<1.0.0
-gpiozero>=1.6.2,<2.0.0
-smbus2>=0.4.0,<1.0.0
+RPi.GPIO>=0.7.1,<1.0.0; sys_platform == "linux"
+gpiozero>=1.6.2,<2.0.0; sys_platform == "linux"
+smbus2>=0.4.0,<1.0.0; sys_platform == "linux"
 
 # I2C and sensor libraries for Bookworm
-adafruit-circuitpython-bme280>=3.2.0,<4.0.0
-adafruit-circuitpython-vl53l0x>=3.6.0,<4.0.0
-adafruit-circuitpython-ina219>=3.4.0,<4.0.0
+adafruit-circuitpython-bme280>=3.2.0,<4.0.0; sys_platform == "linux"
+adafruit-circuitpython-vl53l0x>=3.6.0,<4.0.0; sys_platform == "linux"
+adafruit-circuitpython-ina219>=3.4.0,<4.0.0; sys_platform == "linux"
 
 # Web API Backend Dependencies
 fastapi>=0.104.0,<1.0.0
@@ -58,5 +44,5 @@ python-dotenv>=1.0.0,<2.0.0
 aiohttp>=3.8.0,<4.0.0
 
 # Raspberry Pi specific dependencies
-picamera2>=0.3.12,<1.0.0
-pigpio>=1.78,<2.0.0
+picamera2>=0.3.12,<1.0.0; sys_platform == "linux"
+pigpio>=1.78,<2.0.0; sys_platform == "linux"
