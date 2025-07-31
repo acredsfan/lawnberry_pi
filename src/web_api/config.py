@@ -35,16 +35,33 @@ class MQTTSettings(BaseSettings):
 
 class AuthSettings(BaseSettings):
     """Authentication and authorization settings"""
-    jwt_secret_key: str = Field(default="your-secret-key-change-in-production", env="JWT_SECRET_KEY")
-    jwt_algorithm: str = Field(default="HS256", env="JWT_ALGORITHM")
-    jwt_expiration_hours: int = Field(default=24, env="JWT_EXPIRATION_HOURS")
+    jwt_secret_key: str = ""
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_hours: int = 24
     
-    # Default admin user
-    admin_username: str = Field(default="admin", env="ADMIN_USERNAME")
-    admin_password: str = Field(default="admin", env="ADMIN_PASSWORD")
+    # Default admin user  
+    admin_username: str = "admin"
+    admin_password: str = ""
     
     # Enable/disable authentication
-    enabled: bool = Field(default=True, env="AUTH_ENABLED")
+    enabled: bool = True
+    
+    def __init__(self, **kwargs):
+        # Load from environment variables
+        kwargs.setdefault('jwt_secret_key', os.getenv('JWT_SECRET_KEY', ''))
+        kwargs.setdefault('jwt_algorithm', os.getenv('JWT_ALGORITHM', 'HS256'))
+        kwargs.setdefault('jwt_expiration_hours', int(os.getenv('JWT_EXPIRATION_HOURS', '24')))
+        kwargs.setdefault('admin_username', os.getenv('ADMIN_USERNAME', 'admin'))
+        kwargs.setdefault('admin_password', os.getenv('ADMIN_PASSWORD', ''))
+        kwargs.setdefault('enabled', os.getenv('AUTH_ENABLED', 'true').lower() == 'true')
+        
+        super().__init__(**kwargs)
+        
+        # Validate critical environment variables after initialization
+        if not self.jwt_secret_key:
+            raise ValueError("Missing required environment variable: JWT_SECRET_KEY. Please set this in your .env file.")
+        if not self.admin_password:
+            raise ValueError("Missing required environment variable: ADMIN_PASSWORD. Please set this in your .env file.")
     
     class Config:
         env_prefix = "AUTH_"

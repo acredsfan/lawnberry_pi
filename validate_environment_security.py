@@ -98,6 +98,7 @@ def test_env_example():
             'REACT_APP_GOOGLE_MAPS_API_KEY', 
             'LAWNBERRY_FLEET_API_KEY',
             'JWT_SECRET_KEY',
+            'ADMIN_PASSWORD',
             'REDIS_PASSWORD',
             'MQTT_USERNAME',
             'MQTT_PASSWORD'

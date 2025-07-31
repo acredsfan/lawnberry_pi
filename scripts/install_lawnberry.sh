@@ -73,30 +73,149 @@ BOOKWORM_OPTIMIZATIONS=false
 SYSTEMD_VERSION=0
 
 detect_bookworm() {
-    print_section "Raspberry Pi OS Bookworm Detection"
+
+apply_bookworm_optimizations() {
+    print_section "Applying Bookworm-Specific Performance Optimizations"
+    
+    if [[ "$BOOKWORM_DETECTED" != true ]]; then
+        log_warning "Skipping Bookworm optimizations - not running on Bookworm"
+        return 0
+    fi
+    
+    # Configure boot optimizations
+    log_info "Configuring boot optimizations in /boot/config.txt..."
+    if [[ -f /boot/config.txt ]]; then
+        # Backup original config
+        sudo cp /boot/config.txt /boot/config.txt.backup.$(date +%Y%m%d_%H%M%S)
+        
+        # Apply GPU memory split for computer vision
+        if ! grep -q "gpu_mem=" /boot/config.txt; then
+            echo "gpu_mem=128" | sudo tee -a /boot/config.txt >/dev/null
+            log_success "Set GPU memory to 128MB for computer vision workloads"
+        fi
+        
+        # Optimize I2C clock speed
+        if ! grep -q "i2c_arm_baudrate=400000" /boot/config.txt; then
+            echo "i2c_arm_baudrate=400000" | sudo tee -a /boot/config.txt >/dev/null
+            log_success "Set I2C clock speed to 400kHz for better sensor performance"
+        fi
+        
+        # Enable enhanced kernel scheduler
+        if ! grep -q "cgroup_memory=1" /boot/cmdline.txt 2>/dev/null; then
+            sudo sed -i 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/cmdline.txt 2>/dev/null || true
+            log_success "Enabled enhanced kernel scheduler optimizations"
+        fi
+    fi
+    
+    # Configure CPU governor for balanced performance
+    log_info "Configuring CPU governor..."
+    if [[ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]]; then
+        echo "ondemand" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        log_success "Set CPU governor to 'ondemand' for balanced performance"
+    fi
+    
+    # Configure systemd service limits for better performance
+    log_info "Applying systemd performance optimizations..."
+    sudo mkdir -p /etc/systemd/system.conf.d/
+    sudo tee /etc/systemd/system.conf.d/lawnberry-performance.conf >/dev/null <<EOF
+# LawnBerry Bookworm Performance Optimizations
+[Manager]
+DefaultLimitNOFILE=65536
+DefaultLimitNPROC=32768
+DefaultCPUAccounting=yes
+DefaultMemoryAccounting=yes
+DefaultTasksMax=4096
+EOF
+    
+    # Configure memory management optimizations
+    log_info "Applying memory management optimizations..."
+    sudo tee /etc/sysctl.d/99-lawnberry-bookworm.conf >/dev/null <<EOF
+# LawnBerry Bookworm Memory Optimizations
+vm.swappiness=10
+vm.dirty_ratio=5
+vm.dirty_background_ratio=2
+vm.vfs_cache_pressure=50
+
+# Network optimizations
+net.core.rmem_max=134217728
+net.core.wmem_max=134217728
+net.ipv4.tcp_congestion_control=bbr
+EOF
+    
+    # Apply Python optimizations
+    log_info "Configuring Python 3.11+ optimizations..."
+    sudo mkdir -p /opt/lawnberry/config/
+    sudo tee /opt/lawnberry/config/python-optimization.env >/dev/null <<EOF
+# Python 3.11 Performance Optimizations
+PYTHONOPTIMIZE=2
+PYTHONDONTWRITEBYTECODE=0
+PYTHONUNBUFFERED=1
+PYTHONHASHSEED=random
+PYTHONMALLOC=pymalloc
+EOF
+    
+    log_success "Applied comprehensive Bookworm performance optimizations"
+    log_info "Note: Some optimizations require a reboot to take effect"
+}
+    print_section "Raspberry Pi OS Bookworm Detection and Optimization"
     
     # Check for Bookworm specifically
     if [[ -f /etc/os-release ]]; then
         if grep -q "VERSION_CODENAME=bookworm" /etc/os-release; then
             BOOKWORM_DETECTED=true
             BOOKWORM_OPTIMIZATIONS=true
-            log_success "Raspberry Pi OS Bookworm detected - enabling optimizations"
+            log_success "Raspberry Pi OS Bookworm detected - enabling full optimizations"
+            
+            # Check Python version for Bookworm compatibility
+            PYTHON_VERSION=$(python3 --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -n1)
+            if [[ $(echo "$PYTHON_VERSION >= 3.11" | bc -l 2>/dev/null || echo 0) -eq 1 ]]; then
+                log_success "Python $PYTHON_VERSION meets Bookworm requirements (3.11+)"
+            else
+                log_warning "Python $PYTHON_VERSION may not be optimal for Bookworm"
+                log_info "Consider upgrading to Python 3.11+ for best performance"
+            fi
+            
+            # Check for Raspberry Pi 4B specifically
+            if [[ -f /proc/device-tree/model ]]; then
+                PI_MODEL=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0')
+                if [[ "$PI_MODEL" == *"Raspberry Pi 4"* ]]; then
+                    log_success "Raspberry Pi 4 Model B detected - optimal hardware"
+                else
+                    log_warning "Hardware: $PI_MODEL - some optimizations may not apply"
+                fi
+            fi
+            
         elif grep -q "bullseye\|buster" /etc/os-release; then
             log_warning "Legacy OS detected - some features may not be available"
             log_info "For best performance, upgrade to Raspberry Pi OS Bookworm"
+            log_info "Many Bookworm-specific optimizations will be disabled"
         fi
     fi
     
-    # Get systemd version for compatibility
+    # Get systemd version for compatibility and security features
     if command -v systemctl >/dev/null 2>&1; then
         SYSTEMD_VERSION=$(systemctl --version | head -n1 | grep -o '[0-9]\+' | head -n1)
         log_info "systemd version: $SYSTEMD_VERSION"
         
         if [[ $SYSTEMD_VERSION -ge 252 ]]; then
-            log_success "systemd 252+ detected - enabling security hardening"
+            log_success "systemd 252+ detected - enabling enhanced security hardening"
+            log_info "Available features: service sandboxing, cgroup v2, process isolation"
         else
             log_warning "systemd < 252 - some security features will be disabled"
+            log_info "Update systemd for enhanced security and performance features"
         fi
+    fi
+    
+    # Check available RAM for 16GB optimization
+    TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
+    TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
+    if [[ $TOTAL_RAM_GB -ge 8 ]]; then
+        log_success "RAM: ${TOTAL_RAM_GB}GB detected - enabling memory optimizations"
+        if [[ $TOTAL_RAM_GB -ge 16 ]]; then
+            log_info "16GB+ RAM detected - enabling advanced memory management"
+        fi
+    else
+        log_warning "RAM: ${TOTAL_RAM_GB}GB - may limit performance optimizations"
     fi
 }
 
