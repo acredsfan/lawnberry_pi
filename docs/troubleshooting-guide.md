@@ -23,7 +23,8 @@ Before diving into specific problems, run through this quick checklist:
 4. [Sensor and Hardware Problems](#sensor-and-hardware-problems)
 5. [Mowing Performance Issues](#mowing-performance-issues)
 6. [Weather Service Problems](#weather-service-problems)
-7. [Software and Interface Issues](#software-and-interface-issues)
+7. [Coral TPU Issues](#coral-tpu-issues)
+8. [Software and Interface Issues](#software-and-interface-issues)
 
 ---
 
@@ -450,6 +451,244 @@ Is blade sharp and undamaged?
 - **Update location manually**: Set specific coordinates in weather settings
 - **Choose different weather source**: Switch between available weather providers
 - **Calibrate local sensors**: Use BME280 data to supplement weather service
+
+---
+
+## Coral TPU Issues
+
+### Problem: Coral TPU Not Detected
+
+**Symptoms**: System shows "CPU mode" in web interface, no Coral acceleration, slower inference
+
+**Diagnostic Steps**:
+
+1. **Check Hardware Connection**
+   ```bash
+   # Check for USB Accelerator
+   lsusb | grep -i "google\|coral"
+   ```
+   ```
+   Device listed? → [YES] Continue to step 2
+                 → [NO] Check USB connection, try different port
+   ```
+
+2. **Check Runtime Installation**
+   ```bash
+   # Verify Edge TPU runtime
+   dpkg -l | grep libedgetpu
+   ```
+   ```
+   Runtime installed? → [YES] Continue to step 3
+                     → [NO] Install runtime: sudo apt-get install libedgetpu1-std
+   ```
+
+3. **Check Python Packages**
+   ```bash
+   # Test PyCoral import
+   python3 -c "from pycoral.utils import edgetpu; print('PyCoral working')"
+   ```
+   ```
+   Import successful? → [YES] Continue to step 4
+                     → [NO] Install packages: sudo apt-get install python3-pycoral
+   ```
+
+4. **Test Hardware Enumeration**
+   ```bash
+   # Check device enumeration
+   python3 -c "from pycoral.utils import edgetpu; print(f'Found {len(edgetpu.list_edge_tpus())} TPU(s)')"
+   ```
+   ```
+   TPU count > 0? → [YES] Hardware working - check application logs
+                 → [NO] Check udev rules and permissions
+   ```
+
+### Problem: Coral Package Installation Fails
+
+**Symptoms**: `apt-get install python3-pycoral` fails, repository errors
+
+**Diagnostic Steps**:
+
+1. **Check Repository Configuration**
+   ```bash
+   # Verify Coral repository
+   ls /etc/apt/sources.list.d/coral-edgetpu.list
+   cat /etc/apt/sources.list.d/coral-edgetpu.list
+   ```
+   ```
+   Repository file exists? → [YES] Continue to step 2
+                          → [NO] Add repository (see Manual Installation section)
+   ```
+
+2. **Update Package Lists**
+   ```bash
+   # Refresh package database
+   sudo apt-get update
+   ```
+   ```
+   Update successful? → [YES] Continue to step 3
+                     → [NO] Check internet connection, fix repository configuration
+   ```
+
+3. **Check Platform Compatibility**
+   ```bash
+   # Verify Pi OS Bookworm
+   lsb_release -a | grep bookworm
+   python3 --version
+   ```
+   ```
+   Bookworm + Python 3.11+? → [YES] Continue to step 4
+                            → [NO] Upgrade to Pi OS Bookworm (required)
+   ```
+
+4. **Try Manual Installation**
+   ```bash
+   # Run installation scripts
+   cd /home/pi/lawnberry-pi
+   sudo ./scripts/install_coral_runtime.sh
+   sudo ./scripts/install_coral_system_packages.sh
+   ```
+
+### Problem: Coral Performance Issues
+
+**Symptoms**: Coral detected but inference is slow or unreliable
+
+**Diagnostic Steps**:
+
+1. **Check Performance Mode**
+   ```bash
+   # Check current runtime package
+   dpkg -l | grep libedgetpu
+   ```
+   ```
+   Using libedgetpu1-std? → [YES] Consider libedgetpu1-max for better performance
+                         → [NO] Check if libedgetpu1-max is causing thermal issues
+   ```
+
+2. **Monitor Temperature**
+   ```bash
+   # Check system temperature
+   vcgencmd measure_temp
+   ```
+   ```
+   Temp < 70°C? → [YES] Temperature OK, continue to step 3
+               → [NO] Switch to standard mode: sudo apt-get install --reinstall libedgetpu1-std
+   ```
+
+3. **Test Inference Speed**
+   ```bash
+   # Run performance test
+   cd /home/pi/lawnberry-pi
+   python3 scripts/test_tpu_integration.py
+   ```
+   ```
+   Inference < 50ms? → [YES] Performance acceptable
+                    → [NO] Check model optimization, thermal throttling
+   ```
+
+4. **Check USB Connection Quality**
+   - Try different USB ports (USB 3.0 preferred)
+   - Use shorter USB cable
+   - Avoid USB hubs if possible
+   ```
+   Direct USB 3.0 connection? → [YES] Connection optimized
+                              → [NO] Use direct USB 3.0 port
+   ```
+
+### Problem: CPU Fallback Not Working
+
+**Symptoms**: System fails when Coral is not available, no graceful degradation
+
+**Diagnostic Steps**:
+
+1. **Check Fallback Packages**
+   ```bash
+   # Verify TensorFlow Lite availability
+   python3 -c "import tflite_runtime.interpreter as tflite; print('CPU fallback available')"
+   ```
+   ```
+   Import successful? → [YES] Continue to step 2
+                     → [NO] Install: pip3 install tflite-runtime
+   ```
+
+2. **Test CPU Inference**
+   ```bash
+   # Force CPU mode
+   cd /home/pi/lawnberry-pi
+   CORAL_TPU_ENABLED=false python3 -c "from src.vision.coral_tpu_manager import CoralTPUManager; print('CPU mode working')"
+   ```
+   ```
+   CPU mode works? → [YES] Fallback functional
+                  → [NO] Check application configuration
+   ```
+
+3. **Check Configuration**
+   ```bash
+   # Verify environment settings
+   grep CORAL_TPU_ENABLED .env
+   ```
+   ```
+   Setting found? → [YES] Ensure CORAL_TPU_ENABLED=true for auto-detection
+                 → [NO] Add CORAL_TPU_ENABLED=true to .env file
+   ```
+
+### Problem: Migration from Pip Packages Fails
+
+**Symptoms**: Old pip-installed packages conflict with system packages
+
+**Diagnostic Steps**:
+
+1. **Check Current Package State**
+   ```bash
+   # List pip-installed Coral packages
+   pip3 list | grep -E "(pycoral|tflite)"
+   # List system packages
+   dpkg -l | grep -E "(pycoral|edgetpu)"
+   ```
+
+2. **Run Migration Script**
+   ```bash
+   # Automatic migration
+   cd /home/pi/lawnberry-pi
+   python3 scripts/migrate_coral_packages.py --verbose
+   ```
+
+3. **Manual Cleanup if Migration Fails**
+   ```bash
+   # Remove pip packages
+   pip3 uninstall pycoral tflite-runtime -y
+   
+   # Install system packages
+   sudo apt-get install python3-pycoral
+   
+   # Verify installation
+   python3 scripts/verify_coral_installation.py
+   ```
+
+### Quick Coral TPU Reference
+
+**Check Status**:
+```bash
+# All-in-one status check
+python3 scripts/verify_coral_installation.py
+
+# Quick hardware check
+lsusb | grep -i google && echo "Hardware detected" || echo "No hardware found"
+
+# Quick software check  
+python3 -c "from pycoral.utils import edgetpu; print(f'{len(edgetpu.list_edge_tpus())} TPU(s) available')" 2>/dev/null || echo "Software not working"
+```
+
+**Common Solutions**:
+- **No hardware detected**: Check USB connection, try different port
+- **Import errors**: Reinstall system packages: `sudo apt-get install --reinstall python3-pycoral`
+- **Permission errors**: Add user to plugdev group: `sudo usermod -a -G plugdev $USER`
+- **Performance issues**: Switch to standard mode: `sudo apt-get install --reinstall libedgetpu1-std`
+- **Repository errors**: Re-add repository and update: `sudo ./scripts/install_coral_runtime.sh`
+
+**Performance Expectations**:
+- **Coral TPU**: 10-30ms inference time for typical models
+- **CPU Fallback**: 100-300ms inference time (still functional)
+- **System Impact**: Coral reduces CPU usage by 80-90%
 
 ---
 

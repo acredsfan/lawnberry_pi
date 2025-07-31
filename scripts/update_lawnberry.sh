@@ -231,6 +231,73 @@ update_code() {
     log_success "Source code updated"
 }
 
+run_coral_migration() {
+    print_section "Checking Coral Package Migration"
+    
+    local migration_script="$SCRIPT_DIR/migrate_coral_packages.py"
+    
+    if [[ ! -f "$migration_script" ]]; then
+        log_warning "Coral migration script not found, skipping migration check"
+        return 0
+    fi
+    
+    log_info "Checking if Coral package migration is needed..."
+    
+    # Check if migration is needed (detection only)
+    local migration_check
+    if migration_check=$(python3 "$migration_script" --detect-only 2>/dev/null); then
+        local migration_needed
+        migration_needed=$(echo "$migration_check" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('migration_needed', False))" 2>/dev/null || echo "false")
+        
+        if [[ "$migration_needed" == "True" ]]; then
+            log_info "Coral package migration needed - migrating from pip to system packages"
+            log_info "This will:"
+            log_info "  - Remove pip-installed pycoral and tflite-runtime packages"
+            log_info "  - Install system packages: python3-pycoral, python3-tflite-runtime"
+            log_info "  - Create backup for rollback capability"
+            
+            # Ask for user confirmation unless forced
+            if [[ "$FORCE_UPDATE" != true ]]; then
+                echo
+                read -p "Proceed with Coral package migration? (Y/n): " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Nn]$ ]]; then
+                    log_warning "Coral migration skipped by user request"
+                    log_warning "Note: You can run migration later with: python3 $migration_script"
+                    return 0
+                fi
+            fi
+            
+            # Run migration
+            log_info "Running Coral package migration..."
+            if python3 "$migration_script" --verbose; then
+                log_success "Coral package migration completed successfully"
+            else
+                log_error "Coral package migration failed"
+                log_error "Check logs at /var/log/lawnberry/coral_migration.log"
+                log_info "You can attempt rollback with: python3 $migration_script --rollback <migration_id>"
+                
+                # Ask if user wants to continue despite migration failure
+                if [[ "$FORCE_UPDATE" != true ]]; then
+                    echo
+                    read -p "Continue update despite migration failure? (y/N): " -n 1 -r
+                    echo
+                    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                        log_error "Update cancelled due to migration failure"
+                        exit 1
+                    fi
+                fi
+                
+                log_warning "Continuing update despite migration failure"
+            fi
+        else
+            log_info "No Coral package migration needed"
+        fi
+    else
+        log_warning "Could not check migration status, continuing with update"
+    fi
+}
+
 update_dependencies() {
     print_section "Updating Dependencies"
     
@@ -250,6 +317,9 @@ update_dependencies() {
         # Upgrade pip
         pip install --upgrade pip
         
+        # Run Coral package migration if needed
+        run_coral_migration
+        
         # Update requirements
         if [[ -f "requirements.txt" ]]; then
             log_info "Installing/updating Python packages..."
@@ -264,22 +334,6 @@ update_dependencies() {
         pip install --upgrade pip
         pip install -r requirements.txt
         log_success "New virtual environment created"
-    fi
-    
-    # Update web UI dependencies
-    if [[ -d "web-ui" && -f "web-ui/package.json" ]]; then
-        log_info "Updating web UI dependencies..."
-        cd web-ui
-        
-        if command -v npm >/dev/null 2>&1; then
-            npm update
-            npm run build || log_warning "Web UI build failed"
-            log_success "Web UI dependencies updated"
-        else
-            log_warning "npm not available - skipping web UI update"
-        fi
-        
-        cd "$PROJECT_ROOT"
     fi
 }
 

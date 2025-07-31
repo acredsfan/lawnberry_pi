@@ -39,50 +39,82 @@ class ModelPerformanceResponse(BaseModel):
     tpu_optimized: bool
 
 
-@router.get("/tpu/status")
-async def get_tpu_status(system_manager=Depends(get_system_manager)) -> Dict[str, Any]:
-    """Get comprehensive TPU status and performance metrics"""
+@router.get("/acceleration/status")
+async def get_acceleration_status(system_manager=Depends(get_system_manager)) -> Dict[str, Any]:
+    """Get comprehensive acceleration status (TPU or CPU fallback)"""
     try:
         vision_manager = getattr(system_manager, 'vision_manager', None)
         if not vision_manager:
             raise HTTPException(status_code=503, detail="Vision system not available")
         
-        tpu_manager = getattr(vision_manager, 'tpu_manager', None)
-        if not tpu_manager:
+        object_detector = getattr(vision_manager, 'object_detector', None)
+        if not object_detector:
             return {
                 "success": True,
                 "data": {
-                    "available": False,
+                    "coral_available": False,
+                    "cpu_fallback_active": False,
                     "operational": False,
-                    "message": "TPU not configured"
+                    "message": "Object detector not configured"
                 }
             }
         
-        # Get comprehensive TPU status
-        status = await tpu_manager.get_comprehensive_status()
-        performance_stats = tpu_manager.get_performance_stats()
+        # Check both TPU and CPU managers
+        tpu_manager = getattr(object_detector, 'tpu_manager', None)
+        cpu_manager = getattr(object_detector, 'cpu_manager', None)
+        
+        status_data = {
+            "coral_available": False,
+            "coral_hardware_present": False,
+            "cpu_fallback_active": False,
+            "operational": False,
+            "acceleration_mode": "none"
+        }
+        
+        # Get TPU status if available
+        if tpu_manager and tpu_manager.is_available():
+            tpu_status = await tpu_manager.get_comprehensive_status()
+            tpu_performance = tpu_manager.get_performance_stats()
+            
+            status_data.update({
+                "coral_available": True,
+                "coral_hardware_present": tpu_status.get('tpu_available', False),
+                "operational": tpu_status.get('operational', False),
+                "acceleration_mode": "coral_tpu",
+                "temperature": tpu_status.get('temperature', 0.0),
+                "power_draw": tpu_status.get('power_draw', 0.0),
+                "utilization": tpu_status.get('utilization', 0.0),
+                "model_name": tpu_status.get('current_model', None),
+                "inference_times_ms": tpu_performance.get('recent_inference_times', []),
+                "cache_hit_rate": tpu_performance.get('cache_hit_rate', 0.0),
+                "error_count": tpu_status.get('error_count', 0),
+                "health_status": tpu_status.get('health_status', 'unknown'),
+                "device_info": tpu_status.get('device_info', {})
+            })
+        
+        # Get CPU fallback status if TPU not available
+        elif cpu_manager and cpu_manager.is_available():
+            cpu_status = await cpu_manager.get_comprehensive_status()
+            cpu_performance = cpu_manager.get_performance_stats()
+            
+            status_data.update({
+                "cpu_fallback_active": True,
+                "operational": cpu_status.get('operational', False),
+                "acceleration_mode": "cpu_fallback",
+                "model_name": cpu_status.get('current_model', None),
+                "inference_times_ms": cpu_performance.get('recent_inference_times', []),
+                "device_info": cpu_status.get('device_info', {}),
+                "performance_note": "Running in CPU mode - consider Coral TPU for better performance"
+            })
         
         return {
             "success": True,
-            "data": {
-                "available": status.get('tpu_available', False),
-                "operational": status.get('operational', False),
-                "temperature": status.get('temperature', 0.0),
-                "power_draw": status.get('power_draw', 0.0),
-                "utilization": status.get('utilization', 0.0),
-                "model_name": status.get('current_model', None),
-                "inference_times_ms": performance_stats.get('recent_inference_times', []),
-                "cache_hit_rate": performance_stats.get('cache_hit_rate', 0.0),
-                "error_count": status.get('error_count', 0),
-                "health_status": status.get('health_status', 'unknown'),
-                "last_inference": status.get('last_inference_time', None),
-                "device_info": status.get('device_info', {})
-            }
+            "data": status_data
         }
         
     except Exception as e:
-        logger.error(f"Error getting TPU status: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get TPU status: {str(e)}")
+        logger.error(f"Error getting acceleration status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get acceleration status: {str(e)}")
 
 
 @router.get("/tpu/performance")

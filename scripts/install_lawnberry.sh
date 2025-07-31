@@ -24,26 +24,24 @@ NC='\033[0m' # No Color
 
 # Logging setup
 LOG_FILE="/tmp/lawnberry_install.log"
-sudo touch "$LOG_FILE"
-sudo chmod 666 "$LOG_FILE"
-exec 1> >(sudo tee -a "$LOG_FILE")
-exec 2> >(sudo tee -a "$LOG_FILE" >&2)
+exec 1> >(tee -a "$LOG_FILE")
+exec 2> >(tee -a "$LOG_FILE" >&2)
 
 # Functions
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1" | sudo tee -a "$LOG_FILE"
+    echo -e "${BLUE}[INFO]${NC} $1" | tee -a "$LOG_FILE"
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1" | sudo tee -a "$LOG_FILE"
+    echo -e "${GREEN}[SUCCESS]${NC} $1" | tee -a "$LOG_FILE"
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1" | sudo tee -a "$LOG_FILE"
+    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1" | sudo tee -a "$LOG_FILE"
+    echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE"
 }
 
 print_header() {
@@ -308,35 +306,12 @@ check_system() {
     log_success "System requirements check passed"
 }
 
-create_directories() {
-    print_section "Creating System Directories"
-
-    log_info "Creating system directories..."
-
-    # Create directories
-    sudo mkdir -p "$LOG_DIR"
-    sudo mkdir -p "$DATA_DIR"
-    sudo mkdir -p "$DATA_DIR/config_backups"
-    sudo mkdir -p "$DATA_DIR/health_metrics"
-    sudo mkdir -p "$DATA_DIR/database"
-    sudo mkdir -p "$BACKUP_DIR"
-
-    # Set ownership and permissions
-    sudo chown -R "$USER:$GROUP" "$LOG_DIR" || sudo chown -R "$USER:$USER" "$LOG_DIR"
-    sudo chown -R "$USER:$GROUP" "$DATA_DIR" || sudo chown -R "$USER:$USER" "$DATA_DIR"
-    sudo chmod 755 "$LOG_DIR"
-    sudo chmod 755 "$DATA_DIR"
-    sudo chmod 700 "$DATA_DIR/config_backups"
-
-    log_success "System directories created"
-}
-
 install_dependencies() {
     print_section "Installing System Dependencies"
-
+    
     log_info "Updating package lists..."
     sudo apt-get update -qq
-
+    
     # Essential packages
     essential_packages=(
         "python3-pip"
@@ -358,7 +333,7 @@ install_dependencies() {
         "logrotate"
         "systemd"
     )
-
+    
     # Hardware-specific packages
     hardware_packages=(
         "python3-picamera2"
@@ -366,71 +341,267 @@ install_dependencies() {
         "python3-rpi.gpio"
         "raspi-config"
     )
-
+    
     # Node.js for web UI
     nodejs_packages=(
         "nodejs"
         "npm"
     )
-
+    
     log_info "Installing essential packages..."
     sudo apt-get install -y "${essential_packages[@]}" || {
         log_error "Failed to install essential packages"
         exit 1
     }
-
+    
     log_info "Installing hardware packages..."
     sudo apt-get install -y "${hardware_packages[@]}" || {
         log_warning "Some hardware packages failed to install - continuing anyway"
     }
-
+    
     log_info "Installing Node.js packages..."
     sudo apt-get install -y "${nodejs_packages[@]}" || {
         log_warning "Node.js installation failed - web UI may not work"
     }
-
+    
     # Enable I2C and SPI
     log_info "Enabling I2C and SPI interfaces..."
     sudo raspi-config nonint do_i2c 0 2>/dev/null || log_warning "Could not enable I2C"
     sudo raspi-config nonint do_spi 0 2>/dev/null || log_warning "Could not enable SPI"
     sudo raspi-config nonint do_camera 0 2>/dev/null || log_warning "Could not enable camera"
-
+    
     # Add user to required groups
     log_info "Adding user to required groups..."
     sudo usermod -a -G i2c,spi,gpio,dialout "$USER" || log_warning "Could not add user to hardware groups"
-
+    
     log_success "Dependencies installed successfully"
 }
 
 setup_python_environment() {
     print_section "Setting up Python Environment"
-
+    
     # Create virtual environment
     log_info "Creating Python virtual environment..."
     cd "$PROJECT_ROOT"
-
+    
     if [[ -d "venv" ]]; then
         log_info "Virtual environment already exists - removing old one"
         rm -rf venv
     fi
-
+    
     python3 -m venv venv
     source venv/bin/activate
-
+    
     # Upgrade pip
     log_info "Upgrading pip..."
     pip install --upgrade pip
-
-    # Install requirements
-    log_info "Installing Python requirements..."
+    
+    # Install core requirements first (always required)
+    log_info "Installing core Python requirements..."
     if [[ -f "requirements.txt" ]]; then
-        pip install -r requirements.txt
+        if pip install -r requirements.txt; then
+            log_success "Core requirements installed successfully"
+        else
+            log_error "Failed to install core requirements"
+            exit 1
+        fi
     else
         log_error "requirements.txt not found"
         exit 1
     fi
-
+    
+    # Run Coral TPU hardware detection and conditional installation
+    setup_coral_packages
+    
     log_success "Python environment setup complete"
+}
+
+setup_coral_packages() {
+    print_section "Coral TPU Package Installation"
+    
+    # Check platform compatibility for Coral packages
+    local coral_compatible=false
+    local bookworm_detected=false
+    local python_version_ok=false
+    
+    # Detect Pi OS Bookworm
+    if [[ -f /etc/os-release ]] && grep -q "VERSION_CODENAME=bookworm" /etc/os-release; then
+        bookworm_detected=true
+        log_success "Pi OS Bookworm detected - system packages available"
+    else
+        log_warning "Non-Bookworm system detected - limited Coral support"
+    fi
+    
+    # Check Python version compatibility
+    if python3 -c "import sys; exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
+        python_version_ok=true
+        log_success "Python 3.11+ detected - compatible with system packages"
+    else
+        log_warning "Python version < 3.11 - may use pip fallback"
+    fi
+    
+    coral_compatible=$bookworm_detected
+    
+    # Check for Coral hardware presence (informational only)
+    local coral_hardware_present=false
+    if command -v lsusb &> /dev/null; then
+        if lsusb | grep -q "18d1:9302\|1a6e:089a"; then
+            coral_hardware_present=true
+            log_success "Coral USB Accelerator detected"
+        else
+            log_info "No Coral USB hardware detected (can be added later)"
+        fi
+    fi
+    
+    # User interaction for Coral installation
+    local install_coral=false
+    local install_runtime=false
+    
+    if [[ "$coral_compatible" == true ]]; then
+        echo
+        echo "Coral TPU Support Available:"
+        echo "  • Pi OS Bookworm detected - system packages supported"
+        echo "  • Python 3.11+ compatible"
+        if [[ "$coral_hardware_present" == true ]]; then
+            echo "  • Coral hardware currently connected"
+        else
+            echo "  • No Coral hardware detected (can be added later)"
+        fi
+        echo
+        echo "Coral TPU provides significant performance improvements for computer vision tasks."
+        echo "You can install support now or add it later using: scripts/install_coral_system_packages.sh"
+        echo
+        
+        read -p "Install Coral TPU support? (Y/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$|^$ ]]; then
+            install_coral=true
+            
+            echo
+            echo "Edge TPU Runtime Installation:"
+            echo "  • Required for Coral hardware acceleration"
+            echo "  • Installs Google's libedgetpu runtime"
+            echo "  • Only needed if you have or plan to use Coral hardware"
+            echo
+            
+            read -p "Also install Edge TPU runtime? (Y/n): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$|^$ ]]; then
+                install_runtime=true
+            fi
+        fi
+    else
+        log_info "Coral TPU system packages not available on this platform"
+        log_info "Will attempt pip-based fallback installation"
+        install_coral=true  # Try fallback method
+    fi
+    
+    # Install Coral packages if requested
+    if [[ "$install_coral" == true ]]; then
+        install_coral_packages_with_fallback "$coral_compatible" "$install_runtime"
+    else
+        log_info "Skipping Coral TPU installation - can be added later"
+        log_info "To install later: scripts/install_coral_system_packages.sh"
+    fi
+}
+
+install_coral_packages_with_fallback() {
+    local system_packages_available="$1"
+    local install_runtime="$2"
+    local installation_success=false
+    
+    log_info "Starting Coral TPU package installation..."
+    
+    # Method 1: System packages (preferred for Bookworm)
+    if [[ "$system_packages_available" == true ]]; then
+        log_info "Attempting system package installation (method 1/3)..."
+        
+        if scripts/install_coral_system_packages.sh --non-interactive; then
+            log_success "System packages installed successfully"
+            installation_success=true
+            
+            # Install runtime if requested
+            if [[ "$install_runtime" == true ]]; then
+                log_info "Installing Edge TPU runtime..."
+                if scripts/install_coral_runtime.sh --non-interactive; then
+                    log_success "Edge TPU runtime installed successfully"
+                else
+                    log_warning "Runtime installation failed - Coral packages available but no hardware acceleration"
+                fi
+            fi
+        else
+            log_warning "System package installation failed - trying fallback methods"
+        fi
+    fi
+    
+    # Method 2: Pip installation fallback
+    if [[ "$installation_success" != true ]] && [[ -f "requirements-coral.txt" ]]; then
+        log_info "Attempting pip-based installation (method 2/3)..."
+        
+        if pip install -r requirements-coral.txt; then
+            log_success "Pip-based Coral packages installed successfully"
+            installation_success=true
+            
+            # Note about runtime for pip installation
+            if [[ "$install_runtime" == true ]]; then
+                log_info "Installing Edge TPU runtime for pip-based packages..."
+                if scripts/install_coral_runtime.sh --non-interactive; then
+                    log_success "Edge TPU runtime installed successfully"
+                else
+                    log_warning "Runtime installation failed - packages available but no hardware acceleration"
+                fi
+            fi
+        else
+            log_warning "Pip installation also failed - trying CPU-only fallback"
+        fi
+    fi
+    
+    # Method 3: CPU-only TensorFlow Lite fallback
+    if [[ "$installation_success" != true ]]; then
+        log_info "Attempting CPU-only TensorFlow Lite installation (method 3/3)..."
+        
+        if pip install 'tflite-runtime>=2.13.0,<3.0.0'; then
+            log_success "CPU-only TensorFlow Lite installed successfully"
+            log_info "Coral acceleration not available - will use CPU processing"
+            installation_success=true
+        else
+            log_error "All Coral installation methods failed"
+            log_error "ML functionality may be limited"
+        fi
+    fi
+    
+    # Final status report
+    if [[ "$installation_success" == true ]]; then
+        log_success "Coral/TensorFlow Lite installation completed"
+        
+        # Run verification
+        log_info "Verifying installation..."
+        if python3 -c "
+try:
+    import tflite_runtime.interpreter as tflite
+    print('✓ TensorFlow Lite available')
+    try:
+        import pycoral.utils.edgetpu as edgetpu
+        print('✓ Coral packages available')
+        devices = edgetpu.list_edge_tpus()
+        if devices:
+            print(f'✓ {len(devices)} Edge TPU device(s) detected')
+        else:
+            print('ℹ No Edge TPU hardware detected (CPU fallback available)')
+    except ImportError:
+        print('ℹ Coral packages not available (CPU-only mode)')
+except ImportError as e:
+    print(f'✗ TensorFlow Lite verification failed: {e}')
+    exit(1)
+" 2>/dev/null; then
+            log_success "Installation verification passed"
+        else
+            log_warning "Installation verification had issues - functionality may be limited"
+        fi
+    else
+        log_error "Coral installation failed completely"
+        log_error "Consider manual installation or running without ML features"
+    fi
 }
 
 detect_hardware() {
@@ -538,11 +709,64 @@ build_web_ui() {
     log_success "Web UI built successfully"
 }
 
+create_directories() {
+    print_section "Creating System Directories"
+    
+    log_info "Creating system directories..."
+    
+    # Create directories
+    sudo mkdir -p "$LOG_DIR"
+    sudo mkdir -p "$DATA_DIR"
+    sudo mkdir -p "$DATA_DIR/config_backups"
+    sudo mkdir -p "$DATA_DIR/health_metrics"
+    sudo mkdir -p "$DATA_DIR/database"
+    sudo mkdir -p "$BACKUP_DIR"
+    
+    # Set ownership and permissions
+    sudo chown -R "$USER:$GROUP" "$LOG_DIR" || sudo chown -R "$USER:$USER" "$LOG_DIR"
+    sudo chown -R "$USER:$GROUP" "$DATA_DIR" || sudo chown -R "$USER:$USER" "$DATA_DIR"
+    sudo chmod 755 "$LOG_DIR"
+    sudo chmod 755 "$DATA_DIR"
+    sudo chmod 700 "$DATA_DIR/config_backups"
+    
+    log_success "System directories created"
+}
+
+apply_bookworm_optimizations() {
+    if [[ $BOOKWORM_OPTIMIZATIONS == true ]]; then
+        print_section "Applying Bookworm-Specific Optimizations"
+        
+        log_info "Configuring memory management for 16GB RAM..."
+        # Create memory optimization configuration
+        sudo tee /etc/sysctl.d/99-lawnberry-bookworm.conf >/dev/null <<EOF
+# LawnBerry Bookworm Memory Optimizations
+vm.swappiness=10
+vm.vfs_cache_pressure=50
+vm.dirty_background_ratio=5
+vm.dirty_ratio=10
+EOF
+        
+        log_info "Enabling CPU governor for performance..."
+        # Set CPU governor for Pi 4B performance
+        if grep -q "Raspberry Pi 4" /proc/device-tree/model 2>/dev/null; then
+            echo 'GOVERNOR="performance"' | sudo tee /etc/default/cpufrequtils >/dev/null
+        fi
+        
+        log_info "Configuring I2C and GPIO optimizations..."
+        # Optimize I2C performance
+        if ! grep -q "dtparam=i2c_arm_baudrate" /boot/config.txt; then
+            echo "dtparam=i2c_arm_baudrate=400000" | sudo tee -a /boot/config.txt >/dev/null
+        fi
+        
+        log_success "Bookworm optimizations applied"
+    fi
+}
+
 install_services() {
     print_section "Installing System Services"
-
+    
     cd "$PROJECT_ROOT"
-
+    
     # Service files to install
     services=(
         "src/system_integration/lawnberry-system.service"
@@ -556,20 +780,20 @@ install_services() {
         "src/vision/lawnberry-vision.service"
         "src/web_api/lawnberry-api.service"
     )
-
+    
     log_info "Installing systemd service files with Bookworm optimizations..."
-
+    
     installed_services=()
     for service_file in "${services[@]}"; do
         if [[ -f "$service_file" ]]; then
             service_name=$(basename "$service_file")
             log_info "Installing $service_name..."
-
+            
             # Update service file paths to use virtual environment
             temp_service="/tmp/$service_name"
             sed "s|/usr/bin/python3|$PROJECT_ROOT/venv/bin/python3|g" "$service_file" > "$temp_service"
             sed -i "s|WorkingDirectory=.*|WorkingDirectory=$PROJECT_ROOT|g" "$temp_service"
-
+            
             # Apply Bookworm-specific security hardening if supported
             if [[ $SYSTEMD_VERSION -ge 252 ]]; then
                 log_info "Applying systemd 252+ security hardening to $service_name"
@@ -589,21 +813,21 @@ SystemCallArchitectures=native
 UMask=0027
 EOF
             fi
-
+            
             sudo cp "$temp_service" "$SERVICE_DIR/"
             sudo chmod 644 "$SERVICE_DIR/$service_name"
             rm "$temp_service"
-
+            
             installed_services+=("${service_name%.service}")
         else
             log_warning "Service file not found: $service_file"
         fi
     done
-
+    
     # Reload systemd
     log_info "Reloading systemd daemon..."
     sudo systemctl daemon-reload
-
+    
     # Enable core services
     core_services=(
         "lawnberry-system"
@@ -612,7 +836,7 @@ EOF
         "lawnberry-safety"
         "lawnberry-api"
     )
-
+    
     log_info "Enabling core services..."
     for service in "${core_services[@]}"; do
         if [[ " ${installed_services[*]} " =~ " ${service} " ]]; then
@@ -620,7 +844,7 @@ EOF
             sudo systemctl enable "$service.service"
         fi
     done
-
+    
     log_success "System services installed"
 }
 
@@ -948,12 +1172,12 @@ show_completion_message() {
 # Main installation process
 main() {
     print_header
-
+    
     # Parse command line arguments
     SKIP_HARDWARE=false
     SKIP_ENV=false
     NON_INTERACTIVE=false
-
+    
     while [[ $# -gt 0 ]]; do
         case $1 in
             --skip-hardware)
@@ -983,20 +1207,20 @@ main() {
                 ;;
         esac
     done
-
+    
     log_info "Starting LawnBerry Pi installation..."
     log_info "Installation log: $LOG_FILE"
-
+    
     # Run installation steps
     check_root
     check_system
     install_dependencies
     setup_python_environment
-
+    
     if [[ "$SKIP_HARDWARE" != true ]]; then
         detect_hardware
     fi
-
+    
     if [[ "$SKIP_ENV" != true ]]; then
         if [[ "$NON_INTERACTIVE" == true ]]; then
             log_info "Skipping environment setup in non-interactive mode"
@@ -1004,7 +1228,7 @@ main() {
             setup_environment
         fi
     fi
-
+    
     build_web_ui
     create_directories
     install_services
@@ -1013,7 +1237,7 @@ main() {
     run_tests
     cleanup
     show_completion_message
-
+    
     log_success "Installation completed successfully!"
 }
 

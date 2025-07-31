@@ -574,6 +574,133 @@ class MotorController:
         self.set_motor_speed(0, 0)
 ```
 
+### Coral TPU Development
+
+**Optional Import Pattern for Coral TPU:**
+```python
+# Recommended pattern for Coral TPU integration
+try:
+    from pycoral.utils import edgetpu
+    from pycoral.utils import dataset
+    from pycoral.adapters import common
+    from pycoral.adapters import detect
+    import tflite_runtime.interpreter as tflite
+    CORAL_AVAILABLE = True
+    
+    # Check for actual hardware presence
+    CORAL_HARDWARE_PRESENT = len(edgetpu.list_edge_tpus()) > 0
+except ImportError:
+    CORAL_AVAILABLE = False
+    CORAL_HARDWARE_PRESENT = False
+    
+    # CPU fallback using standard tflite-runtime
+    try:
+        import tflite_runtime.interpreter as tflite
+        CPU_FALLBACK_AVAILABLE = True
+    except ImportError:
+        CPU_FALLBACK_AVAILABLE = False
+        # Last resort: use TensorFlow Lite from full TensorFlow
+        try:
+            import tensorflow as tf
+            tflite = tf.lite
+            CPU_FALLBACK_AVAILABLE = True
+        except ImportError:
+            CPU_FALLBACK_AVAILABLE = False
+```
+
+**Coral TPU Manager Implementation:**
+```python
+class CoralTPUManager:
+    def __init__(self, config):
+        self.config = config
+        self.interpreter = None
+        self.coral_available = CORAL_AVAILABLE
+        self.hardware_present = CORAL_HARDWARE_PRESENT
+        self.logger = logging.getLogger(__name__)
+    
+    async def initialize(self, model_path: str) -> bool:
+        """Initialize TPU with graceful CPU fallback"""
+        try:
+            if self.coral_available and self.hardware_present:
+                # Try Coral TPU initialization
+                self.interpreter = tflite.Interpreter(
+                    model_path=model_path,
+                    experimental_delegates=[edgetpu.make_edge_tpu_delegate()]
+                )
+                self.logger.info("Coral TPU initialized successfully")
+                return True
+            else:
+                # CPU fallback
+                self.interpreter = tflite.Interpreter(model_path=model_path)
+                self.logger.info("Using CPU inference (Coral not available)")
+                return True
+                
+        except Exception as e:
+            self.logger.warning(f"Coral initialization failed: {e}, falling back to CPU")
+            # Fallback to CPU-only inference
+            try:
+                self.interpreter = tflite.Interpreter(model_path=model_path)
+                return True
+            except Exception as cpu_error:
+                self.logger.error(f"CPU fallback also failed: {cpu_error}")
+                return False
+    
+    def get_inference_stats(self) -> Dict[str, Any]:
+        """Get performance statistics"""
+        return {
+            "coral_available": self.coral_available,
+            "hardware_present": self.hardware_present,
+            "using_coral": self.coral_available and self.hardware_present,
+            "inference_device": "coral_tpu" if (self.coral_available and self.hardware_present) else "cpu"
+        }
+```
+
+**Best Practices for Coral Integration:**
+
+1. **Always provide CPU fallback**: Never require Coral hardware
+2. **Graceful degradation**: Application should work without Coral, just slower  
+3. **Hardware detection**: Check for actual hardware, not just package availability
+4. **Performance logging**: Track inference times for both Coral and CPU modes
+5. **User feedback**: Clearly indicate which inference method is being used
+
+**Testing Coral Features:**
+```python
+import pytest
+
+class TestCoralIntegration:
+    def test_graceful_fallback(self):
+        """Test that system works without Coral hardware"""
+        # Mock no hardware present
+        with patch('pycoral.utils.edgetpu.list_edge_tpus', return_value=[]):
+            manager = CoralTPUManager(config={})
+            assert manager.initialize("model.tflite")
+            stats = manager.get_inference_stats()
+            assert stats["inference_device"] == "cpu"
+    
+    @pytest.mark.skipif(not CORAL_HARDWARE_PRESENT, reason="No Coral TPU hardware")
+    def test_coral_hardware_detection(self):
+        """Test Coral hardware detection (only runs with hardware)"""
+        manager = CoralTPUManager(config={})
+        assert manager.hardware_present
+        assert manager.initialize("model.tflite")
+        stats = manager.get_inference_stats()
+        assert stats["inference_device"] == "coral_tpu"
+```
+
+**Configuration Examples:**
+```yaml
+# config/ml_inference.yaml
+coral_tpu:
+  enabled: true                    # Set to false to force CPU mode
+  model_path: "/opt/lawnberry/models/detection_model_edgetpu.tflite"
+  cpu_fallback_model: "/opt/lawnberry/models/detection_model.tflite"
+  performance_mode: "standard"     # or "maximum"
+  
+cpu_fallback:
+  model_path: "/opt/lawnberry/models/detection_model.tflite"
+  num_threads: 2                   # CPU threads for inference
+```
+
 ---
 
 ## Testing Framework
