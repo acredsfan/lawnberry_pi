@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Hardware Detection and Testing Module
-Automatically detects and tests LawnBerry Pi hardware components
+Enhanced Hardware Detection and Testing Module
+Automatically detects and tests LawnBerry Pi hardware components with manual override support
 """
 
 import asyncio
@@ -10,9 +10,11 @@ import subprocess
 import json
 import os
 import sys
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union
 from pathlib import Path
 import time
+from dataclasses import dataclass, asdict
+from enum import Enum
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -49,14 +51,86 @@ except ImportError:
     gpiozero = None
 
 
-class HardwareDetector:
-    """Detects and tests LawnBerry Pi hardware components"""
+class DetectionConfidence(Enum):
+    """Confidence levels for hardware detection"""
+    HIGH = "high"       # 90-100% confident
+    MEDIUM = "medium"   # 70-89% confident  
+    LOW = "low"         # 50-69% confident
+    UNKNOWN = "unknown" # <50% confident
+
+
+@dataclass
+class HardwareDetectionResult:
+    """Result of hardware detection with confidence scoring"""
+    component_name: str
+    detected: bool
+    confidence: DetectionConfidence
+    details: Dict[str, Any]
+    alternative_options: List[str]
+    manual_override: Optional[Dict[str, Any]] = None
+    requires_user_confirmation: bool = False
+
+
+@dataclass
+class HardwareCapability:
+    """Defines hardware capability with alternatives"""
+    name: str
+    required: bool
+    primary_hardware: List[str]
+    alternative_hardware: List[str]
+    software_fallback: Optional[str] = None
+
+
+class EnhancedHardwareDetector:
+    """Enhanced hardware detector with confidence scoring and manual override support"""
     
     def __init__(self, config_path: str = "config/hardware.yaml"):
         self.config_path = config_path
         self.logger = self._setup_logging()
-        self.detection_results = {}
+        self.detection_results: Dict[str, HardwareDetectionResult] = {}
         self.test_results = {}
+        self.manual_overrides: Dict[str, Dict[str, Any]] = {}
+        self.hardware_capabilities = self._define_hardware_capabilities()
+    
+    def _define_hardware_capabilities(self) -> Dict[str, HardwareCapability]:
+        """Define hardware capabilities with alternatives"""
+        return {
+            'navigation': HardwareCapability(
+                name='navigation',
+                required=True,
+                primary_hardware=['SparkFun GPS-RTK-SMA', 'BNO085 IMU'],
+                alternative_hardware=['Generic GPS', 'MPU6050', 'LSM9DS1'],
+                software_fallback='Dead reckoning navigation'
+            ),
+            'obstacle_detection': HardwareCapability(
+                name='obstacle_detection',
+                required=True,
+                primary_hardware=['VL53L0X ToF', 'Pi Camera'],
+                alternative_hardware=['HC-SR04 Ultrasonic', 'VL53L1X ToF', 'Generic Camera'],
+                software_fallback='Camera-only detection'
+            ),
+            'power_monitoring': HardwareCapability(
+                name='power_monitoring',
+                required=True,
+                primary_hardware=['INA226 Power Monitor'],
+                alternative_hardware=['INA219', 'Voltage Divider + ADC'],
+                software_fallback='Software estimation'
+            ),
+            'environmental': HardwareCapability(
+                name='environmental',
+                required=False,
+                primary_hardware=['BME280'],
+                alternative_hardware=['DHT22', 'BMP280'],
+                software_fallback='Weather API'
+            ),
+            'communication': HardwareCapability(
+                name='communication',
+                required=True,
+                primary_hardware=['RoboHAT RP2040'],
+                alternative_hardware=['Arduino', 'Pico'],
+                software_fallback='Direct GPIO control'
+            )
+        }
         
     def _setup_logging(self) -> logging.Logger:
         """Setup logging for hardware detection"""
@@ -73,29 +147,42 @@ class HardwareDetector:
         
         return logger
     
-    async def detect_all_hardware(self) -> Dict[str, Any]:
-        """Detect all hardware components"""
-        self.logger.info("Starting comprehensive hardware detection...")
+    def set_manual_override(self, component: str, override_config: Dict[str, Any]) -> None:
+        """Set manual override for a specific component"""
+        self.manual_overrides[component] = override_config
+        self.logger.info(f"Manual override set for {component}: {override_config}")
+    
+    def get_detection_confidence(self, component: str) -> DetectionConfidence:
+        """Get confidence level for detected component"""
+        if component in self.detection_results:
+            return self.detection_results[component].confidence
+        return DetectionConfidence.UNKNOWN
+    
+    async def detect_all_hardware(self) -> Dict[str, HardwareDetectionResult]:
+        """Enhanced hardware detection with confidence scoring"""
+        self.logger.info("Starting enhanced hardware detection with confidence scoring...")
         
         detection_tasks = [
-            self._detect_i2c_devices(),
-            self._detect_serial_devices(),
-            self._detect_camera(),
-            self._detect_gpio_capability(),
-            self._detect_system_info(),
+            self._detect_i2c_devices_enhanced(),
+            self._detect_serial_devices_enhanced(),
+            self._detect_camera_enhanced(),
+            self._detect_gpio_capability_enhanced(),
+            self._detect_system_info_enhanced(),
         ]
         
         results = await asyncio.gather(*detection_tasks, return_exceptions=True)
         
-        # Compile results
-        self.detection_results = {
-            'i2c_devices': results[0] if not isinstance(results[0], Exception) else {},
-            'serial_devices': results[1] if not isinstance(results[1], Exception) else {},
-            'camera': results[2] if not isinstance(results[2], Exception) else {},
-            'gpio': results[3] if not isinstance(results[3], Exception) else {},
-            'system': results[4] if not isinstance(results[4], Exception) else {},
-            'timestamp': time.time()
-        }
+        # Process results with confidence scoring
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                self.logger.error(f"Detection task {i} failed: {result}")
+                continue
+            
+            if isinstance(result, dict):
+                self.detection_results.update(result)
+        
+        # Apply manual overrides
+        self._apply_manual_overrides()
         
         return self.detection_results
     
@@ -831,6 +918,278 @@ class HardwareDetector:
                 print(f"  Camera Capture: ✗ Failed")
         
         print("\n" + "="*60)
+
+
+
+    def _apply_manual_overrides(self) -> None:
+        """Apply manual overrides to detection results"""
+        for component, override_config in self.manual_overrides.items():
+            if component in self.detection_results:
+                result = self.detection_results[component]
+                result.manual_override = override_config
+                result.confidence = DetectionConfidence.HIGH  # User confirmed
+                self.logger.info(f"Applied manual override for {component}")
+    
+    async def _detect_i2c_devices_enhanced(self) -> Dict[str, HardwareDetectionResult]:
+        """Enhanced I2C device detection with confidence scoring"""
+        results = {}
+        
+        if not smbus:
+            self.logger.warning("SMBus not available - I2C detection limited")
+            return results
+        
+        try:
+            bus = smbus.SMBus(1)
+            expected_devices = {
+                'tof_left': {'address': 0x29, 'alternatives': [0x52, 0x53]},
+                'tof_right': {'address': 0x30, 'alternatives': [0x52, 0x53]},
+                'power_monitor': {'address': 0x40, 'alternatives': [0x41, 0x44, 0x45]},
+                'environmental': {'address': 0x76, 'alternatives': [0x77, 0x40]},
+                'display': {'address': 0x3c, 'alternatives': [0x3d]}
+            }
+            
+            for device_name, config in expected_devices.items():
+                primary_addr = config['address']
+                alternatives = config['alternatives']
+                
+                # Try primary address
+                detected = self._test_i2c_address(bus, primary_addr)
+                confidence = DetectionConfidence.HIGH if detected else DetectionConfidence.UNKNOWN
+                alternative_options = []
+                
+                if not detected:
+                    # Try alternatives
+                    for alt_addr in alternatives:
+                        if self._test_i2c_address(bus, alt_addr):
+                            detected = True
+                            confidence = DetectionConfidence.MEDIUM
+                            alternative_options.append(f"Found at 0x{alt_addr:02x}")
+                            break
+                
+                results[device_name] = HardwareDetectionResult(
+                    component_name=device_name,
+                    detected=detected,
+                    confidence=confidence,
+                    details={'address': primary_addr if confidence == DetectionConfidence.HIGH else alt_addr if alternative_options else primary_addr},
+                    alternative_options=alternative_options,
+                    requires_user_confirmation=confidence == DetectionConfidence.MEDIUM
+                )
+            
+            bus.close()
+            
+        except Exception as e:
+            self.logger.error(f"I2C detection failed: {e}")
+        
+        return results
+    
+    async def _detect_serial_devices_enhanced(self) -> Dict[str, HardwareDetectionResult]:
+        """Enhanced serial device detection with confidence scoring"""
+        results = {}
+        
+        if not serial:
+            self.logger.warning("PySerial not available - serial detection limited")
+            return results
+        
+        expected_devices = {
+            'robohat': {'ports': ['/dev/ttyACM1', '/dev/ttyACM0'], 'baud': 115200},
+            'gps': {'ports': ['/dev/ttyACM0', '/dev/ttyUSB0'], 'baud': 38400},
+            'imu': {'ports': ['/dev/ttyAMA4', '/dev/ttyAMA0'], 'baud': 3000000}
+        }
+        
+        available_ports = [port.device for port in serial.tools.list_ports.comports()]
+        
+        for device_name, config in expected_devices.items():
+            primary_port = config['ports'][0]
+            alternative_ports = config['ports'][1:]
+            detected = False
+            confidence = DetectionConfidence.UNKNOWN
+            alternative_options = []
+            actual_port = primary_port
+            
+            # Check primary port
+            if primary_port in available_ports:
+                detected = True
+                confidence = DetectionConfidence.HIGH
+                actual_port = primary_port
+            else:
+                # Check alternatives
+                for alt_port in alternative_ports:
+                    if alt_port in available_ports:
+                        detected = True
+                        confidence = DetectionConfidence.MEDIUM
+                        actual_port = alt_port
+                        alternative_options.append(f"Found at {alt_port}")
+                        break
+            
+            results[device_name] = HardwareDetectionResult(
+                component_name=device_name,
+                detected=detected,
+                confidence=confidence,
+                details={'port': actual_port, 'baud': config['baud']},
+                alternative_options=alternative_options,
+                requires_user_confirmation=confidence == DetectionConfidence.MEDIUM
+            )
+        
+        return results
+    
+    async def _detect_camera_enhanced(self) -> Dict[str, HardwareDetectionResult]:
+        """Enhanced camera detection with confidence scoring"""
+        results = {}
+        
+        # Try different camera detection methods
+        detected = False
+        confidence = DetectionConfidence.UNKNOWN
+        alternative_options = []
+        camera_details = {}
+        
+        # Method 1: Try picamera2 (Bookworm preferred)
+        if picamera2:
+            try:
+                from picamera2 import Picamera2
+                cam = Picamera2()
+                cam.close()
+                detected = True
+                confidence = DetectionConfidence.HIGH
+                camera_details = {'type': 'Pi Camera (picamera2)', 'device_path': '/dev/video0'}
+            except Exception as e:
+                self.logger.debug(f"Picamera2 detection failed: {e}")
+        
+        # Method 2: Try OpenCV detection
+        if not detected and cv2:
+            try:
+                cap = cv2.VideoCapture(0)
+                if cap.isOpened():
+                    detected = True
+                    confidence = DetectionConfidence.MEDIUM
+                    camera_details = {'type': 'Generic Camera (OpenCV)', 'device_path': '/dev/video0'}
+                    alternative_options.append("Detected via OpenCV - may need configuration")
+                cap.release()
+            except Exception as e:
+                self.logger.debug(f"OpenCV camera detection failed: {e}")
+        
+        # Method 3: Check for video devices
+        if not detected:
+            video_devices = [f"/dev/video{i}" for i in range(4) if Path(f"/dev/video{i}").exists()]
+            if video_devices:
+                detected = True
+                confidence = DetectionConfidence.LOW
+                camera_details = {'type': 'Unknown Camera', 'device_path': video_devices[0]}
+                alternative_options.extend([f"Video device: {dev}" for dev in video_devices])
+        
+        results['camera'] = HardwareDetectionResult(
+            component_name='camera',
+            detected=detected,
+            confidence=confidence,
+            details=camera_details,
+            alternative_options=alternative_options,
+            requires_user_confirmation=confidence in [DetectionConfidence.MEDIUM, DetectionConfidence.LOW]
+        )
+        
+        return results
+    
+    async def _detect_gpio_capability_enhanced(self) -> Dict[str, HardwareDetectionResult]:
+        """Enhanced GPIO capability detection"""
+        results = {}
+        
+        detected = False
+        confidence = DetectionConfidence.UNKNOWN
+        alternative_options = []
+        gpio_details = {}
+        
+        if gpiozero:
+            try:
+                from gpiozero import LED
+                # Test with a safe pin
+                test_pin = LED(18)
+                test_pin.close()
+                detected = True
+                confidence = DetectionConfidence.HIGH
+                gpio_details = {'library': 'gpiozero', 'available': True}
+            except Exception as e:
+                self.logger.debug(f"GPIOZero test failed: {e}")
+                alternative_options.append("GPIOZero available but may need permissions")
+                confidence = DetectionConfidence.MEDIUM
+        
+        # Check for GPIO sysfs interface
+        if not detected and Path('/sys/class/gpio').exists():
+            detected = True
+            confidence = DetectionConfidence.LOW
+            gpio_details = {'library': 'sysfs', 'available': True}
+            alternative_options.append("GPIO available via sysfs interface")
+        
+        results['gpio'] = HardwareDetectionResult(
+            component_name='gpio',
+            detected=detected,
+            confidence=confidence,
+            details=gpio_details,
+            alternative_options=alternative_options,
+            requires_user_confirmation=confidence != DetectionConfidence.HIGH
+        )
+        
+        return results
+    
+    async def _detect_system_info_enhanced(self) -> Dict[str, HardwareDetectionResult]:
+        """Enhanced system information detection"""
+        results = {}
+        
+        try:
+            # Pi model detection
+            pi_model = "Unknown"
+            try:
+                with open('/proc/device-tree/model', 'r') as f:
+                    pi_model = f.read().strip().replace('\x00', '')
+            except:
+                pass
+            
+            # Memory detection
+            memory_mb = 0
+            try:
+                with open('/proc/meminfo', 'r') as f:
+                    for line in f:
+                        if line.startswith('MemTotal:'):
+                            memory_mb = int(line.split()[1]) // 1024
+                            break
+            except:
+                pass
+            
+            # OS detection
+            os_info = "Unknown"
+            try:
+                result = subprocess.run(['lsb_release', '-d'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    os_info = result.stdout.split('\t')[1].strip()
+            except:
+                pass
+            
+            confidence = DetectionConfidence.HIGH
+            system_details = {
+                'pi_model': pi_model,
+                'memory_mb': memory_mb,
+                'os': os_info,
+                'python_version': sys.version.split()[0]
+            }
+            
+            results['system'] = HardwareDetectionResult(
+                component_name='system',
+                detected=True,
+                confidence=confidence,
+                details=system_details,
+                alternative_options=[],
+                requires_user_confirmation=False
+            )
+            
+        except Exception as e:
+            self.logger.error(f"System info detection failed: {e}")
+        
+        return results
+    
+    def _test_i2c_address(self, bus, address: int) -> bool:
+        """Test if device responds at I2C address"""
+        try:
+            bus.read_byte(address)
+            return True
+        except:
+            return False
 
 
 async def main():

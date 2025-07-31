@@ -12,6 +12,11 @@ from datetime import datetime, timedelta
 from enum import Enum
 import math
 import statistics
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+import pickle
+import os
 
 from ..hardware.hardware_interface import HardwareInterface
 from ..communication.client import MQTTClient
@@ -32,6 +37,173 @@ class ChargingMode(Enum):
     AUTO = "auto"
     MANUAL = "manual"
     ECO = "eco"
+
+
+class PowerOptimizationProfile(Enum):
+    """User-configurable power optimization profiles"""
+    MAXIMUM_PERFORMANCE = "max_performance"
+    BALANCED = "balanced"
+    POWER_SAVER = "power_saver"
+    MAXIMUM_EFFICIENCY = "max_efficiency"
+    CUSTOM = "custom"
+
+
+@dataclass
+class PowerProfile:
+    """User-configurable power profile settings"""
+    name: str
+    performance_weight: float  # 0.0 to 1.0
+    efficiency_weight: float   # 0.0 to 1.0
+    cpu_governor: str
+    sensor_reduction_factor: float  # 0.0 to 1.0
+    camera_quality_factor: float   # 0.0 to 1.0
+    motor_efficiency_mode: bool
+    description: str
+
+
+@dataclass
+class MLPrediction:
+    """Machine learning prediction result"""
+    value: float
+    confidence: float
+    model_version: str
+    timestamp: datetime
+
+
+class ChargingLocationML:
+    """Machine learning for optimal charging location prediction"""
+    
+    def __init__(self):
+        self.solar_efficiency_model = None
+        self.weather_pattern_model = None
+        self.seasonal_model = None
+        self.model_path = "data/ml_models/charging_location"
+        self._training_data = []
+        
+    async def initialize(self):
+        """Initialize ML models"""
+        os.makedirs(self.model_path, exist_ok=True)
+        await self._load_models()
+        
+    async def _load_models(self):
+        """Load trained models from disk"""
+        try:
+            solar_model_path = os.path.join(self.model_path, "solar_efficiency.pkl")
+            if os.path.exists(solar_model_path):
+                with open(solar_model_path, 'rb') as f:
+                    self.solar_efficiency_model = pickle.load(f)
+                    
+            weather_model_path = os.path.join(self.model_path, "weather_pattern.pkl")
+            if os.path.exists(weather_model_path):
+                with open(weather_model_path, 'rb') as f:
+                    self.weather_pattern_model = pickle.load(f)
+                    
+            seasonal_model_path = os.path.join(self.model_path, "seasonal.pkl")
+            if os.path.exists(seasonal_model_path):
+                with open(seasonal_model_path, 'rb') as f:
+                    self.seasonal_model = pickle.load(f)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Could not load ML models: {e}")
+            
+    async def _save_models(self):
+        """Save trained models to disk"""
+        try:
+            if self.solar_efficiency_model:
+                with open(os.path.join(self.model_path, "solar_efficiency.pkl"), 'wb') as f:
+                    pickle.dump(self.solar_efficiency_model, f)
+                    
+            if self.weather_pattern_model:
+                with open(os.path.join(self.model_path, "weather_pattern.pkl"), 'wb') as f:
+                    pickle.dump(self.weather_pattern_model, f)
+                    
+            if self.seasonal_model:
+                with open(os.path.join(self.model_path, "seasonal.pkl"), 'wb') as f:
+                    pickle.dump(self.seasonal_model, f)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Could not save ML models: {e}")
+            
+    def add_training_data(self, location: Tuple[float, float], solar_power: float, 
+                         weather_data: Dict, seasonal_factor: float, timestamp: datetime):
+        """Add training data point"""
+        self._training_data.append({
+            'latitude': location[0],
+            'longitude': location[1],
+            'solar_power': solar_power,
+            'hour': timestamp.hour,
+            'day_of_year': timestamp.timetuple().tm_yday,
+            'temperature': weather_data.get('temperature', 20),
+            'humidity': weather_data.get('humidity', 50),
+            'cloud_cover': weather_data.get('cloud_cover', 0),
+            'wind_speed': weather_data.get('wind_speed', 0),
+            'seasonal_factor': seasonal_factor
+        })
+        
+        # Retrain models periodically
+        if len(self._training_data) % 100 == 0:
+            asyncio.create_task(self._retrain_models())
+            
+    async def _retrain_models(self):
+        """Retrain ML models with accumulated data"""
+        if len(self._training_data) < 50:  # Need minimum data points
+            return
+            
+        try:
+            data = np.array([[d['latitude'], d['longitude'], d['hour'], d['day_of_year'],
+                            d['temperature'], d['humidity'], d['cloud_cover'], d['wind_speed']]
+                           for d in self._training_data])
+            targets = np.array([d['solar_power'] for d in self._training_data])
+            
+            # Train solar efficiency model
+            self.solar_efficiency_model = RandomForestRegressor(n_estimators=100, random_state=42)
+            self.solar_efficiency_model.fit(data, targets)
+            
+            # Train weather pattern model (simplified)
+            weather_data = np.array([[d['temperature'], d['humidity'], d['cloud_cover'], d['wind_speed']]
+                                   for d in self._training_data])
+            self.weather_pattern_model = LinearRegression()
+            self.weather_pattern_model.fit(weather_data, targets)
+            
+            # Train seasonal model
+            seasonal_data = np.array([[d['day_of_year'], d['hour']] for d in self._training_data])
+            seasonal_targets = np.array([d['seasonal_factor'] for d in self._training_data])
+            self.seasonal_model = RandomForestRegressor(n_estimators=50, random_state=42)
+            self.seasonal_model.fit(seasonal_data, seasonal_targets)
+            
+            await self._save_models()
+            logging.getLogger(__name__).info("ML models retrained successfully")
+            
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Error retraining ML models: {e}")
+            
+    async def predict_solar_efficiency(self, location: Tuple[float, float], 
+                                     weather_data: Dict, timestamp: datetime) -> MLPrediction:
+        """Predict solar efficiency for location and conditions"""
+        try:
+            if not self.solar_efficiency_model:
+                return MLPrediction(0.5, 0.0, "no_model", timestamp)
+                
+            features = np.array([[location[0], location[1], timestamp.hour, 
+                                timestamp.timetuple().tm_yday,
+                                weather_data.get('temperature', 20),
+                                weather_data.get('humidity', 50),
+                                weather_data.get('cloud_cover', 0),
+                                weather_data.get('wind_speed', 0)]])
+            
+            prediction = self.solar_efficiency_model.predict(features)[0]
+            
+            # Calculate confidence based on training data variance
+            confidence = min(1.0, len(self._training_data) / 1000.0)
+            
+            return MLPrediction(
+                value=max(0.0, min(1.0, prediction / 30.0)),  # Normalize to 0-1
+                confidence=confidence,
+                model_version="v1.0",
+                timestamp=timestamp
+            )
+            
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Error predicting solar efficiency: {e}")
+            return MLPrediction(0.5, 0.0, "error", timestamp)
 
 
 @dataclass
@@ -109,27 +281,57 @@ class PowerManager:
         self.charging_mode = ChargingMode.AUTO
         self.power_saving_enabled = False
         
+        # User-configurable power optimization
+        self.current_optimization_profile = PowerOptimizationProfile.BALANCED
+        self.power_profiles = self._initialize_power_profiles()
+        self.custom_profile_settings = {}
+        
+        # Machine learning system
+        self.charging_location_ml = ChargingLocationML()
+        
         # Battery monitoring
         self.battery_metrics = BatteryMetrics(12.0, 0.0, 0.0, 0.5)
         self.solar_metrics = SolarMetrics(0.0, 0.0, 0.0)
         self.power_consumption = PowerConsumption(0.0)
         
-        # Sunny spot management
+        # Sunny spot management with ML enhancement
         self.sunny_spots: List[SunnySpot] = []
         self.current_sunny_spot: Optional[SunnySpot] = None
         self.sunny_spot_learning_enabled = True
+        self.auto_sunny_spot_discovery = True
         
         # Historical data for trends
         self.battery_history: List[BatteryMetrics] = []
         self.solar_history: List[SolarMetrics] = []
         self.consumption_history: List[PowerConsumption] = []
         
+        # Advanced battery management
+        self.battery_health_tracker = {}
+        self.charging_cycle_optimizer = {}
+        self.temperature_protection_active = False
+        
+        # Automatic shutdown system
+        self.auto_shutdown_enabled = True
+        self.user_shutdown_thresholds = {
+            'critical': 0.05,  # 5%
+            'warning': 0.15,   # 15%
+            'return_to_base': 0.25  # 25%
+        }
+        self.shutdown_behavior = 'graceful'  # 'graceful', 'immediate', 'smart'
+        
+        # Emergency power management
+        self.emergency_reserve_enabled = True
+        self.emergency_reserve_threshold = 0.03  # 3%
+        self.critical_functions_only = False
+        
         # Tasks
         self._monitoring_task: Optional[asyncio.Task] = None
         self._optimization_task: Optional[asyncio.Task] = None
         self._sunny_spot_task: Optional[asyncio.Task] = None
+        self._ml_training_task: Optional[asyncio.Task] = None
+        self._battery_health_task: Optional[asyncio.Task] = None
         
-        # Safety thresholds
+        # Safety thresholds (now user-configurable)
         self.CRITICAL_BATTERY_LEVEL = 0.05  # 5%
         self.LOW_BATTERY_LEVEL = 0.20  # 20%
         self.OPTIMAL_BATTERY_LEVEL = 0.80  # 80%
@@ -170,51 +372,185 @@ class PowerManager:
             }
         }
     
+    def _initialize_power_profiles(self) -> Dict[PowerOptimizationProfile, PowerProfile]:
+        """Initialize predefined power optimization profiles"""
+        return {
+            PowerOptimizationProfile.MAXIMUM_PERFORMANCE: PowerProfile(
+                name="Maximum Performance",
+                performance_weight=1.0,
+                efficiency_weight=0.0,
+                cpu_governor="performance",
+                sensor_reduction_factor=0.0,
+                camera_quality_factor=1.0,
+                motor_efficiency_mode=False,
+                description="Prioritize performance over power efficiency"
+            ),
+            PowerOptimizationProfile.BALANCED: PowerProfile(
+                name="Balanced",
+                performance_weight=0.6,
+                efficiency_weight=0.4,
+                cpu_governor="ondemand",
+                sensor_reduction_factor=0.2,
+                camera_quality_factor=0.8,
+                motor_efficiency_mode=True,
+                description="Balance between performance and efficiency"
+            ),
+            PowerOptimizationProfile.POWER_SAVER: PowerProfile(
+                name="Power Saver",
+                performance_weight=0.3,
+                efficiency_weight=0.7,
+                cpu_governor="powersave",
+                sensor_reduction_factor=0.5,
+                camera_quality_factor=0.5,
+                motor_efficiency_mode=True,
+                description="Prioritize power saving with acceptable performance"
+            ),
+            PowerOptimizationProfile.MAXIMUM_EFFICIENCY: PowerProfile(
+                name="Maximum Efficiency",
+                performance_weight=0.0,
+                efficiency_weight=1.0,
+                cpu_governor="powersave",
+                sensor_reduction_factor=0.7,
+                camera_quality_factor=0.3,
+                motor_efficiency_mode=True,
+                description="Maximum power efficiency, minimum performance"
+            ),
+            PowerOptimizationProfile.CUSTOM: PowerProfile(
+                name="Custom",
+                performance_weight=0.5,
+                efficiency_weight=0.5,
+                cpu_governor="ondemand",
+                sensor_reduction_factor=0.3,
+                camera_quality_factor=0.7,
+                motor_efficiency_mode=True,
+                description="User-customized power profile"
+            )
+        }
+    
     async def initialize(self) -> bool:
         """Initialize power management system"""
         if self._initialized:
             return True
         
         try:
-            self.logger.info("Initializing power management system...")
+            self.logger.info("Initializing advanced power management system...")
+            
+            # Initialize machine learning system
+            await self.charging_location_ml.initialize()
             
             # Load historical data
             await self._load_historical_data()
+            
+            # Load user configuration
+            await self._load_user_power_config()
             
             # Start monitoring tasks
             self._monitoring_task = asyncio.create_task(self._monitoring_loop())
             self._optimization_task = asyncio.create_task(self._optimization_loop())
             self._sunny_spot_task = asyncio.create_task(self._sunny_spot_loop())
+            self._ml_training_task = asyncio.create_task(self._ml_training_loop())
+            self._battery_health_task = asyncio.create_task(self._battery_health_loop())
             
             # Subscribe to MQTT topics
             await self._setup_mqtt_subscriptions()
             
             self._initialized = True
-            self.logger.info("Power management system initialized successfully")
+            self.logger.info("Advanced power management system initialized successfully")
             return True
             
         except Exception as e:
             self.logger.error(f"Failed to initialize power management: {e}")
             return False
     
+    async def _load_user_power_config(self):
+        """Load user power configuration from cache or file"""
+        try:
+            # Try to load from cache first
+            cached_config = await self.cache.get("power_user_config")
+            if cached_config:
+                self.current_optimization_profile = PowerOptimizationProfile(
+                    cached_config.get('optimization_profile', 'balanced')
+                )
+                self.custom_profile_settings = cached_config.get('custom_settings', {})
+                self.user_shutdown_thresholds = cached_config.get('shutdown_thresholds', 
+                                                                self.user_shutdown_thresholds)
+                self.shutdown_behavior = cached_config.get('shutdown_behavior', 'graceful')
+                
+            self.logger.info("User power configuration loaded")
+        except Exception as e:
+            self.logger.warning(f"Could not load user power config: {e}")
+    
+    async def _ml_training_loop(self):
+        """Machine learning training and optimization loop"""
+        while not self._shutdown_event.is_set():
+            try:
+                await asyncio.sleep(3600)  # Run every hour
+                
+                # Collect training data from current location and conditions
+                if self.current_sunny_spot and self.weather:
+                    current_pos = await self.hardware.get_sensor_data("gps")
+                    if current_pos:
+                        weather_data = await self.weather.get_current_weather()
+                        if weather_data:
+                            location = (current_pos.get('latitude', 0), current_pos.get('longitude', 0))
+                            seasonal_factor = self._calculate_seasonal_factor()
+                            
+                            self.charging_location_ml.add_training_data(
+                                location,
+                                self.solar_metrics.power,
+                                weather_data.__dict__ if hasattr(weather_data, '__dict__') else {},
+                                seasonal_factor,
+                                datetime.now()
+                            )
+                            
+            except Exception as e:
+                self.logger.error(f"Error in ML training loop: {e}")
+                await asyncio.sleep(300)  # Wait 5 minutes on error
+    
+    async def _battery_health_loop(self):
+        """Advanced battery health monitoring and optimization loop"""
+        while not self._shutdown_event.is_set():
+            try:
+                await asyncio.sleep(300)  # Run every 5 minutes
+                
+                # Update battery health metrics
+                await self._update_battery_health()
+                
+                # Check for temperature protection
+                await self._check_temperature_protection()
+                
+                # Optimize charging cycles
+                await self._optimize_charging_cycles()
+                
+                # Check for emergency shutdown conditions
+                await self._check_emergency_shutdown()
+                
+            except Exception as e:
+                self.logger.error(f"Error in battery health loop: {e}")
+                await asyncio.sleep(60)  # Wait 1 minute on error
+
     async def shutdown(self):
-        """Gracefully shutdown power management system"""
-        self.logger.info("Shutting down power management system...")
+        """Shutdown power management system"""
+        self.logger.info("Shutting down advanced power management system...")
+        
         self._shutdown_event.set()
         
         # Cancel tasks
-        for task in [self._monitoring_task, self._optimization_task, self._sunny_spot_task]:
+        tasks = [self._monitoring_task, self._optimization_task, self._sunny_spot_task,
+                self._ml_training_task, self._battery_health_task]
+        for task in tasks:
             if task and not task.done():
                 task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                
+        # Wait for tasks to complete
+        await asyncio.gather(*[t for t in tasks if t], return_exceptions=True)
         
-        # Save historical data
+        # Save historical data and ML models
         await self._save_historical_data()
+        await self.charging_location_ml._save_models()
         
-        self.logger.info("Power management system shutdown complete")
+        self._initialized = False
+        self.logger.info("Advanced power management system shutdown complete")
     
     async def _monitoring_loop(self):
         """Main monitoring loop for battery and solar data"""

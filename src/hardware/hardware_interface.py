@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+from pathlib import Path
 
 from .managers import I2CManager, SerialManager, CameraManager, GPIOManager
 from .plugin_system import PluginManager, HardwarePlugin
@@ -198,9 +199,25 @@ class HardwareInterface:
             if command == 'pwm' and len(args) == 2:
                 return await robohat.send_pwm_command(args[0], args[1])
             elif command == 'rc_disable':
-                return await robohat.managers['serial'].write_command('robohat', 'rc=disable')
+                return await robohat.enable_rc_control(False)
             elif command == 'rc_enable':
-                return await robohat.managers['serial'].write_command('robohat', 'rc=enable')
+                return await robohat.enable_rc_control(True)
+            elif command == 'rc_mode' and len(args) == 1:
+                return await robohat.set_rc_mode(args[0])
+            elif command == 'blade_control' and len(args) == 1:
+                return await robohat.set_blade_control(args[0] == 'true')
+            elif command == 'configure_channel' and len(args) >= 2:
+                channel = int(args[0])
+                function = args[1]
+                min_val = int(args[2]) if len(args) > 2 else 1000
+                max_val = int(args[3]) if len(args) > 3 else 2000
+                center_val = int(args[4]) if len(args) > 4 else 1500
+                if hasattr(robohat, 'configure_channel'):
+                    return await robohat.configure_channel(channel, function, min_val, max_val, center_val)
+                return False
+            elif command == 'get_rc_status':
+                status = await robohat.get_rc_status() if hasattr(robohat, 'get_rc_status') else None
+                return status is not None
             elif command == 'enc_zero':
                 return await robohat.managers['serial'].write_command('robohat', 'enc=zero')
             else:
@@ -210,6 +227,14 @@ class HardwareInterface:
             self.logger.error(f"RoboHAT command failed: {e}")
             return False
     
+    async def get_rc_status_data(self) -> Dict[str, Any]:
+        """Get RC status data for API responses"""
+        robohat = self.plugin_manager.get_plugin('robohat')
+        if robohat and hasattr(robohat, 'get_rc_status'):
+            status = await robohat.get_rc_status()
+            return status or {}
+        return {}
+
     async def get_camera_frame(self):
         """Get latest camera frame"""
         return await self.camera_manager.get_latest_frame()
@@ -221,6 +246,179 @@ class HardwareInterface:
         
         pin_number = self.config.gpio.pins[pin_name]
         await self.gpio_manager.write_pin(pin_number, value)
+
+
+    def set_manual_override(self, component: str, override_config: Dict[str, Any]) -> None:
+        """Set manual override for hardware component"""
+        # Store manual overrides in the interface for now
+        if not hasattr(self, 'manual_overrides'):
+            self.manual_overrides = {}
+        self.manual_overrides[component] = override_config
+        self.logger.info(f"Manual override set for {component}")
+    
+    def get_hardware_capabilities(self) -> Dict[str, Any]:
+        """Get current hardware capabilities and feature matrix"""
+        capabilities: Dict[str, Any] = {
+            'available_features': [],
+            'degraded_features': [],
+            'unavailable_features': [],
+            'component_status': {},
+            'alternative_hardware': {},
+            'software_fallbacks': {}
+        }
+        
+        # Check component status
+        for name in self.plugin_manager.list_plugins():
+            plugin = self.plugin_manager.get_plugin(name)
+            if plugin and hasattr(plugin, 'health') and hasattr(plugin.health, 'is_healthy'):
+                capabilities['component_status'][name] = plugin.health.is_healthy()
+            else:
+                capabilities['component_status'][name] = False
+        
+        # Define feature matrix
+        feature_matrix = {
+            'obstacle_detection': {
+                'required': ['camera'],
+                'optional': ['tof_left', 'tof_right'],
+                'alternatives': ['ultrasonic_sensors', 'lidar'],
+                'fallback': 'vision_only_detection'
+            },
+            'navigation': {
+                'required': ['gps'],
+                'optional': ['imu'],
+                'alternatives': ['rtk_gps', 'dual_gps'],
+                'fallback': 'dead_reckoning'
+            },
+            'power_monitoring': {
+                'required': ['power_monitor'],
+                'optional': ['voltage_sensor'],
+                'alternatives': ['ina219', 'voltage_divider'],
+                'fallback': 'software_estimation'
+            },
+            'environmental_sensing': {
+                'required': [],
+                'optional': ['environmental'],
+                'alternatives': ['dht22', 'bmp280'],
+                'fallback': 'weather_api'
+            },
+            'communication': {
+                'required': ['robohat'],
+                'optional': [],
+                'alternatives': ['arduino', 'pico'],
+                'fallback': 'direct_gpio'
+            }
+        }
+        
+        # Evaluate features
+        for feature_name, requirements in feature_matrix.items():
+            required_available = all(
+                capabilities['component_status'].get(comp, False)
+                for comp in requirements['required']
+            )
+            
+            if required_available:
+                optional_available = any(
+                    capabilities['component_status'].get(comp, False)
+                    for comp in requirements['optional']
+                ) if requirements['optional'] else True
+                
+                if optional_available:
+                    capabilities['available_features'].append(feature_name)
+                else:
+                    capabilities['degraded_features'].append(feature_name)
+            else:
+                capabilities['unavailable_features'].append(feature_name)
+                capabilities['alternative_hardware'][feature_name] = requirements['alternatives']
+                capabilities['software_fallbacks'][feature_name] = requirements['fallback']
+        
+        return capabilities
+    
+    def validate_hardware_configuration(self, component: str, config: Dict[str, Any]) -> List[str]:
+        """Validate hardware configuration with comprehensive checks"""
+        errors = []
+        
+        # Basic validation
+        if not component:
+            errors.append("Component name is required")
+        
+        if not config:
+            errors.append("Configuration is required")
+            return errors
+        
+        # Component-specific validation
+        component_type = self._determine_plugin_type_from_name(component)
+        
+        if component_type == 'tof_sensor':
+            if 'address' not in config:
+                errors.append("I2C address required for ToF sensor")
+            elif not isinstance(config['address'], int) or not (0x08 <= config['address'] <= 0x77):
+                errors.append("Invalid I2C address for ToF sensor")
+        
+        elif component_type == 'camera':
+            if 'device_path' not in config:
+                errors.append("Device path required for camera")
+            elif not Path(config['device_path']).exists():
+                errors.append(f"Camera device not found: {config['device_path']}")
+        
+        elif component_type in ['gps_sensor', 'communication']:
+            if 'port' not in config:
+                errors.append("Serial port required")
+            elif not Path(config['port']).exists():
+                errors.append(f"Serial port not found: {config['port']}")
+        
+        return errors
+    
+    def _determine_plugin_type_from_name(self, component_name: str) -> str:
+        """Determine plugin type from component name"""
+        name = component_name.lower()
+        
+        if 'tof' in name:
+            return 'tof_sensor'
+        elif 'power' in name:
+            return 'power_sensor'
+        elif 'camera' in name:
+            return 'camera'
+        elif 'gps' in name:
+            return 'gps_sensor'
+        elif 'imu' in name:
+            return 'imu_sensor'
+        elif 'environmental' in name or 'weather' in name:
+            return 'environmental_sensor'
+        elif 'robohat' in name:
+            return 'communication'
+        else:
+            return 'generic'
+    
+    def get_alternative_configurations(self, component: str) -> List[Dict[str, Any]]:
+        """Get alternative hardware configurations for component"""
+        component_type = self._determine_plugin_type_from_name(component)
+        alternatives = []
+        
+        if component_type == 'tof_sensor':
+            alternatives = [
+                {'model': 'VL53L1X', 'address': 0x29, 'description': 'Enhanced ToF sensor'},
+                {'model': 'HC-SR04', 'trigger_pin': 18, 'echo_pin': 24, 'description': 'Ultrasonic sensor'},
+                {'model': 'VL53L4CD', 'address': 0x52, 'description': 'Long-range ToF sensor'}
+            ]
+        elif component_type == 'camera':
+            alternatives = [
+                {'model': 'Pi Camera v3', 'device_path': '/dev/video0', 'description': 'Latest Pi Camera'},
+                {'model': 'USB Camera', 'device_path': '/dev/video1', 'description': 'Generic USB camera'},
+                {'model': 'IP Camera', 'url': 'rtsp://192.168.1.100', 'description': 'Network camera'}
+            ]
+        elif component_type == 'gps_sensor':
+            alternatives = [
+                {'model': 'Generic GPS', 'port': '/dev/ttyUSB0', 'baud': 9600, 'description': 'Standard GPS receiver'},
+                {'model': 'Pi Hat GPS', 'port': '/dev/ttyAMA0', 'baud': 9600, 'description': 'Pi Hat GPS module'}
+            ]
+        elif component_type == 'power_sensor':
+            alternatives = [
+                {'model': 'INA219', 'address': 0x41, 'description': 'Alternative power monitor'},
+                {'model': 'Voltage Divider', 'pin': 'A0', 'description': 'Simple voltage monitoring'}
+            ]
+        
+        return alternatives
+
     
     async def read_gpio_pin(self, pin_name: str) -> int:
         """Read GPIO pin by name"""

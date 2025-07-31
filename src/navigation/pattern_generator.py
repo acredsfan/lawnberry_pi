@@ -292,6 +292,281 @@ class PatternGenerator:
         
         return lines
     
+    def _generate_advanced_curved_lines(self, boundary: Boundary, parameters: Dict[str, Any]) -> List[List[Point]]:
+        """Generate advanced curved line algorithms for complex irregular yard shapes"""
+        curve_type = parameters.get('curve_type', 'bezier')
+        spacing = parameters.get('spacing', self.default_spacing)
+        complexity = parameters.get('complexity', 0.3)
+        
+        bounds = self._get_boundary_bounds(boundary)
+        curved_paths = []
+        
+        if curve_type == 'bezier':
+            # Generate Bezier curve-based paths
+            curved_paths = self._generate_bezier_curves(boundary, spacing, complexity)
+        elif curve_type == 'spline':
+            # Generate B-spline based paths
+            curved_paths = self._generate_spline_curves(boundary, spacing, complexity)
+        elif curve_type == 'adaptive':
+            # Generate boundary-adaptive curves
+            curved_paths = self._generate_adaptive_curves(boundary, spacing, complexity)
+        
+        return curved_paths
+    
+    def _generate_bezier_curves(self, boundary: Boundary, spacing: float, complexity: float) -> List[List[Point]]:
+        """Generate Bezier curve-based mowing paths"""
+        bounds = self._get_boundary_bounds(boundary)
+        paths = []
+        
+        # Calculate control points based on boundary geometry
+        center_x = (bounds['min_x'] + bounds['max_x']) / 2
+        center_y = (bounds['min_y'] + bounds['max_y']) / 2
+        
+        width = bounds['max_x'] - bounds['min_x']
+        height = bounds['max_y'] - bounds['min_y']
+        
+        num_curves = int(max(width, height) / spacing)
+        
+        for i in range(num_curves):
+            t_offset = i / num_curves
+            
+            # Create Bezier control points
+            p0 = Point(bounds['min_x'], bounds['min_y'] + t_offset * height)
+            p1 = Point(center_x + complexity * width * math.sin(t_offset * math.pi), center_y)
+            p2 = Point(center_x - complexity * width * math.cos(t_offset * math.pi), center_y)
+            p3 = Point(bounds['max_x'], bounds['min_y'] + t_offset * height)
+            
+            # Generate Bezier curve points
+            curve_points = []
+            for t in range(0, 101, 2):  # Generate points along curve
+                t_norm = t / 100.0
+                
+                # Cubic Bezier formula
+                x = ((1-t_norm)**3 * p0.x + 
+                     3*(1-t_norm)**2*t_norm * p1.x + 
+                     3*(1-t_norm)*t_norm**2 * p2.x + 
+                     t_norm**3 * p3.x)
+                y = ((1-t_norm)**3 * p0.y + 
+                     3*(1-t_norm)**2*t_norm * p1.y + 
+                     3*(1-t_norm)*t_norm**2 * p2.y + 
+                     t_norm**3 * p3.y)
+                
+                point = Point(x, y)
+                if self._point_in_boundary(point, boundary):
+                    curve_points.append(point)
+            
+            if len(curve_points) > 5:  # Minimum viable curve
+                paths.append(curve_points)
+        
+        return paths
+    
+    def _generate_random_offset_algorithms(self, boundary: Boundary, parameters: Dict[str, Any]) -> List[List[Point]]:
+        """Generate sophisticated random offset algorithms to prevent grass wear patterns"""
+        base_pattern = parameters.get('base_pattern', 'parallel')
+        offset_variance = parameters.get('offset_variance', 0.2)
+        seed_rotation = parameters.get('seed_rotation', True)
+        temporal_shift = parameters.get('temporal_shift', 0.1)
+        
+        # Statistical distribution models for randomization
+        import random
+        random.seed(int(parameters.get('random_seed', 42)))
+        
+        if base_pattern == 'parallel':
+            base_paths = self._generate_parallel_pattern(boundary, parameters)
+        else:
+            base_paths = self._generate_waves_pattern(boundary, parameters)
+        
+        randomized_paths = []
+        
+        for path in base_paths:
+            randomized_path = []
+            
+            for i, point in enumerate(path):
+                # Apply Gaussian random offset
+                offset_x = random.gauss(0, offset_variance)
+                offset_y = random.gauss(0, offset_variance)
+                
+                # Apply temporal shift for time-based pattern rotation
+                if seed_rotation:
+                    time_factor = (i / len(path)) * temporal_shift
+                    rotation_angle = time_factor * math.pi / 4
+                    
+                    # Rotate offset
+                    cos_r = math.cos(rotation_angle)
+                    sin_r = math.sin(rotation_angle)
+                    
+                    rotated_x = offset_x * cos_r - offset_y * sin_r
+                    rotated_y = offset_x * sin_r + offset_y * cos_r
+                    
+                    offset_x, offset_y = rotated_x, rotated_y
+                
+                new_point = Point(point.x + offset_x, point.y + offset_y)
+                
+                # Ensure point stays within boundary
+                if self._point_in_boundary(new_point, boundary):
+                    randomized_path.append(new_point)
+                else:
+                    randomized_path.append(point)  # Keep original if offset goes outside
+            
+            if randomized_path:
+                randomized_paths.append(randomized_path)
+        
+        return randomized_paths
+    
+    def _generate_spline_curves(self, boundary: Boundary, spacing: float, complexity: float) -> List[List[Point]]:
+        """Generate B-spline based mowing paths for smooth curves"""
+        bounds = self._get_boundary_bounds(boundary)
+        paths = []
+        
+        # Generate control points for B-spline
+        num_control_points = max(4, int(complexity * 10))
+        width = bounds['max_x'] - bounds['min_x']
+        height = bounds['max_y'] - bounds['min_y']
+        
+        num_splines = int(max(width, height) / spacing)
+        
+        for i in range(num_splines):
+            # Create control points along boundary
+            control_points = []
+            for j in range(num_control_points):
+                t = j / (num_control_points - 1)
+                x = bounds['min_x'] + t * width
+                y = bounds['min_y'] + (i / num_splines) * height + complexity * height * math.sin(t * math.pi * 2)
+                control_points.append(Point(x, y))
+            
+            # Generate spline curve (simplified cubic interpolation)
+            spline_points = []
+            for t in range(0, 101, 3):
+                t_norm = t / 100.0
+                
+                # Simple cubic interpolation between control points
+                if len(control_points) >= 4:
+                    segment_index = min(len(control_points) - 4, int(t_norm * (len(control_points) - 3)))
+                    local_t = (t_norm * (len(control_points) - 3)) - segment_index
+                    
+                    p0, p1, p2, p3 = control_points[segment_index:segment_index + 4]
+                    
+                    # Catmull-Rom spline interpolation
+                    x = 0.5 * ((2 * p1.x) +
+                              (-p0.x + p2.x) * local_t +
+                              (2*p0.x - 5*p1.x + 4*p2.x - p3.x) * local_t**2 +
+                              (-p0.x + 3*p1.x - 3*p2.x + p3.x) * local_t**3)
+                    
+                    y = 0.5 * ((2 * p1.y) +
+                              (-p0.y + p2.y) * local_t +
+                              (2*p0.y - 5*p1.y + 4*p2.y - p3.y) * local_t**2 +
+                              (-p0.y + 3*p1.y - 3*p2.y + p3.y) * local_t**3)
+                    
+                    point = Point(x, y)
+                    if self._point_in_boundary(point, boundary):
+                        spline_points.append(point)
+            
+            if len(spline_points) > 5:
+                paths.append(spline_points)
+        
+        return paths
+    
+    def _generate_adaptive_curves(self, boundary: Boundary, spacing: float, complexity: float) -> List[List[Point]]:
+        """Generate boundary-adaptive curves that follow yard contours"""
+        paths = []
+        
+        # Analyze boundary curvature
+        boundary_segments = self._analyze_boundary_curvature(boundary)
+        
+        for segment in boundary_segments:
+            # Generate paths that adapt to boundary curvature
+            adaptive_path = []
+            
+            for i in range(len(segment) - 1):
+                start_point = segment[i]
+                end_point = segment[i + 1]
+                
+                # Calculate curve that follows boundary shape
+                curve_points = self._generate_boundary_following_curve(
+                    start_point, end_point, boundary, spacing, complexity
+                )
+                adaptive_path.extend(curve_points)
+            
+            if len(adaptive_path) > 3:
+                paths.append(adaptive_path)
+        
+        return paths
+    
+    def _analyze_boundary_curvature(self, boundary: Boundary) -> List[List[Point]]:
+        """Analyze boundary curvature to create adaptive segments"""
+        if len(boundary.points) < 3:
+            return [boundary.points]
+        
+        segments = []
+        current_segment = [boundary.points[0]]
+        
+        for i in range(1, len(boundary.points) - 1):
+            p1 = boundary.points[i - 1]
+            p2 = boundary.points[i]
+            p3 = boundary.points[i + 1]
+            
+            # Calculate curvature using cross product
+            v1_x, v1_y = p2.x - p1.x, p2.y - p1.y
+            v2_x, v2_y = p3.x - p2.x, p3.y - p2.y
+            
+            cross_product = v1_x * v2_y - v1_y * v2_x
+            curvature = abs(cross_product) / max(0.001, (v1_x**2 + v1_y**2)**0.5 * (v2_x**2 + v2_y**2)**0.5)
+            
+            current_segment.append(p2)
+            
+            # Split segment if high curvature detected
+            if curvature > 0.3 and len(current_segment) > 2:
+                segments.append(current_segment)
+                current_segment = [p2]
+        
+        current_segment.append(boundary.points[-1])
+        segments.append(current_segment)
+        
+        return segments
+    
+    def _generate_boundary_following_curve(
+        self, start: Point, end: Point, boundary: Boundary, spacing: float, complexity: float
+    ) -> List[Point]:
+        """Generate curve that follows boundary contours"""
+        curve_points = []
+        
+        # Calculate direction vector
+        dx = end.x - start.x
+        dy = end.y - start.y
+        length = math.sqrt(dx*dx + dy*dy)
+        
+        if length < 0.001:
+            return [start]
+        
+        # Normalize direction
+        dx /= length
+        dy /= length
+        
+        # Generate points along the curve
+        num_points = max(5, int(length / (spacing * 0.5)))
+        
+        for i in range(num_points):
+            t = i / (num_points - 1) if num_points > 1 else 0
+            
+            # Base position
+            base_x = start.x + t * (end.x - start.x)
+            base_y = start.y + t * (end.y - start.y)
+            
+            # Add curvature that follows boundary
+            perpendicular_x = -dy
+            perpendicular_y = dx
+            
+            curve_offset = complexity * spacing * math.sin(t * math.pi)
+            
+            curve_x = base_x + perpendicular_x * curve_offset
+            curve_y = base_y + perpendicular_y * curve_offset
+            
+            point = Point(curve_x, curve_y)
+            if self._point_in_boundary(point, boundary):
+                curve_points.append(point)
+        
+        return curve_points
+    
     def _optimize_path_order(self, paths: List[List[Point]]) -> List[List[Point]]:
         """Optimize path ordering for minimum travel distance (nearest neighbor)"""
         if len(paths) <= 1:

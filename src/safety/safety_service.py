@@ -1,6 +1,6 @@
 """
-Comprehensive Safety Monitoring Service
-Integrates all safety components with 100ms emergency response
+Enhanced Comprehensive Safety Monitoring Service
+Integrates all safety components with tiered access control and advanced sensor fusion
 """
 
 import asyncio
@@ -16,13 +16,18 @@ from ..hardware.data_structures import GPSReading
 from .emergency_controller import EmergencyController
 from .hazard_detector import HazardDetector
 from .boundary_monitor import BoundaryMonitor
+from .access_control import SafetyAccessController, SafetyAccessLevel
+from .sensor_fusion_safety import SensorFusionSafetySystem
+from .enhanced_protocols import EnhancedSafetyProtocols
+from .environmental_safety import EnvironmentalSafetySystem
+from .maintenance_safety import MaintenanceSafetySystem
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class SafetyConfig:
-    """Safety service configuration"""
+    """Enhanced safety service configuration with tiered access support"""
     emergency_response_time_ms: int = 100
     safety_update_rate_hz: int = 20
     emergency_update_rate_hz: int = 50
@@ -38,12 +43,36 @@ class SafetyConfig:
     enable_weather_safety: bool = True
     enable_vision_safety: bool = True
     enable_boundary_enforcement: bool = True
+    
+    # Enhanced safety features
+    enable_tiered_access_control: bool = True
+    enable_sensor_fusion_safety: bool = True
+    enable_enhanced_protocols: bool = True
+    enable_environmental_safety: bool = True
+    enable_maintenance_safety: bool = True
+    
+    # Sensor fusion parameters
+    sensor_fusion_confidence_threshold: float = 0.7
+    sensor_fusion_agreement_threshold: float = 0.6
+    adaptive_sensor_weights: bool = True
+    
+    # Environmental safety parameters
+    max_safe_slope_degrees: float = 15.0
+    caution_slope_degrees: float = 10.0
+    min_grip_factor: float = 0.6
+    min_stability_factor: float = 0.7
+    
+    # Maintenance safety parameters
+    blade_wear_threshold: float = 70.0
+    battery_capacity_threshold: float = 80.0
+    battery_temp_max: float = 45.0
+    vibration_threshold: float = 2.0
 
 
 class SafetyService:
     """
-    Comprehensive safety monitoring service that coordinates all safety components
-    and provides 100ms emergency response capability
+    Enhanced comprehensive safety monitoring service with tiered access control,
+    advanced sensor fusion, and comprehensive safety protocols
     """
     
     def __init__(self, mqtt_client: MQTTClient, config: SafetyConfig = None):
@@ -55,6 +84,16 @@ class SafetyService:
         self.emergency_controller = EmergencyController(mqtt_client, self.config)
         self.hazard_detector = HazardDetector(mqtt_client, self.config)
         self.boundary_monitor = BoundaryMonitor(mqtt_client, self.config)
+        
+        # Enhanced safety components
+        self.access_controller: Optional[SafetyAccessController] = None
+        self.sensor_fusion_safety: Optional[SensorFusionSafetySystem] = None
+        self.enhanced_protocols: Optional[EnhancedSafetyProtocols] = None
+        self.environmental_safety: Optional[EnvironmentalSafetySystem] = None
+        self.maintenance_safety: Optional[MaintenanceSafetySystem] = None
+        
+        # Initialize enhanced components if enabled
+        self._initialize_enhanced_components()
         
         # Service state
         self._running = False
@@ -75,49 +114,438 @@ class SafetyService:
         # Emergency callbacks
         self._emergency_callbacks: List[Callable] = []
         
+        # Enhanced safety metrics
+        self._access_control_events: List[Dict[str, Any]] = []
+        self._sensor_fusion_performance: Dict[str, float] = {}
+        self._environmental_safety_events: List[Dict[str, Any]] = []
+        self._maintenance_safety_events: List[Dict[str, Any]] = []
+    
+    def _initialize_enhanced_components(self):
+        """Initialize enhanced safety components based on configuration"""
+        try:
+            # Initialize access controller
+            if self.config.enable_tiered_access_control:
+                self.access_controller = SafetyAccessController()
+                logger.info("Initialized tiered access control system")
+            
+            # Initialize sensor fusion safety
+            if self.config.enable_sensor_fusion_safety:
+                fusion_config = {
+                    'confidence_threshold': self.config.sensor_fusion_confidence_threshold,
+                    'agreement_threshold': self.config.sensor_fusion_agreement_threshold,
+                    'adaptive_weights': self.config.adaptive_sensor_weights
+                }
+                self.sensor_fusion_safety = SensorFusionSafetySystem(self.mqtt_client, fusion_config)
+                logger.info("Initialized advanced sensor fusion safety system")
+            
+            # Initialize enhanced protocols
+            if self.config.enable_enhanced_protocols and self.access_controller:
+                protocols_config = {
+                    'emergency_contacts': [],  # Would be loaded from config file
+                    'remote_shutdown_tokens': []  # Would be loaded from secure config
+                }
+                self.enhanced_protocols = EnhancedSafetyProtocols(
+                    self.mqtt_client, self.access_controller, protocols_config
+                )
+                logger.info("Initialized enhanced safety protocols")
+            
+            # Initialize environmental safety
+            if self.config.enable_environmental_safety and self.sensor_fusion_safety:
+                env_config = {
+                    'max_safe_slope_degrees': self.config.max_safe_slope_degrees,
+                    'caution_slope_degrees': self.config.caution_slope_degrees,
+                    'min_grip_factor': self.config.min_grip_factor,
+                    'min_stability_factor': self.config.min_stability_factor
+                }
+                self.environmental_safety = EnvironmentalSafetySystem(
+                    self.mqtt_client, self.sensor_fusion_safety, env_config
+                )
+                logger.info("Initialized environmental safety system")
+            
+            # Initialize maintenance safety
+            if self.config.enable_maintenance_safety and self.access_controller:
+                maintenance_config = {
+                    'blade_wear_threshold': self.config.blade_wear_threshold,
+                    'battery_capacity_threshold': self.config.battery_capacity_threshold,
+                    'battery_temp_max': self.config.battery_temp_max,
+                    'vibration_threshold': self.config.vibration_threshold
+                }
+                self.maintenance_safety = MaintenanceSafetySystem(
+                    self.mqtt_client, self.access_controller, maintenance_config
+                )
+                logger.info("Initialized maintenance safety system")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize enhanced safety components: {e}")
+            raise
+        
     async def start(self):
-        """Start the comprehensive safety service"""
-        logger.info("Starting comprehensive safety monitoring service")
+        """Start the enhanced comprehensive safety service"""
+        logger.info("Starting enhanced comprehensive safety monitoring service")
         self._running = True
         
         # Subscribe to system commands
         await self._subscribe_to_commands()
         
-        # Start all safety components
+        # Start core safety components
         await self.safety_monitor.start()
         await self.emergency_controller.start()
         await self.hazard_detector.start()
         if self.config.enable_boundary_enforcement:
             await self.boundary_monitor.start()
         
+        # Start enhanced safety components
+        await self._start_enhanced_components()
+        
         # Register emergency callbacks between components
         self.safety_monitor.register_emergency_callback(self._handle_safety_emergency)
         self.hazard_detector.register_emergency_callback(self._handle_hazard_emergency)
         self.boundary_monitor.register_emergency_callback(self._handle_boundary_emergency)
         
+        # Register enhanced safety callbacks
+        await self._register_enhanced_callbacks()
+        
         # Start service coordination tasks
         self._service_task = asyncio.create_task(self._safety_coordination_loop())
         self._emergency_task = asyncio.create_task(self._emergency_coordination_loop())
+        
+        logger.info("Enhanced safety monitoring service started successfully")
+    
+    async def _start_enhanced_components(self):
+        """Start enhanced safety components"""
+        try:
+            if self.sensor_fusion_safety:
+                await self.sensor_fusion_safety.start()
+                logger.debug("Started sensor fusion safety system")
+            
+            if self.enhanced_protocols:
+                await self.enhanced_protocols.start()
+                logger.debug("Started enhanced safety protocols")
+            
+            if self.environmental_safety:
+                await self.environmental_safety.start()
+                logger.debug("Started environmental safety system")
+            
+            if self.maintenance_safety:
+                await self.maintenance_safety.start()
+                logger.debug("Started maintenance safety system")
+                
+        except Exception as e:
+            logger.error(f"Failed to start enhanced safety components: {e}")
+            raise
+    
+    async def _register_enhanced_callbacks(self):
+        """Register callbacks for enhanced safety components"""
+        try:
+            # Register sensor fusion callbacks
+            if self.sensor_fusion_safety:
+                self.sensor_fusion_safety.register_obstacle_callback(self._handle_sensor_fusion_obstacle)
+                self.sensor_fusion_safety.register_environmental_callback(self._handle_environmental_change)
+            
+            # Register enhanced protocol callbacks
+            if self.enhanced_protocols:
+                self.enhanced_protocols.register_violation_callback(self._handle_safety_violation)
+                self.enhanced_protocols.register_emergency_callback(self._handle_enhanced_emergency)
+            
+            # Register environmental safety callbacks
+            if self.environmental_safety:
+                self.environmental_safety.register_slope_callback(self._handle_slope_analysis)
+                self.environmental_safety.register_surface_callback(self._handle_surface_analysis)
+                self.environmental_safety.register_wildlife_callback(self._handle_wildlife_detection)
+                self.environmental_safety.register_hazard_callback(self._handle_environmental_hazard)
+            
+            # Register maintenance safety callbacks
+            if self.maintenance_safety:
+                self.maintenance_safety.register_blade_callback(self._handle_blade_analysis)
+                self.maintenance_safety.register_battery_callback(self._handle_battery_analysis)
+                self.maintenance_safety.register_lockout_callback(self._handle_maintenance_lockout)
+                self.maintenance_safety.register_diagnostic_callback(self._handle_diagnostic_result)
+                
+        except Exception as e:
+            logger.error(f"Failed to register enhanced safety callbacks: {e}")
         
         # Subscribe to position updates
         await self.mqtt_client.subscribe("lawnberry/sensors/gps", self._handle_position_update)
         await self.mqtt_client.subscribe("lawnberry/system/state", self._handle_system_state_change)
         
-        logger.info("Safety service started successfully")
+        logger.info("Enhanced safety service started successfully")
+    
+    async def _stop_enhanced_components(self):
+        """Stop enhanced safety components"""
+        try:
+            if self.maintenance_safety:
+                await self.maintenance_safety.stop()
+                logger.debug("Stopped maintenance safety system")
+            
+            if self.environmental_safety:
+                await self.environmental_safety.stop()
+                logger.debug("Stopped environmental safety system")
+            
+            if self.enhanced_protocols:
+                await self.enhanced_protocols.stop()
+                logger.debug("Stopped enhanced safety protocols")
+            
+            if self.sensor_fusion_safety:
+                await self.sensor_fusion_safety.stop()
+                logger.debug("Stopped sensor fusion safety system")
+                
+        except Exception as e:
+            logger.error(f"Error stopping enhanced safety components: {e}")
+    
+    # Enhanced safety callback handlers
+    async def _handle_sensor_fusion_obstacle(self, obstacle):
+        """Handle sensor fusion obstacle detection"""
+        self._sensor_fusion_performance['obstacles_detected'] = self._sensor_fusion_performance.get('obstacles_detected', 0) + 1
         
+        # Trigger emergency response for critical obstacles
+        if obstacle.threat_level.value in ['CRITICAL', 'HIGH']:
+            await self._trigger_emergency_response({
+                'type': 'sensor_fusion_obstacle',
+                'obstacle_id': obstacle.obstacle_id,
+                'threat_level': obstacle.threat_level.value,
+                'position': obstacle.position,
+                'confidence': obstacle.confidence
+            })
+        
+        logger.debug(f"Sensor fusion obstacle detected: {obstacle.classification} at {obstacle.position}")
+    
+    async def _handle_environmental_change(self, conditions):
+        """Handle environmental condition changes"""
+        # Log environmental changes that might affect safety
+        logger.debug(f"Environmental conditions updated: temp={conditions.temperature}°C, visibility={conditions.visibility_factor}")
+    
+    async def _handle_safety_violation(self, event):
+        """Handle safety violation from enhanced protocols"""
+        self._access_control_events.append({
+            'event_id': event.event_id,
+            'type': event.event_type.value,
+            'severity': event.severity.value,
+            'timestamp': event.timestamp,
+            'user': event.user_involved
+        })
+        
+        # Trigger emergency response for critical violations
+        if event.severity.value in ['EMERGENCY_STOP', 'SYSTEM_SHUTDOWN']:
+            await self._trigger_emergency_response({
+                'type': 'safety_violation',
+                'event_id': event.event_id,
+                'description': event.description,
+                'severity': event.severity.value
+            })
+        
+        logger.warning(f"Safety violation: {event.description}")
+    
+    async def _handle_enhanced_emergency(self, event):
+        """Handle enhanced emergency events"""
+        await self._trigger_emergency_response({
+            'type': 'enhanced_emergency',
+            'event_id': event.event_id,
+            'description': event.description,
+            'severity': event.severity.value
+        })
+        
+        logger.critical(f"Enhanced emergency: {event.description}")
+    
+    async def _handle_slope_analysis(self, analysis):
+        """Handle slope analysis results"""
+        if analysis.safety_assessment.value in ['UNSAFE', 'PROHIBITED']:
+            self._environmental_safety_events.append({
+                'type': 'unsafe_slope',
+                'angle': analysis.angle_degrees,
+                'assessment': analysis.safety_assessment.value,
+                'timestamp': datetime.now()
+            })
+            
+            logger.warning(f"Unsafe slope detected: {analysis.angle_degrees:.1f}° - {analysis.safety_assessment.value}")
+    
+    async def _handle_surface_analysis(self, analysis):
+        """Handle surface analysis results"""
+        if analysis.mowing_suitability < 0.3:
+            self._environmental_safety_events.append({
+                'type': 'unsuitable_surface',
+                'surface_type': analysis.surface_type.value,
+                'suitability': analysis.mowing_suitability,
+                'timestamp': datetime.now()
+            })
+            
+            logger.warning(f"Unsuitable surface: {analysis.surface_type.value} (suitability: {analysis.mowing_suitability:.2f})")
+    
+    async def _handle_wildlife_detection(self, detection):
+        """Handle wildlife detection"""
+        if detection.threat_level > 0.7:
+            self._environmental_safety_events.append({
+                'type': 'wildlife_threat',
+                'wildlife_type': detection.wildlife_type.value,
+                'threat_level': detection.threat_level,
+                'position': detection.position,
+                'timestamp': detection.timestamp
+            })
+            
+            logger.warning(f"Wildlife threat: {detection.wildlife_type.value} (threat: {detection.threat_level:.2f})")
+    
+    async def _handle_environmental_hazard(self, hazard):
+        """Handle environmental hazards"""
+        if hazard.severity > 0.8:
+            await self._trigger_emergency_response({
+                'type': 'environmental_hazard',
+                'hazard_id': hazard.hazard_id,
+                'hazard_type': hazard.hazard_type,
+                'severity': hazard.severity,
+                'action': hazard.recommended_action
+            })
+        
+        logger.warning(f"Environmental hazard: {hazard.hazard_type} (severity: {hazard.severity:.2f})")
+    
+    async def _handle_blade_analysis(self, blade_data):
+        """Handle blade wear analysis"""
+        if blade_data.safety_concern:
+            self._maintenance_safety_events.append({
+                'type': 'blade_safety_concern',
+                'blade_id': blade_data.blade_id,
+                'condition': blade_data.condition.value,
+                'wear_percentage': blade_data.wear_percentage,
+                'timestamp': blade_data.timestamp
+            })
+            
+            logger.warning(f"Blade safety concern: {blade_data.condition.value} ({blade_data.wear_percentage:.1f}% wear)")
+    
+    async def _handle_battery_analysis(self, battery_data):
+        """Handle battery health analysis"""
+        if battery_data.safety_concerns:
+            self._maintenance_safety_events.append({
+                'type': 'battery_safety_concern',
+                'battery_id': battery_data.battery_id,
+                'concerns': battery_data.safety_concerns,
+                'capacity': battery_data.capacity_percentage,
+                'timestamp': battery_data.timestamp
+            })
+            
+            logger.warning(f"Battery safety concerns: {', '.join(battery_data.safety_concerns)}")
+    
+    async def _handle_maintenance_lockout(self, lockout):
+        """Handle maintenance lockout"""
+        if lockout.severity.value == 'CRITICAL':
+            await self._trigger_emergency_response({
+                'type': 'maintenance_lockout',
+                'lockout_id': lockout.lockout_id,
+                'description': lockout.description,
+                'affected_systems': lockout.affected_systems
+            })
+        
+        logger.warning(f"Maintenance lockout: {lockout.description}")
+    
+    async def _handle_diagnostic_result(self, diagnostic):
+        """Handle diagnostic results"""
+        if diagnostic.safety_impact and diagnostic.status.value == 'CRITICAL':
+            self._maintenance_safety_events.append({
+                'type': 'diagnostic_failure',
+                'test_name': diagnostic.test_name,
+                'status': diagnostic.status.value,
+                'issues': diagnostic.issues_found,
+                'timestamp': diagnostic.timestamp
+            })
+            
+            logger.warning(f"Critical diagnostic failure: {diagnostic.test_name}")
+    
+    async def _trigger_emergency_response(self, event_data):
+        """Trigger emergency response for enhanced safety events"""
+        # Publish emergency event
+        await self.mqtt_client.publish("safety/emergency", event_data)
+        
+        # Trigger emergency callbacks
+        for callback in self._emergency_callbacks:
+            try:
+                await callback(event_data)
+            except Exception as e:
+                logger.error(f"Error in emergency callback: {e}")
+        
+        # Update safety status to emergency
+        self._system_state = "EMERGENCY"
+        self._safety_events_log.append({
+            'timestamp': datetime.now(),
+            'event_type': 'emergency_response',
+            'data': event_data
+        })
+    
+    async def get_enhanced_safety_status(self):
+        """Get comprehensive enhanced safety status"""
+        base_status = await self.get_comprehensive_safety_status()
+        
+        enhanced_status = {
+            'access_control': {
+                'enabled': self.access_controller is not None,
+                'total_events': len(self._access_control_events),
+                'recent_events': len([e for e in self._access_control_events if (datetime.now() - e['timestamp']).seconds < 3600])
+            },
+            'sensor_fusion': {
+                'enabled': self.sensor_fusion_safety is not None,
+                'performance_metrics': self._sensor_fusion_performance,
+                'system_status': await self.sensor_fusion_safety.get_system_status() if self.sensor_fusion_safety else None
+            },
+            'enhanced_protocols': {
+                'enabled': self.enhanced_protocols is not None,
+                'safety_status': await self.enhanced_protocols.get_safety_status() if self.enhanced_protocols else None
+            },
+            'environmental_safety': {
+                'enabled': self.environmental_safety is not None,
+                'total_events': len(self._environmental_safety_events),
+                'status': await self.environmental_safety.get_environmental_status() if self.environmental_safety else None
+            },
+            'maintenance_safety': {
+                'enabled': self.maintenance_safety is not None,
+                'total_events': len(self._maintenance_safety_events),
+                'status': await self.maintenance_safety.get_maintenance_status() if self.maintenance_safety else None
+            }
+        }
+        
+        # Merge with base status
+        base_status.update({'enhanced_features': enhanced_status})
+        return base_status
+    
+    # User access control methods
+    async def register_user(self, username: str, initial_level: SafetyAccessLevel = SafetyAccessLevel.BASIC):
+        """Register a user in the safety access control system"""
+        if self.access_controller:
+            return await self.access_controller.register_user(username, initial_level)
+        return False
+    
+    async def check_user_access(self, username: str, parameter: str = None, feature: str = None):
+        """Check user access to safety parameters or features"""
+        if not self.access_controller:
+            return True  # Default to allow if access control disabled
+        
+        if parameter:
+            return await self.access_controller.check_parameter_access(username, parameter)
+        elif feature:
+            return await self.access_controller.check_feature_access(username, feature)
+        
+        return False
+    
+    async def complete_safety_training(self, username: str, module: str, score: float):
+        """Record safety training completion"""
+        if self.access_controller:
+            from .access_control import TrainingModule
+            try:
+                training_module = TrainingModule(module)
+                return await self.access_controller.complete_training(username, training_module, score)
+            except ValueError:
+                logger.error(f"Invalid training module: {module}")
+                return False
+        return False
+
     async def stop(self):
-        """Stop the safety service"""
-        logger.info("Stopping safety monitoring service")
+        """Stop the enhanced comprehensive safety service"""
+        logger.info("Stopping enhanced comprehensive safety monitoring service")
         self._running = False
         
-        # Cancel tasks
+        # Cancel service tasks
         if self._service_task:
             self._service_task.cancel()
             try:
                 await self._service_task
             except asyncio.CancelledError:
                 pass
-        
+                
         if self._emergency_task:
             self._emergency_task.cancel()
             try:
@@ -125,13 +553,16 @@ class SafetyService:
             except asyncio.CancelledError:
                 pass
         
-        # Stop all components
-        await self.safety_monitor.stop()
-        await self.emergency_controller.stop()
-        await self.hazard_detector.stop()
-        await self.boundary_monitor.stop()
+        # Stop enhanced safety components
+        await self._stop_enhanced_components()
         
-        logger.info("Safety service stopped")
+        # Stop core safety components
+        await self.boundary_monitor.stop()
+        await self.hazard_detector.stop()
+        await self.emergency_controller.stop()
+        await self.safety_monitor.stop()
+        
+        logger.info("Enhanced comprehensive safety monitoring service stopped")
     
     async def _subscribe_to_commands(self):
         """Subscribe to safety-related commands"""

@@ -21,11 +21,22 @@ safety:
   
 # Model Settings
 models:
-  primary_model_path: "models/custom/lawn_obstacles_v1.tflite"
-  backup_model_path: "models/efficientdet_d0.tflite"
+  primary_model_path: "models/custom/advanced_obstacles_v2.tflite"
+  backup_model_path: "models/custom/lawn_obstacles_v1.tflite"
+  fallback_model_path: "models/efficientdet_d0.tflite"
   model_update_check_interval: 3600  # Check for model updates every hour
   custom_models_path: "models/custom"
   enable_model_auto_update: true
+  
+  # Advanced specialized models
+  specialized_models:
+    grass_health: "models/custom/grass_health_analyzer_v2.tflite"
+    weather_conditions: "models/custom/weather_condition_expert_v2.tflite"
+    terrain_analysis: "models/custom/terrain_surface_analyzer_v2.tflite"
+  
+  # Model switching settings
+  enable_dynamic_model_switching: true
+  model_switching_confidence_threshold: 0.7
   
 # Training Settings
 training:

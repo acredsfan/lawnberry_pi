@@ -57,6 +57,23 @@ PWM_FREQ = 50  # Hz
 steer_pwm = pwmio.PWMOut(board.GP10, frequency=PWM_FREQ, duty_cycle=0)
 thr_pwm   = pwmio.PWMOut(board.GP11, frequency=PWM_FREQ, duty_cycle=0)
 
+# ---------- RC Control Modes ---------- #
+class RCMode:
+    EMERGENCY = "emergency"    # RC control only for emergency situations
+    MANUAL = "manual"         # Complete manual control of all functions
+    ASSISTED = "assisted"     # Manual control with safety oversight
+    TRAINING = "training"     # Manual control with movement recording
+
+# ---------- RC Channel Configuration ---------- #
+RC_CHANNELS = {
+    1: {"pin": board.GP6, "function": "steer", "min": 1000, "max": 2000, "center": 1500},
+    2: {"pin": board.GP5, "function": "throttle", "min": 1000, "max": 2000, "center": 1500},
+    3: {"pin": board.GP7, "function": "blade", "min": 1000, "max": 2000, "center": 1500},
+    4: {"pin": board.GP4, "function": "speed_adj", "min": 1000, "max": 2000, "center": 1500},
+    5: {"pin": board.GP3, "function": "emergency", "min": 1000, "max": 2000, "center": 1500},
+    6: {"pin": board.GP2, "function": "mode_switch", "min": 1000, "max": 2000, "center": 1500},
+}
+
 # ---------- RC receiver (PulseIn) - Multi-channel ---------- #
 rc_inputs = {}
 for ch_num, config in RC_CHANNELS.items():
@@ -79,23 +96,6 @@ encoder.position = 0
 wdt = microcontroller.watchdog
 wdt.timeout = 8
 wdt.mode = WatchDogMode.RESET
-
-# ---------- RC Control Modes ---------- #
-class RCMode:
-    EMERGENCY = "emergency"    # RC control only for emergency situations
-    MANUAL = "manual"         # Complete manual control of all functions
-    ASSISTED = "assisted"     # Manual control with safety oversight
-    TRAINING = "training"     # Manual control with movement recording
-
-# ---------- RC Channel Configuration ---------- #
-RC_CHANNELS = {
-    1: {"pin": board.GP6, "function": "steer", "min": 1000, "max": 2000, "center": 1500},
-    2: {"pin": board.GP5, "function": "throttle", "min": 1000, "max": 2000, "center": 1500},
-    3: {"pin": board.GP7, "function": "blade", "min": 1000, "max": 2000, "center": 1500},
-    4: {"pin": board.GP4, "function": "speed_adj", "min": 1000, "max": 2000, "center": 1500},
-    5: {"pin": board.GP3, "function": "emergency", "min": 1000, "max": 2000, "center": 1500},
-    6: {"pin": board.GP2, "function": "mode_switch", "min": 1000, "max": 2000, "center": 1500},
-}
 
 # ---------- Globals ---------- #
 rc_enabled        = True

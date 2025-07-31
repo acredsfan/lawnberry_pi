@@ -12,6 +12,8 @@ import Navigation from './pages/Navigation'
 import Maps from './pages/Maps'
 import Settings from './pages/Settings'
 import Training from './pages/Training'
+import RCControl from './pages/RCControl'
+import Documentation from './pages/Documentation'
 import Logo from './components/Logo'
 import { webSocketService } from './services/websocket'
 import { usePerformanceMonitor } from './hooks/usePerformanceMonitor'
@@ -160,6 +162,7 @@ const App: React.FC = () => {
           <Route path="/maps" element={<Maps />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/training" element={<Training />} />
+          <Route path="/documentation" element={<Documentation />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Layout>

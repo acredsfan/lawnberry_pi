@@ -1,6 +1,7 @@
 """
 System Manager - Master orchestration for Lawnberry autonomous mower
 Coordinates all subsystems with proper startup sequence, health monitoring, and graceful shutdown
+Enhanced with dynamic resource management and performance optimization
 """
 
 import asyncio
@@ -22,6 +23,8 @@ from .deployment_manager import DeploymentManager
 from .build_system import BuildSystem
 from .fleet_manager import FleetManager
 from .system_monitor import SystemMonitor
+from .enhanced_system_monitor import EnhancedSystemMonitor
+from .dynamic_resource_manager import OperationMode
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SystemStatus:
-    """Overall system status"""
+    """Overall system status with enhanced performance metrics"""
     state: SystemState
     uptime: float
     services_running: int
@@ -40,11 +43,18 @@ class SystemStatus:
     errors: List[str]
     deployment_status: Optional[Dict[str, str]]
     fleet_status: Optional[Dict[str, str]]
+    # Enhanced performance fields
+    operation_mode: str
+    resource_efficiency: float
+    dynamic_optimization_active: bool
+    performance_score: float
+    active_alerts: int
 
 
 class SystemManager:
     """
     Master system manager that orchestrates all Lawnberry subsystems
+    Enhanced with dynamic resource management and performance optimization
     """
     
     def __init__(self):
@@ -52,6 +62,9 @@ class SystemManager:
         self.service_orchestrator = ServiceOrchestrator()
         self.health_monitor = HealthMonitor()
         self.state_machine = SystemStateMachine()
+        
+        # Enhanced performance monitoring
+        self.enhanced_monitor = EnhancedSystemMonitor(self.config_manager)
         
         # Deployment automation components
         self.deployment_manager = DeploymentManager(
@@ -76,7 +89,7 @@ class SystemManager:
     async def initialize(self):
         """Initialize the system manager and all subsystems"""
         try:
-            logger.info("Initializing Lawnberry System Manager")
+            logger.info("Initializing Lawnberry System Manager with Enhanced Performance Monitoring")
             
             # Load and validate configuration
             await self.config_manager.load_all_configs()
@@ -86,6 +99,9 @@ class SystemManager:
             
             # Initialize health monitor
             await self.health_monitor.initialize()
+            
+            # Initialize enhanced monitoring system
+            await self.enhanced_monitor.initialize()
             
             # Initialize deployment automation components
             await self.system_monitor.initialize()
@@ -271,6 +287,11 @@ class SystemManager:
         except Exception as e:
             logger.warning(f"Failed to get fleet status: {e}")
 
+        # Get enhanced performance metrics
+        enhanced_status = await self.enhanced_monitor.get_comprehensive_status()
+        system_overview = enhanced_status.get('system_overview', {})
+        efficiency_metrics = enhanced_status.get('efficiency_metrics', {})
+
         return SystemStatus(
             state=self.state_machine.current_state,
             uptime=uptime,
@@ -281,7 +302,13 @@ class SystemManager:
             last_update=datetime.now(),
             errors=system_health.errors,
             deployment_status=deployment_status,
-            fleet_status=fleet_status
+            fleet_status=fleet_status,
+            # Enhanced performance fields
+            operation_mode=system_overview.get('operation_mode', 'idle'),
+            resource_efficiency=efficiency_metrics.get('overall_efficiency', 0.0),
+            dynamic_optimization_active=system_overview.get('monitoring_active', False),
+            performance_score=system_overview.get('system_stability', 0.0),
+            active_alerts=system_overview.get('active_alerts', 0)
         )
     
     async def graceful_shutdown(self):
@@ -321,6 +348,9 @@ class SystemManager:
             await self.fleet_manager.shutdown()
             await self.deployment_manager.shutdown()
             await self.system_monitor.shutdown()
+            
+            # Stop enhanced monitoring system
+            await self.enhanced_monitor.shutdown()
             
             # Stop health monitor
             await self.health_monitor.shutdown()

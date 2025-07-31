@@ -456,6 +456,81 @@ class RoboHATPlugin(HardwarePlugin):
             self.logger.error(f"Failed to send PWM command: {e}")
             return False
     
+    async def get_rc_status(self) -> Optional[Dict[str, Any]]:
+        """Get comprehensive RC status from RoboHAT"""
+        if not self._initialized:
+            if not await self.initialize():
+                return None
+        
+        try:
+            serial_manager = self.managers["serial"]
+            success = await serial_manager.write_command("robohat", "get_rc_status")
+            
+            if success:
+                # Wait for status response
+                await asyncio.sleep(0.1)
+                line = await serial_manager.read_line("robohat", timeout=1.0)
+                
+                if line and line.startswith("[STATUS]"):
+                    # Parse status response
+                    status_str = line.replace("[STATUS] ", "")
+                    try:
+                        import ast
+                        status_dict = ast.literal_eval(status_str)
+                        await self.health.record_success()
+                        return status_dict
+                    except Exception as parse_error:
+                        self.logger.error(f"Failed to parse RC status: {parse_error}")
+            
+            return None
+            
+        except Exception as e:
+            await self.health.record_failure()
+            self.logger.error(f"Failed to get RC status: {e}")
+            return None
+
+    async def configure_channel(self, channel: int, function: str, 
+                              min_val: int = 1000, max_val: int = 2000, 
+                              center_val: int = 1500) -> bool:
+        """Configure RC channel function mapping"""
+        if not self._initialized:
+            if not await self.initialize():
+                return False
+        
+        valid_functions = ["steer", "throttle", "blade", "speed_adj", "emergency", "mode_switch"]
+        if function not in valid_functions:
+            self.logger.error(f"Invalid RC function: {function}")
+            return False
+        
+        if not (1 <= channel <= 6):
+            self.logger.error(f"Invalid RC channel: {channel}")
+            return False
+        
+        try:
+            serial_manager = self.managers["serial"]
+            command = f"rc_config={channel},{function}"
+            success = await serial_manager.write_command("robohat", command)
+            
+            if success:
+                # Update local channel config
+                self.channel_config[channel] = {
+                    "function": function,
+                    "min": min_val,
+                    "max": max_val,
+                    "center": center_val
+                }
+                await self.health.record_success()
+                self.logger.info(f"RC channel {channel} configured for {function}")
+            else:
+                await self.health.record_failure()
+            
+            return success
+            
+        except Exception as e:
+            await self.health.record_failure()
+            self.logger.error(f"Failed to configure RC channel: {e}")
+            return False
+
     async def read_data(self) -> Optional[SensorReading]:
         """Read status from RoboHAT"""
         if not self._initialized:
@@ -463,25 +538,17 @@ class RoboHATPlugin(HardwarePlugin):
                 return None
         
         try:
-            serial_manager = self.managers["serial"]
-            line = await serial_manager.read_line("robohat", timeout=0.5)
+            # Get comprehensive RC status
+            rc_status = await self.get_rc_status()
             
-            if line and line.startswith("["):
-                # Parse status line: [RC] steer=1500 µs thr=1500 µs enc=0
-                parts = line.split()
-                mode = parts[0].strip("[]")
-                
-                steer_val = int(parts[1].split("=")[1])
-                thr_val = int(parts[2].split("=")[1])  
-                enc_val = int(parts[3].split("=")[1])
-                
+            if rc_status:
                 from .data_structures import RoboHATStatus
                 status = RoboHATStatus(
                     timestamp=datetime.now(),
-                    rc_enabled=(mode == "RC"),
-                    steer_pwm=steer_val,
-                    throttle_pwm=thr_val,
-                    encoder_position=enc_val,
+                    rc_enabled=rc_status.get("rc_enabled", True),
+                    steer_pwm=rc_status.get("channels", {}).get(1, 1500),
+                    throttle_pwm=rc_status.get("channels", {}).get(2, 1500),
+                    encoder_position=rc_status.get("encoder", 0),
                     connection_active=True
                 )
                 

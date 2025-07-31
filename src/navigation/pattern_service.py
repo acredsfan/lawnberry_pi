@@ -24,6 +24,119 @@ class PatternService:
         self.generator = PatternGenerator()
         self._pattern_configs: Dict[str, Dict[str, Any]] = {}
         self._initialize_default_configs()
+
+    async def initialize_ai_optimizer(self):
+        """Initialize AI pattern optimizer"""
+        try:
+            from .ai_pattern_optimizer import ai_pattern_optimizer
+            await ai_pattern_optimizer.initialize()
+            self.logger.info("AI pattern optimizer initialized")
+        except Exception as e:
+            self.logger.warning(f"Could not initialize AI optimizer: {e}")
+    
+    async def generate_ai_optimized_pattern(
+        self, 
+        pattern: MowingPattern, 
+        boundary_coords: List[Dict[str, float]], 
+        yard_characteristics: Dict[str, Any],
+        environmental_conditions: Dict[str, Any],
+        optimization_strategy: str = "balanced",
+        base_parameters: Optional[Dict[str, Any]] = None
+    ) -> List[List[Dict[str, float]]]:
+        """
+        Generate AI-optimized mowing pattern with advanced algorithmic enhancements
+        """
+        try:
+            from .ai_pattern_optimizer import ai_pattern_optimizer, YardCharacteristics, OptimizationStrategy
+            
+            # Convert boundary coordinates to internal format
+            boundary_points = [Point(coord['lat'], coord['lng']) for coord in boundary_coords]
+            boundary = Boundary(boundary_points)
+            
+            # Convert yard characteristics
+            yard_char = YardCharacteristics(
+                area=yard_characteristics.get('area', 100.0),
+                shape_complexity=yard_characteristics.get('shape_complexity', 0.5),
+                obstacle_density=yard_characteristics.get('obstacle_density', 0.1),
+                slope_variance=yard_characteristics.get('slope_variance', 0.1),
+                edge_ratio=yard_characteristics.get('edge_ratio', 0.2),
+                irregular_sections=yard_characteristics.get('irregular_sections', 0),
+                grass_type_distribution=yard_characteristics.get('grass_type_distribution', {'default': 1.0})
+            )
+            
+            # Get base parameters if not provided
+            if base_parameters is None:
+                config = self._pattern_configs.get(pattern.value, {})
+                base_parameters = config.get('parameters', {})
+            
+            # Convert pattern enum to internal type
+            pattern_type = PatternType(pattern.value)
+            
+            # Get optimization strategy
+            try:
+                strategy = OptimizationStrategy(optimization_strategy)
+            except ValueError:
+                strategy = OptimizationStrategy.BALANCED
+            
+            # Get AI-optimized parameters
+            optimized_params = await ai_pattern_optimizer.optimize_pattern_for_yard(
+                pattern_type, boundary, yard_char, environmental_conditions, strategy, base_parameters
+            )
+            
+            # Generate pattern with optimized parameters
+            paths = self.generator.generate_pattern(pattern_type, boundary, optimized_params)
+            
+            # Convert back to coordinate format
+            result_paths = []
+            for path in paths:
+                coord_path = [{'lat': point.x, 'lng': point.y} for point in path]
+                result_paths.append(coord_path)
+            
+            self.logger.info(f"Generated AI-optimized {pattern.value} pattern with {len(result_paths)} paths")
+            return result_paths
+            
+        except Exception as e:
+            self.logger.error(f"AI pattern optimization failed: {e}")
+            # Fallback to standard pattern generation
+            return await self.generate_pattern_path(pattern, boundary_coords, base_parameters)
+    
+    async def learn_from_pattern_performance(
+        self, 
+        pattern: MowingPattern,
+        boundary_coords: List[Dict[str, float]],
+        yard_characteristics: Dict[str, Any],
+        environmental_conditions: Dict[str, Any],
+        performance_metrics: Dict[str, float]
+    ):
+        """Learn from pattern performance for continuous improvement"""
+        try:
+            from .ai_pattern_optimizer import ai_pattern_optimizer, PatternPerformanceMetric
+            from datetime import datetime
+            
+            # Create performance metric
+            performance_data = PatternPerformanceMetric(
+                pattern_type=pattern.value,
+                coverage_efficiency=performance_metrics.get('coverage_efficiency', 0.8),
+                battery_usage=performance_metrics.get('battery_usage', 0.5),
+                time_to_complete=performance_metrics.get('time_to_complete', 3600),
+                grass_quality_score=performance_metrics.get('grass_quality_score', 0.8),
+                terrain_adaptation_score=performance_metrics.get('terrain_adaptation_score', 0.7),
+                weather_resilience=performance_metrics.get('weather_resilience', 0.8),
+                user_satisfaction=performance_metrics.get('user_satisfaction', 0.8),
+                edge_case_handling=performance_metrics.get('edge_case_handling', 0.7),
+                timestamp=datetime.now(),
+                yard_characteristics=yard_characteristics,
+                environmental_conditions=environmental_conditions
+            )
+            
+            # Feed to AI optimizer for learning
+            await ai_pattern_optimizer.learn_from_performance(performance_data)
+            
+            self.logger.info(f"Logged performance data for {pattern.value} pattern")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to log pattern performance: {e}")
+
     
     def _initialize_default_configs(self):
         """Initialize default pattern configurations with proper parameters"""

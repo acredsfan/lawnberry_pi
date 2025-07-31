@@ -1,0 +1,5 @@
+export { default as DeploymentGuide } from './DeploymentGuide'
+export { default as UserManual } from './UserManual'
+export { default as TechnicalReference } from './TechnicalReference'
+export { default as MaintenanceGuide } from './MaintenanceGuide'
+export { default as TrainingMaterials } from './TrainingMaterials'

@@ -67,6 +67,39 @@ check_root() {
     fi
 }
 
+# Global variables for Bookworm optimization
+BOOKWORM_DETECTED=false
+BOOKWORM_OPTIMIZATIONS=false
+SYSTEMD_VERSION=0
+
+detect_bookworm() {
+    print_section "Raspberry Pi OS Bookworm Detection"
+    
+    # Check for Bookworm specifically
+    if [[ -f /etc/os-release ]]; then
+        if grep -q "VERSION_CODENAME=bookworm" /etc/os-release; then
+            BOOKWORM_DETECTED=true
+            BOOKWORM_OPTIMIZATIONS=true
+            log_success "Raspberry Pi OS Bookworm detected - enabling optimizations"
+        elif grep -q "bullseye\|buster" /etc/os-release; then
+            log_warning "Legacy OS detected - some features may not be available"
+            log_info "For best performance, upgrade to Raspberry Pi OS Bookworm"
+        fi
+    fi
+    
+    # Get systemd version for compatibility
+    if command -v systemctl >/dev/null 2>&1; then
+        SYSTEMD_VERSION=$(systemctl --version | head -n1 | grep -o '[0-9]\+' | head -n1)
+        log_info "systemd version: $SYSTEMD_VERSION"
+        
+        if [[ $SYSTEMD_VERSION -ge 252 ]]; then
+            log_success "systemd 252+ detected - enabling security hardening"
+        else
+            log_warning "systemd < 252 - some security features will be disabled"
+        fi
+    fi
+}
+
 check_system() {
     print_section "System Requirements Check"
     
@@ -76,6 +109,11 @@ check_system() {
     else
         model=$(cat /proc/device-tree/model)
         log_info "Detected: $model"
+        
+        # Check for Pi 4B specifically for optimizations
+        if grep -q "Raspberry Pi 4" /proc/device-tree/model; then
+            log_success "Raspberry Pi 4 detected - enabling performance optimizations"
+        fi
     fi
     
     # Check OS
@@ -84,6 +122,9 @@ check_system() {
         log_info "Operating System: $os_info"
     fi
     
+    # Detect Bookworm first
+    detect_bookworm
+    
     # Check Python version - Bookworm compatibility
     if command -v python3 >/dev/null 2>&1; then
         python_version=$(python3 --version)
@@ -91,11 +132,17 @@ check_system() {
         
         # Check if Python 3.11+ (Bookworm requirement)
         if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
-            log_warning "Python 3.11+ recommended for Raspberry Pi OS Bookworm"
-            log_info "Minimum Python 3.8 detected - some optimizations may not be available"
-            if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" 2>/dev/null; then
-                log_error "Python 3.8 or higher is required"
+            if [[ $BOOKWORM_DETECTED == true ]]; then
+                log_error "Python 3.11+ required for Raspberry Pi OS Bookworm compatibility"
+                log_error "Please ensure you're running the latest Bookworm with Python 3.11+"
                 exit 1
+            else
+                log_warning "Python 3.11+ recommended for optimal performance"
+                log_info "Minimum Python 3.8 detected - some optimizations may not be available"
+                if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" 2>/dev/null; then
+                    log_error "Python 3.8 or higher is required"
+                    exit 1
+                fi
             fi
         else
             log_success "Python 3.11+ detected - Bookworm optimized features available"
@@ -370,6 +417,36 @@ create_directories() {
     log_success "System directories created"
 }
 
+apply_bookworm_optimizations() {
+    if [[ $BOOKWORM_OPTIMIZATIONS == true ]]; then
+        print_section "Applying Bookworm-Specific Optimizations"
+        
+        log_info "Configuring memory management for 16GB RAM..."
+        # Create memory optimization configuration
+        sudo tee /etc/sysctl.d/99-lawnberry-bookworm.conf >/dev/null <<EOF
+# LawnBerry Bookworm Memory Optimizations
+vm.swappiness=10
+vm.vfs_cache_pressure=50
+vm.dirty_background_ratio=5
+vm.dirty_ratio=10
+EOF
+        
+        log_info "Enabling CPU governor for performance..."
+        # Set CPU governor for Pi 4B performance
+        if grep -q "Raspberry Pi 4" /proc/device-tree/model 2>/dev/null; then
+            echo 'GOVERNOR="performance"' | sudo tee /etc/default/cpufrequtils >/dev/null
+        fi
+        
+        log_info "Configuring I2C and GPIO optimizations..."
+        # Optimize I2C performance
+        if ! grep -q "dtparam=i2c_arm_baudrate" /boot/config.txt; then
+            echo "dtparam=i2c_arm_baudrate=400000" | sudo tee -a /boot/config.txt >/dev/null
+        fi
+        
+        log_success "Bookworm optimizations applied"
+    fi
+}
+
 install_services() {
     print_section "Installing System Services"
     
@@ -389,7 +466,7 @@ install_services() {
         "src/web_api/lawnberry-api.service"
     )
     
-    log_info "Installing systemd service files..."
+    log_info "Installing systemd service files with Bookworm optimizations..."
     
     installed_services=()
     for service_file in "${services[@]}"; do
@@ -401,6 +478,26 @@ install_services() {
             temp_service="/tmp/$service_name"
             sed "s|/usr/bin/python3|$PROJECT_ROOT/venv/bin/python3|g" "$service_file" > "$temp_service"
             sed -i "s|WorkingDirectory=.*|WorkingDirectory=$PROJECT_ROOT|g" "$temp_service"
+            
+            # Apply Bookworm-specific security hardening if supported
+            if [[ $SYSTEMD_VERSION -ge 252 ]]; then
+                log_info "Applying systemd 252+ security hardening to $service_name"
+                # Add additional Bookworm security features
+                cat >> "$temp_service" << 'EOF'
+
+# Additional Bookworm Security Features
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+UMask=0027
+EOF
+            fi
             
             sudo cp "$temp_service" "$SERVICE_DIR/"
             sudo chmod 644 "$SERVICE_DIR/$service_name"
@@ -465,6 +562,32 @@ setup_database() {
 }
 
 configure_system() {
+
+run_post_install_validation() {
+    print_section "Post-Installation Validation"
+    
+    log_info "Running Bookworm compatibility validation..."
+    cd "$PROJECT_ROOT"
+    
+    if [[ -f "scripts/validate_bookworm_installation.py" ]]; then
+        if [[ $BOOKWORM_DETECTED == true ]]; then
+            log_info "Bookworm detected - running comprehensive validation"
+            python3 scripts/validate_bookworm_installation.py --quick
+        else
+            log_info "Non-Bookworm system - running basic validation"
+            python3 scripts/validate_bookworm_installation.py --quick
+        fi
+        
+        validation_result=$?
+        if [[ $validation_result -eq 0 ]]; then
+            log_success "Installation validation passed!"
+        else
+            log_warning "Installation validation found issues - check /tmp/bookworm_validation_report.json"
+        fi
+    else
+        log_info "Validation script not found - skipping validation"
+    fi
+}
     print_section "System Configuration"
     
     # Create logrotate configuration

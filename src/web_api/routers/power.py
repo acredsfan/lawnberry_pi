@@ -182,3 +182,140 @@ async def get_charging_locations(
         "current_best": None,
         "learning_progress": 0.0
     }
+
+@router.post("/optimization-profile")
+async def set_power_optimization_profile(
+    profile: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(require_permission("write"))
+):
+    """Set power optimization profile (max_performance/balanced/power_saver/max_efficiency/custom)"""
+    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
+    
+    if not mqtt_bridge or not mqtt_bridge.is_connected():
+        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
+    
+    valid_profiles = ["max_performance", "balanced", "power_saver", "max_efficiency", "custom"]
+    if profile not in valid_profiles:
+        raise ValueError(f"Invalid profile. Must be one of: {', '.join(valid_profiles)}")
+    
+    success = await mqtt_bridge.publish_message(
+        "power/optimization_profile/set",
+        {
+            "profile": profile,
+            "set_by": current_user.get("username", "unknown"),
+            "timestamp": datetime.utcnow().isoformat()
+        },
+        qos=2
+    )
+    
+    if not success:
+        raise ServiceUnavailableError("power", "Failed to set power optimization profile")
+    
+    return {
+        "success": True,
+        "message": f"Power optimization profile set to: {profile}",
+        "profile": profile
+    }
+
+@router.post("/shutdown-thresholds")
+async def update_shutdown_thresholds(
+    thresholds: Dict[str, float],
+    request: Request,
+    current_user: Dict[str, Any] = Depends(require_permission("write"))
+):
+    """Update user-configurable shutdown thresholds"""
+    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
+    
+    if not mqtt_bridge or not mqtt_bridge.is_connected():
+        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
+    
+    # Validate thresholds
+    required_keys = ['critical', 'warning', 'return_to_base']
+    if not all(key in thresholds for key in required_keys):
+        raise ValueError(f"Missing required threshold keys: {required_keys}")
+    
+    if not (0.01 <= thresholds['critical'] <= thresholds['warning'] <= thresholds['return_to_base'] <= 0.5):
+        raise ValueError("Thresholds must be: 0.01 <= critical <= warning <= return_to_base <= 0.5")
+    
+    success = await mqtt_bridge.publish_message(
+        "power/shutdown_thresholds/set",
+        {
+            "thresholds": thresholds,
+            "set_by": current_user.get("username", "unknown"),
+            "timestamp": datetime.utcnow().isoformat()
+        },
+        qos=2
+    )
+    
+    if not success:
+        raise ServiceUnavailableError("power", "Failed to update shutdown thresholds")
+    
+    return {
+        "success": True,
+        "message": "Shutdown thresholds updated successfully",
+        "thresholds": thresholds
+    }
+
+@router.get("/analytics")
+async def get_power_analytics(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get comprehensive power analytics and ML predictions"""
+    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
+    
+    if not mqtt_bridge or not mqtt_bridge.is_connected():
+        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
+    
+    analytics_data = mqtt_bridge.get_cached_data("power/analytics")
+    
+    return analytics_data or {
+        "current_profile": "balanced",
+        "battery_health": 1.0,
+        "daily_solar_generation": 0.0,
+        "daily_consumption": 0.0,
+        "efficiency_ratio": 0.0,
+        "sunny_spots_learned": 0,
+        "ml_prediction": None,
+        "shutdown_thresholds": {
+            "critical": 0.05,
+            "warning": 0.15,
+            "return_to_base": 0.25
+        },
+        "emergency_features": {
+            "auto_shutdown_enabled": True,
+            "emergency_reserve_enabled": True,
+            "critical_functions_only": False
+        }
+    }
+
+@router.post("/emergency-shutdown")
+async def trigger_emergency_shutdown(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(require_permission("admin"))
+):
+    """Trigger emergency shutdown (admin only)"""
+    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
+    
+    if not mqtt_bridge or not mqtt_bridge.is_connected():
+        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
+    
+    success = await mqtt_bridge.publish_message(
+        "commands/power",
+        {
+            "command": "emergency_shutdown",
+            "triggered_by": current_user.get("username", "unknown"),
+            "timestamp": datetime.utcnow().isoformat()
+        },
+        qos=2
+    )
+    
+    if not success:
+        raise ServiceUnavailableError("power", "Failed to trigger emergency shutdown")
+    
+    return {
+        "success": True,
+        "message": "Emergency shutdown initiated",
+        "delay_seconds": 30
+    }
