@@ -650,7 +650,7 @@ const Maps: React.FC = () => {
             </Grid>
           )}
         </Box>
-      </Grid>
+      </Paper>
     </Box>
   );
 };

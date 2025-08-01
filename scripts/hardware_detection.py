@@ -860,13 +860,18 @@ class EnhancedHardwareDetector:
         
         # System Information
         system = self.detection_results.get('system', {})
+        if isinstance(system, HardwareDetectionResult):
+            system_details = system.details
+        else:
+            system_details = system
+        
         print(f"\nSystem Information:")
-        print(f"  Pi Model: {system.get('pi_model', 'Unknown')}")
-        print(f"  Memory: {system.get('memory_mb', 'Unknown')} MB")
-        print(f"  OS: {system.get('os', 'Unknown')}")
-        print(f"  Python: {system.get('python_version', 'Unknown')}")
-        print(f"  I2C Enabled: {'Yes' if system.get('i2c_enabled') else 'No'}")
-        print(f"  SPI Enabled: {'Yes' if system.get('spi_enabled') else 'No'}")
+        print(f"  Pi Model: {system_details.get('pi_model', 'Unknown')}")
+        print(f"  Memory: {system_details.get('memory_mb', 'Unknown')} MB")
+        print(f"  OS: {system_details.get('os', 'Unknown')}")
+        print(f"  Python: {system_details.get('python_version', 'Unknown')}")
+        print(f"  I2C Enabled: {'Yes' if system_details.get('i2c_enabled') else 'No'}")
+        print(f"  SPI Enabled: {'Yes' if system_details.get('spi_enabled') else 'No'}")
         
         # I2C Devices
         i2c = self.detection_results.get('i2c_devices', {})

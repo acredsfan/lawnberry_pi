@@ -332,7 +332,9 @@ install_dependencies() {
         "sqlite3"
         "logrotate"
         "systemd"
-        "libcap-dev"  # Added to resolve python-prctl dependency
+        "libcap-dev"
+        "mosquitto"
+        "mosquitto-clients"
     )
     
     # Hardware-specific packages
@@ -708,6 +710,10 @@ build_web_ui() {
         return
     }
     
+    # Fix security vulnerabilities
+    log_info "Fixing npm security vulnerabilities..."
+    npm audit fix --force || log_warning "Some npm security issues could not be automatically fixed"
+    
     log_info "Building web UI..."
     npm run build || {
         log_warning "Web UI build failed"
@@ -824,7 +830,7 @@ EOF
             
             sudo cp "$temp_service" "$SERVICE_DIR/"
             sudo chmod 644 "$SERVICE_DIR/$service_name"
-            rm "$temp_service"
+            rm "$temp_service" "$temp_service"
             
             installed_services+=("${service_name%.service}")
         else
@@ -879,6 +885,29 @@ setup_database() {
         log_info "Starting Redis server..."
         sudo systemctl start redis-server
         sudo systemctl enable redis-server
+    fi
+    
+    # Start and configure Mosquitto MQTT broker
+    if systemctl is-available mosquitto >/dev/null 2>&1; then
+        log_info "Configuring and starting Mosquitto MQTT broker..."
+        
+        # Create basic mosquitto configuration
+        sudo tee /etc/mosquitto/conf.d/lawnberry.conf >/dev/null <<EOF
+# LawnBerry MQTT Configuration
+listener 1883 localhost
+allow_anonymous true
+log_dest file /var/log/mosquitto/mosquitto.log
+log_type error
+log_type warning  
+log_type notice
+log_type information
+EOF
+        
+        sudo systemctl start mosquitto
+        sudo systemctl enable mosquitto
+        log_success "Mosquitto MQTT broker configured and started"
+    else
+        log_warning "Mosquitto MQTT broker not available - communication features may be limited"
     fi
     
     log_success "Database initialization complete"
@@ -1129,7 +1158,7 @@ cleanup() {
     
     # Clean up temporary files
     log_info "Cleaning up temporary files..."
-    rm -f /tmp/lawnberry_*
+    sudo rm -f /tmp/lawnberry_*
     
     # Clean up build artifacts
     cd "$PROJECT_ROOT"

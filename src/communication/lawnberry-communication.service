@@ -3,7 +3,6 @@ Description=Lawnberry Communication System (MQTT)
 Documentation=https://github.com/lawnberry/communication-system
 After=network.target mosquitto.service
 Wants=mosquitto.service
-Requires=mosquitto.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -52,4 +51,3 @@ NotifyAccess=main
 
 [Install]
 WantedBy=multi-user.target
-Also=mosquitto.service
