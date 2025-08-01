@@ -292,7 +292,7 @@ select_performance_mode() {
                 echo "Please enter 1 or 2"
                 ;;
         esac
-    done
+done
 }
 
 # Runtime installation
@@ -471,15 +471,6 @@ EOF
     else
         log_info "Udev rules already exist"
     fi
-
-    # Install PyCoral package
-    log_info "Installing PyCoral for Python integration..."
-    if sudo apt-get install -y python3-pycoral; then
-        log_success "PyCoral installed successfully."
-    else
-        log_error "Failed to install python3-pycoral."
-        log_warning "Python support for the Edge TPU will not be available."
-    fi
     
     # Provide next steps
     echo
@@ -559,4 +550,5 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 else
     # Being sourced by another script
     log_info "Coral runtime installer loaded as library"
+fi
 fi

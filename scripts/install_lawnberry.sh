@@ -389,196 +389,80 @@ setup_python_environment() {
 
     # Run Coral TPU hardware detection and conditional installation
     setup_coral_packages
+
+    # Create a separate virtual environment for Coral dependencies
+    log_info "Creating a separate virtual environment for PyCoral..."
+    python3 -m venv "$PROJECT_ROOT/venv_coral"
+    source "$PROJECT_ROOT/venv_coral/bin/activate"
+    pip install --upgrade pip
+    
+    log_info "Installing PyCoral and tflite-runtime from pre-built wheels..."
+    
+    PYCORAL_WHEEL="pycoral-2.0.0-cp311-cp311-linux_aarch64.whl"
+    TFLITE_WHEEL="tflite_runtime-2.5.0.post1-cp311-cp311-linux_aarch64.whl"
+    
+    log_info "Downloading ${PYCORAL_WHEEL}..."
+    curl -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${PYCORAL_WHEEL}" -o "${PYCORAL_WHEEL}"
+    
+    log_info "Downloading ${TFLITE_WHEEL}..."
+    curl -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${TFLITE_WHEEL}" -o "${TFLITE_WHEEL}"
+
+    log_info "Installing downloaded wheels into venv_coral..."
+    pip install "${PYCORAL_WHEEL}"
+    pip install "${TFLITE_WHEEL}"
+
+    log_info "Cleaning up wheel files..."
+    rm "${PYCORAL_WHEEL}" "${TFLITE_WHEEL}"
+
+    deactivate
+
+    # Return to the main virtual environment
+    source "$PROJECT_ROOT/venv/bin/activate"
     
     log_success "Python environment setup complete"
 }
 
 setup_coral_packages() {
-    print_section "Coral TPU Package Installation"
-    
-    # Check platform compatibility for Coral packages
-    local coral_compatible=false
-    local bookworm_detected=false
-    local python_version_ok=false
-    
-    # Detect Pi OS Bookworm
-    if [[ -f /etc/os-release ]] && grep -q "VERSION_CODENAME=bookworm" /etc/os-release; then
-        bookworm_detected=true
-        log_success "Pi OS Bookworm detected - system packages available"
-    else
-        log_warning "Non-Bookworm system detected - limited Coral support"
-    fi
-    
-    # Check Python version compatibility
-    if python3 -c "import sys; exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
-        python_version_ok=true
-        log_success "Python 3.11+ detected - compatible with system packages"
-    else
-        log_warning "Python version < 3.11 - may use pip fallback"
-    fi
-    
-    coral_compatible=$bookworm_detected
-    
-    # Check for Coral hardware presence (informational only)
-    local coral_hardware_present=false
-    if command -v lsusb &> /dev/null; then
-        if lsusb | grep -q "18d1:9302\\|1a6e:089a"; then
-            coral_hardware_present=true
-            log_success "Coral USB Accelerator detected"
-        else
-            log_info "No Coral USB hardware detected (can be added later)"
-        fi
-    fi
-    
-    # User interaction for Coral installation
-    local install_coral=false
-    local install_runtime=false
-    
-    if [[ "$coral_compatible" == true ]]; then
-        echo
-        echo "Coral TPU Support Available:"
-        echo "  • Pi OS Bookworm detected - system packages supported"
-        echo "  • Python 3.11+ compatible"
-        if [[ "$coral_hardware_present" == true ]]; then
-            echo "  • Coral hardware currently connected"
-        else
-            echo "  • No Coral hardware detected (can be added later)"
-        fi
-        echo
-        echo "Coral TPU provides significant performance improvements for computer vision tasks."
-        echo "You can install support now or add it later using: scripts/install_coral_system_packages.sh"
-        echo
-        
-        read -p "Install Coral TPU support? (Y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$|^$ ]]; then
-            install_coral=true
-            
-            echo
-            echo "Edge TPU Runtime Installation:"
-            echo "  • Required for Coral hardware acceleration"
-            echo "  • Installs Google's libedgetpu runtime"
-            echo "  • Only needed if you have or plan to use Coral hardware"
-            echo
-            
-            read -p "Also install Edge TPU runtime? (Y/n): " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$|^$ ]]; then
-                install_runtime=true
-            fi
-        fi
-    else
-        log_info "Coral TPU system packages not available on this platform"
-        log_info "Will attempt pip-based fallback installation"
-        install_coral=true  # Try fallback method
-    fi
-    
-    # Install Coral packages if requested
-    if [[ "$install_coral" == true ]]; then
-        install_coral_packages_with_fallback "$coral_compatible" "$install_runtime"
-    else
-        log_info "Skipping Coral TPU installation - can be added later"
-        log_info "To install later: scripts/install_coral_system_packages.sh"
-    fi
-}
+    print_section "Setting up Isolated Coral Environment"
 
-install_coral_packages_with_fallback() {
-    local system_packages_available="$1"
-    local install_runtime="$2"
-    local installation_success=false
+    log_info "Creating a separate virtual environment for PyCoral in '$PROJECT_ROOT/venv_coral'..."
+    python3 -m venv "$PROJECT_ROOT/venv_coral"
     
-    log_info "Starting Coral TPU package installation..."
+    log_info "Activating Coral virtual environment..."
+    source "$PROJECT_ROOT/venv_coral/bin/activate"
     
-    # Method 1: System packages (preferred for Bookworm)
-    if [[ "$system_packages_available" == true ]]; then
-        log_info "Attempting system package installation (method 1/3)..."
-        
-        if scripts/install_coral_system_packages.sh --non-interactive; then
-            log_success "System packages installed successfully"
-            installation_success=true
-            
-            # Install runtime if requested
-            if [[ "$install_runtime" == true ]]; then
-                log_info "Installing Edge TPU runtime..."
-                if scripts/install_coral_runtime.sh --non-interactive; then
-                    log_success "Edge TPU runtime installed successfully"
-                else
-                    log_warning "Runtime installation failed - Coral packages available but no hardware acceleration"
-                fi
-            fi
-        else
-            log_warning "System package installation failed - trying fallback methods"
-        fi
-    fi
+    log_info "Upgrading pip in Coral venv..."
+    pip install --upgrade pip
     
-    # Method 2: Pip installation fallback
-    if [[ "$installation_success" != true ]] && [[ -f "requirements-coral.txt" ]]; then
-        log_info "Attempting pip-based installation (method 2/3)..."
-        
-        if pip install -r requirements-coral.txt; then
-            log_success "Pip-based Coral packages installed successfully"
-            installation_success=true
-            
-            # Note about runtime for pip installation
-            if [[ "$install_runtime" == true ]]; then
-                log_info "Installing Edge TPU runtime for pip-based packages..."
-                if scripts/install_coral_runtime.sh --non-interactive; then
-                    log_success "Edge TPU runtime installed successfully"
-                else
-                    log_warning "Runtime installation failed - packages available but no hardware acceleration"
-                fi
-            fi
-        else
-            log_warning "Pip installation also failed - trying CPU-only fallback"
-        fi
-    fi
+    log_info "Downloading and installing PyCoral and TFLite-Runtime for Python 3.11..."
     
-    # Method 3: CPU-only TensorFlow Lite fallback
-    if [[ "$installation_success" != true ]]; then
-        log_info "Attempting CPU-only TensorFlow Lite installation (method 3/3)..."
-        
-        if pip install 'tflite-runtime>=2.13.0,<3.0.0'; then
-            log_success "CPU-only TensorFlow Lite installed successfully"
-            log_info "Coral acceleration not available - will use CPU processing"
-            installation_success=true
-        else
-            log_error "All Coral installation methods failed"
-            log_error "ML functionality may be limited"
-        fi
-    fi
+    # Define the correct wheel files for Python 3.11 on aarch64
+    PYCORAL_WHEEL="pycoral-2.0.0-cp311-cp311-linux_aarch64.whl"
+    TFLITE_WHEEL="tflite_runtime-2.5.0.post1-cp311-cp311-linux_aarch64.whl"
     
-    # Final status report
-    if [[ "$installation_success" == true ]]; then
-        log_success "Coral/TensorFlow Lite installation completed"
-        
-        # Run verification
-        log_info "Verifying installation..."
-        if python3 -c "
-try:
-    import tflite_runtime.interpreter as tflite
-    print('✓ TensorFlow Lite available')
-    try:
-        import pycoral.utils.edgetpu as edgetpu
-        print('✓ Coral packages available')
-        devices = edgetpu.list_edge_tpus()
-        if devices:
-            print(f'✓ {len(devices)} Edge TPU device(s) detected')
-        else:
-            print('ℹ No Edge TPU hardware detected (CPU fallback available)')
-    except ImportError:
-        print('ℹ Coral packages not available (CPU-only mode)')
-except ImportError as e:
-    print(f'✗ TensorFlow Lite verification failed: {e}')
-    exit(1)
-" 2>/dev/null; then
-            log_success "Installation verification passed"
-        else
-            log_warning "Installation verification had issues - functionality may be limited"
-        fi
-    else
-        log_error "Coral installation failed completely"
-        log_error "Consider manual installation or running without ML features"
-    fi
+    # Download the wheels
+    log_info "Downloading ${PYCORAL_WHEEL}..."
+    curl -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${PYCORAL_WHEEL}" -o "${PYCORAL_WHEEL}"
+    
+    log_info "Downloading ${TFLITE_WHEEL}..."
+    curl -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${TFLITE_WHEEL}" -o "${TFLITE_WHEEL}"
+
+    # Install the downloaded wheels
+    log_info "Installing downloaded wheels into venv_coral..."
+    pip install "${PYCORAL_WHEEL}"
+    pip install "${TFLITE_WHEEL}"
+
+    log_info "Cleaning up downloaded wheel files..."
+    rm "${PYCORAL_WHEEL}" "${TFLITE_WHEEL}"
+
+    log_info "Deactivating Coral virtual environment."
+    deactivate
+
+    # IMPORTANT: Reactivate the main virtual environment for the rest of the script
+    log_info "Reactivating main virtual environment..."
+    source "$PROJECT_ROOT/venv/bin/activate"
+    
+    log_success "Isolated Coral environment setup complete."
 }
 
 detect_hardware() {
