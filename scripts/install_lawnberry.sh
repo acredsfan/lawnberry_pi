@@ -19,6 +19,7 @@ BACKUP_DIR="/var/backups/lawnberry"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+ORANGE='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
@@ -37,7 +38,7 @@ log_success() {
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
+    echo -e "${ORANGE}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
 }
 
 log_error() {
@@ -343,72 +344,203 @@ install_dependencies() {
 }
 
 setup_coral_packages() {
-    print_section "Setting up Isolated Coral Environment"
+    print_section "Setting up Google Coral TPU Environment (Optional)"
 
-    log_info "Creating a separate virtual environment for PyCoral in '$PROJECT_ROOT/venv_coral/'..."
-    python3 -m venv "$PROJECT_ROOT/venv_coral"
+    # Check if user wants Coral TPU support
+    if [[ "$NON_INTERACTIVE" == true ]]; then
+        log_info "Non-interactive mode - skipping Coral TPU setup"
+        return 0
+    fi
+
+    echo
+    echo "Google Coral TPU Support Setup"
+    echo "=============================="
+    echo "The Coral USB Accelerator provides AI acceleration for machine learning models."
+    echo "This is optional and only needed if you have a Coral TPU device."
+    echo "Setup requires installing Google's Edge TPU runtime and PyCoral library."
+    echo
+    read -p "Do you want to install Coral TPU support? (y/N): " -n 1 -r
+    echo
     
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Skipping Coral TPU setup - you can install it later if needed"
+        return 0
+    fi
+
+    log_info "Setting up Google Coral TPU support..."
+
+    # Step 1: Install Edge TPU runtime
+    log_info "Step 1: Installing Edge TPU runtime..."
+    
+    # Add Google's Coral repository
+    log_info "Adding Google Coral repository to apt sources..."
+    echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list
+    
+    # Add repository key
+    log_info "Adding Google's signing key..."
+    curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add - || {
+        log_error "Failed to add Google's signing key"
+        return 1
+    }
+    
+    # Update package lists
+    log_info "Updating package lists..."
+    sudo apt-get update -qq || {
+        log_error "Failed to update package lists"
+        return 1
+    }
+    
+    # Ask about runtime frequency
+    echo
+    echo "Edge TPU Runtime Frequency Options:"
+    echo "=================================="
+    echo "1. Standard frequency (recommended) - Lower power, cooler operation"
+    echo "2. Maximum frequency - Higher performance, more power, device gets hot"
+    echo
+    echo "The maximum frequency version provides better performance but the device"
+    echo "can become very hot to touch and may cause burn injuries."
+    echo
+    read -p "Choose runtime version (1 for standard, 2 for maximum): " -n 1 -r
+    echo
+    
+    if [[ $REPLY == "2" ]]; then
+        EDGE_TPU_PACKAGE="libedgetpu1-max"
+        log_warning "Installing maximum frequency runtime - device will get very hot!"
+        log_warning "Keep device away from direct contact to avoid burn injuries"
+    else
+        EDGE_TPU_PACKAGE="libedgetpu1-std"
+        log_info "Installing standard frequency runtime (recommended)"
+    fi
+    
+    # Install Edge TPU runtime
+    log_info "Installing Edge TPU runtime package: $EDGE_TPU_PACKAGE"
+    sudo apt-get install -y "$EDGE_TPU_PACKAGE" || {
+        log_error "Failed to install Edge TPU runtime"
+        return 1
+    }
+    
+    log_success "Edge TPU runtime installed successfully"
+
+    # Step 2: Create separate virtual environment for PyCoral
+    log_info "Step 2: Creating isolated virtual environment for PyCoral..."
+    
+    CORAL_VENV_DIR="$PROJECT_ROOT/venv_coral"
+    
+    if [[ -d "$CORAL_VENV_DIR" ]]; then
+        log_info "Removing existing Coral virtual environment..."
+        rm -rf "$CORAL_VENV_DIR"
+    fi
+    
+    log_info "Creating new Coral virtual environment..."
+    python3 -m venv "$CORAL_VENV_DIR" || {
+        log_error "Failed to create Coral virtual environment"
+        return 1
+    }
+    
+    # Activate Coral environment
     log_info "Activating Coral virtual environment..."
-    source "$PROJECT_ROOT/venv_coral/bin/activate"
+    source "$CORAL_VENV_DIR/bin/activate"
     
-    log_info "Upgrading pip in Coral venv..."
+    # Upgrade pip
+    log_info "Upgrading pip in Coral environment..."
     pip install --upgrade pip
     
-    log_info "Downloading and installing PyCoral and TFLite-Runtime for Python 3.11..."
+    # Step 3: Install PyCoral using official method
+    log_info "Step 3: Installing PyCoral library..."
     
-    # Define the correct wheel files for Python 3.11 on aarch64
-    BASE_URL="https://dl.google.com/coral/python"
-TFLITE_WHEEL="tflite_runtime-2.5.0.post1-cp311-cp311-linux_aarch64.whl"
-PYCORAL_WHEEL="pycoral-2.0.0-cp311-cp311-linux_aarch64.whl"
-
-    # --- Download and verify TFLite-Runtime wheel ---
-    log_info "Downloading ${TFLITE_WHEEL} from Google's servers..."
-    curl --fail -L "${BASE_URL}/${TFLITE_WHEEL}" -o "${TFLITE_WHEEL}" || {
-        log_error "Download failed for ${TFLITE_WHEEL}. Please check your internet connection and the URL."
-        return 1
-    }
-
-    # Verify file size
-    FILESIZE=$(stat -c%s "${TFLITE_WHEEL}")
-    if [ "$FILESIZE" -lt 100000 ]; then
-        log_error "Downloaded file ${TFLITE_WHEEL} is invalid (size: ${FILESIZE} bytes). It may not be a valid wheel file."
-        rm "${TFLITE_WHEEL}"
-        return 1
+    # Check if we're on Debian-based system (preferred method)
+    if command -v apt-get >/dev/null 2>&1; then
+        log_info "Using apt package manager method (recommended for Debian/Ubuntu)..."
+        deactivate  # Exit venv to install system package
+        
+        # Install system package
+        sudo apt-get install -y python3-pycoral || {
+            log_warning "System package installation failed, trying pip method..."
+            
+            # Fallback to pip method
+            source "$CORAL_VENV_DIR/bin/activate"
+            log_info "Installing PyCoral via pip with Google's repository..."
+            pip install --extra-index-url https://google-coral.github.io/py-repo/ "pycoral~=2.0" || {
+                log_error "Failed to install PyCoral via pip"
+                deactivate
+                return 1
+            }
+        }
+    else
+        # Non-Debian systems use pip method
+        log_info "Installing PyCoral via pip with Google's repository..."
+        pip install --extra-index-url https://google-coral.github.io/py-repo/ "pycoral~=2.0" || {
+            log_error "Failed to install PyCoral via pip"
+            deactivate
+            return 1
+        }
     fi
-    log_info "Successfully downloaded ${TFLITE_WHEEL} (${FILESIZE} bytes)."
-
-    # --- Download and verify PyCoral wheel ---
-    log_info "Downloading ${PYCORAL_WHEEL} from Google's servers..."
-    curl --fail -L "${BASE_URL}/${PYCORAL_WHEEL}" -o "${PYCORAL_WHEEL}" || {
-        log_error "Download failed for ${PYCORAL_WHEEL}. Please check your internet connection and the URL."
-        return 1
-    }
     
-    # Verify file size
-    FILESIZE=$(stat -c%s "${PYCORAL_WHEEL}")
-    if [ "$FILESIZE" -lt 100000 ]; then
-        log_error "Downloaded file ${PYCORAL_WHEEL} is invalid (size: ${FILESIZE} bytes). It may not be a valid wheel file."
-        rm "${PYCORAL_WHEEL}"
-        return 1
+    # Test the installation
+    log_info "Testing PyCoral installation..."
+    if command -v apt-get >/dev/null 2>&1 && sudo apt-get -qq list python3-pycoral 2>/dev/null | grep -q installed; then
+        # System package installed
+        log_info "Testing system PyCoral installation..."
+        python3 -c "import pycoral.utils.edgetpu; print('PyCoral system installation successful')" || {
+            log_warning "PyCoral system package test failed"
+        }
+    else
+        # pip installation in venv
+        if [[ -f "$CORAL_VENV_DIR/bin/activate" ]]; then
+            source "$CORAL_VENV_DIR/bin/activate"
+            python3 -c "import pycoral.utils.edgetpu; print('PyCoral venv installation successful')" || {
+                log_warning "PyCoral venv installation test failed"
+            }
+            deactivate
+        fi
     fi
-    log_info "Successfully downloaded ${PYCORAL_WHEEL} (${FILESIZE} bytes)."
+    
+    # Create helper script for using Coral environment
+    log_info "Creating Coral environment helper script..."
+    cat > "$PROJECT_ROOT/activate_coral.sh" << 'EOF'
+#!/bin/bash
+# Helper script to activate Coral environment
 
-    # --- Install the downloaded wheels ---
-    log_info "Installing downloaded wheels into venv_coral..."
-    pip install "${TFLITE_WHEEL}"
-    pip install "${PYCORAL_WHEEL}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CORAL_VENV="$SCRIPT_DIR/venv_coral"
 
-    log_info "Cleaning up downloaded wheel files..."
-    rm "${TFLITE_WHEEL}" "${PYCORAL_WHEEL}"
-
-    log_info "Deactivating Coral virtual environment."
-    deactivate
-
-    # IMPORTANT: Reactivate the main virtual environment for the rest of the script
+if [[ -d "$CORAL_VENV" ]]; then
+    echo "Activating Coral TPU virtual environment..."
+    source "$CORAL_VENV/bin/activate"
+    echo "Coral environment activated. Run 'deactivate' to exit."
+    echo "Test with: python3 -c 'import pycoral.utils.edgetpu; print(\"Coral TPU support ready!\")'"
+else
+    echo "Coral virtual environment not found at: $CORAL_VENV"
+    echo "Run the installer again to set up Coral TPU support."
+fi
+EOF
+    chmod +x "$PROJECT_ROOT/activate_coral.sh"
+    
+    # Hardware detection
+    log_info "Checking for connected Coral TPU devices..."
+    if lsusb | grep -q "18d1:9302\|1a6e:089a" 2>/dev/null; then
+        log_success "Coral USB Accelerator detected!"
+    else
+        log_info "No Coral USB Accelerator detected (this is normal if not connected)"
+        log_info "Connect your Coral device and unplug/replug it to load the new runtime"
+    fi
+    
+    # Reactivate main virtual environment
     log_info "Reactivating main virtual environment..."
     source "$PROJECT_ROOT/venv/bin/activate"
     
-    log_success "Isolated Coral environment setup complete."
+    log_success "Coral TPU setup completed successfully!"
+    echo
+    echo "Coral TPU Setup Summary:"
+    echo "========================"
+    echo "- Edge TPU runtime: $EDGE_TPU_PACKAGE"
+    echo "- PyCoral library: Installed"
+    if [[ -d "$CORAL_VENV_DIR" ]]; then
+        echo "- Coral environment: $CORAL_VENV_DIR"
+        echo "- Helper script: ./activate_coral.sh"
+    fi
+    echo "- To use Coral: Connect device and run ./activate_coral.sh"
+    echo
 }
 
 setup_python_environment() {
@@ -456,8 +588,8 @@ setup_python_environment() {
         exit 1
     }
 
-    # Run Coral TPU hardware detection and conditional installation
-    setup_coral_packages
+    # Coral TPU support is now optional and handled separately
+    # Use setup_coral_packages() function for Coral installation
     
     log_success "Python environment setup complete"
 }
@@ -1135,6 +1267,9 @@ main() {
     check_system
     install_dependencies
     setup_python_environment
+    
+    # Optional Coral TPU support setup
+    setup_coral_packages
     
     if [[ "$SKIP_HARDWARE" != true ]]; then
         detect_hardware
