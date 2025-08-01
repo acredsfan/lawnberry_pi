@@ -4,6 +4,30 @@
 
 set -e
 
+# Command line argument parsing
+NON_INTERACTIVE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --non-interactive)
+            NON_INTERACTIVE=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo "Options:"
+            echo "  --non-interactive Use default options without prompts"
+            echo "  --help, -h        Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'

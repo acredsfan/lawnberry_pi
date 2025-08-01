@@ -218,24 +218,135 @@ git clone https://github.com/your-repo/lawnberry-pi.git
 cd lawnberry-pi
 
 # Make installation script executable
-sudo chmod +x scripts/install_lawnberry.sh
+chmod +x install_system_integration.sh
 ```
 
 ### 3.2 Install System Dependencies
 
 ```bash
 # Run the automated installation script
-./scripts/install_lawnberry.sh
+./install_system_integration.sh
 
 # This script will:
 # - Install Python dependencies
-# - Install Node.js and web UI dependencies
+# - Install Node.js and web UI dependencies  
 # - Set up system services
 # - Configure hardware interfaces
 # - Create necessary directories
+# - Prompt for optional Coral TPU installation
 ```
 
-### 3.3 Configure Environment Variables
+**Coral TPU Installation Prompt**: During installation, you'll be asked if you want to install Coral Edge TPU support. This is optional and provides AI acceleration for object detection. See [Section 3.3 Coral TPU Setup](#33-coral-tpu-setup-optional) for details.
+
+### 3.3 Coral TPU Setup (Optional)
+
+The Coral Edge TPU provides hardware acceleration for AI inference, significantly improving object detection performance. This section covers installation for users who have or plan to get Coral TPU hardware.
+
+#### 3.3.1 Hardware Compatibility
+
+**Supported Hardware**:
+- ✅ **Coral USB Accelerator** (most common, plug-and-play)
+- ✅ **Coral Dev Board Mini** (embedded option)
+- ✅ **Coral M.2 Accelerator** (for compatible carrier boards)
+
+**Software Requirements**:
+- ✅ **Pi OS Bookworm** (required - this guide assumes Bookworm)
+- ✅ **Python 3.11+** (Bookworm default)
+- ✅ **ARM64 architecture** (64-bit Pi OS)
+
+#### 3.3.2 Installation Methods
+
+**Method 1: Automated Installation (Recommended)**
+
+If you didn't install Coral support during the main installation:
+
+```bash
+# Run Coral-specific installer
+cd /home/pi/lawnberry-pi
+sudo ./scripts/install_coral_runtime.sh
+
+# Install Python packages
+sudo ./scripts/install_coral_system_packages.sh
+```
+
+**Method 2: Manual Installation**
+
+For advanced users or troubleshooting:
+
+```bash
+# 1. Add Google's repository
+echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+sudo apt-get update
+
+# 2. Install Edge TPU runtime (choose one)
+sudo apt-get install libedgetpu1-std    # Standard frequency (recommended)
+# OR
+sudo apt-get install libedgetpu1-max    # Maximum frequency (runs hotter)
+
+# 3. Install Python library
+sudo apt-get install python3-pycoral
+
+# 4. Verify installation
+python3 -c "from pycoral.utils import edgetpu; print('Coral packages installed successfully')"
+```
+
+#### 3.3.3 Hardware Detection and Verification
+
+After installation, verify your Coral TPU is detected:
+
+```bash
+# Check for USB Accelerator
+lsusb | grep -i "google\|coral"
+# Expected output: Bus 001 Device 004: ID 18d1:9302 Google Inc.
+
+# Test Coral functionality
+cd /home/pi/lawnberry-pi
+python3 scripts/verify_coral_installation.py
+
+# Check hardware enumeration
+python3 -c "from pycoral.utils import edgetpu; print(f'Detected {len(edgetpu.list_edge_tpus())} Edge TPU device(s)')"
+```
+
+**Expected Results**:
+- ✅ **With hardware present**: "Detected 1 Edge TPU device(s)"
+- ✅ **Without hardware**: "Detected 0 Edge TPU device(s)" (CPU fallback will be used)
+
+#### 3.3.4 Performance Modes
+
+The Edge TPU runtime supports two performance modes:
+
+| Mode | Package | Performance | Temperature | Power |
+|------|---------|-------------|-------------|-------|
+| **Standard** | `libedgetpu1-std` | ~4 TOPS | Cool running | Lower |
+| **Maximum** | `libedgetpu1-max` | ~4 TOPS | Runs hot | Higher |
+
+**Recommendation**: Use **Standard mode** unless you need maximum performance and have adequate cooling.
+
+**Switch modes**:
+```bash
+# Switch to standard mode
+sudo apt-get install --reinstall libedgetpu1-std
+
+# Switch to maximum mode  
+sudo apt-get install --reinstall libedgetpu1-max
+
+# Restart services after mode change
+sudo systemctl restart lawnberry-*
+```
+
+### 3.4 CPU Fallback Configuration
+
+LawnBerryPi automatically uses CPU-based inference when Coral TPU is not available. No additional configuration is required - the system will:
+
+- ✅ **Automatically detect** Coral hardware presence
+- ✅ **Use Coral acceleration** when available
+- ✅ **Fall back to CPU** when Coral is not present
+- ✅ **Show status** in web interface
+
+**Performance Impact**: CPU inference is 5-10x slower than Coral TPU but still functional for most use cases.
+
+### 3.5 Configure Environment Variables
 
 1. **Create environment file**:
 ```bash
@@ -255,9 +366,13 @@ REACT_APP_GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
 LAWNBERRY_FLEET_API_KEY=your_fleet_key_here
 DEBUG_MODE=false
 LOG_LEVEL=INFO
+
+# Optional: Coral TPU Configuration
+CORAL_TPU_ENABLED=true          # Set to false to force CPU mode
+CORAL_MODEL_PATH=/opt/lawnberry/models/custom/  # Custom model directory
 ```
 
-### 3.3 Get Required API Keys
+### 3.6 Get Required API Keys
 
 #### OpenWeather API Key (Free)
 1. Go to [OpenWeatherMap](https://openweathermap.org/api)

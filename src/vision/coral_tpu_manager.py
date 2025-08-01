@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import numpy as np
+import cv2
 from typing import Optional, List, Dict, Any, Tuple
 from pathlib import Path
 import time
@@ -13,16 +14,38 @@ import queue
 import psutil
 from collections import deque
 
+# Try to import Coral TPU libraries first
 try:
     from pycoral.utils import edgetpu
     from pycoral.utils import dataset
     from pycoral.adapters import common
     from pycoral.adapters import detect
-    import tflite_runtime.interpreter as tflite
     CORAL_AVAILABLE = True
-except ImportError:
+    CORAL_HARDWARE_PRESENT = False  # Will be set during initialization
+    logging.info("Coral TPU libraries imported successfully")
+except ImportError as e:
     CORAL_AVAILABLE = False
-    logging.warning("Coral TPU libraries not available, falling back to CPU")
+    CORAL_HARDWARE_PRESENT = False
+    edgetpu = None
+    dataset = None
+    common = None
+    detect = None
+    logging.warning(f"Coral TPU libraries not available: {e}. Using CPU fallback.")
+
+# Try to import TensorFlow Lite runtime
+try:
+    import tflite_runtime.interpreter as tflite
+    TFLITE_AVAILABLE = True
+    logging.info("TensorFlow Lite runtime imported successfully")
+except ImportError:
+    try:
+        import tensorflow.lite as tflite
+        TFLITE_AVAILABLE = True
+        logging.info("Using TensorFlow Lite from TensorFlow package")
+    except ImportError as e:
+        TFLITE_AVAILABLE = False
+        tflite = None
+        logging.error(f"Neither tflite_runtime nor tensorflow.lite available: {e}")
 
 from .data_structures import VisionConfig, ModelInfo
 
@@ -614,22 +637,53 @@ class CPUFallbackManager:
             return False
     
     async def run_inference(self, image: np.ndarray) -> Optional[Dict[str, Any]]:
-        """Run inference on CPU"""
+        """Run inference on CPU using TensorFlow Lite"""
         if self._interpreter is None:
+            self.logger.error("CPU interpreter not initialized")
+            return None
+        if not TFLITE_AVAILABLE:
+            self.logger.error("TensorFlow Lite not available")
             return None
         
         try:
             start_time = time.time()
             
-            # Similar preprocessing and inference logic as TPU version
-            # but without TPU-specific optimizations
+            # Get input details
+            input_details = self._interpreter.get_input_details()
+            output_details = self._interpreter.get_output_details()
+            
+            # Preprocess image to match input requirements
+            input_shape = input_details[0]['shape']
+            if len(input_shape) == 4:  # Batch dimension included
+                height, width = input_shape[1], input_shape[2]
+            else:
+                height, width = input_shape[0], input_shape[1]
+            
+            # Resize and normalize image
+            processed_image = cv2.resize(image, (width, height))
+            if input_details[0]['dtype'] == np.uint8:
+                input_data = np.expand_dims(processed_image, axis=0).astype(np.uint8)
+            else:
+                input_data = np.expand_dims(processed_image, axis=0).astype(np.float32) / 255.0
+            
+            # Run inference
+            self._interpreter.set_tensor(input_details[0]['index'], input_data)
+            self._interpreter.invoke()
+            
+            # Get outputs
+            outputs = {}
+            for output_detail in output_details:
+                output_data = self._interpreter.get_tensor(output_detail['index'])
+                outputs[output_detail['name']] = output_data
             
             inference_time = (time.time() - start_time) * 1000
             
             return {
-                'outputs': {},  # Implement actual inference
+                'outputs': outputs,
                 'inference_time_ms': inference_time,
-                'tpu_used': False
+                'tpu_used': False,
+                'input_shape': input_shape,
+                'model_info': self._model_info
             }
             
         except Exception as e:
@@ -638,41 +692,46 @@ class CPUFallbackManager:
     
     def is_available(self) -> bool:
         """Check if CPU fallback is available"""
-        return self._interpreter is not None
-
+        return self._interpreter is not None and TFLITE_AVAILABLE
 
     async def get_comprehensive_status(self) -> Dict[str, Any]:
-        """Get comprehensive TPU status including device information"""
+        """Get comprehensive CPU fallback status"""
         try:
-            status = {
-                'tpu_available': self._tpu_available,
-                'operational': self._health_status.get('operational', False),
-                'temperature': self._health_status.get('temperature', 0.0),
-                'power_draw': self._health_status.get('power_draw', 0.0),
-                'utilization': self._health_status.get('utilization', 0.0),
-                'error_count': self._health_status.get('error_count', 0),
-                'health_status': 'healthy' if self.is_available() else 'offline',
-                'last_inference_time': self._health_status.get('last_check', None),
-                'current_model': self._model_info.name if self._model_info else None,
-                'device_info': self._model_info.metadata.get('tpu_device_info', {}) if self._model_info else {}
-            }
-            
-            if CORAL_AVAILABLE and self._tpu_available:
-                # Get real-time TPU device info
-                from pycoral.utils import edgetpu
-                tpu_devices = edgetpu.list_edge_tpus()
-                if tpu_devices:
-                    status['device_info'].update(tpu_devices[0])
-            
-            return status
-            
-        except Exception as e:
-            self.logger.error(f"Error getting comprehensive status: {e}")
             return {
                 'tpu_available': False,
+                'cpu_fallback_active': True,
+                'operational': self.is_available(),
+                'temperature': 0.0,  # CPU temperature not monitored
+                'power_draw': 0.0,   # CPU power not monitored separately
+                'utilization': 0.0,  # Would need separate monitoring
+                'error_count': 0,
+                'health_status': 'healthy' if self.is_available() else 'offline',
+                'last_inference_time': None,
+                'current_model': self._model_info.get('name') if self._model_info else None,
+                'device_info': {
+                    'type': 'CPU',
+                    'runtime': 'TensorFlow Lite',
+                    'available': TFLITE_AVAILABLE
+                }
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting CPU status: {e}")
+            return {
+                'tpu_available': False,
+                'cpu_fallback_active': True,
                 'operational': False,
                 'error_message': str(e)
             }
+
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """Get CPU performance statistics"""
+        return {
+            'recent_inference_times': [],
+            'cache_hit_rate': 0.0,
+            'average_inference_time': 0.0,
+            'total_inferences': 0,
+            'cpu_mode': True
+        }
 
     async def run_comprehensive_benchmark(self) -> Dict[str, Any]:
         """Run comprehensive TPU performance benchmark"""
