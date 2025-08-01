@@ -157,7 +157,7 @@ detect_bookworm() {
         log_success "RAM: ${TOTAL_RAM_GB}GB detected - enabling memory optimizations"
         if [[ $TOTAL_RAM_GB -ge 16 ]]; then
             log_info "16GB+ RAM detected - enabling advanced memory management"
-        fi
+        }
     else
         log_warning "RAM: ${TOTAL_RAM_GB}GB - may limit performance optimizations"
     fi
@@ -342,6 +342,75 @@ install_dependencies() {
     log_success "Dependencies installed successfully"
 }
 
+setup_coral_packages() {
+    print_section "Setting up Isolated Coral Environment"
+
+    log_info "Creating a separate virtual environment for PyCoral in '$PROJECT_ROOT/venv_coral/'..."
+    python3 -m venv "$PROJECT_ROOT/venv_coral"
+    
+    log_info "Activating Coral virtual environment..."
+    source "$PROJECT_ROOT/venv_coral/bin/activate"
+    
+    log_info "Upgrading pip in Coral venv..."
+    pip install --upgrade pip
+    
+    log_info "Downloading and installing PyCoral and TFLite-Runtime for Python 3.11..."
+    
+    # Define the correct wheel files for Python 3.11 on aarch64
+    BASE_URL="https://dl.google.com/coral/python"
+TFLITE_WHEEL="tflite_runtime-2.5.0.post1-cp311-cp311-linux_aarch64.whl"
+PYCORAL_WHEEL="pycoral-2.0.0-cp311-cp311-linux_aarch64.whl"
+
+    # --- Download and verify TFLite-Runtime wheel ---
+    log_info "Downloading ${TFLITE_WHEEL} from Google's servers..."
+    curl --fail -L "${BASE_URL}/${TFLITE_WHEEL}" -o "${TFLITE_WHEEL}" || {
+        log_error "Download failed for ${TFLITE_WHEEL}. Please check your internet connection and the URL."
+        return 1
+    }
+
+    # Verify file size
+    FILESIZE=$(stat -c%s "${TFLITE_WHEEL}")
+    if [ "$FILESIZE" -lt 100000 ]; then
+        log_error "Downloaded file ${TFLITE_WHEEL} is invalid (size: ${FILESIZE} bytes). It may not be a valid wheel file."
+        rm "${TFLITE_WHEEL}"
+        return 1
+    fi
+    log_info "Successfully downloaded ${TFLITE_WHEEL} (${FILESIZE} bytes)."
+
+    # --- Download and verify PyCoral wheel ---
+    log_info "Downloading ${PYCORAL_WHEEL} from Google's servers..."
+    curl --fail -L "${BASE_URL}/${PYCORAL_WHEEL}" -o "${PYCORAL_WHEEL}" || {
+        log_error "Download failed for ${PYCORAL_WHEEL}. Please check your internet connection and the URL."
+        return 1
+    }
+    
+    # Verify file size
+    FILESIZE=$(stat -c%s "${PYCORAL_WHEEL}")
+    if [ "$FILESIZE" -lt 100000 ]; then
+        log_error "Downloaded file ${PYCORAL_WHEEL} is invalid (size: ${FILESIZE} bytes). It may not be a valid wheel file."
+        rm "${PYCORAL_WHEEL}"
+        return 1
+    fi
+    log_info "Successfully downloaded ${PYCORAL_WHEEL} (${FILESIZE} bytes)."
+
+    # --- Install the downloaded wheels ---
+    log_info "Installing downloaded wheels into venv_coral..."
+    pip install "${TFLITE_WHEEL}"
+    pip install "${PYCORAL_WHEEL}"
+
+    log_info "Cleaning up downloaded wheel files..."
+    rm "${TFLITE_WHEEL}" "${PYCORAL_WHEEL}"
+
+    log_info "Deactivating Coral virtual environment."
+    deactivate
+
+    # IMPORTANT: Reactivate the main virtual environment for the rest of the script
+    log_info "Reactivating main virtual environment..."
+    source "$PROJECT_ROOT/venv/bin/activate"
+    
+    log_success "Isolated Coral environment setup complete."
+}
+
 setup_python_environment() {
     print_section "Setting up Python Environment"
     
@@ -377,7 +446,7 @@ setup_python_environment() {
     else
         log_error "requirements.txt not found"
         exit 1
-    fi
+    }
 
     # Ensure requests library is installed
     log_info "Ensuring 'requests' library is installed..."
@@ -389,105 +458,8 @@ setup_python_environment() {
 
     # Run Coral TPU hardware detection and conditional installation
     setup_coral_packages
-
-    # Create a separate virtual environment for Coral dependencies
-    log_info "Creating a separate virtual environment for PyCoral..."
-    python3 -m venv "$PROJECT_ROOT/venv_coral"
-    source "$PROJECT_ROOT/venv_coral/bin/activate"
-    pip install --upgrade pip
-    
-    log_info "Installing PyCoral and tflite-runtime from pre-built wheels..."
-    
-    PYCORAL_WHEEL="pycoral-2.0.0-cp311-cp311-linux_aarch64.whl"
-    TFLITE_WHEEL="tflite_runtime-2.5.0.post1-cp311-cp311-linux_aarch64.whl"
-    
-    log_info "Downloading ${PYCORAL_WHEEL}..."
-    curl -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${PYCORAL_WHEEL}" -o "${PYCORAL_WHEEL}"
-    
-    log_info "Downloading ${TFLITE_WHEEL}..."
-    curl -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${TFLITE_WHEEL}" -o "${TFLITE_WHEEL}"
-
-    log_info "Installing downloaded wheels into venv_coral..."
-    pip install "${PYCORAL_WHEEL}"
-    pip install "${TFLITE_WHEEL}"
-
-    log_info "Cleaning up wheel files..."
-    rm "${PYCORAL_WHEEL}" "${TFLITE_WHEEL}"
-
-    deactivate
-
-    # Return to the main virtual environment
-    source "$PROJECT_ROOT/venv/bin/activate"
     
     log_success "Python environment setup complete"
-}
-
-setup_coral_packages() {
-    print_section "Setting up Isolated Coral Environment"
-
-    log_info "Creating a separate virtual environment for PyCoral in '$PROJECT_ROOT/venv_coral'..."
-    python3 -m venv "$PROJECT_ROOT/venv_coral"
-    
-    log_info "Activating Coral virtual environment..."
-    source "$PROJECT_ROOT/venv_coral/bin/activate"
-    
-    log_info "Upgrading pip in Coral venv..."
-    pip install --upgrade pip
-    
-    log_info "Downloading and installing PyCoral and TFLite-Runtime for Python 3.11..."
-    
-    # Define the correct wheel files for Python 3.11 on aarch64
-    PYCORAL_WHEEL="pycoral-2.0.0-cp311-cp311-linux_aarch64.whl"
-    TFLITE_WHEEL="tflite_runtime-2.5.0.post1-cp311-cp311-linux_aarch64.whl"
-    
-    # --- Download and verify PyCoral wheel ---
-    log_info "Downloading ${PYCORAL_WHEEL}..."
-    curl --fail -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${PYCORAL_WHEEL}" -o "${PYCORAL_WHEEL}" || {
-        log_error "Download failed for ${PYCORAL_WHEEL}. Please check your internet connection and the URL."
-        return 1
-    }
-    
-    # Verify file size
-    FILESIZE=$(stat -c%s "${PYCORAL_WHEEL}")
-    if [ "$FILESIZE" -lt 100000 ]; then
-        log_error "Downloaded file ${PYCORAL_WHEEL} is invalid (size: ${FILESIZE} bytes). It may not be a valid wheel file."
-        rm "${PYCORAL_WHEEL}"
-        return 1
-    fi
-    log_info "Successfully downloaded ${PYCORAL_WHEEL} (${FILESIZE} bytes)."
-
-    # --- Download and verify TFLite-Runtime wheel ---
-    log_info "Downloading ${TFLITE_WHEEL}..."
-    curl --fail -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${TFLITE_WHEEL}" -o "${TFLITE_WHEEL}" || {
-        log_error "Download failed for ${TFLITE_WHEEL}. Please check your internet connection and the URL."
-        return 1
-    }
-
-    # Verify file size
-    FILESIZE=$(stat -c%s "${TFLITE_WHEEL}")
-    if [ "$FILESIZE" -lt 100000 ]; then
-        log_error "Downloaded file ${TFLITE_WHEEL} is invalid (size: ${FILESIZE} bytes). It may not be a valid wheel file."
-        rm "${TFLITE_WHEEL}"
-        return 1
-    fi
-    log_info "Successfully downloaded ${TFLITE_WHEEL} (${FILESIZE} bytes)."
-
-    # --- Install the downloaded wheels ---
-    log_info "Installing downloaded wheels into venv_coral..."
-    pip install "${PYCORAL_WHEEL}"
-    pip install "${TFLITE_WHEEL}"
-
-    log_info "Cleaning up downloaded wheel files..."
-    rm "${PYCORAL_WHEEL}" "${TFLITE_WHEEL}"
-
-    log_info "Deactivating Coral virtual environment."
-    deactivate
-
-    # IMPORTANT: Reactivate the main virtual environment for the rest of the script
-    log_info "Reactivating main virtual environment..."
-    source "$PROJECT_ROOT/venv/bin/activate"
-    
-    log_success "Isolated Coral environment setup complete."
 }
 
 detect_hardware() {
@@ -962,7 +934,7 @@ if [[ -e /dev/video0 ]]; then
     echo "✓ Camera: Detected"
 else
     echo "✗ Camera: Not detected"
-fi
+}
 
 # Network connectivity
 echo ""
@@ -1159,8 +1131,8 @@ main() {
 
     # Run installation steps
     check_root
-    check_system
     fix_permissions
+    check_system
     install_dependencies
     setup_python_environment
     
