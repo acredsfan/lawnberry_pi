@@ -157,7 +157,7 @@ detect_bookworm() {
         log_success "RAM: ${TOTAL_RAM_GB}GB detected - enabling memory optimizations"
         if [[ $TOTAL_RAM_GB -ge 16 ]]; then
             log_info "16GB+ RAM detected - enabling advanced memory management"
-        endif
+        fi
     else
         log_warning "RAM: ${TOTAL_RAM_GB}GB - may limit performance optimizations"
     fi
@@ -1251,6 +1251,7 @@ main() {
     # Run installation steps
     check_root
     check_system
+    fix_permissions
     install_dependencies
     setup_python_environment
     
