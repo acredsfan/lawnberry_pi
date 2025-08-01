@@ -16,16 +16,16 @@ GROUP=$(id -gn)
 BACKUP_DIR="/var/backups/lawnberry"
 
 # Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+RED='[0;31m'
+GREEN='[0;32m'
+YELLOW='[1;33m'
+BLUE='[0;34m'
+NC='[0m' # No Color
 
-# Logging setup
-LOG_FILE="/tmp/lawnberry_install.log"
-exec 1> >(tee -a "$LOG_FILE")
-exec 2> >(tee -a "$LOG_FILE" >&2)
+# --- LOGGING SETUP ---
+# Default log file location
+LOG_FILE="$SCRIPT_DIR/lawnberry_install.log"
+DEBUG_MODE=false
 
 # Functions
 log_info() {
@@ -44,6 +44,14 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE"
 }
 
+log_debug() {
+    if [ "$DEBUG_MODE" = true ]; then
+        echo -e "${YELLOW}[DEBUG]${NC} $1" | tee -a "$LOG_FILE"
+    fi
+}
+
+# --- MAIN SCRIPT ---
+
 print_header() {
     echo
     echo "=================================================================="
@@ -60,6 +68,7 @@ print_section() {
 }
 
 check_root() {
+    log_debug "Checking for root execution."
     if [[ $EUID -eq 0 ]]; then
         log_error "This script should not be run as root."
         log_info "Please run as the lawnberry user or your regular user."
@@ -73,90 +82,7 @@ BOOKWORM_OPTIMIZATIONS=false
 SYSTEMD_VERSION=0
 
 detect_bookworm() {
-
-apply_bookworm_optimizations() {
-    print_section "Applying Bookworm-Specific Performance Optimizations"
-    
-    if [[ "$BOOKWORM_DETECTED" != true ]]; then
-        log_warning "Skipping Bookworm optimizations - not running on Bookworm"
-        return 0
-    fi
-    
-    # Configure boot optimizations
-    log_info "Configuring boot optimizations in /boot/config.txt..."
-    if [[ -f /boot/config.txt ]]; then
-        # Backup original config
-        sudo cp /boot/config.txt /boot/config.txt.backup.$(date +%Y%m%d_%H%M%S)
-        
-        # Apply GPU memory split for computer vision
-        if ! grep -q "gpu_mem=" /boot/config.txt; then
-            echo "gpu_mem=128" | sudo tee -a /boot/config.txt >/dev/null
-            log_success "Set GPU memory to 128MB for computer vision workloads"
-        fi
-        
-        # Optimize I2C clock speed
-        if ! grep -q "i2c_arm_baudrate=400000" /boot/config.txt; then
-            echo "i2c_arm_baudrate=400000" | sudo tee -a /boot/config.txt >/dev/null
-            log_success "Set I2C clock speed to 400kHz for better sensor performance"
-        fi
-        
-        # Enable enhanced kernel scheduler
-        if ! grep -q "cgroup_memory=1" /boot/cmdline.txt 2>/dev/null; then
-            sudo sed -i 's/$/ cgroup_memory=1 cgroup_enable=memory/' /boot/cmdline.txt 2>/dev/null || true
-            log_success "Enabled enhanced kernel scheduler optimizations"
-        fi
-    fi
-    
-    # Configure CPU governor for balanced performance
-    log_info "Configuring CPU governor..."
-    if [[ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]]; then
-        echo "ondemand" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
-        log_success "Set CPU governor to 'ondemand' for balanced performance"
-    fi
-    
-    # Configure systemd service limits for better performance
-    log_info "Applying systemd performance optimizations..."
-    sudo mkdir -p /etc/systemd/system.conf.d/
-    sudo tee /etc/systemd/system.conf.d/lawnberry-performance.conf >/dev/null <<EOF
-# LawnBerry Bookworm Performance Optimizations
-[Manager]
-DefaultLimitNOFILE=65536
-DefaultLimitNPROC=32768
-DefaultCPUAccounting=yes
-DefaultMemoryAccounting=yes
-DefaultTasksMax=4096
-EOF
-    
-    # Configure memory management optimizations
-    log_info "Applying memory management optimizations..."
-    sudo tee /etc/sysctl.d/99-lawnberry-bookworm.conf >/dev/null <<EOF
-# LawnBerry Bookworm Memory Optimizations
-vm.swappiness=10
-vm.dirty_ratio=5
-vm.dirty_background_ratio=2
-vm.vfs_cache_pressure=50
-
-# Network optimizations
-net.core.rmem_max=134217728
-net.core.wmem_max=134217728
-net.ipv4.tcp_congestion_control=bbr
-EOF
-    
-    # Apply Python optimizations
-    log_info "Configuring Python 3.11+ optimizations..."
-    sudo mkdir -p /opt/lawnberry/config/
-    sudo tee /opt/lawnberry/config/python-optimization.env >/dev/null <<EOF
-# Python 3.11 Performance Optimizations
-PYTHONOPTIMIZE=2
-PYTHONDONTWRITEBYTECODE=0
-PYTHONUNBUFFERED=1
-PYTHONHASHSEED=random
-PYTHONMALLOC=pymalloc
-EOF
-    
-    log_success "Applied comprehensive Bookworm performance optimizations"
-    log_info "Note: Some optimizations require a reboot to take effect"
-}
+    log_debug "Detecting Raspberry Pi OS Bookworm."
     print_section "Raspberry Pi OS Bookworm Detection and Optimization"
     
     # Check for Bookworm specifically
@@ -168,6 +94,7 @@ EOF
             
             # Check Python version for Bookworm compatibility
             PYTHON_VERSION=$(python3 --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -n1)
+            log_debug "Detected Python version: $PYTHON_VERSION"
             if [[ $(echo "$PYTHON_VERSION >= 3.11" | bc -l 2>/dev/null || echo 0) -eq 1 ]]; then
                 log_success "Python $PYTHON_VERSION meets Bookworm requirements (3.11+)"
             else
@@ -178,6 +105,7 @@ EOF
             # Check for Raspberry Pi 4B specifically
             if [[ -f /proc/device-tree/model ]]; then
                 PI_MODEL=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0')
+                log_debug "Detected Raspberry Pi model: $PI_MODEL"
                 if [[ "$PI_MODEL" == *"Raspberry Pi 4"* ]]; then
                     log_success "Raspberry Pi 4 Model B detected - optimal hardware"
                 else
@@ -196,6 +124,7 @@ EOF
     if command -v systemctl >/dev/null 2>&1; then
         SYSTEMD_VERSION=$(systemctl --version | head -n1 | grep -o '[0-9]\+' | head -n1)
         log_info "systemd version: $SYSTEMD_VERSION"
+        log_debug "Detected systemd version: $SYSTEMD_VERSION"
         
         if [[ $SYSTEMD_VERSION -ge 252 ]]; then
             log_success "systemd 252+ detected - enabling enhanced security hardening"
@@ -209,6 +138,7 @@ EOF
     # Check available RAM for 16GB optimization
     TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
     TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
+    log_debug "Total RAM detected: ${TOTAL_RAM_KB} KB (${TOTAL_RAM_GB} GB)"
     if [[ $TOTAL_RAM_GB -ge 8 ]]; then
         log_success "RAM: ${TOTAL_RAM_GB}GB detected - enabling memory optimizations"
         if [[ $TOTAL_RAM_GB -ge 16 ]]; then
@@ -223,6 +153,7 @@ check_system() {
     print_section "System Requirements Check"
     
     # Check if we're on Raspberry Pi
+    log_debug "Checking for Raspberry Pi hardware."
     if [[ ! -f /proc/device-tree/model ]] || ! grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
         log_warning "Not running on Raspberry Pi - some features may not work"
     else
@@ -245,6 +176,7 @@ check_system() {
     detect_bookworm
     
     # Check Python version - Bookworm compatibility
+    log_debug "Checking Python version."
     if command -v python3 >/dev/null 2>&1; then
         python_version=$(python3 --version)
         log_info "Python: $python_version"
@@ -310,6 +242,7 @@ install_dependencies() {
     print_section "Installing System Dependencies"
     
     log_info "Updating package lists..."
+    log_debug "Running 'sudo apt-get update -qq'"
     sudo apt-get update -qq
     
     # Essential packages
@@ -345,36 +278,51 @@ install_dependencies() {
         "raspi-config"
     )
     
-    # Node.js for web UI
-    nodejs_packages=(
-        "nodejs"
-        "npm"
-    )
-    
     log_info "Installing essential packages..."
+    log_debug "Installing: ${essential_packages[*]}"
     sudo apt-get install -y "${essential_packages[@]}" || {
         log_error "Failed to install essential packages"
         exit 1
     }
     
     log_info "Installing hardware packages..."
+    log_debug "Installing: ${hardware_packages[*]}"
     sudo apt-get install -y "${hardware_packages[@]}" || {
         log_warning "Some hardware packages failed to install - continuing anyway"
     }
     
-    log_info "Installing Node.js packages..."
-    sudo apt-get install -y nodejs npm || {
+    log_info "Installing Node.js for the web UI..."
+    if ! command -v node >/dev/null || ! command -v npm >/dev/null; then
+        log_info "Node.js or npm not found. Installing Node.js via NodeSource."
+        log_debug "Downloading and running NodeSource setup script for Node.js 20.x"
+        # Download and execute the NodeSource setup script for Node.js 20.x
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+        # Install Node.js (which includes npm)
+        log_debug "Installing nodejs package."
+        sudo apt-get install -y nodejs
+    else
+        log_info "Node.js and npm are already installed."
+    fi
+
+    # Verify installation
+    if command -v node >/dev/null && command -v npm >/dev/null; then
+        log_success "Node.js and npm are installed."
+        log_info "Node version: $(node -v)"
+        log_info "npm version: $(npm -v)"
+    else
         log_warning "Node.js installation failed - web UI may not work"
-    }
+    fi
     
     # Enable I2C and SPI
     log_info "Enabling I2C and SPI interfaces..."
+    log_debug "Running raspi-config to enable I2C, SPI, and camera."
     sudo raspi-config nonint do_i2c 0 2>/dev/null || log_warning "Could not enable I2C"
     sudo raspi-config nonint do_spi 0 2>/dev/null || log_warning "Could not enable SPI"
     sudo raspi-config nonint do_camera 0 2>/dev/null || log_warning "Could not enable camera"
     
     # Add user to required groups
     log_info "Adding user to required groups..."
+    log_debug "Adding user '$USER' to groups: i2c, spi, gpio, dialout"
     sudo usermod -a -G i2c,spi,gpio,dialout "$USER" || log_warning "Could not add user to hardware groups"
     
     log_success "Dependencies installed successfully"
@@ -389,19 +337,23 @@ setup_python_environment() {
     
     if [[ -d "venv" ]]; then
         log_info "Virtual environment already exists - removing old one"
+        log_debug "Removing existing venv directory."
         rm -rf venv
     fi
     
+    log_debug "Creating new virtual environment."
     python3 -m venv venv
     source venv/bin/activate
     
     # Upgrade pip
     log_info "Upgrading pip..."
+    log_debug "Running 'pip install --upgrade pip'"
     pip install --upgrade pip
     
     # Install core requirements first (always required)
     log_info "Installing core Python requirements..."
     if [[ -f "requirements.txt" ]]; then
+        log_debug "Installing packages from requirements.txt"
         if pip install -r requirements.txt; then
             log_success "Core requirements installed successfully"
         else
@@ -415,6 +367,7 @@ setup_python_environment() {
 
     # Ensure requests library is installed
     log_info "Ensuring 'requests' library is installed..."
+    log_debug "Installing 'requests' library."
     pip install requests || {
         log_error "Failed to install 'requests' library"
         exit 1
@@ -704,6 +657,10 @@ build_web_ui() {
         return
     fi
     
+    log_info "Cleaning npm cache and removing old dependencies..."
+    npm cache clean --force
+    rm -rf node_modules package-lock.json
+
     log_info "Installing web UI dependencies..."
     npm install || {
         log_warning "npm install failed - web UI may not work"
@@ -1068,6 +1025,7 @@ echo "System Resources:"
 if command -v free >/dev/null 2>&1; then
     echo "Memory: $(free | grep Mem | awk '{printf("%.1f%%\n", $3/$2 * 100.0)}')"
 fi
+
 if command -v df >/dev/null 2>&1; then
     echo "Disk: $(df / | tail -1 | awk '{print $5}')"
 fi
@@ -1210,7 +1168,7 @@ show_completion_message() {
 main() {
     print_header
     
-    # Parse command line arguments
+    # --- Argument Parsing ---
     SKIP_HARDWARE=false
     SKIP_ENV=false
     NON_INTERACTIVE=false
@@ -1229,12 +1187,17 @@ main() {
                 NON_INTERACTIVE=true
                 shift
                 ;;
+            --debug)
+                DEBUG_MODE=true
+                shift
+                ;;
             -h|--help)
                 echo "Usage: $0 [OPTIONS]"
                 echo "Options:"
                 echo "  --skip-hardware    Skip hardware detection"
                 echo "  --skip-env        Skip environment setup"
                 echo "  --non-interactive Run without user prompts"
+                echo "  --debug           Enable debug logging"
                 echo "  -h, --help        Show this help"
                 exit 0
                 ;;
@@ -1244,10 +1207,37 @@ main() {
                 ;;
         esac
     done
-    
+
+    # --- Start Installation ---
+    # Clear log file at the beginning of the script
+    if [ "$DEBUG_MODE" = true ]; then
+        > "$LOG_FILE"
+    fi
+
+    # Redirect stdout/stderr to log file
+    exec 1> >(tee -a "$LOG_FILE")
+    exec 2> >(tee -a "$LOG_FILE" >&2)
+
     log_info "Starting LawnBerry Pi installation..."
-    log_info "Installation log: $LOG_FILE"
+    log_info "Installation log will be saved to: $LOG_FILE"
     
+    # Ask user about debug logging if not already enabled
+    if [ "$DEBUG_MODE" = false ] && [ "$NON_INTERACTIVE" = false ]; then
+        echo
+        read -p "Enable debug logging for detailed troubleshooting? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            DEBUG_MODE=true
+            log_info "Debug logging enabled."
+        fi
+    fi
+
+    log_debug "Installation started with the following options:"
+    log_debug "  SKIP_HARDWARE: $SKIP_HARDWARE"
+    log_debug "  SKIP_ENV: $SKIP_ENV"
+    log_debug "  NON_INTERACTIVE: $NON_INTERACTIVE"
+    log_debug "  DEBUG_MODE: $DEBUG_MODE"
+
     # Run installation steps
     check_root
     check_system
