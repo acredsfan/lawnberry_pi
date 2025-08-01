@@ -303,7 +303,6 @@ class EnhancedHardwareDetector:
                         'present': False,
                         'expected': True
                     }
-            
             devices['scan_successful'] = True
             devices['found_count'] = len([d for d in devices.values() 
                                         if isinstance(d, dict) and d.get('present')])
@@ -1502,7 +1501,7 @@ class EnhancedHardwareDetector:
 
 async def main():
     """Main detection function"""
-    detector = HardwareDetector()
+    detector = EnhancedHardwareDetector()
     
     print("Starting LawnBerry Pi hardware detection...")
     

@@ -11,8 +11,8 @@ INSTALL_DIR="/opt/lawnberry"
 SERVICE_DIR="/etc/systemd/system"
 LOG_DIR="/var/log/lawnberry"
 DATA_DIR="/var/lib/lawnberry"
-USER="lawnberry"
-GROUP="lawnberry"
+USER=$(whoami)
+GROUP=$(id -gn)
 BACKUP_DIR="/var/backups/lawnberry"
 
 # Colors for output
@@ -357,6 +357,7 @@ install_dependencies() {
         "sqlite3"
         "logrotate"
         "systemd"
+        "libcap-dev"  # Added to resolve python-prctl dependency
     )
 
     # Hardware-specific packages
@@ -365,12 +366,6 @@ install_dependencies() {
         "python3-gpiozero"
         "python3-rpi.gpio"
         "raspi-config"
-    )
-
-    # Node.js for web UI
-    nodejs_packages=(
-        "nodejs"
-        "npm"
     )
 
     log_info "Installing essential packages..."
@@ -384,10 +379,16 @@ install_dependencies() {
         log_warning "Some hardware packages failed to install - continuing anyway"
     }
 
-    log_info "Installing Node.js packages..."
-    sudo apt-get install -y "${nodejs_packages[@]}" || {
-        log_warning "Node.js installation failed - web UI may not work"
-    }
+    # Install Node.js LTS from NodeSource
+    print_section "Installing Node.js LTS (via NodeSource)"
+    if ! command -v node >/dev/null 2>&1 || [[ $(node -v | cut -d. -f1 | tr -d 'v') -lt 18 ]]; then
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+        sudo apt-get install -y nodejs || {
+            log_warning "Node.js installation failed - web UI may not work"
+        }
+    else
+        log_info "Node.js LTS already installed: $(node -v)"
+    fi
 
     # Enable I2C and SPI
     log_info "Enabling I2C and SPI interfaces..."
@@ -429,6 +430,13 @@ setup_python_environment() {
         log_error "requirements.txt not found"
         exit 1
     fi
+
+    # Ensure requests library is installed
+    log_info "Ensuring 'requests' library is installed..."
+    pip install requests || {
+        log_error "Failed to install 'requests' library"
+        exit 1
+    }
 
     log_success "Python environment setup complete"
 }

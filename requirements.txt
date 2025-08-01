@@ -27,7 +27,7 @@ gpiozero>=1.6.2,<2.0.0; sys_platform == "linux"
 smbus2>=0.4.0,<1.0.0; sys_platform == "linux"
 
 # I2C and sensor libraries for Bookworm
-adafruit-circuitpython-bme280>=3.2.0,<4.0.0; sys_platform == "linux"
+adafruit-circuitpython-bme280; sys_platform == "linux"
 adafruit-circuitpython-vl53l0x>=3.6.0,<4.0.0; sys_platform == "linux"
 adafruit-circuitpython-ina219>=3.4.0,<4.0.0; sys_platform == "linux"
 
@@ -42,6 +42,7 @@ websockets>=12.0,<13.0.0
 psutil>=5.9.0,<6.0.0
 python-dotenv>=1.0.0,<2.0.0
 aiohttp>=3.8.0,<4.0.0
+requests
 
 # Raspberry Pi specific dependencies
 picamera2>=0.3.12,<1.0.0; sys_platform == "linux"
