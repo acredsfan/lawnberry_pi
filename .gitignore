@@ -65,6 +65,7 @@ dist/
 Thumbs.db
 *.sublime-project
 *.sublime-workspace
+GEMINI.md
 
 # Logs and temporary files
 *.log
