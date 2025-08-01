@@ -22,6 +22,7 @@ on:
 
 env:
   PYTHON_VERSION: '3.9'
+  NODE_VERSION: '18'
   
 jobs:
   test-matrix:
@@ -98,6 +99,51 @@ jobs:
       with:
         file: coverage-unit.xml
         flags: unit
+
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: web-ui/package-lock.json
+    
+    - name: Install dependencies
+      working-directory: ./web-ui
+      run: npm ci
+    
+    - name: Run type checking
+      working-directory: ./web-ui
+      run: npm run test:type
+    
+    - name: Run unit and integration tests
+      working-directory: ./web-ui
+      run: npm run test:ci
+    
+    - name: Install Playwright browsers
+      working-directory: ./web-ui
+      run: npx playwright install --with-deps
+    
+    - name: Run E2E tests
+      working-directory: ./web-ui
+      run: npm run test:e2e
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: frontend-test-results
+        path: |
+          web-ui/coverage/
+          web-ui/test-results/
+          web-ui/playwright-report/
         name: unit-tests
 
   integration-tests:

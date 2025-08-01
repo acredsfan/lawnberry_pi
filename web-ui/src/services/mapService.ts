@@ -12,7 +12,7 @@ export class MapService {
     this.config = {
       provider: 'google',
       usageLevel: 'medium',
-      apiKey: (import.meta.env as any).REACT_APP_GOOGLE_MAPS_API_KEY,
+      apiKey: import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY,
       defaultCenter: { lat: 40.7128, lng: -74.0060 },
       defaultZoom: 15,
       enableCaching: true,

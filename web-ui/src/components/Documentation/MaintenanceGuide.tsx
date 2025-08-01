@@ -48,7 +48,7 @@ import {
   ExpandMore as ExpandMoreIcon,
   Close as CloseIcon,
   Notifications as NotificationIcon,
-  Calendar as CalendarIcon
+  CalendarToday as CalendarIcon
 } from '@mui/icons-material'
 
 interface MaintenanceGuideProps {

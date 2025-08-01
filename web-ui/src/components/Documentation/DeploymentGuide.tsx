@@ -18,12 +18,12 @@ import {
   Alert,
   Chip,
   Link,
-  Code,
   TextField,
   FormControlLabel,
   Checkbox,
   LinearProgress
 } from '@mui/material'
+import { Code } from '../ui'
 import {
   ExpandMore as ExpandMoreIcon,
   CheckCircle as CheckIcon,

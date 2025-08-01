@@ -48,6 +48,8 @@ export interface MowerStatus {
     percentage: number
   }
   lastUpdate: number
+  location_source: 'gps' | 'rtk' | 'visual' | 'imu' | 'manual'
+  connected: boolean
 }
 
 export interface WeatherData {
@@ -77,23 +79,79 @@ export interface WeatherData {
   }>
 }
 
-export interface MowingPattern {
+export type MowingPattern = {
   id: string
   name: string
   description: string
-  type: 'parallel' | 'checkerboard' | 'spiral' | 'waves' | 'crosshatch'
-  parameters: {
-    spacing?: number
-    angle?: number
-    overlap?: number
-  }
-}
+} & (
+  | {
+      type: 'parallel'
+      parameters: {
+        spacing?: number
+        angle?: number
+        overlap?: number
+      }
+    }
+  | {
+      type: 'checkerboard'
+      parameters: {
+        spacing?: number
+        overlap?: number
+      }
+    }
+  | {
+      type: 'spiral'
+      parameters: {
+        spacing?: number
+        centerPoint?: { lat: number; lng: number }
+      }
+    }
+  | {
+      type: 'waves'
+      parameters: {
+        spacing?: number
+        amplitude: number
+        wavelength: number
+        angle?: number
+      }
+    }
+  | {
+      type: 'crosshatch'
+      parameters: {
+        spacing?: number
+        first_angle: number
+        second_angle: number
+        overlap?: number
+      }
+    }
+)
 
 export interface YardBoundary {
   id: string
   name: string
   coordinates: Array<{ lat: number; lng: number }>
   type: 'boundary' | 'no-go' | 'home'
+}
+
+export interface Boundary {
+  id: string
+  name: string
+  coordinates: Array<{ lat: number; lng: number }>
+  type: 'boundary'
+}
+
+export interface NoGoZone {
+  id: string
+  name: string
+  coordinates: Array<{ lat: number; lng: number }>
+  type: 'no-go'
+}
+
+export interface HomeLocation {
+  id: string
+  name: string
+  coordinates: Array<{ lat: number; lng: number }>
+  type: 'home'
 }
 
 export interface Schedule {
@@ -178,7 +236,10 @@ export interface NavigationState {
   coverage: Array<{ lat: number; lng: number; covered: boolean }>
 }
 
-export type MapProvider = 'google' | 'openstreetmap'
+export const enum MapProvider {
+  GOOGLE = 'google',
+  OPENSTREETMAP = 'openstreetmap'
+}
 
 export type MapUsageLevel = 'high' | 'medium' | 'low'
 

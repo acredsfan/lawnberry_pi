@@ -185,9 +185,24 @@ const HomeLocationManager: React.FC<HomeLocationManagerProps> = ({
             handleMarkerDragEnd(location.id, { lat: newPos.lat(), lng: newPos.lng() });
           }
         });
-      } else {
-        // Leaflet marker (placeholder - would need actual Leaflet implementation)
-        console.log('Leaflet marker implementation needed');
+      } else if ('L' in window && map instanceof L.Map) {
+        // Leaflet marker implementation
+        const leafletMarker = L.marker([location.position.latitude, location.position.longitude], {
+          draggable: true,
+          icon: L.divIcon({
+            html: getMarkerSVG(location.type, location.is_default),
+            className: 'custom-div-icon',
+            iconSize: [32, 32],
+            iconAnchor: [16, 32]
+          })
+        }).addTo(map);
+
+        leafletMarker.on('dragend', () => {
+          const newPos = leafletMarker.getLatLng();
+          handleMarkerDragEnd(location.id, { lat: newPos.lat, lng: newPos.lng });
+        });
+
+        marker = leafletMarker;
       }
 
       if (marker) {

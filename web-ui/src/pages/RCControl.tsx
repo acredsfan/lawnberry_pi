@@ -37,7 +37,7 @@ import {
   PowerSettingsNew
 } from '@mui/icons-material';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { apiClient } from '../utils/api';
+import { api } from '../utils/api';
 
 interface RCStatus {
   rc_enabled: boolean;
@@ -81,7 +81,7 @@ const RCControl: React.FC = () => {
   // Fetch RC status
   const fetchStatus = async () => {
     try {
-      const response = await apiClient.get('/api/v1/rc/status');
+      const response = await api.rc.getStatus();
       setStatus(response.data);
       setError(null);
     } catch (err) {
@@ -93,7 +93,7 @@ const RCControl: React.FC = () => {
   // Fetch channel configuration
   const fetchChannels = async () => {
     try {
-      const response = await apiClient.get('/api/v1/rc/channels');
+      const response = await api.rc.getChannels();
       setChannels(response.data);
     } catch (err) {
       console.error('Channel config fetch error:', err);
@@ -118,8 +118,7 @@ const RCControl: React.FC = () => {
   // Handle RC enable/disable
   const handleRCToggle = async (enabled: boolean) => {
     try {
-      const endpoint = enabled ? '/api/v1/rc/enable' : '/api/v1/rc/disable';
-      await apiClient.post(endpoint);
+      await api.rc.enableRC(enabled);
       await fetchStatus();
     } catch (err) {
       setError(`Failed to ${enabled ? 'enable' : 'disable'} RC control`);
@@ -130,7 +129,7 @@ const RCControl: React.FC = () => {
   const handleModeChange = async (event: SelectChangeEvent) => {
     const mode = event.target.value;
     try {
-      await apiClient.post('/api/v1/rc/mode', { mode });
+      await api.rc.setMode(mode);
       await fetchStatus();
     } catch (err) {
       setError('Failed to change RC mode');
@@ -140,7 +139,7 @@ const RCControl: React.FC = () => {
   // Handle blade control
   const handleBladeToggle = async (enabled: boolean) => {
     try {
-      await apiClient.post('/api/v1/rc/blade', { enabled });
+      await api.rc.sendCommand('blade', { enabled });
       await fetchStatus();
     } catch (err) {
       setError('Failed to control blade');
@@ -150,7 +149,7 @@ const RCControl: React.FC = () => {
   // Handle emergency stop
   const handleEmergencyStop = async () => {
     try {
-      await apiClient.post('/api/v1/rc/emergency_stop');
+      await api.rc.sendCommand('emergency_stop');
       await fetchStatus();
     } catch (err) {
       setError('Failed to trigger emergency stop');
@@ -160,8 +159,7 @@ const RCControl: React.FC = () => {
   // Handle channel configuration
   const handleChannelConfig = async () => {
     try {
-      await apiClient.post('/api/v1/rc/channel/configure', {
-        channel: selectedChannel,
+      await api.rc.updateChannel(selectedChannel, {
         function: selectedFunction,
         min_value: 1000,
         max_value: 2000,

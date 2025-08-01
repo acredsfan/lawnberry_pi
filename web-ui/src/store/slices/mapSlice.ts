@@ -108,7 +108,7 @@ const mapSlice = createSlice({
     
     initializeMapFromEnvironment: (state) => {
       // This would typically be called on app initialization
-      const apiKey = (import.meta.env as any).REACT_APP_GOOGLE_MAPS_API_KEY;
+      const apiKey = import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY;
       if (apiKey) {
         state.config.apiKey = apiKey;
         state.config.provider = 'google';

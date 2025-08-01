@@ -1,5 +1,7 @@
 import { io, Socket } from 'socket.io-client'
 import { WebSocketMessage } from '../types'
+import { store } from '../store/store'
+import { setConnectionState } from '../store/slices/mowerSlice'
 
 class WebSocketService {
   private socket: Socket | null = null
@@ -29,6 +31,7 @@ class WebSocketService {
     this.socket.on('connect', () => {
       console.log('WebSocket connected')
       this.reconnectAttempts = 0
+      store.dispatch(setConnectionState(true))
       this.emit('connect')
       
       // Subscribe to all relevant topics
@@ -46,6 +49,7 @@ class WebSocketService {
 
     this.socket.on('disconnect', (reason) => {
       console.log('WebSocket disconnected:', reason)
+      store.dispatch(setConnectionState(false))
       this.emit('disconnect', reason)
     })
 
@@ -209,7 +213,8 @@ class WebSocketService {
   get connectionState(): 'connected' | 'disconnected' | 'connecting' | 'error' {
     if (!this.socket) return 'disconnected'
     if (this.socket.connected) return 'connected'
-    if (this.socket.connecting) return 'connecting'
+    // Socket.IO doesn't have 'connecting' property, use connection status
+    if (this.socket.disconnected === false && !this.socket.connected) return 'connecting'
     return 'error'
   }
 }

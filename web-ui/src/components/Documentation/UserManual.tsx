@@ -30,12 +30,12 @@ import {
 import {
   PlayArrow as PlayIcon,
   Stop as StopIcon,
-  Emergency as EmergencyIcon,
+  ErrorOutline as EmergencyIcon,
   Settings as SettingsIcon,
   Map as MapIcon,
   Speed as SpeedIcon,
   Security as SecurityIcon,
-  Battery as BatteryIcon,
+  BatteryFull as BatteryIcon,
   Visibility as VisionIcon,
   ExpandMore as ExpandMoreIcon,
   Warning as WarningIcon,
@@ -402,7 +402,6 @@ const UserManual: React.FC<UserManualProps> = ({ expertiseLevel }) => {
                       <Alert 
                         severity={item.alert === 'critical' ? 'error' : 'warning'} 
                         sx={{ mb: 2 }}
-                        size="small"
                       >
                         {item.alert === 'critical' ? 
                           'Critical safety procedure - follow exactly' : 
