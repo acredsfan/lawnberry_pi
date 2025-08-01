@@ -14,6 +14,9 @@ This directory contains printable reference cards, checklists, and emergency pro
 - **[Troubleshooting Flowchart](troubleshooting-flowchart.md)** - Common problem diagnosis
 - **[Hardware Diagnostics](hardware-diagnostics-card.md)** - Basic hardware testing commands
 
+### 👨‍💻 Developer References
+- **[Bash Scripting Checklist](bash-scripting-checklist.md)** - Prevent common shell script syntax errors
+
 ### 📱 Operating References
 - **[Web Interface Quick Guide](web-interface-guide.md)** - Key web interface functions
 - **[Mowing Patterns Guide](mowing-patterns-guide.md)** - Choosing the right mowing pattern

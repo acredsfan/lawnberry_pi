@@ -14,8 +14,9 @@
 6. [Hardware Integration](#hardware-integration)
 7. [Testing Framework](#testing-framework)
 8. [Plugin Development](#plugin-development)
-9. [Deployment and CI/CD](#deployment-and-cicd)
-10. [Contributing Guidelines](#contributing-guidelines)
+9. [Shell Scripting Best Practices](#shell-scripting-best-practices)
+10. [Deployment and CI/CD](#deployment-and-cicd)
+11. [Contributing Guidelines](#contributing-guidelines)
 
 ---
 
@@ -917,6 +918,146 @@ class PluginManager:
     
     def get_plugin(self, name: str) -> BasePlugin:
         return self.plugins.get(name)
+```
+
+---
+
+## Shell Scripting Best Practices
+
+### Critical Syntax Rules
+
+**⚠️ IMPORTANT: Common Syntax Errors to Avoid**
+
+The most frequent bash scripting errors in this project involve incorrect statement closures:
+
+#### 1. If Statement Closures
+```bash
+# ❌ WRONG - Never use curly braces to close if statements
+if [[ condition ]]; then
+    # do something
+}  # This will cause syntax error!
+
+# ✅ CORRECT - Always use 'fi' to close if statements
+if [[ condition ]]; then
+    # do something
+fi  # Correct closure
+```
+
+#### 2. Nested If Statements
+```bash
+# ❌ WRONG - Mixed closures
+if [[ $RAM_GB -ge 8 ]]; then
+    echo "Good RAM"
+    if [[ $RAM_GB -ge 16 ]]; then
+        echo "Excellent RAM"
+    }  # Wrong! Should be 'fi'
+else
+    echo "Low RAM"
+fi
+
+# ✅ CORRECT - All if statements closed with 'fi'
+if [[ $RAM_GB -ge 8 ]]; then
+    echo "Good RAM"
+    if [[ $RAM_GB -ge 16 ]]; then
+        echo "Excellent RAM"
+    fi  # Correct inner closure
+else
+    echo "Low RAM"
+fi  # Correct outer closure
+```
+
+### Bash Statement Closures Reference
+
+| Statement Type | Opening | Closing | Example |
+|---------------|---------|---------|---------|
+| If statement | `if` | `fi` | `if [[ condition ]]; then ... fi` |
+| Function | `function_name() {` | `}` | `my_function() { ... }` |
+| While loop | `while` | `done` | `while [[ condition ]]; do ... done` |
+| For loop | `for` | `done` | `for item in list; do ... done` |
+| Case statement | `case` | `esac` | `case $var in pattern) ... esac` |
+
+### Pre-Commit Syntax Checking
+
+**Always validate your bash scripts before committing:**
+
+```bash
+# Check syntax of install script
+bash -n scripts/install_lawnberry.sh
+
+# Check all shell scripts in project
+find . -name "*.sh" -type f -exec bash -n {} \; -print
+
+# Use shellcheck if available (recommended)
+shellcheck scripts/*.sh
+```
+
+### Error Prevention Strategies
+
+#### 1. Use Consistent Indentation
+```bash
+# ✅ GOOD - Clear visual structure
+if [[ condition ]]; then
+    if [[ nested_condition ]]; then
+        echo "nested action"
+    fi
+    echo "main action"
+fi
+```
+
+#### 2. Match Opening/Closing Statements
+```bash
+# ✅ Use editor features to highlight matching pairs
+# - Most editors will highlight matching if/fi pairs
+# - Use proper indentation to visually verify structure
+```
+
+#### 3. Common Patterns in LawnBerry Scripts
+```bash
+# Pattern 1: Error handling with proper closures
+if [[ -f "requirements.txt" ]]; then
+    if pip install -r requirements.txt; then
+        log_success "Installation successful"
+    else
+        log_error "Installation failed"
+        exit 1
+    fi
+else
+    log_error "requirements.txt not found"
+    exit 1
+fi  # Note: always 'fi', never '}'
+
+# Pattern 2: Hardware detection with nested conditions
+if [[ $TOTAL_RAM_GB -ge 8 ]]; then
+    log_success "RAM: ${TOTAL_RAM_GB}GB detected - enabling optimizations"
+    if [[ $TOTAL_RAM_GB -ge 16 ]]; then
+        log_info "16GB+ RAM detected - enabling advanced features"
+    fi  # Inner if closure
+else
+    log_warning "RAM: ${TOTAL_RAM_GB}GB - limited optimizations"
+fi  # Outer if closure
+```
+
+### Quick Reference Checklist
+
+Before committing any bash script changes:
+
+- [ ] Run `bash -n scriptname.sh` to check syntax
+- [ ] Verify all `if` statements end with `fi` (never `}`)
+- [ ] Check that functions use `{}` for closures
+- [ ] Ensure proper indentation for readability
+- [ ] Test the script in a safe environment
+
+### IDE Configuration
+
+**VS Code Settings for Bash:**
+```json
+{
+    "shellcheck.enable": true,
+    "shellformat.useEditorConfig": true,
+    "files.associations": {
+        "*.sh": "shellscript"
+    }
+}
 ```
 
 ---

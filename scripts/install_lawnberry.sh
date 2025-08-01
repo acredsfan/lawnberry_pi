@@ -157,7 +157,7 @@ detect_bookworm() {
         log_success "RAM: ${TOTAL_RAM_GB}GB detected - enabling memory optimizations"
         if [[ $TOTAL_RAM_GB -ge 16 ]]; then
             log_info "16GB+ RAM detected - enabling advanced memory management"
-        }
+        fi
     else
         log_warning "RAM: ${TOTAL_RAM_GB}GB - may limit performance optimizations"
     fi
@@ -446,7 +446,7 @@ setup_python_environment() {
     else
         log_error "requirements.txt not found"
         exit 1
-    }
+    fi
 
     # Ensure requests library is installed
     log_info "Ensuring 'requests' library is installed..."
