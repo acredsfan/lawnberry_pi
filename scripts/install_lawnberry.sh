@@ -16,11 +16,11 @@ GROUP=$(id -gn)
 BACKUP_DIR="/var/backups/lawnberry"
 
 # Colors for output
-RED='[0;31m'
-GREEN='[0;32m'
-YELLOW='[1;33m'
-BLUE='[0;34m'
-NC='[0m' # No Color
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
 # --- LOGGING SETUP ---
 # Default log file location
@@ -58,21 +58,6 @@ print_header() {
     echo "                   LAWNBERRY PI INSTALLER"
     echo "=================================================================="
     echo
-}
-
-fix_script_permissions() {
-    log_info "Ensuring all shell scripts are executable..."
-    
-    # Make all .sh files in scripts directory executable
-    if [ -d "$PROJECT_ROOT/scripts" ]; then
-        find "$PROJECT_ROOT/scripts" -name "*.sh" -type f -exec chmod +x {} \;
-        log_success "Shell script permissions fixed"
-    fi
-    
-    # Also fix any other common script locations
-    if [ -d "$INSTALL_DIR/scripts" ]; then
-        find "$INSTALL_DIR/scripts" -name "*.sh" -type f -exec chmod +x {} \;
-    fi
 }
 
 print_section() {
@@ -128,7 +113,7 @@ detect_bookworm() {
                 fi
             fi
             
-        elif grep -q "bullseye\|buster" /etc/os-release; then
+        elif grep -q "bullseye\\|buster" /etc/os-release; then
             log_warning "Legacy OS detected - some features may not be available"
             log_info "For best performance, upgrade to Raspberry Pi OS Bookworm"
             log_info "Many Bookworm-specific optimizations will be disabled"
@@ -158,7 +143,7 @@ detect_bookworm() {
         log_success "RAM: ${TOTAL_RAM_GB}GB detected - enabling memory optimizations"
         if [[ $TOTAL_RAM_GB -ge 16 ]]; then
             log_info "16GB+ RAM detected - enabling advanced memory management"
-        fi
+        endif
     else
         log_warning "RAM: ${TOTAL_RAM_GB}GB - may limit performance optimizations"
     fi
@@ -423,7 +408,7 @@ setup_coral_packages() {
     # Check for Coral hardware presence (informational only)
     local coral_hardware_present=false
     if command -v lsusb &> /dev/null; then
-        if lsusb | grep -q "18d1:9302\|1a6e:089a"; then
+        if lsusb | grep -q "18d1:9302\\|1a6e:089a"; then
             coral_hardware_present=true
             log_success "Coral USB Accelerator detected"
         else
@@ -672,13 +657,10 @@ build_web_ui() {
         return
     fi
     
-    log_info "Cleaning npm cache and removing old dependencies..."
-    npm cache clean --force
-    rm -rf node_modules package-lock.json
-
-    log_info "Installing web UI dependencies..."
-    npm install --legacy-peer-deps || {
-        log_warning "npm install failed - web UI may not work"
+    log_info "Ensuring a clean installation of web UI dependencies with npm ci..."
+    # Use npm ci for a clean, consistent install from package-lock.json
+    npm ci --legacy-peer-deps || {
+        log_warning "npm ci failed - web UI may not work. Check web-ui/package-lock.json for inconsistencies."
         return
     }
     
@@ -885,8 +867,6 @@ EOF
     log_success "Database initialization complete"
 }
 
-configure_system() {
-
 run_post_install_validation() {
     print_section "Post-Installation Validation"
     
@@ -912,6 +892,8 @@ run_post_install_validation() {
         log_info "Validation script not found - skipping validation"
     fi
 }
+
+configure_system() {
     print_section "System Configuration"
     
     # Create logrotate configuration
@@ -1038,9 +1020,8 @@ done
 echo ""
 echo "System Resources:"
 if command -v free >/dev/null 2>&1; then
-    echo "Memory: $(free | grep Mem | awk '{printf("%.1f%%\n", $3/$2 * 100.0)}')"
+    echo "Memory: $(free | grep Mem | awk '{printf("%.1f%%\n", $3/$2 * 100.0)}'")"
 fi
-
 if command -v df >/dev/null 2>&1; then
     echo "Disk: $(df / | tail -1 | awk '{print $5}')"
 fi
@@ -1256,7 +1237,6 @@ main() {
     # Run installation steps
     check_root
     check_system
-    fix_script_permissions
     install_dependencies
     setup_python_environment
     
@@ -1277,6 +1257,7 @@ main() {
     install_services
     setup_database
     configure_system
+    run_post_install_validation
     run_tests
     cleanup
     show_completion_message

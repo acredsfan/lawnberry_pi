@@ -471,15 +471,23 @@ EOF
     else
         log_info "Udev rules already exist"
     fi
+
+    # Install PyCoral package
+    log_info "Installing PyCoral for Python integration..."
+    if sudo apt-get install -y python3-pycoral; then
+        log_success "PyCoral installed successfully."
+    else
+        log_error "Failed to install python3-pycoral."
+        log_warning "Python support for the Edge TPU will not be available."
+    fi
     
     # Provide next steps
     echo
     log_info "Runtime installation completed successfully!"
     echo
     echo "Next steps:"
-    echo "1. Install PyCoral packages: sudo apt-get install python3-pycoral"
-    echo "2. Connect your Coral device (if not already connected)"
-    echo "3. Test with: python3 -c \"from pycoral.utils import edgetpu; print(edgetpu.list_edge_tpus())\""
+    echo "1. Connect your Coral device (if not already connected)"
+    echo "2. Test with: python3 -c \"from pycoral.utils import edgetpu; print(edgetpu.list_edge_tpus())\"
     echo
     if [[ "$HARDWARE_PRESENT" != true ]]; then
         echo "Note: No Coral hardware was detected during installation."
