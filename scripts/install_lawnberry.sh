@@ -440,14 +440,39 @@ setup_coral_packages() {
     PYCORAL_WHEEL="pycoral-2.0.0-cp311-cp311-linux_aarch64.whl"
     TFLITE_WHEEL="tflite_runtime-2.5.0.post1-cp311-cp311-linux_aarch64.whl"
     
-    # Download the wheels
+    # --- Download and verify PyCoral wheel ---
     log_info "Downloading ${PYCORAL_WHEEL}..."
-    curl -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${PYCORAL_WHEEL}" -o "${PYCORAL_WHEEL}"
+    curl --fail -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${PYCORAL_WHEEL}" -o "${PYCORAL_WHEEL}" || {
+        log_error "Download failed for ${PYCORAL_WHEEL}. Please check your internet connection and the URL."
+        return 1
+    }
     
-    log_info "Downloading ${TFLITE_WHEEL}..."
-    curl -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${TFLITE_WHEEL}" -o "${TFLITE_WHEEL}"
+    # Verify file size
+    FILESIZE=$(stat -c%s "${PYCORAL_WHEEL}")
+    if [ "$FILESIZE" -lt 100000 ]; then
+        log_error "Downloaded file ${PYCORAL_WHEEL} is invalid (size: ${FILESIZE} bytes). It may not be a valid wheel file."
+        rm "${PYCORAL_WHEEL}"
+        return 1
+    fi
+    log_info "Successfully downloaded ${PYCORAL_WHEEL} (${FILESIZE} bytes)."
 
-    # Install the downloaded wheels
+    # --- Download and verify TFLite-Runtime wheel ---
+    log_info "Downloading ${TFLITE_WHEEL}..."
+    curl --fail -L "https://github.com/google-coral/pycoral/releases/download/v2.0.0/${TFLITE_WHEEL}" -o "${TFLITE_WHEEL}" || {
+        log_error "Download failed for ${TFLITE_WHEEL}. Please check your internet connection and the URL."
+        return 1
+    }
+
+    # Verify file size
+    FILESIZE=$(stat -c%s "${TFLITE_WHEEL}")
+    if [ "$FILESIZE" -lt 100000 ]; then
+        log_error "Downloaded file ${TFLITE_WHEEL} is invalid (size: ${FILESIZE} bytes). It may not be a valid wheel file."
+        rm "${TFLITE_WHEEL}"
+        return 1
+    fi
+    log_info "Successfully downloaded ${TFLITE_WHEEL} (${FILESIZE} bytes)."
+
+    # --- Install the downloaded wheels ---
     log_info "Installing downloaded wheels into venv_coral..."
     pip install "${PYCORAL_WHEEL}"
     pip install "${TFLITE_WHEEL}"
