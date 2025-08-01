@@ -1,0 +1,6 @@
+# Ensure shell scripts are executable
+*.sh text eol=lf
+scripts/*.sh binary
+
+# Set executable bit for shell scripts
+*.sh diff=bash

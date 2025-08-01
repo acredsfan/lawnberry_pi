@@ -60,6 +60,21 @@ print_header() {
     echo
 }
 
+fix_script_permissions() {
+    log_info "Ensuring all shell scripts are executable..."
+    
+    # Make all .sh files in scripts directory executable
+    if [ -d "$PROJECT_ROOT/scripts" ]; then
+        find "$PROJECT_ROOT/scripts" -name "*.sh" -type f -exec chmod +x {} \;
+        log_success "Shell script permissions fixed"
+    fi
+    
+    # Also fix any other common script locations
+    if [ -d "$INSTALL_DIR/scripts" ]; then
+        find "$INSTALL_DIR/scripts" -name "*.sh" -type f -exec chmod +x {} \;
+    fi
+}
+
 print_section() {
     echo
     echo "----------------------------------------"
@@ -662,7 +677,7 @@ build_web_ui() {
     rm -rf node_modules package-lock.json
 
     log_info "Installing web UI dependencies..."
-    npm install || {
+    npm install --legacy-peer-deps || {
         log_warning "npm install failed - web UI may not work"
         return
     }
@@ -1241,6 +1256,7 @@ main() {
     # Run installation steps
     check_root
     check_system
+    fix_script_permissions
     install_dependencies
     setup_python_environment
     
