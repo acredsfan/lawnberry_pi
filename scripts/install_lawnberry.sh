@@ -67,6 +67,20 @@ print_section() {
     echo "----------------------------------------"
 }
 
+fix_permissions() {
+    print_section "Fixing File Permissions"
+    log_info "Running fix_permissions.sh to make all scripts executable..."
+    if [ -f "$SCRIPT_DIR/fix_permissions.sh" ]; then
+        bash "$SCRIPT_DIR/fix_permissions.sh"
+    else
+        log_warning "fix_permissions.sh not found, skipping..."
+    fi
+
+    log_info "Setting ownership of all project files to the current user..."
+    sudo chown -R $USER:$GROUP "$PROJECT_ROOT"
+    log_success "File and folder permissions have been set."
+}
+
 check_root() {
     log_debug "Checking for root execution."
     if [[ $EUID -eq 0 ]]; then
@@ -784,7 +798,7 @@ EOF
             
             sudo cp "$temp_service" "$SERVICE_DIR/"
             sudo chmod 644 "$SERVICE_DIR/$service_name"
-            rm "$temp_service" "$temp_service"
+            rm -f "$temp_service"
             
             installed_services+=("${service_name%.service}")
         else
