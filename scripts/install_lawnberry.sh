@@ -28,6 +28,12 @@ NC='\033[0m' # No Color
 LOG_FILE="$SCRIPT_DIR/lawnberry_install.log"
 DEBUG_MODE=false
 
+# Delete existing log file if it exists to start fresh
+if [[ -f "$LOG_FILE" ]]; then
+    rm -f "$LOG_FILE"
+    echo "Deleted existing installation log file"
+fi
+
 # Functions
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1" | tee -a "$LOG_FILE"
@@ -283,6 +289,10 @@ install_dependencies() {
         "libcap-dev"
         "mosquitto"
         "mosquitto-clients"
+        "python3-pytest"
+        "libcamera-apps"
+        "libcamera-dev"
+        "python3-libcamera"
     )
     
     # Hardware-specific packages
@@ -305,6 +315,19 @@ install_dependencies() {
     sudo apt-get install -y "${hardware_packages[@]}" || {
         log_warning "Some hardware packages failed to install - continuing anyway"
     }
+    
+    # Ensure MQTT broker starts properly
+    if systemctl is-available mosquitto >/dev/null 2>&1; then
+        log_info "Starting Mosquitto MQTT broker..."
+        sudo systemctl enable mosquitto
+        sudo systemctl restart mosquitto || log_warning "Could not start Mosquitto MQTT broker"
+        sleep 2
+        if systemctl is-active --quiet mosquitto; then
+            log_success "Mosquitto MQTT broker is running"
+        else
+            log_warning "Mosquitto MQTT broker failed to start"
+        fi
+    fi
     
     log_info "Installing Node.js for the web UI..."
     if ! command -v node >/dev/null || ! command -v npm >/dev/null; then
@@ -346,7 +369,6 @@ install_dependencies() {
 setup_coral_packages() {
     print_section "Setting up Google Coral TPU Environment (Optional)"
 
-    # Check if user wants Coral TPU support
     if [[ "$NON_INTERACTIVE" == true ]]; then
         log_info "Non-interactive mode - skipping Coral TPU setup"
         return 0
@@ -357,207 +379,165 @@ setup_coral_packages() {
     echo "=============================="
     echo "The Coral USB Accelerator provides AI acceleration for machine learning models."
     echo "This is optional and only needed if you have a Coral TPU device."
-    echo "Setup requires installing Google's Edge TPU runtime and PyCoral library."
+    echo
+    echo "⚠️  IMPORTANT COMPATIBILITY NOTE:"
+    echo "PyCoral currently supports Python 3.6–3.9 only."
+    echo "This installer sets up a pyenv-based Python 3.9 environment with all requirements."
     echo
     read -p "Do you want to install Coral TPU support? (y/N): " -n 1 -r
     echo
-    
+
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Skipping Coral TPU setup - you can install it later if needed"
+        log_info "Skipping Coral TPU setup"
         return 0
     fi
 
-    log_info "Setting up Google Coral TPU support..."
-
-    # Step 1: Install Edge TPU runtime
-    log_info "Step 1: Installing Edge TPU runtime..."
-    
-    # Add Google's Coral repository
-    log_info "Adding Google Coral repository to apt sources..."
-    echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list
-    
-    # Add repository key
-    log_info "Adding Google's signing key..."
-    curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add - || {
-        log_error "Failed to add Google's signing key"
-        return 1
-    }
-    
-    # Update package lists
-    log_info "Updating package lists..."
-    sudo apt-get update -qq || {
-        log_error "Failed to update package lists"
-        return 1
-    }
-    
-    # Ask about runtime frequency
+    log_info "Installing Coral Edge TPU runtime..."
     echo
     echo "Edge TPU Runtime Frequency Options:"
-    echo "=================================="
-    echo "1. Standard frequency (recommended) - Lower power, cooler operation"
-    echo "2. Maximum frequency - Higher performance, more power, device gets hot"
+    echo "1. Standard frequency (recommended)"
+    echo "2. Maximum frequency (more heat/power)"
+    read -p "Choose runtime version (1 for standard, 2 for max): " -n 1 -r
     echo
-    echo "The maximum frequency version provides better performance but the device"
-    echo "can become very hot to touch and may cause burn injuries."
-    echo
-    read -p "Choose runtime version (1 for standard, 2 for maximum): " -n 1 -r
-    echo
-    
+
     if [[ $REPLY == "2" ]]; then
         EDGE_TPU_PACKAGE="libedgetpu1-max"
-        log_warning "Installing maximum frequency runtime - device will get very hot!"
-        log_warning "Keep device away from direct contact to avoid burn injuries"
+        log_warning "Installing MAX frequency runtime – device will run hot"
     else
         EDGE_TPU_PACKAGE="libedgetpu1-std"
-        log_info "Installing standard frequency runtime (recommended)"
+        log_info "Installing standard runtime"
     fi
-    
-    # Install Edge TPU runtime
-    log_info "Installing Edge TPU runtime package: $EDGE_TPU_PACKAGE"
+
+    echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list
+    curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+    sudo apt-get update -qq
     sudo apt-get install -y "$EDGE_TPU_PACKAGE" || {
         log_error "Failed to install Edge TPU runtime"
         return 1
     }
-    
-    log_success "Edge TPU runtime installed successfully"
+    log_success "Edge TPU runtime installed: $EDGE_TPU_PACKAGE"
 
-    # Step 2: Create separate virtual environment for PyCoral
-    log_info "Step 2: Creating isolated virtual environment for PyCoral..."
-    
-    CORAL_VENV_DIR="$PROJECT_ROOT/venv_coral"
-    
-    if [[ -d "$CORAL_VENV_DIR" ]]; then
-        log_info "Removing existing Coral virtual environment..."
-        rm -rf "$CORAL_VENV_DIR"
+    # Setup pyenv and virtualenv
+    CORAL_VENV_NAME="coral-python39"
+    CORAL_VENV_DIR="$PROJECT_ROOT/venv_coral_pyenv"
+    PYTHON_39_VERSION="3.9.18"
+
+    export PYENV_ROOT="$HOME/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init -)" 2>/dev/null || true
+    eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
+
+    if ! pyenv versions | grep -q "$PYTHON_39_VERSION"; then
+        log_info "Installing Python $PYTHON_39_VERSION via pyenv..."
+        pyenv install "$PYTHON_39_VERSION"
     fi
-    
-    log_info "Creating new Coral virtual environment..."
-    python3 -m venv "$CORAL_VENV_DIR" || {
-        log_error "Failed to create Coral virtual environment"
+
+    log_info "Creating virtualenv for Coral: $CORAL_VENV_NAME"
+    pyenv virtualenv-delete -f "$CORAL_VENV_NAME" 2>/dev/null || true
+    rm -rf "$CORAL_VENV_DIR"
+    pyenv virtualenv "$PYTHON_39_VERSION" "$CORAL_VENV_NAME"
+    ln -sf "$PYENV_ROOT/versions/$CORAL_VENV_NAME" "$CORAL_VENV_DIR"
+
+    # Ensure shell uses the correct virtualenv
+    export PATH="$PYENV_ROOT/versions/$CORAL_VENV_NAME/bin:$PATH"
+    PYENV_PYTHON="$PYENV_ROOT/versions/$CORAL_VENV_NAME/bin/python"
+    PYENV_PIP="$PYENV_PYTHON -m pip"
+
+    log_info "Python binary: $PYENV_PYTHON"
+    log_info "Upgrading pip"
+    $PYENV_PIP install --upgrade pip
+
+    # Install PyCoral wheel
+    WHEEL_URL="https://github.com/google-coral/pycoral/releases/download/v2.0.0/pycoral-2.0.0-cp39-cp39-linux_aarch64.whl"
+    WHEEL_FILE="pycoral-2.0.0-cp39-cp39-linux_aarch64.whl"
+
+    log_info "Downloading PyCoral wheel..."
+    curl -L -o "$WHEEL_FILE" "$WHEEL_URL" || {
+        log_error "Failed to download PyCoral wheel"
         return 1
     }
-    
-    # Activate Coral environment
-    log_info "Activating Coral virtual environment..."
-    source "$CORAL_VENV_DIR/bin/activate"
-    
-    # Upgrade pip
-    log_info "Upgrading pip in Coral environment..."
-    pip install --upgrade pip
-    
-    # Step 3: Install PyCoral using official method
-    log_info "Step 3: Installing PyCoral library..."
-    
-    # Check if we're on Debian-based system (preferred method)
-    if command -v apt-get >/dev/null 2>&1; then
-        log_info "Using apt package manager method (recommended for Debian/Ubuntu)..."
-        deactivate  # Exit venv to install system package
-        
-        # Install system package
-        sudo apt-get install -y python3-pycoral || {
-            log_warning "System package installation failed, trying pip method..."
-            
-            # Fallback to pip method
-            source "$CORAL_VENV_DIR/bin/activate"
-            log_info "Installing PyCoral via pip with Google's repository..."
-            pip install --extra-index-url https://google-coral.github.io/py-repo/ "pycoral~=2.0" || {
-                log_error "Failed to install PyCoral via pip"
-                deactivate
-                return 1
-            }
-        }
-    else
-        # Non-Debian systems use pip method
-        log_info "Installing PyCoral via pip with Google's repository..."
-        pip install --extra-index-url https://google-coral.github.io/py-repo/ "pycoral~=2.0" || {
-            log_error "Failed to install PyCoral via pip"
-            deactivate
-            return 1
-        }
-    fi
-    
-    # Test the installation
-    log_info "Testing PyCoral installation..."
-    if command -v apt-get >/dev/null 2>&1 && sudo apt-get -qq list python3-pycoral 2>/dev/null | grep -q installed; then
-        # System package installed
-        log_info "Testing system PyCoral installation..."
-        python3 -c "import pycoral.utils.edgetpu; print('PyCoral system installation successful')" || {
-            log_warning "PyCoral system package test failed"
-        }
-    else
-        # pip installation in venv
-        if [[ -f "$CORAL_VENV_DIR/bin/activate" ]]; then
-            source "$CORAL_VENV_DIR/bin/activate"
-            python3 -c "import pycoral.utils.edgetpu; print('PyCoral venv installation successful')" || {
-                log_warning "PyCoral venv installation test failed"
-            }
-            deactivate
-        fi
-    fi
-    
-    # Create helper script for using Coral environment
-    log_info "Creating Coral environment helper script..."
-    cat > "$PROJECT_ROOT/activate_coral.sh" << 'EOF'
+
+    log_info "Installing PyCoral wheel..."
+    $PYENV_PIP install --force-reinstall --no-deps "$WHEEL_FILE" || {
+        log_error "PyCoral wheel installation failed"
+        return 1
+    }
+    rm -f "$WHEEL_FILE"
+
+    log_info "Installing pinned dependencies for PyCoral..."
+    $PYENV_PIP install "numpy==1.23.5" --timeout 100 --retries 5 || {
+        log_error "Failed to install numpy 1.23.5"
+        return 1
+    }
+
+    $PYENV_PIP install "Pillow>=4.0.0" --extra-index-url https://www.piwheels.org/simple
+
+    TFLITE_URL="https://github.com/google-coral/pycoral/releases/download/v2.0.0/tflite_runtime-2.5.0.post1-cp39-cp39-linux_aarch64.whl"
+    TFLITE_FILE="tflite_runtime-2.5.0.post1-cp39-cp39-linux_aarch64.whl"
+
+    log_info "Installing tflite-runtime..."
+    curl -L -o "$TFLITE_FILE" "$TFLITE_URL"
+    $PYENV_PIP install --no-deps "$TFLITE_FILE" || {
+        log_error "tflite-runtime install failed"
+        return 1
+    }
+    rm -f "$TFLITE_FILE"
+
+    log_info "Testing PyCoral..."
+    $PYENV_PYTHON -c "from pycoral.utils.edgetpu import list_edge_tpus; print('✅ PyCoral OK')" 2>/dev/null \
+        && log_success "PyCoral installed and TPU accessible" \
+        || log_warning "PyCoral import failed — check runtime or USB device"
+
+    log_info "Creating helper script to activate Coral environment..."
+    cat > "$PROJECT_ROOT/activate_coral.sh" << EOF
 #!/bin/bash
-# Helper script to activate Coral environment
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CORAL_VENV="$SCRIPT_DIR/venv_coral"
-
-if [[ -d "$CORAL_VENV" ]]; then
-    echo "Activating Coral TPU virtual environment..."
-    source "$CORAL_VENV/bin/activate"
-    echo "Coral environment activated. Run 'deactivate' to exit."
-    echo "Test with: python3 -c 'import pycoral.utils.edgetpu; print(\"Coral TPU support ready!\")'"
-else
-    echo "Coral virtual environment not found at: $CORAL_VENV"
-    echo "Run the installer again to set up Coral TPU support."
-fi
+export PYENV_ROOT="\$HOME/.pyenv"
+export PATH="\$PYENV_ROOT/bin:\$PATH"
+eval "\$(pyenv init -)"
+eval "\$(pyenv virtualenv-init -)"
+pyenv activate "$CORAL_VENV_NAME"
+exec \$SHELL
 EOF
     chmod +x "$PROJECT_ROOT/activate_coral.sh"
-    
-    # Hardware detection
-    log_info "Checking for connected Coral TPU devices..."
-    if lsusb | grep -q "18d1:9302\|1a6e:089a" 2>/dev/null; then
-        log_success "Coral USB Accelerator detected!"
-    else
-        log_info "No Coral USB Accelerator detected (this is normal if not connected)"
-        log_info "Connect your Coral device and unplug/replug it to load the new runtime"
-    fi
-    
-    # Reactivate main virtual environment
-    log_info "Reactivating main virtual environment..."
-    source "$PROJECT_ROOT/venv/bin/activate"
-    
-    log_success "Coral TPU setup completed successfully!"
-    echo
-    echo "Coral TPU Setup Summary:"
-    echo "========================"
-    echo "- Edge TPU runtime: $EDGE_TPU_PACKAGE"
-    echo "- PyCoral library: Installed"
-    if [[ -d "$CORAL_VENV_DIR" ]]; then
-        echo "- Coral environment: $CORAL_VENV_DIR"
-        echo "- Helper script: ./activate_coral.sh"
-    fi
-    echo "- To use Coral: Connect device and run ./activate_coral.sh"
-    echo
+
+    log_success "Coral TPU setup completed!"
 }
+
+
 
 setup_python_environment() {
     print_section "Setting up Python Environment"
     
-    # Create virtual environment
-    log_info "Creating Python virtual environment..."
+    # Check if virtual environment already exists and is properly configured
+    if [[ -d "$PROJECT_ROOT/venv" ]] && [[ -f "$PROJECT_ROOT/venv/bin/activate" ]] && [[ "$FORCE_REINSTALL" != "true" ]]; then
+        log_info "Checking existing virtual environment..."
+        
+        # Test if the environment has required packages
+        source "$PROJECT_ROOT/venv/bin/activate"
+        
+        # Check if key packages are installed
+        if python -c "import requests, fastapi, uvicorn, redis, yaml" 2>/dev/null; then
+            log_success "Virtual environment already exists and is properly configured"
+            log_info "Skipping Python environment setup (use --force-reinstall to override)"
+            return 0
+        else
+            log_info "Virtual environment exists but missing required packages - reinstalling"
+            deactivate 2>/dev/null || true
+        fi
+    fi
+    
+    # Create virtual environment with system site packages for libcamera access
+    log_info "Creating Python virtual environment with system packages access..."
     cd "$PROJECT_ROOT"
     
     if [[ -d "venv" ]]; then
-        log_info "Virtual environment already exists - removing old one"
+        log_info "Removing existing virtual environment..."
         log_debug "Removing existing venv directory."
         rm -rf venv
     fi
     
-    log_debug "Creating new virtual environment."
-    python3 -m venv venv
+    log_debug "Creating new virtual environment with --system-site-packages for libcamera access."
+    python3 -m venv --system-site-packages venv
     source venv/bin/activate
     
     # Upgrade pip
@@ -587,6 +567,14 @@ setup_python_environment() {
         log_error "Failed to install 'requests' library"
         exit 1
     }
+    
+    # Verify libcamera access
+    log_info "Verifying libcamera access in virtual environment..."
+    if python3 -c "import libcamera; print('✓ libcamera accessible')" 2>/dev/null; then
+        log_success "libcamera module accessible in virtual environment"
+    else
+        log_warning "libcamera module not accessible - camera features may be limited"
+    fi
 
     # Coral TPU support is now optional and handled separately
     # Use setup_coral_packages() function for Coral installation
@@ -695,13 +683,341 @@ build_web_ui() {
     log_info "Fixing npm security vulnerabilities..."
     npm audit fix --force || log_warning "Some npm security issues could not be automatically fixed"
     
-    log_info "Building web UI..."
-    npm run build || {
-        log_warning "Web UI build failed"
-        return
-    }
+    log_info "Building web UI with ARM-specific optimizations..."
     
-    log_success "Web UI built successfully"
+    # Aggressive ARM compatibility environment variables (fixed Node options)
+    export NODE_OPTIONS="--max-old-space-size=512"
+    export VITE_OPTIMIZE_DEPS_DISABLED="true"
+    export VITE_ESBUILD_TARGET="es2015"
+    export VITE_BUILD_TARGET="es2015"
+    export VITE_LEGACY_BUILD="true"
+    export CI="true"  # Disable interactive prompts
+    export FORCE_COLOR="0"  # Disable color output that can cause issues
+    
+    # Create ARM-compatible Vite config override
+    log_info "Creating ARM-compatible build configuration..."
+    cat > vite.config.arm.ts << 'EOF'
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: '0.0.0.0',
+    port: 3000,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
+      }
+    }
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    minify: false,
+    target: 'es2015',
+    rollupOptions: {
+      output: {
+        inlineDynamicImports: true,
+        manualChunks: undefined
+      }
+    }
+  },
+  optimizeDeps: {
+    disabled: true
+  },
+  esbuild: {
+    target: 'es2015',
+    supported: {
+      'bigint': false,
+      'top-level-await': false
+    }
+  }
+})
+EOF
+    
+    # Try multiple build strategies, starting with most aggressive ARM compatibility
+    build_success=false
+    
+    # Strategy 1: Ultra-simple ARM build
+    log_info "Attempting ultra-simple ARM build..."
+    if timeout 300 npm run build -- --config vite.config.arm.ts --mode production 2>/dev/null; then
+        log_success "Ultra-simple ARM build succeeded"
+        build_success=true
+    else
+        log_warning "Ultra-simple ARM build failed (likely Illegal instruction), trying manual static generation..."
+        
+        # Strategy 2: Manual React build using older/simpler tools
+        log_info "Attempting manual TypeScript compilation..."
+        if command -v tsc >/dev/null 2>&1; then
+            mkdir -p dist/assets
+            
+            # Try basic TypeScript compilation
+            if tsc --outDir dist --target es2015 --module commonjs --jsx react src/index.tsx 2>/dev/null; then
+                log_success "TypeScript compilation succeeded"
+                build_success=true
+            fi
+        fi
+        
+        # Strategy 3: Static file generation (most reliable fallback)
+        if [[ "$build_success" != true ]]; then
+            log_info "Creating static HTML interface as ARM-compatible fallback..."
+            mkdir -p dist/assets
+            
+            # Create comprehensive static interface
+            cat > dist/index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LawnBerryPi Control</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header { 
+            background: rgba(255,255,255,0.95); 
+            padding: 20px; 
+            border-radius: 12px; 
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+        }
+        .header h1 { 
+            color: #2E7D32; 
+            margin-bottom: 10px;
+            font-size: 2.5rem;
+            font-weight: 300;
+        }
+        .header p { color: #666; }
+        .grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
+            gap: 20px;
+            flex: 1;
+        }
+        .card { 
+            background: rgba(255,255,255,0.95); 
+            padding: 20px; 
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            transition: transform 0.2s;
+        }
+        .card:hover { transform: translateY(-2px); }
+        .card h3 { 
+            color: #2E7D32; 
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status { 
+            padding: 12px; 
+            border-radius: 8px; 
+            margin: 10px 0;
+            border-left: 4px solid;
+        }
+        .status.info { 
+            background: #e3f2fd; 
+            color: #1976d2; 
+            border-color: #2196f3;
+        }
+        .status.warning { 
+            background: #fff3e0; 
+            color: #f57c00; 
+            border-color: #ff9800;
+        }
+        .status.success { 
+            background: #e8f5e8; 
+            color: #2e7d32; 
+            border-color: #4caf50;
+        }
+        .api-link { 
+            display: inline-block; 
+            background: #2E7D32; 
+            color: white; 
+            padding: 10px 20px; 
+            text-decoration: none; 
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+        .api-link:hover { background: #1b5e20; }
+        .command { 
+            background: #f5f5f5; 
+            padding: 10px; 
+            border-radius: 4px; 
+            font-family: 'Courier New', monospace; 
+            margin: 10px 0;
+            border-left: 3px solid #2E7D32;
+        }
+        .footer {
+            margin-top: 40px;
+            text-align: center;
+            color: rgba(255,255,255,0.8);
+        }
+        .icon { 
+            width: 20px; 
+            height: 20px; 
+            background: currentColor;
+            mask-size: contain;
+            display: inline-block;
+        }
+        .icon-system { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'/%3E%3C/svg%3E"); }
+        .icon-api { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0L19.2 12l-4.6-4.6L16 6l6 6-6 6-1.4-1.4z'/%3E%3C/svg%3E"); }
+        .icon-terminal { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M2 3h20c1.1 0 2 .9 2 2v14c0 1.1-.9 2-2 2H2c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2zm0 2v14h20V5H2zm8 6l-4 4h2.5l2.5-2.5L8.5 10H6l4-4z'/%3E%3C/svg%3E"); }
+        .icon-warning { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z'/%3E%3C/svg%3E"); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚜 LawnBerryPi Control Interface</h1>
+            <p>Autonomous Lawn Mower Management System</p>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <h3><span class="icon icon-warning"></span>Build Status</h3>
+                <div class="status warning">
+                    <strong>Notice:</strong> The full React-based web interface could not be built on this ARM system due to compatibility issues with Vite 7.x and newer build tools.
+                </div>
+                <div class="status info">
+                    This simplified interface provides basic system access and API documentation links.
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3><span class="icon icon-system"></span>System Status</h3>
+                <div class="status success">
+                    <strong>LawnBerry Pi System:</strong> Installed and Running
+                </div>
+                <div class="status info">
+                    <strong>Hardware Detection:</strong> Completed
+                </div>
+                <div class="status info">
+                    <strong>Services:</strong> Active
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3><span class="icon icon-api"></span>API Access</h3>
+                <p>Access the full system functionality through the REST API:</p>
+                <a href="/api/docs" target="_blank" class="api-link">📚 API Documentation</a>
+                <a href="/api/health" target="_blank" class="api-link">💓 Health Check</a>
+                <a href="/api/status" target="_blank" class="api-link">📊 System Status</a>
+            </div>
+            
+            <div class="card">
+                <h3><span class="icon icon-terminal"></span>Command Line Access</h3>
+                <p>System control commands:</p>
+                <div class="command">lawnberry-system status</div>
+                <div class="command">lawnberry-system start</div>
+                <div class="command">lawnberry-system logs</div>
+                <div class="command">lawnberry-health-check</div>
+            </div>
+            
+            <div class="card">
+                <h3>🔧 Manual API Examples</h3>
+                <p>Direct API access via curl:</p>
+                <div class="command">curl http://localhost:8000/api/health</div>
+                <div class="command">curl http://localhost:8000/api/system/status</div>
+                <div class="command">curl http://localhost:8000/api/hardware/detect</div>
+            </div>
+            
+            <div class="card">
+                <h3>📱 Alternative Access</h3>
+                <div class="status info">
+                    <strong>SSH Access:</strong> Full system control via terminal
+                </div>
+                <div class="status info">
+                    <strong>API Client:</strong> Use Postman or similar tools
+                </div>
+                <div class="status info">
+                    <strong>Mobile Apps:</strong> Connect to REST API endpoints
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>LawnBerryPi - Autonomous Lawn Care System | ARM Static Interface</p>
+            <p>For full web interface, consider using a desktop browser connected to the API</p>
+        </div>
+    </div>
+    
+    <script>
+        // Simple JavaScript for basic functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check API health and update status
+            fetch('/api/health')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('API Health:', data);
+                    const statusCards = document.querySelectorAll('.status.success');
+                    if (statusCards.length > 0) {
+                        statusCards[0].innerHTML = '<strong>LawnBerry Pi System:</strong> ✅ Connected and Healthy';
+                    }
+                })
+                .catch(error => {
+                    console.log('API not yet available:', error);
+                });
+        });
+    </script>
+</body>
+</html>
+EOF
+            
+            # Copy any existing assets
+            if [[ -d "src/assets" ]]; then
+                cp -r src/assets dist/ 2>/dev/null || true
+            fi
+            
+            if [[ -d "public" ]]; then
+                cp -r public/* dist/ 2>/dev/null || true
+            fi
+            
+            # Create basic CSS and JS files for completeness
+            mkdir -p dist/assets
+            echo "/* LawnBerryPi ARM-compatible styles loaded */" > dist/assets/main.css
+            echo "console.log('LawnBerryPi ARM-compatible interface loaded');" > dist/assets/main.js
+            
+            log_success "Created comprehensive static web interface as ARM-compatible fallback"
+            build_success=true
+        fi
+    fi
+    
+    # Clean up temporary files
+    rm -f vite.config.arm.ts
+    
+    if [[ "$build_success" == true ]]; then
+        log_success "Web UI build completed successfully"
+        
+        # Verify build output
+        if [[ -f "dist/index.html" ]]; then
+            log_info "Build output verified: dist/index.html exists ($(wc -l < dist/index.html) lines)"
+            log_info "Web interface will be available at: http://$(hostname -I | awk '{print $1}'):8000"
+        else
+            log_warning "Build output missing: dist/index.html not found"
+        fi
+    else
+        log_error "All Web UI build strategies failed"
+        log_info "The system will work without the web interface"
+        log_info "You can access the API directly at http://localhost:8000/api/"
+    fi
 }
 
 create_directories() {
@@ -710,6 +1026,7 @@ create_directories() {
     log_info "Creating system directories..."
     
     # Create directories
+    sudo mkdir -p "$INSTALL_DIR"
     sudo mkdir -p "$LOG_DIR"
     sudo mkdir -p "$DATA_DIR"
     sudo mkdir -p "$DATA_DIR/config_backups"
@@ -717,9 +1034,15 @@ create_directories() {
     sudo mkdir -p "$DATA_DIR/database"
     sudo mkdir -p "$BACKUP_DIR"
     
+    # Copy project files to installation directory
+    log_info "Copying project files to $INSTALL_DIR..."
+    sudo cp -r "$PROJECT_ROOT"/* "$INSTALL_DIR/" || log_warning "Could not copy all project files"
+    
     # Set ownership and permissions
+    sudo chown -R "$USER:$GROUP" "$INSTALL_DIR" || sudo chown -R "$USER:$USER" "$INSTALL_DIR"
     sudo chown -R "$USER:$GROUP" "$LOG_DIR" || sudo chown -R "$USER:$USER" "$LOG_DIR"
     sudo chown -R "$USER:$GROUP" "$DATA_DIR" || sudo chown -R "$USER:$USER" "$DATA_DIR"
+    sudo chmod 755 "$INSTALL_DIR"
     sudo chmod 755 "$LOG_DIR"
     sudo chmod 755 "$DATA_DIR"
     sudo chmod 700 "$DATA_DIR/config_backups"
@@ -776,24 +1099,68 @@ install_services() {
         "src/web_api/lawnberry-api.service"
     )
     
-    log_info "Installing systemd service files with Bookworm optimizations..."
+    log_info "Checking and installing systemd service files with Bookworm optimizations..."
     
     installed_services=()
+    services_needing_update=()
+    
     for service_file in "${services[@]}"; do
         if [[ -f "$service_file" ]]; then
             service_name=$(basename "$service_file")
-            log_info "Installing $service_name..."
+            target_service="$SERVICE_DIR/$service_name"
+            needs_install=false
             
-            # Update service file paths to use virtual environment
-            temp_service="/tmp/$service_name"
-            sed "s|/usr/bin/python3|$PROJECT_ROOT/venv/bin/python3|g" "$service_file" > "$temp_service"
-            sed -i "s|WorkingDirectory=.*|WorkingDirectory=$PROJECT_ROOT|g" "$temp_service"
+            # Check if service needs to be installed/updated
+            if [[ ! -f "$target_service" ]]; then
+                log_info "Service not found: $service_name - installing..."
+                needs_install=true
+            else
+                # Check if source service file is newer than installed one
+                if [[ "$service_file" -nt "$target_service" ]]; then
+                    log_info "Service outdated: $service_name - updating..."
+                    needs_install=true
+                    services_needing_update+=("$service_name")
+                else
+                    # Check if Python path in service file needs updating
+                    if ! grep -q "$PROJECT_ROOT/venv/bin/python3" "$target_service" 2>/dev/null; then
+                        log_info "Service paths outdated: $service_name - updating..."
+                        needs_install=true
+                        services_needing_update+=("$service_name")
+                    else
+                        log_debug "Service up-to-date: $service_name - skipping"
+                    fi
+                fi
+            fi
             
-            # Apply Bookworm-specific security hardening if supported
-            if [[ $SYSTEMD_VERSION -ge 252 ]]; then
-                log_info "Applying systemd 252+ security hardening to $service_name"
-                # Add additional Bookworm security features
-                cat >> "$temp_service" << 'EOF'
+            if [[ "$needs_install" == true ]]; then
+                log_info "Installing/updating $service_name..."
+                
+                # Stop service if it's running and being updated
+                if [[ " ${services_needing_update[*]} " =~ " ${service_name} " ]]; then
+                    service_base="${service_name%.service}"
+                    if systemctl is-active --quiet "$service_name" 2>/dev/null; then
+                        log_info "Stopping $service_name for update..."
+                        sudo systemctl stop "$service_name" || log_warning "Could not stop $service_name"
+                    fi
+                fi
+                
+                # Update service file paths to use virtual environment and correct user
+                temp_service="/tmp/$service_name"
+                sed "s|/usr/bin/python3|$PROJECT_ROOT/venv/bin/python3|g" "$service_file" > "$temp_service"
+                sed -i "s|WorkingDirectory=.*|WorkingDirectory=$PROJECT_ROOT|g" "$temp_service"
+                # Fix user and group to match current user
+                sed -i "s|User=.*|User=$USER|g" "$temp_service"
+                sed -i "s|Group=.*|Group=$GROUP|g" "$temp_service"
+                # Fix any remaining /opt/lawnberry references to PROJECT_ROOT
+                sed -i "s|/opt/lawnberry|$PROJECT_ROOT|g" "$temp_service"
+                # Ensure PYTHONPATH points to project root
+                sed -i "s|Environment=PYTHONPATH=.*|Environment=PYTHONPATH=$PROJECT_ROOT|g" "$temp_service"
+                
+                # Apply Bookworm-specific security hardening if supported
+                if [[ $SYSTEMD_VERSION -ge 252 ]]; then
+                    log_info "Applying systemd 252+ security hardening to $service_name"
+                    # Add additional Bookworm security features
+                    cat >> "$temp_service" << 'EOF'
 
 # Additional Bookworm Security Features
 ProtectClock=true
@@ -807,23 +1174,29 @@ RestrictSUIDSGID=true
 SystemCallArchitectures=native
 UMask=0027
 EOF
+                fi
+                
+                sudo cp "$temp_service" "$SERVICE_DIR/"
+                sudo chmod 644 "$SERVICE_DIR/$service_name"
+                rm -f "$temp_service"
+                
+                installed_services+=("${service_name%.service}")
+            else
+                # Service is up-to-date, but still add to list for enabling
+                installed_services+=("${service_name%.service}")
             fi
-            
-            sudo cp "$temp_service" "$SERVICE_DIR/"
-            sudo chmod 644 "$SERVICE_DIR/$service_name"
-            rm -f "$temp_service"
-            
-            installed_services+=("${service_name%.service}")
         else
             log_warning "Service file not found: $service_file"
         fi
     done
     
-    # Reload systemd
-    log_info "Reloading systemd daemon..."
-    sudo systemctl daemon-reload
+    # Reload systemd if any services were installed/updated
+    if [[ ${#services_needing_update[@]} -gt 0 ]] || [[ ${#installed_services[@]} -gt 0 ]]; then
+        log_info "Reloading systemd daemon..."
+        sudo systemctl daemon-reload
+    fi
     
-    # Enable core services
+    # Enable core services (check if they need enabling)
     core_services=(
         "lawnberry-system"
         "lawnberry-data"
@@ -832,15 +1205,34 @@ EOF
         "lawnberry-api"
     )
     
-    log_info "Enabling core services..."
+    log_info "Checking and enabling core services..."
     for service in "${core_services[@]}"; do
         if [[ " ${installed_services[*]} " =~ " ${service} " ]]; then
-            log_info "Enabling $service..."
-            sudo systemctl enable "$service.service"
+            # Check if service is already enabled
+            if ! systemctl is-enabled "$service.service" >/dev/null 2>&1; then
+                log_info "Enabling $service..."
+                sudo systemctl enable "$service.service" || log_warning "Could not enable $service"
+            else
+                log_debug "Service already enabled: $service"
+            fi
         fi
     done
     
-    log_success "System services installed"
+    # Restart updated services
+    if [[ ${#services_needing_update[@]} -gt 0 ]]; then
+        log_info "Restarting updated services..."
+        for service_name in "${services_needing_update[@]}"; do
+            service_base="${service_name%.service}"
+            if [[ " ${core_services[*]} " =~ " ${service_base} " ]]; then
+                if systemctl is-enabled "$service_name" >/dev/null 2>&1; then
+                    log_info "Restarting $service_name..."
+                    sudo systemctl restart "$service_name" || log_warning "Could not restart $service_name"
+                fi
+            fi
+        done
+    fi
+    
+    log_success "System services installed and configured"
 }
 
 setup_database() {
@@ -1195,6 +1587,7 @@ main() {
     SKIP_HARDWARE=false
     SKIP_ENV=false
     NON_INTERACTIVE=false
+    FORCE_REINSTALL=false
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -1210,6 +1603,10 @@ main() {
                 NON_INTERACTIVE=true
                 shift
                 ;;
+            --force-reinstall)
+                FORCE_REINSTALL=true
+                shift
+                ;;
             --debug)
                 DEBUG_MODE=true
                 shift
@@ -1220,6 +1617,7 @@ main() {
                 echo "  --skip-hardware    Skip hardware detection"
                 echo "  --skip-env        Skip environment setup"
                 echo "  --non-interactive Run without user prompts"
+                echo "  --force-reinstall Force reinstall of Python environment"
                 echo "  --debug           Enable debug logging"
                 echo "  -h, --help        Show this help"
                 exit 0

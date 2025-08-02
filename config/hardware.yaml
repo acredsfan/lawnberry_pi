@@ -1,35 +1,24 @@
-# Hardware Interface Layer Configuration
-
-# I2C Configuration - Bookworm optimized
 i2c:
   bus_number: 1
-  clock_speed: 400000  # Increased for better performance on Bookworm
-  timeout: 2.0         # Enhanced timeout for stability
-  retry_count: 3       # Improved error handling
   devices:
-    tof_left: 0x29
-    tof_right: 0x30
-    power_monitor: 0x40
-    environmental: 0x76
-    display: 0x3c
-
-# Serial Device Configuration
+    tof_right: 48
+    power_monitor: 64
+    environmental: 118
+    display: 60
 serial:
   devices:
     robohat:
-      port: "/dev/ttyACM1"
+      port: /dev/ttyACM1
       baud: 115200
       timeout: 1.0
     gps:
-      port: "/dev/ttyACM0"
+      port: /dev/ttyACM0
       baud: 38400
       timeout: 1.0
     imu:
-      port: "/dev/ttyAMA4"
+      port: /dev/ttyAMA4
       baud: 3000000
-      timeout: 0.1
-
-# GPIO Pin Configuration
+      timeout: 1.0
 gpio:
   pins:
     tof_left_shutdown: 22
@@ -38,68 +27,27 @@ gpio:
     tof_right_interrupt: 12
     blade_enable: 24
     blade_direction: 25
-
-# Camera Configuration - Bookworm optimized with picamera2
 camera:
-  device_path: "/dev/video0"
+  device_path: /dev/video0
   width: 1920
   height: 1080
   fps: 30
   buffer_size: 5
-  # Bookworm-specific optimizations
-  use_picamera2: true
-  auto_exposure: true
-  auto_white_balance: true
-  hardware_acceleration: true
-  preview_size: [640, 480]  # For efficient preview
-
-# Plugin Configuration
 plugins:
-  - name: "tof_left"
-    enabled: true
-    parameters:
-      i2c_address: 0x29
-      shutdown_pin: 22
-      interrupt_pin: 6
-      
-  - name: "tof_right"
-    enabled: true
+  -
+    name: tof_right
+    enabled: True
     parameters:
       i2c_address: 0x30
       shutdown_pin: 23
       interrupt_pin: 12
-      
-  - name: "power_monitor"
-    enabled: true
+  -
+    name: power_monitor
+    enabled: True
     parameters:
       i2c_address: 0x40
       channel: 1
-      
-  - name: "robohat"
-    enabled: true
-    parameters: {}
-    
-  - name: "weather_service"
-    enabled: true
-    parameters:
-      config_path: "config/weather.yaml"
-
-# System Configuration - Bookworm optimized
-logging_level: "INFO"
+logging_level: INFO
 retry_attempts: 3
 retry_base_delay: 0.1
 retry_max_delay: 5.0
-
-# Bookworm-specific performance settings
-performance:
-  cpu_affinity: true        # Enable CPU affinity for critical processes
-  memory_optimization: true # Enable memory optimization features
-  async_io_optimization: true # Enable async I/O optimizations
-  hardware_scheduling: enhanced # Use enhanced hardware scheduling
-
-# Python 3.11 optimizations
-python:
-  version: "3.11"
-  async_optimizations: true
-  error_handling: enhanced
-  memory_management: optimized

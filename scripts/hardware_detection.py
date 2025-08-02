@@ -563,16 +563,16 @@ class EnhancedHardwareDetector:
     
     async def _test_i2c_communication(self) -> Dict[str, Any]:
         """Test I2C device communication"""
-        i2c_devices = self.detection_results.get('i2c_devices', {})
+        i2c_devices = self.detection_results.get('i2c_devices')
         test_results = {}
         
-        if not smbus or not i2c_devices.get('scan_successful'):
-            return {'error': 'I2C not available or scan failed'}
+        if not smbus or not i2c_devices or not i2c_devices.detected:
+            return {'error': 'I2C not available or no devices detected'}
         
         try:
             bus = smbus.SMBus(1)
             
-            for device_name, device_info in i2c_devices.items():
+            for device_name, device_info in i2c_devices.details.get('devices', {}).items():
                 if not isinstance(device_info, dict) or not device_info.get('present'):
                     continue
                 
@@ -603,13 +603,13 @@ class EnhancedHardwareDetector:
     
     async def _test_serial_communication(self) -> Dict[str, Any]:
         """Test serial device communication"""
-        serial_devices = self.detection_results.get('serial_devices', {})
+        serial_devices = self.detection_results.get('serial_devices')
         test_results = {}
         
-        if not serial or not serial_devices.get('scan_successful'):
-            return {'error': 'Serial not available or scan failed'}
+        if not serial or not serial_devices or not serial_devices.detected:
+            return {'error': 'Serial not available or no devices detected'}
         
-        for device_name, device_info in serial_devices.items():
+        for device_name, device_info in serial_devices.details.get('devices', {}).items():
             if not isinstance(device_info, dict) or not device_info.get('present'):
                 continue
             
@@ -742,28 +742,30 @@ class EnhancedHardwareDetector:
         }
         
         # Add detected I2C devices
-        i2c_devices = self.detection_results.get('i2c_devices', {})
-        for device_name, device_info in i2c_devices.items():
-            if isinstance(device_info, dict) and device_info.get('present'):
-                address = int(device_info['address'], 16)
-                config['i2c']['devices'][device_name] = address
+        i2c_devices = self.detection_results.get('i2c_devices')
+        if i2c_devices and i2c_devices.detected:
+            for device_name, device_info in i2c_devices.details.get('devices', {}).items():
+                if isinstance(device_info, dict) and device_info.get('present'):
+                    address = int(device_info['address'], 16)
+                    config['i2c']['devices'][device_name] = address
         
         # Add detected serial devices
-        serial_devices = self.detection_results.get('serial_devices', {})
-        for device_name, device_info in serial_devices.items():
-            if isinstance(device_info, dict) and device_info.get('present'):
-                device_config = {
-                    'port': device_info['device'],
-                    'baud': self._get_default_baud_rate(device_name),
-                    'timeout': 1.0
-                }
-                config['serial']['devices'][device_name] = device_config
+        serial_devices = self.detection_results.get('serial_devices')
+        if serial_devices and serial_devices.detected:
+            for device_name, device_info in serial_devices.details.get('devices', {}).items():
+                if isinstance(device_info, dict) and device_info.get('present'):
+                    device_config = {
+                        'port': device_info['device'],
+                        'baud': self._get_default_baud_rate(device_name),
+                        'timeout': 1.0
+                    }
+                    config['serial']['devices'][device_name] = device_config
         
         # Add camera configuration
-        camera_info = self.detection_results.get('camera', {})
-        if camera_info.get('present'):
+        camera_info = self.detection_results.get('camera')
+        if camera_info and camera_info.detected:
             config['camera'] = {
-                'device_path': camera_info.get('device_path', '/dev/video0'),
+                'device_path': camera_info.details.get('device_path', '/dev/video0'),
                 'width': 1920,
                 'height': 1080,
                 'fps': 30,
@@ -771,11 +773,13 @@ class EnhancedHardwareDetector:
             }
         
         # Add plugins for detected devices
-        for device_name, device_info in i2c_devices.items():
-            if isinstance(device_info, dict) and device_info.get('present'):
-                plugin_config = self._create_plugin_config(device_name, device_info)
-                if plugin_config:
-                    config['plugins'].append(plugin_config)
+        i2c_devices = self.detection_results.get('i2c_devices')
+        if i2c_devices and i2c_devices.detected:
+            for device_name, device_info in i2c_devices.details.get('devices', {}).items():
+                if isinstance(device_info, dict) and device_info.get('present'):
+                    plugin_config = self._create_plugin_config(device_name, device_info)
+                    if plugin_config:
+                        config['plugins'].append(plugin_config)
         
         return config
     
@@ -874,28 +878,36 @@ class EnhancedHardwareDetector:
         print(f"  SPI Enabled: {'Yes' if system_details.get('spi_enabled') else 'No'}")
         
         # I2C Devices
-        i2c = self.detection_results.get('i2c_devices', {})
-        print(f"\nI2C Devices ({i2c.get('found_count', 0)} found):")
-        for name, info in i2c.items():
-            if isinstance(info, dict) and 'address' in info:
-                status = "✓ Present" if info.get('present') else "✗ Missing"
-                print(f"  {name:15} @ {info['address']} - {status}")
+        i2c_devices = self.detection_results.get('i2c_devices')
+        if i2c_devices and i2c_devices.detected:
+            device_count = len(i2c_devices.details.get('devices', {}))
+            print(f"\nI2C Devices ({device_count} found):")
+            for name, info in i2c_devices.details.get('devices', {}).items():
+                if isinstance(info, dict) and 'address' in info:
+                    status = "✓ Present" if info.get('present') else "✗ Missing"
+                    print(f"  {name:15} @ {info['address']} - {status}")
+        else:
+            print(f"\nI2C Devices (0 found):")
         
         # Serial Devices
-        serial_devs = self.detection_results.get('serial_devices', {})
-        print(f"\nSerial Devices ({serial_devs.get('found_count', 0)} found):")
-        for name, info in serial_devs.items():
-            if isinstance(info, dict) and 'device' in info:
-                status = "✓ Present" if info.get('present') else "✗ Missing"
-                device = info.get('device', 'Unknown')
-                print(f"  {name:15} @ {device} - {status}")
+        serial_devices = self.detection_results.get('serial_devices')
+        if serial_devices and serial_devices.detected:
+            device_count = len(serial_devices.details.get('devices', {}))
+            print(f"\nSerial Devices ({device_count} found):")
+            for name, info in serial_devices.details.get('devices', {}).items():
+                if isinstance(info, dict) and 'device' in info:
+                    status = "✓ Present" if info.get('present') else "✗ Missing"
+                    device = info.get('device', 'Unknown')
+                    print(f"  {name:15} @ {device} - {status}")
+        else:
+            print(f"\nSerial Devices (0 found):")
         
         # Camera
-        camera = self.detection_results.get('camera', {})
+        camera = self.detection_results.get('camera')
         print(f"\nCamera:")
-        if camera.get('present'):
-            cam_type = camera.get('type', 'Unknown')
-            device = camera.get('device_path', 'Unknown')
+        if camera and camera.detected:
+            cam_type = camera.details.get('type', 'Unknown')
+            device = camera.details.get('device_path', 'Unknown')
             print(f"  Type: {cam_type}")
             print(f"  Device: {device}")
             print(f"  Status: ✓ Present")
@@ -903,10 +915,10 @@ class EnhancedHardwareDetector:
             print(f"  Status: ✗ Not detected")
         
         # GPIO
-        gpio = self.detection_results.get('gpio', {})
+        gpio = self.detection_results.get('gpio')
         print(f"\nGPIO:")
-        if gpio.get('available'):
-            print(f"  Library: {gpio.get('library', 'Unknown')}")
+        if gpio and gpio.detected:
+            print(f"  Library: {gpio.details.get('library', 'Unknown')}")
             print(f"  Status: ✓ Available")
         else:
             print(f"  Status: ✗ Not available")
@@ -950,11 +962,21 @@ class EnhancedHardwareDetector:
     
     async def _detect_i2c_devices_enhanced(self) -> Dict[str, HardwareDetectionResult]:
         """Enhanced I2C device detection with confidence scoring"""
-        results = {}
+        individual_results = {}
         
         if not smbus:
             self.logger.warning("SMBus not available - I2C detection limited")
-            return results
+            # Return a grouped result indicating I2C is not available
+            return {
+                'i2c_devices': HardwareDetectionResult(
+                    component_name='i2c_devices',
+                    detected=False,
+                    confidence=DetectionConfidence.HIGH,
+                    details={'error': 'SMBus not available', 'devices': {}},
+                    alternative_options=['Install python3-smbus package'],
+                    requires_user_confirmation=False
+                )
+            }
         
         try:
             bus = smbus.SMBus(1)
@@ -966,6 +988,9 @@ class EnhancedHardwareDetector:
                 'display': {'address': 0x3c, 'alternatives': [0x3d]}
             }
             
+            detected_devices = {}
+            any_detected = False
+            
             for device_name, config in expected_devices.items():
                 primary_addr = config['address']
                 alternatives = config['alternatives']
@@ -974,6 +999,7 @@ class EnhancedHardwareDetector:
                 detected = self._test_i2c_address(bus, primary_addr)
                 confidence = DetectionConfidence.HIGH if detected else DetectionConfidence.UNKNOWN
                 alternative_options = []
+                actual_addr = primary_addr
                 
                 if not detected:
                     # Try alternatives
@@ -982,31 +1008,72 @@ class EnhancedHardwareDetector:
                             detected = True
                             confidence = DetectionConfidence.MEDIUM
                             alternative_options.append(f"Found at 0x{alt_addr:02x}")
+                            actual_addr = alt_addr
                             break
                 
-                results[device_name] = HardwareDetectionResult(
+                if detected:
+                    any_detected = True
+                    detected_devices[device_name] = {
+                        'address': f"0x{actual_addr:02x}",
+                        'present': True,
+                        'confidence': confidence.value
+                    }
+                
+                individual_results[device_name] = HardwareDetectionResult(
                     component_name=device_name,
                     detected=detected,
                     confidence=confidence,
-                    details={'address': primary_addr if confidence == DetectionConfidence.HIGH else alt_addr if alternative_options else primary_addr},
+                    details={'address': actual_addr},
                     alternative_options=alternative_options,
                     requires_user_confirmation=confidence == DetectionConfidence.MEDIUM
                 )
             
             bus.close()
             
+            # Create grouped result for I2C devices
+            group_result = HardwareDetectionResult(
+                component_name='i2c_devices',
+                detected=any_detected,
+                confidence=DetectionConfidence.HIGH if any_detected else DetectionConfidence.LOW,
+                details={'devices': detected_devices},
+                alternative_options=[],
+                requires_user_confirmation=False
+            )
+            
+            # Return both individual and grouped results
+            result = individual_results.copy()
+            result['i2c_devices'] = group_result
+            return result
+            
         except Exception as e:
             self.logger.error(f"I2C detection failed: {e}")
-        
-        return results
+            return {
+                'i2c_devices': HardwareDetectionResult(
+                    component_name='i2c_devices',
+                    detected=False,
+                    confidence=DetectionConfidence.LOW,
+                    details={'error': str(e), 'devices': {}},
+                    alternative_options=['Check I2C is enabled in raspi-config'],
+                    requires_user_confirmation=True
+                )
+            }
     
     async def _detect_serial_devices_enhanced(self) -> Dict[str, HardwareDetectionResult]:
         """Enhanced serial device detection with confidence scoring"""
-        results = {}
+        individual_results = {}
         
         if not serial:
             self.logger.warning("PySerial not available - serial detection limited")
-            return results
+            return {
+                'serial_devices': HardwareDetectionResult(
+                    component_name='serial_devices',
+                    detected=False,
+                    confidence=DetectionConfidence.HIGH,
+                    details={'error': 'PySerial not available', 'devices': {}},
+                    alternative_options=['Install python3-serial package'],
+                    requires_user_confirmation=False
+                )
+            }
         
         expected_devices = {
             'robohat': {'ports': ['/dev/ttyACM1', '/dev/ttyACM0'], 'baud': 115200},
@@ -1015,6 +1082,8 @@ class EnhancedHardwareDetector:
         }
         
         available_ports = [port.device for port in serial.tools.list_ports.comports()]
+        detected_devices = {}
+        any_detected = False
         
         for device_name, config in expected_devices.items():
             primary_port = config['ports'][0]
@@ -1039,7 +1108,15 @@ class EnhancedHardwareDetector:
                         alternative_options.append(f"Found at {alt_port}")
                         break
             
-            results[device_name] = HardwareDetectionResult(
+            if detected:
+                any_detected = True
+                detected_devices[device_name] = {
+                    'device': actual_port,
+                    'present': True,
+                    'baud': config['baud']
+                }
+            
+            individual_results[device_name] = HardwareDetectionResult(
                 component_name=device_name,
                 detected=detected,
                 confidence=confidence,
@@ -1048,7 +1125,20 @@ class EnhancedHardwareDetector:
                 requires_user_confirmation=confidence == DetectionConfidence.MEDIUM
             )
         
-        return results
+        # Create grouped result for serial devices
+        group_result = HardwareDetectionResult(
+            component_name='serial_devices',
+            detected=any_detected,
+            confidence=DetectionConfidence.HIGH if any_detected else DetectionConfidence.LOW,
+            details={'devices': detected_devices},
+            alternative_options=[],
+            requires_user_confirmation=False
+        )
+        
+        # Return both individual and grouped results
+        result = individual_results.copy()
+        result['serial_devices'] = group_result
+        return result
     
     async def _detect_camera_enhanced(self) -> Dict[str, HardwareDetectionResult]:
         """Enhanced camera detection with confidence scoring"""

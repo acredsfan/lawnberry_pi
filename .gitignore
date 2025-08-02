@@ -130,6 +130,7 @@ env/
 ENV/
 env.bak/
 venv.bak/
-solar_charge_calculator.py
-venv_coral/
+solar_charge_calculator.pyy
 *.whl
+venv_coral_pyenv
+hardware_detected.yaml

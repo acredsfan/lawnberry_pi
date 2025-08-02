@@ -5,7 +5,8 @@ Settings and configuration for the web API backend using Pydantic.
 
 from functools import lru_cache
 from typing import List, Optional, Dict, Any
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings
 import os
 
 
