@@ -9,9 +9,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 
-from ...vision.vision_manager import VisionManager
-from ...vision.coral_tpu_manager import CoralTPUManager
-from ...vision.tpu_dashboard import TPUPerformanceDashboard
+from vision.vision_manager import VisionManager
+from vision.coral_tpu_manager import CoralTPUManager
+from vision.tpu_dashboard import TPUPerformanceDashboard
 from ..dependencies import get_system_manager
 
 logger = logging.getLogger(__name__)

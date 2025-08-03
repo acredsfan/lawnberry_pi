@@ -81,76 +81,112 @@ const Dashboard: React.FC = () => {
   }
 
   return (
-    <Box sx={{ width: '100%', height: '100%', overflow: 'auto' }}>
+    <Box sx={{ width: '100%', height: '100%', overflow: 'auto' }} className="retro-grid">
       <Grid container spacing={3}>
         {/* Status Overview */}
         <Grid item xs={12}>
-          <Card>
+          <Card className="holographic">
             <CardContent>
               <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                <Typography variant="h5" component="h2">
-                  System Status
+                <Typography variant="h4" component="h2" className="neon-text">
+                  SYSTEM STATUS
                 </Typography>
-                <IconButton size="small">
+                <IconButton 
+                  size="small" 
+                  sx={{ 
+                    color: 'primary.main',
+                    '&:hover': { 
+                      color: 'secondary.main',
+                      transform: 'rotate(180deg)',
+                      transition: 'all 0.3s ease'
+                    }
+                  }}
+                >
                   <RefreshIcon />
                 </IconButton>
               </Box>
               
-              <Grid container spacing={2}>
+              <Grid container spacing={3}>
                 <Grid item xs={6} sm={3}>
-                  <Box display="flex" alignItems="center" gap={1}>
+                  <Box display="flex" flexDirection="column" alignItems="center" gap={1}>
                     <Chip 
                       label={status?.state.toUpperCase() || 'UNKNOWN'}
                       color={getStatusColor(status?.state || 'idle')}
-                      size="small"
+                      size="large"
+                      sx={{ 
+                        fontSize: '1.1rem', 
+                        fontWeight: 900,
+                        minWidth: '120px',
+                        animation: 'pulse-glow 2s ease-in-out infinite'
+                      }}
                     />
+                    <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                      Current State
+                    </Typography>
                   </Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Current State
-                  </Typography>
                 </Grid>
                 
                 <Grid item xs={6} sm={3}>
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <LocationIcon fontSize="small" />
-                    <Box>
-                      <Typography variant="body2">
-                        {status?.position ? 
-                          `${status.position.lat.toFixed(6)}, ${status.position.lng.toFixed(6)}` :
-                          'No Location'
-                        }
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {status?.location_source === 'gps_hardware' ? 'GPS' : 
-                         status?.location_source === 'config_fallback' ? 'Config' : 'Unknown'}
-                      </Typography>
+                  <Box display="flex" flexDirection="column" alignItems="center" gap={1}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <LocationIcon sx={{ color: 'primary.main', filter: 'drop-shadow(0 0 5px currentColor)' }} />
+                      <Box>
+                        <Typography variant="body2" className="neon-text" sx={{ fontFamily: 'monospace' }}>
+                          {status?.position ? 
+                            `${status.position.lat.toFixed(6)}, ${status.position.lng.toFixed(6)}` :
+                            'NO SIGNAL'
+                          }
+                        </Typography>
+                        <Chip 
+                          size="small"
+                          label={status?.location_source === 'gps' ? 'GPS ACTIVE' : 
+                                 status?.location_source === 'config' ? 'CONFIG MODE' : 'UNKNOWN'}
+                          color={status?.location_source === 'gps' ? 'success' : 'warning'}
+                        />
+                      </Box>
                     </Box>
+                    <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                      Position Lock
+                    </Typography>
                   </Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Position
-                  </Typography>
                 </Grid>
                 
                 <Grid item xs={6} sm={3}>
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <Typography variant="body2">
-                      {status?.coverage ? `${status.coverage.percentage.toFixed(1)}%` : '0%'}
+                  <Box display="flex" flexDirection="column" alignItems="center" gap={1}>
+                    <Typography variant="h3" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 900 }}>
+                      {status?.coverage ? `${status.coverage.percentage.toFixed(1)}%` : '0.0%'}
+                    </Typography>
+                    <LinearProgress 
+                      variant="determinate" 
+                      value={status?.coverage?.percentage || 0}
+                      sx={{ 
+                        width: '100%', 
+                        height: 8, 
+                        background: 'rgba(0, 255, 209, 0.2)',
+                        '& .MuiLinearProgress-bar': {
+                          background: 'linear-gradient(90deg, #00FFD1, #FF1493)',
+                          boxShadow: '0 0 10px currentColor'
+                        }
+                      }}
+                    />
+                    <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                      Area Coverage
                     </Typography>
                   </Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Coverage
-                  </Typography>
                 </Grid>
                 
                 <Grid item xs={6} sm={3}>
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <Typography variant="body2">
-                      {weatherData?.current.condition || 'Unknown'}
+                  <Box display="flex" flexDirection="column" alignItems="center" gap={1}>
+                    <Typography variant="h5" className="neon-text-secondary" sx={{ fontFamily: 'monospace' }}>
+                      {weatherData?.current.condition || 'UNKNOWN'}
+                    </Typography>
+                    <Typography variant="body2" className="neon-text" sx={{ fontFamily: 'monospace' }}>
+                      {weatherData?.current.temperature ? `${weatherData.current.temperature.toFixed(1)}°C` : '--°C'}
+                    </Typography>
+                    <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                      Weather Status
                     </Typography>
                   </Box>
-                  <Typography variant="caption" color="text.secondary">
-                    Weather
-                  </Typography>
                 </Grid>
               </Grid>
             </CardContent>
@@ -159,12 +195,12 @@ const Dashboard: React.FC = () => {
 
         {/* Camera Feed */}
         <Grid item xs={12} md={8}>
-          <Card sx={{ height: 400 }}>
+          <Card sx={{ height: 450 }} className="holographic">
             <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Live Camera Feed
+              <Typography variant="h5" gutterBottom className="neon-text" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                LIVE CAMERA FEED
               </Typography>
-              <Box className="camera-feed" sx={{ height: 320, backgroundColor: '#000', borderRadius: 1, position: 'relative' }}>
+              <Box className="camera-feed" sx={{ height: 380, backgroundColor: '#000', position: 'relative' }}>
                 {videoStream ? (
                   <>
                     <img 
@@ -173,18 +209,26 @@ const Dashboard: React.FC = () => {
                       style={{ 
                         width: '100%', 
                         height: '100%', 
-                        objectFit: 'cover',
-                        borderRadius: 4
+                        objectFit: 'cover'
                       }}
                       onError={() => setVideoStream(null)}
                     />
-                    <Box className="camera-overlay">
-                      {/* Overlay for detected objects would go here */}
-                    </Box>
+                    <Box className="camera-overlay" />
                   </>
                 ) : (
-                  <Box display="flex" justifyContent="center" alignItems="center" height="100%" color="white">
-                    <Typography>Camera feed unavailable</Typography>
+                  <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" height="100%" gap={2}>
+                    <Typography variant="h6" className="neon-text-secondary">
+                      CAMERA OFFLINE
+                    </Typography>
+                    <Typography variant="body2" className="neon-text" sx={{ fontFamily: 'monospace' }}>
+                      [NO SIGNAL DETECTED]
+                    </Typography>
+                    <Box sx={{ 
+                      width: 200, 
+                      height: 4, 
+                      background: 'linear-gradient(90deg, transparent, #FF073A, transparent)',
+                      animation: 'neon-border 2s linear infinite'
+                    }} />
                   </Box>
                 )}
               </Box>
@@ -194,19 +238,26 @@ const Dashboard: React.FC = () => {
 
         {/* Battery Status */}
         <Grid item xs={12} md={4}>
-          <Card sx={{ height: 400 }}>
+          <Card sx={{ height: 450 }} className="holographic">
             <CardContent>
-              <Box display="flex" alignItems="center" gap={1} mb={2}>
-                <BatteryIcon />
-                <Typography variant="h6">
-                  Battery Status
+              <Box display="flex" alignItems="center" gap={2} mb={3}>
+                <BatteryIcon sx={{ 
+                  fontSize: '2rem', 
+                  color: getBatteryColor(status?.battery.level || 0) === 'success' ? 'success.main' : 
+                         getBatteryColor(status?.battery.level || 0) === 'warning' ? 'warning.main' : 'error.main',
+                  filter: 'drop-shadow(0 0 10px currentColor)'
+                }} />
+                <Typography variant="h5" className="neon-text" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                  POWER CORE
                 </Typography>
               </Box>
               
-              <Box sx={{ mb: 3 }}>
-                <Box display="flex" justifyContent="space-between" mb={1}>
-                  <Typography variant="body2">Charge Level</Typography>
-                  <Typography variant="body2" fontWeight="bold">
+              <Box sx={{ mb: 4 }}>
+                <Box display="flex" justifyContent="space-between" mb={2}>
+                  <Typography variant="body2" className="neon-text-secondary" sx={{ textTransform: 'uppercase' }}>
+                    Charge Level
+                  </Typography>
+                  <Typography variant="h4" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 900 }}>
                     {status?.battery.level || 0}%
                   </Typography>
                 </Box>
@@ -214,34 +265,54 @@ const Dashboard: React.FC = () => {
                   variant="determinate" 
                   value={status?.battery.level || 0}
                   color={getBatteryColor(status?.battery.level || 0)}
-                  sx={{ height: 8, borderRadius: 4 }}
+                  sx={{ 
+                    height: 16, 
+                    border: '1px solid currentColor',
+                    background: 'rgba(0, 0, 0, 0.8)',
+                    '& .MuiLinearProgress-bar': {
+                      boxShadow: '0 0 20px currentColor'
+                    }
+                  }}
                 />
               </Box>
 
               <Grid container spacing={2}>
                 <Grid item xs={6}>
-                  <Typography variant="caption" color="text.secondary">Voltage</Typography>
-                  <Typography variant="body2" fontWeight="bold">
+                  <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase' }}>
+                    Voltage
+                  </Typography>
+                  <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
                     {status?.battery.voltage.toFixed(2) || '0.00'}V
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="caption" color="text.secondary">Current</Typography>
-                  <Typography variant="body2" fontWeight="bold">
+                  <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase' }}>
+                    Current
+                  </Typography>
+                  <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
                     {status?.battery.current.toFixed(2) || '0.00'}A
                   </Typography>
                 </Grid>
                 <Grid item xs={12}>
-                  <Typography variant="caption" color="text.secondary">Charging</Typography>
-                  <Typography variant="body2" fontWeight="bold">
-                    {status?.battery.charging ? 'Yes' : 'No'}
+                  <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase' }}>
+                    Charging Status
                   </Typography>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                      {status?.battery.charging ? 'CHARGING' : 'DISCHARGING'}
+                    </Typography>
+                    <Box 
+                      className={`status-indicator ${status?.battery.charging ? 'status-online' : 'status-warning'}`}
+                    />
+                  </Box>
                 </Grid>
                 {status?.battery.timeRemaining && (
                   <Grid item xs={12}>
-                    <Typography variant="caption" color="text.secondary">Time Remaining</Typography>
-                    <Typography variant="body2" fontWeight="bold">
-                      {Math.floor(status.battery.timeRemaining / 60)}h {status.battery.timeRemaining % 60}m
+                    <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase' }}>
+                      Time Remaining
+                    </Typography>
+                    <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                      {Math.floor(status.battery.timeRemaining / 60)}H {status.battery.timeRemaining % 60}M
                     </Typography>
                   </Grid>
                 )}
@@ -252,42 +323,70 @@ const Dashboard: React.FC = () => {
 
         {/* Sensor Data Chart */}
         <Grid item xs={12}>
-          <Card>
+          <Card className="holographic">
             <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Real-time Sensor Data
+              <Typography variant="h5" gutterBottom className="neon-text" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                REAL-TIME SENSOR DATA
               </Typography>
               <Box className="chart-container">
                 <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={sensorHistory}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="time" />
-                    <YAxis yAxisId="left" />
-                    <YAxis yAxisId="right" orientation="right" />
-                    <Tooltip />
+                  <LineChart data={sensorHistory} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 255, 209, 0.3)" />
+                    <XAxis 
+                      dataKey="time" 
+                      stroke="#00FFD1" 
+                      style={{ fontSize: '12px', fontFamily: 'monospace' }}
+                    />
+                    <YAxis 
+                      yAxisId="left" 
+                      stroke="#00FFD1" 
+                      style={{ fontSize: '12px', fontFamily: 'monospace' }}
+                    />
+                    <YAxis 
+                      yAxisId="right" 
+                      orientation="right" 
+                      stroke="#FF1493" 
+                      style={{ fontSize: '12px', fontFamily: 'monospace' }}
+                    />
+                    <Tooltip 
+                      contentStyle={{
+                        backgroundColor: '#1a1a2e',
+                        border: '2px solid #00FFD1',
+                        borderRadius: 0,
+                        boxShadow: '0 0 20px rgba(0, 255, 209, 0.5)',
+                        fontFamily: 'monospace',
+                        color: '#FFFFFF'
+                      }}
+                    />
                     <Line 
                       yAxisId="left"
                       type="monotone" 
                       dataKey="battery" 
-                      stroke="#4caf50" 
-                      strokeWidth={2}
+                      stroke="#39FF14" 
+                      strokeWidth={3}
                       name="Battery (%)"
+                      dot={{ fill: '#39FF14', strokeWidth: 2, r: 4 }}
+                      activeDot={{ r: 6, stroke: '#39FF14', strokeWidth: 2, fill: '#39FF14' }}
                     />
                     <Line 
                       yAxisId="right"
                       type="monotone" 
                       dataKey="temperature" 
-                      stroke="#ff9800" 
-                      strokeWidth={2}
+                      stroke="#FFD700" 
+                      strokeWidth={3}
                       name="Temperature (°C)"
+                      dot={{ fill: '#FFD700', strokeWidth: 2, r: 4 }}
+                      activeDot={{ r: 6, stroke: '#FFD700', strokeWidth: 2, fill: '#FFD700' }}
                     />
                     <Line 
                       yAxisId="right"
                       type="monotone" 
                       dataKey="speed" 
-                      stroke="#2196f3" 
-                      strokeWidth={2}
+                      stroke="#FF1493" 
+                      strokeWidth={3}
                       name="Speed (km/h)"
+                      dot={{ fill: '#FF1493', strokeWidth: 2, r: 4 }}
+                      activeDot={{ r: 6, stroke: '#FF1493', strokeWidth: 2, fill: '#FF1493' }}
                     />
                   </LineChart>
                 </ResponsiveContainer>

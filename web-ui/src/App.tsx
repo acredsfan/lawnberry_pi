@@ -35,6 +35,80 @@ const App: React.FC = () => {
       try {
         dispatch(setConnectionStatus('connecting'))
         
+        // Initialize with mock data for demonstration
+        const mockMowerStatus = {
+          state: 'idle' as const,
+          position: {
+            lat: 40.7128,
+            lng: -74.0060,
+            heading: 90,
+            accuracy: 5
+          },
+          battery: {
+            level: 78,
+            voltage: 24.2,
+            current: 1.8,
+            charging: false,
+            timeRemaining: 145
+          },
+          sensors: {
+            imu: {
+              orientation: { x: 0.1, y: -0.2, z: 0.0 },
+              acceleration: { x: 0.0, y: 0.0, z: 9.81 },
+              gyroscope: { x: 0.01, y: -0.02, z: 0.00 },
+              temperature: 35.6
+            },
+            tof: {
+              left: 1.2,
+              right: 0.8
+            },
+            environmental: {
+              temperature: 24.5,
+              humidity: 65,
+              pressure: 1013.25
+            },
+            power: {
+              voltage: 24.2,
+              current: 1.8,
+              power: 43.56
+            }
+          },
+          coverage: {
+            totalArea: 1000,
+            coveredArea: 750,
+            percentage: 75.0
+          },
+          lastUpdate: Date.now(),
+          location_source: 'gps' as const,
+          connected: true
+        }
+
+        const mockWeatherData = {
+          current: {
+            temperature: 24.5,
+            humidity: 65,
+            windSpeed: 3.2,
+            windDirection: 180,
+            precipitation: 0,
+            condition: 'Partly Cloudy',
+            icon: 'partly-cloudy'
+          },
+          forecast: [
+            {
+              date: new Date().toISOString().split('T')[0],
+              temperature: { min: 18, max: 28 },
+              condition: 'Sunny',
+              icon: 'sunny',
+              precipitation: 0
+            }
+          ],
+          alerts: []
+        }
+        
+        // Set initial mock data
+        dispatch(setStatus(mockMowerStatus))
+        dispatch(setWeatherData(mockWeatherData))
+        
         // Initialize WebSocket connection
         webSocketService.connect()
         
@@ -68,6 +142,47 @@ const App: React.FC = () => {
           }))
         })
 
+        webSocketService.on('mqtt_data', (data, topic) => {
+          // Handle MQTT data forwarded through WebSocket
+          console.log('Received MQTT data:', topic, data)
+          
+          // Route data to appropriate store slices based on topic
+          if (topic.startsWith('system/status')) {
+            dispatch(setStatus(data))
+          } else if (topic.startsWith('sensors/')) {
+            // Handle sensor data
+            if (data.sensor_type === 'environmental') {
+              // Update weather-related sensor data
+              dispatch(setWeatherData({
+                current: {
+                  temperature: data.temperature,
+                  humidity: data.humidity,
+                  condition: data.condition || 'unknown'
+                }
+              }))
+            }
+          } else if (topic.startsWith('power/battery')) {
+            // Update battery status
+            dispatch(setStatus({
+              battery: data
+            }))
+          } else if (topic.startsWith('navigation/')) {
+            // Update navigation data
+            dispatch(setStatus({
+              position: data.position,
+              location_source: data.location_source
+            }))
+          } else if (topic.startsWith('weather/current')) {
+            dispatch(setWeatherData(data))
+          }
+        })
+
+        webSocketService.on('data', (data, topic) => {
+          // Handle direct data messages
+          console.log('Received direct data:', topic, data)
+          // Process similar to mqtt_data
+        })
+
         webSocketService.on('mower_status', (data) => {
           dispatch(setStatus(data))
         })
@@ -79,6 +194,46 @@ const App: React.FC = () => {
         webSocketService.on('notification', (data) => {
           dispatch(addNotification(data))
         })
+
+        // Simulate periodic data updates for demo purposes
+        const simulateDataUpdates = () => {
+          setInterval(() => {
+            const updatedStatus = {
+              ...mockMowerStatus,
+              battery: {
+                ...mockMowerStatus.battery,
+                level: Math.max(20, mockMowerStatus.battery.level - Math.random() * 0.5),
+                current: 1.5 + Math.random() * 0.6
+              },
+              sensors: {
+                ...mockMowerStatus.sensors,
+                environmental: {
+                  ...mockMowerStatus.sensors.environmental,
+                  temperature: 24.5 + (Math.random() - 0.5) * 2,
+                  humidity: 65 + (Math.random() - 0.5) * 10
+                },
+                imu: {
+                  ...mockMowerStatus.sensors.imu,
+                  acceleration: {
+                    x: (Math.random() - 0.5) * 0.2,
+                    y: (Math.random() - 0.5) * 0.2,
+                    z: 9.81 + (Math.random() - 0.5) * 0.1
+                  }
+                }
+              },
+              coverage: {
+                ...mockMowerStatus.coverage,
+                coveredArea: Math.min(1000, mockMowerStatus.coverage.coveredArea + Math.random() * 5),
+                percentage: Math.min(100, mockMowerStatus.coverage.percentage + Math.random() * 0.5)
+              },
+              lastUpdate: Date.now()
+            }
+            dispatch(setStatus(updatedStatus))
+          }, 3000) // Update every 3 seconds for demo
+        }
+
+        // Start data simulation after a short delay
+        setTimeout(simulateDataUpdates, 2000)
 
         // Track user activity
         const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart']
@@ -160,6 +315,7 @@ const App: React.FC = () => {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/navigation" element={<Navigation />} />
           <Route path="/maps" element={<Maps />} />
+          <Route path="/rc-control" element={<RCControl />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/training" element={<Training />} />
           <Route path="/documentation" element={<Documentation />} />

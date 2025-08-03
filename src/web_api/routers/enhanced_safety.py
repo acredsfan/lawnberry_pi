@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 import logging
 
-from ...safety.access_control import SafetyAccessLevel, TrainingModule
+from safety.access_control import SafetyAccessLevel, TrainingModule
 from ..auth import require_permission, get_current_user
 from ..schemas import SuccessResponse, ErrorResponse
 

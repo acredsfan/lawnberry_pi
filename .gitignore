@@ -134,4 +134,5 @@ solar_charge_calculator.pyy
 *.whl
 venv_coral_pyenv
 hardware_detected.yaml
-hardware_detection_results.json
+*hardware_detection_results.json
+

@@ -1,0 +1,43 @@
+[Unit]
+Description=Lawnberry Web API Backend
+After=network.target mosquitto.service redis.service
+Wants=mosquitto.service redis.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+Restart=always
+RestartSec=5
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/lawnberry_pi
+ExecStart=/home/pi/lawnberry_pi/venv/bin/python /home/pi/lawnberry_pi/src/web_api/run_server.py
+Environment=PYTHONPATH=/home/pi/lawnberry_pi/src
+Environment=LOG_LEVEL=INFO
+Environment=HOST=0.0.0.0
+Environment=PORT=8000
+
+# Allow access to home directory for development environment
+ProtectHome=false
+
+# Security settings (relaxed for development)
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/lawnberry /tmp /home/pi/lawnberry_pi
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+CPUQuota=200%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawnberry-api
+
+[Install]
+WantedBy=multi-user.target

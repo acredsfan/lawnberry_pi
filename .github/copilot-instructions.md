@@ -9,6 +9,10 @@
 - **Always use `timeout` command**: `timeout 30s python script.py` or implement internal timeouts
 - **Clean workspace obsessively** - Delete ALL temporary test files, debug scripts, and verification files
 - **Never commit sensitive data** - Check for API keys, passwords, or personal information before any commits
+- **NEVER use workarounds or shortcuts** - Always make sure fixes are complete and ensure intended design/functionality.
+- **Always keep user and developer documentation up-to-date** - Update README, API docs, and inline comments with every change.
+- **Double and Triple check all changes** - Review code thoroughly before committing.
+- **Ensure all changes made are also integrated into the installation script** - Update installation scripts and deployment configurations accordingly.
 
 ## Architecture Overview
 

@@ -9,7 +9,7 @@ from datetime import datetime
 import logging
 
 from ..dependencies import get_system_manager
-from ...system_integration.dynamic_resource_manager import OperationMode
+from system_integration.dynamic_resource_manager import OperationMode
 
 logger = logging.getLogger(__name__)
 

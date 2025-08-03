@@ -11,7 +11,7 @@ from ..models import MowingSchedule, PatternConfig, MowingPattern, SuccessRespon
 from ..auth import get_current_user, require_permission
 from ..exceptions import ServiceUnavailableError, NotFoundError
 from ..mqtt_bridge import MQTTBridge
-from ...navigation.pattern_service import pattern_service
+from navigation.pattern_service import pattern_service
 
 router = APIRouter()
 

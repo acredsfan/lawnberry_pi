@@ -28,7 +28,7 @@ import {
 import {
   RadioButtonChecked,
   RadioButtonUnchecked,
-  Emergency,
+  Report as Emergency,
   Settings,
   Refresh,
   Warning,

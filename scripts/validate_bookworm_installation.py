@@ -334,7 +334,7 @@ class BookwormInstallationValidator:
             start_time = time.time()
             with open(test_file, 'wb') as f:
                 f.write(test_data)
-                f.fsync()
+                os.fsync(f.fileno())
             write_time = time.time() - start_time
             performance_metrics['disk_write_time'] = write_time
             

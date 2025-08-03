@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional, Callable, Set
 from datetime import datetime
 import weakref
 
-from ..communication.client import MQTTClient
+from communication.client import MQTTClient
 from .models import WebSocketMessage
 
 
@@ -109,11 +109,11 @@ class MQTTBridge:
         
         # Subscribe to all mapped topics
         for topic in self._topic_mappings.keys():
-            await self.mqtt_client.subscribe(
-                f"lawnberry/{topic}",
-                callback=self._handle_mqtt_message
-            )
-            self.logger.debug(f"Subscribed to lawnberry/{topic}")
+            full_topic = f"lawnberry/{topic}"
+            await self.mqtt_client.subscribe(full_topic)
+            # Add message handler for this topic
+            self.mqtt_client.add_message_handler(full_topic, self._handle_mqtt_message)
+            self.logger.debug(f"Subscribed to {full_topic}")
     
     async def _handle_mqtt_message(self, topic: str, payload: Dict[str, Any]):
         """Handle incoming MQTT messages"""

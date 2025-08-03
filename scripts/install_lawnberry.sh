@@ -15,6 +15,176 @@ USER=$(whoami)
 GROUP=$(id -gn)
 BACKUP_DIR="/var/backups/lawnberry"
 
+# Installation component flags
+INSTALL_DEPENDENCIES=true
+INSTALL_PYTHON_ENV=true
+INSTALL_WEB_UI=true
+INSTALL_SERVICES=true
+INSTALL_DATABASE=true
+INSTALL_SYSTEM_CONFIG=true
+SKIP_HARDWARE=false
+SKIP_ENV=false
+SKIP_VALIDATION=false
+
+# Parse command line arguments for modular installation
+show_help() {
+    cat << 'EOF'
+LawnBerry Installation Script - Modular Installation Support
+
+Usage: ./install_lawnberry.sh [OPTIONS]
+
+Installation Options:
+  --help                    Show this help message
+  --dependencies-only       Install only system dependencies
+  --python-only            Install only Python environment and packages
+  --web-ui-only            Build and install only the web UI
+  --services-only          Install only systemd services
+  --database-only          Initialize only the database
+  --system-config-only     Configure only system settings
+  
+Component Combinations:
+  --backend-only           Install dependencies + Python + services + database
+  --frontend-only          Install web UI only
+  --minimal                Install core components (no validation, no hardware detection)
+
+Control Options:
+  --skip-hardware          Skip hardware detection and sensor setup
+  --skip-env               Skip environment file setup
+  --skip-validation        Skip post-installation validation
+  --non-interactive        Run in non-interactive mode
+  --debug                  Enable debug output
+
+Examples:
+  ./install_lawnberry.sh                    # Full installation
+  ./install_lawnberry.sh --web-ui-only      # Only rebuild web UI
+  ./install_lawnberry.sh --services-only    # Only reinstall services
+  ./install_lawnberry.sh --backend-only     # Backend components only
+  ./install_lawnberry.sh --minimal          # Core installation only
+EOF
+}
+
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --help)
+                show_help
+                exit 0
+                ;;
+            --dependencies-only)
+                INSTALL_DEPENDENCIES=true
+                INSTALL_PYTHON_ENV=false
+                INSTALL_WEB_UI=false
+                INSTALL_SERVICES=false
+                INSTALL_DATABASE=false
+                INSTALL_SYSTEM_CONFIG=false
+                SKIP_VALIDATION=true
+                ;;
+            --python-only)
+                INSTALL_DEPENDENCIES=false
+                INSTALL_PYTHON_ENV=true
+                INSTALL_WEB_UI=false
+                INSTALL_SERVICES=false
+                INSTALL_DATABASE=false
+                INSTALL_SYSTEM_CONFIG=false
+                SKIP_VALIDATION=true
+                ;;
+            --web-ui-only)
+                INSTALL_DEPENDENCIES=false
+                INSTALL_PYTHON_ENV=false
+                INSTALL_WEB_UI=true
+                INSTALL_SERVICES=false
+                INSTALL_DATABASE=false
+                INSTALL_SYSTEM_CONFIG=false
+                SKIP_VALIDATION=true
+                SKIP_HARDWARE=true
+                SKIP_ENV=true
+                ;;
+            --services-only)
+                INSTALL_DEPENDENCIES=false
+                INSTALL_PYTHON_ENV=false
+                INSTALL_WEB_UI=false
+                INSTALL_SERVICES=true
+                INSTALL_DATABASE=false
+                INSTALL_SYSTEM_CONFIG=false
+                SKIP_VALIDATION=true
+                SKIP_HARDWARE=true
+                ;;
+            --database-only)
+                INSTALL_DEPENDENCIES=false
+                INSTALL_PYTHON_ENV=false
+                INSTALL_WEB_UI=false
+                INSTALL_SERVICES=false
+                INSTALL_DATABASE=true
+                INSTALL_SYSTEM_CONFIG=false
+                SKIP_VALIDATION=true
+                SKIP_HARDWARE=true
+                SKIP_ENV=true
+                ;;
+            --system-config-only)
+                INSTALL_DEPENDENCIES=false
+                INSTALL_PYTHON_ENV=false
+                INSTALL_WEB_UI=false
+                INSTALL_SERVICES=false
+                INSTALL_DATABASE=false
+                INSTALL_SYSTEM_CONFIG=true
+                SKIP_VALIDATION=true
+                SKIP_HARDWARE=true
+                ;;
+            --backend-only)
+                INSTALL_DEPENDENCIES=true
+                INSTALL_PYTHON_ENV=true
+                INSTALL_WEB_UI=false
+                INSTALL_SERVICES=true
+                INSTALL_DATABASE=true
+                INSTALL_SYSTEM_CONFIG=true
+                SKIP_VALIDATION=true
+                ;;
+            --frontend-only)
+                INSTALL_DEPENDENCIES=false
+                INSTALL_PYTHON_ENV=false
+                INSTALL_WEB_UI=true
+                INSTALL_SERVICES=false
+                INSTALL_DATABASE=false
+                INSTALL_SYSTEM_CONFIG=false
+                SKIP_VALIDATION=true
+                SKIP_HARDWARE=true
+                SKIP_ENV=true
+                ;;
+            --minimal)
+                INSTALL_DEPENDENCIES=true
+                INSTALL_PYTHON_ENV=true
+                INSTALL_WEB_UI=true
+                INSTALL_SERVICES=true
+                INSTALL_DATABASE=true
+                INSTALL_SYSTEM_CONFIG=true
+                SKIP_VALIDATION=true
+                SKIP_HARDWARE=true
+                ;;
+            --skip-hardware)
+                SKIP_HARDWARE=true
+                ;;
+            --skip-env)
+                SKIP_ENV=true
+                ;;
+            --skip-validation)
+                SKIP_VALIDATION=true
+                ;;
+            --non-interactive)
+                NON_INTERACTIVE=true
+                ;;
+            --debug)
+                DEBUG_MODE=true
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+        shift
+    done
+}
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -1470,56 +1640,13 @@ show_completion_message() {
 }
 
 # Main installation process
+# Enhanced main function with modular installation support
 main() {
     print_header
     
-    # --- Argument Parsing ---
-    SKIP_HARDWARE=false
-    SKIP_ENV=false
-    NON_INTERACTIVE=false
-    FORCE_REINSTALL=false
+    # Parse command line arguments for modular installation
+    parse_arguments "$@"
     
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --skip-hardware)
-                SKIP_HARDWARE=true
-                shift
-                ;;
-            --skip-env)
-                SKIP_ENV=true
-                shift
-                ;;
-            --non-interactive)
-                NON_INTERACTIVE=true
-                shift
-                ;;
-            --force-reinstall)
-                FORCE_REINSTALL=true
-                shift
-                ;;
-            --debug)
-                DEBUG_MODE=true
-                shift
-                ;;
-            -h|--help)
-                echo "Usage: $0 [OPTIONS]"
-                echo "Options:"
-                echo "  --skip-hardware    Skip hardware detection"
-                echo "  --skip-env        Skip environment setup"
-                echo "  --non-interactive Run without user prompts"
-                echo "  --force-reinstall Force reinstall of Python environment"
-                echo "  --debug           Enable debug logging"
-                echo "  -h, --help        Show this help"
-                exit 0
-                ;;
-            *)
-                log_error "Unknown option: $1"
-                exit 1
-                ;;
-        esac
-    done
-
-    # --- Start Installation ---
     # Clear log file at the beginning of the script
     if [ "$DEBUG_MODE" = true ]; then
         > "$LOG_FILE"
@@ -1543,28 +1670,39 @@ main() {
         fi
     fi
 
-    log_debug "Installation started with the following options:"
+    log_info "Installation mode configuration:"
+    log_info "  INSTALL_DEPENDENCIES: $INSTALL_DEPENDENCIES"
+    log_info "  INSTALL_PYTHON_ENV: $INSTALL_PYTHON_ENV"
+    log_info "  INSTALL_WEB_UI: $INSTALL_WEB_UI"
+    log_info "  INSTALL_SERVICES: $INSTALL_SERVICES"
+    log_info "  INSTALL_DATABASE: $INSTALL_DATABASE"
+    log_info "  INSTALL_SYSTEM_CONFIG: $INSTALL_SYSTEM_CONFIG"
     log_debug "  SKIP_HARDWARE: $SKIP_HARDWARE"
     log_debug "  SKIP_ENV: $SKIP_ENV"
-    log_debug "  NON_INTERACTIVE: $NON_INTERACTIVE"
+    log_debug "  SKIP_VALIDATION: $SKIP_VALIDATION"
     log_debug "  DEBUG_MODE: $DEBUG_MODE"
 
-    # Run installation steps
+    # Always check these first regardless of mode
     check_root
     fix_permissions
     check_system
-    install_dependencies
-    setup_python_environment
+
+    # Run installation steps based on flags
+    if [[ "$INSTALL_DEPENDENCIES" == true ]]; then
+        install_dependencies
+        setup_coral_packages
+    fi
     
-    # Optional Coral TPU support setup
-    setup_coral_packages
+    if [[ "$INSTALL_PYTHON_ENV" == true ]]; then
+        setup_python_environment
+    fi
     
-    if [[ "$SKIP_HARDWARE" != true ]]; then
+    if [[ "$SKIP_HARDWARE" != true ]] && [[ "$INSTALL_DEPENDENCIES" == true || "$INSTALL_PYTHON_ENV" == true ]]; then
         detect_hardware
         initialize_tof_sensors
     fi
     
-    if [[ "$SKIP_ENV" != true ]]; then
+    if [[ "$SKIP_ENV" != true ]] && [[ "$INSTALL_SYSTEM_CONFIG" == true ]]; then
         if [[ "$NON_INTERACTIVE" == true ]]; then
             log_info "Skipping environment setup in non-interactive mode"
         else
@@ -1572,13 +1710,33 @@ main() {
         fi
     fi
     
-    build_web_ui
-    create_directories
-    install_services
-    setup_database
-    configure_system
-    run_post_install_validation
-    run_tests
+    if [[ "$INSTALL_WEB_UI" == true ]]; then
+        build_web_ui
+    fi
+    
+    # Always create directories if installing any component that needs them
+    if [[ "$INSTALL_SERVICES" == true || "$INSTALL_DATABASE" == true ]]; then
+        create_directories
+    fi
+    
+    if [[ "$INSTALL_SERVICES" == true ]]; then
+        install_services
+    fi
+    
+    if [[ "$INSTALL_DATABASE" == true ]]; then
+        setup_database
+    fi
+    
+    if [[ "$INSTALL_SYSTEM_CONFIG" == true ]]; then
+        configure_system
+    fi
+    
+    # Run validation and tests unless skipped
+    if [[ "$SKIP_VALIDATION" != true ]]; then
+        run_post_install_validation
+        run_tests
+    fi
+    
     cleanup
     show_completion_message
     

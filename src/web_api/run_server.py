@@ -10,6 +10,13 @@ import signal
 import sys
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+project_root = Path(__file__).parent.parent.parent
+env_file = project_root / ".env"
+if env_file.exists():
+    load_dotenv(env_file)
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))

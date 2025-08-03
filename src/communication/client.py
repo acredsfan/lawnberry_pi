@@ -146,6 +146,22 @@ class MQTTClient:
             self.logger.error(f"Failed to initialize MQTT client: {e}")
             return False
     
+    async def connect(self) -> bool:
+        """Public method to connect to MQTT broker"""
+        return await self._connect()
+    
+    async def disconnect(self):
+        """Public method to disconnect from MQTT broker"""
+        if self.client and self._connected:
+            self.client.loop_stop()
+            self.client.disconnect()
+            self._connected = False
+            self.logger.info("MQTT client disconnected")
+    
+    def is_connected(self) -> bool:
+        """Check if client is connected"""
+        return self._connected
+    
     async def shutdown(self):
         """Shutdown client gracefully"""
         self.logger.info("Shutting down MQTT client...")

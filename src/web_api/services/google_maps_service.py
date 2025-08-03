@@ -13,7 +13,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 import aiohttp
-import aioredis
+from redis.asyncio import Redis
 from fastapi import HTTPException
 
 
@@ -77,7 +77,7 @@ class GoogleMapsService:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        redis_client: Optional[aioredis.Redis] = None,
+        redis_client: Optional[Redis] = None,
         usage_level: UsageLevel = UsageLevel.MEDIUM,
         cost_alert_threshold: float = 50.0
     ):

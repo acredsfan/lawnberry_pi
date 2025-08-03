@@ -42,8 +42,8 @@ async def lifespan(app: FastAPI):
     
     # Initialize Redis client for caching
     try:
-        import aioredis
-        redis_client = aioredis.from_url(
+        from redis.asyncio import Redis
+        redis_client = Redis.from_url(
             f"redis://{settings.redis.host}:{settings.redis.port}/{settings.redis.db}",
             password=settings.redis.password,
             max_connections=settings.redis.max_connections

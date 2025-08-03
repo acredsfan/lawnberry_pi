@@ -1,15 +1,11 @@
 """
-Pydantic Models
-API request/response models with validation for all endpoints.
+Pydantic models for the web API.
 """
 
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Union
+from typing import Dict, List, Optional, Any, Union
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from enum import Enum
-
-from pydantic import BaseModel, Field, validator
-
-from .utils import sanitize_string
 
 
 # Enums
@@ -125,11 +121,8 @@ class NavigationStatus(TimestampedModel):
 
 
 class NavigationCommand(BaseAPIModel):
-    """Navigation control command"""
-    action: str = Field(regex="^(start|stop|pause|resume|return_home)$")
-    target_position: Optional[Position] = None
-    pattern: Optional[MowingPattern] = None
-    speed: Optional[float] = Field(gt=0, le=2.0)
+    """Navigation command request"""
+    action: str = Field(pattern="^(start|stop|pause|resume|return_home)$")
 
 
 # Pattern Models
@@ -137,11 +130,12 @@ class MowingSchedule(BaseAPIModel):
     """Mowing schedule configuration"""
     enabled: bool = True
     days_of_week: List[int] = Field(min_items=1, max_items=7)
-    start_time: str = Field(regex="^([01]?[0-9]|2[0-3]):[0-5][0-9]$")
+    start_time: str = Field(pattern="^([01]?[0-9]|2[0-3]):[0-5][0-9]$")
     duration_minutes: int = Field(gt=0, le=480)
     pattern: MowingPattern
     
-    @validator('days_of_week')
+    @field_validator('days_of_week')
+    @classmethod
     def validate_days(cls, v):
         if not all(0 <= day <= 6 for day in v):
             raise ValueError('Days must be 0-6 (Monday=0)')
@@ -159,8 +153,8 @@ class PatternConfig(BaseAPIModel):
 # Configuration Models
 class SystemConfig(BaseAPIModel):
     """System configuration"""
-    units: str = Field(regex="^(metric|imperial)$", default="metric")
-    temperature_unit: str = Field(regex="^(celsius|fahrenheit)$", default="celsius")
+    units: str = Field(pattern="^(metric|imperial)$", default="metric")
+    temperature_unit: str = Field(pattern="^(celsius|fahrenheit)$", default="celsius")
     safety_timeout: int = Field(gt=0, le=300, default=100)
     emergency_stop_enabled: bool = True
     auto_return_battery_level: float = Field(ge=0.1, le=0.5, default=0.2)
@@ -181,7 +175,8 @@ class Boundary(BaseAPIModel):
     points: List[Position] = Field(min_items=3)
     name: str = "main_boundary"
     
-    @validator('points')
+    @field_validator('points')
+    @classmethod
     def validate_boundary(cls, v):
         if len(v) < 3:
             raise ValueError('Boundary must have at least 3 points')
@@ -194,7 +189,8 @@ class NoGoZone(BaseAPIModel):
     name: str
     priority: Priority = Priority.HIGH
     
-    @validator('points')
+    @field_validator('points')
+    @classmethod
     def validate_zone(cls, v):
         if len(v) < 3:
             raise ValueError('No-go zone must have at least 3 points')
@@ -221,9 +217,10 @@ class HomeLocation(BaseAPIModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     
-    @validator('custom_type')
-    def validate_custom_type(cls, v, values):
-        if values.get('type') == HomeLocationType.CUSTOM and not v:
+    @field_validator('custom_type')
+    @classmethod
+    def validate_custom_type(cls, v, info):
+        if info.data.get('type') == HomeLocationType.CUSTOM and not v:
             raise ValueError('custom_type is required when type is CUSTOM')
         return v
 
@@ -343,10 +340,11 @@ class PaginatedResponse(BaseAPIModel):
     size: int
     pages: int
     
-    @validator('pages', pre=True, always=True)
-    def calculate_pages(cls, v, values):
-        total = values.get('total', 0)
-        size = values.get('size', 20)
+    @field_validator('pages', mode='before')
+    @classmethod
+    def calculate_pages(cls, v, info):
+        total = info.data.get('total', 0)
+        size = info.data.get('size', 20)
         return max(1, (total + size - 1) // size) if total > 0 else 1
 
 
