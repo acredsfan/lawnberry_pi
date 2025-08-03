@@ -61,6 +61,6 @@
     "camera_tests": {
       "error": "'HardwareDetectionResult' object has no attribute 'get'"
     },
-    "timestamp": 1754237473.0665507
+    "timestamp": 1754238523.0662167
   }
 }
