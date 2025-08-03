@@ -210,7 +210,7 @@ class HardwarePlugin(ABC):
 
 
 class ToFSensorPlugin(HardwarePlugin):
-    """VL53L0X Time-of-Flight sensor plugin"""
+    """VL53L0X Time-of-Flight sensor plugin using Adafruit CircuitPython library"""
     
     @property
     def plugin_type(self) -> str:
@@ -221,44 +221,80 @@ class ToFSensorPlugin(HardwarePlugin):
         return ["i2c", "gpio"]
     
     async def initialize(self) -> bool:
-        """Initialize ToF sensor"""
+        """Initialize ToF sensor using proper VL53L0X library"""
         async with self._lock:
             if self._initialized:
                 return True
             
             try:
-                i2c_manager = self.managers["i2c"]
-                gpio_manager = self.managers["gpio"]
+                # Import ToF manager
+                from .tof_manager import ToFSensorManager, ToFSensorConfig
                 
-                # Get configuration
-                address = self.config.parameters.get("i2c_address", 0x29)
+                # Get configuration parameters
+                sensor_name = self.config.name
                 shutdown_pin = self.config.parameters.get("shutdown_pin")
                 interrupt_pin = self.config.parameters.get("interrupt_pin")
+                target_address = self.config.parameters.get("i2c_address", 0x29)
                 
-                # Setup GPIO pins if specified
-                if shutdown_pin:
-                    await gpio_manager.setup_pin(shutdown_pin, "output", initial=1)
-                if interrupt_pin:
-                    await gpio_manager.setup_pin(interrupt_pin, "input", pull_up_down="up")
+                if not shutdown_pin:
+                    raise HardwareError(f"ToF sensor {sensor_name} missing shutdown_pin configuration")
                 
-                # Initialize sensor (simplified - would include actual VL53L0X init sequence)
-                await i2c_manager.write_register(address, 0x00, 0x01)  # Power on
-                await asyncio.sleep(0.1)
+                # Create sensor configuration
+                sensor_config = ToFSensorConfig(
+                    name=sensor_name,
+                    shutdown_pin=shutdown_pin,
+                    interrupt_pin=interrupt_pin,
+                    target_address=target_address
+                )
                 
-                # Verify sensor ID
-                sensor_id = await i2c_manager.read_register(address, 0xC0, 1)
-                if sensor_id[0] != 0xEE:  # VL53L0X ID
-                    raise HardwareError(f"Invalid sensor ID: 0x{sensor_id[0]:02x}")
+                # Create or get shared ToF manager instance
+                if not hasattr(self.__class__, '_shared_tof_manager'):
+                    self.__class__._shared_tof_manager = ToFSensorManager()
+                
+                tof_manager = self.__class__._shared_tof_manager
+                
+                # Initialize manager if not already done
+                if not tof_manager._initialized:
+                    # Get all ToF sensor configs from hardware interface
+                    all_configs = self._get_all_tof_configs()
+                    success = await tof_manager.initialize(all_configs)
+                    if not success:
+                        raise HardwareError("Failed to initialize ToF manager")
+                
+                # Store reference to manager and sensor name
+                self._tof_manager = tof_manager
+                self._sensor_name = sensor_name
                 
                 self._initialized = True
                 await self.health.record_success()
-                self.logger.info(f"ToF sensor initialized at address 0x{address:02x}")
+                self.logger.info(f"ToF sensor {sensor_name} plugin initialized")
                 return True
                 
             except Exception as e:
                 await self.health.record_failure()
-                self.logger.error(f"Failed to initialize ToF sensor: {e}")
+                self.logger.error(f"Failed to initialize ToF sensor plugin: {e}")
                 return False
+    
+    def _get_all_tof_configs(self) -> List:
+        """Get all ToF sensor configurations from the system"""
+        from .tof_manager import ToFSensorConfig
+        
+        # Default configuration based on hardware setup
+        # This should ideally come from the hardware interface configuration
+        return [
+            ToFSensorConfig(
+                name="tof_left",
+                shutdown_pin=22,
+                interrupt_pin=6,
+                target_address=0x29
+            ),
+            ToFSensorConfig(
+                name="tof_right",
+                shutdown_pin=23,
+                interrupt_pin=12,
+                target_address=0x30
+            )
+        ]
     
     async def read_data(self) -> Optional[SensorReading]:
         """Read distance measurement from ToF sensor"""
@@ -267,35 +303,40 @@ class ToFSensorPlugin(HardwarePlugin):
                 return None
         
         try:
-            i2c_manager = self.managers["i2c"]
-            address = self.config.parameters.get("i2c_address", 0x29)
+            # Read from the specific sensor via ToF manager
+            reading = await self._tof_manager.read_sensor(self._sensor_name)
             
-            # Start measurement (simplified)
-            await i2c_manager.write_register(address, 0x00, 0x01)
-            await asyncio.sleep(0.03)  # 30ms measurement time
+            if not reading:
+                raise HardwareError(f"No reading from ToF sensor {self._sensor_name}")
             
-            # Read distance (simplified - actual VL53L0X has complex protocol)
-            distance_data = await i2c_manager.read_register(address, 0x1E, 2)
-            distance_mm = (distance_data[0] << 8) | distance_data[1]
-            
-            from .data_structures import ToFReading
-            reading = ToFReading(
-                timestamp=datetime.now(),
-                sensor_id=self.config.name,
-                value=distance_mm,
+            # Convert to plugin SensorReading format
+            from .data_structures import SensorReading
+            sensor_reading = SensorReading(
+                timestamp=reading.timestamp,
+                sensor_id=self._sensor_name,
+                value=reading.distance_mm,
                 unit="mm",
-                i2c_address=address,
-                distance_mm=distance_mm,
-                range_status="valid" if distance_mm < 2000 else "out_of_range"
+                i2c_address=reading.address,
+                distance_mm=reading.distance_mm,
+                range_status=reading.range_status
             )
             
             await self.health.record_success()
-            return reading
+            return sensor_reading
             
         except Exception as e:
             await self.health.record_failure()
-            self.logger.error(f"Failed to read ToF sensor: {e}")
+            self.logger.error(f"Failed to read ToF sensor {self._sensor_name}: {e}")
             return None
+    
+    async def shutdown(self):
+        """Shutdown ToF sensor plugin"""
+        if hasattr(self, '_tof_manager') and self._tof_manager:
+            # Only shutdown if this is the last ToF sensor plugin
+            # In a real implementation, we'd track active plugins
+            pass  # Manager handles its own lifecycle
+        
+        await super().shutdown()
 
 
 class PowerMonitorPlugin(HardwarePlugin):

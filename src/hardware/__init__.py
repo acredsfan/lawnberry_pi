@@ -2,6 +2,7 @@
 from .managers import I2CManager, SerialManager, CameraManager, GPIOManager
 from .plugin_system import HardwarePlugin, PluginManager
 from .exceptions import HardwareError, DeviceNotFoundError, CommunicationError
+from .hardware_interface import HardwareInterface, create_hardware_interface
 
 __all__ = [
     'I2CManager',
@@ -12,5 +13,7 @@ __all__ = [
     'PluginManager',
     'HardwareError',
     'DeviceNotFoundError',
-    'CommunicationError'
+    'CommunicationError',
+    'HardwareInterface',
+    'create_hardware_interface'
 ]

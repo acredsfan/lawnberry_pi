@@ -11,6 +11,7 @@ from .plugin_system import PluginManager, HardwarePlugin
 from .config import ConfigManager, HardwareInterfaceConfig
 from .data_structures import SensorReading, DeviceHealth
 from .exceptions import HardwareError, DeviceNotFoundError
+from .tof_manager import ToFSensorManager
 
 
 class HardwareInterface:
@@ -28,13 +29,15 @@ class HardwareInterface:
         self.serial_manager = SerialManager()
         self.camera_manager = CameraManager(self.config.camera.device_path)
         self.gpio_manager = GPIOManager()
+        self.tof_manager = ToFSensorManager()
         
         # Plugin system
         self.plugin_manager = PluginManager({
             'i2c': self.i2c_manager,
             'serial': self.serial_manager,
             'camera': self.camera_manager,
-            'gpio': self.gpio_manager
+            'gpio': self.gpio_manager,
+            'tof': self.tof_manager
         })
         
         # State
@@ -58,6 +61,13 @@ class HardwareInterface:
             # Initialize managers
             await self.i2c_manager.initialize(self.config.i2c.bus_number)
             await self.gpio_manager.initialize()
+            
+            # Initialize ToF sensor manager
+            tof_success = await self.tof_manager.initialize()
+            if tof_success:
+                self.logger.info("ToF sensor manager initialized successfully")
+            else:
+                self.logger.warning("ToF sensor manager initialization failed - continuing without ToF sensors")
             
             await self.camera_manager.initialize(
                 width=self.config.camera.width,
@@ -428,6 +438,57 @@ class HardwareInterface:
         pin_number = self.config.gpio.pins[pin_name]
         return await self.gpio_manager.read_pin(pin_number)
     
+    async def read_tof_sensor(self, sensor_name: str) -> Optional[Dict[str, Any]]:
+        """Read distance from a specific ToF sensor"""
+        if not self.tof_manager._initialized:
+            self.logger.warning("ToF manager not initialized")
+            return None
+        
+        try:
+            reading = await self.tof_manager.read_sensor(sensor_name)
+            if reading:
+                return {
+                    'sensor_name': reading.sensor_name,
+                    'distance_mm': reading.distance_mm,
+                    'range_status': reading.range_status,
+                    'address': reading.address,
+                    'timestamp': reading.timestamp
+                }
+            return None
+        except Exception as e:
+            self.logger.error(f"Failed to read ToF sensor {sensor_name}: {e}")
+            return None
+    
+    async def read_all_tof_sensors(self) -> Dict[str, Dict[str, Any]]:
+        """Read distances from all ToF sensors"""
+        if not self.tof_manager._initialized:
+            self.logger.warning("ToF manager not initialized")
+            return {}
+        
+        try:
+            readings = await self.tof_manager.read_all_sensors()
+            result = {}
+            
+            for sensor_name, reading in readings.items():
+                result[sensor_name] = {
+                    'distance_mm': reading.distance_mm,
+                    'range_status': reading.range_status,
+                    'address': reading.address,
+                    'timestamp': reading.timestamp
+                }
+            
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to read ToF sensors: {e}")
+            return {}
+    
+    def get_tof_sensor_status(self) -> Dict[str, Dict]:
+        """Get status of all ToF sensors"""
+        if not self.tof_manager._initialized:
+            return {"status": "not_initialized"}
+        
+        return self.tof_manager.get_sensor_status()
+    
     async def get_system_health(self) -> Dict[str, Any]:
         """Get overall system health status"""
         health_status = {
@@ -435,7 +496,8 @@ class HardwareInterface:
             'timestamp': datetime.now(),
             'managers': {},
             'plugins': {},
-            'devices': {}
+            'devices': {},
+            'sensors': {}
         }
         
         # Check plugin health
@@ -452,10 +514,25 @@ class HardwareInterface:
                 'last_success': device_health.last_successful_read
             }
         
+        # Check ToF sensors specifically
+        if self.tof_manager._initialized:
+            tof_status = self.get_tof_sensor_status()
+            health_status['sensors']['tof'] = tof_status
+            
+            # Check if any ToF sensors are failing
+            tof_healthy = all(sensor_info.get('status', 'unknown') == 'ok' 
+                             for sensor_info in tof_status.values() 
+                             if 'status' in sensor_info)
+            if not tof_healthy:
+                health_status['overall_healthy'] = False
+        else:
+            health_status['sensors']['tof'] = {"status": "not_initialized"}
+            health_status['overall_healthy'] = False
+        
         # Overall health check
         all_healthy = all(plugin_health.values()) and all(
             dev['healthy'] for dev in health_status['devices'].values()
-        )
+        ) and health_status['overall_healthy']
         health_status['overall_healthy'] = all_healthy
         
         return health_status

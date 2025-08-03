@@ -24,22 +24,22 @@ class SensorReading:
 @dataclass
 class I2CDeviceReading(SensorReading):
     """I2C device reading with address info"""
-    i2c_address: int
+    i2c_address: int = 0x00
     register: Optional[int] = None
 
 
 @dataclass
 class SerialDeviceReading(SensorReading):
     """Serial device reading with port info"""
-    port: str
-    baud_rate: int
+    port: str = ""
+    baud_rate: int = 9600
 
 
 @dataclass
 class GPIOReading(SensorReading):
     """GPIO pin reading"""
-    pin: int
-    direction: str  # 'input' or 'output'
+    pin: int = 0
+    direction: str = "input"  # 'input' or 'output'
 
 
 @dataclass
@@ -61,44 +61,44 @@ class CameraFrame:
 @dataclass
 class ToFReading(I2CDeviceReading):
     """Time-of-Flight sensor reading in millimeters"""
-    distance_mm: int
+    distance_mm: int = 0
     range_status: str = "valid"
 
 
 @dataclass
 class IMUReading(SerialDeviceReading):
     """IMU sensor reading with orientation and motion data"""
-    quaternion: tuple[float, float, float, float]
-    acceleration: tuple[float, float, float]  # m/s²
-    angular_velocity: tuple[float, float, float]  # rad/s
+    quaternion: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+    acceleration: tuple[float, float, float] = (0.0, 0.0, 0.0)  # m/s²
+    angular_velocity: tuple[float, float, float] = (0.0, 0.0, 0.0)  # rad/s
     magnetic_field: Optional[tuple[float, float, float]] = None  # µT
 
 
 @dataclass
 class GPSReading(SerialDeviceReading):
     """GPS reading with position and accuracy"""
-    latitude: float
-    longitude: float
-    altitude: float
-    accuracy: float  # meters
-    satellites: int
-    fix_type: str  # 'none', '2d', '3d', 'rtk'
+    latitude: float = 0.0
+    longitude: float = 0.0
+    altitude: float = 0.0
+    accuracy: float = 0.0  # meters
+    satellites: int = 0
+    fix_type: str = "none"  # 'none', '2d', '3d', 'rtk'
 
 
 @dataclass
 class PowerReading(I2CDeviceReading):
     """Power monitor reading"""
-    voltage: float  # V
-    current: float  # A
-    power: float    # W
+    voltage: float = 0.0  # V
+    current: float = 0.0  # A
+    power: float = 0.0    # W
 
 
 @dataclass
 class EnvironmentalReading(I2CDeviceReading):
     """Environmental sensor reading (BME280)"""
-    temperature: float  # °C
-    humidity: float     # %
-    pressure: float     # hPa
+    temperature: float = 0.0  # °C
+    humidity: float = 0.0     # %
+    pressure: float = 0.0     # hPa
 
 
 @dataclass

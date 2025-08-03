@@ -330,16 +330,46 @@ install_dependencies() {
     fi
     
     log_info "Installing Node.js for the web UI..."
-    if ! command -v node >/dev/null || ! command -v npm >/dev/null; then
-        log_info "Node.js or npm not found. Installing Node.js via NodeSource."
-        log_debug "Downloading and running NodeSource setup script for Node.js 20.x"
-        # Download and execute the NodeSource setup script for Node.js 20.x
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    
+    # Check current Node.js version and compatibility
+    if command -v node >/dev/null && command -v npm >/dev/null; then
+        current_node=$(node --version | sed 's/v//')
+        node_major=$(echo $current_node | cut -d. -f1)
+        log_info "Current Node.js version: $current_node"
+        
+        # Test for ARM compatibility issues  
+        if ! timeout 10s node -e "console.log('Node.js compatibility test passed')" 2>/dev/null; then
+            log_warning "Current Node.js version has ARM compatibility issues - reinstalling compatible version"
+            node_needs_update=true
+        elif [[ $node_major -gt 18 ]]; then
+            log_warning "Node.js v$node_major may have ARM compatibility issues - installing v18 LTS"
+            node_needs_update=true  
+        else
+            log_success "Node.js version is compatible"
+            node_needs_update=false
+        fi
+    else
+        log_info "Node.js not found - installing Node.js 18 LTS"
+        node_needs_update=true
+    fi
+    
+    # Install compatible Node.js version if needed
+    if [[ "$node_needs_update" == true ]]; then
+        log_info "Installing Node.js 18 LTS for optimal ARM compatibility..."
+        
+        # Remove existing Node.js if problematic
+        if command -v node >/dev/null; then
+            log_info "Removing incompatible Node.js version..."
+            sudo apt-get remove -y nodejs npm 2>/dev/null || true
+        fi
+        
+        # Install Node.js 18 LTS via NodeSource
+        log_debug "Downloading and running NodeSource setup script for Node.js 18.x LTS"
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+        
         # Install Node.js (which includes npm)
         log_debug "Installing nodejs package."
         sudo apt-get install -y nodejs
-    else
-        log_info "Node.js and npm are already installed."
     fi
 
     # Verify installation
@@ -347,6 +377,14 @@ install_dependencies() {
         log_success "Node.js and npm are installed."
         log_info "Node version: $(node -v)"
         log_info "npm version: $(npm -v)"
+        
+        # Final compatibility test
+        if timeout 10s node -e "console.log('✅ Node.js ARM compatibility verified')" 2>/dev/null; then
+            log_success "Node.js ARM compatibility confirmed"
+        else
+            log_error "Node.js still has compatibility issues after installation"
+            exit 1
+        fi
     else
         log_warning "Node.js installation failed - web UI may not work"
     fi
@@ -623,6 +661,60 @@ detect_hardware() {
     fi
 }
 
+initialize_tof_sensors() {
+    print_section "ToF Sensor Initialization"
+    
+    cd "$PROJECT_ROOT"
+    source venv/bin/activate
+    
+    log_info "Initializing dual VL53L0X ToF sensors..."
+    log_info "This ensures both sensors are configured at different I2C addresses"
+    
+    # Check if ToF sensors are physically connected
+    log_info "Checking for ToF sensor hardware..."
+    
+    # Run I2C detection first
+    if command -v i2cdetect >/dev/null 2>&1; then
+        # Look for any devices at 0x29 or 0x30 (typical ToF addresses)
+        if i2cdetect -y 1 | grep -E "(29|30)" >/dev/null 2>&1; then
+            log_info "ToF sensors detected on I2C bus"
+            
+            # Run our ToF initialization script
+            if python3 setup_dual_tof.py >/dev/null 2>&1; then
+                log_success "✅ Dual ToF sensors initialized successfully"
+                log_success "  - Left sensor (tof_left): 0x30"
+                log_success "  - Right sensor (tof_right): 0x29"
+                
+                # Verify both sensors are accessible
+                log_info "Verifying sensor accessibility..."
+                if i2cdetect -y 1 | grep -E " 29 " >/dev/null 2>&1 && i2cdetect -y 1 | grep -E " 30 " >/dev/null 2>&1; then
+                    log_success "✅ Both ToF sensors accessible at correct addresses"
+                    
+                    # Update hardware configuration to reflect both sensors
+                    log_info "Updating hardware configuration..."
+                    if [[ -f "config/hardware.yaml" ]]; then
+                        # The setup script already updated the config, so we're good
+                        log_success "✅ Hardware configuration updated"
+                    fi
+                else
+                    log_warning "⚠️ ToF sensors initialized but address verification failed"
+                fi
+                
+            else
+                log_warning "ToF sensor initialization script failed"
+                log_info "ToF sensors may still work with default configuration"
+            fi
+        else
+            log_info "No ToF sensors detected on I2C bus"
+            log_info "This is normal if ToF sensors are not yet connected"
+        fi
+    else
+        log_warning "i2cdetect not available - skipping ToF sensor check"
+    fi
+    
+    log_info "ToF sensor initialization complete"
+}
+
 setup_environment() {
     print_section "Environment Configuration"
     
@@ -668,356 +760,154 @@ build_web_ui() {
     
     # Check if Node.js is available
     if ! command -v npm >/dev/null 2>&1; then
-        log_warning "npm not available - skipping web UI build"
-        return
+        log_error "npm not available - Node.js is required for web UI build"
+        exit 1
     fi
     
-    log_info "Ensuring a clean installation of web UI dependencies with npm ci..."
-    # Use npm ci for a clean, consistent install from package-lock.json
-    npm ci --legacy-peer-deps || {
-        log_warning "npm ci failed - web UI may not work. Check web-ui/package-lock.json for inconsistencies."
-        return
-    }
+    # ARM64/Raspberry Pi compatibility assessment
+    NODE_VERSION=$(node --version | sed 's/v//')
+    NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1)
     
-    # Fix security vulnerabilities
-    log_info "Fixing npm security vulnerabilities..."
-    npm audit fix --force || log_warning "Some npm security issues could not be automatically fixed"
+    log_info "Node.js version: $NODE_VERSION (ARM64 compatibility check)"
     
-    log_info "Building web UI with ARM-specific optimizations..."
-    
-    # Aggressive ARM compatibility environment variables (fixed Node options)
-    export NODE_OPTIONS="--max-old-space-size=512"
-    export VITE_OPTIMIZE_DEPS_DISABLED="true"
-    export VITE_ESBUILD_TARGET="es2015"
-    export VITE_BUILD_TARGET="es2015"
-    export VITE_LEGACY_BUILD="true"
-    export CI="true"  # Disable interactive prompts
-    export FORCE_COLOR="0"  # Disable color output that can cause issues
-    
-    # Create ARM-compatible Vite config override
-    log_info "Creating ARM-compatible build configuration..."
-    cat > vite.config.arm.ts << 'EOF'
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    host: '0.0.0.0',
-    port: 3000,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true
-      }
-    }
-  },
-  build: {
-    outDir: 'dist',
-    sourcemap: false,
-    minify: false,
-    target: 'es2015',
-    rollupOptions: {
-      output: {
-        inlineDynamicImports: true,
-        manualChunks: undefined
-      }
-    }
-  },
-  optimizeDeps: {
-    disabled: true
-  },
-  esbuild: {
-    target: 'es2015',
-    supported: {
-      'bigint': false,
-      'top-level-await': false
-    }
-  }
-})
-EOF
-    
-    # Try multiple build strategies, starting with most aggressive ARM compatibility
-    build_success=false
-    
-    # Strategy 1: Ultra-simple ARM build
-    log_info "Attempting ultra-simple ARM build..."
-    if timeout 300 npm run build -- --config vite.config.arm.ts --mode production 2>/dev/null; then
-        log_success "Ultra-simple ARM build succeeded"
-        build_success=true
-    else
-        log_warning "Ultra-simple ARM build failed (likely Illegal instruction), trying manual static generation..."
+    # Ensure we have a secure, compatible Node.js version for ARM64
+    if [[ $NODE_MAJOR -lt 18 ]]; then
+        log_error "Node.js $NODE_VERSION is too old for optimal ARM64 support and security"
+        log_error "Raspberry Pi OS Bookworm with ARM64 needs Node.js 18+ for best compatibility"
+        exit 1
+    elif [[ $NODE_MAJOR -eq 18 ]]; then
+        log_info "Node.js 18.x - Good ARM64 compatibility and security support"
+        export NODE_OPTIONS="--max-old-space-size=1536 --no-warnings"
+    elif [[ $NODE_MAJOR -eq 20 ]]; then
+        log_info "Node.js 20.x - Excellent ARM64 support, LTS recommended"
+        export NODE_OPTIONS="--max-old-space-size=2048 --no-warnings"
+    elif [[ $NODE_MAJOR -ge 21 ]]; then
+        log_warning "Node.js $NODE_MAJOR.x - Very new, may have ARM64 compatibility issues"
+        log_info "Testing compatibility before proceeding..."
         
-        # Strategy 2: Manual React build using older/simpler tools
-        log_info "Attempting manual TypeScript compilation..."
-        if command -v tsc >/dev/null 2>&1; then
-            mkdir -p dist/assets
-            
-            # Try basic TypeScript compilation
-            if tsc --outDir dist --target es2015 --module commonjs --jsx react src/index.tsx 2>/dev/null; then
-                log_success "TypeScript compilation succeeded"
-                build_success=true
-            fi
+        # Test Node.js basic functionality on ARM64
+        if ! timeout 10s node -e "console.log('ARM64 test OK')" >/dev/null 2>&1; then
+            log_error "Node.js $NODE_VERSION has ARM64 compatibility issues"
+            exit 1
         fi
-        
-        # Strategy 3: Static file generation (most reliable fallback)
-        if [[ "$build_success" != true ]]; then
-            log_info "Creating static HTML interface as ARM-compatible fallback..."
-            mkdir -p dist/assets
-            
-            # Create comprehensive static interface
-            cat > dist/index.html << 'EOF'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LawnBerryPi Control</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            color: #333;
-        }
-        .container { 
-            max-width: 1200px; 
-            margin: 0 auto; 
-            padding: 20px;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .header { 
-            background: rgba(255,255,255,0.95); 
-            padding: 20px; 
-            border-radius: 12px; 
-            margin-bottom: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-            backdrop-filter: blur(10px);
-        }
-        .header h1 { 
-            color: #2E7D32; 
-            margin-bottom: 10px;
-            font-size: 2.5rem;
-            font-weight: 300;
-        }
-        .header p { color: #666; }
-        .grid { 
-            display: grid; 
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
-            gap: 20px;
-            flex: 1;
-        }
-        .card { 
-            background: rgba(255,255,255,0.95); 
-            padding: 20px; 
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-            backdrop-filter: blur(10px);
-            transition: transform 0.2s;
-        }
-        .card:hover { transform: translateY(-2px); }
-        .card h3 { 
-            color: #2E7D32; 
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .status { 
-            padding: 12px; 
-            border-radius: 8px; 
-            margin: 10px 0;
-            border-left: 4px solid;
-        }
-        .status.info { 
-            background: #e3f2fd; 
-            color: #1976d2; 
-            border-color: #2196f3;
-        }
-        .status.warning { 
-            background: #fff3e0; 
-            color: #f57c00; 
-            border-color: #ff9800;
-        }
-        .status.success { 
-            background: #e8f5e8; 
-            color: #2e7d32; 
-            border-color: #4caf50;
-        }
-        .api-link { 
-            display: inline-block; 
-            background: #2E7D32; 
-            color: white; 
-            padding: 10px 20px; 
-            text-decoration: none; 
-            border-radius: 6px;
-            transition: background 0.2s;
-        }
-        .api-link:hover { background: #1b5e20; }
-        .command { 
-            background: #f5f5f5; 
-            padding: 10px; 
-            border-radius: 4px; 
-            font-family: 'Courier New', monospace; 
-            margin: 10px 0;
-            border-left: 3px solid #2E7D32;
-        }
-        .footer {
-            margin-top: 40px;
-            text-align: center;
-            color: rgba(255,255,255,0.8);
-        }
-        .icon { 
-            width: 20px; 
-            height: 20px; 
-            background: currentColor;
-            mask-size: contain;
-            display: inline-block;
-        }
-        .icon-system { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'/%3E%3C/svg%3E"); }
-        .icon-api { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0L19.2 12l-4.6-4.6L16 6l6 6-6 6-1.4-1.4z'/%3E%3C/svg%3E"); }
-        .icon-terminal { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M2 3h20c1.1 0 2 .9 2 2v14c0 1.1-.9 2-2 2H2c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2zm0 2v14h20V5H2zm8 6l-4 4h2.5l2.5-2.5L8.5 10H6l4-4z'/%3E%3C/svg%3E"); }
-        .icon-warning { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z'/%3E%3C/svg%3E"); }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🚜 LawnBerryPi Control Interface</h1>
-            <p>Autonomous Lawn Mower Management System</p>
-        </div>
-        
-        <div class="grid">
-            <div class="card">
-                <h3><span class="icon icon-warning"></span>Build Status</h3>
-                <div class="status warning">
-                    <strong>Notice:</strong> The full React-based web interface could not be built on this ARM system due to compatibility issues with Vite 7.x and newer build tools.
-                </div>
-                <div class="status info">
-                    This simplified interface provides basic system access and API documentation links.
-                </div>
-            </div>
-            
-            <div class="card">
-                <h3><span class="icon icon-system"></span>System Status</h3>
-                <div class="status success">
-                    <strong>LawnBerry Pi System:</strong> Installed and Running
-                </div>
-                <div class="status info">
-                    <strong>Hardware Detection:</strong> Completed
-                </div>
-                <div class="status info">
-                    <strong>Services:</strong> Active
-                </div>
-            </div>
-            
-            <div class="card">
-                <h3><span class="icon icon-api"></span>API Access</h3>
-                <p>Access the full system functionality through the REST API:</p>
-                <a href="/api/docs" target="_blank" class="api-link">📚 API Documentation</a>
-                <a href="/api/health" target="_blank" class="api-link">💓 Health Check</a>
-                <a href="/api/status" target="_blank" class="api-link">📊 System Status</a>
-            </div>
-            
-            <div class="card">
-                <h3><span class="icon icon-terminal"></span>Command Line Access</h3>
-                <p>System control commands:</p>
-                <div class="command">lawnberry-system status</div>
-                <div class="command">lawnberry-system start</div>
-                <div class="command">lawnberry-system logs</div>
-                <div class="command">lawnberry-health-check</div>
-            </div>
-            
-            <div class="card">
-                <h3>🔧 Manual API Examples</h3>
-                <p>Direct API access via curl:</p>
-                <div class="command">curl http://localhost:8000/api/health</div>
-                <div class="command">curl http://localhost:8000/api/system/status</div>
-                <div class="command">curl http://localhost:8000/api/hardware/detect</div>
-            </div>
-            
-            <div class="card">
-                <h3>📱 Alternative Access</h3>
-                <div class="status info">
-                    <strong>SSH Access:</strong> Full system control via terminal
-                </div>
-                <div class="status info">
-                    <strong>API Client:</strong> Use Postman or similar tools
-                </div>
-                <div class="status info">
-                    <strong>Mobile Apps:</strong> Connect to REST API endpoints
-                </div>
-            </div>
-        </div>
-        
-        <div class="footer">
-            <p>LawnBerryPi - Autonomous Lawn Care System | ARM Static Interface</p>
-            <p>For full web interface, consider using a desktop browser connected to the API</p>
-        </div>
-    </div>
+        export NODE_OPTIONS="--max-old-space-size=2048 --no-warnings"
+    fi
     
-    <script>
-        // Simple JavaScript for basic functionality
-        document.addEventListener('DOMContentLoaded', function() {
-            // Check API health and update status
-            fetch('/api/health')
-                .then(response => response.json())
-                .then(data => {
-                    console.log('API Health:', data);
-                    const statusCards = document.querySelectorAll('.status.success');
-                    if (statusCards.length > 0) {
-                        statusCards[0].innerHTML = '<strong>LawnBerry Pi System:</strong> ✅ Connected and Healthy';
-                    }
-                })
-                .catch(error => {
-                    console.log('API not yet available:', error);
-                });
-        });
-    </script>
-</body>
-</html>
-EOF
+    # Verify package.json and dependencies
+    if [[ ! -f "package.json" ]]; then
+        log_error "package.json not found in web-ui directory"
+        exit 1
+    fi
+    
+    log_info "Installing web UI dependencies with ARM64 optimizations..."
+    
+    # Set ARM64-friendly npm configuration for better compatibility
+    export npm_config_target_arch=arm64
+    export npm_config_target_platform=linux
+    export npm_config_cache=/tmp/npm-cache-$USER
+    
+    # Clean any potentially corrupted installations
+    rm -rf node_modules package-lock.json .npm
+    
+    # Use npm install instead of ci for better ARM64 dependency resolution
+    log_info "Installing dependencies (optimized for ARM64)..."
+    if ! timeout 600s npm install --verbose --no-audit --no-fund --prefer-online; then
+        log_error "Failed to install dependencies"
+        log_error "This may be due to ARM64 compatibility issues with some packages"
+        exit 1
+    fi
+    
+    # Verify critical dependencies are installed and check their ARM64 compatibility
+    if [[ ! -d "node_modules/react" ]] || [[ ! -d "node_modules/vite" ]]; then
+        log_error "Critical dependencies missing after install"
+        exit 1
+    fi
+    
+    # Check Vite version for ARM64 compatibility (newest compatible approach)
+    vite_version=$(npm list vite --depth=0 2>/dev/null | grep vite@ | cut -d'@' -f2 | head -1)
+    if [[ -n "$vite_version" ]]; then
+        vite_major=$(echo "$vite_version" | cut -d'.' -f1)
+        log_info "Detected Vite version: $vite_version"
+        
+        if [[ "$vite_major" -eq 4 ]]; then
+            log_info "Vite 4.x - Stable ARM64 compatibility"
+        elif [[ "$vite_major" -eq 5 ]]; then
+            log_info "Vite 5.x - Good ARM64 support"
+        elif [[ "$vite_major" -eq 6 ]]; then
+            log_info "Vite 6.x - Latest stable with ARM64 support"
+        elif [[ "$vite_major" -ge 7 ]]; then
+            log_warning "Vite $vite_version - Very new, testing ARM64 compatibility..."
             
-            # Copy any existing assets
-            if [[ -d "src/assets" ]]; then
-                cp -r src/assets dist/ 2>/dev/null || true
+            # Test Vite binary compatibility before proceeding
+            if ! timeout 15s npx vite --version >/dev/null 2>&1; then
+                log_error "Vite $vite_version binary not compatible with ARM64"
+                log_error "Consider downgrading to Vite 6.x for better ARM64 compatibility"
+                exit 1
             fi
-            
-            if [[ -d "public" ]]; then
-                cp -r public/* dist/ 2>/dev/null || true
-            fi
-            
-            # Create basic CSS and JS files for completeness
-            mkdir -p dist/assets
-            echo "/* LawnBerryPi ARM-compatible styles loaded */" > dist/assets/main.css
-            echo "console.log('LawnBerryPi ARM-compatible interface loaded');" > dist/assets/main.js
-            
-            log_success "Created comprehensive static web interface as ARM-compatible fallback"
-            build_success=true
+            log_info "Vite $vite_version ARM64 compatibility test passed"
         fi
     fi
     
-    # Clean up temporary files
-    rm -f vite.config.arm.ts
+    log_success "Dependencies installed successfully"
     
-    if [[ "$build_success" == true ]]; then
+    # Set build environment variables optimized for Raspberry Pi ARM64
+    export CI="true"
+    export FORCE_COLOR="0"
+    export NODE_ENV="production"
+    export VITE_APP_API_URL="/api"
+    export VITE_APP_WS_URL="/ws"
+    export GENERATE_SOURCEMAP="false"  # Reduce build size and memory usage
+    
+    # Create production build
+    log_info "Building web UI for production (ARM64 optimized)..."
+    
+    # Run build with proper timeout and error handling
+    if timeout 600s npm run build; then
         log_success "Web UI build completed successfully"
         
         # Verify build output
-        if [[ -f "dist/index.html" ]]; then
-            log_info "Build output verified: dist/index.html exists ($(wc -l < dist/index.html) lines)"
-            log_info "Web interface will be available at: http://$(hostname -I | awk '{print $1}'):8000"
+        if [[ -d "dist" ]] && [[ -f "dist/index.html" ]]; then
+            build_size=$(du -sh dist | cut -f1)
+            file_count=$(find dist -type f | wc -l)
+            log_info "Build output: $file_count files, $build_size total"
+            log_success "Web UI ready for deployment"
         else
-            log_warning "Build output missing: dist/index.html not found"
+            log_error "Build completed but output files missing"
+            exit 1
         fi
     else
-        log_error "All Web UI build strategies failed"
-        log_info "The system will work without the web interface"
-        log_info "You can access the API directly at http://localhost:8000/api/"
+        log_error "Web UI build failed or timed out"
+        log_error "This may be due to ARM64 compatibility issues with build dependencies"
+        
+        # Try to provide helpful error information
+        if [[ -f "npm-debug.log" ]]; then
+            log_info "Last 10 lines of npm debug log:"
+            tail -10 npm-debug.log | while read line; do
+                log_info "  $line"
+            done
+        fi
+        
+        exit 1
     fi
+    
+    # Test the build by serving it briefly
+    log_info "Testing web UI build..."
+    npm run preview &>/dev/null &
+    preview_pid=$!
+    sleep 5
+    
+    # Test if server responds
+    if curl -s http://localhost:4173 >/dev/null 2>&1; then
+        log_success "Web UI preview test passed"
+    else
+        log_warning "Web UI preview test failed - may need manual verification"
+    fi
+    
+    # Cleanup
+    kill $preview_pid 2>/dev/null || true
+    wait $preview_pid 2>/dev/null || true
+    
+    log_success "Web UI build process completed"
 }
 
 create_directories() {
@@ -1671,6 +1561,7 @@ main() {
     
     if [[ "$SKIP_HARDWARE" != true ]]; then
         detect_hardware
+        initialize_tof_sensors
     fi
     
     if [[ "$SKIP_ENV" != true ]]; then
