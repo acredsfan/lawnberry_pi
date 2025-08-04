@@ -19,7 +19,7 @@ from .config import get_settings
 from .auth import get_current_user, AuthManager
 from .routers import (
     system, sensors, navigation, patterns, 
-    configuration, maps, weather, power, websocket, progress, rc_control, google_maps
+    configuration, maps, weather, power, websocket, progress, rc_control, google_maps, camera
 )
 from .middleware import RateLimitMiddleware, RequestLoggingMiddleware
 from .mqtt_bridge import MQTTBridge
@@ -222,6 +222,13 @@ def create_app() -> FastAPI:
             "cors_enabled": True
         }
     
+    # Ping endpoint for health checks
+    @app.get("/api/v1/ping")
+    @app.head("/api/v1/ping")
+    async def ping():
+        """Simple ping endpoint for health checks"""
+        return {"status": "ok", "timestamp": time.time()}
+    
     # Include routers
     app.include_router(system.router, prefix="/api/v1/system", tags=["system"])
     app.include_router(sensors.router, prefix="/api/v1/sensors", tags=["sensors"])
@@ -234,6 +241,7 @@ def create_app() -> FastAPI:
     app.include_router(power.router, prefix="/api/v1/power", tags=["power"])
     app.include_router(progress.router, prefix="/api/v1/progress", tags=["progress"])
     app.include_router(rc_control.router, prefix="/api/v1/rc", tags=["rc_control"])
+    app.include_router(camera.router, prefix="/api/v1", tags=["camera"])
     app.include_router(websocket.router, prefix="/ws", tags=["websocket"])
     
     # Store start time
