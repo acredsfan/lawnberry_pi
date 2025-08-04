@@ -12,13 +12,15 @@ import Logo from '../Logo'
 
 interface LayoutProps {
   children: React.ReactNode
+  fullPageMode?: boolean // New prop for full-page desktop layout
 }
 
 const drawerWidth = 240
 
-const Layout: React.FC<LayoutProps> = ({ children }) => {
+const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
+  const isDesktop = useMediaQuery(theme.breakpoints.up('lg'))
   const dispatch = useDispatch()
   const navigate = useNavigate()
   const location = useLocation()
@@ -27,6 +29,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { emergencyStop } = useSelector((state: RootState) => state.mower)
 
   const unreadCount = notifications.filter(n => !n.read).length
+
+  // Determine if we should use full-page mode (desktop only)
+  const useFullPage = fullPageMode && isDesktop
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: DashboardIcon, path: '/dashboard' },
@@ -177,7 +182,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         }}
       >
         <Toolbar /> {/* Spacer for fixed AppBar */}
-        <Box sx={{ flexGrow: 1, overflow: 'auto', p: { xs: 1, sm: 2, md: 3 } }}>
+        <Box sx={{ 
+          flexGrow: 1, 
+          overflow: 'auto', 
+          p: useFullPage ? 0 : { xs: 1, sm: 2, md: 3 },
+          height: useFullPage ? '100%' : 'auto'
+        }}>
           {children}
         </Box>
       </Box>

@@ -214,10 +214,10 @@ async def api_exception_handler(request: Request, exc: APIException) -> JSONResp
         'request_id': request_id,
         'method': request.method,
         'url': str(request.url),
-        'error_code': exc.error_code,
-        'error_message': exc.message,
+        'error_code': getattr(exc, 'error_code', 'UNKNOWN'),
+        'error_message': getattr(exc, 'message', str(exc.detail) if hasattr(exc, 'detail') else str(exc)),
         'status_code': exc.status_code,
-        'details': exc.details
+        'details': getattr(exc, 'details', None)
     }
     
     if exc.status_code >= 500:

@@ -33,10 +33,6 @@ export default defineConfig({
     })
   ],
   envPrefix: ['VITE_', 'REACT_APP_'],
-  define: {
-    // Make REACT_APP_ variables available as VITE_ variables
-    'import.meta.env.VITE_GOOGLE_MAPS_API_KEY': JSON.stringify(process.env.REACT_APP_GOOGLE_MAPS_API_KEY)
-  },
   server: {
     host: '0.0.0.0',
     port: 3000,

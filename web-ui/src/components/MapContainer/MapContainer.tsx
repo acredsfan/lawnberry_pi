@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Alert, CircularProgress, ToggleButtonGroup, ToggleButton } from '@mui/material';
 import { MapProvider, MapError, MapState, MapUsageLevel } from '../../types';
 import { mapService } from '../../services/mapService';
+import { useMapAutoCentering } from '../../hooks/useMapAutoCentering';
 import GoogleMapComponent from './GoogleMapComponent';
 import LeafletMapComponent from './LeafletMapComponent';
 
@@ -36,7 +37,23 @@ const MapContainer: React.FC<MapContainerProps> = ({
     cacheStatus: 'empty'
   });
   
+  const [currentCenter, setCurrentCenter] = useState(center);
   const initializationRef = useRef(false);
+
+  // Auto-centering functionality
+  const handleCenterRequest = useCallback((position: { lat: number; lng: number }) => {
+    console.log('🎯 MapContainer received center request:', position);
+    setCurrentCenter(position);
+  }, []);
+
+  useMapAutoCentering(handleCenterRequest);
+
+  // Update center when prop changes
+  useEffect(() => {
+    if (center && center !== currentCenter) {
+      setCurrentCenter(center);
+    }
+  }, [center, currentCenter]);
 
   const handleError = useCallback((error: MapError) => {
     setMapState(prev => ({ ...prev, error, isLoading: false }));
@@ -172,7 +189,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
   }
 
   const mapProps = {
-    center: center || mapService.getConfig().defaultCenter,
+    center: currentCenter || mapService.getConfig().defaultCenter,
     zoom,
     usageLevel,
     isOffline: mapState.isOffline,

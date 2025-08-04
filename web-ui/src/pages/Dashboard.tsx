@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react'
-import { Grid, Card, CardContent, Typography, Box, LinearProgress, Chip, IconButton } from '@mui/material'
+import { Grid, Card, CardContent, Typography, Box, LinearProgress, Chip, IconButton, Alert } from '@mui/material'
 import { Battery90 as BatteryIcon, Thermostat as TempIcon, Speed as SpeedIcon, LocationOn as LocationIcon, Refresh as RefreshIcon } from '@mui/icons-material'
 import { useSelector, useDispatch } from 'react-redux'
 import { RootState } from '../store/store'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts'
 import { format } from 'date-fns'
+import { setStatus, setConnectionState } from '../store/slices/mowerSlice'
+import { dataService } from '../services/dataService'
+import { MowerStatus } from '../types'
 
 const Dashboard: React.FC = () => {
   const dispatch = useDispatch()
@@ -20,6 +23,52 @@ const Dashboard: React.FC = () => {
   }>>([])
 
   const [videoStream, setVideoStream] = useState<string | null>(null)
+  const [realDataActive, setRealDataActive] = useState(false)
+  const [lastDataUpdate, setLastDataUpdate] = useState<Date | null>(null)
+
+  // Initialize real data service
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null
+
+    const initializeDataService = async () => {
+      try {
+        // Check if backend is available
+        const isBackendAvailable = await dataService.checkConnectivity()
+        
+        if (isBackendAvailable) {
+          setRealDataActive(true)
+          dispatch(setConnectionState(true))
+          
+          // Subscribe to status updates from data service
+          unsubscribe = dataService.subscribe((newStatus: MowerStatus) => {
+            dispatch(setStatus(newStatus))
+            setLastDataUpdate(new Date())
+          })
+          
+          // Start polling every 3 seconds for real-time updates
+          dataService.startStatusPolling(3000)
+          
+          console.log('✅ Real data service activated - polling backend every 3 seconds')
+        } else {
+          setRealDataActive(false)
+          console.warn('⚠️ Backend not available, using fallback mock data')
+        }
+      } catch (error) {
+        console.error('Failed to initialize data service:', error)
+        setRealDataActive(false)
+      }
+    }
+
+    initializeDataService()
+
+    // Cleanup on unmount
+    return () => {
+      if (unsubscribe) {
+        unsubscribe()
+      }
+      dataService.stopStatusPolling()
+    }
+  }, [dispatch])
 
   useEffect(() => {
     // Simulate real-time data updates
@@ -91,19 +140,39 @@ const Dashboard: React.FC = () => {
                 <Typography variant="h4" component="h2" className="neon-text">
                   SYSTEM STATUS
                 </Typography>
-                <IconButton 
-                  size="small" 
-                  sx={{ 
-                    color: 'primary.main',
-                    '&:hover': { 
-                      color: 'secondary.main',
-                      transform: 'rotate(180deg)',
-                      transition: 'all 0.3s ease'
-                    }
-                  }}
-                >
-                  <RefreshIcon />
-                </IconButton>
+                <Box display="flex" alignItems="center" gap={2}>
+                  {realDataActive && (
+                    <Chip 
+                      label="LIVE DATA" 
+                      color="success" 
+                      size="small"
+                      className="pulse"
+                      sx={{ 
+                        fontFamily: 'monospace',
+                        fontWeight: 'bold',
+                        animation: 'pulse 2s infinite'
+                      }}
+                    />
+                  )}
+                  {lastDataUpdate && (
+                    <Typography variant="caption" color="text.secondary">
+                      Updated: {format(lastDataUpdate, 'HH:mm:ss')}
+                    </Typography>
+                  )}
+                  <IconButton 
+                    size="small" 
+                    sx={{ 
+                      color: 'primary.main',
+                      '&:hover': { 
+                        color: 'secondary.main',
+                        transform: 'rotate(180deg)',
+                        transition: 'all 0.3s ease'
+                      }
+                    }}
+                  >
+                    <RefreshIcon />
+                  </IconButton>
+                </Box>
               </Box>
               
               <Grid container spacing={3}>

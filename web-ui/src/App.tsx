@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Box, Snackbar, Alert, CircularProgress, Typography } from '@mui/material'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState } from './store/store'
@@ -17,6 +17,30 @@ import Documentation from './pages/Documentation'
 import Logo from './components/Logo'
 import { webSocketService } from './services/websocket'
 import { usePerformanceMonitor } from './hooks/usePerformanceMonitor'
+
+const AppContent: React.FC = () => {
+  const location = useLocation()
+  
+  // Define routes that should use full-page mode on desktop
+  const fullPageRoutes = ['/maps', '/dashboard']
+  const shouldUseFullPage = fullPageRoutes.includes(location.pathname)
+
+  return (
+    <Layout fullPageMode={shouldUseFullPage}>
+      <Routes>
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/navigation" element={<Navigation />} />
+        <Route path="/maps" element={<Maps />} />
+        <Route path="/rc-control" element={<RCControl />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/training" element={<Training />} />
+        <Route path="/documentation" element={<Documentation />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </Layout>
+  )
+}
 
 const App: React.FC = () => {
   const dispatch = useDispatch()
@@ -309,19 +333,7 @@ const App: React.FC = () => {
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/navigation" element={<Navigation />} />
-          <Route path="/maps" element={<Maps />} />
-          <Route path="/rc-control" element={<RCControl />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/training" element={<Training />} />
-          <Route path="/documentation" element={<Documentation />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-      </Layout>
+      <AppContent />
 
       <Snackbar
         open={notification.open}

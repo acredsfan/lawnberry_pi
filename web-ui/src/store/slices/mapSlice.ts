@@ -108,21 +108,33 @@ const mapSlice = createSlice({
     
     initializeMapFromEnvironment: (state) => {
       // This would typically be called on app initialization
-      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-      console.log('Google Maps API Key from environment:', apiKey ? 'Found' : 'Not found');
+      const apiKey = import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY || import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+      console.log('Google Maps API Key check:', {
+        reactKey: import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
+        viteKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
+        finalKey: apiKey ? 'Found' : 'Not found'
+      });
       
       if (apiKey) {
+        console.log('Initializing Google Maps with API key');
         state.config.apiKey = apiKey;
         state.config.provider = MapProvider.GOOGLE;
         state.userPreferences.preferredProvider = MapProvider.GOOGLE;
         state.currentProvider = MapProvider.GOOGLE;
         state.isOffline = false;
+        state.error = null;
       } else {
         console.log('No Google Maps API key found, falling back to OpenStreetMap');
         state.config.provider = MapProvider.OPENSTREETMAP;
         state.userPreferences.preferredProvider = MapProvider.OPENSTREETMAP;
         state.currentProvider = MapProvider.OPENSTREETMAP;
         state.isOffline = false;
+        state.error = {
+          type: 'api_key_invalid',
+          message: 'Google Maps API key not configured',
+          provider: MapProvider.GOOGLE,
+          canFallback: true
+        };
       }
     }
   }
