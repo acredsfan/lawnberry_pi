@@ -212,6 +212,16 @@ def create_app() -> FastAPI:
             "connected": True
         }
     
+    # Simple connectivity test endpoint
+    @app.get("/api/v1/test")
+    async def test_connectivity():
+        """Simple test endpoint for debugging frontend connectivity"""
+        return {
+            "message": "Backend is reachable",
+            "timestamp": time.time(),
+            "cors_enabled": True
+        }
+    
     # Include routers
     app.include_router(system.router, prefix="/api/v1/system", tags=["system"])
     app.include_router(sensors.router, prefix="/api/v1/sensors", tags=["sensors"])

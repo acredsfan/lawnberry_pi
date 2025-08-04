@@ -52,6 +52,30 @@ const Dashboard: React.FC = () => {
         } else {
           setRealDataActive(false)
           console.warn('⚠️ Backend not available, using fallback mock data')
+          
+          // Set fallback data immediately
+          const fallbackStatus: MowerStatus = {
+            state: 'idle',
+            position: { lat: 40.7128, lng: -74.0060, heading: 0, accuracy: 5 },
+            battery: { level: 75.3, voltage: 24.1, current: 1.8, charging: false, timeRemaining: 120 },
+            sensors: {
+              imu: {
+                orientation: { x: 0, y: 0, z: 0 },
+                acceleration: { x: 0, y: 0, z: 9.8 },
+                gyroscope: { x: 0, y: 0, z: 0 },
+                temperature: 35
+              },
+              tof: { left: 1.2, right: 1.5 },
+              environmental: { temperature: 22, humidity: 65, pressure: 1013 },
+              power: { voltage: 24.1, current: 1.8, power: 43.4 }
+            },
+            coverage: { totalArea: 1000, coveredArea: 450, percentage: 45 },
+            lastUpdate: Date.now() / 1000,
+            location_source: 'gps',
+            connected: false
+          }
+          dispatch(setStatus(fallbackStatus))
+          dispatch(setConnectionState(false))
         }
       } catch (error) {
         console.error('Failed to initialize data service:', error)

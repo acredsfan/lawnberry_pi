@@ -55,6 +55,7 @@ export class DataService {
    */
   async fetchMowerStatus(): Promise<MowerStatus> {
     try {
+      console.log('🔄 Fetching mower status from:', `${API_BASE_URL}/api/v1/mock/status`)
       const response = await fetch(`${API_BASE_URL}/api/v1/mock/status`)
       
       if (!response.ok) {
@@ -62,9 +63,11 @@ export class DataService {
       }
       
       const data = await response.json()
+      console.log('✅ Received mower status:', data)
       
       // Check if we should trigger map centering
       if (data.position && this.shouldCenterMap(data.position)) {
+        console.log('🎯 Triggering map centering for position:', data.position)
         // Dispatch custom event for map centering
         window.dispatchEvent(new CustomEvent('centerMapOnRobot', {
           detail: { position: data.position }
@@ -73,7 +76,7 @@ export class DataService {
       
       return data
     } catch (error) {
-      console.error('Failed to fetch mower status:', error)
+      console.error('❌ Failed to fetch mower status:', error)
       // Return fallback mock data
       return this.getFallbackStatus()
     }
@@ -139,20 +142,24 @@ export class DataService {
       this.stopStatusPolling()
     }
 
+    console.log(`🔄 Starting status polling every ${intervalMs}ms`)
+    
     this.statusPollingInterval = window.setInterval(async () => {
       try {
         const status = await this.fetchMowerStatus()
         this.notifySubscribers(status)
       } catch (error) {
-        console.error('Status polling error:', error)
+        console.error('❌ Status polling error:', error)
       }
     }, intervalMs)
 
     // Fetch initial status immediately
+    console.log('🔄 Fetching initial status...')
     this.fetchMowerStatus().then(status => {
+      console.log('✅ Initial status fetched, notifying subscribers:', status)
       this.notifySubscribers(status)
     }).catch(error => {
-      console.error('Initial status fetch error:', error)
+      console.error('❌ Initial status fetch error:', error)
     })
   }
 

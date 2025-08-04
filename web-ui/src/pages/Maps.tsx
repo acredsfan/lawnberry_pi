@@ -18,7 +18,9 @@ import {
   CardContent,
   Chip,
   Tooltip,
-  Fab
+  Fab,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
 import { 
   Map as MapIcon, 
@@ -52,6 +54,8 @@ import { noGoZoneService, NoGoZone } from '../services/noGoZoneService';
 import { homeLocationService, HomeLocation } from '../services/homeLocationService';
 
 const Maps: React.FC = () => {
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up('lg'));
   const dispatch = useDispatch<AppDispatch>();
   const mapState = useSelector((state: RootState) => selectMapState(state));
   const mapConfig = useSelector((state: RootState) => selectMapConfig(state));
@@ -64,6 +68,9 @@ const Maps: React.FC = () => {
   const [homeLocations, setHomeLocations] = useState<HomeLocation[]>([]);
   const [showHelp, setShowHelp] = useState(false);
   const mapRef = useRef<google.maps.Map | L.Map | null>(null);
+
+  // Determine if we should use full-width layout (desktop full-page mode)
+  const useFullWidth = isDesktop;
 
   const robotPosition = status?.position ? {
     lat: status.position.lat,
@@ -273,11 +280,16 @@ const Maps: React.FC = () => {
           />
         </Tabs>
 
-        <Box sx={{ p: 3 }}>
+        <Box sx={{ p: useFullWidth ? 0 : 3 }}>
           {activeTab === 0 && (
-            <Grid container spacing={3}>
-              <Grid item xs={12} lg={8}>
-                <Paper sx={{ height: 600, overflow: 'hidden', position: 'relative' }}>
+            <Grid container spacing={useFullWidth ? 0 : 3}>
+              <Grid item xs={12} lg={useFullWidth ? 12 : 8}>
+                <Paper sx={{ 
+                  height: useFullWidth ? '100vh' : 600, 
+                  overflow: 'hidden', 
+                  position: 'relative',
+                  borderRadius: useFullWidth ? 0 : 1
+                }}>
                   <MapContainer
                     center={robotPosition || mapConfig.defaultCenter}
                     zoom={mapConfig.defaultZoom}
@@ -334,10 +346,11 @@ const Maps: React.FC = () => {
                 </Paper>
               </Grid>
               
-              <Grid item xs={12} lg={4}>
-                <Grid container spacing={2}>
-                  {/* Robot Status Card */}
-                  <Grid item xs={12}>
+              {!useFullWidth && (
+                <Grid item xs={12} lg={4}>
+                  <Grid container spacing={2}>
+                    {/* Robot Status Card */}
+                    <Grid item xs={12}>
                     <Card>
                       <CardContent>
                         <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -464,6 +477,7 @@ const Maps: React.FC = () => {
                   )}
                 </Grid>
               </Grid>
+              )}
             </Grid>
           )}
 
