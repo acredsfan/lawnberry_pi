@@ -280,7 +280,7 @@ const Navigation: React.FC = () => {
                   Coverage: {status?.coverage?.percentage.toFixed(1) || '0'}%
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Battery: {status?.battery.level || 0}%
+                  Battery: {status?.battery.level ? status.battery.level.toFixed(1) : '0.0'}%
                 </Typography>
               </Box>
             </CardContent>

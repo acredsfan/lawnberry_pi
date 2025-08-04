@@ -15,13 +15,13 @@ const initialState: MapSliceState = {
   // Map state
   isLoading: false,
   error: null,
-  currentProvider: 'google',
+  currentProvider: MapProvider.GOOGLE,
   isOffline: false,
   cacheStatus: 'empty',
   
   // Map configuration
   config: {
-    provider: 'google',
+    provider: MapProvider.GOOGLE,
     usageLevel: 'medium',
     apiKey: undefined,
     defaultCenter: { lat: 40.7128, lng: -74.0060 },
@@ -33,7 +33,7 @@ const initialState: MapSliceState = {
   // Additional state
   lastKnownPosition: null,
   userPreferences: {
-    preferredProvider: 'google',
+    preferredProvider: MapProvider.GOOGLE,
     autoFallback: true,
     showProviderSwitch: true
   }
@@ -108,14 +108,21 @@ const mapSlice = createSlice({
     
     initializeMapFromEnvironment: (state) => {
       // This would typically be called on app initialization
-      const apiKey = import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY;
+      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY;
+      console.log('Google Maps API Key from environment:', apiKey ? 'Found' : 'Not found');
+      
       if (apiKey) {
         state.config.apiKey = apiKey;
-        state.config.provider = 'google';
-        state.userPreferences.preferredProvider = 'google';
+        state.config.provider = MapProvider.GOOGLE;
+        state.userPreferences.preferredProvider = MapProvider.GOOGLE;
+        state.currentProvider = MapProvider.GOOGLE;
+        state.isOffline = false;
       } else {
-        state.config.provider = 'openstreetmap';
-        state.userPreferences.preferredProvider = 'openstreetmap';
+        console.log('No Google Maps API key found, falling back to OpenStreetMap');
+        state.config.provider = MapProvider.OPENSTREETMAP;
+        state.userPreferences.preferredProvider = MapProvider.OPENSTREETMAP;
+        state.currentProvider = MapProvider.OPENSTREETMAP;
+        state.isOffline = false;
       }
     }
   }

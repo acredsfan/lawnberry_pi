@@ -258,7 +258,7 @@ const Dashboard: React.FC = () => {
                     Charge Level
                   </Typography>
                   <Typography variant="h4" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 900 }}>
-                    {status?.battery.level || 0}%
+                    {status?.battery.level ? status.battery.level.toFixed(1) : '0.0'}%
                   </Typography>
                 </Box>
                 <LinearProgress 

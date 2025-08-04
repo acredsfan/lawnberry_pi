@@ -105,6 +105,12 @@ const Maps: React.FC = () => {
 
   useEffect(() => {
     // Initialize map configuration from environment on component mount
+    console.log('Maps page initializing...');
+    console.log('Environment check:', {
+      viteKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
+      reactKey: import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found'
+    });
+    
     dispatch(initializeMapFromEnvironment());
     loadBoundaries();
     loadNoGoZones();
@@ -195,10 +201,22 @@ const Maps: React.FC = () => {
       </Typography>
 
       {/* API Key Status */}
-      {!mapConfig.apiKey && (
+      {mapState.error && mapState.error.type === 'api_key_invalid' && (
         <Alert severity="info" sx={{ mb: 3 }}>
           Google Maps API key not configured. Using OpenStreetMap as fallback. 
           Configure REACT_APP_GOOGLE_MAPS_API_KEY in your environment to enable Google Maps.
+        </Alert>
+      )}
+
+      {mapState.currentProvider === MapProvider.OPENSTREETMAP && !mapState.error && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          Using OpenStreetMap provider. Google Maps is available if you configure REACT_APP_GOOGLE_MAPS_API_KEY.
+        </Alert>
+      )}
+
+      {mapState.error && mapState.error.type !== 'api_key_invalid' && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          Map Error: {mapState.error.message}
         </Alert>
       )}
 
@@ -362,7 +380,7 @@ const Maps: React.FC = () => {
                               Battery Level
                             </Typography>
                             <Typography variant="h4" color={status.battery.level < 20 ? 'error.main' : 'inherit'}>
-                              {status.battery.level}%
+                              {status.battery.level.toFixed(1)}%
                             </Typography>
                           </Box>
                         )}
@@ -427,6 +445,8 @@ const Maps: React.FC = () => {
 
                         <Typography variant="body2" color="text.secondary">
                           Map Provider: <strong>{mapState.currentProvider}</strong>
+                          {mapConfig.apiKey && <> (API Key: Configured)</>}
+                          {mapState.isOffline && <> - OFFLINE MODE</>}
                         </Typography>
                       </CardContent>
                     </Card>
