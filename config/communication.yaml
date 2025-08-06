@@ -36,6 +36,7 @@ broker:
 
 # MQTT Client Configuration
 client:
+  client_id: "web_api_backend"
   # Connection settings
   reconnect_delay: 5        # Initial reconnect delay (seconds)
   max_reconnect_delay: 300  # Maximum reconnect delay (seconds)  

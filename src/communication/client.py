@@ -109,7 +109,7 @@ class MQTTClient:
             self.logger.info(f"Initializing MQTT client: {self.client_id}")
             
             # Create client
-            self.client = mqtt.Client(self.client_id, clean_session=self.config['clean_session'])
+            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, self.client_id, clean_session=self.config['clean_session'])
             self.client.on_connect = self._on_connect
             self.client.on_disconnect = self._on_disconnect
             self.client.on_message = self._on_message

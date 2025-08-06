@@ -59,6 +59,10 @@ async def lifespan(app: FastAPI):
     mqtt_bridge = MQTTBridge(settings.mqtt)
     await mqtt_bridge.connect()
     app.state.mqtt_bridge = mqtt_bridge
+
+    # Integrate MQTT bridge with WebSocket manager for real-time data
+    from .routers.websocket import setup_websocket_mqtt_integration
+    setup_websocket_mqtt_integration(mqtt_bridge)
     
     # Initialize auth manager
     auth_manager = AuthManager(settings.auth)

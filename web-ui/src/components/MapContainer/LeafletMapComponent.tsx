@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, useMap, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { MapError, MapUsageLevel, MapProvider } from '../../types';
 import { mapService } from '../../services/mapService';
@@ -19,6 +19,7 @@ interface LeafletMapComponentProps {
   isOffline: boolean;
   onError: (error: MapError) => void;
   robotPosition?: { lat: number; lng: number };
+  robotPath?: Array<{ lat: number; lng: number }>;
   style?: React.CSSProperties;
   children?: React.ReactNode;
 }
@@ -78,6 +79,8 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
   usageLevel,
   isOffline,
   onError,
+  robotPosition,
+  robotPath,
   style,
   children
 }) => {
@@ -218,15 +221,22 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
         />
         
         <MapUpdater center={center} zoom={zoom} />
-      <OfflineOverlay isOffline={isOffline} />
+        <OfflineOverlay isOffline={isOffline} />
       
-      {robotPosition && (
-        <Marker position={[robotPosition.lat, robotPosition.lng]}>
-          <Popup>LawnBerry Robot</Popup>
-        </Marker>
-      )}
+        {robotPosition && (
+          <Marker position={[robotPosition.lat, robotPosition.lng]}>
+            <Popup>LawnBerry Robot</Popup>
+          </Marker>
+        )}
+
+        {robotPath && robotPath.length > 0 && (
+          <Polyline
+            positions={robotPath.map(p => [p.lat, p.lng])}
+            color="blue"
+          />
+        )}
       
-      {children}
+        {children}
       </MapContainer>
     </div>
   );

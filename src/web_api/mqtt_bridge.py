@@ -60,6 +60,7 @@ class MQTTBridge:
                     'broker_host': self.config.broker_host,
                     'broker_port': self.config.broker_port,
                     'keepalive': self.config.keepalive,
+                    'clean_session': True,
                     'reconnect_delay': self.config.reconnect_delay,
                     'max_reconnect_delay': self.config.max_reconnect_delay,
                     'message_timeout': self.config.message_timeout,
@@ -78,7 +79,9 @@ class MQTTBridge:
             )
             
             # Connect to MQTT
-            await self.mqtt_client.connect()
+            initialized = await self.mqtt_client.initialize()
+            if not initialized:
+                raise ConnectionError("Failed to initialize MQTT client")
             
             # Subscribe to all relevant topics
             await self._setup_subscriptions()

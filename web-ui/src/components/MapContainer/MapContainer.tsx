@@ -6,6 +6,7 @@ import { mapService } from '../../services/mapService';
 import { useMapAutoCentering } from '../../hooks/useMapAutoCentering';
 import GoogleMapComponent from './GoogleMapComponent';
 import LeafletMapComponent from './LeafletMapComponent';
+import WeatherWidget from '../WeatherWidget';
 
 export interface MapContainerProps {
   center?: { lat: number; lng: number };
@@ -15,6 +16,12 @@ export interface MapContainerProps {
   onProviderChange?: (provider: MapProvider) => void;
   onError?: (error: MapError) => void;
   robotPosition?: { lat: number; lng: number };
+  robotPath?: Array<{ lat: number; lng: number }>;
+  weather?: {
+    temperature: number;
+    humidity: number;
+    condition: string;
+  };
   style?: React.CSSProperties;
   className?: string;
   children?: React.ReactNode;
@@ -28,6 +35,8 @@ const MapContainer: React.FC<MapContainerProps> = ({
   onProviderChange,
   onError,
   robotPosition,
+  robotPath,
+  weather,
   style,
   className,
   children
@@ -198,11 +207,24 @@ const MapContainer: React.FC<MapContainerProps> = ({
     isOffline: mapState.isOffline,
     onError: handleError,
     robotPosition,
+    robotPath,
     style: { width: '100%', height: '100%' }
   };
 
   return (
     <Box className={className} style={style} sx={{ position: 'relative' }}>
+      {weather && (
+        <WeatherWidget
+          weather={weather}
+          style={{
+            position: 'absolute',
+            top: 10,
+            left: 10,
+            zIndex: 1000,
+            backgroundColor: 'rgba(255, 255, 255, 0.8)',
+          }}
+        />
+      )}
       {mapState.error && (
         <Alert 
           severity="warning" 
