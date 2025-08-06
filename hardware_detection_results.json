@@ -1,11 +1,11 @@
 {
   "detection": {
-    "tof_left": "HardwareDetectionResult(component_name='tof_left', detected=True, confidence=<DetectionConfidence.HIGH: 'high'>, details={'address': 41}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
-    "tof_right": "HardwareDetectionResult(component_name='tof_right', detected=True, confidence=<DetectionConfidence.HIGH: 'high'>, details={'address': 48}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
-    "power_monitor": "HardwareDetectionResult(component_name='power_monitor', detected=True, confidence=<DetectionConfidence.HIGH: 'high'>, details={'address': 64}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
-    "environmental": "HardwareDetectionResult(component_name='environmental', detected=True, confidence=<DetectionConfidence.HIGH: 'high'>, details={'address': 118}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
+    "tof_left": "HardwareDetectionResult(component_name='tof_left', detected=False, confidence=<DetectionConfidence.UNKNOWN: 'unknown'>, details={'address': 41}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
+    "tof_right": "HardwareDetectionResult(component_name='tof_right', detected=False, confidence=<DetectionConfidence.UNKNOWN: 'unknown'>, details={'address': 48}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
+    "power_monitor": "HardwareDetectionResult(component_name='power_monitor', detected=False, confidence=<DetectionConfidence.UNKNOWN: 'unknown'>, details={'address': 64}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
+    "environmental": "HardwareDetectionResult(component_name='environmental', detected=False, confidence=<DetectionConfidence.UNKNOWN: 'unknown'>, details={'address': 118}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
     "display": "HardwareDetectionResult(component_name='display', detected=True, confidence=<DetectionConfidence.HIGH: 'high'>, details={'address': 60}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
-    "i2c_devices": "HardwareDetectionResult(component_name='i2c_devices', detected=True, confidence=<DetectionConfidence.HIGH: 'high'>, details={'devices': {'tof_left': {'address': '0x29', 'present': True, 'confidence': 'high'}, 'tof_right': {'address': '0x30', 'present': True, 'confidence': 'high'}, 'power_monitor': {'address': '0x40', 'present': True, 'confidence': 'high'}, 'environmental': {'address': '0x76', 'present': True, 'confidence': 'high'}, 'display': {'address': '0x3c', 'present': True, 'confidence': 'high'}}}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
+    "i2c_devices": "HardwareDetectionResult(component_name='i2c_devices', detected=True, confidence=<DetectionConfidence.HIGH: 'high'>, details={'devices': {'display': {'address': '0x3c', 'present': True, 'confidence': 'high'}}}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
     "robohat": "HardwareDetectionResult(component_name='robohat', detected=True, confidence=<DetectionConfidence.HIGH: 'high'>, details={'port': '/dev/ttyACM1', 'baud': 115200}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
     "gps": "HardwareDetectionResult(component_name='gps', detected=True, confidence=<DetectionConfidence.HIGH: 'high'>, details={'port': '/dev/ttyACM0', 'baud': 38400}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
     "imu": "HardwareDetectionResult(component_name='imu', detected=True, confidence=<DetectionConfidence.HIGH: 'high'>, details={'port': '/dev/ttyAMA4', 'baud': 3000000}, alternative_options=[], manual_override=None, requires_user_confirmation=False)",
@@ -17,22 +17,6 @@
   },
   "tests": {
     "i2c_tests": {
-      "tof_left": {
-        "communication": "success",
-        "address": "0x29"
-      },
-      "tof_right": {
-        "communication": "success",
-        "address": "0x30"
-      },
-      "power_monitor": {
-        "communication": "success",
-        "address": "0x40"
-      },
-      "environmental": {
-        "communication": "success",
-        "address": "0x76"
-      },
       "display": {
         "communication": "success",
         "address": "0x3c"
@@ -43,7 +27,7 @@
         "communication": "success",
         "device": "/dev/ttyACM1",
         "data_available": true,
-        "bytes_read": 25
+        "bytes_read": 33
       },
       "gps": {
         "communication": "success",
@@ -61,6 +45,6 @@
     "camera_tests": {
       "error": "'HardwareDetectionResult' object has no attribute 'get'"
     },
-    "timestamp": 1754240190.0585632
+    "timestamp": 1754425336.0624092
   }
 }

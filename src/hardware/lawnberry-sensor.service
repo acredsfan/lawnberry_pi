@@ -1,0 +1,56 @@
+[Unit]
+Description=Lawnberry Hardware Sensor Service
+Documentation=https://github.com/lawnberry/hardware-sensors
+After=network.target lawnberry-communication.service
+Requires=lawnberry-communication.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=lawnberry
+Group=lawnberry
+WorkingDirectory=/opt/lawnberry
+Environment=PYTHONPATH=/opt/lawnberry
+Environment=LAWNBERRY_ENV=production
+ExecStart=/opt/lawnberry/venv/bin/python -m src.hardware.sensor_service
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=3
+StartLimitBurst=3
+
+# Resource limits
+MemoryLimit=256M
+CPUQuota=50%
+TasksMax=50
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry /dev
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictRealtime=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Hardware access
+SupplementaryGroups=gpio i2c spi dialout
+
+# Performance settings
+Nice=-1
+IOSchedulingClass=1
+IOSchedulingPriority=4
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawnberry-sensor
+
+# Watchdog
+WatchdogSec=30
+NotifyAccess=main
+
+[Install]
+WantedBy=multi-user.target

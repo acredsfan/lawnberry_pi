@@ -55,8 +55,8 @@ export class DataService {
    */
   async fetchMowerStatus(): Promise<MowerStatus> {
     try {
-      console.log('🔄 Fetching mower status from:', `${API_BASE_URL}/api/v1/mock/status`)
-      const response = await fetch(`${API_BASE_URL}/api/v1/mock/status`)
+      console.log('🔄 Fetching mower status from:', `${API_BASE_URL}/api/v1/status`)
+      const response = await fetch(`${API_BASE_URL}/api/v1/status`)
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)

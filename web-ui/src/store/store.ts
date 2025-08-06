@@ -5,6 +5,7 @@ import settingsReducer from './slices/settingsSlice'
 import navigationReducer from './slices/navigationSlice'
 import uiReducer from './slices/uiSlice'
 import mapReducer from './slices/mapSlice'
+import unitsReducer from './slices/unitsSlice'
 
 export const store = configureStore({
   reducer: {
@@ -14,6 +15,7 @@ export const store = configureStore({
     navigation: navigationReducer,
     ui: uiReducer,
     map: mapReducer,
+    units: unitsReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

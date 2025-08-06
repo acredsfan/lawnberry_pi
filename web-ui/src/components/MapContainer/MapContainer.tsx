@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Alert, CircularProgress, ToggleButtonGroup, ToggleButton } from '@mui/material';
-import { MapProvider, MapError, MapState, MapUsageLevel } from '../../types';
+import { MapError, MapState, MapUsageLevel } from '../../types';
+import { MapProvider } from '../../types';
 import { mapService } from '../../services/mapService';
 import { useMapAutoCentering } from '../../hooks/useMapAutoCentering';
 import GoogleMapComponent from './GoogleMapComponent';
@@ -13,6 +14,7 @@ export interface MapContainerProps {
   preferredProvider?: MapProvider;
   onProviderChange?: (provider: MapProvider) => void;
   onError?: (error: MapError) => void;
+  robotPosition?: { lat: number; lng: number };
   style?: React.CSSProperties;
   className?: string;
   children?: React.ReactNode;
@@ -25,6 +27,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
   preferredProvider,
   onProviderChange,
   onError,
+  robotPosition,
   style,
   className,
   children
@@ -32,7 +35,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
   const [mapState, setMapState] = useState<MapState>({
     isLoading: true,
     error: null,
-    currentProvider: preferredProvider || 'google',
+    currentProvider: preferredProvider || MapProvider.GOOGLE,
     isOffline: !navigator.onLine,
     cacheStatus: 'empty'
   });
@@ -90,7 +93,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
       const mapError = mapService.createMapError(
         'generic',
         error instanceof Error ? error.message : 'Failed to initialize map',
-        preferredProvider || 'google',
+        preferredProvider || MapProvider.GOOGLE,
         false
       );
       handleError(mapError);
@@ -194,6 +197,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
     usageLevel,
     isOffline: mapState.isOffline,
     onError: handleError,
+    robotPosition,
     style: { width: '100%', height: '100%' }
   };
 

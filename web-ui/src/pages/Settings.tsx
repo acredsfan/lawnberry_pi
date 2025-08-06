@@ -4,6 +4,7 @@ import { Save as SaveIcon, RestoreSharp as ResetIcon } from '@mui/icons-material
 import { useSelector, useDispatch } from 'react-redux'
 import { RootState } from '../store/store'
 import { updateUnits, updateSafety, updateOperation, updateDisplay, updateBatteryThresholds, resetToDefaults } from '../store/slices/settingsSlice'
+import UnitsSettings from '../components/UnitsSettings/UnitsSettings'
 
 const Settings: React.FC = () => {
   const dispatch = useDispatch()
@@ -357,6 +358,11 @@ const Settings: React.FC = () => {
             </Card>
           </Grid>
         )}
+
+        {/* Enhanced Units Settings */}
+        <Grid item xs={12} lg={8}>
+          <UnitsSettings standalone={true} />
+        </Grid>
       </Grid>
     </Box>
   )

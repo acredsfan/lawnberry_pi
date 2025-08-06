@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
-import { MapError, MapUsageLevel } from '../../types';
+import { MapError, MapUsageLevel, MapProvider } from '../../types';
 import { mapService } from '../../services/mapService';
 
 // Fix for default markers in Leaflet
@@ -18,6 +18,7 @@ interface LeafletMapComponentProps {
   usageLevel: MapUsageLevel;
   isOffline: boolean;
   onError: (error: MapError) => void;
+  robotPosition?: { lat: number; lng: number };
   style?: React.CSSProperties;
   children?: React.ReactNode;
 }
@@ -217,9 +218,15 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
         />
         
         <MapUpdater center={center} zoom={zoom} />
-        <OfflineOverlay isOffline={isOffline} />
-        
-        {children}
+      <OfflineOverlay isOffline={isOffline} />
+      
+      {robotPosition && (
+        <Marker position={[robotPosition.lat, robotPosition.lng]}>
+          <Popup>LawnBerry Robot</Popup>
+        </Marker>
+      )}
+      
+      {children}
       </MapContainer>
     </div>
   );

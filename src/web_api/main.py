@@ -212,6 +212,85 @@ def create_app() -> FastAPI:
             "connected": True
         }
     
+    # Real mower status endpoint using sensor data from MQTT
+    @app.get("/api/v1/status")
+    async def real_mower_status(request: Request):
+        """Real mower status data from hardware sensors via MQTT"""
+        mqtt_bridge = getattr(request.app.state, 'mqtt_bridge', None)
+        
+        if not mqtt_bridge or not mqtt_bridge.is_connected():
+            # Fallback to mock data if MQTT not available
+            return await mock_mower_status()
+        
+        try:
+            # Get sensor data from MQTT cache
+            gps_data = mqtt_bridge.get_cached_data("sensors/gps/data") or {}
+            imu_data = mqtt_bridge.get_cached_data("sensors/imu/data") or {}
+            tof_data = mqtt_bridge.get_cached_data("sensors/tof/data") or {}
+            env_data = mqtt_bridge.get_cached_data("sensors/environmental/data") or {}
+            power_data = mqtt_bridge.get_cached_data("power/battery") or {}
+            health_data = mqtt_bridge.get_cached_data("system/health") or {}
+            
+            # Determine mower state based on available data
+            state = "idle"  # Default state
+            if power_data.get("charging", False):
+                state = "charging"
+            elif gps_data.get("latitude", 0) != 0 and imu_data.get("acceleration", {}).get("x", 0) > 0.1:
+                state = "mowing"
+            
+            # Build status response from real sensor data
+            return {
+                "state": state,
+                "position": {
+                    "lat": gps_data.get("latitude", 0.0),
+                    "lng": gps_data.get("longitude", 0.0),
+                    "heading": imu_data.get("orientation", {}).get("yaw", 0.0),
+                    "accuracy": gps_data.get("accuracy", 0.0)
+                },
+                "battery": {
+                    "level": power_data.get("battery_level", 0.0),
+                    "voltage": power_data.get("battery_voltage", 0.0),
+                    "current": power_data.get("battery_current", 0.0),
+                    "charging": power_data.get("charging", False),
+                    "timeRemaining": max(0, int(power_data.get("battery_level", 0) * 2))  # Rough estimate
+                },
+                "sensors": {
+                    "imu": {
+                        "orientation": imu_data.get("orientation", {"x": 0, "y": 0, "z": 0}),
+                        "acceleration": imu_data.get("acceleration", {"x": 0, "y": 0, "z": 0}),
+                        "gyroscope": imu_data.get("gyroscope", {"x": 0, "y": 0, "z": 0}),
+                        "temperature": imu_data.get("temperature", 0.0)
+                    },
+                    "tof": {
+                        "left": tof_data.get("left_distance", 0.0),
+                        "right": tof_data.get("right_distance", 0.0)
+                    },
+                    "environmental": {
+                        "temperature": env_data.get("temperature", 0.0),
+                        "humidity": env_data.get("humidity", 0.0),
+                        "pressure": env_data.get("pressure", 0.0)
+                    },
+                    "power": {
+                        "voltage": power_data.get("battery_voltage", 0.0),
+                        "current": power_data.get("battery_current", 0.0),
+                        "power": power_data.get("battery_voltage", 0.0) * power_data.get("battery_current", 0.0)
+                    }
+                },
+                "coverage": {
+                    "totalArea": 1000,  # This would come from navigation service
+                    "coveredArea": 450,  # This would come from navigation service 
+                    "percentage": 45.0
+                },
+                "lastUpdate": time.time(),
+                "location_source": "gps" if gps_data.get("satellites", 0) > 3 else "dead_reckoning",
+                "connected": True
+            }
+            
+        except Exception as e:
+            # Log error and fallback to mock data
+            logging.getLogger(__name__).error(f"Error getting real status data: {e}")
+            return await mock_mower_status()
+    
     # Simple connectivity test endpoint
     @app.get("/api/v1/test")
     async def test_connectivity():

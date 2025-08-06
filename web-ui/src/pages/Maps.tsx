@@ -52,6 +52,7 @@ import { MapUsageLevel, MapProvider } from '../types';
 import { boundaryService, Boundary } from '../services/boundaryService';
 import { noGoZoneService, NoGoZone } from '../services/noGoZoneService';
 import { homeLocationService, HomeLocation } from '../services/homeLocationService';
+import { useUnits } from '../hooks/useUnits';
 
 const Maps: React.FC = () => {
   const theme = useTheme();
@@ -61,6 +62,7 @@ const Maps: React.FC = () => {
   const mapConfig = useSelector((state: RootState) => selectMapConfig(state));
   const userPreferences = useSelector((state: RootState) => selectUserPreferences(state));
   const { status } = useSelector((state: RootState) => state.mower);
+  const { format: formatUnits } = useUnits();
 
   const [activeTab, setActiveTab] = useState(0);
   const [boundaries, setBoundaries] = useState<Boundary[]>([]);
@@ -285,7 +287,7 @@ const Maps: React.FC = () => {
             <Grid container spacing={useFullWidth ? 0 : 3}>
               <Grid item xs={12} lg={useFullWidth ? 12 : 8}>
                 <Paper sx={{ 
-                  height: useFullWidth ? '100vh' : 600, 
+                  height: useFullWidth ? 'calc(100vh - 120px)' : 600, 
                   overflow: 'hidden', 
                   position: 'relative',
                   borderRadius: useFullWidth ? 0 : 1
@@ -295,6 +297,7 @@ const Maps: React.FC = () => {
                     zoom={mapConfig.defaultZoom}
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
+                    robotPosition={robotPosition}
                     onProviderChange={(provider) => {
                       console.log('Provider changed to:', provider);
                     }}
@@ -414,7 +417,7 @@ const Maps: React.FC = () => {
                             Total Area
                           </Typography>
                           <Typography variant="h4">
-                            {totalArea < 1000 ? `${Math.round(totalArea)} m²` : `${(totalArea / 10000).toFixed(2)} ha`}
+                            {formatUnits.area(totalArea)}
                           </Typography>
                         </Box>
 
@@ -443,7 +446,7 @@ const Maps: React.FC = () => {
                             No-Go Zones
                           </Typography>
                           <Typography variant="body1">
-                            {activeNoGoZones.length} active ({totalNoGoArea < 1000 ? `${Math.round(totalNoGoArea)} m²` : `${(totalNoGoArea / 10000).toFixed(2)} ha`})
+                            {activeNoGoZones.length} active ({formatUnits.area(totalNoGoArea)})
                           </Typography>
                         </Box>
 
@@ -490,6 +493,7 @@ const Maps: React.FC = () => {
                     zoom={mapConfig.defaultZoom}
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
+                    robotPosition={robotPosition}
                     onProviderChange={(provider) => {
                       console.log('Provider changed to:', provider);
                     }}
@@ -530,6 +534,7 @@ const Maps: React.FC = () => {
                     zoom={mapConfig.defaultZoom}
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
+                    robotPosition={robotPosition}
                     onProviderChange={(provider) => {
                       console.log('Provider changed to:', provider);
                     }}
@@ -572,6 +577,7 @@ const Maps: React.FC = () => {
                     zoom={mapConfig.defaultZoom}
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
+                    robotPosition={robotPosition}
                     onProviderChange={(provider) => {
                       console.log('Provider changed to:', provider);
                     }}
@@ -612,6 +618,7 @@ const Maps: React.FC = () => {
                     zoom={mapConfig.defaultZoom}
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
+                    robotPosition={robotPosition}
                     onProviderChange={(provider) => {
                       console.log('Provider changed to:', provider);
                     }}
@@ -619,9 +626,6 @@ const Maps: React.FC = () => {
                       console.error('Map error:', error);
                     }}
                     style={{ height: '100%' }}
-                    onMapReady={(map) => {
-                      mapRef.current = map;
-                    }}
                   />
                 </Paper>
               </Grid>

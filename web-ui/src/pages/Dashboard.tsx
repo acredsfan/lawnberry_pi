@@ -7,6 +7,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { format } from 'date-fns'
 import { setStatus, setConnectionState } from '../store/slices/mowerSlice'
 import { dataService } from '../services/dataService'
+import { useUnits } from '../hooks/useUnits'
 import { MowerStatus } from '../types'
 
 const Dashboard: React.FC = () => {
@@ -14,6 +15,7 @@ const Dashboard: React.FC = () => {
   const { status, isConnected } = useSelector((state: RootState) => state.mower)
   const { data: weatherData } = useSelector((state: RootState) => state.weather)
   const { connectionStatus } = useSelector((state: RootState) => state.ui)
+    const { format: formatUnits, converters, unitsPrefs } = useUnits()
   
   const [sensorHistory, setSensorHistory] = useState<Array<{
     time: string
@@ -101,11 +103,11 @@ const Dashboard: React.FC = () => {
         const newDataPoint = {
           time: format(new Date(), 'HH:mm:ss'),
           battery: status.battery.level,
-          temperature: status.sensors.environmental.temperature,
-          speed: Math.sqrt(
+          temperature: converters.temperature.fromCelsius(status.sensors.environmental.temperature),
+          speed: converters.speed.fromMps(Math.sqrt(
             Math.pow(status.sensors.imu.acceleration.x, 2) +
             Math.pow(status.sensors.imu.acceleration.y, 2)
-          ) * 3.6 // Convert to km/h approximation
+          )) // Convert from m/s to current unit system
         }
         
         setSensorHistory(prev => {
@@ -274,7 +276,7 @@ const Dashboard: React.FC = () => {
                       {weatherData?.current.condition || 'UNKNOWN'}
                     </Typography>
                     <Typography variant="body2" className="neon-text" sx={{ fontFamily: 'monospace' }}>
-                      {weatherData?.current.temperature ? `${weatherData.current.temperature.toFixed(1)}°C` : '--°C'}
+                      {weatherData?.current.temperature ? formatUnits.temperature(weatherData.current.temperature) : `--${formatUnits.temperature(0).split('0')[1]}`}
                     </Typography>
                     <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
                       Weather Status
@@ -467,7 +469,7 @@ const Dashboard: React.FC = () => {
                       dataKey="temperature" 
                       stroke="#FFD700" 
                       strokeWidth={3}
-                      name="Temperature (°C)"
+                      name={`Temperature (${unitsPrefs.temperatureUnit})`}
                       dot={{ fill: '#FFD700', strokeWidth: 2, r: 4 }}
                       activeDot={{ r: 6, stroke: '#FFD700', strokeWidth: 2, fill: '#FFD700' }}
                     />
@@ -477,7 +479,7 @@ const Dashboard: React.FC = () => {
                       dataKey="speed" 
                       stroke="#FF1493" 
                       strokeWidth={3}
-                      name="Speed (km/h)"
+                      name={`Speed (${unitsPrefs.unitSystem === 'metric' ? 'km/h' : 'mph'})`}
                       dot={{ fill: '#FF1493', strokeWidth: 2, r: 4 }}
                       activeDot={{ r: 6, stroke: '#FF1493', strokeWidth: 2, fill: '#FF1493' }}
                     />

@@ -16,7 +16,9 @@ import RCControl from './pages/RCControl'
 import Documentation from './pages/Documentation'
 import Logo from './components/Logo'
 import { webSocketService } from './services/websocket'
+import { sensorDataService } from './services/sensorDataService'
 import { usePerformanceMonitor } from './hooks/usePerformanceMonitor'
+import { useUnits } from './hooks/useUnits'
 
 const AppContent: React.FC = () => {
   const location = useLocation()
@@ -53,6 +55,7 @@ const App: React.FC = () => {
   })
 
   usePerformanceMonitor()
+  useUnits() // Initialize units system
 
   useEffect(() => {
     const initializeApp = async () => {
@@ -132,6 +135,87 @@ const App: React.FC = () => {
         // Set initial mock data
         dispatch(setStatus(mockMowerStatus))
         dispatch(setWeatherData(mockWeatherData))
+        
+        // Start real-time sensor data service
+        const unsubscribeSensorData = sensorDataService.subscribe((sensorData) => {
+          // Update mower status with real sensor data
+          const updatedStatus = {
+            state: 'idle' as const,
+            position: {
+              lat: sensorData.gps.latitude,
+              lng: sensorData.gps.longitude,
+              heading: sensorData.imu.orientation.yaw,
+              accuracy: sensorData.gps.accuracy
+            },
+            battery: {
+              level: sensorData.power.battery_level,
+              voltage: sensorData.power.battery_voltage,
+              current: sensorData.power.battery_current,
+              charging: sensorData.power.charging,
+              timeRemaining: Math.floor(sensorData.power.battery_level * 2) // Rough estimate
+            },
+            sensors: {
+              imu: {
+                orientation: sensorData.imu.orientation,
+                acceleration: sensorData.imu.acceleration,
+                gyroscope: sensorData.imu.gyroscope,
+                temperature: sensorData.imu.temperature
+              },
+              tof: {
+                left: sensorData.tof.left_distance,
+                right: sensorData.tof.right_distance
+              },
+              environmental: {
+                temperature: sensorData.environmental.temperature,
+                humidity: sensorData.environmental.humidity,
+                pressure: sensorData.environmental.pressure
+              },
+              power: {
+                voltage: sensorData.power.battery_voltage,
+                current: sensorData.power.battery_current,
+                power: sensorData.power.battery_voltage * sensorData.power.battery_current
+              }
+            },
+            coverage: {
+              totalArea: 1000,
+              coveredArea: 750,
+              percentage: 75.0
+            },
+            lastUpdate: Date.now(),
+            location_source: 'gps' as const,
+            connected: true
+          }
+          
+          dispatch(setStatus(updatedStatus))
+          
+          // Update weather data with environmental sensors
+          const updatedWeatherData = {
+            current: {
+              temperature: sensorData.environmental.temperature,
+              humidity: sensorData.environmental.humidity,
+              windSpeed: 3.2,
+              windDirection: 180,
+              precipitation: sensorData.environmental.rain_detected ? 0.5 : 0,
+              condition: sensorData.environmental.rain_detected ? 'Rainy' : 'Clear',
+              icon: sensorData.environmental.rain_detected ? 'rain' : 'sunny'
+            },
+            forecast: [
+              {
+                date: new Date().toISOString().split('T')[0],
+                temperature: { min: 18, max: 28 },
+                condition: 'Sunny',
+                icon: 'sunny',
+                precipitation: 0
+              }
+            ],
+            alerts: []
+          }
+          
+          dispatch(setWeatherData(updatedWeatherData))
+        })
+        
+        // Start the sensor data service
+        sensorDataService.start()
         
         // Initialize WebSocket connection
         webSocketService.connect()
@@ -219,46 +303,9 @@ const App: React.FC = () => {
           dispatch(addNotification(data))
         })
 
-        // Simulate periodic data updates for demo purposes
-        const simulateDataUpdates = () => {
-          setInterval(() => {
-            const updatedStatus = {
-              ...mockMowerStatus,
-              battery: {
-                ...mockMowerStatus.battery,
-                level: Math.max(20, mockMowerStatus.battery.level - Math.random() * 0.5),
-                current: 1.5 + Math.random() * 0.6
-              },
-              sensors: {
-                ...mockMowerStatus.sensors,
-                environmental: {
-                  ...mockMowerStatus.sensors.environmental,
-                  temperature: 24.5 + (Math.random() - 0.5) * 2,
-                  humidity: 65 + (Math.random() - 0.5) * 10
-                },
-                imu: {
-                  ...mockMowerStatus.sensors.imu,
-                  acceleration: {
-                    x: (Math.random() - 0.5) * 0.2,
-                    y: (Math.random() - 0.5) * 0.2,
-                    z: 9.81 + (Math.random() - 0.5) * 0.1
-                  }
-                }
-              },
-              coverage: {
-                ...mockMowerStatus.coverage,
-                coveredArea: Math.min(1000, mockMowerStatus.coverage.coveredArea + Math.random() * 5),
-                percentage: Math.min(100, mockMowerStatus.coverage.percentage + Math.random() * 0.5)
-              },
-              lastUpdate: Date.now()
-            }
-            dispatch(setStatus(updatedStatus))
-          }, 3000) // Update every 3 seconds for demo
-        }
-
-        // Start data simulation after a short delay
-        setTimeout(simulateDataUpdates, 2000)
-
+        // Remove the old data simulation since we now have real-time sensor data
+        // const simulateDataUpdates = () => { ... } - REMOVED
+        
         // Track user activity
         const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart']
         const updateUserActivity = () => dispatch(updateActivity())
@@ -273,6 +320,12 @@ const App: React.FC = () => {
           activityEvents.forEach(event => {
             document.removeEventListener(event, updateUserActivity, true)
           })
+          
+          // Stop sensor data service
+          sensorDataService.stop()
+          unsubscribeSensorData()
+          
+          // Disconnect WebSocket
           webSocketService.disconnect()
         }
       } catch (error) {

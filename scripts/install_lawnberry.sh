@@ -1151,6 +1151,7 @@ install_services() {
         "src/communication/lawnberry-communication.service"
         "src/data_management/lawnberry-data.service"
         "src/hardware/lawnberry-hardware.service"
+        "src/hardware/lawnberry-sensor.service"
         "src/sensor_fusion/lawnberry-sensor-fusion.service"
         "src/weather/lawnberry-weather.service"
         "src/power_management/lawnberry-power.service"
