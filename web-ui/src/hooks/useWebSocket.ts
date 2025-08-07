@@ -37,8 +37,8 @@ export const useWebSocket = (
     dispatch(setConnectionState(false));
   }, [dispatch]);
 
-  const send = useCallback((topic: string, data: any) => {
-    webSocketService.send(topic, data);
+  const send = useCallback((topic: string, data?: any) => {
+    webSocketService.send({ type: topic, data });
   }, []);
 
   const sendCommand = useCallback((command: string, parameters?: any) => {

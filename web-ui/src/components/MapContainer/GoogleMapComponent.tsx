@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { MapError, MapUsageLevel, YardBoundary } from '../../types';
+import { MapError, MapUsageLevel, YardBoundary, MapProvider } from '../../types';
 import { mapService } from '../../services/mapService';
 
 interface GoogleMapComponentProps {
@@ -64,23 +64,23 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
     // LawnBerryPi branded map styles
     return [
       {
-        featureType: 'landscape' as google.maps.MapTypeStyleFeatureType,
-        elementType: 'geometry.fill' as google.maps.MapTypeStyleElementType,
+        featureType: 'landscape',
+        elementType: 'geometry.fill',
         stylers: [{ color: '#e8f5e8' }] // Light green for grass areas
       },
       {
-        featureType: 'poi.park' as google.maps.MapTypeStyleFeatureType,
-        elementType: 'geometry.fill' as google.maps.MapTypeStyleElementType,
+        featureType: 'poi.park',
+        elementType: 'geometry.fill',
         stylers: [{ color: '#c8e6c9' }] // Slightly darker green for parks
       },
       {
-        featureType: 'water' as google.maps.MapTypeStyleFeatureType,
-        elementType: 'geometry.fill' as google.maps.MapTypeStyleElementType,
+        featureType: 'water',
+        elementType: 'geometry.fill',
         stylers: [{ color: '#81c784' }] // LawnBerry theme green for water
       },
       {
-        featureType: 'road' as google.maps.MapTypeStyleFeatureType,
-        elementType: 'geometry.stroke' as google.maps.MapTypeStyleElementType,
+        featureType: 'road',
+        elementType: 'geometry.stroke',
         stylers: [{ color: '#4caf50' }] // Green road borders
       }
     ];
@@ -117,7 +117,7 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
       // Performance optimizations based on usage level
       clickableIcons: usageSettings.enableAllFeatures,
       disableDefaultUI: !usageSettings.enableAllFeatures,
-      backgroundColor: '#e8f5e8'
+      backgroundColor: 'transparent'
     };
   }, [center, zoom, usageLevel, createCustomMapStyles]);
 
@@ -537,7 +537,7 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       const mapError = mapService.createMapError(
         'generic',
         error instanceof Error ? error.message : 'Failed to initialize Google Maps',
-        'google',
+        'google' as MapProvider,
         true
       );
       onError(mapError);
@@ -571,7 +571,7 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       const quotaError = mapService.createMapError(
         'quota_exceeded',
         'Google Maps API quota exceeded. Switching to OpenStreetMap.',
-        'google',
+        'google' as MapProvider,
         true
       );
       onError(quotaError);

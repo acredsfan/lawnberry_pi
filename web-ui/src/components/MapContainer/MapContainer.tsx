@@ -44,7 +44,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
   const [mapState, setMapState] = useState<MapState>({
     isLoading: true,
     error: null,
-    currentProvider: preferredProvider || MapProvider.GOOGLE,
+    currentProvider: preferredProvider || 'google' as MapProvider,
     isOffline: !navigator.onLine,
     cacheStatus: 'empty'
   });
@@ -76,6 +76,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
     if (initializationRef.current) return;
     initializationRef.current = true;
 
+    console.log('🗺️ Initializing MapContainer...');
     setMapState(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
@@ -86,8 +87,15 @@ const MapContainer: React.FC<MapContainerProps> = ({
         defaultZoom: zoom
       });
 
-      // Initialize the preferred provider
-      const actualProvider = await mapService.initializeProvider(preferredProvider);
+      // Check Google Maps API key availability
+      const apiKey = import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY;
+      console.log('🔑 Google Maps API Key status:', apiKey ? 'Available' : 'Missing');
+
+      // Initialize the preferred provider, with Google as priority if API key is available
+      const targetProvider = apiKey ? 'google' : 'openstreetmap';
+      const actualProvider = await mapService.initializeProvider(targetProvider);
+      
+      console.log('📍 Map initialized with provider:', actualProvider);
       
       setMapState({
         isLoading: false,
@@ -99,19 +107,20 @@ const MapContainer: React.FC<MapContainerProps> = ({
 
       onProviderChange?.(actualProvider);
     } catch (error) {
+      console.error('❌ Map initialization error:', error);
       const mapError = mapService.createMapError(
         'generic',
         error instanceof Error ? error.message : 'Failed to initialize map',
-        preferredProvider || MapProvider.GOOGLE,
+        preferredProvider || 'google' as MapProvider,
         false
       );
       handleError(mapError);
     }
-  }, [center, zoom, usageLevel, preferredProvider, onProviderChange, handleError]);
+  }, [usageLevel, handleError]); // Removed frequently changing dependencies
 
   useEffect(() => {
     initializeMap();
-  }, [initializeMap]);
+  }, []); // Initialize only once
 
   useEffect(() => {
     const handleOnline = () => setMapState(prev => ({ ...prev, isOffline: false }));
@@ -212,7 +221,19 @@ const MapContainer: React.FC<MapContainerProps> = ({
   };
 
   return (
-    <Box className={className} style={style} sx={{ position: 'relative' }}>
+    <Box 
+      className={className} 
+      style={style} 
+      sx={{ 
+        position: 'relative',
+        height: '100%',
+        width: '100%',
+        '& > div:last-child': {
+          height: '100%',
+          width: '100%'
+        }
+      }}
+    >
       {weather && (
         <WeatherWidget
           weather={weather}

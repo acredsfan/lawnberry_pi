@@ -3,7 +3,9 @@ import { Chip } from '@mui/material';
 import { styled } from '@mui/material/styles';
 
 // Styled badge component with variant support
-const StyledBadge = styled(Chip)<{ variant?: 'default' | 'secondary' | 'destructive' | 'outline' }>(
+const StyledBadge = styled(Chip, {
+  shouldForwardProp: (prop) => prop !== 'variant'
+})<{ variant?: 'default' | 'secondary' | 'destructive' | 'outline' }>(
   ({ theme, variant = 'default' }) => {
     const baseStyles = {
       fontSize: '0.75rem',
@@ -66,7 +68,6 @@ export const Badge = React.forwardRef<HTMLDivElement, BadgeProps>(
     <StyledBadge
       ref={ref}
       label={children}
-      variant={variant}
       className={className}
       {...props}
     />

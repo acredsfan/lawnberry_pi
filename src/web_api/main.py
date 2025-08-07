@@ -14,6 +14,9 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 import time
 import json
+from pathlib import Path  # added for static asset detection
+from fastapi.responses import RedirectResponse, FileResponse  # updated for serving UI
+
 
 from .config import get_settings
 from .auth import get_current_user, AuthManager
@@ -311,6 +314,43 @@ def create_app() -> FastAPI:
     async def ping():
         """Simple ping endpoint for health checks"""
         return {"status": "ok", "timestamp": time.time()}
+    
+    # Mount production web UI (static build) if available
+    # Served under /ui to avoid clashing with API root paths
+    dist_path = Path("web-ui/dist")
+    index_file = dist_path / "index.html"
+    if index_file.exists():
+        try:
+            from fastapi.staticfiles import StaticFiles
+            app.mount("/ui", StaticFiles(directory=str(dist_path), html=True), name="web-ui")
+            logging.getLogger(__name__).info("Mounted web UI static assets at /ui")
+            
+            # Serve UI index at root (so tunnels to / show UI)
+            @app.get("/", include_in_schema=False)
+            async def root_index():
+                return FileResponse(index_file)
+            
+            # Optional redirect /ui -> /ui/ (kept)
+            @app.get("/ui", include_in_schema=False)
+            async def ui_redirect():
+                return RedirectResponse(url="/ui/", status_code=302)
+            
+            # SPA catch-all: serve index.html for non-API paths
+            RESERVED_PREFIXES = {"api", "ws", "health", "docs", "openapi", "redoc"}
+            @app.get("/{full_path:path}", include_in_schema=False)
+            async def spa_catch_all(full_path: str):
+                # If first segment is reserved (API or system), fall through (404 handled elsewhere)
+                first = full_path.split("/", 1)[0] if full_path else ""
+                if first in RESERVED_PREFIXES or full_path.startswith("static/"):
+                    raise HTTPException(status_code=404, detail="Not Found")
+                # Avoid serving index for asset files that genuinely miss
+                if any(full_path.endswith(ext) for ext in (".png", ".jpg", ".css", ".js", ".map", ".svg", ".ico")):
+                    raise HTTPException(status_code=404, detail="Asset Not Found")
+                return FileResponse(index_file)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to mount web UI static assets: {e}")
+    else:
+        logging.getLogger(__name__).info("Web UI dist directory not found; skipping static mount")
     
     # Include routers
     app.include_router(system.router, prefix="/api/v1/system", tags=["system"])

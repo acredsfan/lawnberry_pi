@@ -161,7 +161,7 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
         const networkError = mapService.createMapError(
           'network_error',
           'Failed to load map tiles. Check your internet connection.',
-          'openstreetmap',
+          'openstreetmap' as MapProvider,
           false
         );
         onError(networkError);
@@ -172,7 +172,7 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
     const style = document.createElement('style');
     style.textContent = `
       .leaflet-container {
-        background: #e8f5e8 !important;
+        background: transparent !important;
       }
       .leaflet-control-container .leaflet-top .leaflet-control {
         margin-top: 60px;
@@ -187,6 +187,9 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
       .leaflet-control-zoom a:hover {
         background: #e8f5e8 !important;
       }
+      .leaflet-tile-pane {
+        filter: brightness(1.05) contrast(1.1);
+      }
     `;
     document.head.appendChild(style);
 
@@ -196,7 +199,7 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
     const tileError = mapService.createMapError(
       'network_error',
       'Unable to load map tiles. Operating in offline mode.',
-      'openstreetmap',
+      'openstreetmap' as MapProvider,
       false
     );
     onError(tileError);

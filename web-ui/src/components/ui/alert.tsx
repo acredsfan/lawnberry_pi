@@ -14,7 +14,7 @@ const StyledAlert = styled(MuiAlert)(({ theme }) => ({
   },
 }));
 
-interface AlertProps extends React.ComponentProps<typeof MuiAlert> {
+interface AlertProps extends Omit<React.ComponentProps<typeof MuiAlert>, 'variant'> {
   variant?: 'default' | 'destructive';
   children: React.ReactNode;
 }
@@ -50,3 +50,13 @@ Alert.displayName = 'Alert';
 
 // Export AlertTitle for compatibility
 export { AlertTitle };
+
+// AlertDescription component for compatibility
+export const AlertDescription = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ children, className, ...props }, ref) => (
+    <div ref={ref} className={className} {...props}>
+      {children}
+    </div>
+  )
+);
+AlertDescription.displayName = 'AlertDescription';

@@ -182,12 +182,11 @@ class SensorService:
                     })
             
             elif 'tof' in sensor_id.lower() or 'vl53l0x' in sensor_id.lower():
-                if 'left' in sensor_id.lower():
-                    formatted['tof']['left_distance'] = reading.value if isinstance(reading.value, (int, float)) else 0.0
-                elif 'right' in sensor_id.lower():
-                    formatted['tof']['right_distance'] = reading.value if isinstance(reading.value, (int, float)) else 0.0
-                else:
-                    formatted['tof']['front_distance'] = reading.value if isinstance(reading.value, (int, float)) else 0.0
+                # Map the single ToF sensor to all distance fields for compatibility
+                distance_value = reading.value if isinstance(reading.value, (int, float)) else 0.0
+                formatted['tof']['left_distance'] = distance_value  # Use same reading for all
+                formatted['tof']['right_distance'] = distance_value 
+                formatted['tof']['front_distance'] = distance_value
                 formatted['tof']['timestamp'] = reading.timestamp.isoformat() if reading.timestamp else datetime.utcnow().isoformat()
             
             elif 'environmental' in sensor_id.lower() or 'bme280' in sensor_id.lower():
@@ -249,24 +248,34 @@ class SensorService:
         self.running = False
         
         if self.mqtt_client:
-            await self.mqtt_client.disconnect()
+            try:
+                await asyncio.wait_for(self.mqtt_client.disconnect(), timeout=5.0)
+            except asyncio.TimeoutError:
+                self.logger.warning("MQTT disconnect timed out")
+            except Exception as e:
+                self.logger.warning(f"MQTT disconnect error: {e}")
             
         if self.hardware:
-            # Hardware interface doesn't have explicit cleanup
-            pass
+            try:
+                await asyncio.wait_for(self.hardware.cleanup(), timeout=15.0)
+                self.logger.info("Hardware cleanup completed")
+            except asyncio.TimeoutError:
+                self.logger.error("Hardware cleanup timed out")
+            except Exception as e:
+                self.logger.error(f"Hardware cleanup error: {e}")
         
         self.logger.info("Hardware sensor service stopped")
 
 
 async def main():
-    """Main entry point for hardware sensor service"""
+    """Main service entry point with proper shutdown handling"""
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler('/var/log/lawnberry/hardware-sensor.log')
+            logging.FileHandler('/var/log/lawnberry/sensor_service.log'),
+            logging.StreamHandler()
         ]
     )
     
@@ -275,20 +284,74 @@ async def main():
     
     # Create service instance
     service = SensorService()
+    shutdown_event = asyncio.Event()
+    initialization_task = None
+    service_task = None
     
     # Setup signal handlers for graceful shutdown
-    def signal_handler():
-        logger.info("Received shutdown signal")
-        asyncio.create_task(service.stop())
+    def signal_handler(signum, frame):
+        logger.info(f"Received shutdown signal {signum}")
+        shutdown_event.set()
     
     # Setup signal handlers
     for sig in [signal.SIGTERM, signal.SIGINT]:
-        signal.signal(sig, lambda s, f: signal_handler())
+        signal.signal(sig, signal_handler)
     
     try:
-        # Initialize and run service
-        await service.initialize()
-        await service.run()
+        # Initialize service with timeout
+        logger.info("Initializing service...")
+        initialization_task = asyncio.create_task(service.initialize())
+        
+        # Wait for either initialization completion or shutdown signal
+        done, pending = await asyncio.wait(
+            [initialization_task, asyncio.create_task(shutdown_event.wait())],
+            return_when=asyncio.FIRST_COMPLETED,
+            timeout=60.0  # 60 second timeout for initialization
+        )
+        
+        # Check if shutdown was requested during initialization
+        if shutdown_event.is_set():
+            logger.info("Shutdown requested during initialization")
+            if initialization_task and not initialization_task.done():
+                initialization_task.cancel()
+                try:
+                    await initialization_task
+                except asyncio.CancelledError:
+                    logger.info("Initialization cancelled successfully")
+            return
+        
+        # Check if initialization completed successfully
+        if initialization_task.done():
+            try:
+                await initialization_task  # This will raise if initialization failed
+                logger.info("Service initialized successfully, starting main loop...")
+            except Exception as e:
+                logger.error(f"Service initialization failed: {e}")
+                return
+        else:
+            logger.error("Service initialization timed out")
+            initialization_task.cancel()
+            return
+        
+        # Create service task
+        service_task = asyncio.create_task(service.run())
+        
+        # Wait for either service completion or shutdown signal
+        done, pending = await asyncio.wait(
+            [service_task, asyncio.create_task(shutdown_event.wait())],
+            return_when=asyncio.FIRST_COMPLETED,
+            timeout=None
+        )
+        
+        # Cancel pending tasks
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        
+        logger.info("Service shutting down gracefully...")
         
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt")
@@ -296,7 +359,14 @@ async def main():
         logger.error(f"Service failed: {e}")
         sys.exit(1)
     finally:
-        await service.stop()
+        # Ensure proper cleanup with timeout
+        try:
+            await asyncio.wait_for(service.stop(), timeout=15.0)
+        except asyncio.TimeoutError:
+            logger.warning("Service stop timed out - forcing exit")
+        except Exception as e:
+            logger.error(f"Error during service stop: {e}")
+        logger.info("Service shutdown complete")
 
 
 if __name__ == "__main__":

@@ -40,6 +40,9 @@ class HardwareInterface:
             'tof': self.tof_manager
         })
         
+        # Set the shared ToF manager to avoid double initialization
+        self.plugin_manager._shared_tof_manager = self.tof_manager
+        
         # State
         self._initialized = False
         self._shutdown_event = asyncio.Event()
@@ -607,6 +610,89 @@ class HardwareInterface:
             self.logger.info(f"Sensor {sensor_name} removed successfully")
         
         return success
+
+    async def cleanup(self):
+        """Clean up all hardware resources"""
+        self.logger.info("Starting hardware interface cleanup...")
+        
+        try:
+            # Signal shutdown
+            self._shutdown_event.set()
+            
+            # Stop health check task if running
+            if self._health_check_task and not self._health_check_task.done():
+                self._health_check_task.cancel()
+                try:
+                    await self._health_check_task
+                except asyncio.CancelledError:
+                    pass
+            
+            # Cleanup all managers with timeout protection
+            cleanup_tasks = []
+            
+            # ToF manager cleanup
+            if hasattr(self.tof_manager, '_cleanup'):
+                cleanup_tasks.append(
+                    asyncio.create_task(
+                        asyncio.wait_for(self.tof_manager._cleanup(), timeout=10.0),
+                        name="tof_cleanup"
+                    )
+                )
+            
+            # GPIO manager cleanup  
+            if hasattr(self.gpio_manager, 'cleanup'):
+                cleanup_tasks.append(
+                    asyncio.create_task(
+                        asyncio.wait_for(self.gpio_manager.cleanup(), timeout=5.0),
+                        name="gpio_cleanup"
+                    )
+                )
+            
+            # Serial manager cleanup
+            if hasattr(self.serial_manager, 'cleanup'):
+                cleanup_tasks.append(
+                    asyncio.create_task(
+                        asyncio.wait_for(self.serial_manager.cleanup(), timeout=5.0),
+                        name="serial_cleanup"
+                    )
+                )
+            
+            # I2C manager cleanup
+            if hasattr(self.i2c_manager, 'cleanup'):
+                cleanup_tasks.append(
+                    asyncio.create_task(
+                        asyncio.wait_for(self.i2c_manager.cleanup(), timeout=5.0),
+                        name="i2c_cleanup"
+                    )
+                )
+            
+            # Camera manager cleanup
+            if hasattr(self.camera_manager, 'cleanup'):
+                cleanup_tasks.append(
+                    asyncio.create_task(
+                        asyncio.wait_for(self.camera_manager.cleanup(), timeout=5.0),
+                        name="camera_cleanup"
+                    )
+                )
+            
+            # Wait for all cleanup tasks to complete
+            if cleanup_tasks:
+                results = await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        self.logger.warning(f"Cleanup task {cleanup_tasks[i].get_name()} failed: {result}")
+                    else:
+                        self.logger.debug(f"Cleanup task {cleanup_tasks[i].get_name()} completed successfully")
+            
+            # Clear state
+            self._sensor_data_cache.clear()
+            self._initialized = False
+            
+            self.logger.info("Hardware interface cleanup completed")
+            
+        except Exception as e:
+            self.logger.error(f"Error during hardware cleanup: {e}")
+            raise
 
 
 # Convenience function for creating hardware interface

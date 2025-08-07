@@ -9,10 +9,22 @@ export class MapService {
   private config: MapConfig;
 
   private constructor() {
+    // Try multiple environment variable patterns for better compatibility
+    const apiKey = import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY || 
+                   import.meta.env.VITE_REACT_APP_GOOGLE_MAPS_API_KEY ||
+                   process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
+    
+    console.log('🔧 MapService initialization:', {
+      metaEnv: !!import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY,
+      viteEnv: !!import.meta.env.VITE_REACT_APP_GOOGLE_MAPS_API_KEY,
+      processEnv: !!process.env.REACT_APP_GOOGLE_MAPS_API_KEY,
+      finalApiKey: !!apiKey
+    });
+    
     this.config = {
       provider: 'google',
       usageLevel: 'medium',
-      apiKey: import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY,
+      apiKey: apiKey,
       defaultCenter: { lat: 40.7128, lng: -74.0060 },
       defaultZoom: 15,
       enableCaching: true,

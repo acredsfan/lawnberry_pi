@@ -56,9 +56,8 @@ const initialState: MowerState = {
       parameters: { 
         amplitude: 0.75,
         wavelength: 8.0,
-        base_angle: 0,
-        spacing: 0.4,
-        overlap: 0.1 
+        angle: 0,
+        spacing: 0.4
       }
     },
     {
@@ -91,6 +90,12 @@ const mowerSlice = createSlice({
   reducers: {
     setStatus: (state, action: PayloadAction<MowerStatus>) => {
       state.status = action.payload
+      state.isConnected = true
+    },
+    updateStatus: (state, action: PayloadAction<Partial<MowerStatus>>) => {
+      if (state.status) {
+        state.status = { ...state.status, ...action.payload }
+      }
       state.isConnected = true
     },
     setConnectionState: (state, action: PayloadAction<boolean>) => {
@@ -163,6 +168,7 @@ const mowerSlice = createSlice({
 
 export const {
   setStatus,
+  updateStatus,
   setConnectionState,
   addSchedule,
   updateSchedule,

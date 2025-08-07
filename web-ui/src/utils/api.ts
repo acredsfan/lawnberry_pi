@@ -14,7 +14,7 @@ const apiClient: AxiosInstance = axios.create({
 
 // Request interceptor for adding auth tokens or other headers
 apiClient.interceptors.request.use(
-  (config: AxiosRequestConfig) => {
+  (config) => {
     // Add authentication token if available
     const token = localStorage.getItem('auth_token');
     if (token && config.headers) {

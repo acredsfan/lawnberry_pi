@@ -74,19 +74,17 @@ def main():
     
     # Run the server
     try:
+        # For Raspberry Pi production keep workers=1 (shared state + MQTT bridge)
         uvicorn.run(
             "web_api.main:app",
             host=settings.host,
             port=settings.port,
-            reload=settings.debug,
+            reload=False,  # disable auto-reload in production
             log_level=settings.log_level.lower(),
             access_log=True,
-            use_colors=True,
-            reload_dirs=["src"] if settings.debug else None,
-            workers=1 if settings.debug else 4,
+            use_colors=False,
+            workers=1,  # single process ensures hardware/MQTT singletons behave
             loop="asyncio",
-            http="httptools",
-            ws="websockets",
             lifespan="on"
         )
     except Exception as e:

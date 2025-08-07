@@ -75,7 +75,6 @@ const NoGoZoneEditor: React.FC<NoGoZoneEditorProps> = ({
         fillOpacity: 0.3,
         strokeColor: '#d32f2f',
         strokeWeight: 2,
-        strokePattern: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 4 }, offset: '0', repeat: '20px' }], // Dashed pattern for visual distinction
         editable: true,
         draggable: false
       }
@@ -147,7 +146,6 @@ const NoGoZoneEditor: React.FC<NoGoZoneEditorProps> = ({
         fillOpacity: zone.isEnabled ? 0.3 : 0.1,
         strokeColor: zone.isEnabled ? '#d32f2f' : '#757575',
         strokeWeight: 2,
-        strokePattern: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 4 }, offset: '0', repeat: '20px' }],
         editable: editingZone === zone.id,
         draggable: false
       });

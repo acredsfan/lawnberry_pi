@@ -50,7 +50,6 @@ vi.mock('react-leaflet', () => ({
   useLeafletContext: vi.fn(),
   MapContainer: vi.fn(() => 'map-container'),
   TileLayer: vi.fn(),
-  useMap: vi.fn(),
   Marker: vi.fn(),
   Popup: vi.fn(),
   FeatureGroup: vi.fn(),
@@ -190,7 +189,7 @@ vi.mock('./services/sensorDataService', () => ({
           rain_detected: false
         },
         power: {
-          battery_voltage: 24.2,
+          battery_voltage: 13.6,
           battery_current: 1.8,
           battery_level: 78,
           charging: false

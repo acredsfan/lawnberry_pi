@@ -2,9 +2,11 @@ import React from 'react';
 import { Button as MuiButton } from '@mui/material';
 import { styled } from '@mui/material/styles';
 
-// Styled button component with variant support
-const StyledButton = styled(MuiButton)<{ variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link' }>(
-  ({ theme, variant = 'default' }) => {
+// Styled button component with variant support  
+const StyledButton = styled(MuiButton, {
+  shouldForwardProp: (prop) => prop !== 'customVariant'
+})<{ customVariant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link' }>(
+  ({ theme, customVariant = 'default' }) => {
     const baseStyles = {
       fontSize: '0.875rem',
       fontWeight: 500,
@@ -95,12 +97,12 @@ const StyledButton = styled(MuiButton)<{ variant?: 'default' | 'destructive' | '
 
     return {
       ...baseStyles,
-      ...variantStyles[variant],
+      ...variantStyles[customVariant],
     };
   }
 );
 
-interface ButtonProps extends Omit<React.ComponentProps<typeof MuiButton>, 'variant'> {
+interface ButtonProps extends Omit<React.ComponentProps<typeof MuiButton>, 'variant' | 'size'> {
   variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
   size?: 'sm' | 'default' | 'lg';
   children: React.ReactNode;
@@ -114,12 +116,29 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       lg: { padding: '0.75rem 1.5rem', fontSize: '1rem' },
     };
 
+    // Map custom variants to MUI variants
+    const getMuiVariant = (): 'text' | 'outlined' | 'contained' => {
+      switch (variant) {
+        case 'outline':
+          return 'outlined';
+        case 'ghost':
+        case 'link':
+          return 'text';
+        default:
+          return 'contained';
+      }
+    };
+
+    // Get the MUI variant to use
+    const muiVariant = getMuiVariant();
+
     return (
       <StyledButton
         ref={ref}
-        variant={variant}
+        variant={muiVariant}
         className={className}
         sx={sizeStyles[size]}
+        customVariant={variant}
         {...props}
       >
         {children}

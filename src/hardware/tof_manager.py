@@ -22,6 +22,14 @@ except ImportError:
     HAS_HARDWARE = False
     logging.warning("VL53L0X hardware libraries not available - running in simulation mode")
 
+# Import hardware error for proper error handling
+try:
+    from .exceptions import HardwareError
+except ImportError:
+    # Fallback if exceptions module doesn't exist
+    class HardwareError(Exception):
+        pass
+
 
 @dataclass
 class ToFSensorConfig:
@@ -55,19 +63,20 @@ class ToFSensorManager:
         self._initialized = False
         self._lock = asyncio.Lock()
         
-        # Default sensor configuration based on hardware.yaml
+        # Default sensor configuration based on hardware setup
+        # Both sensors are physically connected and tested
         self.default_configs = [
             ToFSensorConfig(
-                name="tof_left",
+                name="tof_left", 
                 shutdown_pin=22,  # GPIO 22
                 interrupt_pin=6,  # GPIO 6
-                target_address=0x29  # Keep left sensor at default address
+                target_address=0x30  # Left sensor gets changed to 0x30
             ),
             ToFSensorConfig(
                 name="tof_right", 
                 shutdown_pin=23,  # GPIO 23
                 interrupt_pin=12, # GPIO 12
-                target_address=0x30  # Change right sensor to 0x30
+                target_address=0x29  # Right sensor keeps default 0x29
             )
         ]
     
@@ -133,7 +142,7 @@ class ToFSensorManager:
         self.logger.info("All ToF sensors powered down")
     
     async def _initialize_sensors_sequence(self):
-        """Initialize sensors one by one following Adafruit example pattern"""
+        """Initialize sensors one by one with proper timeout protection"""
         self.logger.info("Starting ToF sensor initialization sequence...")
         
         import RPi.GPIO as GPIO
@@ -142,36 +151,95 @@ class ToFSensorManager:
             try:
                 self.logger.info(f"Initializing sensor {i+1}/{len(self.sensor_configs)}: {config.name}")
                 
-                # Step 1: Turn ON this sensor
-                GPIO.output(config.shutdown_pin, GPIO.HIGH)
-                await asyncio.sleep(0.1)  # Allow sensor to boot
+                # Use timeout for each sensor initialization
+                await asyncio.wait_for(
+                    self._initialize_single_sensor_with_timeout(i, config, GPIO),
+                    timeout=30.0  # 30 second timeout per sensor
+                )
+                self.logger.info(f"✅ {config.name} initialized successfully")
                 
-                # Step 2: Create VL53L0X instance (at default address 0x29)
-                sensor = VL53L0X(self.i2c)
-                
-                # Step 3: Start continuous mode for better performance
-                sensor.start_continuous()
-                
-                # Step 4: Set measurement timing budget if specified
-                if hasattr(sensor, 'measurement_timing_budget'):
-                    sensor.measurement_timing_budget = config.measurement_timing_budget
-                
-                # Step 5: Change address if NOT the last sensor and NOT default address
-                if i < len(self.sensor_configs) - 1 and config.target_address != 0x29:
-                    self.logger.info(f"Changing {config.name} address from 0x29 to 0x{config.target_address:02x}")
-                    sensor.set_address(config.target_address)
-                    await asyncio.sleep(0.1)  # Allow address change to settle
-                
-                # Step 6: Store sensor reference
-                self.sensors[config.name] = sensor
-                
-                self.logger.info(f"✅ {config.name} initialized at address 0x{config.target_address:02x}")
-                
+            except asyncio.TimeoutError:
+                self.logger.error(f"❌ {config.name} initialization timed out after 30 seconds")
+                continue  # Continue with next sensor
             except Exception as e:
-                self.logger.error(f"Failed to initialize {config.name}: {e}")
-                raise
+                self.logger.error(f"❌ Failed to initialize {config.name}: {e}")
+                continue  # Continue with next sensor
         
-        self.logger.info("🎉 All ToF sensors initialization complete!")
+        if not self.sensors:
+            raise HardwareError("Failed to initialize any ToF sensors")
+            
+        self.logger.info(f"🎉 ToF sensor initialization complete! Initialized {len(self.sensors)} sensors")
+        
+        # Verify all sensors are accessible
+        if self.sensors:
+            await self._verify_sensors()
+
+    async def _initialize_single_sensor_with_timeout(self, i: int, config: ToFSensorConfig, GPIO):
+        """Initialize a single ToF sensor with proper error handling"""
+        # Step 1: Turn ON this sensor
+        GPIO.output(config.shutdown_pin, GPIO.HIGH)
+        await asyncio.sleep(0.1)  # Allow sensor to boot
+        self.logger.debug(f"Powered on {config.name} via GPIO {config.shutdown_pin}")
+        
+        # Step 2: Create VL53L0X instance with executor to prevent blocking
+        def create_sensor():
+            return VL53L0X(self.i2c)
+        
+        sensor = await asyncio.get_event_loop().run_in_executor(None, create_sensor)
+        self.logger.debug(f"Created VL53L0X instance for {config.name}")
+        
+        # Step 3: Start continuous mode with executor to prevent blocking
+        def start_continuous():
+            sensor.start_continuous()
+            
+        await asyncio.get_event_loop().run_in_executor(None, start_continuous)
+        self.logger.debug(f"Started continuous mode for {config.name}")
+        
+        # Step 4: Set measurement timing budget if specified
+        if hasattr(sensor, 'measurement_timing_budget'):
+            def set_timing():
+                sensor.measurement_timing_budget = config.measurement_timing_budget
+                
+            await asyncio.get_event_loop().run_in_executor(None, set_timing)
+            self.logger.debug(f"Set timing budget to {config.measurement_timing_budget}us for {config.name}")
+        
+        # Step 5: Change address if NOT the last sensor
+        if i < len(self.sensor_configs) - 1:
+            await self._change_sensor_address_with_timeout(sensor, config)
+        
+        # Step 6: Store sensor reference
+        self.sensors[config.name] = sensor
+
+    async def _change_sensor_address_with_timeout(self, sensor, config: ToFSensorConfig):
+        """Change sensor address with proper timeout and verification"""
+        old_address = 0x29
+        new_address = config.target_address
+        self.logger.info(f"Changing {config.name} address from 0x{old_address:02x} to 0x{new_address:02x}")
+        
+        # Set new address with executor to prevent blocking
+        def set_address():
+            sensor.set_address(new_address)
+            
+        await asyncio.get_event_loop().run_in_executor(None, set_address)
+        await asyncio.sleep(0.1)  # Allow address change to settle
+        
+        # Verify address change worked by scanning I2C bus
+        def scan_bus():
+            if self.i2c.try_lock():
+                try:
+                    return self.i2c.scan()
+                finally:
+                    self.i2c.unlock()
+            return []
+            
+        devices = await asyncio.get_event_loop().run_in_executor(None, scan_bus)
+        
+        if new_address in devices:
+            self.logger.info(f"✅ Address change successful - {config.name} now at 0x{new_address:02x}")
+        else:
+            self.logger.error(f"❌ Address change failed - {config.name} not found at 0x{new_address:02x}")
+            self.logger.debug(f"Available I2C devices: {[hex(d) for d in devices]}")
+            raise HardwareError(f"Failed to change {config.name} address to 0x{new_address:02x}")
         
         # Verify all sensors are accessible
         await self._verify_sensors()
@@ -247,25 +315,60 @@ class ToFSensorManager:
                 self.logger.warning(f"Failed to stop continuous mode on {sensor_name}: {e}")
     
     async def _cleanup(self):
-        """Clean up resources"""
+        """Clean up resources with timeout protection"""
+        self.logger.info("Starting ToF sensor cleanup...")
+        
         try:
-            await self.stop_continuous_mode()
+            # Stop continuous mode with timeout
+            await asyncio.wait_for(self.stop_continuous_mode(), timeout=5.0)
             
-            # Turn off all sensors using RPi.GPIO
+            # Turn off all sensors using RPi.GPIO with timeout protection
             import RPi.GPIO as GPIO
+            
+            cleanup_tasks = []
             for config in self.sensor_configs:
                 try:
                     GPIO.output(config.shutdown_pin, GPIO.LOW)
-                except:
-                    pass
-                    
-            GPIO.cleanup()
+                    self.logger.debug(f"GPIO {config.shutdown_pin} set LOW for {config.name}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to set GPIO {config.shutdown_pin} LOW: {e}")
             
+            # Small delay to ensure sensors are off
+            await asyncio.sleep(0.1)
+            
+            # Clean up GPIO
+            try:
+                GPIO.cleanup()
+                self.logger.info("GPIO cleanup completed")
+            except Exception as e:
+                self.logger.warning(f"GPIO cleanup warning: {e}")
+            
+            # Clear data structures
             self.sensors.clear()
             self.shutdown_pins.clear()
+            self.sensor_configs.clear()
             
+            # Close I2C bus if it exists
+            if hasattr(self, 'i2c') and self.i2c:
+                try:
+                    self.i2c.deinit()
+                    self.logger.debug("I2C bus deinitialized")
+                except Exception as e:
+                    self.logger.debug(f"I2C deinit warning: {e}")
+                    
+            self.logger.info("ToF sensor cleanup completed successfully")
+            
+        except asyncio.TimeoutError:
+            self.logger.error("ToF sensor cleanup timed out")
         except Exception as e:
-            self.logger.error(f"Error during cleanup: {e}")
+            self.logger.error(f"Error during ToF cleanup: {e}")
+        finally:
+            # Force GPIO cleanup as last resort
+            try:
+                import RPi.GPIO as GPIO
+                GPIO.cleanup()
+            except:
+                pass
     
     async def shutdown(self):
         """Shutdown ToF sensor manager"""

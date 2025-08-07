@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import * as L from 'leaflet';
 import {
   Box,
   Card,
@@ -150,7 +151,7 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
 
       const color = getPathColor(path.status);
       
-      if (mapProvider === MapProvider.GOOGLE_MAPS && 'google' in window) {
+      if (mapProvider === 'google' && 'google' in window) {
         const polyline = new google.maps.Polyline({
           path: path.coordinates,
           geodesic: true,
@@ -160,7 +161,7 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
           map: mapInstance as google.maps.Map
         });
         newOverlays.push(polyline);
-      } else if (mapProvider === MapProvider.OPENSTREETMAP && 'L' in window) {
+      } else if (mapProvider === 'openstreetmap' && 'L' in window) {
         const leafletMap = mapInstance as L.Map;
         const polyline = L.polyline(
           path.coordinates.map(coord => [coord.lat, coord.lng]),
@@ -179,9 +180,9 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
 
   const clearMapOverlays = useCallback(() => {
     overlays.forEach(overlay => {
-      if (mapProvider === MapProvider.GOOGLE_MAPS) {
+      if (mapProvider === 'google') {
         overlay.setMap(null);
-      } else if (mapProvider === MapProvider.OPENSTREETMAP) {
+      } else if (mapProvider === 'openstreetmap') {
         overlay.remove();
       }
     });

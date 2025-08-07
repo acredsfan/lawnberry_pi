@@ -210,7 +210,7 @@ const ProgressTracker: React.FC<ProgressTrackerProps> = ({
         });
         setRobotMarker(marker);
       }
-    } else if (mapProvider === 'leaflet' && map && 'setView' in map) {
+    } else if (mapProvider === 'openstreetmap' && map && 'setView' in map) {
       // Leaflet implementation
       if (robotMarker && 'setLatLng' in robotMarker) {
         (robotMarker as any).setLatLng([position.lat, position.lng]);
@@ -280,7 +280,7 @@ const ProgressTracker: React.FC<ProgressTrackerProps> = ({
         map
       });
       setPathOverlay(polyline);
-    } else if (mapProvider === 'leaflet' && map && 'setView' in map) {
+    } else if (mapProvider === 'openstreetmap' && map && 'setView' in map) {
       const L = (window as any).L;
       if (L) {
         const latlngs = pathHistoryRef.current.map(point => [point.lat, point.lng]);

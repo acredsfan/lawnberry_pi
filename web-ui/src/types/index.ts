@@ -48,7 +48,7 @@ export interface MowerStatus {
     percentage: number
   }
   lastUpdate: number
-  location_source: 'gps' | 'rtk' | 'visual' | 'imu' | 'manual'
+  location_source: 'gps' | 'rtk' | 'visual' | 'imu' | 'manual' | 'config'
   connected: boolean
 }
 
@@ -122,6 +122,7 @@ export type MowingPattern = {
         first_angle: number
         second_angle: number
         overlap?: number
+        base_angle?: number
       }
     }
 )
@@ -236,10 +237,7 @@ export interface NavigationState {
   coverage: Array<{ lat: number; lng: number; covered: boolean }>
 }
 
-export const enum MapProvider {
-  GOOGLE = 'google',
-  OPENSTREETMAP = 'openstreetmap'
-}
+export type MapProvider = 'google' | 'openstreetmap'
 
 export type MapUsageLevel = 'high' | 'medium' | 'low'
 

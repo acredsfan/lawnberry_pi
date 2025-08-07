@@ -15,13 +15,13 @@ const initialState: MapSliceState = {
   // Map state
   isLoading: false,
   error: null,
-  currentProvider: MapProvider.GOOGLE,
+  currentProvider: 'google' as MapProvider,
   isOffline: false,
   cacheStatus: 'empty',
   
   // Map configuration
   config: {
-    provider: MapProvider.GOOGLE,
+    provider: 'google' as MapProvider,
     usageLevel: 'medium',
     apiKey: undefined,
     defaultCenter: { lat: 40.7128, lng: -74.0060 },
@@ -33,7 +33,7 @@ const initialState: MapSliceState = {
   // Additional state
   lastKnownPosition: null,
   userPreferences: {
-    preferredProvider: MapProvider.GOOGLE,
+    preferredProvider: 'google' as MapProvider,
     autoFallback: true,
     showProviderSwitch: true
   }
@@ -118,21 +118,21 @@ const mapSlice = createSlice({
       if (apiKey) {
         console.log('Initializing Google Maps with API key');
         state.config.apiKey = apiKey;
-        state.config.provider = MapProvider.GOOGLE;
-        state.userPreferences.preferredProvider = MapProvider.GOOGLE;
-        state.currentProvider = MapProvider.GOOGLE;
+        state.config.provider = 'google' as MapProvider;
+        state.userPreferences.preferredProvider = 'google' as MapProvider;
+        state.currentProvider = 'google' as MapProvider;
         state.isOffline = false;
         state.error = null;
       } else {
         console.log('No Google Maps API key found, falling back to OpenStreetMap');
-        state.config.provider = MapProvider.OPENSTREETMAP;
-        state.userPreferences.preferredProvider = MapProvider.OPENSTREETMAP;
-        state.currentProvider = MapProvider.OPENSTREETMAP;
+        state.config.provider = 'openstreetmap' as MapProvider;
+        state.userPreferences.preferredProvider = 'openstreetmap' as MapProvider;
+        state.currentProvider = 'openstreetmap' as MapProvider;
         state.isOffline = false;
         state.error = {
           type: 'api_key_invalid',
           message: 'Google Maps API key not configured',
-          provider: MapProvider.GOOGLE,
+          provider: 'google' as MapProvider,
           canFallback: true
         };
       }

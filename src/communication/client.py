@@ -11,6 +11,15 @@ from typing import Dict, Any, Optional, Callable, List, Set
 from datetime import datetime
 from collections import defaultdict, deque
 import threading
+from dataclasses import is_dataclass, asdict
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles datetime objects"""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
 
 try:
     import paho.mqtt.client as mqtt
@@ -26,7 +35,11 @@ class MQTTClient:
     def __init__(self, client_id: str, config: Dict[str, Any] = None):
         self.client_id = client_id
         self.logger = logging.getLogger(f"{__name__}.{client_id}")
-        self.config = config or self._default_config()
+        # Deep-merge provided config with defaults so missing keys (e.g. queue_size) don't raise KeyError
+        if config:
+            self.config = self._merge_config(self._default_config(), config)
+        else:
+            self.config = self._default_config()
         
         # MQTT client
         self.client: Optional[mqtt.Client] = None
@@ -73,6 +86,15 @@ class MQTTClient:
             'status': 20
         }
     
+    def _merge_config(self, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        """Deep merge override into base (non-destructive for unspecified keys)"""
+        for k, v in override.items():
+            if isinstance(v, dict) and k in base and isinstance(base[k], dict):
+                base[k] = self._merge_config(base[k], v)
+            else:
+                base[k] = v
+        return base
+
     def _default_config(self) -> Dict[str, Any]:
         """Default client configuration"""
         return {
@@ -436,7 +458,27 @@ class MQTTClient:
                 category = message.metadata.message_type.value
                 qos = self._qos_map.get(message.metadata.priority, qos)
             else:
-                payload = json.dumps(message) if not isinstance(message, str) else message
+                # Convert dataclass instances
+                if is_dataclass(message):
+                    message = asdict(message)
+                # Objects with to_dict support
+                elif hasattr(message, 'to_dict') and callable(getattr(message, 'to_dict')):
+                    try:
+                        message = message.to_dict()
+                    except Exception:
+                        pass
+                # Ensure datetime objects inside structures become ISO strings
+                def _convert(obj):
+                    if isinstance(obj, datetime):
+                        return obj.isoformat()
+                    if isinstance(obj, list):
+                        return [_convert(i) for i in obj]
+                    if isinstance(obj, dict):
+                        return {k: _convert(v) for k, v in obj.items()}
+                    return obj
+                if isinstance(message, (dict, list)):
+                    message = _convert(message)
+                payload = message if isinstance(message, str) else json.dumps(message, cls=DateTimeEncoder, default=str)
                 category = 'general'
             
             # Check rate limiting

@@ -248,7 +248,7 @@ class ToFSensorPlugin(HardwarePlugin):
                 )
                 
                 # Create or get shared ToF manager instance
-                if not hasattr(self.__class__, '_shared_tof_manager'):
+                if not hasattr(self.__class__, '_shared_tof_manager') or self.__class__._shared_tof_manager is None:
                     self.__class__._shared_tof_manager = ToFSensorManager()
                 
                 tof_manager = self.__class__._shared_tof_manager

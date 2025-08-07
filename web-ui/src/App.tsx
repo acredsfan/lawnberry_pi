@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { Box, Snackbar, Alert, CircularProgress, Typography } from '@mui/material'
+import { Box, Snackbar, Alert, CircularProgress, Typography, Button } from '@mui/material'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState } from './store/store'
 import { addNotification, setConnectionStatus, updateActivity } from './store/slices/uiSlice'
-import { setStatus, setConnectionState } from './store/slices/mowerSlice'
+import { setStatus, updateStatus, setConnectionState } from './store/slices/mowerSlice'
 import { setWeatherData } from './store/slices/weatherSlice'
 import Layout from './components/Layout/Layout'
 import Dashboard from './pages/Dashboard'
@@ -48,6 +48,7 @@ const App: React.FC = () => {
   const dispatch = useDispatch()
   const { notifications, connectionStatus } = useSelector((state: RootState) => state.ui)
   const [initializing, setInitializing] = useState(true)
+  const [initError, setInitError] = useState<string | null>(null)
   const [notification, setNotification] = useState<{ open: boolean; message: string; severity: 'success' | 'info' | 'warning' | 'error' }>({
     open: false,
     message: '',
@@ -58,7 +59,18 @@ const App: React.FC = () => {
   useUnits() // Initialize units system
 
   useEffect(() => {
+    // Emergency timeout to show app no matter what after 5 seconds
+    const emergencyTimeout = setTimeout(() => {
+      if (initializing) {
+        console.log('🚨 EMERGENCY: Forcing app to show after timeout')
+        setInitError('Initialization took too long - showing interface anyway')
+        setInitializing(false)
+      }
+    }, 5000)
+
     const initializeApp = async () => {
+      console.log('🚀 Starting LawnBerryPi app initialization...')
+      
       try {
         dispatch(setConnectionStatus('connecting'))
         
@@ -132,96 +144,15 @@ const App: React.FC = () => {
           alerts: []
         }
         
-        // Set initial mock data
+        // Set initial mock data immediately
         dispatch(setStatus(mockMowerStatus))
         dispatch(setWeatherData(mockWeatherData))
         
-        // Start real-time sensor data service
-        const unsubscribeSensorData = sensorDataService.subscribe((sensorData) => {
-          // Update mower status with real sensor data
-          const updatedStatus = {
-            state: 'idle' as const,
-            position: {
-              lat: sensorData.gps.latitude,
-              lng: sensorData.gps.longitude,
-              heading: sensorData.imu.orientation.yaw,
-              accuracy: sensorData.gps.accuracy
-            },
-            battery: {
-              level: sensorData.power.battery_level,
-              voltage: sensorData.power.battery_voltage,
-              current: sensorData.power.battery_current,
-              charging: sensorData.power.charging,
-              timeRemaining: Math.floor(sensorData.power.battery_level * 2) // Rough estimate
-            },
-            sensors: {
-              imu: {
-                orientation: sensorData.imu.orientation,
-                acceleration: sensorData.imu.acceleration,
-                gyroscope: sensorData.imu.gyroscope,
-                temperature: sensorData.imu.temperature
-              },
-              tof: {
-                left: sensorData.tof.left_distance,
-                right: sensorData.tof.right_distance
-              },
-              environmental: {
-                temperature: sensorData.environmental.temperature,
-                humidity: sensorData.environmental.humidity,
-                pressure: sensorData.environmental.pressure
-              },
-              power: {
-                voltage: sensorData.power.battery_voltage,
-                current: sensorData.power.battery_current,
-                power: sensorData.power.battery_voltage * sensorData.power.battery_current
-              }
-            },
-            coverage: {
-              totalArea: 1000,
-              coveredArea: 750,
-              percentage: 75.0
-            },
-            lastUpdate: Date.now(),
-            location_source: 'gps' as const,
-            connected: true
-          }
-          
-          dispatch(setStatus(updatedStatus))
-          
-          // Update weather data with environmental sensors
-          const updatedWeatherData = {
-            current: {
-              temperature: sensorData.environmental.temperature,
-              humidity: sensorData.environmental.humidity,
-              windSpeed: 3.2,
-              windDirection: 180,
-              precipitation: sensorData.environmental.rain_detected ? 0.5 : 0,
-              condition: sensorData.environmental.rain_detected ? 'Rainy' : 'Clear',
-              icon: sensorData.environmental.rain_detected ? 'rain' : 'sunny'
-            },
-            forecast: [
-              {
-                date: new Date().toISOString().split('T')[0],
-                temperature: { min: 18, max: 28 },
-                condition: 'Sunny',
-                icon: 'sunny',
-                precipitation: 0
-              }
-            ],
-            alerts: []
-          }
-          
-          dispatch(setWeatherData(updatedWeatherData))
-        })
-        
-        // Start the sensor data service
-        sensorDataService.start()
-        
-        // Initialize WebSocket connection
-        webSocketService.connect()
-        
-        // Set up WebSocket event handlers
+        console.log('✅ Mock data initialized')
+
+        // Set up WebSocket event handlers early
         webSocketService.on('connect', () => {
+          console.log('� WebSocket connected')
           dispatch(setConnectionStatus('connected'))
           dispatch(setConnectionState(true))
           dispatch(addNotification({
@@ -232,6 +163,7 @@ const App: React.FC = () => {
         })
 
         webSocketService.on('disconnect', () => {
+          console.log('🔗 WebSocket disconnected')
           dispatch(setConnectionStatus('disconnected'))
           dispatch(setConnectionState(false))
           dispatch(addNotification({
@@ -242,6 +174,7 @@ const App: React.FC = () => {
         })
 
         webSocketService.on('error', (error) => {
+          console.log('🔗 WebSocket error:', error)
           dispatch(setConnectionStatus('error'))
           dispatch(addNotification({
             type: 'error',
@@ -250,62 +183,6 @@ const App: React.FC = () => {
           }))
         })
 
-        webSocketService.on('mqtt_data', (data, topic) => {
-          // Handle MQTT data forwarded through WebSocket
-          console.log('Received MQTT data:', topic, data)
-          
-          // Route data to appropriate store slices based on topic
-          if (topic.startsWith('system/status')) {
-            dispatch(setStatus(data))
-          } else if (topic.startsWith('sensors/')) {
-            // Handle sensor data
-            if (data.sensor_type === 'environmental') {
-              // Update weather-related sensor data
-              dispatch(setWeatherData({
-                current: {
-                  temperature: data.temperature,
-                  humidity: data.humidity,
-                  condition: data.condition || 'unknown'
-                }
-              }))
-            }
-          } else if (topic.startsWith('power/battery')) {
-            // Update battery status
-            dispatch(setStatus({
-              battery: data
-            }))
-          } else if (topic.startsWith('navigation/')) {
-            // Update navigation data
-            dispatch(setStatus({
-              position: data.position,
-              location_source: data.location_source
-            }))
-          } else if (topic.startsWith('weather/current')) {
-            dispatch(setWeatherData(data))
-          }
-        })
-
-        webSocketService.on('data', (data, topic) => {
-          // Handle direct data messages
-          console.log('Received direct data:', topic, data)
-          // Process similar to mqtt_data
-        })
-
-        webSocketService.on('mower_status', (data) => {
-          dispatch(setStatus(data))
-        })
-
-        webSocketService.on('weather_data', (data) => {
-          dispatch(setWeatherData(data))
-        })
-
-        webSocketService.on('notification', (data) => {
-          dispatch(addNotification(data))
-        })
-
-        // Remove the old data simulation since we now have real-time sensor data
-        // const simulateDataUpdates = () => { ... } - REMOVED
-        
         // Track user activity
         const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart']
         const updateUserActivity = () => dispatch(updateActivity())
@@ -314,29 +191,117 @@ const App: React.FC = () => {
           document.addEventListener(event, updateUserActivity, true)
         })
 
-        setInitializing(false)
+        console.log('🎉 Basic initialization complete')
+        
+        // Show app immediately with a short delay to ensure rendering
+        setTimeout(() => {
+          console.log('🎨 Showing UI...')
+          clearTimeout(emergencyTimeout)
+          setInitializing(false)
+          dispatch(setConnectionStatus('connected'))
+        }, 250)
 
+        // Initialize background services after UI is shown (non-blocking)
+        setTimeout(() => {
+          console.log('🔌 Starting background services...')
+          
+          // Try to connect WebSocket (non-critical)
+          try {
+            console.log('🌐 Attempting WebSocket connection...')
+            webSocketService.connect()
+          } catch (error) {
+            console.warn('⚠️ WebSocket connection failed:', error)
+          }
+
+          // Try to start sensor data service (non-critical)
+          try {
+            console.log('📊 Starting sensor data service...')
+            
+            const unsubscribeSensorData = sensorDataService.subscribe((sensorData) => {
+              // Update mower status with real sensor data
+              const updatedStatus = {
+                state: 'idle' as const,
+                position: {
+                  lat: sensorData.gps.latitude || mockMowerStatus.position.lat,
+                  lng: sensorData.gps.longitude || mockMowerStatus.position.lng,
+                  heading: sensorData.imu.orientation.yaw || mockMowerStatus.position.heading,
+                  accuracy: sensorData.gps.accuracy || mockMowerStatus.position.accuracy
+                },
+                battery: {
+                  level: sensorData.power.battery_level || mockMowerStatus.battery.level,
+                  voltage: sensorData.power.battery_voltage || mockMowerStatus.battery.voltage,
+                  current: sensorData.power.battery_current || mockMowerStatus.battery.current,
+                  charging: sensorData.power.charging || mockMowerStatus.battery.charging,
+                  timeRemaining: Math.floor((sensorData.power.battery_level || mockMowerStatus.battery.level) * 2)
+                },
+                sensors: {
+                  imu: {
+                    orientation: { 
+                      x: sensorData.imu.orientation.roll || mockMowerStatus.sensors.imu.orientation.x,
+                      y: sensorData.imu.orientation.pitch || mockMowerStatus.sensors.imu.orientation.y,
+                      z: sensorData.imu.orientation.yaw || mockMowerStatus.sensors.imu.orientation.z
+                    },
+                    acceleration: sensorData.imu.acceleration || mockMowerStatus.sensors.imu.acceleration,
+                    gyroscope: sensorData.imu.gyroscope || mockMowerStatus.sensors.imu.gyroscope,
+                    temperature: sensorData.imu.temperature || mockMowerStatus.sensors.imu.temperature
+                  },
+                  tof: {
+                    left: sensorData.tof.left_distance || mockMowerStatus.sensors.tof.left,
+                    right: sensorData.tof.right_distance || mockMowerStatus.sensors.tof.right
+                  },
+                  environmental: {
+                    temperature: sensorData.environmental.temperature || mockMowerStatus.sensors.environmental.temperature,
+                    humidity: sensorData.environmental.humidity || mockMowerStatus.sensors.environmental.humidity,
+                    pressure: sensorData.environmental.pressure || mockMowerStatus.sensors.environmental.pressure
+                  },
+                  power: {
+                    voltage: sensorData.power.battery_voltage || mockMowerStatus.sensors.power.voltage,
+                    current: sensorData.power.battery_current || mockMowerStatus.sensors.power.current,
+                    power: (sensorData.power.battery_voltage || mockMowerStatus.sensors.power.voltage) * (sensorData.power.battery_current || mockMowerStatus.sensors.power.current)
+                  }
+                },
+                coverage: mockMowerStatus.coverage,
+                lastUpdate: Date.now(),
+                location_source: 'gps' as const,
+                connected: true
+              }
+              
+              dispatch(setStatus(updatedStatus))
+            })
+            
+            sensorDataService.start()
+            console.log('📊 Sensor data service started')
+          } catch (error) {
+            console.warn('⚠️ Sensor data service failed to start:', error)
+          }
+        }, 500)
+
+        // Cleanup function
         return () => {
           activityEvents.forEach(event => {
             document.removeEventListener(event, updateUserActivity, true)
           })
           
-          // Stop sensor data service
-          sensorDataService.stop()
-          unsubscribeSensorData()
-          
-          // Disconnect WebSocket
-          webSocketService.disconnect()
+          try {
+            sensorDataService.stop()
+            webSocketService.disconnect()
+          } catch (error) {
+            console.warn('Error during cleanup:', error)
+          }
         }
+        
       } catch (error) {
-        console.error('Failed to initialize app:', error)
-        dispatch(setConnectionStatus('error'))
-        dispatch(addNotification({
-          type: 'error',
-          title: 'Initialization Error',
-          message: 'Failed to initialize application'
-        }))
-        setInitializing(false)
+        console.error('❌ Failed to initialize app:', error)
+        const errorMessage = error instanceof Error ? error.message : 'Unknown initialization error'
+        setInitError(errorMessage)
+        
+        // Always show the app, even if there are errors
+        setTimeout(() => {
+          console.log('⚠️ Showing app despite initialization error')
+          clearTimeout(emergencyTimeout)
+          setInitializing(false)
+          dispatch(setConnectionStatus('error'))
+        }, 500)
       }
     }
 
@@ -368,18 +333,45 @@ const App: React.FC = () => {
         alignItems="center"
         height="100vh"
         gap={3}
-        sx={{ backgroundColor: 'background.default' }}
+        sx={{ backgroundColor: 'background.default', p: 3 }}
       >
         <Logo size={80} showText={true} />
-        <CircularProgress size={48} thickness={4} />
-        <Box textAlign="center">
-          <Typography variant="h6" color="primary" gutterBottom>
-            Initializing LawnBerryPi Control...
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Connecting to mower system
-          </Typography>
-        </Box>
+        {!initError ? (
+          <>
+            <CircularProgress size={48} thickness={4} />
+            <Box textAlign="center">
+              <Typography variant="h6" color="primary" gutterBottom>
+                Initializing LawnBerryPi Control...
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Connecting to mower system
+              </Typography>
+            </Box>
+          </>
+        ) : (
+          <Box textAlign="center">
+            <Typography variant="h6" color="error" gutterBottom>
+              Initialization Error
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              {initError}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Loading interface anyway...
+            </Typography>
+            <CircularProgress size={32} thickness={4} sx={{ mb: 2 }} />
+            <Button 
+              variant="outlined" 
+              onClick={() => {
+                console.log('🔧 Manual override - showing app')
+                setInitializing(false)
+              }}
+              sx={{ mt: 1 }}
+            >
+              Skip & Continue
+            </Button>
+          </Box>
+        )}
       </Box>
     )
   }

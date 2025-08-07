@@ -28,7 +28,9 @@ import {
   Block as BlockIcon,
   Home as HomeIcon,
   Timeline as TimelineIcon,
-  Help as HelpIcon
+  Help as HelpIcon,
+  Fullscreen as FullscreenIcon,
+  FullscreenExit as FullscreenExitIcon
 } from '@mui/icons-material';
 import { MapContainer } from '../components/MapContainer';
 import { BoundaryEditor, LeafletBoundaryEditor } from '../components/BoundaryEditor';
@@ -114,11 +116,27 @@ const Maps: React.FC = () => {
 
   useEffect(() => {
     // Initialize map configuration from environment on component mount
-    console.log('Maps page initializing...');
-    console.log('Environment check:', {
-      viteKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
-      reactKey: import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found'
+    console.log('🗺️ Maps page initializing...');
+    console.log('🔑 Environment check:', {
+      viteKey: import.meta.env.VITE_REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
+      reactKey: import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
+      processKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found'
     });
+    
+    // Initialize with Google Maps as preferred if API key is available
+    const hasGoogleApiKey = !!(
+      import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY || 
+      import.meta.env.VITE_REACT_APP_GOOGLE_MAPS_API_KEY ||
+      process.env.REACT_APP_GOOGLE_MAPS_API_KEY
+    );
+    
+    if (hasGoogleApiKey) {
+      dispatch(setPreferredProvider('google'));
+      console.log('✅ Google Maps API key found - setting Google as preferred provider');
+    } else {
+      dispatch(setPreferredProvider('openstreetmap'));
+      console.log('⚠️ No Google Maps API key - falling back to OpenStreetMap');
+    }
     
     dispatch(initializeMapFromEnvironment());
     loadBoundaries();
@@ -217,7 +235,7 @@ const Maps: React.FC = () => {
         </Alert>
       )}
 
-      {mapState.currentProvider === MapProvider.OPENSTREETMAP && !mapState.error && (
+      {mapState.currentProvider === 'openstreetmap' && !mapState.error && (
         <Alert severity="info" sx={{ mb: 3 }}>
           Using OpenStreetMap provider. Google Maps is available if you configure REACT_APP_GOOGLE_MAPS_API_KEY.
         </Alert>
@@ -287,7 +305,8 @@ const Maps: React.FC = () => {
             <Grid container spacing={useFullWidth ? 0 : 3}>
               <Grid item xs={12} lg={useFullWidth ? 12 : 8}>
                 <Paper sx={{ 
-                  height: useFullWidth ? 'calc(100vh - 120px)' : 600, 
+                  height: useFullWidth ? 'calc(100vh - 120px)' : isDesktop ? '75vh' : '60vh', 
+                  minHeight: '500px',
                   overflow: 'hidden', 
                   position: 'relative',
                   borderRadius: useFullWidth ? 0 : 1
@@ -644,6 +663,21 @@ const Maps: React.FC = () => {
           )}
         </Box>
       </Paper>
+
+      {/* Fullscreen Toggle FAB */}
+      <Fab
+        color="primary"
+        aria-label="toggle fullscreen"
+        onClick={() => setUseFullWidth(!useFullWidth)}
+        sx={{
+          position: 'fixed',
+          bottom: 16,
+          right: 16,
+          zIndex: 1000
+        }}
+      >
+        {useFullWidth ? <FullscreenExitIcon /> : <FullscreenIcon />}
+      </Fab>
     </Box>
   );
 };

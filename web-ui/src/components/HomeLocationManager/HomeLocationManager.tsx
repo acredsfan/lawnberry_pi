@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import * as L from 'leaflet';
 import {
   Box,
   Typography,
@@ -180,7 +181,7 @@ const HomeLocationManager: React.FC<HomeLocationManagerProps> = ({
         });
 
         marker.addListener('dragend', () => {
-          const newPos = marker.getPosition();
+          const newPos = (marker as google.maps.Marker).getPosition();
           if (newPos) {
             handleMarkerDragEnd(location.id, { lat: newPos.lat(), lng: newPos.lng() });
           }

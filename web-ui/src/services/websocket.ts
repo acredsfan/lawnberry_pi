@@ -23,13 +23,25 @@ class WebSocketService {
       ? 'ws://localhost:8000/ws/realtime'
       : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/realtime`
 
-    console.log('Connecting to WebSocket:', wsUrl)
+    console.log('🔌 Connecting to WebSocket:', wsUrl)
 
     try {
       this.socket = new WebSocket(wsUrl)
       
+      // Set a connection timeout
+      const connectionTimeout = setTimeout(() => {
+        if (this.socket?.readyState === WebSocket.CONNECTING) {
+          console.warn('⏰ WebSocket connection timeout')
+          this.socket.close()
+          this.connectionState = 'error'
+          store.dispatch(setConnectionState(false))
+          this.emit('error', new Error('Connection timeout'))
+        }
+      }, 10000) // 10 second timeout
+      
       this.socket.onopen = () => {
-        console.log('WebSocket connected')
+        clearTimeout(connectionTimeout)
+        console.log('✅ WebSocket connected successfully')
         this.connectionState = 'connected'
         this.reconnectAttempts = 0
         store.dispatch(setConnectionState(true))
@@ -40,15 +52,21 @@ class WebSocketService {
       }
 
       this.socket.onclose = (event) => {
-        console.log('WebSocket disconnected:', event.reason)
+        clearTimeout(connectionTimeout)
+        console.log('🔌 WebSocket disconnected:', event.reason || 'Unknown reason')
         this.connectionState = 'disconnected'
         store.dispatch(setConnectionState(false))
         this.emit('disconnect', event.reason)
-        this.scheduleReconnect()
+        
+        // Only try to reconnect if this wasn't a manual close
+        if (event.code !== 1000) {
+          this.scheduleReconnect()
+        }
       }
 
       this.socket.onerror = (error) => {
-        console.error('WebSocket connection error:', error)
+        clearTimeout(connectionTimeout)
+        console.error('❌ WebSocket connection error:', error)
         this.connectionState = 'error'
         store.dispatch(setConnectionState(false))
         this.emit('error', error)
@@ -59,11 +77,11 @@ class WebSocketService {
           const message = JSON.parse(event.data)
           this.handleMessage(message)
         } catch (error) {
-          console.error('Error parsing WebSocket message:', error)
+          console.error('❌ Error parsing WebSocket message:', error, 'Raw data:', event.data)
         }
       }
     } catch (error) {
-      console.error('Failed to create WebSocket connection:', error)
+      console.error('❌ Failed to create WebSocket connection:', error)
       this.connectionState = 'error'
       store.dispatch(setConnectionState(false))
       this.emit('error', error)

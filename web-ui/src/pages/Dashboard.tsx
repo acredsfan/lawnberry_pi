@@ -15,7 +15,7 @@ const Dashboard: React.FC = () => {
   const { status, isConnected } = useSelector((state: RootState) => state.mower)
   const { data: weatherData } = useSelector((state: RootState) => state.weather)
   const { connectionStatus } = useSelector((state: RootState) => state.ui)
-    const { format: formatUnits, converters, unitsPrefs } = useUnits()
+    const { format: formatUnits, convert: converters, unitPreferences: unitsPrefs } = useUnits()
   
   const [sensorHistory, setSensorHistory] = useState<Array<{
     time: string
@@ -103,11 +103,11 @@ const Dashboard: React.FC = () => {
         const newDataPoint = {
           time: format(new Date(), 'HH:mm:ss'),
           battery: status.battery.level,
-          temperature: converters.temperature.fromCelsius(status.sensors.environmental.temperature),
-          speed: converters.speed.fromMps(Math.sqrt(
+          temperature: converters.temperature(status.sensors.environmental.temperature).value,
+          speed: converters.speed(Math.sqrt(
             Math.pow(status.sensors.imu.acceleration.x, 2) +
             Math.pow(status.sensors.imu.acceleration.y, 2)
-          )) // Convert from m/s to current unit system
+          )).value // Convert from m/s to current unit system
         }
         
         setSensorHistory(prev => {
@@ -207,7 +207,7 @@ const Dashboard: React.FC = () => {
                     <Chip 
                       label={status?.state.toUpperCase() || 'UNKNOWN'}
                       color={getStatusColor(status?.state || 'idle')}
-                      size="large"
+                      size="medium"
                       sx={{ 
                         fontSize: '1.1rem', 
                         fontWeight: 900,
@@ -469,7 +469,7 @@ const Dashboard: React.FC = () => {
                       dataKey="temperature" 
                       stroke="#FFD700" 
                       strokeWidth={3}
-                      name={`Temperature (${unitsPrefs.temperatureUnit})`}
+                      name={`Temperature (${unitsPrefs.temperature})`}
                       dot={{ fill: '#FFD700', strokeWidth: 2, r: 4 }}
                       activeDot={{ r: 6, stroke: '#FFD700', strokeWidth: 2, fill: '#FFD700' }}
                     />
@@ -479,7 +479,7 @@ const Dashboard: React.FC = () => {
                       dataKey="speed" 
                       stroke="#FF1493" 
                       strokeWidth={3}
-                      name={`Speed (${unitsPrefs.unitSystem === 'metric' ? 'km/h' : 'mph'})`}
+                      name={`Speed (${unitsPrefs.system === 'metric' ? 'km/h' : 'mph'})`}
                       dot={{ fill: '#FF1493', strokeWidth: 2, r: 4 }}
                       activeDot={{ r: 6, stroke: '#FF1493', strokeWidth: 2, fill: '#FF1493' }}
                     />
