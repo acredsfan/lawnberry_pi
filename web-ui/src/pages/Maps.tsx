@@ -501,7 +501,6 @@ const Maps: React.FC = () => {
                     </Grid>
                   )}
                 </Grid>
-                </Grid>
               </Grid>
             </Grid>
           )}
