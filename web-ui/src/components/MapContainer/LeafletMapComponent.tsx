@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, useMap, Marker, Popup, Polyline, Polygon } from 'react-leaflet';
+import { MapContainer, TileLayer, useMap, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { MapError, MapUsageLevel, MapProvider } from '../../types';
 import { mapService } from '../../services/mapService';
@@ -20,9 +20,6 @@ interface LeafletMapComponentProps {
   onError: (error: MapError) => void;
   robotPosition?: { lat: number; lng: number };
   robotPath?: Array<{ lat: number; lng: number }>;
-  boundaries?: Array<{ id: string; name: string; coordinates: Array<{ lat: number; lng: number }> }>;
-  noGoZones?: Array<{ id: string; name: string; coordinates: Array<{ lat: number; lng: number }> }>;
-  homeLocation?: { lat: number; lng: number };
   style?: React.CSSProperties;
   children?: React.ReactNode;
 }
@@ -84,9 +81,6 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
   onError,
   robotPosition,
   robotPath,
-  boundaries = [],
-  noGoZones = [],
-  homeLocation,
   style,
   children
 }) => {
@@ -238,37 +232,7 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
           </Marker>
         )}
 
-        {homeLocation && (
-          <Marker position={[homeLocation.lat, homeLocation.lng]}>
-            <Popup>Home Base</Popup>
-          </Marker>
-        )}
-
-        {boundaries.map(b => (
-          <Polygon
-            key={b.id}
-            positions={b.coordinates.map(c => [c.lat, c.lng]) as any}
-            pathOptions={{ color: '#4caf50', weight: 2, fillOpacity: 0.1 }}
-          >
-            <Popup>
-              <strong>{b.name}</strong><br />Boundary
-            </Popup>
-          </Polygon>
-        ))}
-
-        {noGoZones.map(z => (
-          <Polygon
-            key={z.id}
-            positions={z.coordinates.map(c => [c.lat, c.lng]) as any}
-            pathOptions={{ color: '#f44336', weight: 2, fillOpacity: 0.2 }}
-          >
-            <Popup>
-              <strong>{z.name}</strong><br />No-Go Zone
-            </Popup>
-          </Polygon>
-        ))}
-
-  {robotPath && robotPath.length > 0 && (
+        {robotPath && robotPath.length > 0 && (
           <Polyline
             positions={robotPath.map(p => [p.lat, p.lng])}
             color="blue"

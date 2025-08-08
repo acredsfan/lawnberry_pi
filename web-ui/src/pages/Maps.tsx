@@ -116,14 +116,12 @@ const Maps: React.FC = () => {
 
   useEffect(() => {
     // Initialize map configuration from environment on component mount
-    if (import.meta.env.DEV) {
-      console.log('🗺️ Maps page initializing...');
-      console.log('🔑 Environment check:', {
+    console.log('🗺️ Maps page initializing...');
+    console.log('🔑 Environment check:', {
       viteKey: import.meta.env.VITE_REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
       reactKey: import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
       processKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found'
-      });
-    }
+    });
     
     // Initialize with Google Maps as preferred if API key is available
     const hasGoogleApiKey = !!(
@@ -134,10 +132,10 @@ const Maps: React.FC = () => {
     
     if (hasGoogleApiKey) {
       dispatch(setPreferredProvider('google'));
-  if (import.meta.env.DEV) console.log('✅ Google Maps API key found - setting Google as preferred provider');
+      console.log('✅ Google Maps API key found - setting Google as preferred provider');
     } else {
       dispatch(setPreferredProvider('openstreetmap'));
-  if (import.meta.env.DEV) console.log('⚠️ No Google Maps API key - falling back to OpenStreetMap');
+      console.log('⚠️ No Google Maps API key - falling back to OpenStreetMap');
     }
     
     dispatch(initializeMapFromEnvironment());
@@ -197,7 +195,7 @@ const Maps: React.FC = () => {
 
   const handlePreviewStart = (pattern: string) => {
     // Navigate to Navigation page or start mowing
-  if (import.meta.env.DEV) console.log('Starting mowing with pattern:', pattern);
+    console.log('Starting mowing with pattern:', pattern);
   };
 
   const handleUsageLevelChange = (level: MapUsageLevel) => {
@@ -304,8 +302,10 @@ const Maps: React.FC = () => {
 
         <Box sx={{ p: useFullWidth ? 0 : 3 }}>
           {activeTab === 0 && (
-            <Grid container spacing={useFullWidth ? 0 : 3}>
-              <Grid item xs={12} lg={useFullWidth ? 12 : 8}>
+            // Render the map full‑width and stack the statistics below it
+            <Grid container spacing={useFullWidth ? 0 : 3} direction="column">
+              {/* Map row: always full width */}
+              <Grid item xs={12}>
                 <Paper sx={{ 
                   height: useFullWidth ? 'calc(100vh - 120px)' : isDesktop ? '75vh' : '60vh', 
                   minHeight: '500px',
@@ -319,30 +319,28 @@ const Maps: React.FC = () => {
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
-                    boundaries={boundaries.filter(b=>b.isValid).map(b=>({id:b.id,name:b.name,coordinates:b.points.map(p=>({lat:p.lat,lng:p.lng}))}))}
-                    noGoZones={noGoZones.filter(z=>z.isValid).map(z=>({id:z.id,name:z.name,coordinates:z.points.map(p=>({lat:p.lat,lng:p.lng}))}))}
-                    homeLocations={homeLocations.map(h=>({id:h.id,name:h.name,coordinates:[{lat:h.lat,lng:h.lng} as any].filter(Boolean)}))}
                     onProviderChange={(provider) => {
-                      if (import.meta.env.DEV) console.log('Provider changed to:', provider);
+                      console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
                     }}
                     style={{ height: '100%' }}
                   >
-                    {/* Provider-specific overlay rendering now handled inside provider components (Google: polygons via native API, Leaflet: Polygon/Marker components) */}
+                    {/* TODO: Add boundary, no-go zone, and home location components as children */}
                   </MapContainer>
                   
                   {/* Layer toggle controls */}
                   <Box
                     sx={{
                       position: 'absolute',
-                      top: 16,
+                      // Position toggles in bottom‑right so they don’t overlap map controls
+                      bottom: 16,
                       right: 16,
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 1,
-                      backgroundColor: (theme) => theme.palette.background.paper,
+                      backgroundColor: 'background.paper',
                       p: 1,
                       borderRadius: 1,
                       boxShadow: 2,
@@ -372,10 +370,10 @@ const Maps: React.FC = () => {
                   </Box>
                 </Paper>
               </Grid>
-              
-              {!useFullWidth && (
-                <Grid item xs={12} lg={4}>
-                  <Grid container spacing={2}>
+
+              {/* Statistics row: render below the map */}
+              <Grid item xs={12}>
+                <Grid container spacing={2}>
                     {/* Robot Status Card */}
                     <Grid item xs={12}>
                     <Card>
@@ -386,7 +384,7 @@ const Maps: React.FC = () => {
                               width: 12,
                               height: 12,
                               borderRadius: '50%',
-                              backgroundColor: (theme) => status?.connected ? theme.palette.success.main : theme.palette.error.main
+                              backgroundColor: status?.connected ? 'success.main' : 'error.main'
                             }}
                           />
                           Robot Status
@@ -503,8 +501,8 @@ const Maps: React.FC = () => {
                     </Grid>
                   )}
                 </Grid>
+                </Grid>
               </Grid>
-              )}
             </Grid>
           )}
 
@@ -519,7 +517,7 @@ const Maps: React.FC = () => {
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
                     onProviderChange={(provider) => {
-                      if (import.meta.env.DEV) console.log('Provider changed to:', provider);
+                      console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
@@ -560,7 +558,7 @@ const Maps: React.FC = () => {
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
                     onProviderChange={(provider) => {
-                      if (import.meta.env.DEV) console.log('Provider changed to:', provider);
+                      console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
@@ -603,7 +601,7 @@ const Maps: React.FC = () => {
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
                     onProviderChange={(provider) => {
-                      if (import.meta.env.DEV) console.log('Provider changed to:', provider);
+                      console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
@@ -644,7 +642,7 @@ const Maps: React.FC = () => {
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
                     onProviderChange={(provider) => {
-                      if (import.meta.env.DEV) console.log('Provider changed to:', provider);
+                      console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);

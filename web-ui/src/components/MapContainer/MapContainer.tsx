@@ -17,10 +17,6 @@ export interface MapContainerProps {
   onError?: (error: MapError) => void;
   robotPosition?: { lat: number; lng: number };
   robotPath?: Array<{ lat: number; lng: number }>;
-  // Overlay data passed through to provider-specific map components
-  boundaries?: Array<{ id: string; name: string; coordinates: Array<{ lat: number; lng: number }> }>;
-  noGoZones?: Array<{ id: string; name: string; coordinates: Array<{ lat: number; lng: number }> }>;
-  homeLocations?: Array<{ id: string; name: string; coordinates: Array<{ lat: number; lng: number }>; is_default?: boolean }>;
   weather?: {
     temperature: number;
     humidity: number;
@@ -40,9 +36,6 @@ const MapContainer: React.FC<MapContainerProps> = ({
   onError,
   robotPosition,
   robotPath,
-  boundaries = [],
-  noGoZones = [],
-  homeLocations = [],
   weather,
   style,
   className,
@@ -224,15 +217,6 @@ const MapContainer: React.FC<MapContainerProps> = ({
     onError: handleError,
     robotPosition,
     robotPath,
-    boundaries,
-    noGoZones,
-    homeLocation: homeLocations.find(h => (h as any).is_default) ? {
-      lat: homeLocations.find(h => (h as any).is_default)!.coordinates[0].lat,
-      lng: homeLocations.find(h => (h as any).is_default)!.coordinates[0].lng
-    } : homeLocations[0] ? {
-      lat: homeLocations[0].coordinates[0].lat,
-      lng: homeLocations[0].coordinates[0].lng
-    } : undefined,
     style: { width: '100%', height: '100%' }
   };
 
