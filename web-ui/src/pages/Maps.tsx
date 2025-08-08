@@ -319,6 +319,9 @@ const Maps: React.FC = () => {
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
+                    boundaries={boundaries.filter(b=>b.isValid).map(b=>({id:b.id,name:b.name,coordinates:b.points.map(p=>({lat:p.lat,lng:p.lng}))}))}
+                    noGoZones={noGoZones.filter(z=>z.isValid).map(z=>({id:z.id,name:z.name,coordinates:z.points.map(p=>({lat:p.lat,lng:p.lng}))}))}
+                    homeLocations={homeLocations.map(h=>({id:h.id,name:h.name,coordinates:[{lat:h.lat,lng:h.lng} as any].filter(Boolean)}))}
                     onProviderChange={(provider) => {
                       if (import.meta.env.DEV) console.log('Provider changed to:', provider);
                     }}
@@ -327,23 +330,7 @@ const Maps: React.FC = () => {
                     }}
                     style={{ height: '100%' }}
                   >
-                    {/* Overlays: boundaries, no-go zones, and home locations */}
-                    {/* Boundary Polylines */}
-                    {boundaries.filter(b => b.isValid).map(b => (
-                      <React.Fragment key={b.name}>
-                        {/* Placeholder: actual map layer components would differ per provider */}
-                      </React.Fragment>
-                    ))}
-                    {/* No-Go Zones */}
-                    {noGoZones.filter(z => z.isValid).map(z => (
-                      <React.Fragment key={z.name}>
-                      </React.Fragment>
-                    ))}
-                    {/* Home Locations */}
-                    {homeLocations.map(h => (
-                      <React.Fragment key={h.id}>
-                      </React.Fragment>
-                    ))}
+                    {/* Provider-specific overlay rendering now handled inside provider components (Google: polygons via native API, Leaflet: Polygon/Marker components) */}
                   </MapContainer>
                   
                   {/* Layer toggle controls */}
@@ -355,7 +342,7 @@ const Maps: React.FC = () => {
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 1,
-                      backgroundColor: 'background.paper',
+                      backgroundColor: (theme) => theme.palette.background.paper,
                       p: 1,
                       borderRadius: 1,
                       boxShadow: 2,

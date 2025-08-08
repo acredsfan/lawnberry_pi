@@ -475,6 +475,53 @@ async def validate_home_location_boundary(
     current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Validate if a position is within yard boundaries"""
-    # TODO: Implement actual boundary validation logic
-    # For now, return a placeholder
-    return {"is_within_boundary": True, "requires_clipping": False}
+    boundaries = await map_storage.get_boundaries()
+    if not boundaries:
+        return {"is_within_boundary": False, "requires_clipping": False}
+
+    def point_in_polygon(pt: Position, poly: List[Position]) -> bool:
+        inside = False
+        for i in range(len(poly)):
+            j = (i - 1) % len(poly)
+            xi, yi = poly[i].latitude, poly[i].longitude
+            xj, yj = poly[j].latitude, poly[j].longitude
+            intersect = ((yi > pt.longitude) != (yj > pt.longitude)) and (
+                pt.latitude < (xj - xi) * (pt.longitude - yi) / (yj - yi + 1e-12) + xi
+            )
+            if intersect:
+                inside = not inside
+        return inside
+
+    within_any = any(point_in_polygon(position, b.points) for b in boundaries if b.points)
+    return {"is_within_boundary": within_any, "requires_clipping": False}
+
+@router.post("/no-go-zones/validate", response_model=Dict[str, Any])
+async def validate_no_go_zone(
+    zone: NoGoZone,
+    current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
+):
+    """Validate no-go zone polygon geometry (basic checks mirroring boundary validation)."""
+    pts = zone.points
+    if len(pts) < 3:
+        return {"isValid": False, "error": "No-go zone must have at least 3 points", "violations": ["insufficient_points"]}
+    if len(pts) > 100:
+        return {"isValid": False, "error": "No-go zone cannot have more than 100 vertices", "violations": ["too_many_vertices"]}
+    # Shoelace area
+    area = 0.0
+    for i in range(len(pts)):
+        j = (i + 1) % len(pts)
+        area += pts[i].latitude * pts[j].longitude
+        area -= pts[j].latitude * pts[i].longitude
+    area = abs(area) / 2.0
+    area_m2 = area * 111320 * 111320 * cos(radians(pts[0].latitude)) if pts else 0.0
+    if area_m2 < 1.0:
+        return {"isValid": False, "error": "No-go zone area too small", "area": area_m2, "violations": ["area_too_small"]}
+    violations: List[str] = []
+    if _has_self_intersection(pts):
+        violations.append("self_intersection")
+    return {
+        "isValid": len(violations) == 0,
+        "area": area_m2,
+        "violations": violations,
+        "error": "Zone has geometric issues" if violations else None
+    }

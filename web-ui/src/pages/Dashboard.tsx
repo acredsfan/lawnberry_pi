@@ -51,10 +51,10 @@ const Dashboard: React.FC = () => {
           // Start polling every 3 seconds for real-time updates
           dataService.startStatusPolling(3000)
           
-          console.log('✅ Real data service activated - polling backend every 3 seconds')
+          if (import.meta.env.DEV) console.log('✅ Real data service activated - polling backend every 3 seconds')
         } else {
           setRealDataActive(false)
-          console.warn('⚠️ Backend not available, using fallback mock data')
+          if (import.meta.env.DEV) console.warn('⚠️ Backend not available, using fallback mock data')
           
           // Set fallback data immediately
           const fallbackStatus: MowerStatus = {
@@ -81,7 +81,7 @@ const Dashboard: React.FC = () => {
           dispatch(setConnectionState(false))
         }
       } catch (error) {
-        console.error('Failed to initialize data service:', error)
+        if (import.meta.env.DEV) console.error('Failed to initialize data service:', error)
         setRealDataActive(false)
       }
     }
