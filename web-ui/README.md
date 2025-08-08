@@ -157,13 +157,21 @@ web-ui/
 - `navigation_update` - Position and path updates
 - `notification` - System alerts and messages
 
-### REST API Endpoints
-- `GET /api/v1/status` - System status
-- `POST /api/v1/navigation/start` - Start mowing
-- `POST /api/v1/navigation/stop` - Stop mowing
-- `GET /api/v1/camera/stream` - Live camera feed
-- `POST /api/v1/boundaries` - Boundary management
-- `GET /api/v1/weather` - Weather data
+### REST API Endpoints (Selected)
+- `GET /health` – Basic liveness (no auth)
+- `GET /api/v1/meta` – API service meta (version, uptime, MQTT) (no auth)
+- `GET /api/v1/maps` (and related read-only map endpoints) – Public read access
+- `GET /api/v1/status` – Mower runtime status (auth required)
+- `POST /api/v1/navigation/start` – Start mowing
+- `POST /api/v1/navigation/stop` – Stop mowing
+- `GET /api/v1/camera/stream` – Live camera feed
+- `POST /api/v1/boundaries` – Boundary management
+- `GET /api/v1/weather` – Weather data
+
+Public endpoints are intentionally limited to map visualization and service health/metadata. All mutation and control endpoints require valid authentication.
+
+### SPA Mount Path
+The production build is served under `/ui/` by FastAPI with an internal fallback so deep links like `/ui/maps` resolve directly. Top-level convenience redirects (e.g. `/maps` → `/ui/maps`) are provided.
 
 ## Browser Compatibility
 

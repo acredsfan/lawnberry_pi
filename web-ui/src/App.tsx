@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Suspense, lazy } from 'react'
 import { Box, Snackbar, Alert, CircularProgress, Typography, Button } from '@mui/material'
 import { useDispatch, useSelector } from 'react-redux'
 import { RootState } from './store/store'
@@ -7,13 +8,15 @@ import { addNotification, setConnectionStatus, updateActivity } from './store/sl
 import { setStatus, updateStatus, setConnectionState } from './store/slices/mowerSlice'
 import { setWeatherData } from './store/slices/weatherSlice'
 import Layout from './components/Layout/Layout'
-import Dashboard from './pages/Dashboard'
-import Navigation from './pages/Navigation'
-import Maps from './pages/Maps'
-import Settings from './pages/Settings'
-import Training from './pages/Training'
-import RCControl from './pages/RCControl'
-import Documentation from './pages/Documentation'
+// Route-level code splitting (dynamic imports) reduces initial bundle size on Pi
+// Only load heavy pages (Maps, Documentation) when user navigates there.
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Navigation = lazy(() => import('./pages/Navigation'))
+const Maps = lazy(() => import('./pages/Maps'))
+const Settings = lazy(() => import('./pages/Settings'))
+const Training = lazy(() => import('./pages/Training'))
+const RCControl = lazy(() => import('./pages/RCControl'))
+const Documentation = lazy(() => import('./pages/Documentation'))
 import Logo from './components/Logo'
 import { webSocketService } from './services/websocket'
 import { sensorDataService } from './services/sensorDataService'
@@ -29,17 +32,24 @@ const AppContent: React.FC = () => {
 
   return (
     <Layout fullPageMode={shouldUseFullPage}>
-      <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/navigation" element={<Navigation />} />
-        <Route path="/maps" element={<Maps />} />
-        <Route path="/rc-control" element={<RCControl />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/training" element={<Training />} />
-        <Route path="/documentation" element={<Documentation />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
+      <Suspense fallback={
+        <Box display="flex" justifyContent="center" alignItems="center" height="100%" flexDirection="column" gap={2}>
+          <CircularProgress size={48} thickness={4} />
+          <Typography variant="caption" sx={{ letterSpacing: '0.15em' }}>LOADING MODULE…</Typography>
+        </Box>
+      }>
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/navigation" element={<Navigation />} />
+            <Route path="/maps" element={<Maps />} />
+          <Route path="/rc-control" element={<RCControl />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/training" element={<Training />} />
+          <Route path="/documentation" element={<Documentation />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </Suspense>
     </Layout>
   )
 }
@@ -59,6 +69,15 @@ const App: React.FC = () => {
   useUnits() // Initialize units system
 
   useEffect(() => {
+    // Frontend watchdog: if connection state not updated in 7s, proceed anyway (prevents indefinite loader)
+    const watchdog = setTimeout(() => {
+      if (initializing) {
+        console.warn('Watchdog triggering degraded UI mode (slow init)')
+        setInitError(prev => prev || 'Slow backend response - operating with limited live data')
+        setInitializing(false)
+      }
+    }, 7000)
+    
     // Emergency timeout to show app no matter what after 5 seconds
     const emergencyTimeout = setTimeout(() => {
       if (initializing) {
@@ -305,7 +324,8 @@ const App: React.FC = () => {
       }
     }
 
-    initializeApp()
+  initializeApp()
+  return () => { clearTimeout(watchdog) }
   }, [dispatch])
 
   useEffect(() => {
@@ -326,50 +346,23 @@ const App: React.FC = () => {
 
   if (initializing) {
     return (
-      <Box
-        display="flex"
-        flexDirection="column"
-        justifyContent="center"
-        alignItems="center"
-        height="100vh"
-        gap={3}
-        sx={{ backgroundColor: 'background.default', p: 3 }}
-      >
-        <Logo size={80} showText={true} />
-        {!initError ? (
-          <>
-            <CircularProgress size={48} thickness={4} />
-            <Box textAlign="center">
-              <Typography variant="h6" color="primary" gutterBottom>
-                Initializing LawnBerryPi Control...
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Connecting to mower system
-              </Typography>
-            </Box>
-          </>
-        ) : (
-          <Box textAlign="center">
-            <Typography variant="h6" color="error" gutterBottom>
-              Initialization Error
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              {initError}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Loading interface anyway...
-            </Typography>
-            <CircularProgress size={32} thickness={4} sx={{ mb: 2 }} />
+      <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" height="100vh" gap={4} sx={{ p: 3, position:'relative' }}>
+        <Box sx={{ position:'absolute', inset:0, pointerEvents:'none', background:'radial-gradient(circle at center, rgba(0,255,209,0.05), transparent 70%)' }} />
+        <Logo size={100} showText={true} />
+        <Box sx={{ width:260, height:6, border:'1px solid #00FFD1', position:'relative', overflow:'hidden', boxShadow:'0 0 15px rgba(0,255,209,0.5)' }}>
+          <Box sx={{ position:'absolute', inset:0, background:'linear-gradient(90deg,#00FFD1,#FF1493,#FFFF00,#00FFD1)', backgroundSize:'300% 100%', animation:'neon-border 2.2s linear infinite' }} />
+        </Box>
+        <Typography variant="h6" color="primary" sx={{ letterSpacing: '0.15em', textTransform:'uppercase', fontWeight:700 }}>
+          {initError ? 'Initializing (Degraded)' : 'Initializing'}
+        </Typography>
+        {initError && (
+          <Box textAlign="center" maxWidth={400}>
+            <Typography variant="body2" color="error" gutterBottom>{initError}</Typography>
             <Button 
-              variant="outlined" 
-              onClick={() => {
-                console.log('🔧 Manual override - showing app')
-                setInitializing(false)
-              }}
-              sx={{ mt: 1 }}
-            >
-              Skip & Continue
-            </Button>
+              variant="outlined"
+              onClick={() => setInitializing(false)}
+              size="small"
+            >Force Continue</Button>
           </Box>
         )}
       </Box>

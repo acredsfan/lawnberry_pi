@@ -273,8 +273,27 @@ uvicorn web_api.main:app --reload --host 0.0.0.0 --port 8000
 ## Monitoring
 
 ### Health Checks
-- `GET /health` - Basic health check
-- `GET /api/v1/status` - Detailed status
+- `GET /health` - Basic liveness (no auth)
+- `GET /api/v1/meta` - API service metadata (no auth; not mower state)
+- `GET /api/v1/status` - Detailed mower/runtime status (auth)
+
+Add the optional post-start systemd probe (already present in `lawnberry-api.service`):
+
+```
+ExecStartPost=/bin/bash -c '/home/pi/lawnberry_pi/scripts/health_check_web_api.sh http://127.0.0.1:8000 || { echo "lawnberry-api health probe failed" >&2; exit 1; }'
+```
+
+This ensures the unit only reports started after the API is responsive.
+
+### Automatic UI Rebuild (ExecStartPre)
+`lawnberry-api.service` now runs `scripts/auto_rebuild_web_ui.sh` before launching. The script:
+* Detects source changes (`src`, `public`, `package.json`, `vite.config.*`).
+* Skips quickly if unchanged (<<1s).
+* Installs dependencies if `node_modules` missing.
+* Builds with timeout (`MAX_BUILD_SECONDS`, default 600s) to avoid hangs.
+* Writes a `.build_timestamp` for future comparisons.
+
+Disable temporarily by commenting the `ExecStartPre` line or exporting `MAX_BUILD_SECONDS=0` and early-exiting (customize script if desired).
 
 ### Logging
 Structured JSON logging with:

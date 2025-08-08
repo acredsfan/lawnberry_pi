@@ -8,25 +8,28 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 import uvicorn
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 import time
+import os  # Added for environment variable override (LAWNBERY_UI_DIR)
+import re
 import json
 from pathlib import Path  # added for static asset detection
 from fastapi.responses import RedirectResponse, FileResponse  # updated for serving UI
+from fastapi.staticfiles import StaticFiles
 
 
 from .config import get_settings
-from .auth import get_current_user, AuthManager
+from .auth import get_current_user, AuthManager, set_auth_manager
 from .routers import (
     system, sensors, navigation, patterns, 
     configuration, maps, weather, power, websocket, progress, rc_control, google_maps, camera
 )
 from .middleware import RateLimitMiddleware, RequestLoggingMiddleware
 from .mqtt_bridge import MQTTBridge
-from .exceptions import APIException, api_exception_handler
+from .exceptions import APIException, api_exception_handler, http_exception_handler
 
 
 # Application lifecycle management
@@ -67,10 +70,14 @@ async def lifespan(app: FastAPI):
     from .routers.websocket import setup_websocket_mqtt_integration
     setup_websocket_mqtt_integration(mqtt_bridge)
     
-    # Initialize auth manager
+    # Initialize auth manager and register globally for dependency helpers
     auth_manager = AuthManager(settings.auth)
     await auth_manager.initialize()
     app.state.auth_manager = auth_manager
+    try:
+        set_auth_manager(auth_manager)
+    except Exception as e:
+        logger.warning(f"Failed to set global auth manager: {e}")
     
     logger.info("Web API backend startup complete")
     
@@ -78,13 +85,23 @@ async def lifespan(app: FastAPI):
     
     # Cleanup
     logger.info("Shutting down web API backend...")
-    await mqtt_bridge.disconnect()
-    
-    # Close Redis connection
+
+    async def _safe_shutdown(coro, name: str, timeout: float):
+        try:
+            await asyncio.wait_for(coro, timeout=timeout)
+            logger.info(f"{name} shutdown complete")
+        except asyncio.TimeoutError:
+            logger.warning(f"Timed out waiting for {name} shutdown (>{timeout}s); continuing")
+        except Exception as e:
+            logger.warning(f"Error during {name} shutdown: {e}")
+
+    # MQTT disconnect (may block if broker unresponsive) - cap at 5s
+    await _safe_shutdown(mqtt_bridge.disconnect(), "MQTT bridge", 5.0)
+
+    # Close Redis connection (cap at 3s)
     if hasattr(app.state, 'redis_client') and app.state.redis_client:
-        await app.state.redis_client.close()
-        logger.info("Redis client closed")
-    
+        await _safe_shutdown(app.state.redis_client.close(), "Redis client", 3.0)
+
     logger.info("Web API backend shutdown complete")
 
 
@@ -117,8 +134,9 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestLoggingMiddleware)
     
     # Add exception handlers
+    # Correct exception handler mapping: HTTPException -> http_exception_handler
     app.add_exception_handler(APIException, api_exception_handler)
-    app.add_exception_handler(HTTPException, api_exception_handler)
+    app.add_exception_handler(HTTPException, http_exception_handler)
     
     # Health check endpoint
     @app.get("/health")
@@ -130,19 +148,28 @@ def create_app() -> FastAPI:
             "version": "1.0.0"
         }
     
-    # API status endpoint
-    @app.get("/api/v1/status")
-    async def api_status(request: Request):
-        """Comprehensive API status information"""
+    # API meta endpoint (renamed to avoid collision with real mower status route below)
+    @app.get("/api/v1/meta")
+    async def api_meta(request: Request):
+        """Meta/application status (distinct from mower runtime status)."""
         mqtt_bridge = getattr(request.app.state, 'mqtt_bridge', None)
-        
         return {
             "api_version": "1.0.0",
+            "service": "lawnberry-api",
             "status": "operational",
             "timestamp": time.time(),
             "mqtt_connected": mqtt_bridge.is_connected() if mqtt_bridge else False,
             "uptime": time.time() - getattr(app.state, 'start_time', time.time())
         }
+
+    # Backward compatibility: redirect old meta path if any code relied on first definition
+    @app.get("/api/v1/status", include_in_schema=False)
+    async def legacy_meta_redirect():  # type: ignore
+        """Redirect legacy meta endpoint to real mower status once meta split implemented."""
+        # We keep this path for actual mower status below; this redirect only fires before override.
+        # FastAPI processes in declaration order, and the real mower status is declared later with same path
+        # so this function will be shadowed; kept for clarity/documentation.
+        return JSONResponse({"detail": "legacy placeholder"})
     
     # Mock mower status endpoint for frontend development
     @app.get("/api/v1/mock/status")
@@ -315,42 +342,168 @@ def create_app() -> FastAPI:
         """Simple ping endpoint for health checks"""
         return {"status": "ok", "timestamp": time.time()}
     
-    # Mount production web UI (static build) if available
-    # Served under /ui to avoid clashing with API root paths
-    dist_path = Path("web-ui/dist")
-    index_file = dist_path / "index.html"
-    if index_file.exists():
-        try:
-            from fastapi.staticfiles import StaticFiles
-            app.mount("/ui", StaticFiles(directory=str(dist_path), html=True), name="web-ui")
-            logging.getLogger(__name__).info("Mounted web UI static assets at /ui")
-            
-            # Serve UI index at root (so tunnels to / show UI)
-            @app.get("/", include_in_schema=False)
-            async def root_index():
-                return FileResponse(index_file)
-            
-            # Optional redirect /ui -> /ui/ (kept)
-            @app.get("/ui", include_in_schema=False)
-            async def ui_redirect():
-                return RedirectResponse(url="/ui/", status_code=302)
-            
-            # SPA catch-all: serve index.html for non-API paths
-            RESERVED_PREFIXES = {"api", "ws", "health", "docs", "openapi", "redoc"}
-            @app.get("/{full_path:path}", include_in_schema=False)
-            async def spa_catch_all(full_path: str):
-                # If first segment is reserved (API or system), fall through (404 handled elsewhere)
-                first = full_path.split("/", 1)[0] if full_path else ""
-                if first in RESERVED_PREFIXES or full_path.startswith("static/"):
-                    raise HTTPException(status_code=404, detail="Not Found")
-                # Avoid serving index for asset files that genuinely miss
-                if any(full_path.endswith(ext) for ext in (".png", ".jpg", ".css", ".js", ".map", ".svg", ".ico")):
-                    raise HTTPException(status_code=404, detail="Asset Not Found")
-                return FileResponse(index_file)
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"Failed to mount web UI static assets: {e}")
+    # ---- Robust Static UI Mount (multi-path + env override) ----
+    # Some deployments run from /opt/lawnberry while development occurs in workspace.
+    # We attempt several candidate locations AND allow LAWNBERY_UI_DIR override.
+    candidates = []
+    env_override = os.getenv("LAWNBERY_UI_DIR")
+    if env_override:
+        candidates.append(Path(env_override).expanduser())
+    # Primary (current working tree)
+    candidates.append(Path("web-ui") / "dist")
+    # Installed copy under /opt
+    candidates.append(Path("/opt/lawnberry/web-ui/dist"))
+    # Relative to this file (in case CWD differs)
+    candidates.append(Path(__file__).resolve().parent.parent.parent / "web-ui" / "dist")
+    mounted = False
+    chosen_path = None
+    class SPAStaticFiles(StaticFiles):
+        """StaticFiles that falls back to index.html for unknown non-asset routes (SPA support)."""
+        def __init__(self, directory: str, index_path: Path):
+            super().__init__(directory=directory, html=True)
+            self._index_path = index_path
+
+        async def get_response(self, path: str, scope):  # type: ignore[override]
+            response = await super().get_response(path, scope)
+            # If not found and it's a client-side route (no dot in last segment), serve index.html
+            if response.status_code == 404:
+                # Paths like assets/... should keep 404 so the browser can handle missing files
+                last_segment = path.rsplit('/', 1)[-1]
+                if '.' not in last_segment:  # treat as client route
+                    return FileResponse(self._index_path)
+            return response
+
+    for c in candidates:
+        index_file = c / "index.html"
+        if index_file.exists():
+            try:
+                # Manual SPA routing instead of StaticFiles mount to guarantee deep link fallback.
+                # This avoids mount precedence issues that prevented /ui/* paths from being intercepted.
+                chosen_path = c
+                mounted = True
+
+                def _cache_headers(resp: Response, immutable: bool = False):
+                    # Immutable long-cache for hashed assets, no-cache for HTML shell
+                    resp.headers["Cache-Control"] = (
+                        "public, max-age=31536000, immutable" if immutable else "no-cache"
+                    )
+                    return resp
+
+                def _is_hashed(name: str) -> bool:
+                    return bool(re.search(r"-[0-9a-f]{6,}\.(?:js|css|png|svg|webp|jpg|jpeg)$", name))
+
+                @app.get("/", include_in_schema=False)
+                async def root_index():  # type: ignore
+                    return _cache_headers(FileResponse(index_file), immutable=False)
+
+                @app.head("/", include_in_schema=False)
+                async def root_index_head():  # type: ignore
+                    return _cache_headers(Response(status_code=200), immutable=False)
+
+                @app.get("/ui", include_in_schema=False)
+                async def ui_redirect():  # type: ignore
+                    return RedirectResponse(url="/ui/", status_code=302)
+
+                @app.get("/ui/", include_in_schema=False)
+                async def ui_index():  # type: ignore
+                    return _cache_headers(FileResponse(index_file), immutable=False)
+
+                @app.head("/ui/", include_in_schema=False)
+                async def ui_index_head():  # type: ignore
+                    return _cache_headers(Response(status_code=200), immutable=False)
+
+                def _safe_asset_path(rel: str) -> Path:
+                    # Prevent path traversal
+                    rel = rel.lstrip("/")
+                    candidate = (chosen_path / rel).resolve()
+                    if not str(candidate).startswith(str(chosen_path.resolve())):
+                        raise HTTPException(status_code=403, detail="Forbidden")
+                    return candidate
+
+                @app.get("/ui/assets/{asset_path:path}", include_in_schema=False)
+                async def ui_assets(asset_path: str):  # type: ignore
+                    p = _safe_asset_path(f"assets/{asset_path}")
+                    if not p.exists():
+                        raise HTTPException(status_code=404, detail="Asset Not Found")
+                    return _cache_headers(FileResponse(p), immutable=_is_hashed(p.name))
+
+                @app.head("/ui/assets/{asset_path:path}", include_in_schema=False)
+                async def ui_assets_head(asset_path: str):  # type: ignore
+                    p = _safe_asset_path(f"assets/{asset_path}")
+                    if not p.exists():
+                        raise HTTPException(status_code=404, detail="Asset Not Found")
+                    return _cache_headers(Response(status_code=200), immutable=_is_hashed(p.name))
+
+                @app.get("/ui/{full_path:path}", include_in_schema=False)
+                async def ui_catch_all(full_path: str):  # type: ignore
+                    p = _safe_asset_path(full_path)
+                    if p.exists() and p.is_file():
+                        return _cache_headers(FileResponse(p), immutable=_is_hashed(p.name))
+                    return _cache_headers(FileResponse(index_file), immutable=False)
+
+                @app.head("/ui/{full_path:path}", include_in_schema=False)
+                async def ui_catch_all_head(full_path: str):  # type: ignore
+                    p = _safe_asset_path(full_path)
+                    if p.exists() and p.is_file():
+                        return _cache_headers(Response(status_code=200), immutable=_is_hashed(p.name))
+                    return _cache_headers(Response(status_code=200), immutable=False)
+
+                logging.getLogger(__name__).info(f"Mounted SPA manual router at /ui from {c}")
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Failed setting up manual UI routes from {c}: {e}")
+            if mounted:
+                break
+    if not mounted:
+        logging.getLogger(__name__).info("No web UI dist located (candidates checked: %s)" % ", ".join(str(p) for p in candidates))
     else:
-        logging.getLogger(__name__).info("Web UI dist directory not found; skipping static mount")
+        # Expose a tiny version endpoint to help frontend verify sync
+        @app.get("/ui-version")
+        async def ui_version():  # type: ignore
+            ts = 0
+            try:
+                ts = int(chosen_path.stat().st_mtime)
+            except Exception:
+                pass
+            return {"mounted_path": str(chosen_path), "mtime": ts}
+
+        # Redirect common top-level SPA routes missing /ui prefix
+        _raw_routes = ["/dashboard", "/maps", "/navigation", "/rc-control", "/settings", "/training", "/documentation"]
+        for _r in _raw_routes:
+            @app.api_route(_r, methods=["GET", "HEAD"], include_in_schema=False)
+            async def _redir_spa(request: Request, route=_r):  # type: ignore
+                return RedirectResponse(url=f"/ui{route}", status_code=302)
+
+        # Asset fallback when user visits without /ui prefix
+        @app.api_route("/assets/{asset_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+        async def _asset_fallback(asset_path: str):  # type: ignore
+            return RedirectResponse(url=f"/ui/assets/{asset_path}", status_code=302)
+
+        @app.api_route("/registerSW.js", methods=["GET", "HEAD"], include_in_schema=False)
+        async def _sw_fallback():  # type: ignore
+            return RedirectResponse(url="/ui/registerSW.js", status_code=302)
+
+        @app.api_route("/manifest.webmanifest", methods=["GET", "HEAD"], include_in_schema=False)
+        async def _manifest_fallback():  # type: ignore
+            return RedirectResponse(url="/ui/manifest.webmanifest", status_code=302)
+
+        # FINAL SPA FALLBACK: Any GET under /ui/* not matching an existing static asset
+        # should serve index.html so client-side routing can resolve. This supplements
+        # the StaticFiles subclass in cases where Starlette routing returns a 404
+        # before our overridden get_response fallback is applied (observed with
+        # deep links like /ui/maps returning JSON 404).
+        index_path = chosen_path / "index.html"
+        if index_path.exists():
+            @app.get("/ui/{full_path:path}", include_in_schema=False)
+            async def ui_spa_catch_all(full_path: str):  # type: ignore
+                if any(full_path.endswith(ext) for ext in (".js", ".css", ".map", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webmanifest")):
+                    raise HTTPException(status_code=404, detail="Asset Not Found")
+                return _cache_headers(FileResponse(index_path), immutable=False)
+
+            @app.head("/ui/{full_path:path}", include_in_schema=False)
+            async def ui_spa_catch_all_head(full_path: str):  # type: ignore
+                if any(full_path.endswith(ext) for ext in (".js", ".css", ".map", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webmanifest")):
+                    raise HTTPException(status_code=404, detail="Asset Not Found")
+                return _cache_headers(Response(status_code=200), immutable=False)
     
     # Include routers
     app.include_router(system.router, prefix="/api/v1/system", tags=["system"])

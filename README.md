@@ -274,6 +274,27 @@ print(f"Device health: {health['devices']}")
 ```
 
 ## Safety Features
+## API Meta & Health
+
+The backend exposes lightweight operational endpoints:
+
+* `GET /health` – Liveness probe (no auth)
+* `GET /api/v1/meta` – Service metadata (version, uptime, MQTT connectivity) (no auth)
+* `GET /api/v1/maps/*` (selected read-only map endpoints) – Public read access for embedding map UI
+
+Systemd post-start probe (ensures readiness): already embedded in `src/web_api/lawnberry-api.service` as `ExecStartPost` calling `scripts/health_check_web_api.sh`.
+
+These are safe for status pages and deployment health checks. A systemd ExecStartPost health probe can validate readiness (see scripts/health_check_web_api.sh).
+
+### SPA Routing
+The web UI is mounted under `/ui`. Direct navigation to deep links like `/ui/maps` or `/ui/navigation` is supported via an internal single-page fallback. Convenience redirects map top-level paths (e.g. `/maps`) to their `/ui/*` equivalents.
+
+### Automatic UI Rebuild
+The API systemd unit performs a conditional Web UI rebuild before start via `ExecStartPre` calling `scripts/auto_rebuild_web_ui.sh`:
+* Fast no-op if no source changes (mtime comparison of `web-ui/src`, `public`, `package.json`, `vite.config.*`).
+* Triggers `npm run build` only when needed; enforces timeout (default 600s via `MAX_BUILD_SECONDS`).
+* Fails startup if a required rebuild fails, preventing stale or partial assets.
+
 
 ### Automatic Failsafe
 - Communication timeouts trigger RC mode fallback

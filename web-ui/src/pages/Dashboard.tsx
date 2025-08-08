@@ -99,14 +99,14 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     // Simulate real-time data updates
     const interval = setInterval(() => {
-      if (status) {
+      if (status && status.battery && status.sensors?.environmental && status.sensors?.imu) {
         const newDataPoint = {
           time: format(new Date(), 'HH:mm:ss'),
-          battery: status.battery.level,
-          temperature: converters.temperature(status.sensors.environmental.temperature).value,
+          battery: typeof status.battery.level === 'number' ? status.battery.level : 0,
+          temperature: converters.temperature(status.sensors.environmental?.temperature ?? 0).value,
           speed: converters.speed(Math.sqrt(
-            Math.pow(status.sensors.imu.acceleration.x, 2) +
-            Math.pow(status.sensors.imu.acceleration.y, 2)
+            Math.pow(status.sensors.imu.acceleration?.x || 0, 2) +
+            Math.pow(status.sensors.imu.acceleration?.y || 0, 2)
           )).value // Convert from m/s to current unit system
         }
         
@@ -128,7 +128,8 @@ const Dashboard: React.FC = () => {
     setVideoStream(streamUrl)
   }, [])
 
-  const getBatteryColor = (level: number) => {
+  const getBatteryColor = (level?: number) => {
+    if (typeof level !== 'number') return 'default'
     if (level > 60) return 'success'
     if (level > 30) return 'warning'
     return 'error'
@@ -139,9 +140,10 @@ const Dashboard: React.FC = () => {
       case 'mowing': return 'success'
       case 'charging': return 'info'
       case 'returning': return 'warning'
-      case 'error': return 'error'
+      case 'error':
       case 'emergency': return 'error'
-      default: return 'default'
+      case 'idle': return 'secondary'
+      default: return 'info'
     }
   }
 
@@ -205,7 +207,7 @@ const Dashboard: React.FC = () => {
                 <Grid item xs={6} sm={3}>
                   <Box display="flex" flexDirection="column" alignItems="center" gap={1}>
                     <Chip 
-                      label={status?.state.toUpperCase() || 'UNKNOWN'}
+                      label={status?.state?.toUpperCase() || 'UNKNOWN'}
                       color={getStatusColor(status?.state || 'idle')}
                       size="medium"
                       sx={{ 
@@ -249,7 +251,7 @@ const Dashboard: React.FC = () => {
                 <Grid item xs={6} sm={3}>
                   <Box display="flex" flexDirection="column" alignItems="center" gap={1}>
                     <Typography variant="h3" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 900 }}>
-                      {status?.coverage ? `${status.coverage.percentage.toFixed(1)}%` : '0.0%'}
+                        {status?.coverage?.percentage != null ? status.coverage.percentage.toFixed(1) : '0'}%
                     </Typography>
                     <LinearProgress 
                       variant="determinate" 
@@ -338,8 +340,13 @@ const Dashboard: React.FC = () => {
               <Box display="flex" alignItems="center" gap={2} mb={3}>
                 <BatteryIcon sx={{ 
                   fontSize: '2rem', 
-                  color: getBatteryColor(status?.battery.level || 0) === 'success' ? 'success.main' : 
-                         getBatteryColor(status?.battery.level || 0) === 'warning' ? 'warning.main' : 'error.main',
+                  color: (() => {
+                    const c = getBatteryColor(status?.battery?.level)
+                    if (c === 'success') return 'success.main'
+                    if (c === 'warning') return 'warning.main'
+                    if (c === 'error') return 'error.main'
+                    return 'text.secondary'
+                  })(),
                   filter: 'drop-shadow(0 0 10px currentColor)'
                 }} />
                 <Typography variant="h5" className="neon-text" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
@@ -353,13 +360,13 @@ const Dashboard: React.FC = () => {
                     Charge Level
                   </Typography>
                   <Typography variant="h4" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 900 }}>
-                    {status?.battery.level ? status.battery.level.toFixed(1) : '0.0'}%
+                    {typeof status?.battery?.level === 'number' ? status.battery.level.toFixed(1) : '0.0'}%
                   </Typography>
                 </Box>
                 <LinearProgress 
                   variant="determinate" 
-                  value={status?.battery.level || 0}
-                  color={getBatteryColor(status?.battery.level || 0)}
+                  value={typeof status?.battery?.level === 'number' ? status.battery.level : 0}
+                  color={getBatteryColor(status?.battery?.level)}
                   sx={{ 
                     height: 16, 
                     border: '1px solid currentColor',
@@ -377,7 +384,7 @@ const Dashboard: React.FC = () => {
                     Voltage
                   </Typography>
                   <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
-                    {status?.battery.voltage.toFixed(2) || '0.00'}V
+                    {typeof status?.battery?.voltage === 'number' ? status.battery.voltage.toFixed(2) : '0.00'}V
                   </Typography>
                 </Grid>
                 <Grid item xs={6}>
@@ -385,7 +392,7 @@ const Dashboard: React.FC = () => {
                     Current
                   </Typography>
                   <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
-                    {status?.battery.current.toFixed(2) || '0.00'}A
+                    {typeof status?.battery?.current === 'number' ? status.battery.current.toFixed(2) : '0.00'}A
                   </Typography>
                 </Grid>
                 <Grid item xs={12}>
@@ -394,20 +401,20 @@ const Dashboard: React.FC = () => {
                   </Typography>
                   <Box display="flex" alignItems="center" gap={1}>
                     <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
-                      {status?.battery.charging ? 'CHARGING' : 'DISCHARGING'}
+                      {status?.battery?.charging ? 'CHARGING' : 'DISCHARGING'}
                     </Typography>
                     <Box 
-                      className={`status-indicator ${status?.battery.charging ? 'status-online' : 'status-warning'}`}
+                      className={`status-indicator ${status?.battery?.charging ? 'status-online' : 'status-warning'}`}
                     />
                   </Box>
                 </Grid>
-                {status?.battery.timeRemaining && (
+                {status?.battery?.timeRemaining && (
                   <Grid item xs={12}>
                     <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase' }}>
                       Time Remaining
                     </Typography>
                     <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
-                      {Math.floor(status.battery.timeRemaining / 60)}H {status.battery.timeRemaining % 60}M
+                      {Math.floor((status.battery?.timeRemaining || 0) / 60)}H {(status.battery?.timeRemaining || 0) % 60}M
                     </Typography>
                   </Grid>
                 )}

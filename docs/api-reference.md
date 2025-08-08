@@ -12,7 +12,17 @@ The LawnBerryPi system provides a comprehensive REST API with WebSocket support 
 
 ## Authentication
 
-All API endpoints require authentication. The system uses token-based authentication with role-based access control.
+Most API endpoints require authentication (token-based with role-based access control). However, the following read-only endpoints are intentionally exposed for unauthenticated access to support public map viewing and basic service diagnostics:
+
+Public (no token required):
+* `GET /api/v1/meta` – API service meta/status (not mower state)
+* `GET /api/v1/maps` – Combined map data (read-only)
+* `GET /api/v1/maps/boundaries`
+* `GET /api/v1/maps/no-go-zones`
+* `GET /api/v1/maps/home-location` / `home-locations`
+* `GET /api/v1/maps/validation/*` (map geometry validation helpers)
+
+All write (POST/PUT/DELETE) map endpoints and every other domain (navigation, power, sensors, patterns, configuration, RC control, camera) still require valid authorization.
 
 ### Headers
 ```
@@ -441,5 +451,31 @@ class LawnBerryAPI {
 ```
 
 ---
+
+## Meta / Service Endpoint
+
+### API Meta
+**GET** `/api/v1/meta`
+
+Returns meta information about the API service itself (distinct from mower runtime status). Useful for UI bootstrapping and service monitoring.
+
+**Response Example:**
+```json
+{
+  "api_version": "1.0.0",
+  "service": "lawnberry-api",
+  "status": "operational",
+  "timestamp": 1733652000.123,
+  "mqtt_connected": true,
+  "uptime": 124.57
+}
+```
+
+## SPA Routing Notes
+
+The web UI (React + Vite) is mounted under `/ui`. Deep links like `/ui/maps` or `/ui/navigation` resolve via an internal single-page application fallback. Non-asset 404s under `/ui/*` return `index.html` automatically. Top-level convenience redirects `/maps` → `/ui/maps` are provided.
+
+If deploying behind a reverse proxy, ensure it does NOT rewrite or pre-empt `/ui/*` paths so the backend fallback remains effective.
+
 
 **Support:** For API support and questions, refer to the main documentation or contact the development team.

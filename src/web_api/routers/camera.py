@@ -6,8 +6,16 @@ Provides camera stream access and control for the web interface.
 import asyncio
 import logging
 from typing import Dict, Any, Optional
-import cv2
-import numpy as np
+
+# Optional heavy dependencies (OpenCV, numpy) may not be installed on minimal systems.
+try:  # pragma: no cover
+    import cv2  # type: ignore
+except Exception:  # noqa
+    cv2 = None  # type: ignore
+try:  # pragma: no cover
+    import numpy as np  # type: ignore
+except Exception:  # noqa
+    np = None  # type: ignore
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
 import io
@@ -54,25 +62,19 @@ async def get_camera_frame(request: Request):
         camera_manager = getattr(system_manager, 'camera_manager', None) if system_manager else None
         
         if not camera_manager:
-            # Return placeholder frame
-            frame = create_placeholder_frame()
-            ret, buffer = cv2.imencode('.jpg', frame)
-            return StreamingResponse(io.BytesIO(buffer.tobytes()), media_type="image/jpeg")
+            # Return placeholder frame (minimal JPEG if cv2 unavailable)
+            return StreamingResponse(io.BytesIO(_generate_placeholder_frame()), media_type="image/jpeg")
         
         # Get frame from camera manager
         frame = await camera_manager.get_frame()
         if frame is None:
-            frame = create_placeholder_frame()
-        
-        ret, buffer = cv2.imencode('.jpg', frame)
-        return StreamingResponse(io.BytesIO(buffer.tobytes()), media_type="image/jpeg")
+            return StreamingResponse(io.BytesIO(_generate_placeholder_frame()), media_type="image/jpeg")
+        return StreamingResponse(io.BytesIO(frame), media_type="image/jpeg")
         
     except Exception as e:
         logger.error(f"Camera frame error: {e}")
         # Return placeholder on error
-        frame = create_placeholder_frame()
-        ret, buffer = cv2.imencode('.jpg', frame)
-        return StreamingResponse(io.BytesIO(buffer.tobytes()), media_type="image/jpeg")
+    return StreamingResponse(io.BytesIO(_generate_placeholder_frame()), media_type="image/jpeg")
 
 
 @router.get("/camera/status")
@@ -120,8 +122,14 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-import cv2
-import numpy as np
+try:  # pragma: no cover
+    import cv2  # type: ignore
+except Exception:  # noqa
+    cv2 = None  # type: ignore
+try:  # pragma: no cover
+    import numpy as np  # type: ignore
+except Exception:  # noqa
+    np = None  # type: ignore
 
 from ..dependencies import get_system_manager
 
@@ -315,37 +323,22 @@ def _placeholder_stream() -> StreamingResponse:
 
 
 def _generate_placeholder_frame(message: str = "Camera Not Available") -> bytes:
-    """Generate a placeholder frame when camera is not available"""
-    try:
-        # Create a simple placeholder image
+    """Generate a placeholder frame when camera is not available. Falls back to tiny JPEG if deps missing."""
+    if not (cv2 and np):
+        return b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00H\x00H\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x11\x08\x01\xe0\x02\x80\x03\x01\x11\x00\x02\x11\x01\x03\x11\x01\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00\x3f\x00\xaa\xff\xd9'
+    try:  # pragma: no cover
         height, width = 480, 640
         frame = np.zeros((height, width, 3), dtype=np.uint8)
-        
-        # Create gradient background
         for y in range(height):
             intensity = int(64 + 32 * np.sin(y * 0.02))
             frame[y, :] = (intensity, intensity//2, intensity//3)
-        
-        # Add main text
-        cv2.putText(frame, "LawnBerryPi Camera", (width//2 - 120, height//2 - 40), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        
-        # Add status message
-        cv2.putText(frame, message, (width//2 - len(message)*4, height//2 + 20), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
-        
-        # Add timestamp
+        cv2.putText(frame, "LawnBerryPi Camera", (40, height//2 - 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(frame, message[:40], (40, height//2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
         timestamp = datetime.now().strftime("%H:%M:%S")
-        cv2.putText(frame, timestamp, (width - 100, height - 20), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 255, 150), 1)
-        
-        # Encode as JPEG
+        cv2.putText(frame, timestamp, (width - 140, height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 255, 150), 1)
         _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
         return buffer.tobytes()
-        
-    except Exception as e:
-        logger.error(f"Error generating placeholder frame: {e}")
-        # Return minimal JPEG
+    except Exception:
         return b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00H\x00H\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x11\x08\x01\xe0\x02\x80\x03\x01\x11\x00\x02\x11\x01\x03\x11\x01\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00\x3f\x00\xaa\xff\xd9'
 
 

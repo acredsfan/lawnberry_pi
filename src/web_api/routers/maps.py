@@ -9,7 +9,7 @@ from datetime import datetime
 from math import cos, radians
 
 from ..models import MapData, Boundary, NoGoZone, Position, HomeLocation, HomeLocationType, SuccessResponse
-from ..auth import get_current_user, require_permission
+from ..auth import get_current_user, require_permission, get_user_or_anonymous
 from ..exceptions import ServiceUnavailableError, NotFoundError
 from ..mqtt_bridge import MQTTBridge
 
@@ -18,7 +18,7 @@ router = APIRouter()
 @router.get("/", response_model=MapData)
 async def get_map_data(
     request: Request,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Get complete map data with current location"""
     mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
@@ -50,7 +50,7 @@ async def get_map_data(
 @router.get("/boundaries", response_model=List[Boundary])
 async def get_boundaries(
     request: Request,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Get yard boundaries"""
     mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
@@ -135,7 +135,7 @@ async def delete_boundary(
 async def validate_boundary(
     boundary: Boundary,
     request: Request,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Validate boundary polygon"""
     points = boundary.points
@@ -222,7 +222,7 @@ def _has_self_intersection(points: List[Position]) -> bool:
 
 @router.get("/no-go-zones", response_model=List[NoGoZone])
 async def get_no_go_zones(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Get no-go zones"""
     return []
@@ -312,7 +312,7 @@ async def delete_no_go_zone(
 
 @router.get("/home-position", response_model=Position)
 async def get_home_position(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Get home/charging position"""
     return Position(latitude=0.0, longitude=0.0)
@@ -348,7 +348,7 @@ async def set_home_position(
 # Home Locations Endpoints
 @router.get("/home-locations", response_model=List[HomeLocation])
 async def get_home_locations(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Get all home locations"""
     # TODO: Implement actual data retrieval from backend
@@ -481,7 +481,7 @@ async def set_default_home_location(
 @router.post("/home-locations/validate-boundary", response_model=Dict[str, bool])
 async def validate_home_location_boundary(
     position: Position,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Validate if a position is within yard boundaries"""
     # TODO: Implement actual boundary validation logic

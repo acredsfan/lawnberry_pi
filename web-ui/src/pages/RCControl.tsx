@@ -181,7 +181,7 @@ const RCControl: React.FC = () => {
 
   // Get status color
   const getStatusColor = () => {
-    if (!status) return 'default';
+    if (!status) return 'info';
     if (status.signal_lost) return 'error';
     if (!status.rc_enabled) return 'warning';
     return 'success';

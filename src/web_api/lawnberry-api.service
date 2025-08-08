@@ -11,7 +11,11 @@ RestartSec=5
 User=pi
 Group=pi
 WorkingDirectory=/home/pi/lawnberry_pi
+# Conditional auto-rebuild of web UI if source newer than dist
+ExecStartPre=/bin/bash /home/pi/lawnberry_pi/scripts/auto_rebuild_web_ui.sh
 ExecStart=/home/pi/lawnberry_pi/venv/bin/python /home/pi/lawnberry_pi/src/web_api/run_server.py
+# Post-start health probe (liveness + meta). Fails service startup if probe fails.
+ExecStartPost=/bin/bash -c '/home/pi/lawnberry_pi/scripts/health_check_web_api.sh http://127.0.0.1:8000 || { echo "lawnberry-api health probe failed" >&2; exit 1; }'
 EnvironmentFile=-/home/pi/lawnberry_pi/.env
 Environment=PYTHONPATH=/home/pi/lawnberry_pi/src
 Environment=LOG_LEVEL=INFO

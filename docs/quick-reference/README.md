@@ -16,6 +16,10 @@ This directory contains printable reference cards, checklists, and emergency pro
 
 ### 👨‍💻 Developer References
 - **[Bash Scripting Checklist](bash-scripting-checklist.md)** - Prevent common shell script syntax errors
+- **API Health Quick Commands** –
+	- Liveness: `curl -fsS http://<host>:8000/health`
+	- Meta: `curl -fsS http://<host>:8000/api/v1/meta`
+	- Systemd probe script: `scripts/health_check_web_api.sh`
 
 ### 📱 Operating References
 - **[Web Interface Quick Guide](web-interface-guide.md)** - Key web interface functions

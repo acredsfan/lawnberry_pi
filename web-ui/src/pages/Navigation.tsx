@@ -215,11 +215,12 @@ const Navigation: React.FC = () => {
   const getStatusColor = (state: string) => {
     switch (state) {
       case 'mowing': return 'success'
-      case 'charging': return 'info' 
+      case 'charging': return 'info'
       case 'returning': return 'warning'
-      case 'error': return 'error'
+      case 'error':
       case 'emergency': return 'error'
-      default: return 'default'
+      case 'idle': return 'secondary'
+      default: return 'info'
     }
   }
 
@@ -276,10 +277,10 @@ const Navigation: React.FC = () => {
                   size="small"
                 />
                 <Typography variant="body2" color="text.secondary">
-                  Coverage: {status?.coverage?.percentage.toFixed(1) || '0'}%
+                  Coverage: {status?.coverage?.percentage != null ? status.coverage.percentage.toFixed(1) : '0'}%
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Battery: {status?.battery.level ? status.battery.level.toFixed(1) : '0.0'}%
+                  Battery: {typeof status?.battery?.level === 'number' ? status.battery.level.toFixed(1) : '0.0'}%
                 </Typography>
               </Box>
             </CardContent>

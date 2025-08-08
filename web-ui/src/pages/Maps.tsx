@@ -73,8 +73,8 @@ const Maps: React.FC = () => {
   const [showHelp, setShowHelp] = useState(false);
   const mapRef = useRef<google.maps.Map | L.Map | null>(null);
 
-  // Determine if we should use full-width layout (desktop full-page mode)
-  const useFullWidth = isDesktop;
+  // Determine if we should use full-width layout (desktop full-page mode); allow user toggle
+  const [useFullWidth, setUseFullWidth] = useState(isDesktop);
 
   const robotPosition = status?.position ? {
     lat: status.position.lat,
@@ -409,13 +409,13 @@ const Maps: React.FC = () => {
                           </Box>
                         )}
 
-                        {status?.battery !== undefined && (
+                        {typeof status?.battery?.level === 'number' && (
                           <Box sx={{ mb: 2 }}>
                             <Typography variant="body2" color="text.secondary">
                               Battery Level
                             </Typography>
-                            <Typography variant="h4" color={status.battery.level < 20 ? 'error.main' : 'inherit'}>
-                              {status.battery.level.toFixed(1)}%
+                            <Typography variant="h4" sx={{ color: status?.battery?.level < 20 ? 'error.main' : 'inherit' }}>
+                              {status?.battery?.level.toFixed(1)}%
                             </Typography>
                           </Box>
                         )}

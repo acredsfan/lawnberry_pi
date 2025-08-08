@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from 'react-query'
 import { store } from './store/store'
 import App from './App'
 import './index.css'
+import ErrorBoundary from './components/system/ErrorBoundary'
 
 declare module '@mui/material/styles' {
   interface Palette {
@@ -46,6 +47,11 @@ const theme = createTheme({
       main: '#FF1493', // Hot pink (80's neon)
       light: '#FF69B4', // Light pink
       dark: '#C71585', // Medium violet red
+    },
+    info: {
+      main: '#1E88E5', // Vibrant neon blue
+      light: '#6AB7FF',
+      dark: '#0D47A1'
     },
     background: {
       default: '#0a0a0a', // Deep black for retro feel
@@ -266,10 +272,24 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <ThemeProvider theme={theme}>
           <CssBaseline />
           <BrowserRouter>
-            <App />
+            <ErrorBoundary>
+              <App />
+            </ErrorBoundary>
           </BrowserRouter>
         </ThemeProvider>
       </QueryClientProvider>
     </Provider>
   </React.StrictMode>,
 )
+
+// Mark hydration done & remove loader
+try {
+  const rootEl = document.getElementById('root')
+  if (rootEl) {
+    rootEl.setAttribute('data-hydration', 'complete')
+    const loader = document.getElementById('initial-loader')
+    if (loader) setTimeout(() => loader.remove(), 300)
+  }
+} catch (e) {
+  console.warn('Hydration marker cleanup failed:', e)
+}

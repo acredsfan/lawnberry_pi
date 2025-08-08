@@ -213,13 +213,13 @@ const Training: React.FC = () => {
                 </Box>
                 <Box display="flex" justifyContent="space-between">
                   <Typography variant="body2">Labeled:</Typography>
-                  <Typography variant="body2" fontWeight="bold" color="success.main">
+                  <Typography variant="body2" fontWeight="bold" sx={{ color: 'success.main' }}>
                     {labeledImages.length}
                   </Typography>
                 </Box>
                 <Box display="flex" justifyContent="space-between">
                   <Typography variant="body2">Unlabeled:</Typography>
-                  <Typography variant="body2" fontWeight="bold" color="warning.main">
+                  <Typography variant="body2" fontWeight="bold" sx={{ color: 'warning.main' }}>
                     {unlabeledImages.length}
                   </Typography>
                 </Box>

@@ -14,6 +14,26 @@
 - **Double and Triple check all changes** - Review code thoroughly before committing.
 - **Ensure all changes made are also integrated into the installation script** - Update installation scripts and deployment configurations accordingly.
 
+### server-memory Usage (Persistent Context Management)
+**Always** Use the `#server-memory` toolset to maintain high-value, current project knowledge (avoid stale or unrelated domains).
+
+Core rules:
+1. Always read current graph first: `mcp_server-memory_read_graph`.
+2. Add concise observations grouped by stable entity names (e.g., `WebUI`, `HardwareInterface`, `DeploymentPipeline`).
+3. Prune aggressively—delete outdated observations or entire entities when superseded.
+4. Never store secrets, credentials, tokens, personal data, or transient debug output.
+5. Before large architectural or refactor steps, re-sync by reading the graph again.
+
+Quick reference:
+- Read graph: `mcp_server-memory_read_graph`
+- Create entities: `mcp_server-memory_create_entities`
+- Add observations: `mcp_server-memory_add_observations`
+- Relate entities: `mcp_server-memory_create_relations`
+- Delete observations: `mcp_server-memory_delete_observations`
+- Delete entities: `mcp_server-memory_delete_entities`
+
+If memory pollution suspected (irrelevant or cross-project data), clear affected entities immediately to prevent decision drift.
+
 ## Architecture Overview
 
 LawnBerryPi is a plugin-based autonomous lawn mower system with layered architecture:

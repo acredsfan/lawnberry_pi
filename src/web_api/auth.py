@@ -16,7 +16,10 @@ from passlib.context import CryptContext
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Standard auth (requires credentials)
 security = HTTPBearer()
+# Optional auth (does not auto-error when header missing)
+optional_security = HTTPBearer(auto_error=False)
 
 
 class AuthManager:
@@ -307,6 +310,43 @@ def get_current_user_optional():
         return get_current_user()
     except HTTPException:
         return None
+
+
+async def get_user_or_anonymous(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security)
+) -> Dict[str, Any]:
+    """Return authenticated user if valid token present; otherwise an anonymous viewer/admin (if auth disabled).
+
+    This is used for read-only endpoints that should not hard-fail when no token is supplied.
+    """
+    auth_mgr = get_auth_manager()
+    # If auth system globally disabled, mirror get_current_user behavior (admin privileges for development ease)
+    if not auth_mgr.config.enabled:
+        return {
+            'username': 'anonymous',
+            'role': 'admin',
+            'exp': None,
+            'iat': None
+        }
+    # If no credentials provided, return limited anonymous role
+    if not credentials:
+        return {
+            'username': 'anonymous',
+            'role': 'viewer',
+            'exp': None,
+            'iat': None
+        }
+    # Have credentials; attempt verification
+    user = auth_mgr.verify_token(credentials.credentials)
+    if user is None:
+        # Invalid token -> degrade to anonymous viewer instead of 401 for read-only context
+        return {
+            'username': 'anonymous',
+            'role': 'viewer',
+            'exp': None,
+            'iat': None
+        }
+    return user
 
 
 # Login/logout models
