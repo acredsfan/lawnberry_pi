@@ -139,3 +139,4 @@ test_web_ui_fixes.sh
 UNITS_IMPLEMENTATION_SUMMARY.md
 WEB_UI_FIXES_SUMMARY.md
 hardware_detection_results.json
+UI_FIX.md

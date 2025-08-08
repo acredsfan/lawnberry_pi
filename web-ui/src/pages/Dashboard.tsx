@@ -366,13 +366,24 @@ const Dashboard: React.FC = () => {
                 <LinearProgress 
                   variant="determinate" 
                   value={typeof status?.battery?.level === 'number' ? status.battery.level : 0}
-                  color={getBatteryColor(status?.battery?.level)}
+                  // We intentionally avoid the MUI color prop (only primary/secondary supported for LinearProgress)
+                  // and instead style via sx so success/warning/error palette shades are applied safely.
                   sx={{ 
-                    height: 16, 
-                    border: '1px solid currentColor',
-                    background: 'rgba(0, 0, 0, 0.8)',
+                    height: 16,
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    backgroundColor: 'rgba(0,0,0,0.7)',
                     '& .MuiLinearProgress-bar': {
-                      boxShadow: '0 0 20px currentColor'
+                      backgroundColor: (theme) => {
+                        const lvl = typeof status?.battery?.level === 'number' ? status.battery.level : 0
+                        if (lvl > 60) return theme.palette.success.main
+                        if (lvl > 30) return theme.palette.warning.main
+                        return theme.palette.error.main
+                      },
+                      boxShadow: (theme) => {
+                        const lvl = typeof status?.battery?.level === 'number' ? status.battery.level : 0
+                        const color = lvl > 60 ? theme.palette.success.main : lvl > 30 ? theme.palette.warning.main : theme.palette.error.main
+                        return `0 0 20px ${color}`
+                      }
                     }
                   }}
                 />

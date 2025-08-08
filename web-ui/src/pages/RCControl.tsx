@@ -339,8 +339,24 @@ const RCControl: React.FC = () => {
                     <LinearProgress
                       variant="determinate"
                       value={signalStrength}
-                      color={signalStrength > 50 ? 'success' : signalStrength > 20 ? 'warning' : 'error'}
-                      sx={{ mt: 0.5, height: 6, borderRadius: 3 }}
+                      // Use sx-based dynamic coloring instead of color prop to avoid unsupported palette lookups
+                      sx={{ 
+                        mt: 0.5, 
+                        height: 6, 
+                        borderRadius: 3,
+                        backgroundColor: (theme) => theme.palette.grey[800],
+                        '& .MuiLinearProgress-bar': {
+                          backgroundColor: (theme) => {
+                            if (signalStrength > 50) return theme.palette.success.main
+                            if (signalStrength > 20) return theme.palette.warning.main
+                            return theme.palette.error.main
+                          },
+                          boxShadow: (theme) => {
+                            const c = signalStrength > 50 ? theme.palette.success.main : signalStrength > 20 ? theme.palette.warning.main : theme.palette.error.main
+                            return `0 0 10px ${c}`
+                          }
+                        }
+                      }}
                     />
                   </Box>
                 );

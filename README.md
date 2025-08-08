@@ -318,6 +318,27 @@ The API systemd unit performs a conditional Web UI rebuild before start via `Exe
 - **Camera Capture**: 30fps with 5-frame buffer
 - **Memory Usage**: Efficient caching with automatic cleanup
 
+### Web UI Theming Note: LinearProgress Colors
+MUI's `LinearProgress` component only exposes `primary` and `secondary` via its `color` prop by default. Passing values such as `success`, `warning`, or `error` (or dot notation like `error.main`) previously caused a runtime error (`Cannot read properties of undefined (reading 'main')`).
+
+To display semantic status colours we now style progress bars exclusively through the `sx` prop targeting `& .MuiLinearProgress-bar` and computing a palette colour dynamically. Example pattern:
+
+```tsx
+<LinearProgress
+    variant="determinate"
+    value={value}
+    sx={{
+        backgroundColor: (theme) => theme.palette.grey[800],
+        '& .MuiLinearProgress-bar': {
+            backgroundColor: (theme) => selectColor(theme, value),
+            boxShadow: (theme) => `0 0 10px ${selectColor(theme, value)}`
+        }
+    }}
+/>
+```
+
+This approach is used in `Dashboard` (battery & coverage) and `RCControl` (channel strength). Future additions should follow this pattern unless explicit module augmentation is added to extend supported `color` variants.
+
 ## Contributing
 
 1. Fork the repository
