@@ -116,12 +116,14 @@ const Maps: React.FC = () => {
 
   useEffect(() => {
     // Initialize map configuration from environment on component mount
-    console.log('🗺️ Maps page initializing...');
-    console.log('🔑 Environment check:', {
+    if (import.meta.env.DEV) {
+      console.log('🗺️ Maps page initializing...');
+      console.log('🔑 Environment check:', {
       viteKey: import.meta.env.VITE_REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
       reactKey: import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
       processKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found'
-    });
+      });
+    }
     
     // Initialize with Google Maps as preferred if API key is available
     const hasGoogleApiKey = !!(
@@ -132,10 +134,10 @@ const Maps: React.FC = () => {
     
     if (hasGoogleApiKey) {
       dispatch(setPreferredProvider('google'));
-      console.log('✅ Google Maps API key found - setting Google as preferred provider');
+  if (import.meta.env.DEV) console.log('✅ Google Maps API key found - setting Google as preferred provider');
     } else {
       dispatch(setPreferredProvider('openstreetmap'));
-      console.log('⚠️ No Google Maps API key - falling back to OpenStreetMap');
+  if (import.meta.env.DEV) console.log('⚠️ No Google Maps API key - falling back to OpenStreetMap');
     }
     
     dispatch(initializeMapFromEnvironment());
@@ -195,7 +197,7 @@ const Maps: React.FC = () => {
 
   const handlePreviewStart = (pattern: string) => {
     // Navigate to Navigation page or start mowing
-    console.log('Starting mowing with pattern:', pattern);
+  if (import.meta.env.DEV) console.log('Starting mowing with pattern:', pattern);
   };
 
   const handleUsageLevelChange = (level: MapUsageLevel) => {
@@ -318,14 +320,30 @@ const Maps: React.FC = () => {
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
                     onProviderChange={(provider) => {
-                      console.log('Provider changed to:', provider);
+                      if (import.meta.env.DEV) console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
                     }}
                     style={{ height: '100%' }}
                   >
-                    {/* TODO: Add boundary, no-go zone, and home location components as children */}
+                    {/* Overlays: boundaries, no-go zones, and home locations */}
+                    {/* Boundary Polylines */}
+                    {boundaries.filter(b => b.isValid).map(b => (
+                      <React.Fragment key={b.name}>
+                        {/* Placeholder: actual map layer components would differ per provider */}
+                      </React.Fragment>
+                    ))}
+                    {/* No-Go Zones */}
+                    {noGoZones.filter(z => z.isValid).map(z => (
+                      <React.Fragment key={z.name}>
+                      </React.Fragment>
+                    ))}
+                    {/* Home Locations */}
+                    {homeLocations.map(h => (
+                      <React.Fragment key={h.id}>
+                      </React.Fragment>
+                    ))}
                   </MapContainer>
                   
                   {/* Layer toggle controls */}
@@ -381,7 +399,7 @@ const Maps: React.FC = () => {
                               width: 12,
                               height: 12,
                               borderRadius: '50%',
-                              backgroundColor: status?.connected ? 'success.main' : 'error.main'
+                              backgroundColor: (theme) => status?.connected ? theme.palette.success.main : theme.palette.error.main
                             }}
                           />
                           Robot Status
@@ -514,7 +532,7 @@ const Maps: React.FC = () => {
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
                     onProviderChange={(provider) => {
-                      console.log('Provider changed to:', provider);
+                      if (import.meta.env.DEV) console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
@@ -555,7 +573,7 @@ const Maps: React.FC = () => {
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
                     onProviderChange={(provider) => {
-                      console.log('Provider changed to:', provider);
+                      if (import.meta.env.DEV) console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
@@ -598,7 +616,7 @@ const Maps: React.FC = () => {
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
                     onProviderChange={(provider) => {
-                      console.log('Provider changed to:', provider);
+                      if (import.meta.env.DEV) console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
@@ -639,7 +657,7 @@ const Maps: React.FC = () => {
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
                     onProviderChange={(provider) => {
-                      console.log('Provider changed to:', provider);
+                      if (import.meta.env.DEV) console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);

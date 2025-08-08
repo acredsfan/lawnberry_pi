@@ -20,7 +20,7 @@ from datetime import datetime
 
 from pydantic import ValidationError
 
-from ..web_api.models import Boundary, NoGoZone, HomeLocation
+from web_api.models import Boundary, NoGoZone, HomeLocation  # absolute import: web_api is sibling top-level package
 
 DATA_DIR = Path("data")
 DATA_FILE = DATA_DIR / "maps_state.json"

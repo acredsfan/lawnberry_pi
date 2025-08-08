@@ -9,7 +9,7 @@ from datetime import datetime
 from math import cos, radians
 
 from ..models import MapData, Boundary, NoGoZone, Position, HomeLocation, HomeLocationType, SuccessResponse
-from ...maps import storage as map_storage
+from maps import storage as map_storage  # Absolute import (sibling package under src)
 from ..auth import get_current_user, require_permission, get_user_or_anonymous
 from ..exceptions import ServiceUnavailableError, NotFoundError
 from ..mqtt_bridge import MQTTBridge

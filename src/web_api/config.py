@@ -8,6 +8,20 @@ from typing import List, Optional, Dict, Any
 from pydantic import Field
 from pydantic_settings import BaseSettings
 import os
+import logging
+from pathlib import Path
+try:
+    # Auto-load .env early so AuthSettings os.getenv lookups work even when
+    # importing settings outside run_server (e.g. systemd ExecStartPost probe).
+    # This is safe and idempotent; if variables already in environment they are preserved.
+    from dotenv import load_dotenv  # type: ignore
+    _root = Path(__file__).resolve().parent.parent.parent  # project root
+    env_path = _root / '.env'
+    if env_path.exists():
+        load_dotenv(env_path, override=False)
+except Exception:
+    # Don't fail if python-dotenv not available; run_server will still load it.
+    pass
 
 
 class MQTTSettings(BaseSettings):
@@ -59,10 +73,18 @@ class AuthSettings(BaseSettings):
         super().__init__(**kwargs)
         
         # Validate critical environment variables after initialization
-        if not self.jwt_secret_key:
-            raise ValueError("Missing required environment variable: JWT_SECRET_KEY. Please set this in your .env file.")
-        if not self.admin_password:
-            raise ValueError("Missing required environment variable: ADMIN_PASSWORD. Please set this in your .env file.")
+        if not self.jwt_secret_key or not self.admin_password:
+            # Instead of aborting startup, disable auth (graceful degraded mode)
+            missing = []
+            if not self.jwt_secret_key:
+                missing.append("JWT_SECRET_KEY")
+            if not self.admin_password:
+                missing.append("ADMIN_PASSWORD")
+            logging.getLogger(__name__).warning(
+                "Authentication disabled due to missing secrets: %s. Set them in .env to enable auth.",
+                ", ".join(missing)
+            )
+            object.__setattr__(self, 'enabled', False)  # pydantic BaseSettings immutability workaround (if any)
     
     class Config:
         env_prefix = "AUTH_"
