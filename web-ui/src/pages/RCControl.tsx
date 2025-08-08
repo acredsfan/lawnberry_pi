@@ -38,6 +38,7 @@ import {
 } from '@mui/icons-material';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { api } from '../utils/api';
+import { signalStrengthColor, guardDottedPaletteMisuse } from '../utils/color';
 
 interface RCStatus {
   rc_enabled: boolean;
@@ -339,23 +340,20 @@ const RCControl: React.FC = () => {
                     <LinearProgress
                       variant="determinate"
                       value={signalStrength}
-                      // Use sx-based dynamic coloring instead of color prop to avoid unsupported palette lookups
-                      sx={{ 
-                        mt: 0.5, 
-                        height: 6, 
-                        borderRadius: 3,
-                        backgroundColor: (theme) => theme.palette.grey[800],
-                        '& .MuiLinearProgress-bar': {
-                          backgroundColor: (theme) => {
-                            if (signalStrength > 50) return theme.palette.success.main
-                            if (signalStrength > 20) return theme.palette.warning.main
-                            return theme.palette.error.main
-                          },
-                          boxShadow: (theme) => {
-                            const c = signalStrength > 50 ? theme.palette.success.main : signalStrength > 20 ? theme.palette.warning.main : theme.palette.error.main
-                            return `0 0 10px ${c}`
+                      sx={(theme) => {
+                        const c = signalStrengthColor(theme, signalStrength)
+                        const sxObj = {
+                          mt: 0.5,
+                          height: 6,
+                          borderRadius: 3,
+                          backgroundColor: theme.palette.grey[800],
+                          '& .MuiLinearProgress-bar': {
+                            backgroundColor: c,
+                            boxShadow: `0 0 10px ${c}`
                           }
-                        }
+                        } as const
+                        guardDottedPaletteMisuse(sxObj, 'RCControl.ChannelProgress')
+                        return sxObj
                       }}
                     />
                   </Box>

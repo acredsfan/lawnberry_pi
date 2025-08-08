@@ -9,6 +9,7 @@ from datetime import datetime
 from math import cos, radians
 
 from ..models import MapData, Boundary, NoGoZone, Position, HomeLocation, HomeLocationType, SuccessResponse
+from ...maps import storage as map_storage
 from ..auth import get_current_user, require_permission, get_user_or_anonymous
 from ..exceptions import ServiceUnavailableError, NotFoundError
 from ..mqtt_bridge import MQTTBridge
@@ -26,10 +27,13 @@ async def get_map_data(
     if not mqtt_bridge or not mqtt_bridge.is_connected():
         raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
     
-    # Get map data from cache
-    boundaries_data = mqtt_bridge.get_cached_data("maps/boundaries")
-    coverage_data = mqtt_bridge.get_cached_data("maps/coverage")
-    location_data = mqtt_bridge.get_cached_data("location/current")
+    # Get map data from cache / storage
+    coverage_data = mqtt_bridge.get_cached_data("maps/coverage") if mqtt_bridge else None
+    location_data = mqtt_bridge.get_cached_data("location/current") if mqtt_bridge else None
+    # Persistent entities (boundaries / zones / home locations)
+    boundaries_list = await map_storage.get_boundaries()
+    zones_list = await map_storage.get_no_go_zones()
+    home_locations = await map_storage.get_home_locations()
     
     # Get current position for map centering
     current_position = None
@@ -40,10 +44,11 @@ async def get_map_data(
         )
     
     return MapData(
-        boundaries=[],  # Would parse from boundaries_data
-        no_go_zones=[],
+        boundaries=boundaries_list,
+        no_go_zones=zones_list,
         home_position=current_position,
-        charging_spots=[],
+        home_locations=home_locations,
+        charging_spots=[],  # Deprecated legacy field
         coverage_map=coverage_data
     )
 
@@ -58,24 +63,8 @@ async def get_boundaries(
     if not mqtt_bridge or not mqtt_bridge.is_connected():
         raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
     
-    # Get boundaries from cache
-    boundaries_data = mqtt_bridge.get_cached_data("maps/boundaries")
-    
-    if not boundaries_data:
-        return []
-    
-    # Convert stored boundaries to API format
-    boundaries = []
-    if isinstance(boundaries_data, list):
-        for boundary_data in boundaries_data:
-            if isinstance(boundary_data, dict) and "points" in boundary_data:
-                boundaries.append(Boundary(
-                    points=[Position(latitude=p.get("latitude", 0), longitude=p.get("longitude", 0)) 
-                           for p in boundary_data.get("points", [])],
-                    name=boundary_data.get("name", "Boundary")
-                ))
-    
-    return boundaries
+    # Retrieve from persistent storage; ignore MQTT cache for canonical list
+    return await map_storage.get_boundaries()
 
 @router.post("/boundaries", response_model=SuccessResponse)
 async def create_boundary(
@@ -89,18 +78,19 @@ async def create_boundary(
     if not mqtt_bridge or not mqtt_bridge.is_connected():
         raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
     
-    success = await mqtt_bridge.publish_message(
-        "maps/boundaries/create",
-        {
-            "boundary": boundary.dict(),
-            "created_by": current_user.get("username", "unknown"),
-            "timestamp": datetime.utcnow().isoformat()
-        },
-        qos=2
-    )
-    
-    if not success:
-        raise ServiceUnavailableError("maps", "Failed to create boundary")
+    # Persist
+    await map_storage.add_boundary(boundary)
+    # Fire-and-forget publish (best effort) for subscribers
+    if mqtt_bridge and mqtt_bridge.is_connected():
+        await mqtt_bridge.publish_message(
+            "maps/boundaries/create",
+            {
+                "boundary": boundary.dict(),
+                "created_by": current_user.get("username", "unknown"),
+                "timestamp": datetime.utcnow().isoformat()
+            },
+            qos=0
+        )
     
     return SuccessResponse(message="Boundary created successfully")
 
@@ -116,18 +106,19 @@ async def delete_boundary(
     if not mqtt_bridge or not mqtt_bridge.is_connected():
         raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
     
-    success = await mqtt_bridge.publish_message(
-        "maps/boundaries/delete",
-        {
-            "boundary_id": boundary_id,
-            "deleted_by": current_user.get("username", "unknown"),
-            "timestamp": datetime.utcnow().isoformat()
-        },
-        qos=2
-    )
-    
-    if not success:
-        raise ServiceUnavailableError("maps", "Failed to delete boundary")
+    deleted = await map_storage.delete_boundary_by_name(boundary_id)
+    if not deleted:
+        raise NotFoundError("boundary", f"Boundary {boundary_id} not found")
+    if mqtt_bridge and mqtt_bridge.is_connected():
+        await mqtt_bridge.publish_message(
+            "maps/boundaries/delete",
+            {
+                "boundary_id": boundary_id,
+                "deleted_by": current_user.get("username", "unknown"),
+                "timestamp": datetime.utcnow().isoformat()
+            },
+            qos=0
+        )
     
     return SuccessResponse(message="Boundary deleted successfully")
 
@@ -225,7 +216,7 @@ async def get_no_go_zones(
     current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Get no-go zones"""
-    return []
+    return await map_storage.get_no_go_zones()
 
 @router.post("/no-go-zones", response_model=SuccessResponse)
 async def create_no_go_zone(
@@ -239,18 +230,17 @@ async def create_no_go_zone(
     if not mqtt_bridge or not mqtt_bridge.is_connected():
         raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
     
-    success = await mqtt_bridge.publish_message(
-        "maps/no_go_zones/create",
-        {
-            "zone": zone.dict(),
-            "created_by": current_user.get("username", "unknown"),
-            "timestamp": datetime.utcnow().isoformat()
-        },
-        qos=2
-    )
-    
-    if not success:
-        raise ServiceUnavailableError("maps", "Failed to create no-go zone")
+    await map_storage.add_no_go_zone(zone)
+    if mqtt_bridge and mqtt_bridge.is_connected():
+        await mqtt_bridge.publish_message(
+            "maps/no_go_zones/create",
+            {
+                "zone": zone.dict(),
+                "created_by": current_user.get("username", "unknown"),
+                "timestamp": datetime.utcnow().isoformat()
+            },
+            qos=0
+        )
     
     return SuccessResponse(message="No-go zone created successfully")
 
@@ -267,19 +257,20 @@ async def update_no_go_zone(
     if not mqtt_bridge or not mqtt_bridge.is_connected():
         raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
     
-    success = await mqtt_bridge.publish_message(
-        "maps/no_go_zones/update",
-        {
-            "zone_id": zone_id,
-            "updates": zone_updates,
-            "updated_by": current_user.get("username", "unknown"),
-            "timestamp": datetime.utcnow().isoformat()
-        },
-        qos=2
-    )
-    
-    if not success:
-        raise ServiceUnavailableError("maps", "Failed to update no-go zone")
+    changed = await map_storage.update_no_go_zone(zone_id, zone_updates)
+    if not changed:
+        raise NotFoundError("no_go_zone", f"Zone {zone_id} not found")
+    if mqtt_bridge and mqtt_bridge.is_connected():
+        await mqtt_bridge.publish_message(
+            "maps/no_go_zones/update",
+            {
+                "zone_id": zone_id,
+                "updates": zone_updates,
+                "updated_by": current_user.get("username", "unknown"),
+                "timestamp": datetime.utcnow().isoformat()
+            },
+            qos=0
+        )
     
     return SuccessResponse(message="No-go zone updated successfully")
 
@@ -295,18 +286,19 @@ async def delete_no_go_zone(
     if not mqtt_bridge or not mqtt_bridge.is_connected():
         raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
     
-    success = await mqtt_bridge.publish_message(
-        "maps/no_go_zones/delete",
-        {
-            "zone_id": zone_id,
-            "deleted_by": current_user.get("username", "unknown"),
-            "timestamp": datetime.utcnow().isoformat()
-        },
-        qos=2
-    )
-    
-    if not success:
-        raise ServiceUnavailableError("maps", "Failed to delete no-go zone")
+    deleted = await map_storage.delete_no_go_zone(zone_id)
+    if not deleted:
+        raise NotFoundError("no_go_zone", f"Zone {zone_id} not found")
+    if mqtt_bridge and mqtt_bridge.is_connected():
+        await mqtt_bridge.publish_message(
+            "maps/no_go_zones/delete",
+            {
+                "zone_id": zone_id,
+                "deleted_by": current_user.get("username", "unknown"),
+                "timestamp": datetime.utcnow().isoformat()
+            },
+            qos=0
+        )
     
     return SuccessResponse(message="No-go zone deleted successfully")
 
@@ -351,8 +343,7 @@ async def get_home_locations(
     current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Get all home locations"""
-    # TODO: Implement actual data retrieval from backend
-    return []
+    return await map_storage.get_home_locations()
 
 
 @router.post("/home-locations", response_model=HomeLocation)

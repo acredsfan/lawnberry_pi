@@ -48,7 +48,9 @@ class MQTTBridge:
             'safety/alerts/+': 'safety_alert',
             'safety/emergency_stop': 'emergency_stop',
             'maps/boundaries': 'map_boundaries',
-            'maps/coverage': 'map_coverage'
+            'maps/coverage': 'map_coverage',
+            'deployment/events': 'deployment_event',
+            'deployment/status': 'deployment_status'
         }
     
     async def connect(self) -> bool:

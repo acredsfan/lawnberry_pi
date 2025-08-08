@@ -108,6 +108,37 @@ class SystemManager:
             await self.deployment_manager.initialize()
             await self.build_system.initialize()
             await self.fleet_manager.initialize()
+
+            # Wire deployment event publisher via communication (MQTT) service if available later.
+            # We defer lookup slightly to allow communication service startup to attach MQTT bridge.
+            async def _publish_deployment_event(topic: str, payload: Dict[str, Any]):
+                """Publish deployment events over MQTT if communication layer exposes bridge.
+
+                This function is resilient: it logs on failure instead of raising so deployment
+                lifecycle isn't blocked by transport issues.
+                """
+                try:
+                    # Attempt lazy import to avoid circular dependency at module import time
+                    from web_api.main import create_app  # type: ignore
+                except Exception:
+                    create_app = None  # type: ignore
+                # If web API already running inside same process with state
+                bridge = None
+                try:
+                    # Potential future integration point: a global registry could expose bridge
+                    from web_api.mqtt_bridge import MQTTBridge  # type: ignore
+                except Exception:
+                    MQTTBridge = None  # type: ignore
+                # For now, try to discover an existing bridge cached on config manager (placeholder)
+                bridge = getattr(self.config_manager, 'mqtt_bridge', None)
+                if bridge and hasattr(bridge, 'publish_message'):
+                    await bridge.publish_message(topic, payload, qos=1)
+                else:
+                    # Fallback: no-op (could enqueue for later retry if needed)
+                    pass
+
+            # Register publisher (safe if communication layer not yet available; emits no-ops until bridge attached)
+            self.deployment_manager.register_event_publisher(_publish_deployment_event)
             
             # Set up signal handlers
             self._setup_signal_handlers()

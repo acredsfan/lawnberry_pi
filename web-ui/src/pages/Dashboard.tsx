@@ -9,6 +9,7 @@ import { setStatus, setConnectionState } from '../store/slices/mowerSlice'
 import { dataService } from '../services/dataService'
 import { useUnits } from '../hooks/useUnits'
 import { MowerStatus } from '../types'
+import { batteryLevelColor, guardDottedPaletteMisuse } from '../utils/color'
 
 const Dashboard: React.FC = () => {
   const dispatch = useDispatch()
@@ -338,17 +339,17 @@ const Dashboard: React.FC = () => {
           <Card sx={{ height: 450 }} className="holographic">
             <CardContent>
               <Box display="flex" alignItems="center" gap={2} mb={3}>
-                <BatteryIcon sx={{ 
-                  fontSize: '2rem', 
-                  color: (() => {
-                    const c = getBatteryColor(status?.battery?.level)
-                    if (c === 'success') return 'success.main'
-                    if (c === 'warning') return 'warning.main'
-                    if (c === 'error') return 'error.main'
-                    return 'text.secondary'
-                  })(),
-                  filter: 'drop-shadow(0 0 10px currentColor)'
-                }} />
+                <BatteryIcon
+                  sx={(theme) => {
+                    const sxObj = {
+                      fontSize: '2rem',
+                      color: batteryLevelColor(theme, status?.battery?.level),
+                      filter: 'drop-shadow(0 0 10px currentColor)'
+                    } as const
+                    guardDottedPaletteMisuse(sxObj, 'Dashboard.BatteryIcon')
+                    return sxObj
+                  }}
+                />
                 <Typography variant="h5" className="neon-text" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
                   POWER CORE
                 </Typography>
@@ -368,23 +369,20 @@ const Dashboard: React.FC = () => {
                   value={typeof status?.battery?.level === 'number' ? status.battery.level : 0}
                   // We intentionally avoid the MUI color prop (only primary/secondary supported for LinearProgress)
                   // and instead style via sx so success/warning/error palette shades are applied safely.
-                  sx={{ 
-                    height: 16,
-                    border: '1px solid rgba(255,255,255,0.15)',
-                    backgroundColor: 'rgba(0,0,0,0.7)',
-                    '& .MuiLinearProgress-bar': {
-                      backgroundColor: (theme) => {
-                        const lvl = typeof status?.battery?.level === 'number' ? status.battery.level : 0
-                        if (lvl > 60) return theme.palette.success.main
-                        if (lvl > 30) return theme.palette.warning.main
-                        return theme.palette.error.main
-                      },
-                      boxShadow: (theme) => {
-                        const lvl = typeof status?.battery?.level === 'number' ? status.battery.level : 0
-                        const color = lvl > 60 ? theme.palette.success.main : lvl > 30 ? theme.palette.warning.main : theme.palette.error.main
-                        return `0 0 20px ${color}`
+                  sx={(theme) => {
+                    const lvl = typeof status?.battery?.level === 'number' ? status.battery.level : 0
+                    const barColor = batteryLevelColor(theme, lvl)
+                    const sxObj = {
+                      height: 16,
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      backgroundColor: 'rgba(0,0,0,0.7)',
+                      '& .MuiLinearProgress-bar': {
+                        backgroundColor: barColor,
+                        boxShadow: `0 0 20px ${barColor}`
                       }
-                    }
+                    } as const
+                    guardDottedPaletteMisuse(sxObj, 'Dashboard.BatteryProgress')
+                    return sxObj
                   }}
                 />
               </Box>

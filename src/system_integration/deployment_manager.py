@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Callable, Awaitable
 from dataclasses import dataclass, asdict
 from enum import Enum
 import aiofiles
@@ -24,6 +24,7 @@ from cryptography.exceptions import InvalidSignature
 from .config_manager import ConfigManager
 from .health_monitor import HealthMonitor
 from .state_machine import SystemStateMachine, SystemState
+from .deployment_events import build_event, DeploymentLifecycleEvent
 
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,20 @@ class DeploymentManager:
         # Background tasks
         self._update_checker_task: Optional[asyncio.Task] = None
         self._deployment_task: Optional[asyncio.Task] = None
+        # Optional async publisher (topic, payload)
+        self._event_publisher: Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]] = None
+
+    def register_event_publisher(self, publisher: Callable[[str, Dict[str, Any]], Awaitable[None]]):
+        """Register async publisher for deployment events."""
+        self._event_publisher = publisher
+
+    async def _emit_event(self, payload: Dict[str, Any]):
+        if not self._event_publisher:
+            return
+        try:
+            await self._event_publisher("deployment/events", payload)
+        except Exception as e:  # pragma: no cover
+            logger.debug(f"Deployment event publish failed: {e}")
         
     def _load_deployment_config(self) -> Dict[str, Any]:
         """Load deployment configuration"""
@@ -388,6 +403,7 @@ class DeploymentManager:
             await self._save_deployment_state()
             
             logger.info(f"Starting deployment of {package.version}")
+            await self._notify_deployment_started(package)
             
             # Determine target partition
             target_partition = 'B' if self.deployment_state.active_partition == 'A' else 'A'
@@ -867,26 +883,68 @@ class DeploymentManager:
     
     # Notification methods (to be implemented based on communication system)
     async def _notify_update_available(self, package: DeploymentPackage):
-        """Notify about available update"""
         logger.info(f"Update notification: {package.version} ({package.package_type.value})")
-        # TODO: Send notification via MQTT/web UI
-    
+        await self._emit_event(build_event(
+            DeploymentLifecycleEvent.UPDATE_AVAILABLE,
+            status="available",
+            version=package.version,
+            package_type=package.package_type.value,
+            message=f"Update {package.version} available ({package.package_type.value})",
+            device_id=self.device_id,
+            metadata={"priority": package.priority},
+        ))
+
+    async def _notify_deployment_started(self, package: DeploymentPackage):
+        logger.info(f"Deployment started: {package.version}")
+        await self._emit_event(build_event(
+            DeploymentLifecycleEvent.DEPLOYMENT_STARTED,
+            status="in_progress",
+            version=package.version,
+            package_type=package.package_type.value,
+            message=f"Deployment started for {package.version}",
+            device_id=self.device_id,
+        ))
+
     async def _notify_deployment_success(self, package: DeploymentPackage):
-        """Notify about successful deployment"""
         logger.info(f"Deployment success notification: {package.version}")
-        # TODO: Send notification via MQTT/web UI
-    
+        await self._emit_event(build_event(
+            DeploymentLifecycleEvent.DEPLOYMENT_SUCCESS,
+            status="success",
+            version=package.version,
+            package_type=package.package_type.value,
+            message=f"Deployment succeeded: {package.version}",
+            device_id=self.device_id,
+        ))
+
     async def _notify_deployment_failure(self, package: DeploymentPackage, error: str):
-        """Notify about deployment failure"""
         logger.error(f"Deployment failure notification: {package.version} - {error}")
-        # TODO: Send notification via MQTT/web UI
-    
+        await self._emit_event(build_event(
+            DeploymentLifecycleEvent.DEPLOYMENT_FAILURE,
+            status="failure",
+            version=package.version if package else None,
+            package_type=package.package_type.value if package else None,
+            message=f"Deployment failed: {error}",
+            device_id=self.device_id,
+        ))
+
     async def _notify_rollback_success(self):
-        """Notify about successful rollback"""
         logger.info("Rollback success notification")
-        # TODO: Send notification via MQTT/web UI
-    
+        await self._emit_event(build_event(
+            DeploymentLifecycleEvent.ROLLBACK_SUCCESS,
+            status="success",
+            version=self.deployment_state.active_version,
+            package_type=None,
+            message="Rollback succeeded",
+            device_id=self.device_id,
+        ))
+
     async def _notify_rollback_failure(self, error: str):
-        """Notify about rollback failure"""
         logger.error(f"Rollback failure notification: {error}")
-        # TODO: Send notification via MQTT/web UI
+        await self._emit_event(build_event(
+            DeploymentLifecycleEvent.ROLLBACK_FAILURE,
+            status="failure",
+            version=self.deployment_state.active_version,
+            package_type=None,
+            message=f"Rollback failed: {error}",
+            device_id=self.device_id,
+        ))
