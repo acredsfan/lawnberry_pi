@@ -302,7 +302,8 @@ const Maps: React.FC = () => {
 
         <Box sx={{ p: useFullWidth ? 0 : 3 }}>
           {activeTab === 0 && (
-            // Render the map full‑width and stack the statistics below it
+            <>
+            {/* Overview tab: full-width map with statistics stacked below */}
             <Grid container spacing={useFullWidth ? 0 : 3} direction="column">
               {/* Map row: always full width */}
               <Grid item xs={12}>
@@ -503,11 +504,15 @@ const Maps: React.FC = () => {
                 </Grid>
               </Grid>
             </Grid>
+            </>
           )}
 
           {activeTab === 1 && (
-            <Grid container spacing={3}>
-              <Grid item xs={12} lg={8}>
+            <>
+            {/* Boundaries tab: stack the map on top and the editor below */}
+            <Grid container spacing={3} direction="column">
+              {/* Map row */}
+              <Grid item xs={12}>
                 <Paper sx={{ height: 600, overflow: 'hidden' }}>
                   <MapContainer
                     center={robotPosition || mapConfig.defaultCenter}
@@ -525,8 +530,9 @@ const Maps: React.FC = () => {
                   />
                 </Paper>
               </Grid>
-              
-              <Grid item xs={12} lg={4}>
+
+              {/* Editor row */}
+              <Grid item xs={12}>
                 {userPreferences.preferredProvider === 'google' ? (
                   <BoundaryEditor
                     map={mapRef.current as google.maps.Map}
@@ -544,11 +550,15 @@ const Maps: React.FC = () => {
                 )}
               </Grid>
             </Grid>
+            </>
           )}
 
           {activeTab === 2 && (
-            <Grid container spacing={3}>
-              <Grid item xs={12} lg={8}>
+            <>
+            {/* No-Go Zones tab: stack the map on top and the editor below */}
+            <Grid container spacing={3} direction="column">
+              {/* Map row */}
+              <Grid item xs={12}>
                 <Paper sx={{ height: 600, overflow: 'hidden' }}>
                   <MapContainer
                     center={robotPosition || mapConfig.defaultCenter}
@@ -566,8 +576,9 @@ const Maps: React.FC = () => {
                   />
                 </Paper>
               </Grid>
-              
-              <Grid item xs={12} lg={4}>
+
+              {/* Editor row */}
+              <Grid item xs={12}>
                 {userPreferences.preferredProvider === 'google' ? (
                   <NoGoZoneEditor
                     map={mapRef.current as google.maps.Map}
@@ -587,11 +598,15 @@ const Maps: React.FC = () => {
                 )}
               </Grid>
             </Grid>
+            </>
           )}
 
           {activeTab === 3 && (
-            <Grid container spacing={3}>
-              <Grid item xs={12} lg={8}>
+            <>
+            {/* Home Locations tab: stack the map on top and the manager below */}
+            <Grid container spacing={3} direction="column">
+              {/* Map row */}
+              <Grid item xs={12}>
                 <Paper sx={{ height: 600, overflow: 'hidden' }}>
                   <MapContainer
                     center={robotPosition || mapConfig.defaultCenter}
@@ -609,8 +624,9 @@ const Maps: React.FC = () => {
                   />
                 </Paper>
               </Grid>
-              
-              <Grid item xs={12} lg={4}>
+
+              {/* Manager row */}
+              <Grid item xs={12}>
                 {userPreferences.preferredProvider === 'google' ? (
                   <HomeLocationManager
                     map={mapRef.current as google.maps.Map}
@@ -628,11 +644,15 @@ const Maps: React.FC = () => {
                 )}
               </Grid>
             </Grid>
+            </>
           )}
 
           {activeTab === 4 && (
-            <Grid container spacing={3}>
-              <Grid item xs={12} lg={8}>
+            <>
+            {/* Patterns tab: stack the map on top and the pattern visualizer below */}
+            <Grid container spacing={3} direction="column">
+              {/* Map row */}
+              <Grid item xs={12}>
                 <Paper sx={{ height: 600, overflow: 'hidden' }}>
                   <MapContainer
                     center={robotPosition || mapConfig.defaultCenter}
@@ -650,8 +670,9 @@ const Maps: React.FC = () => {
                   />
                 </Paper>
               </Grid>
-              
-              <Grid item xs={12} lg={4}>
+
+              {/* Pattern visualizer row */}
+              <Grid item xs={12}>
                 <PatternVisualizer
                   mapInstance={mapRef.current}
                   mapProvider={userPreferences.preferredProvider}
@@ -662,6 +683,7 @@ const Maps: React.FC = () => {
                 />
               </Grid>
             </Grid>
+            </>
           )}
         </Box>
       </Paper>
