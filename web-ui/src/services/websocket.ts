@@ -1,6 +1,7 @@
 import { WebSocketMessage } from '../types'
 import { store } from '../store/store'
 import { setConnectionState } from '../store/slices/mowerSlice'
+import { perfMetrics } from '../utils/perfMetrics'
 
 class WebSocketService {
   private socket: WebSocket | null = null
@@ -17,6 +18,8 @@ class WebSocketService {
     }
 
     this.connectionState = 'connecting'
+  // perf: mark websocket connect start (only first time)
+  perfMetrics.setWebSocketConnectStart()
     
     // Use relative WebSocket URL that works with nginx proxy
     const wsUrl = process.env.NODE_ENV === 'development' 
@@ -46,6 +49,8 @@ class WebSocketService {
         this.reconnectAttempts = 0
         store.dispatch(setConnectionState(true))
         this.emit('connect')
+  // perf: mark connected
+  perfMetrics.setWebSocketConnected()
         
         // Subscribe to all relevant topics after connection
         this.subscribeToTopics()
@@ -126,7 +131,9 @@ class WebSocketService {
       'navigation/status',
       'power/battery',
       'weather/current',
-      'safety/alerts/+'
+  'safety/alerts/+',
+  // RC control status updates (added for RCControl real-time view)
+  'rc/status'
     ]
 
     topics.forEach(topic => {
@@ -225,6 +232,10 @@ class WebSocketService {
         // Forward MQTT data to appropriate handlers
         this.emit('data', message.data, message.topic)
         this.emit(message.topic, message.data)
+        // Normalize RC status topic to a simpler event name for UI components
+        if (message.topic === 'rc/status') {
+          this.emit('rc_status', message.data)
+        }
         break
         
       case 'status':

@@ -7,6 +7,7 @@ import CssBaseline from '@mui/material/CssBaseline'
 import { QueryClient, QueryClientProvider } from 'react-query'
 import { store } from './store/store'
 import App from './App'
+import { perfMetrics } from './utils/perfMetrics'
 import './index.css'
 import ErrorBoundary from './components/system/ErrorBoundary'
 
@@ -289,6 +290,8 @@ try {
     rootEl.setAttribute('data-hydration', 'complete')
     const loader = document.getElementById('initial-loader')
     if (loader) setTimeout(() => loader.remove(), 300)
+  // Performance mark for hydration complete
+  perfMetrics.setHydrationComplete()
   }
 } catch (e) {
   console.warn('Hydration marker cleanup failed:', e)

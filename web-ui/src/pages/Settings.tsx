@@ -155,6 +155,34 @@ const Settings: React.FC = () => {
                     label="Show Advanced Options"
                   />
                 </Grid>
+
+                <Grid item xs={12}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={!!settings.display.reducedMotion}
+                        onChange={(e) => dispatch(updateDisplay({
+                          reducedMotion: e.target.checked
+                        }))}
+                      />
+                    }
+                    label="Reduced Motion (Accessibility)"
+                  />
+                </Grid>
+
+                <Grid item xs={12}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={!!settings.display.lowPowerMode}
+                        onChange={(e) => dispatch(updateDisplay({
+                          lowPowerMode: e.target.checked
+                        }))}
+                      />
+                    }
+                    label="Low Power Theme Mode"
+                  />
+                </Grid>
               </Grid>
             </CardContent>
           </Card>

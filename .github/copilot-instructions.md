@@ -129,6 +129,36 @@ Primary installation via `scripts/install_lawnberry.sh`:
 - **Service Setup**: Creates systemd services with proper permissions
 - **ToF Sensor Initialization**: Special handling for VL53L0X dual sensor setup with address conflicts
 
+### Canonical Runtime vs Source Tree
+The editable source repository (typically `/home/pi/lawnberry_pi`) is synced to the immutable runtime directory `/opt/lawnberry` used by all systemd services. Services MUST NOT run directly from the source tree for security and consistency.
+
+Fast deploy/update workflow:
+```bash
+# Minimal code + config sync (subset hashing enabled by default)
+./scripts/install_lawnberry.sh --deploy-update
+
+# With environment overrides:
+FAST_DEPLOY_HASH=0 FAST_DEPLOY_DIST_MODE=minimal ./scripts/lawnberry-deploy.sh
+```
+
+Environment / mode flags (export before running deploy if needed):
+- `FAST_DEPLOY_HASH=0` disables subset drift hashing (speeds large syncs)
+- `FAST_DEPLOY_DIST_MODE=skip|minimal|full` controls web-ui dist syncing (default: minimal)
+    - `skip`: do not sync any dist assets
+    - `minimal`: sync only changed top-level files (index.html, manifest, sw.js, registerSW.js, workbox*, small static assets) and new hashed asset files
+    - `full`: rsync entire `web-ui/dist/` with timeout protection
+- `RSYNC_TIMEOUT_PER=<seconds>` adjust per-directory rsync timeout (default 40)
+
+Guidelines:
+- Always edit code in source tree, then fast deploy.
+- Never hand-edit `/opt/lawnberry` (changes will be overwritten on next deploy).
+- If drift detected, investigate uncommitted source modifications before forcing deploy.
+
+Backup before major changes:
+```bash
+sudo tar -czf lawnberry-prechange-$(date +%Y%m%d).tar.gz /opt/lawnberry/config /var/lib/lawnberry
+```
+
 ### Mandatory Workspace Cleanup Protocol
 **BEFORE ANY COMMIT OR COMPLETION**:
 ```bash

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -77,7 +77,11 @@ const RCControl: React.FC = () => {
   const [selectedChannel, setSelectedChannel] = useState<number>(1);
   const [selectedFunction, setSelectedFunction] = useState<string>('steer');
 
-  const { isConnected } = useWebSocket('ws://localhost:8000/ws');
+  // Use WebSocket (relative URL handled inside hook/service). We leverage subscription to rc_status
+  const { isConnected, subscribe, send } = useWebSocket();
+  const lastUpdateRef = useRef<number | null>(null);
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  const [fallbackPolling, setFallbackPolling] = useState<boolean>(false);
 
   // Fetch RC status
   const fetchStatus = async () => {
@@ -101,20 +105,45 @@ const RCControl: React.FC = () => {
     }
   };
 
-  // Initial data fetch
+  // Initial data fetch & WebSocket subscription
   useEffect(() => {
-    const loadData = async () => {
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+    const init = async () => {
       setLoading(true);
       await Promise.all([fetchStatus(), fetchChannels()]);
       setLoading(false);
     };
+    init();
 
-    loadData();
-    
-    // Set up polling
-    const interval = setInterval(fetchStatus, 2000);
-    return () => clearInterval(interval);
-  }, []);
+    // Subscribe to rc_status push updates
+    const unsubscribe = subscribe((data: any) => {
+      // Expect data to match RCStatus shape
+      setStatus(data);
+      setError(null);
+      const now = performance.now();
+      if (lastUpdateRef.current !== null) {
+        setLatencyMs(now - lastUpdateRef.current);
+      }
+      lastUpdateRef.current = now;
+    }, 'rc_status');
+
+    // Fallback polling if no push updates received within window
+    pollInterval = setInterval(async () => {
+      const now = performance.now();
+      if (lastUpdateRef.current === null || (now - lastUpdateRef.current) > 5000) {
+        setFallbackPolling(true);
+        await fetchStatus();
+      } else {
+        setFallbackPolling(false);
+      }
+    }, 4000); // slower than previous 2s to reduce load; push is primary
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+      unsubscribe();
+    };
+  }, [subscribe]);
 
   // Handle RC enable/disable
   const handleRCToggle = async (enabled: boolean) => {
@@ -202,7 +231,7 @@ const RCControl: React.FC = () => {
     <Box p={3}>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4">RC Control System</Typography>
-        <Box>
+        <Box display="flex" alignItems="center" gap={1}>
           <Tooltip title="Refresh Status">
             <IconButton onClick={fetchStatus}>
               <Refresh />
@@ -213,6 +242,16 @@ const RCControl: React.FC = () => {
               <Settings />
             </IconButton>
           </Tooltip>
+          {latencyMs !== null && (
+            <Tooltip title={`Approx. update latency ${latencyMs.toFixed(0)} ms`}>
+              <Chip size="small" color={latencyMs < 500 ? 'success' : latencyMs < 1500 ? 'warning' : 'error'} label={`${latencyMs.toFixed(0)} ms`} />
+            </Tooltip>
+          )}
+          {fallbackPolling && (
+            <Tooltip title="Using fallback polling (no recent push updates)">
+              <Chip size="small" color="warning" label="Fallback" />
+            </Tooltip>
+          )}
         </Box>
       </Box>
 
@@ -224,7 +263,7 @@ const RCControl: React.FC = () => {
 
       {!isConnected && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          WebSocket connection lost. RC status may not be real-time.
+          WebSocket connection lost. RC status may not be real-time (fallback polling active).
         </Alert>
       )}
 

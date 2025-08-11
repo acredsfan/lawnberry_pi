@@ -17,6 +17,18 @@ export interface MapContainerProps {
   onError?: (error: MapError) => void;
   robotPosition?: { lat: number; lng: number };
   robotPath?: Array<{ lat: number; lng: number }>;
+  /** Display-only yard boundaries (validated) */
+  boundaries?: Array<{ id: string; name: string; coordinates: Array<{ lat: number; lng: number }>; type?: string }>;
+  /** Display-only no-go zones (enabled + validated) */
+  noGoZones?: Array<{ id: string; name: string; coordinates: Array<{ lat: number; lng: number }>; type?: string }>;
+  /** Primary home location position */
+  homeLocation?: { lat: number; lng: number } | null;
+  /** Enable drawing controls (provider-agnostic) */
+  enableDrawing?: boolean;
+  drawingMode?: 'boundary' | 'no-go' | 'home' | null;
+  onBoundaryComplete?: (coordinates: Array<{ lat: number; lng: number }>) => void;
+  onNoGoZoneComplete?: (coordinates: Array<{ lat: number; lng: number }>) => void;
+  onHomeLocationSet?: (coordinate: { lat: number; lng: number }) => void;
   weather?: {
     temperature: number;
     humidity: number;
@@ -25,6 +37,10 @@ export interface MapContainerProps {
   style?: React.CSSProperties;
   className?: string;
   children?: React.ReactNode;
+  /** Callback with underlying map instance (google.maps.Map or L.Map) once ready */
+  onMapReady?: (map: any, provider: MapProvider) => void;
+  geofenceViolation?: boolean;
+  geofenceInNoGo?: boolean;
 }
 
 const MapContainer: React.FC<MapContainerProps> = ({
@@ -36,10 +52,21 @@ const MapContainer: React.FC<MapContainerProps> = ({
   onError,
   robotPosition,
   robotPath,
+  boundaries = [],
+  noGoZones = [],
+  homeLocation = null,
+  enableDrawing = false,
+  drawingMode = null,
+  onBoundaryComplete,
+  onNoGoZoneComplete,
+  onHomeLocationSet,
   weather,
   style,
   className,
   children
+  , onMapReady
+  , geofenceViolation
+  , geofenceInNoGo
 }) => {
   const [mapState, setMapState] = useState<MapState>({
     isLoading: true,
@@ -209,7 +236,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
     );
   }
 
-  const mapProps = {
+  const mapProps: any = {
     center: currentCenter || mapService.getConfig().defaultCenter,
     zoom,
     usageLevel,
@@ -217,6 +244,14 @@ const MapContainer: React.FC<MapContainerProps> = ({
     onError: handleError,
     robotPosition,
     robotPath,
+  boundaries: boundaries,
+  noGoZones: noGoZones,
+  homeLocation: homeLocation || undefined,
+  isDrawingMode: enableDrawing && !!drawingMode,
+  drawingType: (drawingMode === 'home' ? 'home' : drawingMode === 'no-go' ? 'no-go' : 'boundary') as any,
+  onBoundaryComplete,
+  onNoGoZoneComplete,
+  onHomeLocationSet,
     style: { width: '100%', height: '100%' }
   };
 
@@ -270,11 +305,11 @@ const MapContainer: React.FC<MapContainerProps> = ({
       </Box>
 
       {mapState.currentProvider === 'google' ? (
-        <GoogleMapComponent {...mapProps}>
+        <GoogleMapComponent {...mapProps} geofenceViolation={geofenceViolation} geofenceInNoGo={geofenceInNoGo} onMapReady={(m: any) => onMapReady?.(m, 'google')}>
           {children}
         </GoogleMapComponent>
       ) : (
-        <LeafletMapComponent {...mapProps}>
+        <LeafletMapComponent {...mapProps} onMapReady={(m: any) => onMapReady?.(m, 'openstreetmap')}>
           {children}
         </LeafletMapComponent>
       )}

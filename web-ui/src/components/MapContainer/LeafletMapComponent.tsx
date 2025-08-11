@@ -20,8 +20,17 @@ interface LeafletMapComponentProps {
   onError: (error: MapError) => void;
   robotPosition?: { lat: number; lng: number };
   robotPath?: Array<{ lat: number; lng: number }>;
+  boundaries?: Array<{ id: string; name: string; coordinates: Array<{ lat: number; lng: number }> }>;
+  noGoZones?: Array<{ id: string; name: string; coordinates: Array<{ lat: number; lng: number }> }>;
+  homeLocation?: { lat: number; lng: number };
+  isDrawingMode?: boolean;
+  drawingType?: 'boundary' | 'no-go' | 'home';
+  onBoundaryComplete?: (coordinates: Array<{ lat: number; lng: number }>) => void;
+  onNoGoZoneComplete?: (coordinates: Array<{ lat: number; lng: number }>) => void;
+  onHomeLocationSet?: (coordinate: { lat: number; lng: number }) => void;
   style?: React.CSSProperties;
   children?: React.ReactNode;
+  onMapReady?: (map: L.Map) => void;
 }
 
 // Component to handle map updates
@@ -81,8 +90,17 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
   onError,
   robotPosition,
   robotPath,
+  boundaries = [],
+  noGoZones = [],
+  homeLocation,
+  isDrawingMode = false,
+  drawingType = 'boundary',
+  onBoundaryComplete,
+  onNoGoZoneComplete,
+  onHomeLocationSet,
   style,
   children
+  , onMapReady
 }) => {
   const [tileLayer, setTileLayer] = useState<string>('');
   const mapRef = useRef<L.Map | null>(null);
@@ -128,6 +146,63 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
   useEffect(() => {
     setTileLayer(getTileLayerUrl());
   }, [getTileLayerUrl]);
+
+  // Basic drawing implementation (simplified vs leaflet-draw) using click sequence
+  const drawingPointsRef = useRef<Array<{ lat: number; lng: number }>>([]);
+  const clickHandlerRef = useRef<((e: L.LeafletMouseEvent) => void) | null>(null);
+  const dblClickHandlerRef = useRef<((e: L.LeafletMouseEvent) => void) | null>(null);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const map = mapRef.current;
+
+    // Clean previous handlers
+    if (clickHandlerRef.current) {
+      map.off('click', clickHandlerRef.current);
+      clickHandlerRef.current = null;
+    }
+    if (dblClickHandlerRef.current) {
+      map.off('dblclick', dblClickHandlerRef.current);
+      dblClickHandlerRef.current = null;
+    }
+    drawingPointsRef.current = [];
+
+    if (!isDrawingMode) return;
+
+    if (drawingType === 'home') {
+      clickHandlerRef.current = (e: L.LeafletMouseEvent) => {
+        onHomeLocationSet && onHomeLocationSet({ lat: e.latlng.lat, lng: e.latlng.lng });
+      };
+      map.on('click', clickHandlerRef.current);
+      return;
+    }
+
+    clickHandlerRef.current = (e: L.LeafletMouseEvent) => {
+      drawingPointsRef.current.push({ lat: e.latlng.lat, lng: e.latlng.lng });
+      // Add a temporary marker for feedback
+      L.circleMarker(e.latlng, { radius: 4, color: drawingType === 'no-go' ? '#f44336' : '#4caf50' }).addTo(map);
+    };
+
+    dblClickHandlerRef.current = () => {
+      if (drawingPointsRef.current.length >= 3) {
+        const pts = [...drawingPointsRef.current];
+        if (drawingType === 'no-go') {
+          onNoGoZoneComplete && onNoGoZoneComplete(pts);
+        } else {
+          onBoundaryComplete && onBoundaryComplete(pts);
+        }
+      }
+      drawingPointsRef.current = [];
+    };
+
+    map.on('click', clickHandlerRef.current);
+    map.on('dblclick', dblClickHandlerRef.current);
+
+    return () => {
+      if (clickHandlerRef.current) map.off('click', clickHandlerRef.current);
+      if (dblClickHandlerRef.current) map.off('dblclick', dblClickHandlerRef.current);
+    };
+  }, [isDrawingMode, drawingType, onBoundaryComplete, onNoGoZoneComplete, onHomeLocationSet]);
 
   const handleMapCreated = useCallback((map: L.Map) => {
     mapRef.current = map;
@@ -193,7 +268,8 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
     `;
     document.head.appendChild(style);
 
-  }, [isOffline, onError]);
+    onMapReady?.(map);
+  }, [isOffline, onError, onMapReady]);
 
   const handleTileLayerError = useCallback(() => {
     const tileError = mapService.createMapError(
@@ -211,9 +287,19 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
         center={[center.lat, center.lng]}
         zoom={zoom}
         style={{ width: '100%', height: '100%' }}
-        whenReady={() => handleMapCreated}
+        whenReady={() => {
+          // react-leaflet passes an event-less ready callback; get map via ref after mount
+          if (mapRef.current) handleMapCreated(mapRef.current);
+        }}
         zoomControl={true}
         attributionControl={true}
+        ref={(instance: any) => {
+          if (instance && instance.target) {
+            mapRef.current = instance.target as L.Map;
+          } else if (instance) {
+            mapRef.current = instance as unknown as L.Map;
+          }
+        }}
       >
         <TileLayer
           url={tileLayer}
@@ -227,10 +313,44 @@ const LeafletMapComponent: React.FC<LeafletMapComponentProps> = ({
         <OfflineOverlay isOffline={isOffline} />
       
         {robotPosition && (
-          <Marker position={[robotPosition.lat, robotPosition.lng]}>
-            <Popup>LawnBerry Robot</Popup>
+          <Marker 
+            position={[robotPosition.lat, robotPosition.lng]}
+            icon={L.divIcon({
+              className: 'robot-heading-icon',
+              html: `<div style="transform: rotate(${(robotPosition as any).heading || 0}deg); width:18px;height:18px;display:flex;align-items:center;justify-content:center;">
+                <svg width='18' height='18' viewBox='0 0 24 24' style='filter: drop-shadow(0 0 2px rgba(0,0,0,0.4));'>
+                  <polygon points='12,2 19,22 12,17 5,22' fill='#ff9800' stroke='white' stroke-width='1.5' />
+                </svg>
+              </div>`
+            })}
+          >
+            <Popup>
+              LawnBerry Robot<br/>Lat: {robotPosition.lat.toFixed(5)}, Lng: {robotPosition.lng.toFixed(5)}
+            </Popup>
           </Marker>
         )}
+
+        {homeLocation && (
+          <Marker position={[homeLocation.lat, homeLocation.lng]}> 
+            <Popup>Home Location</Popup>
+          </Marker>
+        )}
+
+        {boundaries.map(b => (
+          <Polyline
+            key={b.id}
+            positions={b.coordinates.map(c => [c.lat, c.lng])}
+            pathOptions={{ color: '#4caf50' }}
+          />
+        ))}
+
+        {noGoZones.map(z => (
+          <Polyline
+            key={z.id}
+            positions={z.coordinates.map(c => [c.lat, c.lng])}
+            pathOptions={{ color: '#f44336' }}
+          />
+        ))}
 
         {robotPath && robotPath.length > 0 && (
           <Polyline

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Suspense, lazy } from 'react'
 import { Box, Snackbar, Alert, CircularProgress, Typography, Button } from '@mui/material'
@@ -57,6 +57,7 @@ const AppContent: React.FC = () => {
 const App: React.FC = () => {
   const dispatch = useDispatch()
   const { notifications, connectionStatus } = useSelector((state: RootState) => state.ui)
+  const mowerStatus = useSelector((state: RootState) => state.mower.status)
   const [initializing, setInitializing] = useState(true)
   const [initError, setInitError] = useState<string | null>(null)
   const [notification, setNotification] = useState<{ open: boolean; message: string; severity: 'success' | 'info' | 'warning' | 'error' }>({
@@ -64,6 +65,8 @@ const App: React.FC = () => {
     message: '',
     severity: 'info'
   })
+  const [dataStale, setDataStale] = useState(false)
+  const lastDataRef = useRef<number>(Date.now())
 
   usePerformanceMonitor()
   useUnits() // Initialize units system
@@ -93,8 +96,10 @@ const App: React.FC = () => {
       try {
         dispatch(setConnectionStatus('connecting'))
         
-        // Initialize with mock data for demonstration
-        const mockMowerStatus = {
+  const useMocks = import.meta.env.VITE_USE_MOCKS === 'true'
+
+  // Initialize with mock data only if enabled
+  const mockMowerStatus = {
           state: 'idle' as const,
           position: {
             lat: 40.7128,
@@ -163,14 +168,16 @@ const App: React.FC = () => {
           alerts: []
         }
         
-        // Set initial mock data immediately
-        dispatch(setStatus(mockMowerStatus))
-        dispatch(setWeatherData(mockWeatherData))
-        
-        console.log('✅ Mock data initialized')
+        if (useMocks) {
+          dispatch(setStatus(mockMowerStatus))
+          dispatch(setWeatherData(mockWeatherData))
+          console.log('✅ Mock data initialized (VITE_USE_MOCKS=true)')
+        } else {
+          console.log('⏳ Skipping mock data (VITE_USE_MOCKS!=true) waiting for live streams')
+        }
 
         // Set up WebSocket event handlers early
-        webSocketService.on('connect', () => {
+  webSocketService.on('connect', () => {
           console.log('� WebSocket connected')
           dispatch(setConnectionStatus('connected'))
           dispatch(setConnectionState(true))
@@ -179,6 +186,49 @@ const App: React.FC = () => {
             title: 'Connected',
             message: 'Successfully connected to mower system'
           }))
+          // Start sensor data service only after WebSocket connection
+          try {
+            sensorDataService.start()
+          } catch (e) {
+            console.warn('Sensor data service start error:', e)
+          }
+        })
+        // Navigation / position topic handling
+        webSocketService.on('navigation/position', (navData: any) => {
+          try {
+            if (!navData) return
+            const { lat, lng, heading, accuracy } = navData
+            dispatch(updateStatus({
+              position: {
+                lat: lat ?? mowerStatus?.position.lat ?? 0,
+                lng: lng ?? mowerStatus?.position.lng ?? 0,
+                heading: heading ?? mowerStatus?.position.heading ?? 0,
+                accuracy: accuracy ?? mowerStatus?.position.accuracy ?? 0
+              },
+              lastUpdate: Date.now(),
+              location_source: navData.source || 'gps'
+            } as any))
+            lastDataRef.current = Date.now()
+          } catch (err) {
+            console.warn('Navigation position handler error', err)
+          }
+        })
+
+        webSocketService.on('navigation/status', (navStatus: any) => {
+          try {
+            if (!navStatus) return
+            const coverage = navStatus.coverage ? {
+              totalArea: navStatus.coverage.total_area || mowerStatus?.coverage.totalArea || 0,
+              coveredArea: navStatus.coverage.covered_area || mowerStatus?.coverage.coveredArea || 0,
+              percentage: navStatus.coverage.percentage || mowerStatus?.coverage.percentage || 0
+            } : mowerStatus?.coverage
+            if (coverage) {
+              dispatch(updateStatus({ coverage, lastUpdate: Date.now() } as any))
+              lastDataRef.current = Date.now()
+            }
+          } catch (err) {
+            console.warn('Navigation status handler error', err)
+          }
         })
 
         webSocketService.on('disconnect', () => {
@@ -232,66 +282,66 @@ const App: React.FC = () => {
             console.warn('⚠️ WebSocket connection failed:', error)
           }
 
-          // Try to start sensor data service (non-critical)
+          // Subscribe to sensor data updates (service starts after WS connect)
           try {
-            console.log('📊 Starting sensor data service...')
-            
             const unsubscribeSensorData = sensorDataService.subscribe((sensorData) => {
-              // Update mower status with real sensor data
+              const baseStatus = useMocks ? mockMowerStatus : {
+                // If not using mocks and we haven't received real values yet, keep sensible defaults
+                ...mockMowerStatus,
+              }
               const updatedStatus = {
-                state: 'idle' as const,
+                state: baseStatus.state,
                 position: {
-                  lat: sensorData.gps.latitude || mockMowerStatus.position.lat,
-                  lng: sensorData.gps.longitude || mockMowerStatus.position.lng,
-                  heading: sensorData.imu.orientation.yaw || mockMowerStatus.position.heading,
-                  accuracy: sensorData.gps.accuracy || mockMowerStatus.position.accuracy
+                  lat: sensorData.gps.latitude || baseStatus.position.lat,
+                  lng: sensorData.gps.longitude || baseStatus.position.lng,
+                  heading: sensorData.imu.orientation.yaw || baseStatus.position.heading,
+                  accuracy: sensorData.gps.accuracy || baseStatus.position.accuracy
                 },
                 battery: {
-                  level: sensorData.power.battery_level || mockMowerStatus.battery.level,
-                  voltage: sensorData.power.battery_voltage || mockMowerStatus.battery.voltage,
-                  current: sensorData.power.battery_current || mockMowerStatus.battery.current,
-                  charging: sensorData.power.charging || mockMowerStatus.battery.charging,
-                  timeRemaining: Math.floor((sensorData.power.battery_level || mockMowerStatus.battery.level) * 2)
+                  level: sensorData.power.battery_level || baseStatus.battery.level,
+                  voltage: sensorData.power.battery_voltage || baseStatus.battery.voltage,
+                  current: sensorData.power.battery_current || baseStatus.battery.current,
+                  charging: sensorData.power.charging || baseStatus.battery.charging,
+                  timeRemaining: Math.floor((sensorData.power.battery_level || baseStatus.battery.level) * 2)
                 },
                 sensors: {
                   imu: {
                     orientation: { 
-                      x: sensorData.imu.orientation.roll || mockMowerStatus.sensors.imu.orientation.x,
-                      y: sensorData.imu.orientation.pitch || mockMowerStatus.sensors.imu.orientation.y,
-                      z: sensorData.imu.orientation.yaw || mockMowerStatus.sensors.imu.orientation.z
+                      x: sensorData.imu.orientation.roll || baseStatus.sensors.imu.orientation.x,
+                      y: sensorData.imu.orientation.pitch || baseStatus.sensors.imu.orientation.y,
+                      z: sensorData.imu.orientation.yaw || baseStatus.sensors.imu.orientation.z
                     },
-                    acceleration: sensorData.imu.acceleration || mockMowerStatus.sensors.imu.acceleration,
-                    gyroscope: sensorData.imu.gyroscope || mockMowerStatus.sensors.imu.gyroscope,
-                    temperature: sensorData.imu.temperature || mockMowerStatus.sensors.imu.temperature
+                    acceleration: sensorData.imu.acceleration || baseStatus.sensors.imu.acceleration,
+                    gyroscope: sensorData.imu.gyroscope || baseStatus.sensors.imu.gyroscope,
+                    temperature: sensorData.imu.temperature || baseStatus.sensors.imu.temperature
                   },
                   tof: {
-                    left: sensorData.tof.left_distance || mockMowerStatus.sensors.tof.left,
-                    right: sensorData.tof.right_distance || mockMowerStatus.sensors.tof.right
+                    left: sensorData.tof.left_distance || baseStatus.sensors.tof.left,
+                    right: sensorData.tof.right_distance || baseStatus.sensors.tof.right
                   },
                   environmental: {
-                    temperature: sensorData.environmental.temperature || mockMowerStatus.sensors.environmental.temperature,
-                    humidity: sensorData.environmental.humidity || mockMowerStatus.sensors.environmental.humidity,
-                    pressure: sensorData.environmental.pressure || mockMowerStatus.sensors.environmental.pressure
+                    temperature: sensorData.environmental.temperature || baseStatus.sensors.environmental.temperature,
+                    humidity: sensorData.environmental.humidity || baseStatus.sensors.environmental.humidity,
+                    pressure: sensorData.environmental.pressure || baseStatus.sensors.environmental.pressure
                   },
                   power: {
-                    voltage: sensorData.power.battery_voltage || mockMowerStatus.sensors.power.voltage,
-                    current: sensorData.power.battery_current || mockMowerStatus.sensors.power.current,
-                    power: (sensorData.power.battery_voltage || mockMowerStatus.sensors.power.voltage) * (sensorData.power.battery_current || mockMowerStatus.sensors.power.current)
+                    voltage: sensorData.power.battery_voltage || baseStatus.sensors.power.voltage,
+                    current: sensorData.power.battery_current || baseStatus.sensors.power.current,
+                    power: (sensorData.power.battery_voltage || baseStatus.sensors.power.voltage) * (sensorData.power.battery_current || baseStatus.sensors.power.current)
                   }
                 },
-                coverage: mockMowerStatus.coverage,
+                coverage: baseStatus.coverage,
                 lastUpdate: Date.now(),
                 location_source: 'gps' as const,
                 connected: true
               }
-              
               dispatch(setStatus(updatedStatus))
+              lastDataRef.current = Date.now()
             })
-            
-            sensorDataService.start()
-            console.log('📊 Sensor data service started')
+            // Keep reference to unsubscribe if needed later
+            ;(window as any).__sensorDataUnsub = unsubscribeSensorData
           } catch (error) {
-            console.warn('⚠️ Sensor data service failed to start:', error)
+            console.warn('⚠️ Sensor data subscription failed:', error)
           }
         }, 500)
 
@@ -301,12 +351,8 @@ const App: React.FC = () => {
             document.removeEventListener(event, updateUserActivity, true)
           })
           
-          try {
-            sensorDataService.stop()
-            webSocketService.disconnect()
-          } catch (error) {
-            console.warn('Error during cleanup:', error)
-          }
+          try { sensorDataService.stop() } catch (error) { console.warn('SensorDataService stop error:', error) }
+          try { webSocketService.disconnect() } catch (error) { console.warn('WebSocket disconnect error:', error) }
         }
         
       } catch (error) {
@@ -340,6 +386,22 @@ const App: React.FC = () => {
     }
   }, [notifications])
 
+  // Data freshness watchdog
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const last = mowerStatus?.lastUpdate || lastDataRef.current
+      const stale = Date.now() - last > 15000 // 15s threshold
+      if (stale !== dataStale) setDataStale(stale)
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [mowerStatus, dataStale])
+
+  const handleRetryData = () => {
+    setDataStale(false)
+    try { webSocketService.disconnect() } catch {}
+    setTimeout(() => webSocketService.connect(), 200)
+  }
+
   const handleCloseNotification = () => {
     setNotification(prev => ({ ...prev, open: false }))
   }
@@ -372,6 +434,14 @@ const App: React.FC = () => {
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <AppContent />
+
+      {dataStale && (
+        <Box sx={{ position: 'fixed', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 2000, maxWidth: 480, width: '90%' }}>
+          <Alert severity="warning" action={<Button color="inherit" size="small" onClick={handleRetryData}>Retry</Button>}>
+            No live data received recently. Connection may be stale.
+          </Alert>
+        </Box>
+      )}
 
       <Snackbar
         open={notification.open}

@@ -13,7 +13,7 @@ interface GoogleMapComponentProps {
   boundaries?: YardBoundary[];
   noGoZones?: YardBoundary[];
   homeLocation?: { lat: number; lng: number };
-  robotPosition?: { lat: number; lng: number };
+  robotPosition?: { lat: number; lng: number; heading?: number };
   isDrawingMode?: boolean;
   drawingType?: 'boundary' | 'no-go' | 'home';
   onBoundaryComplete?: (coordinates: Array<{ lat: number; lng: number }>) => void;
@@ -22,6 +22,9 @@ interface GoogleMapComponentProps {
   showMowingProgress?: boolean;
   mowingPath?: Array<{ lat: number; lng: number }>;
   coveredAreas?: Array<{ lat: number; lng: number }>;
+  onMapReady?: (map: google.maps.Map) => void;
+  geofenceViolation?: boolean;
+  geofenceInNoGo?: boolean;
 }
 
 const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
@@ -44,6 +47,9 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
   showMowingProgress = false,
   mowingPath = [],
   coveredAreas = []
+  , onMapReady
+  , geofenceViolation
+  , geofenceInNoGo
 }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
@@ -339,14 +345,14 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
     boundaryPolygonsRef.current = [];
 
     // Add new boundary polygons
-    boundaries.forEach(boundary => {
+  boundaries.forEach(boundary => {
       const polygon = new google.maps.Polygon({
-        paths: boundary.coordinates.map(coord => ({ lat: coord.lat, lng: coord.lng })),
-        strokeColor: '#4caf50',
-        strokeOpacity: 0.8,
-        strokeWeight: 2,
-        fillColor: '#4caf50',
-        fillOpacity: 0.1,
+    paths: (boundary as any).coordinates?.map((coord: any) => ({ lat: coord.lat, lng: coord.lng })) || (boundary as any).points?.map((p: any) => ({ lat: p.lat, lng: p.lng })),
+  strokeColor: geofenceViolation ? '#f44336' : '#4caf50',
+  strokeOpacity: geofenceViolation ? 1.0 : 0.8,
+  strokeWeight: geofenceViolation ? 3 : 2,
+  fillColor: geofenceViolation ? '#f44336' : '#4caf50',
+  fillOpacity: geofenceViolation ? 0.15 : 0.1,
         editable: true,
         draggable: false
       });
@@ -354,7 +360,7 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       polygon.setMap(mapInstanceRef.current);
       boundaryPolygonsRef.current.push(polygon);
     });
-  }, [boundaries]);
+  }, [boundaries, geofenceViolation]);
 
   const updateNoGoZones = useCallback(() => {
     if (!mapInstanceRef.current) return;
@@ -364,14 +370,14 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
     noGoZonePolygonsRef.current = [];
 
     // Add new no-go zone polygons
-    noGoZones.forEach(zone => {
+  noGoZones.forEach(zone => {
       const polygon = new google.maps.Polygon({
-        paths: zone.coordinates.map(coord => ({ lat: coord.lat, lng: coord.lng })),
-        strokeColor: '#f44336',
-        strokeOpacity: 0.8,
-        strokeWeight: 2,
-        fillColor: '#f44336',
-        fillOpacity: 0.3,
+    paths: (zone as any).coordinates?.map((coord: any) => ({ lat: coord.lat, lng: coord.lng })) || (zone as any).points?.map((p: any) => ({ lat: p.lat, lng: p.lng })),
+  strokeColor: geofenceInNoGo ? '#ff1744' : '#f44336',
+  strokeOpacity: geofenceInNoGo ? 1.0 : 0.9,
+  strokeWeight: geofenceInNoGo ? 3 : 2,
+  fillColor: geofenceInNoGo ? '#ff1744' : '#f44336',
+  fillOpacity: geofenceInNoGo ? 0.4 : 0.3,
         editable: true,
         draggable: false
       });
@@ -379,7 +385,7 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       polygon.setMap(mapInstanceRef.current);
       noGoZonePolygonsRef.current.push(polygon);
     });
-  }, [noGoZones]);
+  }, [noGoZones, geofenceInNoGo]);
 
   const updateHomeLocation = useCallback(() => {
     if (!mapInstanceRef.current) return;
@@ -420,7 +426,7 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
     }
 
     // Add new robot marker
-    if (robotPosition) {
+  if (robotPosition) {
       const marker = new google.maps.Marker({
         position: robotPosition,
         map: mapInstanceRef.current,
@@ -432,7 +438,7 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
           fillOpacity: 1,
           strokeColor: 'white',
           strokeWeight: 2,
-          rotation: 0 // TODO: Use actual heading from robot
+      rotation: robotPosition.heading || 0
         },
         zIndex: 1000
       });
@@ -494,7 +500,7 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       }
 
       const mapOptions = getMapOptions();
-      const map = new google.maps.Map(mapRef.current, mapOptions);
+  const map = new google.maps.Map(mapRef.current, mapOptions);
       
       mapInstanceRef.current = map;
       
@@ -507,7 +513,8 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       // Setup map event listeners
       setupMapEventListeners(map);
       
-      setIsInitialized(true);
+  setIsInitialized(true);
+  onMapReady?.(map);
 
       // Add error handling for map tiles
       map.addListener('tilesloaded', () => {
@@ -644,7 +651,21 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
         height: '100%',
         ...style
       }}
+  data-geofence-violation={geofenceViolation ? '1' : '0'}
+  data-geofence-in-nogo={geofenceInNoGo ? '1' : '0'}
     >
+      {/* Inline style for geofence pulse (scoped by data attr) */}
+      <style>{`
+        [data-geofence-violation="1"] canvas + div { /* heuristic: after tiles layer */ }
+        [data-geofence-violation="1"] .gm-style .pulse-boundary {
+          animation: lbPulse 1.2s ease-in-out infinite;
+        }
+        @keyframes lbPulse {
+          0% { box-shadow: 0 0 0 0 rgba(244,67,54,0.6); }
+          70% { box-shadow: 0 0 0 8px rgba(244,67,54,0); }
+          100% { box-shadow: 0 0 0 0 rgba(244,67,54,0); }
+        }
+      `}</style>
       {children}
     </div>
   );

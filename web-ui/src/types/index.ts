@@ -194,6 +194,8 @@ export interface SystemSettings {
     theme: 'light' | 'dark' | 'auto'
     refreshRate: number
     showAdvanced: boolean
+  reducedMotion?: boolean
+  lowPowerMode?: boolean
   }
 }
 

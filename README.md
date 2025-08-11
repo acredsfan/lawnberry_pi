@@ -51,7 +51,7 @@ Visit the **[Documentation Index](docs/README.md)** for all available guides, re
 ## 🏗️ System Architecture
 
 ### Hardware Components
-- **Raspberry Pi 4** (16GB RAM) - Main computing platform
+- **Raspberry Pi 4** (8GB RAM) - Main computing platform
 - **RoboHAT with RP2040** - Motor control and sensor interface
 - **RTK-GPS Module** - Centimeter-accurate positioning
 - **Environmental Sensors** - Weather monitoring and safety
@@ -62,7 +62,7 @@ Visit the **[Documentation Index](docs/README.md)** for all available guides, re
 ### Software Architecture
 - **Modular Python Backend** - Microservices design with asyncio
 - **React Web Interface** - Responsive PWA with real-time updates
-- **Real-time Communication** - WebSocket integration for live monitoring
+- **Real-time Communication** - Single multiplexed WebSocket (sensors, navigation, power, safety)
 - **Weather Integration** - OpenWeather API with intelligent scheduling
 - **Safety Systems** - Multi-layered protection and emergency response
 
@@ -99,6 +99,8 @@ python3 scripts/first_run_wizard.py
 - 💾 **Database Initialization** - Automated SQLite and Redis setup
 - 🧪 **System Testing** - Comprehensive connectivity and functionality tests
 - 🧙 **First-Run Wizard** - User-friendly guided setup for beginners
+ - 🛰️ **Deferred Live Data Start** - Sensor streams attach only after stable WebSocket connection
+ - 🧪 **Optional Mock Mode** - Set `VITE_USE_MOCKS=true` (frontend) to preload demo status & weather while backend is offline
 
 ### 📋 Available Scripts
 
@@ -338,6 +340,20 @@ To display semantic status colours we now style progress bars exclusively throug
 ```
 
 This approach is used in `Dashboard` (battery & coverage) and `RCControl` (channel strength). Future additions should follow this pattern unless explicit module augmentation is added to extend supported `color` variants.
+
+### Live Data Flow (Frontend 2025 Update)
+
+```
+WebSocket ⇨ websocket service (auto reconnect & topic subscription)
+         ⇨ sensorDataService (lazy start post-connect)
+         ⇨ Redux mowerSlice (setStatus / updateStatus)
+         ⇨ UI components (Dashboard, Maps, Power, RCControl)
+```
+
+Safeguards:
+- 15s stale-data watchdog surfaces reconnect banner.
+- Mock gating via `VITE_USE_MOCKS` prevents mixing synthetic & live packets.
+- Navigation position & coverage updates come through lightweight incremental `updateStatus` actions to reduce render cost on Pi.
 
 ## Contributing
 

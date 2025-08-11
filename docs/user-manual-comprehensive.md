@@ -55,7 +55,7 @@
 ### Hardware Components
 
 **Core Processing:**
-- Raspberry Pi 4B 16GB - Main computer
+- Raspberry Pi 4B 8GB - Main computer
 - RoboHAT with RP2040 - Motor control and sensor interface
 - OLED Display - Shows system status
 
@@ -689,7 +689,7 @@ The LawnBerryPi implements multiple layers of safety protection:
 
 **Raspberry Pi 4B Configuration:**
 - CPU: Quad-core ARM Cortex-A72 @ 1.5GHz
-- RAM: 16GB LPDDR4
+- RAM: 8GB LPDDR4
 - Storage: MicroSD card (minimum 32GB, recommend 64GB+)
 - Operating System: Raspberry Pi OS 64-bit (Bookworm)
 

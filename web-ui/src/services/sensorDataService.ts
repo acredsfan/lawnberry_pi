@@ -50,6 +50,7 @@ class SensorDataService {
   private listeners: ((data: SensorData) => void)[] = [];
   private currentData: SensorData;
   private unsubscribeFunctions: (() => void)[] = [];
+  private started = false;
   
   constructor() {
     // Initialize with default/empty values until real data arrives
@@ -95,11 +96,12 @@ class SensorDataService {
       }
     };
     
-    // Subscribe to sensor data topics
-    this.setupWebSocketHandlers();
+    // Defer WebSocket handler registration until start() so we fully control lifecycle
   }
   
   private setupWebSocketHandlers(): void {
+    // Avoid duplicate handler registration on repeated start() calls
+    if (this.unsubscribeFunctions.length > 0) return;
     // GPS data handler
     const gpsHandler = (data: any) => {
       this.currentData.gps = {
@@ -203,6 +205,10 @@ class SensorDataService {
   }
 
   public start(): void {
+  if (this.started) return;
+  this.started = true;
+  // Register handlers (idempotent)
+  this.setupWebSocketHandlers();
     // Subscribe to sensor topics when starting
     webSocketService.subscribe([
       'sensors/gps/data',
@@ -216,6 +222,7 @@ class SensorDataService {
   }
 
   public stop(): void {
+  this.started = false;
     // Unsubscribe from all sensor topics when stopping
     webSocketService.unsubscribe([
       'sensors/gps/data',

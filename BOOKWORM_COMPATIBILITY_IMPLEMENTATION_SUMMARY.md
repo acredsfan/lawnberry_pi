@@ -15,7 +15,7 @@ This document summarizes the comprehensive Bookworm compatibility implementation
 
 ### 2. Bookworm-Specific Optimizations ✅
 **Function**: `apply_bookworm_optimizations()` in install script
-- **Memory Management**: Optimized for 16GB RAM with tuned vm settings
+- **Memory Management**: Optimized for 8GB RAM with tuned vm settings
   - `vm.swappiness=10`
   - `vm.vfs_cache_pressure=50`
   - `vm.dirty_background_ratio=5`
@@ -107,7 +107,7 @@ This document summarizes the comprehensive Bookworm compatibility implementation
 - **Continuous Validation**: Ongoing compatibility monitoring capabilities
 
 ### Performance Optimization
-- **Memory Tuning**: 16GB RAM optimization with Bookworm-specific settings
+- **Memory Tuning**: 8GB RAM optimization with Bookworm-specific settings
 - **I/O Performance**: Optimized I2C and file system operations
 - **CPU Scheduling**: Performance governor and process priority optimization
 

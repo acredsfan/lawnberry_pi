@@ -100,7 +100,7 @@ class ConfigValidator:
                     'max_memory_usage_mb': {
                         'type': 'int',
                         'min': 512,
-                        'max': 15000  # For 16GB system
+                        'max': 7900  # For 8GB system (leave headroom below 8192)
                     },
                     'max_cpu_usage_percent': {
                         'type': 'float',

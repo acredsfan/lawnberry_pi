@@ -46,6 +46,7 @@ Component Combinations:
   --backend-only           Install dependencies + Python + services + database
   --frontend-only          Install web UI only
   --minimal                Install core components (no validation, no hardware detection)
+    --deploy-update          Sync current working tree to /opt canonical runtime & restart services (fast deploy)
 
 Control Options:
   --skip-hardware          Skip hardware detection and sensor setup
@@ -157,6 +158,18 @@ parse_arguments() {
                 INSTALL_SERVICES=true
                 INSTALL_DATABASE=true
                 INSTALL_SYSTEM_CONFIG=true
+                SKIP_VALIDATION=true
+                SKIP_HARDWARE=true
+                ;;
+            --deploy-update)
+                # Fast path: only sync source to INSTALL_DIR and restart services
+                DEPLOY_UPDATE_ONLY=true
+                INSTALL_DEPENDENCIES=false
+                INSTALL_PYTHON_ENV=false
+                INSTALL_WEB_UI=false
+                INSTALL_SERVICES=false
+                INSTALL_DATABASE=false
+                INSTALL_SYSTEM_CONFIG=false
                 SKIP_VALIDATION=true
                 SKIP_HARDWARE=true
                 ;;
@@ -326,14 +339,14 @@ detect_bookworm() {
         fi
     fi
     
-    # Check available RAM for 16GB optimization
+    # Check available RAM (8GB is target optimal configuration)
     TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
     TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
     log_debug "Total RAM detected: ${TOTAL_RAM_KB} KB (${TOTAL_RAM_GB} GB)"
     if [[ $TOTAL_RAM_GB -ge 8 ]]; then
         log_success "RAM: ${TOTAL_RAM_GB}GB detected - enabling memory optimizations"
         if [[ $TOTAL_RAM_GB -ge 16 ]]; then
-            log_info "16GB+ RAM detected - enabling advanced memory management"
+            log_info "High RAM capacity detected - enabling advanced memory management"
         fi
     else
         log_warning "RAM: ${TOTAL_RAM_GB}GB - may limit performance optimizations"
@@ -1097,6 +1110,16 @@ create_directories() {
     # Copy project files to installation directory
     log_info "Copying project files to $INSTALL_DIR..."
     sudo cp -r "$PROJECT_ROOT"/* "$INSTALL_DIR/" || log_warning "Could not copy all project files"
+
+    # Ensure a virtual environment exists in canonical install dir (Option A runtime)
+    if [[ ! -d "$INSTALL_DIR/venv" ]]; then
+        log_info "Creating virtual environment in $INSTALL_DIR/venv (canonical runtime)"
+        # Use root-owned creation then adjust ownership
+        sudo python3 -m venv --system-site-packages "$INSTALL_DIR/venv" || log_warning "Failed to create venv in $INSTALL_DIR"
+        sudo chown -R "$USER:$GROUP" "$INSTALL_DIR/venv" || sudo chown -R "$USER:$USER" "$INSTALL_DIR/venv"
+    else
+        log_debug "Virtual environment already present in $INSTALL_DIR/venv"
+    fi
     
     # Set ownership and permissions
     sudo chown -R "$USER:$GROUP" "$INSTALL_DIR" || sudo chown -R "$USER:$USER" "$INSTALL_DIR"
@@ -1110,11 +1133,283 @@ create_directories() {
     log_success "System directories created"
 }
 
+deploy_update() {
+    print_section "Fast Deploy Update (Sync to /opt)"
+    local deploy_start_ts=$(date +%s)
+    local max_seconds=${FAST_DEPLOY_MAX_SECONDS:-0}
+    if [[ $max_seconds -gt 0 ]]; then
+        log_info "Fast deploy max duration set to ${max_seconds}s"
+    fi
+
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        log_error "Canonical install directory $INSTALL_DIR not found. Run full install first."
+        exit 1
+    fi
+
+    log_info "Synchronizing source tree to $INSTALL_DIR (excluding logs, data, venv, node_modules, build artifacts)..."
+
+    # Lightweight optional drift check (FAST_DEPLOY_HASH=0 to disable)
+    if [[ "${FAST_DEPLOY_HASH:-1}" -eq 1 ]] && command -v sha256sum >/dev/null 2>&1; then
+        log_info "Running quick drift hash (subset of source files)"
+        hash_start=$(date +%s)
+        # Subset: python, TS/TSX, service units, manifests
+        mapfile -t HASH_FILES < <(find "$PROJECT_ROOT" -maxdepth 6 -type f \
+            \( -path "$PROJECT_ROOT/venv/*" -o -path "$PROJECT_ROOT/node_modules/*" -o -path "$PROJECT_ROOT/web-ui/node_modules/*" -o -path "$PROJECT_ROOT/web-ui/.*/ *" -o -name '*.log' \) -prune -o \
+            -regex ".*\.(py|ts|tsx)" -o -name '*.service' -o -name 'pyproject.toml' -o -name 'requirements.txt' -o -name 'requirements-optional.txt' -o -name 'requirements-coral.txt' 2>/dev/null | sed '/^$/d')
+        hf_count=${#HASH_FILES[@]}
+        if (( hf_count > 0 && hf_count < 8000 )); then
+            # Hash in chunks to reduce memory
+            pre_hash=$(printf '%s\n' "${HASH_FILES[@]}" | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
+            runtime_hash=""
+            if [[ -d "$INSTALL_DIR" ]]; then
+                runtime_hash=$(find "$INSTALL_DIR" -maxdepth 6 -type f \
+                    \( -path "$INSTALL_DIR/venv/*" -o -path "$INSTALL_DIR/node_modules/*" -o -path "$INSTALL_DIR/web-ui/node_modules/*" -o -name '*.log' \) -prune -o \
+                    -regex ".*\.(py|ts|tsx)" -o -name '*.service' -o -name 'pyproject.toml' -o -name 'requirements.txt' -o -name 'requirements-optional.txt' -o -name 'requirements-coral.txt' 2>/dev/null | sed '/^$/d' | \
+                    xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1 || true)
+            fi
+            if [[ -n "$runtime_hash" && "$pre_hash" != "$runtime_hash" ]]; then
+                log_warning "Drift detected (subset hash mismatch)"
+            else
+                log_debug "No drift detected (subset hash)"
+            fi
+        else
+            log_debug "Skipping hash (file count=$hf_count)"
+        fi
+        log_info "Quick hash completed in $(( $(date +%s) - hash_start ))s (files=$hf_count)"
+    else
+        log_debug "Skipping quick drift hash (disabled or sha256sum missing)"
+    fi
+
+    # Incremental directory-by-directory rsync to avoid long single timeouts
+    RSYNC_TIMEOUT_PER=${RSYNC_TIMEOUT_PER:-40}
+    RSYNC_OPTS=(-a --no-times --omit-dir-times --delete --exclude 'venv/' --exclude 'node_modules/' --exclude '.git/' --exclude 'build/' --exclude 'dist/' --exclude '*.log' --exclude 'data/' --exclude 'reports/')
+    # Determine top-level entries to sync
+    mapfile -t SYNC_DIRS < <(find "$PROJECT_ROOT" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | grep -Ev '^(venv|venv_coral_pyenv|node_modules|data|reports|tests|\.git|__pycache__)$' | sort)
+    # Optionally include tests if requested
+    if [[ "${FAST_DEPLOY_INCLUDE_TESTS:-0}" -eq 1 ]]; then
+        [[ -d "$PROJECT_ROOT/tests" ]] && SYNC_DIRS+=(tests)
+    fi
+    # Always ensure destination exists
+    for d in "${SYNC_DIRS[@]}"; do
+        if [[ $max_seconds -gt 0 ]]; then
+            local now=$(date +%s)
+            if (( now - deploy_start_ts > max_seconds )); then
+                log_warning "Reached FAST_DEPLOY_MAX_SECONDS ($max_seconds) before syncing remaining directories; aborting further syncs"
+                break
+            fi
+        fi
+        [[ -d "$PROJECT_ROOT/$d" ]] || continue
+        log_info "Syncing directory: $d (timeout ${RSYNC_TIMEOUT_PER}s)"
+    if ! timeout ${RSYNC_TIMEOUT_PER}s ionice -c3 nice -n 10 rsync "${RSYNC_OPTS[@]}" "$PROJECT_ROOT/$d/" "$INSTALL_DIR/$d/" 2>/dev/null; then
+            log_warning "Timeout or error syncing $d - retrying without timeout"
+            if ! ionice -c3 nice -n 10 rsync "${RSYNC_OPTS[@]}" "$PROJECT_ROOT/$d/" "$INSTALL_DIR/$d/"; then
+                log_error "Failed to sync directory $d"
+            fi
+        fi
+    done
+    # Sync top-level files
+    log_info "Syncing top-level files"
+    mapfile -t TOP_FILES < <(find "$PROJECT_ROOT" -maxdepth 1 -type f -printf '%f\n')
+    for f in "${TOP_FILES[@]}"; do
+        case "$f" in
+            lawnberry_install.log|*.pyc) continue;;
+            *)
+                rsync -a "$PROJECT_ROOT/$f" "$INSTALL_DIR/$f" 2>/dev/null || true
+            ;;
+        esac
+    done
+    log_success "Incremental rsync synchronization complete"
+
+    # Ensure ownership remains correct
+    sudo chown -R "$USER:$GROUP" "$INSTALL_DIR" || sudo chown -R "$USER:$USER" "$INSTALL_DIR"
+
+    # --- Optimized web UI dist sync with mode selection ---
+    # Modes: skip|minimal|full (default: minimal). Set FAST_DEPLOY_DIST_MODE env variable.
+    if [[ -d "$PROJECT_ROOT/web-ui/dist" ]]; then
+        DIST_MODE="${FAST_DEPLOY_DIST_MODE:-minimal}"
+        case "$DIST_MODE" in
+            skip)
+                log_info "FAST_DEPLOY_DIST_MODE=skip -> Skipping web UI dist sync"
+                ;;
+            minimal|full|*)
+                [[ "$DIST_MODE" != "full" && "$DIST_MODE" != "minimal" ]] && DIST_MODE="minimal"
+                # Ensure target dist exists
+                mkdir -p "$INSTALL_DIR/web-ui/dist"
+                # Change detection: if index.html unchanged and mode=minimal, short-circuit
+                if [[ -f "$INSTALL_DIR/web-ui/dist/index.html" && -f "$PROJECT_ROOT/web-ui/dist/index.html" ]]; then
+                    src_idx_hash=$(sha256sum "$PROJECT_ROOT/web-ui/dist/index.html" 2>/dev/null | cut -d' ' -f1)
+                    dst_idx_hash=$(sha256sum "$INSTALL_DIR/web-ui/dist/index.html" 2>/dev/null | cut -d' ' -f1)
+                else
+                    src_idx_hash=missing
+                    dst_idx_hash=different
+                fi
+                if [[ "$DIST_MODE" == "minimal" && "$src_idx_hash" == "$dst_idx_hash" ]]; then
+                    # Check for any new hashed assets (filename with .[hash].) not present at destination
+                    new_assets=false
+                    while IFS= read -r f; do
+                        rel=${f#"$PROJECT_ROOT/web-ui/dist/"}
+                        [[ -f "$INSTALL_DIR/web-ui/dist/$rel" ]] || { new_assets=true; break; }
+                    done < <(find "$PROJECT_ROOT/web-ui/dist" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[^/]+\.[a-f0-9]{8,}\.[a-z0-9]{2,4}$' 2>/dev/null)
+                    if [[ $new_assets == false ]]; then
+                        log_info "Web UI dist unchanged (minimal mode) - skipping dist sync"
+                        DIST_SYNC_SKIPPED=1
+                    fi
+                fi
+                if [[ "$DIST_SYNC_SKIPPED" != 1 ]]; then
+                    if [[ "$DIST_MODE" == "full" ]]; then
+                        log_info "Syncing web UI dist (full mode, timeout 35s)"
+                        if ! timeout 35s rsync -a --delete "$PROJECT_ROOT/web-ui/dist/" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null; then
+                            log_warning "Full dist sync timed out - falling back to minimal subset"
+                            DIST_MODE="minimal"
+                        else
+                            DIST_SYNC_DONE=1
+                        fi
+                    fi
+                    if [[ "$DIST_MODE" == "minimal" && "$DIST_SYNC_DONE" != 1 ]]; then
+                        log_info "Syncing web UI dist (minimal core files)"
+                        # Copy critical entry files
+                        for coref in index.html manifest*.json favicon.* robots.txt asset-manifest.json registerSW.js sw.js service-worker.js; do
+                            cp "$PROJECT_ROOT/web-ui/dist/$coref" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null || true
+                        done
+                        # Sync new hashed assets only (do not delete old to avoid 404 during rolling reload)
+                        while IFS= read -r asset; do
+                            rel=${asset#"$PROJECT_ROOT/web-ui/dist/"}
+                            if [[ ! -f "$INSTALL_DIR/web-ui/dist/$rel" ]]; then
+                                cp "$asset" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null || true
+                            fi
+                        done < <(find "$PROJECT_ROOT/web-ui/dist" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[^/]+\.[a-f0-9]{8,}\.[a-z0-9]{2,4}$' 2>/dev/null)
+                        DIST_SYNC_DONE=1
+                    fi
+                    # Verification message
+                    if [[ "$DIST_SYNC_DONE" == 1 ]]; then
+                        count=$(find "$INSTALL_DIR/web-ui/dist" -maxdepth 1 -type f | wc -l)
+                        log_success "Web UI dist sync complete (files=$count, mode=$DIST_MODE)"
+                    else
+                        log_warning "Web UI dist sync not fully completed (mode=$DIST_MODE)"
+                    fi
+                fi
+                ;;
+        esac
+    else
+        log_debug "No web-ui/dist directory present in source; skipping"
+    fi
+
+    # Post-sync verification hash (optional & bounded)
+    if [[ "${FAST_DEPLOY_SKIP_POST_HASH:-0}" -eq 1 ]]; then
+        log_debug "Skipping post-sync hash (FAST_DEPLOY_SKIP_POST_HASH=1)"
+    elif command -v sha256sum >/dev/null 2>&1; then
+        log_info "Computing post-sync verification hash (bounded)"
+        if ! post_hash=$(timeout 8s bash -c 'find "$0" -maxdepth 2 -type f \
+            \( -path "$0/venv/*" -o -path "$0/node_modules/*" -o -path "$0/web-ui/node_modules/*" \) -prune -o -regex ".*\\.(py|ts|tsx)$" -print | sort | head -2000 | xargs sha256sum 2>/dev/null | sha256sum | cut -d" " -f1' "$INSTALL_DIR" 2>/dev/null); then
+            log_warning "Post-sync hash timed out or failed (skipping)"
+        else
+            [[ -n "$post_hash" ]] && log_debug "Runtime sync hash: $post_hash"
+        fi
+    fi
+
+    # Ensure runtime python environment has dependencies
+    if [[ "${FAST_DEPLOY_SKIP_VENV:-0}" -eq 1 ]]; then
+        log_info "FAST_DEPLOY_SKIP_VENV=1 -> Skipping runtime venv validation"
+    else
+        ensure_runtime_python_env
+    fi
+
+    # Restart core services to pick up code changes
+    # First, recanonicalize any service units still pointing at project root (legacy state)
+    legacy_services=$(grep -l "WorkingDirectory=$PROJECT_ROOT" /etc/systemd/system/lawnberry-*.service 2>/dev/null || true)
+    if [[ -n "$legacy_services" ]]; then
+        log_info "Rewriting legacy service units to canonical /opt paths"
+        for svc_file in $legacy_services; do
+            sudo sed -i "s|WorkingDirectory=$PROJECT_ROOT|WorkingDirectory=$INSTALL_DIR|" "$svc_file"
+            sudo sed -i "s|Environment=PYTHONPATH=$PROJECT_ROOT|Environment=PYTHONPATH=$INSTALL_DIR|" "$svc_file"
+            sudo sed -i "s|ExecStart=$PROJECT_ROOT/venv/bin/python3|ExecStart=$INSTALL_DIR/venv/bin/python3|" "$svc_file" || true
+            sudo sed -i "s|ExecStart=$PROJECT_ROOT/venv/bin/python|ExecStart=$INSTALL_DIR/venv/bin/python|" "$svc_file" || true
+            # Remove any duplicated trailing 'Additional Bookworm Security Features' block if previously appended
+            # Keep only first occurrence of ProtectClock line cluster
+            if grep -q "# Additional Bookworm Security Features" "$svc_file"; then
+                sudo awk 'BEGIN{found=0} /# Additional Bookworm Security Features/{if(found){skip=1}else{found=1}} {if(!skip)print} END{}' "$svc_file" > /tmp/clean_unit && sudo mv /tmp/clean_unit "$svc_file"
+            fi
+        done
+        sudo systemctl daemon-reload
+    fi
+
+    if [[ "${FAST_DEPLOY_SKIP_SERVICES:-0}" -eq 1 ]]; then
+        log_info "FAST_DEPLOY_SKIP_SERVICES=1 -> Skipping service restarts"
+    else
+        core_services=(
+            "lawnberry-system"
+            "lawnberry-data"
+            "lawnberry-hardware"
+            "lawnberry-safety"
+            "lawnberry-api"
+        )
+        local per_restart_timeout=${FAST_DEPLOY_SERVICE_TIMEOUT:-10}
+        log_info "Restarting core services (timeout ${per_restart_timeout}s each) ..."
+        for svc in "${core_services[@]}"; do
+            if systemctl is-enabled "$svc" >/dev/null 2>&1; then
+                if ! timeout ${per_restart_timeout}s sudo systemctl restart "$svc" 2>/dev/null; then
+                    log_warning "Timeout or failure restarting $svc"
+                else
+                    log_debug "Restarted $svc"
+                fi
+            else
+                log_debug "Service not enabled: $svc"
+            fi
+        done
+    fi
+
+    local deploy_end_ts=$(date +%s)
+    log_success "Deploy update complete in $((deploy_end_ts - deploy_start_ts))s"
+}
+
+ensure_runtime_python_env() {
+    log_info "Validating runtime Python environment in $INSTALL_DIR/venv"
+    if [[ ! -x "$INSTALL_DIR/venv/bin/python" ]]; then
+        log_warning "Runtime venv missing; creating..."
+        python3 -m venv --system-site-packages "$INSTALL_DIR/venv" || {
+            log_error "Failed to create runtime venv"
+            return
+        }
+    fi
+
+    # Quick import probe for a representative module
+    if ! "$INSTALL_DIR/venv/bin/python" -c "import fastapi" 2>/dev/null; then
+        log_info "Installing Python dependencies into runtime venv"
+        "$INSTALL_DIR/venv/bin/python" -m pip install --upgrade pip setuptools wheel >/dev/null 2>&1 || true
+        if [[ -f "$INSTALL_DIR/requirements.txt" ]]; then
+            "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" || log_warning "Base requirements install encountered issues"
+        fi
+        if [[ -f "$INSTALL_DIR/requirements-optional.txt" ]]; then
+            "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements-optional.txt" || log_warning "Optional requirements install issues"
+        fi
+        if [[ -f "$INSTALL_DIR/requirements-coral.txt" ]]; then
+            "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements-coral.txt" || log_debug "Coral requirements skipped or failed"
+        fi
+    else
+        log_debug "Runtime venv already has core dependencies"
+    fi
+
+    # Final verification of critical modules (non-fatal if missing hardware libs)
+    "$INSTALL_DIR/venv/bin/python" - <<'EOF'
+critical = ["fastapi", "pydantic", "asyncio"]
+missing = []
+for m in critical:
+    try:
+        __import__(m)
+    except Exception:
+        missing.append(m)
+if missing:
+    print(f"[WARN] Missing critical modules in runtime venv: {missing}")
+else:
+    print("[OK] Runtime venv core modules present")
+EOF
+}
+
 apply_bookworm_optimizations() {
     if [[ $BOOKWORM_OPTIMIZATIONS == true ]]; then
         print_section "Applying Bookworm-Specific Optimizations"
         
-        log_info "Configuring memory management for 16GB RAM..."
+    log_info "Configuring memory management for 8GB RAM..."
         # Create memory optimization configuration
         sudo tee /etc/sysctl.d/99-lawnberry-bookworm.conf >/dev/null <<EOF
 # LawnBerry Bookworm Memory Optimizations
@@ -1182,8 +1477,8 @@ install_services() {
                     needs_install=true
                     services_needing_update+=("$service_name")
                 else
-                    # Check if Python path in service file needs updating
-                    if ! grep -q "$PROJECT_ROOT/venv/bin/python3" "$target_service" 2>/dev/null; then
+                    # Check if Python path in service file needs updating (canonical runtime = INSTALL_DIR)
+                        if ! grep -q "$INSTALL_DIR/venv/bin/python" "$target_service" 2>/dev/null; then
                         log_info "Service paths outdated: $service_name - updating..."
                         needs_install=true
                         services_needing_update+=("$service_name")
@@ -1205,23 +1500,26 @@ install_services() {
                     fi
                 fi
                 
-                # Update service file paths to use virtual environment and correct user
+                # Update service file paths BUT retain /opt canonical deployment (Option A)
+                # We intentionally keep WorkingDirectory=/opt/lawnberry so runtime is isolated from dev tree
                 temp_service="/tmp/$service_name"
-                sed "s|/usr/bin/python3|$PROJECT_ROOT/venv/bin/python3|g" "$service_file" > "$temp_service"
-                sed -i "s|WorkingDirectory=.*|WorkingDirectory=$PROJECT_ROOT|g" "$temp_service"
-                # Fix user and group to match current user
+                cp "$service_file" "$temp_service"
+                # Ensure python path points to canonical venv if template used /usr/bin/python3
+                sed -i "s|/usr/bin/python3|$INSTALL_DIR/venv/bin/python3|g" "$temp_service"
+                # Normalize WorkingDirectory & PYTHONPATH explicitly (idempotent when already correct)
+                sed -i "s|WorkingDirectory=.*|WorkingDirectory=$INSTALL_DIR|g" "$temp_service"
+                sed -i "s|Environment=PYTHONPATH=.*|Environment=PYTHONPATH=$INSTALL_DIR|g" "$temp_service"
+                # Fix user and group to match current user (templates may specify placeholder)
                 sed -i "s|User=.*|User=$USER|g" "$temp_service"
                 sed -i "s|Group=.*|Group=$GROUP|g" "$temp_service"
-                # Fix any remaining /opt/lawnberry references to PROJECT_ROOT
-                sed -i "s|/opt/lawnberry|$PROJECT_ROOT|g" "$temp_service"
-                # Ensure PYTHONPATH points to project root
-                sed -i "s|Environment=PYTHONPATH=.*|Environment=PYTHONPATH=$PROJECT_ROOT|g" "$temp_service"
+                # (No replacement of /opt/lawnberry with project root — by design per Option A decision)
                 
                 # Apply Bookworm-specific security hardening if supported
                 if [[ $SYSTEMD_VERSION -ge 252 ]]; then
-                    log_info "Applying systemd 252+ security hardening to $service_name"
-                    # Add additional Bookworm security features
-                    cat >> "$temp_service" << 'EOF'
+                    # Only append hardening block if not already present
+                    if ! grep -q 'ProtectClock=' "$temp_service"; then
+                        log_info "Appending hardening block to $service_name (systemd >=252)"
+                        cat >> "$temp_service" << 'EOF'
 
 # Additional Bookworm Security Features
 ProtectClock=true
@@ -1235,6 +1533,9 @@ RestrictSUIDSGID=true
 SystemCallArchitectures=native
 UMask=0027
 EOF
+                    else
+                        log_debug "Hardening keys already present in $service_name"
+                    fi
                 fi
                 
                 sudo cp "$temp_service" "$SERVICE_DIR/"
@@ -1647,6 +1948,17 @@ main() {
     
     # Parse command line arguments for modular installation
     parse_arguments "$@"
+
+    # Fast deploy/update shortcut before heavy setup (minimal logging init only)
+    if [[ "$DEPLOY_UPDATE_ONLY" == true ]]; then
+        # Basic log file handling
+        exec 1> >(tee -a "$LOG_FILE")
+        exec 2> >(tee -a "$LOG_FILE" >&2)
+        log_info "Running fast deploy/update mode (--deploy-update)"
+        deploy_update
+        log_success "Fast deploy/update finished"
+        exit 0
+    fi
     
     # Clear log file at the beginning of the script
     if [ "$DEBUG_MODE" = true ]; then

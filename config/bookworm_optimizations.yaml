@@ -28,9 +28,9 @@ boot_config:
   gpu_freq: 750   # Optimized GPU frequency
   over_voltage: 2 # Safe overvoltage for stable operation
   
-  # Memory Configuration for 16GB RAM
+  # Memory Configuration for 8GB RAM
   arm_64bit: 1
-  total_mem: 16384  # 16GB RAM utilization
+  total_mem: 8192  # 8GB RAM utilization
   
   # Enhanced Kernel Scheduler (Bookworm feature)
   kernel: "kernel8.img"
@@ -208,7 +208,7 @@ validation_checklist:
     - "Raspberry Pi OS Bookworm detected"
     - "Python 3.11+ available"
     - "systemd 252+ available"
-    - "16GB RAM detected"
+  - "8GB RAM detected"
     - "Raspberry Pi 4B detected"
   
   hardware_interfaces:

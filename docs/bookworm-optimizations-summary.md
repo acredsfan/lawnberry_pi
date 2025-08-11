@@ -143,7 +143,7 @@ sudo systemctl status lawnberry-system.service
 - **Camera Processing**: 30fps @ 1080p consistently
 
 ### Resource Usage
-- **Total Memory**: ~2GB with all services (16GB system)
+- **Total Memory**: ~2GB with all services (8GB system)
 - **CPU Usage**: <30% during normal operation
 - **Storage**: ~4GB system footprint
 - **Network**: <1MB/min normal telemetry
@@ -212,5 +212,5 @@ Future optimizations may leverage:
 
 **Implementation Date**: December 2024  
 **Tested On**: Raspberry Pi OS Bookworm (64-bit) with Python 3.11.2  
-**Hardware**: Raspberry Pi 4 Model B (16GB RAM)  
+**Hardware**: Raspberry Pi 4 Model B (8GB RAM)  
 **Status**: Production Ready ✅

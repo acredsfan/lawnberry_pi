@@ -19,7 +19,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
     ┌─────────────────────────────────────────────┼──────────────┐
     │                 MAIN COMPUTE                │              │
     │  ┌─────────────────────────────────────┐    │              │
-    │  │        Raspberry Pi 4 (16GB)       │    │ 12V Bus      │
+    │  │        Raspberry Pi 4 (8GB)        │    │ 12V Bus      │
     │  │  ┌─────────────────────────────┐    │    │              │
     │  │  │      RoboHAT (RP2040)       │    │    │              │
     │  │  │                             │    │    │              │
@@ -68,11 +68,11 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 
 ## Core Components
 
-### Raspberry Pi 4 (16GB RAM)
+### Raspberry Pi 4 (8GB RAM)
 **Function**: Main computing platform running all software systems
 **Specifications**:
 - ARM Cortex-A72 quad-core processor (1.5GHz)
-- 16GB LPDDR4 RAM for advanced processing
+- 8GB LPDDR4 RAM for advanced processing
 - WiFi 802.11ac and Gigabit Ethernet
 - Multiple I2C, SPI, UART, and GPIO interfaces
 - Camera Serial Interface (CSI) for Pi Camera

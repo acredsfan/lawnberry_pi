@@ -106,7 +106,7 @@ This document summarizes the comprehensive performance optimization implementati
 ## Hardware Optimization for Raspberry Pi 4B
 
 ### Pi 4B Specific Enhancements
-- **16GB RAM Utilization**: Efficient memory management for full 16GB capacity
+- **8GB RAM Utilization**: Efficient memory management for full 8GB capacity
 - **Quad-core Optimization**: Load balancing across all 4 cores
 - **Thermal Management**: Pi-specific temperature monitoring (/sys/class/thermal/thermal_zone0/temp)
 - **GPIO Performance**: Optimized hardware interface polling rates

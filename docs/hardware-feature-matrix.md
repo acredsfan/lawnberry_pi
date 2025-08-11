@@ -17,7 +17,7 @@ This document provides a complete matrix of hardware components, their capabilit
 | Component | Specification | Status | Notes |
 |-----------|---------------|--------|-------|
 | **CPU** | ARM Cortex-A72 Quad-core 1.5GHz | ✅ Implemented | Sufficient for all processing needs |
-| **RAM** | 16GB LPDDR4 | ✅ Implemented | Enables advanced computer vision |
+| **RAM** | 8GB LPDDR4 | ✅ Implemented | Supports advanced computer vision |
 | **Storage** | MicroSD 64GB+ Class 10 | ✅ Implemented | High-speed card recommended |
 | **GPIO** | 40-pin header | ✅ Fully Utilized | Pin mapping 100% compliant |
 | **Camera Interface** | CSI connector | ✅ Implemented | 1920x1080@30fps capability |
@@ -284,7 +284,7 @@ This document provides a complete matrix of hardware components, their capabilit
 
 | System | Components | Status | Capability Level |
 |--------|------------|--------|------------------|
-| **Processing** | Pi 4B 16GB | ✅ Complete | Professional |
+| **Processing** | Pi 4B 8GB | ✅ Complete | Professional |
 | **Navigation** | RTK GPS + IMU | ✅ Complete | Sub-centimeter |
 | **Sensors** | ToF + Camera + Environmental | ✅ Complete | Comprehensive |
 | **Power** | 30Ah LiFePO4 + 30W Solar | ✅ Complete | Full-day operation |

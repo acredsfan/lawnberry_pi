@@ -2,7 +2,7 @@
 
 **Version:** 1.0  
 **Target Audience:** Software developers extending or customizing the system  
-**Last Updated:** December 2024
+**Last Updated:** August 2025
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@
 ### Prerequisites
 
 **Hardware Requirements:**
-- Raspberry Pi 4B 16GB RAM (production) or x86_64 development machine
+- Raspberry Pi 4B 8GB RAM (production) or x86_64 development machine
 - Development machine with 8GB+ RAM
 - Git-enabled development environment
 
@@ -348,9 +348,33 @@ async def get_current_user(token: str = Depends(security)):
 **Technology Stack:**
 - React 18 with TypeScript
 - Redux Toolkit for state management
-- Material-UI for component library
-- Vite for build tooling
-- WebSocket for real-time updates
+- Material-UI (MUI) for component library with custom neon theme
+- Vite for build tooling & fast HMR on Pi
+- WebSocket (single multiplexed connection) for real-time status, sensor, navigation, power topics
+- Turf.js for geometric operations (boundary merging, intersections)
+
+### Live Data Flow (2025 Update)
+
+```
+ WebSocket ⇨ websocket.ts (topic demux & reconnect logic)
+           ⇨ sensorDataService (lazy-start after 'connect')
+           ⇨ Redux mowerSlice.setStatus/updateStatus
+           ⇨ Components (Dashboard, Maps, Power panels)
+```
+
+Key updates:
+1. Deferred service start: `sensorDataService.start()` only runs after WebSocket 'connect' event to prevent phantom subscriptions.
+2. Mock gating: Set `VITE_USE_MOCKS=true` to inject initial mock mower & weather status; otherwise UI waits for first live packet while still rendering quickly via initialization watchdog.
+3. Navigation topics: `navigation/position` and `navigation/status` now directly call `updateStatus` to adjust position/heading and coverage metrics without reconstructing full status.
+4. Stale data watchdog: In `App.tsx`, a 5s interval checks last update timestamp; after 15s of inactivity a warning banner offers a reconnect action.
+5. Dashboard refactor: Removed legacy polling `dataService`; now strictly consumes Redux state fed by WebSocket streams for deterministic state transitions and lower network overhead.
+6. Boundary & geofence visualization: `MapContainer` forwards geofence violation flags to provider-specific map components; polygons re-style live on violation without re-instantiating layers.
+
+Performance considerations (Pi Bookworm ARM64):
+- All heavy dynamic imports are route-split; Maps & Documentation pages lazy-loaded.
+- Sensor updates coalesce naturally via single Redux mutation path lowering render churn.
+- Heading indicator uses lightweight CSS/SVG rotation (Leaflet) or symbol rotation (Google) avoiding layout thrash.
+- Data freshness banner avoids global re-render by being outside primary route content tree.
 
 ### Component Structure
 
@@ -413,7 +437,7 @@ export const customSlice = createSlice({
 });
 ```
 
-### Google Maps Integration
+### Mapping Integration (Google & Leaflet Dual Provider)
 
 **Custom Map Components:**
 ```typescript
@@ -448,9 +472,9 @@ export const CustomMapComponent: React.FC<CustomMapProps> = ({
 };
 ```
 
-### Service Integration
+### Service Integration & Data Services
 
-**API Service Layer:**
+**API Service Layer (REST) & Real-time Layer:**
 ```typescript
 // services/apiService.ts
 class ApiService {
@@ -477,6 +501,23 @@ class ApiService {
 }
 
 export const apiService = new ApiService();
+
+// Real-time sensor data service (excerpt)
+// Start only after websocket 'connect'
+webSocketService.on('connect', () => sensorDataService.start())
+
+// Subscribe to navigation position
+webSocketService.on('navigation/position', (payload) => {
+    store.dispatch(updateStatus({
+        position: {
+            lat: payload.lat,
+            lng: payload.lng,
+            heading: payload.heading,
+            accuracy: payload.accuracy
+        },
+        lastUpdate: Date.now()
+    }))
+})
 ```
 
 ---
@@ -1030,7 +1071,7 @@ fi  # Note: always 'fi', never '}'
 if [[ $TOTAL_RAM_GB -ge 8 ]]; then
     log_success "RAM: ${TOTAL_RAM_GB}GB detected - enabling optimizations"
     if [[ $TOTAL_RAM_GB -ge 16 ]]; then
-        log_info "16GB+ RAM detected - enabling advanced features"
+    log_info "8GB+ RAM detected - enabling advanced features"
     fi  # Inner if closure
 else
     log_warning "RAM: ${TOTAL_RAM_GB}GB - limited optimizations"

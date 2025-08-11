@@ -72,13 +72,71 @@ const Maps: React.FC = () => {
   const [homeLocations, setHomeLocations] = useState<HomeLocation[]>([]);
   const [showHelp, setShowHelp] = useState(false);
   const mapRef = useRef<google.maps.Map | L.Map | null>(null);
+  const handleMapReady = useCallback((mapInstance: any) => {
+    mapRef.current = mapInstance;
+    // TODO: attach geofence overlay layers & heading rotation watchers
+  }, []);
+  // Layer visibility toggles
+  const [showLayers, setShowLayers] = useState({
+    boundaries: true,
+    noGo: true,
+    home: true,
+    path: true
+  });
+  // Geofence status state
+  const [geofenceStatus, setGeofenceStatus] = useState({
+    insideBoundary: true,
+    inNoGo: false,
+    violation: false
+  });
+  // Drawing toolbar state
+  const [drawingEnabled, setDrawingEnabled] = useState(false);
+  const [drawingMode, setDrawingMode] = useState<'boundary' | 'no-go' | 'home' | null>(null);
+
+  const handleBoundaryComplete = useCallback((coords: Array<{ lat: number; lng: number }>) => {
+    // Append new boundary (auto-valid initial) - id placeholder
+    const newBoundary = {
+      id: `boundary-${Date.now()}`,
+      name: `Boundary ${boundaries.length + 1}`,
+      points: coords,
+      isValid: true,
+      vertices: coords.length
+    } as any;
+    setBoundaries(prev => [...prev, newBoundary]);
+  }, [boundaries]);
+
+  const handleNoGoComplete = useCallback((coords: Array<{ lat: number; lng: number }>) => {
+    const newZone = {
+      id: `nogo-${Date.now()}`,
+      name: `No-Go ${noGoZones.length + 1}`,
+      points: coords,
+      isValid: true,
+      vertices: coords.length,
+      isEnabled: true
+    } as any;
+    setNoGoZones(prev => [...prev, newZone]);
+  }, [noGoZones]);
+
+  const handleHomeSet = useCallback((coord: { lat: number; lng: number }) => {
+    const newHome = {
+      id: `home-${Date.now()}`,
+      name: `Home ${homeLocations.length + 1}`,
+      type: 'charging_station',
+      position: { latitude: coord.lat, longitude: coord.lng },
+      is_default: homeLocations.length === 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    } as any;
+    setHomeLocations(prev => [...prev, newHome]);
+  }, [homeLocations]);
 
   // Determine if we should use full-width layout (desktop full-page mode); allow user toggle
   const [useFullWidth, setUseFullWidth] = useState(isDesktop);
 
   const robotPosition = status?.position ? {
     lat: status.position.lat,
-    lng: status.position.lng
+    lng: status.position.lng,
+    heading: status.position.heading
   } : undefined;
 
   // Keyboard shortcuts
@@ -217,10 +275,47 @@ const Maps: React.FC = () => {
   const activeNoGoZones = noGoZones.filter(z => z.isEnabled && z.isValid);
   const totalNoGoArea = noGoZones.reduce((sum, z) => sum + (z.area || 0), 0);
 
+  // Point in polygon (ray casting) helper
+  const pointInPolygon = useCallback((point: { lat: number; lng: number }, polygon: Array<{ lat: number; lng: number }>) => {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].lat, yi = polygon[i].lng;
+      const xj = polygon[j].lat, yj = polygon[j].lng;
+      const intersect = ((yi > point.lng) !== (yj > point.lng)) &&
+        (point.lat < (xj - xi) * (point.lng - yi) / (yj - yi + 1e-12) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }, []);
+
+  // Compute geofence status whenever robot position or zones change
+  useEffect(() => {
+    if (!robotPosition) return;
+    if (validBoundaries.length === 0) {
+      // No boundaries defined => treat as inside, no violation
+      setGeofenceStatus({ insideBoundary: true, inNoGo: false, violation: false });
+      return;
+    }
+    const insideAny = validBoundaries.some(b => pointInPolygon(robotPosition, b.points));
+    const inNoGo = activeNoGoZones.some(z => pointInPolygon(robotPosition, z.points));
+    setGeofenceStatus({ insideBoundary: insideAny, inNoGo, violation: !insideAny || inNoGo });
+    if ((!insideAny || inNoGo)) {
+      console.warn('🚨 Geofence violation detected', { insideAny, inNoGo, position: robotPosition });
+    }
+  }, [robotPosition, validBoundaries, activeNoGoZones, pointInPolygon]);
+
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" component="h1" gutterBottom>
         LawnBerry Maps
+        {geofenceStatus.violation && (
+          <Chip
+            label={geofenceStatus.inNoGo ? 'IN NO-GO ZONE' : 'OUTSIDE BOUNDARY'}
+            color="error"
+            size="small"
+            sx={{ ml: 2 }}
+          />
+        )}
       </Typography>
       
       <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
@@ -320,15 +415,58 @@ const Maps: React.FC = () => {
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
+                    boundaries={showLayers.boundaries ? validBoundaries.map(b => ({ id: b.id, name: b.name, coordinates: b.points, type: 'boundary' as const })) : []}
+                    noGoZones={showLayers.noGo ? activeNoGoZones.map(z => ({ id: z.id, name: z.name, coordinates: z.points, type: 'no-go' as const })) : []}
+                    homeLocation={showLayers.home && defaultHomeLocation ? { lat: defaultHomeLocation.position.latitude, lng: defaultHomeLocation.position.longitude } : null}
+                    enableDrawing={drawingEnabled}
+                    drawingMode={drawingMode}
+                    onBoundaryComplete={handleBoundaryComplete}
+                    onNoGoZoneComplete={handleNoGoComplete}
+                    onHomeLocationSet={handleHomeSet}
                     onProviderChange={(provider) => {
                       console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
                     }}
+                    onMapReady={handleMapReady}
+                    geofenceViolation={geofenceStatus.violation}
+                    geofenceInNoGo={geofenceStatus.inNoGo}
                     style={{ height: '100%' }}
                   >
-                    {/* TODO: Add boundary, no-go zone, and home location components as children */}
+                    {/* Overlays injected via MapContainer props */}
+                    {drawingEnabled && (
+                      <Box sx={{ position: 'absolute', top: 12, left: 12, zIndex: 1200, display: 'flex', gap: 1 }}>
+                        <Chip
+                          label="Boundary"
+                          color={drawingMode === 'boundary' ? 'success' : 'default'}
+                          onClick={() => setDrawingMode('boundary')}
+                          variant={drawingMode === 'boundary' ? 'filled' : 'outlined'}
+                          size="small"
+                        />
+                        <Chip
+                          label="No-Go"
+                          color={drawingMode === 'no-go' ? 'error' : 'default'}
+                          onClick={() => setDrawingMode('no-go')}
+                          variant={drawingMode === 'no-go' ? 'filled' : 'outlined'}
+                          size="small"
+                        />
+                        <Chip
+                          label="Home"
+                          color={drawingMode === 'home' ? 'info' : 'default'}
+                          onClick={() => setDrawingMode('home')}
+                          variant={drawingMode === 'home' ? 'filled' : 'outlined'}
+                          size="small"
+                        />
+                        <Chip
+                          label="Finish"
+                          color="primary"
+                          onClick={() => { setDrawingEnabled(false); setDrawingMode(null); }}
+                          variant="outlined"
+                          size="small"
+                        />
+                      </Box>
+                    )}
                   </MapContainer>
                   
                   {/* Layer toggle controls */}
@@ -349,23 +487,28 @@ const Maps: React.FC = () => {
                     }}
                   >
                     <FormControlLabel
-                      control={<Switch size="small" defaultChecked />}
+                      control={<Switch size="small" checked={showLayers.boundaries} onChange={e => setShowLayers(s => ({ ...s, boundaries: e.target.checked }))} />}
                       label="Boundaries"
                       sx={{ m: 0, fontSize: '0.875rem' }}
                     />
                     <FormControlLabel
-                      control={<Switch size="small" defaultChecked />}
+                      control={<Switch size="small" checked={showLayers.noGo} onChange={e => setShowLayers(s => ({ ...s, noGo: e.target.checked }))} />}
                       label="No-Go Zones"
                       sx={{ m: 0, fontSize: '0.875rem' }}
                     />
                     <FormControlLabel
-                      control={<Switch size="small" defaultChecked />}
+                      control={<Switch size="small" checked={showLayers.home} onChange={e => setShowLayers(s => ({ ...s, home: e.target.checked }))} />}
                       label="Home Locations"
                       sx={{ m: 0, fontSize: '0.875rem' }}
                     />
                     <FormControlLabel
-                      control={<Switch size="small" defaultChecked />}
+                      control={<Switch size="small" checked={showLayers.path} onChange={e => setShowLayers(s => ({ ...s, path: e.target.checked }))} />}
                       label="Robot Path"
+                      sx={{ m: 0, fontSize: '0.875rem' }}
+                    />
+                    <FormControlLabel
+                      control={<Switch size="small" checked={drawingEnabled} onChange={e => { setDrawingEnabled(e.target.checked); if (!e.target.checked) setDrawingMode(null); }} />}
+                      label="Draw"
                       sx={{ m: 0, fontSize: '0.875rem' }}
                     />
                   </Box>
@@ -389,7 +532,20 @@ const Maps: React.FC = () => {
                             }}
                           />
                           Robot Status
+                          {geofenceStatus.violation && (
+                            <Chip
+                              label={geofenceStatus.inNoGo ? 'No-Go Violation' : 'Boundary Violation'}
+                              color="error"
+                              size="small"
+                              sx={{ ml: 1 }}
+                            />
+                          )}
                         </Typography>
+                        {geofenceStatus.violation && (
+                          <Alert severity="error" sx={{ mb: 2 }}>
+                            {geofenceStatus.inNoGo ? 'Robot has entered a restricted no-go zone.' : 'Robot is outside all defined yard boundaries.'}
+                          </Alert>
+                        )}
                         
                         <Box sx={{ mb: 2 }}>
                           <Typography variant="body2" color="text.secondary">
@@ -520,12 +676,18 @@ const Maps: React.FC = () => {
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
+                    boundaries={validBoundaries.map(b => ({ id: b.id, name: b.name, coordinates: b.points, type: 'boundary' as const }))}
+                    noGoZones={[]}
+                    homeLocation={defaultHomeLocation ? { lat: defaultHomeLocation.position.latitude, lng: defaultHomeLocation.position.longitude } : null}
                     onProviderChange={(provider) => {
                       console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
                     }}
+                    onMapReady={handleMapReady}
+                    geofenceViolation={geofenceStatus.violation}
+                    geofenceInNoGo={geofenceStatus.inNoGo}
                     style={{ height: '100%' }}
                   />
                 </Paper>
@@ -566,12 +728,18 @@ const Maps: React.FC = () => {
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
+                    boundaries={validBoundaries.map(b => ({ id: b.id, name: b.name, coordinates: b.points, type: 'boundary' as const }))}
+                    noGoZones={activeNoGoZones.map(z => ({ id: z.id, name: z.name, coordinates: z.points, type: 'no-go' as const }))}
+                    homeLocation={defaultHomeLocation ? { lat: defaultHomeLocation.position.latitude, lng: defaultHomeLocation.position.longitude } : null}
                     onProviderChange={(provider) => {
                       console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
                     }}
+                    onMapReady={handleMapReady}
+                    geofenceViolation={geofenceStatus.violation}
+                    geofenceInNoGo={geofenceStatus.inNoGo}
                     style={{ height: '100%' }}
                   />
                 </Paper>
@@ -614,12 +782,18 @@ const Maps: React.FC = () => {
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
+                    boundaries={validBoundaries.map(b => ({ id: b.id, name: b.name, coordinates: b.points, type: 'boundary' as const }))}
+                    noGoZones={activeNoGoZones.map(z => ({ id: z.id, name: z.name, coordinates: z.points, type: 'no-go' as const }))}
+                    homeLocation={defaultHomeLocation ? { lat: defaultHomeLocation.position.latitude, lng: defaultHomeLocation.position.longitude } : null}
                     onProviderChange={(provider) => {
                       console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
                     }}
+                    onMapReady={handleMapReady}
+                    geofenceViolation={geofenceStatus.violation}
+                    geofenceInNoGo={geofenceStatus.inNoGo}
                     style={{ height: '100%' }}
                   />
                 </Paper>
@@ -660,12 +834,18 @@ const Maps: React.FC = () => {
                     usageLevel={mapConfig.usageLevel}
                     preferredProvider={userPreferences.preferredProvider}
                     robotPosition={robotPosition}
+                    boundaries={validBoundaries.map(b => ({ id: b.id, name: b.name, coordinates: b.points, type: 'boundary' as const }))}
+                    noGoZones={activeNoGoZones.map(z => ({ id: z.id, name: z.name, coordinates: z.points, type: 'no-go' as const }))}
+                    homeLocation={defaultHomeLocation ? { lat: defaultHomeLocation.position.latitude, lng: defaultHomeLocation.position.longitude } : null}
                     onProviderChange={(provider) => {
                       console.log('Provider changed to:', provider);
                     }}
                     onError={(error) => {
                       console.error('Map error:', error);
                     }}
+                    onMapReady={handleMapReady}
+                    geofenceViolation={geofenceStatus.violation}
+                    geofenceInNoGo={geofenceStatus.inNoGo}
                     style={{ height: '100%' }}
                   />
                 </Paper>
@@ -676,8 +856,9 @@ const Maps: React.FC = () => {
                 <PatternVisualizer
                   mapInstance={mapRef.current}
                   mapProvider={userPreferences.preferredProvider}
-                  boundaries={boundaries.length > 0 ? boundaries[0]?.points || [] : []}
+                  boundaries={boundaries.map(b => b.points)}
                   noGoZones={noGoZones.map(zone => zone.points)}
+                  homeLocations={homeLocations as any}
                   onPatternChange={handlePatternChange}
                   onPreviewStart={handlePreviewStart}
                 />

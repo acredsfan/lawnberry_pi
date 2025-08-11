@@ -31,7 +31,7 @@ It is designed to be efficient, safe, and easy to use.
 - User friendly setup script to allow fast and easy configuration so that the mower can be deployed quickly
 
 ## Hardware
-- Raspberry Pi 4 Model B 16GB RAM
+- Raspberry Pi 4 Model B 8GB RAM
 - RoboHAT (modified with RP2040-Zero)
 - 2x VL53L0X ToF Sensors (Front Left and Front Right)
 - 1x BNO085 IMU

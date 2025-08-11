@@ -6,10 +6,10 @@ import { RootState } from '../store/store'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts'
 import { format } from 'date-fns'
 import { setStatus, setConnectionState } from '../store/slices/mowerSlice'
-import { dataService } from '../services/dataService'
 import { useUnits } from '../hooks/useUnits'
-import { MowerStatus } from '../types'
 import { batteryLevelColor, guardDottedPaletteMisuse } from '../utils/color'
+import PowerManagementPanel from '../components/PowerManagement/PowerManagementPanel'
+import PerformanceMetricsPanel from '../components/Instrumentation/PerformanceMetricsPanel'
 
 const Dashboard: React.FC = () => {
   const dispatch = useDispatch()
@@ -26,104 +26,16 @@ const Dashboard: React.FC = () => {
   }>>([])
 
   const [videoStream, setVideoStream] = useState<string | null>(null)
-  const [realDataActive, setRealDataActive] = useState(false)
   const [lastDataUpdate, setLastDataUpdate] = useState<Date | null>(null)
 
-  // Initialize real data service
+  // Track last update timestamp whenever status changes
   useEffect(() => {
-    let unsubscribe: (() => void) | null = null
-
-    const initializeDataService = async () => {
-      try {
-        // Check if backend is available
-        const isBackendAvailable = await dataService.checkConnectivity()
-        
-        if (isBackendAvailable) {
-          setRealDataActive(true)
-          dispatch(setConnectionState(true))
-          
-          // Subscribe to status updates from data service
-          unsubscribe = dataService.subscribe((newStatus: MowerStatus) => {
-            dispatch(setStatus(newStatus))
-            setLastDataUpdate(new Date())
-          })
-          
-          // Start polling every 3 seconds for real-time updates
-          dataService.startStatusPolling(3000)
-          
-          if (import.meta.env.DEV) console.log('✅ Real data service activated - polling backend every 3 seconds')
-        } else {
-          setRealDataActive(false)
-          if (import.meta.env.DEV) console.warn('⚠️ Backend not available, using fallback mock data')
-          
-          // Set fallback data immediately
-          const fallbackStatus: MowerStatus = {
-            state: 'idle',
-            position: { lat: 40.7128, lng: -74.0060, heading: 0, accuracy: 5 },
-            battery: { level: 75.3, voltage: 24.1, current: 1.8, charging: false, timeRemaining: 120 },
-            sensors: {
-              imu: {
-                orientation: { x: 0, y: 0, z: 0 },
-                acceleration: { x: 0, y: 0, z: 9.8 },
-                gyroscope: { x: 0, y: 0, z: 0 },
-                temperature: 35
-              },
-              tof: { left: 1.2, right: 1.5 },
-              environmental: { temperature: 22, humidity: 65, pressure: 1013 },
-              power: { voltage: 24.1, current: 1.8, power: 43.4 }
-            },
-            coverage: { totalArea: 1000, coveredArea: 450, percentage: 45 },
-            lastUpdate: Date.now() / 1000,
-            location_source: 'gps',
-            connected: false
-          }
-          dispatch(setStatus(fallbackStatus))
-          dispatch(setConnectionState(false))
-        }
-      } catch (error) {
-        if (import.meta.env.DEV) console.error('Failed to initialize data service:', error)
-        setRealDataActive(false)
-      }
-    }
-
-    initializeDataService()
-
-    // Cleanup on unmount
-    return () => {
-      if (unsubscribe) {
-        unsubscribe()
-      }
-      dataService.stopStatusPolling()
-    }
-  }, [dispatch])
-
-  useEffect(() => {
-    // Simulate real-time data updates
-    const interval = setInterval(() => {
-      if (status && status.battery && status.sensors?.environmental && status.sensors?.imu) {
-        const newDataPoint = {
-          time: format(new Date(), 'HH:mm:ss'),
-          battery: typeof status.battery.level === 'number' ? status.battery.level : 0,
-          temperature: converters.temperature(status.sensors.environmental?.temperature ?? 0).value,
-          speed: converters.speed(Math.sqrt(
-            Math.pow(status.sensors.imu.acceleration?.x || 0, 2) +
-            Math.pow(status.sensors.imu.acceleration?.y || 0, 2)
-          )).value // Convert from m/s to current unit system
-        }
-        
-        setSensorHistory(prev => {
-          const updated = [...prev, newDataPoint]
-          return updated.slice(-20) // Keep last 20 data points
-        })
-      }
-    }, 2000)
-
-    return () => clearInterval(interval)
+    if (status) setLastDataUpdate(new Date())
   }, [status])
 
+  // Initialize camera stream once
   useEffect(() => {
-    // Set up video stream
-    const streamUrl = process.env.NODE_ENV === 'development' 
+    const streamUrl = process.env.NODE_ENV === 'development'
       ? 'http://localhost:8000/api/v1/camera/stream'
       : `/api/v1/camera/stream`
     setVideoStream(streamUrl)
@@ -170,9 +82,9 @@ const Dashboard: React.FC = () => {
                   SYSTEM STATUS
                 </Typography>
                 <Box display="flex" alignItems="center" gap={2}>
-                  {realDataActive && (
+                  {status && (
                     <Chip 
-                      label="LIVE DATA" 
+                      label="LIVE" 
                       color="success" 
                       size="small"
                       className="pulse"
@@ -432,78 +344,13 @@ const Dashboard: React.FC = () => {
           </Card>
         </Grid>
 
-        {/* Sensor Data Chart */}
+        {/* Power Management UI (Task 6) */}
         <Grid item xs={12}>
-          <Card className="holographic">
-            <CardContent>
-              <Typography variant="h5" gutterBottom className="neon-text" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                REAL-TIME SENSOR DATA
-              </Typography>
-              <Box className="chart-container">
-                <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={sensorHistory} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 255, 209, 0.3)" />
-                    <XAxis 
-                      dataKey="time" 
-                      stroke="#00FFD1" 
-                      style={{ fontSize: '12px', fontFamily: 'monospace' }}
-                    />
-                    <YAxis 
-                      yAxisId="left" 
-                      stroke="#00FFD1" 
-                      style={{ fontSize: '12px', fontFamily: 'monospace' }}
-                    />
-                    <YAxis 
-                      yAxisId="right" 
-                      orientation="right" 
-                      stroke="#FF1493" 
-                      style={{ fontSize: '12px', fontFamily: 'monospace' }}
-                    />
-                    <Tooltip 
-                      contentStyle={{
-                        backgroundColor: '#1a1a2e',
-                        border: '2px solid #00FFD1',
-                        borderRadius: 0,
-                        boxShadow: '0 0 20px rgba(0, 255, 209, 0.5)',
-                        fontFamily: 'monospace',
-                        color: '#FFFFFF'
-                      }}
-                    />
-                    <Line 
-                      yAxisId="left"
-                      type="monotone" 
-                      dataKey="battery" 
-                      stroke="#39FF14" 
-                      strokeWidth={3}
-                      name="Battery (%)"
-                      dot={{ fill: '#39FF14', strokeWidth: 2, r: 4 }}
-                      activeDot={{ r: 6, stroke: '#39FF14', strokeWidth: 2, fill: '#39FF14' }}
-                    />
-                    <Line 
-                      yAxisId="right"
-                      type="monotone" 
-                      dataKey="temperature" 
-                      stroke="#FFD700" 
-                      strokeWidth={3}
-                      name={`Temperature (${unitsPrefs.temperature})`}
-                      dot={{ fill: '#FFD700', strokeWidth: 2, r: 4 }}
-                      activeDot={{ r: 6, stroke: '#FFD700', strokeWidth: 2, fill: '#FFD700' }}
-                    />
-                    <Line 
-                      yAxisId="right"
-                      type="monotone" 
-                      dataKey="speed" 
-                      stroke="#FF1493" 
-                      strokeWidth={3}
-                      name={`Speed (${unitsPrefs.system === 'metric' ? 'km/h' : 'mph'})`}
-                      dot={{ fill: '#FF1493', strokeWidth: 2, r: 4 }}
-                      activeDot={{ r: 6, stroke: '#FF1493', strokeWidth: 2, fill: '#FF1493' }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </Box>
-            </CardContent>
-          </Card>
+          <PowerManagementPanel />
+        </Grid>
+        {/* Performance Metrics (Task 7) */}
+        <Grid item xs={12}>
+          <PerformanceMetricsPanel />
         </Grid>
       </Grid>
     </Box>

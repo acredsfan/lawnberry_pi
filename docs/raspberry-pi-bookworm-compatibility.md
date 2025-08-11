@@ -7,7 +7,7 @@ This document provides comprehensive information about LawnBerryPi's compatibili
 ## System Requirements
 
 ### Hardware Requirements
-- **Raspberry Pi 4 Model B** (4GB+ RAM recommended, 16GB for optimal performance)
+- **Raspberry Pi 4 Model B** (4GB+ RAM recommended, 8GB for optimal performance)
 - **MicroSD Card**: Class 10, 32GB minimum (64GB+ recommended)
 - **All hardware components** as specified in `docs/hardware-overview.md`
 
@@ -127,7 +127,7 @@ gpio:
 ## Performance Optimizations
 
 ### Memory Management
-With 16GB RAM on Pi 4B and Bookworm optimizations:
+With 8GB RAM on Pi 4B and Bookworm optimizations:
 
 ```bash
 # Memory allocation for services (in systemd units)
@@ -240,7 +240,7 @@ timeout: 2.0  # Increased from 1.0
 
 ## Performance Benchmarks
 
-### System Performance (Pi 4B 16GB + Bookworm)
+### System Performance (Pi 4B 8GB + Bookworm)
 - **Boot Time**: ~45 seconds to full system ready
 - **Service Start Time**: ~10 seconds for all services
 - **Memory Usage**: ~2GB total (with all services)
@@ -317,4 +317,4 @@ bash scripts/update_lawnberry.sh
 
 **Last Updated**: December 2024  
 **Tested On**: Raspberry Pi OS Bookworm (64-bit) with Python 3.11.2  
-**Hardware**: Raspberry Pi 4 Model B (16GB RAM)
+**Hardware**: Raspberry Pi 4 Model B (8GB RAM)

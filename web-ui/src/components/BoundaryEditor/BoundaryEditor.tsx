@@ -28,6 +28,8 @@ import {
   Warning as WarningIcon
 } from '@mui/icons-material';
 import { Loader } from '@googlemaps/js-api-loader';
+// Geometry operations
+import { union, polygon as turfPolygon, Feature, Polygon, booleanIntersects } from '@turf/turf';
 
 interface BoundaryPoint {
   lat: number;
@@ -260,10 +262,76 @@ const BoundaryEditor: React.FC<BoundaryEditorProps> = ({
   };
 
   const mergeOverlappingPolygons = (polygons: Boundary[]): Boundary[] => {
-    // Simple merge logic - in a real implementation, use a proper geometry library
-    // For now, just return the input polygons
-    // TODO: Implement proper polygon union using turf.js or similar
-    return polygons;
+    if (polygons.length < 2) return polygons;
+    try {
+      // Convert to GeoJSON features with reference back to index
+      const features: Array<{ feature: Feature<Polygon>; boundary: Boundary }> = polygons.map(p => ({
+        feature: turfPolygon([
+          p.points.map(pt => [pt.lng, pt.lat])
+        ], { id: p.id, name: p.name }),
+        boundary: p
+      }));
+
+      const consumed = new Set<number>();
+      const merged: Boundary[] = [];
+
+      for (let i = 0; i < features.length; i++) {
+        if (consumed.has(i)) continue;
+        let group: Feature<Polygon>[] = [features[i].feature];
+        let groupNames: string[] = [features[i].boundary.name];
+        consumed.add(i);
+        let changed = true;
+        while (changed) {
+          changed = false;
+            for (let j = 0; j < features.length; j++) {
+              if (consumed.has(j)) continue;
+              // Check intersection with any in group
+              if (group.some(g => booleanIntersects(g as any, features[j].feature as any))) {
+                group.push(features[j].feature);
+                groupNames.push(features[j].boundary.name);
+                consumed.add(j);
+                changed = true;
+              }
+            }
+        }
+        // Union group
+        let unionFeature: any = group[0];
+        for (let k = 1; k < group.length; k++) {
+          try {
+            unionFeature = union(unionFeature as any, group[k] as any) || unionFeature;
+          } catch (e) {
+            console.warn('Union failure within group', e);
+          }
+        }
+        if (unionFeature.geometry.type === 'Polygon') {
+          const coords = unionFeature.geometry.coordinates[0].map((c: number[]) => ({ lat: c[1], lng: c[0] }));
+          merged.push({
+            id: group.length > 1 ? `boundary-merged-${Date.now()}-${merged.length}` : features[i].boundary.id,
+            name: group.length > 1 ? `Merged(${groupNames.length}) ${groupNames.slice(0,3).join('+')}${groupNames.length>3?'…':''}` : features[i].boundary.name,
+            points: coords,
+            area: undefined,
+            isValid: true,
+            vertices: coords.length
+          });
+        } else if (unionFeature.geometry.type === 'MultiPolygon') {
+          unionFeature.geometry.coordinates.forEach((poly: any, idx: number) => {
+            const coords = poly[0].map((c: number[]) => ({ lat: c[1], lng: c[0] }));
+            merged.push({
+              id: `boundary-merged-${Date.now()}-${merged.length}-${idx}`,
+              name: `MergedPart ${idx+1} (${groupNames.length})`,
+              points: coords,
+              area: undefined,
+              isValid: true,
+              vertices: coords.length
+            });
+          });
+        }
+      }
+      return merged;
+    } catch (e) {
+      console.warn('Polygon merging error', e);
+      return polygons;
+    }
   };
 
   const startDrawing = () => {
@@ -299,7 +367,13 @@ const BoundaryEditor: React.FC<BoundaryEditorProps> = ({
         vertices: points.length
       };
 
-      const updatedBoundaries = [...boundaries, newBoundary];
+      let updatedBoundaries = [...boundaries, newBoundary];
+      // Perform merge pass (will preserve non-overlapping polygons)
+      const merged = mergeOverlappingPolygons(updatedBoundaries);
+      if (merged.length !== updatedBoundaries.length) {
+        setAlert({ message: 'Overlapping boundaries merged', severity: 'success' });
+      }
+      updatedBoundaries = merged;
       onBoundariesChange(updatedBoundaries);
       
       setShowNameDialog(false);
@@ -345,7 +419,7 @@ const BoundaryEditor: React.FC<BoundaryEditorProps> = ({
             Yard Boundaries
           </Typography>
           
-          <Box sx={{ mb: 2 }}>
+          <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
             <Button
               variant="contained"
               startIcon={<AddIcon />}
@@ -365,6 +439,52 @@ const BoundaryEditor: React.FC<BoundaryEditorProps> = ({
                 Cancel
               </Button>
             )}
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => {
+                // Export boundaries to JSON
+                const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(boundaries, null, 2));
+                const dl = document.createElement('a');
+                dl.setAttribute('href', dataStr);
+                dl.setAttribute('download', 'boundaries.json');
+                dl.click();
+              }}
+            >Export</Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'application/json';
+                input.onchange = (e: any) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    try {
+                      const imported = JSON.parse(reader.result as string);
+                      if (Array.isArray(imported)) {
+                        onBoundariesChange(imported.map((b: any, idx: number) => ({
+                          id: b.id || `boundary-import-${idx}-${Date.now()}`,
+                          name: b.name || `Imported Boundary ${idx+1}`,
+                          points: b.points || b.coordinates || [],
+                          area: b.area,
+                          isValid: true,
+                          vertices: (b.points || b.coordinates || []).length
+                        })));
+                        setAlert({ message: 'Boundaries imported', severity: 'success' });
+                      }
+                    } catch (err) {
+                      setAlert({ message: 'Import failed: invalid file', severity: 'error' });
+                    }
+                  };
+                  reader.readAsText(file);
+                };
+                input.click();
+              }}
+            >Import</Button>
           </Box>
 
           <List>

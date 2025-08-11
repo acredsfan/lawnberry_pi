@@ -97,6 +97,16 @@ export const api = {
       api.put(`/api/v1/navigation/boundaries/${id}`, boundary),
   },
 
+  // Power management methods
+  power: {
+    getStatus: () => api.get('/api/v1/power/status'),
+    updateShutdownThresholds: (thresholds: {critical: number, warning: number, return_to_base: number}) =>
+      api.post('/api/v1/power/shutdown-thresholds', thresholds),
+    setMode: (mode: string) => api.post('/api/v1/power/mode', { mode }),
+    seekSunnySpot: () => api.post('/api/v1/power/seek-sunny-spot'),
+    emergencyShutdown: () => api.post('/api/v1/power/emergency-shutdown'),
+  },
+
   // System methods
   system: {
     getHealth: () => api.get('/api/v1/system/health'),

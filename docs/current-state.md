@@ -16,7 +16,7 @@ The LawnBerryPi project has achieved comprehensive implementation completeness w
 ### ✅ Fully Implemented Components
 
 **Core Processing:**
-- Raspberry Pi 4 Model B 16GB RAM - ✅ Confirmed in hardware config
+- Raspberry Pi 4 Model B 8GB RAM - ✅ Confirmed in hardware config
 - RoboHAT with RP2040-Zero modification - ✅ Implemented with USB/Serial communication
 
 **Sensors - I2C Bus:**

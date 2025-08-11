@@ -32,8 +32,9 @@ interface PatternPath {
 interface PatternVisualizationProps {
   mapInstance: google.maps.Map | L.Map | null;
   mapProvider: MapProvider;
-  boundaries: Array<{ lat: number; lng: number }>;
+  boundaries: Array<{ lat: number; lng: number }> | Array<Array<{ lat: number; lng: number }>>;
   noGoZones?: Array<Array<{ lat: number; lng: number }>>;
+  homeLocations?: Array<{ id: string; name: string; position: { latitude: number; longitude: number }; is_default?: boolean }>;
   onPatternChange?: (pattern: string, parameters: any) => void;
   onPreviewStart?: (pattern: string) => void;
 }
@@ -43,6 +44,7 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
   mapProvider,
   boundaries,
   noGoZones = [],
+  homeLocations = [],
   onPatternChange,
   onPreviewStart
 }) => {
@@ -58,6 +60,8 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
   const [patternPaths, setPatternPaths] = useState<PatternPath[]>([]);
   const [overlays, setOverlays] = useState<any[]>([]);
   const [efficiency, setEfficiency] = useState<any>(null);
+  const [selectedBoundaryIndex, setSelectedBoundaryIndex] = useState(0);
+  const [startSubmitting, setStartSubmitting] = useState(false);
 
   // Initialize pattern parameters based on selected pattern
   useEffect(() => {
@@ -69,10 +73,10 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
 
   // Generate pattern paths when parameters change
   useEffect(() => {
-    if (boundaries.length > 0 && showPreview) {
+    if ((Array.isArray(boundaries) && (boundaries as any).length > 0) && showPreview) {
       generatePatternPaths();
     }
-  }, [selectedPattern, patternParameters, boundaries, showPreview]);
+  }, [selectedPattern, patternParameters, boundaries, showPreview, selectedBoundaryIndex]);
 
   // Update map overlays when paths change
   useEffect(() => {
@@ -83,15 +87,17 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
   }, [mapInstance, patternPaths, showPlanned, showCompleted, mapProvider]);
 
   const generatePatternPaths = useCallback(async () => {
-    if (!boundaries.length || isGenerating) return;
+    const boundaryList = Array.isArray(boundaries[0]) ? (boundaries as Array<Array<{ lat: number; lng: number }>>) : [boundaries as Array<{ lat: number; lng: number }>];
+    if (!boundaryList.length || isGenerating) return;
 
     setIsGenerating(true);
     try {
+      const activeBoundary = boundaryList[Math.min(selectedBoundaryIndex, boundaryList.length - 1)];
       const response = await fetch(`/api/v1/patterns/${selectedPattern}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          coordinates: boundaries,
+          coordinates: activeBoundary,
           parameters: patternParameters
         })
       });
@@ -116,7 +122,7 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          coordinates: boundaries,
+          coordinates: activeBoundary,
           parameters: patternParameters
         })
       });
@@ -140,6 +146,21 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
 
     const newOverlays: any[] = [];
 
+    const pathIntersectsNoGo = (coords: Array<{ lat: number; lng: number }>) => {
+      // Simple rejection: if any point lies inside a no-go polygon, we treat as intersecting
+      const pointInPoly = (pt: { lat: number; lng: number }, poly: Array<{ lat: number; lng: number }>) => {
+        let inside = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+          const xi = poly[i].lat, yi = poly[i].lng;
+          const xj = poly[j].lat, yj = poly[j].lng;
+          const intersect = ((yi > pt.lng) !== (yj > pt.lng)) && (pt.lat < (xj - xi) * (pt.lng - yi) / (yj - yi + 1e-12) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      };
+      return noGoZones.some(zone => coords.some(c => pointInPoly(c, zone)));
+    };
+
     patternPaths.forEach((path) => {
       const shouldShow = (
         (path.status === 'planned' && showPlanned) ||
@@ -148,6 +169,11 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
       );
 
       if (!shouldShow) return;
+
+      if (noGoZones.length && pathIntersectsNoGo(path.coordinates)) {
+        // Skip drawing this segment to mimic clipping; future: real clipping
+        return;
+      }
 
       const color = getPathColor(path.status);
       
@@ -210,6 +236,30 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
     if (patternConfig) {
       setPatternParameters(patternConfig.parameters);
       onPatternChange?.(pattern, patternConfig.parameters);
+    }
+  };
+
+  const defaultHome = homeLocations.find(h => h.is_default) || homeLocations[0];
+
+  const handleStartMowing = async () => {
+    if (!patternPaths.length) return;
+    setStartSubmitting(true);
+    try {
+      await fetch('/api/v1/navigation/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pattern: selectedPattern,
+          parameters: patternParameters,
+          boundary_index: selectedBoundaryIndex,
+          home: defaultHome ? { lat: defaultHome.position.latitude, lng: defaultHome.position.longitude } : null
+        })
+      });
+      onPreviewStart?.(selectedPattern);
+    } catch (e) {
+      console.error('Failed to start mowing', e);
+    } finally {
+      setStartSubmitting(false);
     }
   };
 
@@ -336,6 +386,23 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
           Pattern Visualization
         </Typography>
 
+        {Array.isArray(boundaries[0]) && (
+          <Box sx={{ mb: 2 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Boundary</InputLabel>
+              <Select
+                value={selectedBoundaryIndex}
+                label="Boundary"
+                onChange={(e) => setSelectedBoundaryIndex(Number(e.target.value))}
+              >
+                {(boundaries as Array<Array<{ lat: number; lng: number }>>).map((b, idx) => (
+                  <MenuItem key={idx} value={idx}>Boundary {idx + 1} ({b.length} pts)</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+        )}
+
         <Grid container spacing={2} sx={{ mb: 2 }}>
           <Grid item xs={12} md={6}>
             <FormControl fullWidth>
@@ -376,17 +443,15 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
                 {isGenerating ? 'Generating...' : 'Refresh'}
               </Button>
 
-              {onPreviewStart && (
-                <Button
-                  variant="contained"
-                  size="small"
-                  onClick={() => onPreviewStart(selectedPattern)}
-                  startIcon={<PlayArrow />}
-                  disabled={!patternPaths.length}
-                >
-                  Start Mowing
-                </Button>
-              )}
+              <Button
+                variant="contained"
+                size="small"
+                onClick={handleStartMowing}
+                startIcon={<PlayArrow />}
+                disabled={!patternPaths.length || startSubmitting}
+              >
+                {startSubmitting ? 'Starting...' : 'Start Mowing'}
+              </Button>
             </Box>
           </Grid>
         </Grid>
@@ -484,6 +549,13 @@ const PatternVisualizer: React.FC<PatternVisualizationProps> = ({
               <Alert severity="info">
                 Showing {patternPaths.length} pattern paths on map. 
                 Blue: Planned, Orange: In Progress, Green: Completed
+                {noGoZones.length ? ' (segments crossing no-go zones suppressed)' : ''}
+              </Alert>
+            )}
+
+            {defaultHome && (
+              <Alert severity="success" sx={{ mt: 2 }}>
+                Home Base: {defaultHome.name} ({defaultHome.position.latitude.toFixed(5)}, {defaultHome.position.longitude.toFixed(5)})
               </Alert>
             )}
           </>

@@ -370,6 +370,104 @@ LOG_LEVEL=INFO
 # Optional: Coral TPU Configuration
 CORAL_TPU_ENABLED=true          # Set to false to force CPU mode
 CORAL_MODEL_PATH=/opt/lawnberry/models/custom/  # Custom model directory
+# Canonical Runtime & Fast Deploy
+
+LawnBerry now uses a canonical runtime directory at `/opt/lawnberry` for all enabled systemd services. Your cloned repository (e.g. `/home/pi/lawnberry_pi`) is the editable source tree. After making code changes, use the fast deploy helper to sync changes into the runtime without a full reinstall:
+
+```bash
+./scripts/install_lawnberry.sh --deploy-update
+```
+
+This performs:
+1. Incremental rsync of source (excluding venv, data, logs, node_modules, build artifacts) to `/opt/lawnberry`.
+2. Optional sync of `web-ui/dist` if you built the frontend separately.
+3. Validation / creation of the runtime virtualenv and dependency install (only if needed).
+4. Automatic correction of any legacy service units still pointing at the project root.
+5. Restart of core services (system, data, hardware, safety, api).
+
+Development Workflow:
+- Edit code in source tree.
+- (Optional) Build web UI: `(cd web-ui && npm run build)`.
+- Deploy update: `./scripts/install_lawnberry.sh --deploy-update`.
+- Check service status: `systemctl status lawnberry-system.service`.
+
+Production Isolation Benefits:
+- Reduces risk of accidental edits to running code.
+- Stable path simplifies documentation & monitoring.
+- Easier backups (`/opt/lawnberry`, `/var/lib/lawnberry`, `/var/log/lawnberry`).
+
+Do NOT manually edit files under `/opt/lawnberry` except for emergency hotfixes—these will be overwritten on the next deploy.
+
+### Troubleshooting Fast Deploy
+
+If a core service fails after deploy:
+1. Re-run `--deploy-update` (repairs legacy paths and dependencies).
+2. Inspect logs: `journalctl -xeu lawnberry-system.service`.
+3. Verify runtime venv: `/opt/lawnberry/venv/bin/python -c "import fastapi"`.
+4. Check for syntax errors introduced by the recent change.
+
+### Uninstall (Extended Cleanup)
+
+Standard removal:
+```bash
+sudo systemctl stop lawnberry-system lawnberry-data lawnberry-hardware lawnberry-safety lawnberry-api || true
+sudo systemctl disable lawnberry-system lawnberry-data lawnberry-hardware lawnberry-safety lawnberry-api || true
+sudo rm -f /etc/systemd/system/lawnberry-*.service
+sudo systemctl daemon-reload
+sudo rm -rf /opt/lawnberry /var/log/lawnberry /var/lib/lawnberry
+```
+
+Remove any legacy service units referencing a source path (older versions):
+```bash
+sudo find /etc/systemd/system -maxdepth 1 -name 'lawnberry-*.service' -exec grep -l '/home/pi/lawnberry_pi' {} \; | xargs -r sudo rm
+sudo systemctl daemon-reload
+```
+
+Backup before uninstall (optional):
+```bash
+sudo tar -czf lawnberry-backup-$(date +%Y%m%d).tar.gz /opt/lawnberry/config /var/lib/lawnberry /var/log/lawnberry
+```
+
+---
+Updated: 2025-08-10 – Added canonical runtime + fast deploy instructions.
+
+### Fast Deploy Advanced Environment Variables
+
+You can tune the fast deploy behavior via environment variables when invoking `--deploy-update` (prefix assignment then command).
+
+Common examples:
+```bash
+# Minimal deploy skipping service restarts and venv check (quick frontend-only change)
+FAST_DEPLOY_DIST_MODE=minimal FAST_DEPLOY_SKIP_VENV=1 FAST_DEPLOY_SKIP_SERVICES=1 ./scripts/install_lawnberry.sh --deploy-update
+
+# Force full dist sync and restart services with shorter timeouts
+FAST_DEPLOY_DIST_MODE=full FAST_DEPLOY_SERVICE_TIMEOUT=4 ./scripts/install_lawnberry.sh --deploy-update
+```
+
+Variables:
+- FAST_DEPLOY_HASH=0|1 (default 1) – Enable subset drift hash before sync.
+- FAST_DEPLOY_DIST_MODE=skip|minimal|full (default minimal) – Control web-ui/dist sync strategy.
+   - skip: Don’t sync frontend assets.
+   - minimal: Only copy changed core files (index.html, manifests) and any new hashed bundles (no deletion).
+   - full: Rsync entire dist with deletion (uses a bounded timeout; falls back to minimal on timeout).
+- FAST_DEPLOY_SERVICE_TIMEOUT=SECONDS (default 10) – Per service restart timeout.
+- FAST_DEPLOY_SKIP_SERVICES=1 – Skip restarting services entirely.
+- FAST_DEPLOY_SKIP_VENV=1 – Skip runtime virtualenv validation/install.
+- FAST_DEPLOY_INCLUDE_TESTS=1 – Include the tests directory in sync (excluded by default for speed).
+- FAST_DEPLOY_MAX_SECONDS=TOTAL – Abort remaining directory syncs if total fast deploy exceeds this duration.
+- FAST_DEPLOY_SKIP_POST_HASH=1 – Skip post-sync verification hash.
+
+Recommended patterns:
+| Scenario | Command |
+|----------|---------|
+| Backend code tweak | `./scripts/install_lawnberry.sh --deploy-update` |
+| Frontend asset change only | `FAST_DEPLOY_DIST_MODE=minimal FAST_DEPLOY_SKIP_VENV=1 ./scripts/install_lawnberry.sh --deploy-update` |
+| Large refactor (full refresh) | `FAST_DEPLOY_DIST_MODE=full FAST_DEPLOY_HASH=1 ./scripts/install_lawnberry.sh --deploy-update` |
+| Skip service restart (manual control) | `FAST_DEPLOY_SKIP_SERVICES=1 ./scripts/install_lawnberry.sh --deploy-update` |
+
+If a deploy is approaching an outer supervisor timeout, set `FAST_DEPLOY_MAX_SECONDS` to ensure the script exits cleanly and can be retried.
+
+
 ```
 
 ### 3.6 Get Required API Keys

@@ -24,7 +24,9 @@ const initialState: SystemSettings = {
   display: {
     theme: 'light',
     refreshRate: 1000,
-    showAdvanced: false
+  showAdvanced: false,
+  reducedMotion: false,
+  lowPowerMode: false
   }
 }
 

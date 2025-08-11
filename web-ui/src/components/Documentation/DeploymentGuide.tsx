@@ -78,7 +78,7 @@ const DeploymentGuide: React.FC<DeploymentGuideProps> = ({ expertiseLevel }) => 
               <ListItem>
                 <ListItemIcon><ComputerIcon /></ListItemIcon>
                 <ListItemText 
-                  primary="Raspberry Pi 4 Model B (16GB RAM recommended)"
+                  primary="Raspberry Pi 4 Model B (8GB RAM recommended)"
                   secondary="Ensure you have the latest Bookworm OS image"
                 />
               </ListItem>
