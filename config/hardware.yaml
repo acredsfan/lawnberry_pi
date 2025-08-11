@@ -55,6 +55,20 @@ plugins:
     parameters:
       i2c_address: 0x40
       channel: 1
+  -
+    name: gps
+    enabled: True
+    parameters:
+      port: /dev/ttyACM0
+      baud: 38400
+      timeout: 1.0
+  -
+    name: imu
+    enabled: True
+    parameters:
+      port: /dev/ttyAMA4
+      baud: 3000000
+      timeout: 0.1
 logging_level: INFO
 retry_attempts: 3
 retry_base_delay: 0.1

@@ -100,7 +100,7 @@ python3 -m pytest tests/performance/test_performance_benchmarks.py -v
   ```
 - [ ] **Camera Interface**: Camera module detected
   ```bash
-  libcamera-hello --list-cameras  # Should list available cameras
+  rpicam-hello --list-cameras  # Should list available cameras
   ```
 - [ ] **USB Interface**: USB devices properly enumerated
   ```bash
@@ -248,18 +248,18 @@ watch -n 300 'echo "=== $(date) ==="; systemctl is-active lawnberry-*.service; f
   echo "# LawnBerryPi Bookworm Compatibility Report"
   echo "Generated: $(date)"
   echo ""
-  
+
   echo "## System Information"
   lsb_release -a
   cat /proc/device-tree/model
   python3 --version
   systemctl --version | head -1
-  
+
   echo ""
   echo "## Validation Results"
   python3 scripts/validate_bookworm_installation.py --quick
   python3 tests/automation/bookworm_validation_suite.py
-  
+
 } > bookworm_compatibility_report.md
 ```
 
