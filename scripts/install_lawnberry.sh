@@ -41,7 +41,7 @@ Installation Options:
   --services-only          Install only systemd services
   --database-only          Initialize only the database
   --system-config-only     Configure only system settings
-  
+
 Component Combinations:
   --backend-only           Install dependencies + Python + services + database
   --frontend-only          Install web UI only
@@ -288,14 +288,14 @@ SYSTEMD_VERSION=0
 detect_bookworm() {
     log_debug "Detecting Raspberry Pi OS Bookworm."
     print_section "Raspberry Pi OS Bookworm Detection and Optimization"
-    
+
     # Check for Bookworm specifically
     if [[ -f /etc/os-release ]]; then
         if grep -q "VERSION_CODENAME=bookworm" /etc/os-release; then
             BOOKWORM_DETECTED=true
             BOOKWORM_OPTIMIZATIONS=true
             log_success "Raspberry Pi OS Bookworm detected - enabling full optimizations"
-            
+
             # Check Python version for Bookworm compatibility
             PYTHON_VERSION=$(python3 --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -n1)
             log_debug "Detected Python version: $PYTHON_VERSION"
@@ -305,7 +305,7 @@ detect_bookworm() {
                 log_warning "Python $PYTHON_VERSION may not be optimal for Bookworm"
                 log_info "Consider upgrading to Python 3.11+ for best performance"
             fi
-            
+
             # Check for Raspberry Pi 4B specifically
             if [[ -f /proc/device-tree/model ]]; then
                 PI_MODEL=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0')
@@ -316,20 +316,20 @@ detect_bookworm() {
                     log_warning "Hardware: $PI_MODEL - some optimizations may not apply"
                 fi
             fi
-            
+
         elif grep -q "bullseye\\|buster" /etc/os-release; then
             log_warning "Legacy OS detected - some features may not be available"
             log_info "For best performance, upgrade to Raspberry Pi OS Bookworm"
             log_info "Many Bookworm-specific optimizations will be disabled"
         fi
     fi
-    
+
     # Get systemd version for compatibility and security features
     if command -v systemctl >/dev/null 2>&1; then
         SYSTEMD_VERSION=$(systemctl --version | head -n1 | grep -o '[0-9]\+' | head -n1)
         log_info "systemd version: $SYSTEMD_VERSION"
         log_debug "Detected systemd version: $SYSTEMD_VERSION"
-        
+
         if [[ $SYSTEMD_VERSION -ge 252 ]]; then
             log_success "systemd 252+ detected - enabling enhanced security hardening"
             log_info "Available features: service sandboxing, cgroup v2, process isolation"
@@ -338,7 +338,7 @@ detect_bookworm() {
             log_info "Update systemd for enhanced security and performance features"
         fi
     fi
-    
+
     # Check available RAM (8GB is target optimal configuration)
     TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
     TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
@@ -355,7 +355,7 @@ detect_bookworm() {
 
 check_system() {
     print_section "System Requirements Check"
-    
+
     # Check if we're on Raspberry Pi
     log_debug "Checking for Raspberry Pi hardware."
     if [[ ! -f /proc/device-tree/model ]] || ! grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
@@ -363,28 +363,28 @@ check_system() {
     else
         model=$(cat /proc/device-tree/model)
         log_info "Detected: $model"
-        
+
         # Check for Pi 4B specifically for optimizations
         if grep -q "Raspberry Pi 4" /proc/device-tree/model; then
             log_success "Raspberry Pi 4 detected - enabling performance optimizations"
         fi
     fi
-    
+
     # Check OS
     if command -v lsb_release >/dev/null 2>&1; then
         os_info=$(lsb_release -d | cut -f2)
         log_info "Operating System: $os_info"
     fi
-    
+
     # Detect Bookworm first
     detect_bookworm
-    
+
     # Check Python version - Bookworm compatibility
     log_debug "Checking Python version."
     if command -v python3 >/dev/null 2>&1; then
         python_version=$(python3 --version)
         log_info "Python: $python_version"
-        
+
         # Check if Python 3.11+ (Bookworm requirement)
         if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
             if [[ $BOOKWORM_DETECTED == true ]]; then
@@ -406,7 +406,7 @@ check_system() {
         log_error "Python 3 is not installed"
         exit 1
     fi
-    
+
     # Check Raspberry Pi OS version - Bookworm preferred
     if [[ -f /etc/os-release ]]; then
         source /etc/os-release
@@ -419,36 +419,36 @@ check_system() {
             log_warning "Unrecognized OS version - Bookworm recommended for best compatibility"
         fi
     fi
-    
+
     # Check available memory
     total_mem=$(grep MemTotal /proc/meminfo | awk '{print $2}')
     total_mem_mb=$((total_mem / 1024))
     log_info "Total Memory: ${total_mem_mb} MB"
-    
+
     if [[ $total_mem_mb -lt 1024 ]]; then
         log_warning "Less than 1GB RAM detected - performance may be limited"
     fi
-    
+
     # Check disk space
     available_space=$(df "$HOME" | tail -1 | awk '{print $4}')
     available_mb=$((available_space / 1024))
     log_info "Available disk space: ${available_mb} MB"
-    
+
     if [[ $available_mb -lt 2048 ]]; then
         log_error "At least 2GB free space required"
         exit 1
     fi
-    
+
     log_success "System requirements check passed"
 }
 
 install_dependencies() {
     print_section "Installing System Dependencies"
-    
+
     log_info "Updating package lists..."
     log_debug "Running 'sudo apt-get update -qq'"
     sudo apt-get update -qq
-    
+
     # Essential packages
     essential_packages=(
         "python3-pip"
@@ -473,11 +473,11 @@ install_dependencies() {
         "mosquitto"
         "mosquitto-clients"
         "python3-pytest"
-        "libcamera-apps"
+        "rpicam-apps"
         "libcamera-dev"
         "python3-libcamera"
     )
-    
+
     # Hardware-specific packages
     hardware_packages=(
         "python3-picamera2"
@@ -485,20 +485,20 @@ install_dependencies() {
         "python3-rpi.gpio"
         "raspi-config"
     )
-    
+
     log_info "Installing essential packages..."
     log_debug "Installing: ${essential_packages[*]}"
     sudo apt-get install -y "${essential_packages[@]}" || {
         log_error "Failed to install essential packages"
         exit 1
     }
-    
+
     log_info "Installing hardware packages..."
     log_debug "Installing: ${hardware_packages[*]}"
     sudo apt-get install -y "${hardware_packages[@]}" || {
         log_warning "Some hardware packages failed to install - continuing anyway"
     }
-    
+
     # Ensure MQTT broker starts properly
     if systemctl is-available mosquitto >/dev/null 2>&1; then
         log_info "Starting Mosquitto MQTT broker..."
@@ -511,22 +511,22 @@ install_dependencies() {
             log_warning "Mosquitto MQTT broker failed to start"
         fi
     fi
-    
+
     log_info "Installing Node.js for the web UI..."
-    
+
     # Check current Node.js version and compatibility
     if command -v node >/dev/null && command -v npm >/dev/null; then
         current_node=$(node --version | sed 's/v//')
         node_major=$(echo $current_node | cut -d. -f1)
         log_info "Current Node.js version: $current_node"
-        
-        # Test for ARM compatibility issues  
+
+        # Test for ARM compatibility issues
         if ! timeout 10s node -e "console.log('Node.js compatibility test passed')" 2>/dev/null; then
             log_warning "Current Node.js version has ARM compatibility issues - reinstalling compatible version"
             node_needs_update=true
         elif [[ $node_major -gt 18 ]]; then
             log_warning "Node.js v$node_major may have ARM compatibility issues - installing v18 LTS"
-            node_needs_update=true  
+            node_needs_update=true
         else
             log_success "Node.js version is compatible"
             node_needs_update=false
@@ -535,21 +535,21 @@ install_dependencies() {
         log_info "Node.js not found - installing Node.js 18 LTS"
         node_needs_update=true
     fi
-    
+
     # Install compatible Node.js version if needed
     if [[ "$node_needs_update" == true ]]; then
         log_info "Installing Node.js 18 LTS for optimal ARM compatibility..."
-        
+
         # Remove existing Node.js if problematic
         if command -v node >/dev/null; then
             log_info "Removing incompatible Node.js version..."
             sudo apt-get remove -y nodejs npm 2>/dev/null || true
         fi
-        
+
         # Install Node.js 18 LTS via NodeSource
         log_debug "Downloading and running NodeSource setup script for Node.js 18.x LTS"
         curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-        
+
         # Install Node.js (which includes npm)
         log_debug "Installing nodejs package."
         sudo apt-get install -y nodejs
@@ -560,7 +560,7 @@ install_dependencies() {
         log_success "Node.js and npm are installed."
         log_info "Node version: $(node -v)"
         log_info "npm version: $(npm -v)"
-        
+
         # Final compatibility test
         if timeout 10s node -e "console.log('✅ Node.js ARM compatibility verified')" 2>/dev/null; then
             log_success "Node.js ARM compatibility confirmed"
@@ -571,19 +571,19 @@ install_dependencies() {
     else
         log_warning "Node.js installation failed - web UI may not work"
     fi
-    
+
     # Enable I2C and SPI
     log_info "Enabling I2C and SPI interfaces..."
     log_debug "Running raspi-config to enable I2C, SPI, and camera."
     sudo raspi-config nonint do_i2c 0 2>/dev/null || log_warning "Could not enable I2C"
     sudo raspi-config nonint do_spi 0 2>/dev/null || log_warning "Could not enable SPI"
     sudo raspi-config nonint do_camera 0 2>/dev/null || log_warning "Could not enable camera"
-    
+
     # Add user to required groups
     log_info "Adding user to required groups..."
     log_debug "Adding user '$USER' to groups: i2c, spi, gpio, dialout"
     sudo usermod -a -G i2c,spi,gpio,dialout "$USER" || log_warning "Could not add user to hardware groups"
-    
+
     log_success "Dependencies installed successfully"
 }
 
@@ -728,14 +728,14 @@ EOF
 
 setup_python_environment() {
     print_section "Setting up Python Environment"
-    
+
     # Check if virtual environment already exists and is properly configured
     if [[ -d "$PROJECT_ROOT/venv" ]] && [[ -f "$PROJECT_ROOT/venv/bin/activate" ]] && [[ "$FORCE_REINSTALL" != "true" ]]; then
         log_info "Checking existing virtual environment..."
-        
+
         # Test if the environment has required packages
         source "$PROJECT_ROOT/venv/bin/activate"
-        
+
         # Check if key packages are installed
         if python -c "import requests, fastapi, uvicorn, redis, yaml" 2>/dev/null; then
             log_success "Virtual environment already exists and is properly configured"
@@ -746,26 +746,26 @@ setup_python_environment() {
             deactivate 2>/dev/null || true
         fi
     fi
-    
+
     # Create virtual environment with system site packages for libcamera access
     log_info "Creating Python virtual environment with system packages access..."
     cd "$PROJECT_ROOT"
-    
+
     if [[ -d "venv" ]]; then
         log_info "Removing existing virtual environment..."
         log_debug "Removing existing venv directory."
         rm -rf venv
     fi
-    
+
     log_debug "Creating new virtual environment with --system-site-packages for libcamera access."
     python3 -m venv --system-site-packages venv
     source venv/bin/activate
-    
+
     # Upgrade pip
     log_info "Upgrading pip..."
     log_debug "Running 'pip install --upgrade pip'"
     pip install --upgrade pip
-    
+
     # Install core requirements first (always required)
     log_info "Installing core Python requirements..."
     if [[ -f "requirements.txt" ]]; then
@@ -788,7 +788,7 @@ setup_python_environment() {
         log_error "Failed to install 'requests' library"
         exit 1
     }
-    
+
     # Verify libcamera access
     log_info "Verifying libcamera access in virtual environment..."
     if python3 -c "import libcamera; print('✓ libcamera accessible')" 2>/dev/null; then
@@ -797,32 +797,44 @@ setup_python_environment() {
         log_warning "libcamera module not accessible - camera features may be limited"
     fi
 
+    # Verify rpicam utilities are available
+    if command -v rpicam-hello >/dev/null 2>&1; then
+        log_info "Testing camera with rpicam-hello..."
+        if rpicam-hello --version >/dev/null 2>&1; then
+            log_success "rpicam-hello is available"
+        else
+            log_warning "rpicam-hello test failed"
+        fi
+    else
+        log_warning "rpicam-hello command not found"
+    fi
+
     # Coral TPU support is now optional and handled separately
     # Use setup_coral_packages() function for Coral installation
-    
+
     log_success "Python environment setup complete"
 }
 
 detect_hardware() {
     print_section "Hardware Detection and Testing"
-    
+
     cd "$PROJECT_ROOT"
     source venv/bin/activate
-    
+
     log_info "Running hardware detection..."
     if python3 scripts/hardware_detection.py; then
         log_success "Hardware detection completed"
-        
+
         # Check if hardware config was generated
         if [[ -f "hardware_detected.yaml" ]]; then
             log_info "Hardware configuration generated"
-            
+
             # Backup original config if it exists
             if [[ -f "config/hardware.yaml" ]]; then
                 cp config/hardware.yaml config/hardware.yaml.backup
                 log_info "Backed up original hardware.yaml"
             fi
-            
+
             # Ask user if they want to use detected config
             echo
             read -p "Use detected hardware configuration? (Y/n): " -n 1 -r
@@ -834,7 +846,7 @@ detect_hardware() {
                 log_info "Keeping original hardware configuration"
             fi
         fi
-        
+
         # Show detection results
         if [[ -f "hardware_detection_results.json" ]]; then
             log_info "Hardware detection results saved to hardware_detection_results.json"
@@ -846,33 +858,33 @@ detect_hardware() {
 
 initialize_tof_sensors() {
     print_section "ToF Sensor Initialization"
-    
+
     cd "$PROJECT_ROOT"
     source venv/bin/activate
-    
+
     log_info "Initializing dual VL53L0X ToF sensors..."
     log_info "This ensures both sensors are configured at different I2C addresses"
-    
+
     # Check if ToF sensors are physically connected
     log_info "Checking for ToF sensor hardware..."
-    
+
     # Run I2C detection first
     if command -v i2cdetect >/dev/null 2>&1; then
         # Look for any devices at 0x29 or 0x30 (typical ToF addresses)
         if i2cdetect -y 1 | grep -E "(29|30)" >/dev/null 2>&1; then
             log_info "ToF sensors detected on I2C bus"
-            
+
             # Run our ToF initialization script
             if python3 setup_dual_tof.py >/dev/null 2>&1; then
                 log_success "✅ Dual ToF sensors initialized successfully"
                 log_success "  - Left sensor (tof_left): 0x30"
                 log_success "  - Right sensor (tof_right): 0x29"
-                
+
                 # Verify both sensors are accessible
                 log_info "Verifying sensor accessibility..."
                 if i2cdetect -y 1 | grep -E " 29 " >/dev/null 2>&1 && i2cdetect -y 1 | grep -E " 30 " >/dev/null 2>&1; then
                     log_success "✅ Both ToF sensors accessible at correct addresses"
-                    
+
                     # Update hardware configuration to reflect both sensors
                     log_info "Updating hardware configuration..."
                     if [[ -f "config/hardware.yaml" ]]; then
@@ -882,7 +894,7 @@ initialize_tof_sensors() {
                 else
                     log_warning "⚠️ ToF sensors initialized but address verification failed"
                 fi
-                
+
             else
                 log_warning "ToF sensor initialization script failed"
                 log_info "ToF sensors may still work with default configuration"
@@ -894,18 +906,18 @@ initialize_tof_sensors() {
     else
         log_warning "i2cdetect not available - skipping ToF sensor check"
     fi
-    
+
     log_info "ToF sensor initialization complete"
 }
 
 setup_environment() {
     print_section "Environment Configuration"
-    
+
     cd "$PROJECT_ROOT"
     source venv/bin/activate
-    
+
     log_info "Setting up environment variables..."
-    
+
     # Check if .env already exists
     if [[ -f ".env" ]]; then
         log_info ".env file already exists - validating..."
@@ -916,13 +928,13 @@ setup_environment() {
             log_warning "Environment configuration issues detected"
         fi
     fi
-    
+
     # Run environment setup
     echo
     echo "Environment setup is required for API keys and configuration."
     read -p "Run interactive environment setup? (Y/n): " -n 1 -r
     echo
-    
+
     if [[ $REPLY =~ ^[Yy]$|^$ ]]; then
         if python3 scripts/setup_environment.py; then
             log_success "Environment setup completed"
@@ -938,21 +950,21 @@ setup_environment() {
 
 build_web_ui() {
     print_section "Building Web UI"
-    
+
     cd "$PROJECT_ROOT/web-ui"
-    
+
     # Check if Node.js is available
     if ! command -v npm >/dev/null 2>&1; then
         log_error "npm not available - Node.js is required for web UI build"
         exit 1
     fi
-    
+
     # ARM64/Raspberry Pi compatibility assessment
     NODE_VERSION=$(node --version | sed 's/v//')
     NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1)
-    
+
     log_info "Node.js version: $NODE_VERSION (ARM64 compatibility check)"
-    
+
     # Ensure we have a secure, compatible Node.js version for ARM64
     if [[ $NODE_MAJOR -lt 18 ]]; then
         log_error "Node.js $NODE_VERSION is too old for optimal ARM64 support and security"
@@ -967,7 +979,7 @@ build_web_ui() {
     elif [[ $NODE_MAJOR -ge 21 ]]; then
         log_warning "Node.js $NODE_MAJOR.x - Very new, may have ARM64 compatibility issues"
         log_info "Testing compatibility before proceeding..."
-        
+
         # Test Node.js basic functionality on ARM64
         if ! timeout 10s node -e "console.log('ARM64 test OK')" >/dev/null 2>&1; then
             log_error "Node.js $NODE_VERSION has ARM64 compatibility issues"
@@ -975,23 +987,23 @@ build_web_ui() {
         fi
         export NODE_OPTIONS="--max-old-space-size=2048 --no-warnings"
     fi
-    
+
     # Verify package.json and dependencies
     if [[ ! -f "package.json" ]]; then
         log_error "package.json not found in web-ui directory"
         exit 1
     fi
-    
+
     log_info "Installing web UI dependencies with ARM64 optimizations..."
-    
+
     # Set ARM64-friendly npm configuration for better compatibility
     export npm_config_target_arch=arm64
     export npm_config_target_platform=linux
     export npm_config_cache=/tmp/npm-cache-$USER
-    
+
     # Clean any potentially corrupted installations
     rm -rf node_modules package-lock.json .npm
-    
+
     # Use npm install instead of ci for better ARM64 dependency resolution
     log_info "Installing dependencies (optimized for ARM64)..."
     if ! timeout 600s npm install --verbose --no-audit --no-fund --prefer-online; then
@@ -999,19 +1011,19 @@ build_web_ui() {
         log_error "This may be due to ARM64 compatibility issues with some packages"
         exit 1
     fi
-    
+
     # Verify critical dependencies are installed and check their ARM64 compatibility
     if [[ ! -d "node_modules/react" ]] || [[ ! -d "node_modules/vite" ]]; then
         log_error "Critical dependencies missing after install"
         exit 1
     fi
-    
+
     # Check Vite version for ARM64 compatibility (newest compatible approach)
     vite_version=$(npm list vite --depth=0 2>/dev/null | grep vite@ | cut -d'@' -f2 | head -1)
     if [[ -n "$vite_version" ]]; then
         vite_major=$(echo "$vite_version" | cut -d'.' -f1)
         log_info "Detected Vite version: $vite_version"
-        
+
         if [[ "$vite_major" -eq 4 ]]; then
             log_info "Vite 4.x - Stable ARM64 compatibility"
         elif [[ "$vite_major" -eq 5 ]]; then
@@ -1020,7 +1032,7 @@ build_web_ui() {
             log_info "Vite 6.x - Latest stable with ARM64 support"
         elif [[ "$vite_major" -ge 7 ]]; then
             log_warning "Vite $vite_version - Very new, testing ARM64 compatibility..."
-            
+
             # Test Vite binary compatibility before proceeding
             if ! timeout 15s npx vite --version >/dev/null 2>&1; then
                 log_error "Vite $vite_version binary not compatible with ARM64"
@@ -1030,9 +1042,9 @@ build_web_ui() {
             log_info "Vite $vite_version ARM64 compatibility test passed"
         fi
     fi
-    
+
     log_success "Dependencies installed successfully"
-    
+
     # Set build environment variables optimized for Raspberry Pi ARM64
     export CI="true"
     export FORCE_COLOR="0"
@@ -1040,14 +1052,14 @@ build_web_ui() {
     export VITE_APP_API_URL="/api"
     export VITE_APP_WS_URL="/ws"
     export GENERATE_SOURCEMAP="false"  # Reduce build size and memory usage
-    
+
     # Create production build
     log_info "Building web UI for production (ARM64 optimized)..."
-    
+
     # Run build with proper timeout and error handling
     if timeout 600s npm run build; then
         log_success "Web UI build completed successfully"
-        
+
         # Verify build output
         if [[ -d "dist" ]] && [[ -f "dist/index.html" ]]; then
             build_size=$(du -sh dist | cut -f1)
@@ -1061,7 +1073,7 @@ build_web_ui() {
     else
         log_error "Web UI build failed or timed out"
         log_error "This may be due to ARM64 compatibility issues with build dependencies"
-        
+
         # Try to provide helpful error information
         if [[ -f "npm-debug.log" ]]; then
             log_info "Last 10 lines of npm debug log:"
@@ -1069,35 +1081,35 @@ build_web_ui() {
                 log_info "  $line"
             done
         fi
-        
+
         exit 1
     fi
-    
+
     # Test the build by serving it briefly
     log_info "Testing web UI build..."
     npm run preview &>/dev/null &
     preview_pid=$!
     sleep 5
-    
+
     # Test if server responds
     if curl -s http://localhost:4173 >/dev/null 2>&1; then
         log_success "Web UI preview test passed"
     else
         log_warning "Web UI preview test failed - may need manual verification"
     fi
-    
+
     # Cleanup
     kill $preview_pid 2>/dev/null || true
     wait $preview_pid 2>/dev/null || true
-    
+
     log_success "Web UI build process completed"
 }
 
 create_directories() {
     print_section "Creating System Directories"
-    
+
     log_info "Creating system directories..."
-    
+
     # Create directories
     sudo mkdir -p "$INSTALL_DIR"
     sudo mkdir -p "$LOG_DIR"
@@ -1106,7 +1118,7 @@ create_directories() {
     sudo mkdir -p "$DATA_DIR/health_metrics"
     sudo mkdir -p "$DATA_DIR/database"
     sudo mkdir -p "$BACKUP_DIR"
-    
+
     # Copy project files to installation directory
     log_info "Copying project files to $INSTALL_DIR..."
     sudo cp -r "$PROJECT_ROOT"/* "$INSTALL_DIR/" || log_warning "Could not copy all project files"
@@ -1120,7 +1132,7 @@ create_directories() {
     else
         log_debug "Virtual environment already present in $INSTALL_DIR/venv"
     fi
-    
+
     # Set ownership and permissions
     sudo chown -R "$USER:$GROUP" "$INSTALL_DIR" || sudo chown -R "$USER:$USER" "$INSTALL_DIR"
     sudo chown -R "$USER:$GROUP" "$LOG_DIR" || sudo chown -R "$USER:$USER" "$LOG_DIR"
@@ -1129,7 +1141,7 @@ create_directories() {
     sudo chmod 755 "$LOG_DIR"
     sudo chmod 755 "$DATA_DIR"
     sudo chmod 700 "$DATA_DIR/config_backups"
-    
+
     log_success "System directories created"
 }
 
@@ -1408,7 +1420,7 @@ EOF
 apply_bookworm_optimizations() {
     if [[ $BOOKWORM_OPTIMIZATIONS == true ]]; then
         print_section "Applying Bookworm-Specific Optimizations"
-        
+
     log_info "Configuring memory management for 8GB RAM..."
         # Create memory optimization configuration
         sudo tee /etc/sysctl.d/99-lawnberry-bookworm.conf >/dev/null <<EOF
@@ -1418,28 +1430,28 @@ vm.vfs_cache_pressure=50
 vm.dirty_background_ratio=5
 vm.dirty_ratio=10
 EOF
-        
+
         log_info "Enabling CPU governor for performance..."
         # Set CPU governor for Pi 4B performance
         if grep -q "Raspberry Pi 4" /proc/device-tree/model 2>/dev/null; then
             echo 'GOVERNOR="performance"' | sudo tee /etc/default/cpufrequtils >/dev/null
         fi
-        
+
         log_info "Configuring I2C and GPIO optimizations..."
         # Optimize I2C performance
         if ! grep -q "dtparam=i2c_arm_baudrate" /boot/config.txt; then
             echo "dtparam=i2c_arm_baudrate=400000" | sudo tee -a /boot/config.txt >/dev/null
         fi
-        
+
         log_success "Bookworm optimizations applied"
     fi
 }
 
 install_services() {
     print_section "Installing System Services"
-    
+
     cd "$PROJECT_ROOT"
-    
+
     # Service files to install
     services=(
         "src/system_integration/lawnberry-system.service"
@@ -1454,18 +1466,18 @@ install_services() {
         "src/vision/lawnberry-vision.service"
         "src/web_api/lawnberry-api.service"
     )
-    
+
     log_info "Checking and installing systemd service files with Bookworm optimizations..."
-    
+
     installed_services=()
     services_needing_update=()
-    
+
     for service_file in "${services[@]}"; do
         if [[ -f "$service_file" ]]; then
             service_name=$(basename "$service_file")
             target_service="$SERVICE_DIR/$service_name"
             needs_install=false
-            
+
             # Check if service needs to be installed/updated
             if [[ ! -f "$target_service" ]]; then
                 log_info "Service not found: $service_name - installing..."
@@ -1487,10 +1499,10 @@ install_services() {
                     fi
                 fi
             fi
-            
+
             if [[ "$needs_install" == true ]]; then
                 log_info "Installing/updating $service_name..."
-                
+
                 # Stop service if it's running and being updated
                 if [[ " ${services_needing_update[*]} " =~ " ${service_name} " ]]; then
                     service_base="${service_name%.service}"
@@ -1499,7 +1511,7 @@ install_services() {
                         sudo systemctl stop "$service_name" || log_warning "Could not stop $service_name"
                     fi
                 fi
-                
+
                 # Update service file paths BUT retain /opt canonical deployment (Option A)
                 # We intentionally keep WorkingDirectory=/opt/lawnberry so runtime is isolated from dev tree
                 temp_service="/tmp/$service_name"
@@ -1513,7 +1525,7 @@ install_services() {
                 sed -i "s|User=.*|User=$USER|g" "$temp_service"
                 sed -i "s|Group=.*|Group=$GROUP|g" "$temp_service"
                 # (No replacement of /opt/lawnberry with project root — by design per Option A decision)
-                
+
                 # Apply Bookworm-specific security hardening if supported
                 if [[ $SYSTEMD_VERSION -ge 252 ]]; then
                     # Only append hardening block if not already present
@@ -1537,11 +1549,11 @@ EOF
                         log_debug "Hardening keys already present in $service_name"
                     fi
                 fi
-                
+
                 sudo cp "$temp_service" "$SERVICE_DIR/"
                 sudo chmod 644 "$SERVICE_DIR/$service_name"
                 rm -f "$temp_service"
-                
+
                 installed_services+=("${service_name%.service}")
             else
                 # Service is up-to-date, but still add to list for enabling
@@ -1551,13 +1563,13 @@ EOF
             log_warning "Service file not found: $service_file"
         fi
     done
-    
+
     # Reload systemd if any services were installed/updated
     if [[ ${#services_needing_update[@]} -gt 0 ]] || [[ ${#installed_services[@]} -gt 0 ]]; then
         log_info "Reloading systemd daemon..."
         sudo systemctl daemon-reload
     fi
-    
+
     # Enable core services (check if they need enabling)
     core_services=(
         "lawnberry-system"
@@ -1566,7 +1578,7 @@ EOF
         "lawnberry-safety"
         "lawnberry-api"
     )
-    
+
     log_info "Checking and enabling core services..."
     for service in "${core_services[@]}"; do
         if [[ " ${installed_services[*]} " =~ " ${service} " ]]; then
@@ -1579,7 +1591,7 @@ EOF
             fi
         fi
     done
-    
+
     # Restart updated services
     if [[ ${#services_needing_update[@]} -gt 0 ]]; then
         log_info "Restarting updated services..."
@@ -1593,39 +1605,39 @@ EOF
             fi
         done
     fi
-    
+
     log_success "System services installed and configured"
 }
 
 setup_database() {
     print_section "Database Initialization"
-    
+
     cd "$PROJECT_ROOT"
     source venv/bin/activate
-    
+
     log_info "Initializing database..."
-    
+
     # Create database directory
     mkdir -p "$DATA_DIR/database"
-    
+
     # Run database initialization if script exists
     if [[ -f "scripts/init_database.py" ]]; then
         python3 scripts/init_database.py
     else
         log_info "Database initialization script not found - skipping"
     fi
-    
+
     # Start Redis if available
     if systemctl is-available redis-server >/dev/null 2>&1; then
         log_info "Starting Redis server..."
         sudo systemctl start redis-server
         sudo systemctl enable redis-server
     fi
-    
+
     # Start and configure Mosquitto MQTT broker
     if systemctl is-available mosquitto >/dev/null 2>&1; then
         log_info "Configuring and starting Mosquitto MQTT broker..."
-        
+
         # Create basic mosquitto configuration
         sudo tee /etc/mosquitto/conf.d/lawnberry.conf >/dev/null <<EOF
 # LawnBerry MQTT Configuration
@@ -1633,27 +1645,27 @@ listener 1883 localhost
 allow_anonymous true
 log_dest file /var/log/mosquitto/mosquitto.log
 log_type error
-log_type warning  
+log_type warning
 log_type notice
 log_type information
 EOF
-        
+
         sudo systemctl start mosquitto
         sudo systemctl enable mosquitto
         log_success "Mosquitto MQTT broker configured and started"
     else
         log_warning "Mosquitto MQTT broker not available - communication features may be limited"
     fi
-    
+
     log_success "Database initialization complete"
 }
 
 run_post_install_validation() {
     print_section "Post-Installation Validation"
-    
+
     log_info "Running Bookworm compatibility validation..."
     cd "$PROJECT_ROOT"
-    
+
     if [[ -f "scripts/validate_bookworm_installation.py" ]]; then
         if [[ $BOOKWORM_DETECTED == true ]]; then
             log_info "Bookworm detected - running comprehensive validation"
@@ -1662,7 +1674,7 @@ run_post_install_validation() {
             log_info "Non-Bookworm system - running basic validation"
             python3 scripts/validate_bookworm_installation.py --quick
         fi
-        
+
         validation_result=$?
         if [[ $validation_result -eq 0 ]]; then
             log_success "Installation validation passed!"
@@ -1676,7 +1688,7 @@ run_post_install_validation() {
 
 configure_system() {
     print_section "System Configuration"
-    
+
     # Create logrotate configuration
     log_info "Configuring log rotation..."
     sudo tee /etc/logrotate.d/lawnberry > /dev/null <<EOF
@@ -1693,10 +1705,10 @@ $LOG_DIR/*.log {
     endscript
 }
 EOF
-    
+
     # Create system control scripts
     log_info "Installing system control scripts..."
-    
+
     # Enhanced system control script
     sudo tee /usr/local/bin/lawnberry-system > /dev/null <<'EOF'
 #!/bin/bash
@@ -1770,7 +1782,7 @@ case "$1" in
         ;;
 esac
 EOF
-    
+
     # Health check script
     sudo tee /usr/local/bin/lawnberry-health-check > /dev/null <<'EOF'
 #!/bin/bash
@@ -1841,71 +1853,71 @@ else
     exit 1
 fi
 EOF
-    
+
     # Make scripts executable
     sudo chmod +x /usr/local/bin/lawnberry-system
     sudo chmod +x /usr/local/bin/lawnberry-health-check
-    
+
     log_success "System configuration complete"
 }
 
 run_tests() {
     print_section "Running System Tests"
-    
+
     cd "$PROJECT_ROOT"
     source venv/bin/activate
-    
+
     log_info "Running basic system tests..."
-    
+
     # Test Python imports
     if python3 -c "import sys; sys.path.insert(0, 'src'); import weather.weather_service" 2>/dev/null; then
         log_success "Python imports: OK"
     else
         log_warning "Python imports: Some modules failed to import"
     fi
-    
+
     # Test configuration loading
     if [[ -f ".env" ]]; then
         log_success "Environment file: Present"
     else
         log_warning "Environment file: Missing"
     fi
-    
+
     # Test hardware detection
     if [[ -f "hardware_detection_results.json" ]]; then
         log_success "Hardware detection: Results available"
     else
         log_warning "Hardware detection: No results found"
     fi
-    
+
     # Test database connection
     if systemctl is-active --quiet redis-server; then
         log_success "Redis database: Running"
     else
         log_warning "Redis database: Not running"
     fi
-    
+
     log_info "System tests completed"
 }
 
 cleanup() {
     print_section "Installation Cleanup"
-    
+
     # Clean up temporary files
     log_info "Cleaning up temporary files..."
     sudo rm -f /tmp/lawnberry_*
-    
+
     # Clean up build artifacts
     cd "$PROJECT_ROOT"
     find . -name "*.pyc" -delete
     find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-    
+
     log_info "Cleanup complete"
 }
 
 show_completion_message() {
     print_section "Installation Complete!"
-    
+
     echo
     log_success "LawnBerry Pi installation completed successfully!"
     echo
@@ -1932,11 +1944,11 @@ show_completion_message() {
     echo
     echo "Web interface will be available at: http://$(hostname -I | awk '{print $1}'):8000"
     echo
-    
+
     if [[ -f "hardware_detection_results.json" ]]; then
         echo "Hardware detection results: hardware_detection_results.json"
     fi
-    
+
     echo "Full installation log: $LOG_FILE"
     echo
 }
@@ -1945,7 +1957,7 @@ show_completion_message() {
 # Enhanced main function with modular installation support
 main() {
     print_header
-    
+
     # Parse command line arguments for modular installation
     parse_arguments "$@"
 
@@ -1959,7 +1971,7 @@ main() {
         log_success "Fast deploy/update finished"
         exit 0
     fi
-    
+
     # Clear log file at the beginning of the script
     if [ "$DEBUG_MODE" = true ]; then
         > "$LOG_FILE"
@@ -1971,7 +1983,7 @@ main() {
 
     log_info "Starting LawnBerry Pi installation..."
     log_info "Installation log will be saved to: $LOG_FILE"
-    
+
     # Ask user about debug logging if not already enabled
     if [ "$DEBUG_MODE" = false ] && [ "$NON_INTERACTIVE" = false ]; then
         echo
@@ -2005,16 +2017,16 @@ main() {
         install_dependencies
         setup_coral_packages
     fi
-    
+
     if [[ "$INSTALL_PYTHON_ENV" == true ]]; then
         setup_python_environment
     fi
-    
+
     if [[ "$SKIP_HARDWARE" != true ]] && [[ "$INSTALL_DEPENDENCIES" == true || "$INSTALL_PYTHON_ENV" == true ]]; then
         detect_hardware
         initialize_tof_sensors
     fi
-    
+
     if [[ "$SKIP_ENV" != true ]] && [[ "$INSTALL_SYSTEM_CONFIG" == true ]]; then
         if [[ "$NON_INTERACTIVE" == true ]]; then
             log_info "Skipping environment setup in non-interactive mode"
@@ -2022,37 +2034,37 @@ main() {
             setup_environment
         fi
     fi
-    
+
     if [[ "$INSTALL_WEB_UI" == true ]]; then
         build_web_ui
     fi
-    
+
     # Always create directories if installing any component that needs them
     if [[ "$INSTALL_SERVICES" == true || "$INSTALL_DATABASE" == true ]]; then
         create_directories
     fi
-    
+
     if [[ "$INSTALL_SERVICES" == true ]]; then
         install_services
     fi
-    
+
     if [[ "$INSTALL_DATABASE" == true ]]; then
         setup_database
     fi
-    
+
     if [[ "$INSTALL_SYSTEM_CONFIG" == true ]]; then
         configure_system
     fi
-    
+
     # Run validation and tests unless skipped
     if [[ "$SKIP_VALIDATION" != true ]]; then
         run_post_install_validation
         run_tests
     fi
-    
+
     cleanup
     show_completion_message
-    
+
     log_success "Installation completed successfully!"
 }
 

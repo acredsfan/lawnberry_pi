@@ -74,8 +74,8 @@ Expected devices:
 Test camera functionality:
 
 ```bash
-libcamera-hello --timeout 2000
-libcamera-vid -t 5000 -o test.h264
+rpicam-hello --timeout 2000
+rpicam-vid -t 5000 -o test.h264
 ```
 
 ## Automated Installation
@@ -171,7 +171,7 @@ hardware:
     motor_right_pwm: 32
     safety_stop: 18
     emergency_stop: 22
-  
+
   i2c_devices:
     tof_sensor_1: 0x29
     tof_sensor_2: 0x30
@@ -330,7 +330,7 @@ async def check_updates():
     deployment_manager = DeploymentManager(config_manager, None, None)
     system_monitor = SystemMonitor(config_manager)
     health_monitor = HealthMonitor()
-    
+
     update_manager = RemoteUpdateManager(config_manager, deployment_manager, system_monitor, health_monitor)
     await update_manager.initialize()
     updates = await update_manager.check_for_updates(force=True)
@@ -612,6 +612,6 @@ sudo /opt/lawnberry/scripts/generate_support_report.sh
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** $(date +%Y-%m-%d)  
+**Document Version:** 1.0
+**Last Updated:** $(date +%Y-%m-%d)
 **Valid For:** LawnBerry v1.0.0 and later
