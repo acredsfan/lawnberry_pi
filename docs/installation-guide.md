@@ -100,7 +100,7 @@ sudo reboot
 ### 2.2 Raspberry Pi and Hat Installation
 
 1. **Mount Raspberry Pi**
-   - Secure Raspberry Pi 4 in protective enclosure
+   - Secure Raspberry Pi 4 or 5 in protective enclosure
    - Ensure adequate ventilation for cooling
 
 2. **Install RoboHAT**

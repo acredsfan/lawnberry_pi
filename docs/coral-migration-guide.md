@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Coral Package Migration system automatically updates existing LawnBerry installations from pip-based Coral packages to system package management on Pi OS Bookworm systems. This migration ensures compatibility with Python 3.11+ and follows Google's recommended installation methods.
+The Coral Package Migration system automatically updates existing LawnBerry installations from pip-based Coral packages to system package management on Pi OS Bookworm systems. This migration uses a dedicated Python 3.9 environment managed with `pyenv`, matching Google's current Coral TPU requirements and installation methods.
 
 ## Migration Process
 
@@ -27,9 +27,11 @@ The migration runs automatically during system updates via `scripts/update_lawnb
    - `pycoral`
    - `tflite-runtime`
 
-5. **Installation Phase**: Installs system packages:
+5. **Installation Phase**: Installs system packages when available:
    - `python3-pycoral` (primary package)
+   - `libedgetpu1-std` runtime
    - `python3-tflite-runtime` (if available)
+   - Falls back to CPU-only inference if packages are missing
 
 6. **Verification Phase**: Tests the new installation:
    - Import tests for Coral packages
@@ -69,7 +71,7 @@ python3 scripts/migrate_coral_packages.py --rollback coral_migration_1234567890 
 ## Migration Scenarios
 
 ### Scenario 1: Standard Migration
-- **System**: Pi OS Bookworm with Python 3.11+
+- **System**: Pi OS Bookworm with Python 3.9 (managed via pyenv)
 - **Current**: pip-installed pycoral packages
 - **Action**: Migrate to system packages
 - **Result**: Improved compatibility and performance

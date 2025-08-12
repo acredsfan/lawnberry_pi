@@ -11,13 +11,12 @@ import cv2
 import numpy as np
 import serial
 
-try:
-    import RPi.GPIO as GPIO
+try:  # Prefer lgpio for Raspberry Pi 4B/5 compatibility
+    import lgpio
     import smbus2
-except ImportError:
-    # Mock for development/testing
+except ImportError:  # pragma: no cover - hardware specific
     smbus2 = None
-    GPIO = None
+    lgpio = None
 
 from .data_structures import (
     CameraFrame,
@@ -289,6 +288,7 @@ class GPIOManager:
         self._pins: Dict[int, Dict] = {}
         self._lock = asyncio.Lock()
         self._initialized = False
+        self._chip: Optional[int] = None
 
         # GPIO pin assignments
         self.pins = {
@@ -305,14 +305,13 @@ class GPIOManager:
         async with self._lock:
             if not self._initialized:
                 try:
-                    if GPIO:
-                        GPIO.setmode(GPIO.BCM)
-                        GPIO.setwarnings(False)
-
+                    if lgpio:
+                        self._chip = lgpio.gpiochip_open(0)
+                        self.logger.info("lgpio chip 0 opened")
+                    else:
+                        self.logger.warning("lgpio not available - using mock GPIO")
                     self._initialized = True
-                    self.logger.info("GPIO initialized")
-
-                except Exception as e:
+                except Exception as e:  # pragma: no cover - hardware specific
                     raise HardwareError(f"Failed to initialize GPIO: {e}")
 
     async def setup_pin(
@@ -323,11 +322,11 @@ class GPIOManager:
 
         async with self._lock:
             try:
-                if GPIO:
-                    gpio_dir = GPIO.OUT if direction == "output" else GPIO.IN
-                    pud = {"up": GPIO.PUD_UP, "down": GPIO.PUD_DOWN, "none": GPIO.PUD_OFF}
-
-                    GPIO.setup(pin, gpio_dir, pull_up_down=pud[pull_up_down], initial=initial)
+                if lgpio and self._chip is not None:
+                    if direction == "output":
+                        lgpio.gpio_claim_output(self._chip, pin, initial)
+                    else:
+                        lgpio.gpio_claim_input(self._chip, pin)
 
                 self._pins[pin] = {
                     "direction": direction,
@@ -347,8 +346,8 @@ class GPIOManager:
 
         async with self._lock:
             try:
-                if GPIO:
-                    GPIO.output(pin, value)
+                if lgpio and self._chip is not None:
+                    lgpio.gpio_write(self._chip, pin, value)
 
                 self.logger.debug(f"GPIO pin {pin} set to {value}")
 
@@ -362,8 +361,8 @@ class GPIOManager:
 
         async with self._lock:
             try:
-                if GPIO:
-                    return GPIO.input(pin)
+                if lgpio and self._chip is not None:
+                    return lgpio.gpio_read(self._chip, pin)
                 return 0  # Mock value
 
             except Exception as e:

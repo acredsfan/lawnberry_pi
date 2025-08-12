@@ -51,7 +51,7 @@ Visit the **[Documentation Index](docs/README.md)** for all available guides, re
 ## 🏗️ System Architecture
 
 ### Hardware Components
-- **Raspberry Pi 4** (8GB RAM) - Main computing platform
+- **Raspberry Pi 4B or 5** (8GB RAM recommended) - Main computing platform
 - **RoboHAT with RP2040** - Motor control and sensor interface
 - **RTK-GPS Module** - Centimeter-accurate positioning
 - **Environmental Sensors** - Weather monitoring and safety

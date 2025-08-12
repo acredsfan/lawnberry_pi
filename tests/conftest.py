@@ -3,25 +3,26 @@ Pytest configuration and shared fixtures for the testing framework.
 Provides common test utilities, mock hardware interfaces, and test data.
 """
 
-import pytest
 import asyncio
-import tempfile
-import shutil
 import json
-import yaml
-from pathlib import Path
-from unittest.mock import Mock, AsyncMock, MagicMock, patch
-from typing import Dict, Any, List, Optional
+import shutil
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+import yaml
 
 # Import all the main modules for testing
 from src.communication import MQTTClient
-from src.hardware.hardware_interface import HardwareInterface
-from src.sensor_fusion.fusion_engine import SensorFusionEngine
-from src.safety.safety_service import SafetyService, SafetyConfig
-from src.power_management.power_manager import PowerManager
-from src.vision.vision_manager import VisionManager
 from src.data_management.data_manager import DataManager
+from src.hardware.hardware_interface import HardwareInterface
+from src.power_management.power_manager import PowerManager
+from src.safety.safety_service import SafetyConfig, SafetyService
+from src.sensor_fusion.fusion_engine import SensorFusionEngine
+from src.vision.vision_manager import VisionManager
 from src.weather.weather_service import WeatherService
 
 
@@ -30,35 +31,30 @@ from src.weather.weather_service import WeatherService
 def test_config():
     """Provide comprehensive test configuration"""
     return {
-        "hardware": {
-            "i2c_bus": 1,
-            "mock_mode": True,
-            "retry_attempts": 3,
-            "timeout_ms": 1000
-        },
+        "hardware": {"i2c_bus": 1, "mock_mode": True, "retry_attempts": 3, "timeout_ms": 1000},
         "safety": {
             "emergency_response_time_ms": 100,
             "person_safety_radius_m": 3.0,
             "pet_safety_radius_m": 1.5,
             "max_safe_tilt_deg": 15.0,
-            "critical_tilt_deg": 25.0
+            "critical_tilt_deg": 25.0,
         },
         "sensor_fusion": {
             "update_rate_hz": 20,
             "gps_timeout_s": 5.0,
             "imu_timeout_s": 1.0,
-            "localization_accuracy_m": 0.2
+            "localization_accuracy_m": 0.2,
         },
         "power": {
             "critical_battery_level": 0.15,
             "low_battery_level": 0.20,
-            "charging_current_limit_a": 5.0
+            "charging_current_limit_a": 5.0,
         },
         "vision": {
             "detection_confidence_threshold": 0.7,
             "max_detection_distance_m": 10.0,
-            "frame_rate_fps": 30
-        }
+            "frame_rate_fps": 30,
+        },
     }
 
 
@@ -76,13 +72,14 @@ def mock_i2c_device():
 
 @pytest.fixture
 def mock_gpio():
-    """Mock GPIO interface"""
+    """Mock lgpio interface"""
     gpio = Mock()
-    gpio.setup = Mock()
-    gpio.output = Mock()
-    gpio.input = Mock(return_value=0)
-    gpio.add_event_detect = Mock()
-    gpio.remove_event_detect = Mock()
+    gpio.gpiochip_open = Mock(return_value=1)
+    gpio.gpio_claim_output = Mock()
+    gpio.gpio_claim_input = Mock()
+    gpio.gpio_write = Mock()
+    gpio.gpio_read = Mock(return_value=0)
+    gpio.gpiochip_close = Mock()
     return gpio
 
 
@@ -102,7 +99,7 @@ def mock_serial():
 def mock_camera():
     """Mock camera interface"""
     import numpy as np
-    
+
     camera = Mock()
     # Create a fake 640x480 RGB image
     fake_frame = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
@@ -130,12 +127,14 @@ async def mqtt_client():
 @pytest.fixture
 async def hardware_interface(test_config, mock_i2c_device, mock_gpio, mock_serial):
     """Mock hardware interface with all sensors"""
-    with patch('src.hardware.managers.smbus.SMBus') as mock_smbus, \
-         patch('src.hardware.managers.RPi.GPIO', mock_gpio), \
-         patch('src.hardware.managers.serial.Serial', return_value=mock_serial):
-        
+    with (
+        patch("src.hardware.managers.smbus.SMBus") as mock_smbus,
+        patch("src.hardware.managers.lgpio", mock_gpio),
+        patch("src.hardware.managers.serial.Serial", return_value=mock_serial),
+    ):
+
         mock_smbus.return_value = mock_i2c_device
-        
+
         interface = HardwareInterface(test_config["hardware"])
         await interface.initialize()
         yield interface
@@ -157,14 +156,14 @@ async def sensor_fusion_engine(mqtt_client, test_config):
     """Sensor fusion engine with mock data"""
     engine = SensorFusionEngine(mqtt_client, test_config["sensor_fusion"])
     yield engine
-    if hasattr(engine, '_running') and engine._running:
+    if hasattr(engine, "_running") and engine._running:
         await engine.stop()
 
 
 @pytest.fixture
 async def vision_manager(mqtt_client, test_config, mock_camera):
     """Vision manager with mock camera"""
-    with patch('cv2.VideoCapture', return_value=mock_camera):
+    with patch("cv2.VideoCapture", return_value=mock_camera):
         manager = VisionManager(mqtt_client, test_config["vision"])
         await manager.initialize()
         yield manager
@@ -181,32 +180,32 @@ def sample_sensor_data():
             "longitude": -74.0060,
             "altitude": 10.0,
             "accuracy": 2.5,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         },
         "imu": {
             "acceleration": {"x": 0.1, "y": 0.2, "z": 9.8},
             "gyroscope": {"x": 0.01, "y": -0.02, "z": 0.005},
             "magnetometer": {"x": 25.0, "y": -15.0, "z": 45.0},
             "orientation": {"roll": 2.0, "pitch": 1.5, "yaw": 180.0},
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         },
         "tof_sensors": {
             "front_left": {"distance_mm": 500, "status": "valid"},
-            "front_right": {"distance_mm": 480, "status": "valid"}
+            "front_right": {"distance_mm": 480, "status": "valid"},
         },
         "environmental": {
             "temperature_c": 22.5,
             "humidity_percent": 65.0,
             "pressure_hpa": 1013.25,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         },
         "power": {
             "voltage_v": 12.6,
             "current_a": 2.3,
             "power_w": 28.98,
             "battery_level": 0.85,
-            "timestamp": datetime.now().isoformat()
-        }
+            "timestamp": datetime.now().isoformat(),
+        },
     }
 
 
@@ -218,7 +217,7 @@ def sample_map_data():
             {"lat": 40.7128, "lng": -74.0060},
             {"lat": 40.7130, "lng": -74.0060},
             {"lat": 40.7130, "lng": -74.0058},
-            {"lat": 40.7128, "lng": -74.0058}
+            {"lat": 40.7128, "lng": -74.0058},
         ],
         "no_go_zones": [
             {
@@ -227,16 +226,16 @@ def sample_map_data():
                     {"lat": 40.7129, "lng": -74.0059},
                     {"lat": 40.7129, "lng": -74.0058},
                     {"lat": 40.7128, "lng": -74.0058},
-                    {"lat": 40.7128, "lng": -74.0059}
-                ]
+                    {"lat": 40.7128, "lng": -74.0059},
+                ],
             }
         ],
         "home_position": {"lat": 40.7128, "lng": -74.0060},
         "coverage_grid": {
             "resolution_m": 0.1,
             "grid_size": {"width": 100, "height": 80},
-            "covered_cells": []
-        }
+            "covered_cells": [],
+        },
     }
 
 
@@ -247,9 +246,9 @@ def temp_config_dir():
     temp_dir = tempfile.mkdtemp(prefix="lawnberry_test_")
     config_dir = Path(temp_dir) / "config"
     config_dir.mkdir(parents=True)
-    
+
     yield config_dir
-    
+
     shutil.rmtree(temp_dir)
 
 
@@ -265,31 +264,32 @@ def temp_data_dir():
 @pytest.fixture
 def performance_monitor():
     """Monitor performance metrics during tests"""
-    import psutil
     import time
-    
+
+    import psutil
+
     class PerformanceMonitor:
         def __init__(self):
             self.start_time = None
             self.start_memory = None
             self.start_cpu = None
-            
+
         def start(self):
             self.start_time = time.time()
             self.start_memory = psutil.virtual_memory().available
             self.start_cpu = psutil.cpu_percent()
-            
+
         def stop(self):
             end_time = time.time()
             end_memory = psutil.virtual_memory().available
             end_cpu = psutil.cpu_percent()
-            
+
             return {
                 "duration_s": end_time - self.start_time,
                 "memory_used_mb": (self.start_memory - end_memory) / 1024 / 1024,
-                "cpu_usage_percent": (end_cpu + self.start_cpu) / 2
+                "cpu_usage_percent": (end_cpu + self.start_cpu) / 2,
             }
-    
+
     return PerformanceMonitor()
 
 
@@ -302,32 +302,32 @@ def safety_test_scenarios():
             "hazard_type": "person",
             "distance_m": 2.5,
             "expected_response": "emergency_stop",
-            "max_response_time_ms": 100
+            "max_response_time_ms": 100,
         },
         "pet_detection": {
             "hazard_type": "pet",
             "distance_m": 1.0,
             "expected_response": "emergency_stop",
-            "max_response_time_ms": 100
+            "max_response_time_ms": 100,
         },
         "cliff_detection": {
             "hazard_type": "cliff",
             "sensor_reading": 2000,  # > 2m drop
             "expected_response": "emergency_stop",
-            "max_response_time_ms": 100
+            "max_response_time_ms": 100,
         },
         "tilt_detection": {
             "hazard_type": "tilt",
             "tilt_angle_deg": 20.0,
             "expected_response": "emergency_stop",
-            "max_response_time_ms": 100
+            "max_response_time_ms": 100,
         },
         "boundary_violation": {
             "hazard_type": "boundary",
             "position": {"lat": 40.7131, "lng": -74.0061},  # Outside boundary
             "expected_response": "boundary_stop",
-            "max_response_time_ms": 200
-        }
+            "max_response_time_ms": 200,
+        },
     }
 
 
@@ -345,7 +345,7 @@ def event_loop():
 async def cleanup_background_tasks():
     """Ensure all background tasks are cleaned up after tests"""
     yield
-    
+
     # Cancel any remaining tasks
     tasks = [task for task in asyncio.all_tasks() if not task.done()]
     for task in tasks:

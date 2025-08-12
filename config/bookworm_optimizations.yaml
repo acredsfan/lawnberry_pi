@@ -5,7 +5,7 @@
 bookworm_optimizations:
   version: "1.0.0"
   target_os: "Raspberry Pi OS Bookworm"
-  target_hardware: "Raspberry Pi 4B"
+  target_hardware: "Raspberry Pi 4B/5"
   python_version: "3.11+"
   systemd_version: "252+"
 
@@ -26,7 +26,13 @@ boot_config:
   # Performance Optimizations
   arm_freq: 1800  # Max safe frequency for Pi 4B
   gpu_freq: 750   # Optimized GPU frequency
-  over_voltage: 2 # Safe overvoltage for stable operation
+    over_voltage: 2 # Safe overvoltage for stable operation
+
+pi5_overrides:
+  boot_config:
+    arm_freq: 2400  # Pi 5 default frequency
+    gpu_freq: 900
+    over_voltage: 0
   
   # Memory Configuration for 8GB RAM
   arm_64bit: 1
@@ -221,7 +227,7 @@ validation_checklist:
     - "All requirements.txt packages installed"
     - "OpenCV 4.8+ with hardware acceleration"
     - "FastAPI with async optimizations"
-    - "RPi.GPIO, gpiozero, smbus2, picamera2 available"
+    - "lgpio, gpiozero, smbus2, picamera2 available"
   
   service_configuration:
     - "All 11 microservices configured"
