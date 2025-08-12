@@ -51,13 +51,29 @@ Visit the **[Documentation Index](docs/README.md)** for all available guides, re
 ## 🏗️ System Architecture
 
 ### Hardware Components
-- **Raspberry Pi 4** (8GB RAM) - Main computing platform
+- **Raspberry Pi 4B or 5** (8GB RAM recommended) - Main computing platform
 - **RoboHAT with RP2040** - Motor control and sensor interface
 - **RTK-GPS Module** - Centimeter-accurate positioning
 - **Environmental Sensors** - Weather monitoring and safety
 - **Camera System** - Object detection and monitoring
 - **LiFePO4 Battery** - Reliable power with solar charging
 - **Drive Motors** - 12V worm gear motors with precision control
+
+### Coral TPU (Optional)
+- **Google Coral USB Accelerator** for edge ML acceleration
+
+To install Coral TPU support on Raspberry Pi OS, use Python 3.9 via `pyenv`:
+
+```bash
+curl https://pyenv.run | bash
+pyenv install 3.9.18
+pyenv virtualenv 3.9.18 coral-python39
+pyenv activate coral-python39
+pip install -r requirements-coral.txt
+```
+
+These steps follow the official [Coral setup guide](https://coral.ai/docs/accelerator/get-started/#2-install-the-pycoral-library).
+If Coral packages are unavailable for your platform, LawnBerryPi automatically falls back to CPU inference.
 
 ### Software Architecture
 - **Modular Python Backend** - Microservices design with asyncio
@@ -126,26 +142,26 @@ from src.hardware import create_hardware_interface
 async def main():
     # Create hardware interface
     hw = create_hardware_interface("config/hardware.yaml")
-    
+
     try:
         # Initialize all hardware
         await hw.initialize()
-        
+
         # Read sensor data
         sensor_data = await hw.get_all_sensor_data()
         for name, reading in sensor_data.items():
             print(f"{name}: {reading.value} {reading.unit}")
-        
+
         # Control RoboHAT
         await hw.send_robohat_command('rc_disable')
         await hw.send_robohat_command('pwm', 1500, 1500)
-        
+
         # Control GPIO
         await hw.control_gpio_pin('blade_enable', 1)
-        
+
         # Get camera frame
         frame = await hw.get_camera_frame()
-        
+
     finally:
         await hw.shutdown()
 
@@ -193,6 +209,17 @@ await hw.send_robohat_command('enc_zero')
 await hw.send_robohat_command('rc_enable')
 ```
 
+## Development Setup
+
+Install core and development dependencies and run checks:
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+pre-commit run --all-files
+python -m pytest tests/ -m "unit"
+```
+
 ## Plugin Development
 
 Create custom sensor plugins by extending `HardwarePlugin`:
@@ -204,15 +231,15 @@ class CustomSensorPlugin(HardwarePlugin):
     @property
     def plugin_type(self) -> str:
         return "custom_sensor"
-    
+
     @property
     def required_managers(self) -> list:
         return ["i2c"]
-    
+
     async def initialize(self) -> bool:
         # Initialize your sensor
         return True
-    
+
     async def read_data(self):
         # Read and return sensor data
         pass

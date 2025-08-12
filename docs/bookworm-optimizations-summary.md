@@ -1,7 +1,7 @@
 # Raspberry Pi OS Bookworm Optimizations Summary
 
 ## Overview
-This document summarizes all Bookworm-specific optimizations implemented in the LawnBerryPi system to ensure full compatibility and optimal performance on Raspberry Pi OS Bookworm.
+This document summarizes all Bookworm-specific optimizations implemented in the LawnBerryPi system to ensure full compatibility and optimal performance on Raspberry Pi OS Bookworm for Raspberry Pi 4B and 5 hardware.
 
 ## Key Changes Made
 
@@ -9,7 +9,7 @@ This document summarizes all Bookworm-specific optimizations implemented in the 
 - **Updated minimum Python requirement**: 3.8+ → 3.11+ (Bookworm default)
 - **Added version constraints**: All dependencies now have upper bounds for stability
 - **Added Raspberry Pi specific libraries**:
-  - `RPi.GPIO>=0.7.1,<1.0.0`
+  - `rpi-lgpio>=0.6`
   - `gpiozero>=1.6.2,<2.0.0`
   - `smbus2>=0.4.0,<1.0.0`
   - `picamera2>=0.3.12,<1.0.0`
@@ -210,7 +210,7 @@ Future optimizations may leverage:
 
 ---
 
-**Implementation Date**: December 2024  
-**Tested On**: Raspberry Pi OS Bookworm (64-bit) with Python 3.11.2  
-**Hardware**: Raspberry Pi 4 Model B (8GB RAM)  
+**Implementation Date**: December 2024
+**Tested On**: Raspberry Pi OS Bookworm (64-bit) with Python 3.11.2
+**Hardware**: Raspberry Pi 4 Model B (8GB RAM)
 **Status**: Production Ready ✅

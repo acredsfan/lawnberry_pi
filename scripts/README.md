@@ -60,7 +60,7 @@ bash scripts/install_lawnberry.sh --help
 - Internet connection for package downloads
 - At least 4GB free disk space (8GB+ recommended)
 - **4GB+ RAM recommended** (8GB optimal for full features)
-- Raspberry Pi 4 Model B (other models may have limited functionality)
+- Raspberry Pi 4 Model B or Raspberry Pi 5 (other models may have limited functionality)
 
 ### Hardware Detection
 
@@ -402,7 +402,7 @@ These installation scripts are part of the LawnBerry Pi project and follow the s
 
 ---
 
-**Need Help?** 
+**Need Help?**
 - Check the troubleshooting section above
 - Review the installation logs
 - Run `lawnberry-health-check` for system status

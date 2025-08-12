@@ -120,18 +120,18 @@ parse_arguments() {
                 ;;
         esac
     done
-    
+
     if [[ -z "$DEPLOYMENT_PACKAGE" ]]; then
         log_error "No deployment package specified"
         show_usage
         exit 1
     fi
-    
+
     if [[ ! -f "$DEPLOYMENT_PACKAGE" ]]; then
         log_error "Deployment package not found: $DEPLOYMENT_PACKAGE"
         exit 1
     fi
-    
+
     # Validate deployment mode
     case $DEPLOYMENT_MODE in
         production|development|testing)
@@ -146,27 +146,27 @@ parse_arguments() {
 
 check_deployment_prerequisites() {
     log_info "Checking deployment prerequisites..."
-    
+
     # Check if running as root
     if [[ $EUID -ne 0 ]]; then
         log_error "This script must be run as root"
         exit 1
     fi
-    
+
     # Check system requirements
     local requirements_met=true
-    
+
     # Check OS version
     if ! grep -q "bookworm" /etc/os-release; then
         log_error "Raspberry Pi OS Bookworm required"
         requirements_met=false
     fi
-    
+
     # Check hardware
-    if ! grep -q "Raspberry Pi 4" /proc/cpuinfo; then
-        log_warning "Raspberry Pi 4B recommended for optimal performance"
+    if ! grep -q "Raspberry Pi 4" /proc/cpuinfo && ! grep -q "Raspberry Pi 5" /proc/cpuinfo; then
+        log_warning "Raspberry Pi 4B or 5 recommended for optimal performance"
     fi
-    
+
     # Check available memory
     local memory_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
     local memory_gb=$((memory_kb / 1024 / 1024))
@@ -174,7 +174,7 @@ check_deployment_prerequisites() {
         log_error "Minimum 4GB RAM required, found ${memory_gb}GB"
         requirements_met=false
     fi
-    
+
     # Check available disk space
     local available_space_kb=$(df / | tail -1 | awk '{print $4}')
     local available_space_gb=$((available_space_kb / 1024 / 1024))
@@ -182,7 +182,7 @@ check_deployment_prerequisites() {
         log_error "Minimum 8GB free disk space required, found ${available_space_gb}GB"
         requirements_met=false
     fi
-    
+
     # Check required tools
     local required_tools=("systemctl" "python3" "pip3" "git" "curl" "tar" "gzip")
     for tool in "${required_tools[@]}"; do
@@ -191,7 +191,7 @@ check_deployment_prerequisites() {
             requirements_met=false
         fi
     done
-    
+
     if [[ "$requirements_met" != true ]]; then
         log_error "Prerequisites not met"
         if [[ "$FORCE_DEPLOYMENT" != true ]]; then
@@ -200,22 +200,22 @@ check_deployment_prerequisites() {
             log_warning "Continuing with force deployment despite failed prerequisites"
         fi
     fi
-    
+
     log_success "Prerequisites check completed"
 }
 
 verify_deployment_package() {
     log_info "Verifying deployment package..."
-    
+
     local package_path="$DEPLOYMENT_PACKAGE"
     local package_name=$(basename "$package_path" .tar.gz)
-    
+
     # Check package file integrity
     if [[ ! -f "$package_path" ]]; then
         log_error "Package file not found: $package_path"
         exit 1
     fi
-    
+
     # Check if checksum file exists
     local checksum_file="${package_path}.sha256"
     if [[ -f "$checksum_file" ]]; then
@@ -231,15 +231,15 @@ verify_deployment_package() {
     else
         log_warning "No checksum file found, skipping integrity check"
     fi
-    
+
     # Extract and verify package contents
     local temp_dir="/tmp/lawnberry_deploy_verify"
     rm -rf "$temp_dir"
     mkdir -p "$temp_dir"
-    
+
     log_info "Extracting package for verification..."
     tar -xzf "$package_path" -C "$temp_dir"
-    
+
     local extracted_dir="$temp_dir/$package_name"
     if [[ ! -d "$extracted_dir" ]]; then
         # Try to find the extracted directory
@@ -249,7 +249,7 @@ verify_deployment_package() {
             exit 1
         fi
     fi
-    
+
     # Verify required files
     local required_files=(
         "install.sh"
@@ -257,7 +257,7 @@ verify_deployment_package() {
         "config/system.yaml"
         "PACKAGE_INFO.json"
     )
-    
+
     local verification_failed=false
     for file in "${required_files[@]}"; do
         if [[ ! -f "$extracted_dir/$file" ]]; then
@@ -265,7 +265,7 @@ verify_deployment_package() {
             verification_failed=true
         fi
     done
-    
+
     if [[ "$verification_failed" == true ]]; then
         log_error "Package verification failed"
         rm -rf "$temp_dir"
@@ -273,40 +273,40 @@ verify_deployment_package() {
             exit 1
         fi
     fi
-    
+
     # Store extracted directory for deployment
     export EXTRACTED_PACKAGE_DIR="$extracted_dir"
-    
+
     log_success "Package verification completed"
 }
 
 create_deployment_backup() {
     log_info "Creating pre-deployment backup..."
-    
+
     local backup_dir="/var/backups/lawnberry"
     local backup_name="pre_deployment_$(date +%Y%m%d_%H%M%S)"
     local backup_path="$backup_dir/$backup_name"
-    
+
     mkdir -p "$backup_dir"
     mkdir -p "$backup_path"
-    
+
     # Backup existing installation if it exists
     if [[ -d "/opt/lawnberry" ]]; then
         log_info "Backing up existing installation..."
         cp -r /opt/lawnberry "$backup_path/"
-        
+
         # Backup user data
         if [[ -d "/var/lib/lawnberry" ]]; then
             cp -r /var/lib/lawnberry "$backup_path/data"
         fi
-        
+
         # Backup recent logs
         if [[ -d "/var/log/lawnberry" ]]; then
             mkdir -p "$backup_path/logs"
             find /var/log/lawnberry -name "*.log" -mtime -7 -exec cp {} "$backup_path/logs/" \; 2>/dev/null || true
         fi
     fi
-    
+
     # Create backup manifest
     cat > "$backup_path/BACKUP_INFO.json" << EOF
 {
@@ -319,14 +319,14 @@ create_deployment_backup() {
     "deployment_mode": "$DEPLOYMENT_MODE"
 }
 EOF
-    
+
     # Compress backup
     cd "$backup_dir"
     tar -czf "${backup_name}.tar.gz" "$backup_name"
     rm -rf "$backup_path"
-    
+
     export DEPLOYMENT_BACKUP="${backup_dir}/${backup_name}.tar.gz"
-    
+
     log_success "Backup created: $DEPLOYMENT_BACKUP"
 }
 
@@ -335,16 +335,16 @@ run_pre_deployment_validation() {
         log_info "Skipping pre-deployment validation (--skip-validation specified)"
         return 0
     fi
-    
+
     log_info "Running pre-deployment validation..."
-    
+
     # Check if validation script exists
     local validation_script="$EXTRACTED_PACKAGE_DIR/scripts/validate_deployment.py"
     if [[ ! -f "$validation_script" ]]; then
         log_warning "Deployment validation script not found, skipping validation"
         return 0
     fi
-    
+
     # Run validation
     local validation_output="/tmp/pre_deployment_validation.json"
     if python3 "$validation_script" --output "$validation_output" --categories installation configuration; then
@@ -352,7 +352,7 @@ run_pre_deployment_validation() {
         return 0
     else
         log_error "Pre-deployment validation failed"
-        
+
         if [[ -f "$validation_output" ]]; then
             log_info "Validation results:"
             python3 -c "
@@ -366,7 +366,7 @@ with open('$validation_output', 'r') as f:
     print(f'  Warnings: {summary[\"warnings\"]}')
 "
         fi
-        
+
         if [[ "$FORCE_DEPLOYMENT" == true ]]; then
             log_warning "Continuing with deployment despite validation failures (--force specified)"
             return 0
@@ -379,21 +379,21 @@ with open('$validation_output', 'r') as f:
 
 deploy_package() {
     log_info "Deploying LawnBerry package..."
-    
+
     # Change to extracted package directory
     cd "$EXTRACTED_PACKAGE_DIR"
-    
+
     # Set deployment mode environment variable
     export LAWNBERRY_DEPLOYMENT_MODE="$DEPLOYMENT_MODE"
     export LAWNBERRY_AUTOMATED_DEPLOYMENT=true
-    
+
     # Run installation script
     log_info "Running installation script..."
     if ./install.sh; then
         log_success "Package installation completed"
     else
         log_error "Package installation failed"
-        
+
         # Attempt rollback
         log_info "Attempting automatic rollback..."
         rollback_deployment
@@ -403,7 +403,7 @@ deploy_package() {
 
 setup_additional_features() {
     log_info "Setting up additional deployment features..."
-    
+
     # Setup monitoring if enabled
     if [[ "$ENABLE_MONITORING" == true ]]; then
         log_info "Setting up monitoring system..."
@@ -414,11 +414,11 @@ setup_additional_features() {
             log_warning "Monitoring setup script not found"
         fi
     fi
-    
+
     # Setup remote updates if enabled
     if [[ "$ENABLE_REMOTE_UPDATES" == true ]]; then
         log_info "Configuring remote update system..."
-        
+
         # Enable remote updates in configuration
         local config_file="/opt/lawnberry/config/deployment.yaml"
         if [[ -f "$config_file" ]]; then
@@ -428,20 +428,20 @@ import yaml
 try:
     with open('$config_file', 'r') as f:
         config = yaml.safe_load(f)
-    
+
     if 'deployment' not in config:
         config['deployment'] = {}
-    
+
     config['deployment']['remote_updates'] = {
         'enabled': True,
         'check_interval': 3600,
         'auto_approve_security': True,
         'auto_approve_config': True
     }
-    
+
     with open('$config_file', 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
-    
+
     print('Remote updates configuration updated')
 except Exception as e:
     print(f'Failed to update configuration: {e}')
@@ -455,19 +455,19 @@ except Exception as e:
 
 run_post_deployment_validation() {
     log_info "Running post-deployment validation..."
-    
+
     # Wait for services to start
     log_info "Waiting for services to initialize..."
     sleep 30
-    
+
     # Run comprehensive validation
     local validation_script="/opt/lawnberry/scripts/validate_deployment.py"
     local validation_output="/tmp/post_deployment_validation.json"
-    
+
     if [[ -f "$validation_script" ]]; then
         if python3 "$validation_script" --output "$validation_output"; then
             log_success "Post-deployment validation passed"
-            
+
             # Display validation summary
             python3 -c "
 import json
@@ -484,19 +484,19 @@ with open('$validation_output', 'r') as f:
             return 0
         else
             log_error "Post-deployment validation failed"
-            
+
             # Show failed tests
             python3 -c "
 import json
 with open('$validation_output', 'r') as f:
     data = json.load(f)
-    
+
 print('Failed Tests:')
 for test in data['tests']:
     if test['status'] == 'FAIL':
         print(f'  - {test[\"description\"]}: {test[\"message\"]}')
 "
-            
+
             log_error "Deployment validation failed, consider rollback"
             return 1
         fi
@@ -508,12 +508,12 @@ for test in data['tests']:
 
 rollback_deployment() {
     log_warning "Initiating deployment rollback..."
-    
+
     if [[ -z "$DEPLOYMENT_BACKUP" ]] || [[ ! -f "$DEPLOYMENT_BACKUP" ]]; then
         log_error "No deployment backup available for rollback"
         return 1
     fi
-    
+
     # Stop services
     log_info "Stopping LawnBerry services..."
     systemctl stop lawnberry-system.service || true
@@ -522,50 +522,50 @@ rollback_deployment() {
     systemctl stop lawnberry-web-api.service || true
     systemctl stop lawnberry-communication.service || true
     systemctl stop lawnberry-monitor.service || true
-    
+
     # Remove current installation
     log_info "Removing current installation..."
     rm -rf /opt/lawnberry
     rm -rf /var/lib/lawnberry
-    
+
     # Restore from backup
     log_info "Restoring from backup..."
     local restore_dir="/tmp/lawnberry_rollback"
     rm -rf "$restore_dir"
     mkdir -p "$restore_dir"
-    
+
     tar -xzf "$DEPLOYMENT_BACKUP" -C "$restore_dir"
     local backup_name=$(basename "$DEPLOYMENT_BACKUP" .tar.gz)
-    
+
     if [[ -d "$restore_dir/$backup_name/lawnberry" ]]; then
         mv "$restore_dir/$backup_name/lawnberry" /opt/lawnberry
     fi
-    
+
     if [[ -d "$restore_dir/$backup_name/data" ]]; then
         mv "$restore_dir/$backup_name/data" /var/lib/lawnberry
     fi
-    
+
     # Restore permissions
     chown -R lawnberry:lawnberry /opt/lawnberry || true
     chown -R lawnberry:lawnberry /var/lib/lawnberry || true
-    
+
     # Restart services
     log_info "Restarting services..."
     systemctl daemon-reload
     systemctl start lawnberry-system.service || true
-    
+
     # Cleanup
     rm -rf "$restore_dir"
-    
+
     log_success "Rollback completed"
 }
 
 generate_deployment_report() {
     log_info "Generating deployment report..."
-    
+
     local report_file="/var/log/lawnberry/deployment_report_$(date +%Y%m%d_%H%M%S).json"
     mkdir -p "$(dirname "$report_file")"
-    
+
     # Collect deployment information
     local deployment_info=$(cat << EOF
 {
@@ -583,24 +583,24 @@ generate_deployment_report() {
 }
 EOF
 )
-    
+
     echo "$deployment_info" > "$report_file"
-    
+
     export DEPLOYMENT_REPORT="$report_file"
-    
+
     log_success "Deployment report created: $report_file"
 }
 
 cleanup_deployment() {
     log_info "Cleaning up deployment artifacts..."
-    
+
     # Remove temporary files
     rm -rf /tmp/lawnberry_deploy_*
     rm -rf /tmp/lawnberry_package_*
-    
+
     # Keep deployment log for reference
     cp "$DEPLOYMENT_LOG" "/var/log/lawnberry/deployment_$(date +%Y%m%d_%H%M%S).log" 2>/dev/null || true
-    
+
     log_success "Cleanup completed"
 }
 
@@ -621,44 +621,44 @@ print_deployment_summary() {
     systemctl is-active lawnberry-hardware.service && echo "  ✓ Hardware Service: Running" || echo "  ✗ Hardware Service: Not Running"
     systemctl is-active lawnberry-safety.service && echo "  ✓ Safety Service: Running" || echo "  ✗ Safety Service: Not Running"
     systemctl is-active lawnberry-web-api.service && echo "  ✓ Web API Service: Running" || echo "  ✗ Web API Service: Not Running"
-    
+
     if [[ "$ENABLE_MONITORING" == true ]]; then
         systemctl is-active lawnberry-monitor.service && echo "  ✓ Monitor Service: Running" || echo "  ✗ Monitor Service: Not Running"
     fi
-    
+
     echo
     echo "Next Steps:"
     echo "  1. Access web interface: http://$(hostname -I | awk '{print $1}'):8000"
     echo "  2. Complete system configuration"
     echo "  3. Run hardware tests"
-    
+
     if [[ "$ENABLE_MONITORING" == true ]]; then
         echo "  4. View monitoring dashboard: sudo -u lawnberry /opt/lawnberry/monitoring/scripts/dashboard.sh"
     fi
-    
+
     echo "=================================================================="
 }
 
 main() {
     print_header
-    
+
     # Parse command line arguments
     parse_arguments "$@"
-    
+
     # Pre-deployment phase
     check_deployment_prerequisites
     verify_deployment_package
     create_deployment_backup
     run_pre_deployment_validation
-    
+
     # Deployment phase
     deploy_package
     setup_additional_features
-    
+
     # Post-deployment phase
     if ! run_post_deployment_validation; then
         log_error "Post-deployment validation failed"
-        
+
         if [[ "$FORCE_DEPLOYMENT" != true ]]; then
             read -p "Do you want to rollback? (y/N): " -n 1 -r
             echo
@@ -668,12 +668,12 @@ main() {
             fi
         fi
     fi
-    
+
     # Finalization
     generate_deployment_report
     cleanup_deployment
     print_deployment_summary
-    
+
     log_success "Automated deployment completed successfully!"
 }
 

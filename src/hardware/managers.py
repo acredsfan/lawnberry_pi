@@ -11,13 +11,20 @@ import cv2
 import numpy as np
 import serial
 
+# Prefer Pi5-compatible rpi-lgpio, fallback to legacy RPi.GPIO
+try:  # pragma: no cover - platform specific import
+    import rpi_lgpio as GPIO  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - platform specific import
+    try:
+        import RPi.GPIO as GPIO  # type: ignore
+    except ModuleNotFoundError:
+        GPIO = None
+
 try:
-    import RPi.GPIO as GPIO
     import smbus2
-except ImportError:
+except ImportError:  # pragma: no cover - dependency may be absent in tests
     # Mock for development/testing
     smbus2 = None
-    GPIO = None
 
 from .data_structures import (
     CameraFrame,

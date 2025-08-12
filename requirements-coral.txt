@@ -1,5 +1,5 @@
 # LawnBerryPi Coral TPU Dependencies
-# 
+#
 # IMPORTANT: These packages are for FALLBACK installation only!
 # Primary installation method for Pi OS Bookworm is system packages:
 #   sudo apt-get install python3-pycoral python3-tflite-runtime
@@ -13,6 +13,7 @@
 # - pycoral pip packages are NOT available for Python 3.11+ on ARM64
 # - These work primarily on x86_64 systems for development
 # - Pi OS Bookworm users should use system packages exclusively
+# - Official Coral support targets Python 3.9 via pyenv (see README for setup)
 
 # Coral Edge TPU Runtime (fallback for non-Bookworm systems)
 pycoral>=2.0.0,<3.0.0; python_version < "3.11" and platform_machine != "aarch64"

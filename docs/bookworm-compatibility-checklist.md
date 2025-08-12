@@ -40,7 +40,7 @@ python3 -m pytest tests/performance/test_performance_benchmarks.py -v
   ```bash
   systemctl --version  # Should show 252 or higher
   ```
-- [ ] **Hardware Model**: Raspberry Pi 4 Model B detected
+- [ ] **Hardware Model**: Raspberry Pi 4 Model B or Raspberry Pi 5 detected
   ```bash
   cat /proc/device-tree/model
   ```
@@ -77,7 +77,7 @@ python3 -m pytest tests/performance/test_performance_benchmarks.py -v
   ```
 - [ ] **Hardware Dependencies**: Raspberry Pi specific packages
   ```bash
-  /opt/lawnberry/venv/bin/python3 -c "import RPi.GPIO, gpiozero, smbus2, picamera2"
+  /opt/lawnberry/venv/bin/python3 -c "import rpi_lgpio, gpiozero, smbus2, picamera2"
   ```
 - [ ] **Version Compatibility**: Bookworm-optimized versions
   ```bash
