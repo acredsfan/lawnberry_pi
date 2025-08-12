@@ -1,7 +1,7 @@
 # LawnBerryPi Developer Guide
 
-**Version:** 1.0  
-**Target Audience:** Software developers extending or customizing the system  
+**Version:** 1.0
+**Target Audience:** Software developers extending or customizing the system
 **Last Updated:** August 2025
 
 ## Table of Contents
@@ -30,7 +30,7 @@
 - Git-enabled development environment
 
 **Software Requirements:**
-- Python 3.11+ 
+- Python 3.11+
 - Node.js 18+ and npm
 - Docker and Docker Compose
 - Git version control
@@ -98,7 +98,7 @@ The LawnBerryPi system uses a distributed microservices architecture for scalabi
 graph TB
     UI[Web UI] --> API[Web API Service]
     API --> MQTT[MQTT Broker]
-    
+
     MQTT --> HW[Hardware Service]
     MQTT --> SAF[Safety Service]
     MQTT --> NAV[Navigation Service]
@@ -110,7 +110,7 @@ graph TB
     MQTT --> DM[Data Management]
     MQTT --> SI[System Integration]
     MQTT --> COM[Communication]
-    
+
     HW --> Hardware[Pi Hardware]
     PWR --> Battery[Power System]
     VIS --> Camera[Camera/Sensors]
@@ -149,7 +149,7 @@ graph TB
 ### Core Services
 
 #### Hardware Interface Service
-**Location:** `src/hardware/`  
+**Location:** `src/hardware/`
 **Purpose:** Direct hardware communication and sensor management
 
 **Key Components:**
@@ -167,14 +167,14 @@ class CustomSensor(BaseSensor):
     def __init__(self, config):
         super().__init__(config)
         self.setup_sensor()
-    
+
     async def read_data(self):
         # Implement sensor reading logic
         return {"value": self.get_sensor_value()}
 ```
 
-#### Safety Service  
-**Location:** `src/safety/`  
+#### Safety Service
+**Location:** `src/safety/`
 **Purpose:** Comprehensive safety monitoring and emergency response
 
 **Key Features:**
@@ -197,7 +197,7 @@ class CustomSafetyRule(SafetyRule):
 ```
 
 #### Navigation Service
-**Location:** `src/navigation/`  
+**Location:** `src/navigation/`
 **Purpose:** Path planning, execution, and mowing pattern implementation
 
 **Core Algorithms:**
@@ -207,7 +207,7 @@ class CustomSafetyRule(SafetyRule):
 - Real-time path adjustment
 
 #### Vision Service
-**Location:** `src/vision/`  
+**Location:** `src/vision/`
 **Purpose:** Computer vision processing and obstacle detection
 
 **Features:**
@@ -219,19 +219,19 @@ class CustomSafetyRule(SafetyRule):
 ### Supporting Services
 
 #### Power Management Service
-**Location:** `src/power_management/`  
+**Location:** `src/power_management/`
 **Purpose:** Battery and solar power monitoring and optimization
 
-#### Weather Service  
-**Location:** `src/weather/`  
+#### Weather Service
+**Location:** `src/weather/`
 **Purpose:** Weather data integration and mowing schedule adaptation
 
 #### Communication Service
-**Location:** `src/communication/`  
+**Location:** `src/communication/`
 **Purpose:** MQTT message handling and routing
 
 #### Data Management Service
-**Location:** `src/data_management/`  
+**Location:** `src/data_management/`
 **Purpose:** Data caching, persistence, and analytics
 
 ---
@@ -297,11 +297,11 @@ from typing import List
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
-    
+
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-    
+
     async def broadcast(self, message: dict):
         for connection in self.active_connections:
             await connection.send_json(message)
@@ -395,7 +395,7 @@ export const CustomComponent: React.FC<CustomComponentProps> = ({
 }) => {
   const dispatch = useDispatch();
   const state = useSelector((state: RootState) => state.custom);
-  
+
   return (
     <div>
       {/* Component implementation */}
@@ -456,7 +456,7 @@ export const CustomMapComponent: React.FC<CustomMapProps> = ({
   onMapReady
 }) => {
   const mapRef = useRef<HTMLDivElement>(null);
-  
+
   useEffect(() => {
     if (mapRef.current) {
       const map = new google.maps.Map(mapRef.current, {
@@ -467,7 +467,7 @@ export const CustomMapComponent: React.FC<CustomMapProps> = ({
       onMapReady(map);
     }
   }, [center, zoom, onMapReady]);
-  
+
   return <div ref={mapRef} style={{ width: '100%', height: '400px' }} />;
 };
 ```
@@ -479,7 +479,7 @@ export const CustomMapComponent: React.FC<CustomMapProps> = ({
 // services/apiService.ts
 class ApiService {
   private baseUrl = '/api/v1';
-  
+
   async get<T>(endpoint: string): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`);
     if (!response.ok) {
@@ -487,7 +487,7 @@ class ApiService {
     }
     return response.json();
   }
-  
+
   async post<T>(endpoint: string, data: any): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: 'POST',
@@ -536,17 +536,17 @@ class BaseSensor(ABC):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.is_initialized = False
-    
+
     @abstractmethod
     async def initialize(self) -> bool:
         """Initialize sensor hardware"""
         pass
-    
+
     @abstractmethod
     async def read_data(self) -> Dict[str, Any]:
         """Read sensor data"""
         pass
-    
+
     @abstractmethod
     async def cleanup(self):
         """Cleanup sensor resources"""
@@ -559,7 +559,7 @@ class CustomTemperatureSensor(BaseSensor):
     def __init__(self, config):
         super().__init__(config)
         self.i2c_address = config.get('i2c_address', 0x48)
-    
+
     async def initialize(self) -> bool:
         try:
             # Initialize I2C communication
@@ -571,17 +571,17 @@ class CustomTemperatureSensor(BaseSensor):
         except Exception as e:
             print(f"Sensor initialization failed: {e}")
             return False
-    
+
     async def read_data(self) -> Dict[str, Any]:
         if not self.is_initialized:
             raise RuntimeError("Sensor not initialized")
-        
+
         # Read raw data from sensor
         raw_data = self.bus.read_word_data(self.i2c_address, 0x00)
-        
+
         # Convert to temperature
         temperature = self.convert_raw_to_celsius(raw_data)
-        
+
         return {
             "temperature": temperature,
             "timestamp": datetime.utcnow().isoformat(),
@@ -598,19 +598,19 @@ class MotorController:
         self.left_motor_pins = config['left_motor']
         self.right_motor_pins = config['right_motor']
         self.setup_gpio()
-    
+
     def setup_gpio(self):
-        import RPi.GPIO as GPIO
+        from src.hardware.gpio_adapter import GPIO
         GPIO.setmode(GPIO.BCM)
         # Configure motor control pins
         for pin in [*self.left_motor_pins, *self.right_motor_pins]:
             GPIO.setup(pin, GPIO.OUT)
-    
+
     def set_motor_speed(self, left_speed: float, right_speed: float):
         """Set motor speeds (-1.0 to 1.0)"""
         self._set_left_motor(left_speed)
         self._set_right_motor(right_speed)
-    
+
     def emergency_stop(self):
         """Immediately stop all motors"""
         self.set_motor_speed(0, 0)
@@ -628,13 +628,13 @@ try:
     from pycoral.adapters import detect
     import tflite_runtime.interpreter as tflite
     CORAL_AVAILABLE = True
-    
+
     # Check for actual hardware presence
     CORAL_HARDWARE_PRESENT = len(edgetpu.list_edge_tpus()) > 0
 except ImportError:
     CORAL_AVAILABLE = False
     CORAL_HARDWARE_PRESENT = False
-    
+
     # CPU fallback using standard tflite-runtime
     try:
         import tflite_runtime.interpreter as tflite
@@ -659,7 +659,7 @@ class CoralTPUManager:
         self.coral_available = CORAL_AVAILABLE
         self.hardware_present = CORAL_HARDWARE_PRESENT
         self.logger = logging.getLogger(__name__)
-    
+
     async def initialize(self, model_path: str) -> bool:
         """Initialize TPU with graceful CPU fallback"""
         try:
@@ -676,7 +676,7 @@ class CoralTPUManager:
                 self.interpreter = tflite.Interpreter(model_path=model_path)
                 self.logger.info("Using CPU inference (Coral not available)")
                 return True
-                
+
         except Exception as e:
             self.logger.warning(f"Coral initialization failed: {e}, falling back to CPU")
             # Fallback to CPU-only inference
@@ -686,7 +686,7 @@ class CoralTPUManager:
             except Exception as cpu_error:
                 self.logger.error(f"CPU fallback also failed: {cpu_error}")
                 return False
-    
+
     def get_inference_stats(self) -> Dict[str, Any]:
         """Get performance statistics"""
         return {
@@ -700,7 +700,7 @@ class CoralTPUManager:
 **Best Practices for Coral Integration:**
 
 1. **Always provide CPU fallback**: Never require Coral hardware
-2. **Graceful degradation**: Application should work without Coral, just slower  
+2. **Graceful degradation**: Application should work without Coral, just slower
 3. **Hardware detection**: Check for actual hardware, not just package availability
 4. **Performance logging**: Track inference times for both Coral and CPU modes
 5. **User feedback**: Clearly indicate which inference method is being used
@@ -718,7 +718,7 @@ class TestCoralIntegration:
             assert manager.initialize("model.tflite")
             stats = manager.get_inference_stats()
             assert stats["inference_device"] == "cpu"
-    
+
     @pytest.mark.skipif(not CORAL_HARDWARE_PRESENT, reason="No Coral TPU hardware")
     def test_coral_hardware_detection(self):
         """Test Coral hardware detection (only runs with hardware)"""
@@ -737,7 +737,7 @@ coral_tpu:
   model_path: "/opt/lawnberry/models/detection_model_edgetpu.tflite"
   cpu_fallback_model: "/opt/lawnberry/models/detection_model.tflite"
   performance_mode: "standard"     # or "maximum"
-  
+
 cpu_fallback:
   model_path: "/opt/lawnberry/models/detection_model.tflite"
   num_threads: 2                   # CPU threads for inference
@@ -781,7 +781,7 @@ from src.hardware.sensors import CustomTemperatureSensor
 async def test_sensor_initialization():
     config = {"i2c_address": 0x48}
     sensor = CustomTemperatureSensor(config)
-    
+
     result = await sensor.initialize()
     assert result is True
     assert sensor.is_initialized is True
@@ -790,7 +790,7 @@ async def test_sensor_initialization():
 async def test_sensor_data_reading():
     sensor = CustomTemperatureSensor({})
     await sensor.initialize()
-    
+
     data = await sensor.read_data()
     assert "temperature" in data
     assert "timestamp" in data
@@ -834,23 +834,23 @@ class MockI2CDevice:
     def __init__(self, address):
         self.address = address
         self.registers = {}
-    
+
     def read_word_data(self, register):
         return self.registers.get(register, 0)
-    
+
     def write_word_data(self, register, value):
         self.registers[register] = value
 
 @pytest.fixture
 def mock_i2c_bus(monkeypatch):
     devices = {}
-    
+
     def mock_smbus(bus_number):
         return type('MockSMBus', (), {
             'read_word_data': lambda addr, reg: devices.get(addr, MockI2CDevice(addr)).read_word_data(reg),
             'write_word_data': lambda addr, reg, val: devices.get(addr, MockI2CDevice(addr)).write_word_data(reg, val)
         })()
-    
+
     monkeypatch.setattr('smbus.SMBus', mock_smbus)
     return devices
 ```
@@ -874,22 +874,22 @@ class BasePlugin(ABC):
         self.config = config
         self.name = self.get_plugin_name()
         self.version = self.get_version()
-    
+
     @abstractmethod
     def get_plugin_name(self) -> str:
         """Return plugin name"""
         pass
-    
+
     @abstractmethod
     def get_version(self) -> str:
         """Return plugin version"""
         pass
-    
+
     @abstractmethod
     async def initialize(self) -> bool:
         """Initialize plugin"""
         pass
-    
+
     @abstractmethod
     async def cleanup(self):
         """Cleanup plugin resources"""
@@ -906,15 +906,15 @@ import aiohttp
 class WeatherExtensionPlugin(BasePlugin):
     def get_plugin_name(self) -> str:
         return "weather_extension"
-    
+
     def get_version(self) -> str:
         return "1.0.0"
-    
+
     async def initialize(self) -> bool:
         self.api_key = self.config.get('api_key')
         self.base_url = self.config.get('base_url', 'https://api.weather.com')
         return True
-    
+
     async def get_extended_forecast(self, location: str) -> Dict[str, Any]:
         """Get 10-day extended forecast"""
         async with aiohttp.ClientSession() as session:
@@ -925,7 +925,7 @@ class WeatherExtensionPlugin(BasePlugin):
             }
             async with session.get(url, params=params) as response:
                 return await response.json()
-    
+
     async def cleanup(self):
         # Cleanup resources
         pass
@@ -942,21 +942,21 @@ from .base_plugin import BasePlugin
 class PluginManager:
     def __init__(self):
         self.plugins: Dict[str, BasePlugin] = {}
-    
+
     async def load_plugin(self, plugin_path: str, config: Dict[str, Any]):
         """Load and initialize a plugin"""
         try:
             module = importlib.import_module(plugin_path)
             plugin_class = getattr(module, 'Plugin')
             plugin = plugin_class(config)
-            
+
             if await plugin.initialize():
                 self.plugins[plugin.name] = plugin
                 return True
         except Exception as e:
             print(f"Failed to load plugin {plugin_path}: {e}")
         return False
-    
+
     def get_plugin(self, name: str) -> BasePlugin:
         return self.plugins.get(name)
 ```
@@ -1144,7 +1144,7 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-  
+
   mosquitto:
     image: eclipse-mosquitto:2
     ports:
@@ -1152,7 +1152,7 @@ services:
       - "9001:9001"
     volumes:
       - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-  
+
   lawnberry-api:
     build:
       context: .
@@ -1185,41 +1185,41 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-    
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install -r requirements-dev.txt
-    
+
     - name: Run tests
       run: |
         pytest tests/ --cov=src --cov-report=xml
-    
+
     - name: Upload coverage
       uses: codecov/codecov-action@v3
       with:
         file: ./coverage.xml
-  
+
   build:
     needs: test
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Build Docker image
       run: |
         docker build -t lawnberry-pi:${{ github.sha }} .
-    
+
     - name: Push to registry
       if: github.ref == 'refs/heads/main'
       run: |
@@ -1330,7 +1330,7 @@ async with aiohttp.ClientSession(
 # Use slots for memory efficiency
 class SensorReading:
     __slots__ = ['timestamp', 'value', 'sensor_id']
-    
+
     def __init__(self, timestamp, value, sensor_id):
         self.timestamp = timestamp
         self.value = value
@@ -1345,7 +1345,7 @@ from pydantic import BaseModel, validator
 
 class BoundaryInput(BaseModel):
     points: List[Position]
-    
+
     @validator('points')
     def validate_points(cls, v):
         if len(v) < 3:
@@ -1413,8 +1413,8 @@ def api_endpoint():
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** December 2024  
+**Document Version:** 1.0
+**Last Updated:** December 2024
 **Next Review:** March 2025
 
 This developer guide provides comprehensive information for extending and customizing the LawnBerryPi system. For specific implementation questions or advanced use cases, refer to the API documentation and community resources.

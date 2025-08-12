@@ -306,12 +306,12 @@ detect_bookworm() {
                 log_info "Consider upgrading to Python 3.11+ for best performance"
             fi
 
-            # Check for Raspberry Pi 4B specifically
+            # Check for Raspberry Pi 4B or 5 specifically
             if [[ -f /proc/device-tree/model ]]; then
                 PI_MODEL=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0')
                 log_debug "Detected Raspberry Pi model: $PI_MODEL"
-                if [[ "$PI_MODEL" == *"Raspberry Pi 4"* ]]; then
-                    log_success "Raspberry Pi 4 Model B detected - optimal hardware"
+                if [[ "$PI_MODEL" == *"Raspberry Pi 4"* ]] || [[ "$PI_MODEL" == *"Raspberry Pi 5"* ]]; then
+                    log_success "$PI_MODEL detected - optimal hardware"
                 else
                     log_warning "Hardware: $PI_MODEL - some optimizations may not apply"
                 fi
@@ -364,9 +364,9 @@ check_system() {
         model=$(cat /proc/device-tree/model)
         log_info "Detected: $model"
 
-        # Check for Pi 4B specifically for optimizations
-        if grep -q "Raspberry Pi 4" /proc/device-tree/model; then
-            log_success "Raspberry Pi 4 detected - enabling performance optimizations"
+        # Check for Pi 4B or Pi 5 for optimizations
+        if grep -Eq "Raspberry Pi 4|Raspberry Pi 5" /proc/device-tree/model; then
+            log_success "Raspberry Pi optimal hardware detected - enabling performance optimizations"
         fi
     fi
 
@@ -1432,8 +1432,8 @@ vm.dirty_ratio=10
 EOF
 
         log_info "Enabling CPU governor for performance..."
-        # Set CPU governor for Pi 4B performance
-        if grep -q "Raspberry Pi 4" /proc/device-tree/model 2>/dev/null; then
+        # Set CPU governor for optimal Raspberry Pi performance
+        if grep -Eq "Raspberry Pi 4|Raspberry Pi 5" /proc/device-tree/model 2>/dev/null; then
             echo 'GOVERNOR="performance"' | sudo tee /etc/default/cpufrequtils >/dev/null
         fi
 

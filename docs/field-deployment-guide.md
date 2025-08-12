@@ -19,9 +19,9 @@ This comprehensive guide covers the complete deployment process for LawnBerry au
 ### Required Equipment
 
 **Hardware:**
-- Raspberry Pi 4B (minimum 4GB RAM, 8GB recommended)
+- Raspberry Pi 4B or 5 (minimum 4GB RAM, 8GB recommended)
 - MicroSD card (minimum 32GB, Class 10)
-- Power supply (official Raspberry Pi 4 power supply recommended)
+- Power supply (official Raspberry Pi power supply recommended)
 - Network connection (Ethernet or WiFi)
 - All LawnBerry hardware components (see Hardware Overview)
 

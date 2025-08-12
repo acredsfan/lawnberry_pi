@@ -5,7 +5,9 @@
 bookworm_optimizations:
   version: "1.0.0"
   target_os: "Raspberry Pi OS Bookworm"
-  target_hardware: "Raspberry Pi 4B"
+  target_hardware:
+    - "Raspberry Pi 4B"
+    - "Raspberry Pi 5"
   python_version: "3.11+"
   systemd_version: "252+"
 
@@ -13,28 +15,34 @@ bookworm_optimizations:
 boot_config:
   # GPU Memory Split for Computer Vision Workloads
   gpu_mem: 128
-  
+
   # I2C Optimization
   dtparam_i2c_arm: "on"
   dtparam_i2c1: "on"
   i2c_arm_baudrate: 400000  # Increased from default 100kHz to 400kHz
-  
+
   # Camera Configuration
   camera_auto_detect: 1
   dtoverlay_camera: "imx219"
-  
+
   # Performance Optimizations
   arm_freq: 1800  # Max safe frequency for Pi 4B
   gpu_freq: 750   # Optimized GPU frequency
   over_voltage: 2 # Safe overvoltage for stable operation
-  
+
   # Memory Configuration for 8GB RAM
   arm_64bit: 1
   total_mem: 8192  # 8GB RAM utilization
-  
+
   # Enhanced Kernel Scheduler (Bookworm feature)
   kernel: "kernel8.img"
   cmdline_additions: "cgroup_memory=1 cgroup_enable=memory"
+
+# Additional boot configuration overrides for Raspberry Pi 5
+boot_config_pi5:
+  arm_freq: 2400
+  gpu_freq: 1000
+  over_voltage: 0
 
 # SystemD Service Optimizations
 systemd_optimizations:
@@ -58,7 +66,7 @@ systemd_optimizations:
     - "RestrictNamespaces=true"
     - "RestrictSUIDSGID=true"
     - "SystemCallArchitectures=native"
-  
+
   # Performance Tuning
   performance_settings:
     - "Nice=-10"
@@ -69,7 +77,7 @@ systemd_optimizations:
     - "MemoryLimit=512M"
     - "CPUQuota=100%"
     - "TasksMax=200"
-  
+
   # Service Timing Optimizations
   timing_optimizations:
     - "TimeoutStartSec=30"  # Reduced from default 90s
@@ -86,7 +94,7 @@ python_optimizations:
     PYTHONUNBUFFERED: "1"            # Immediate output
     PYTHONHASHSEED: "random"         # Security enhancement
     PYTHONMALLOC: "pymalloc"         # Optimized memory allocator
-  
+
   # Bytecode Pre-compilation
   precompilation:
     enabled: true
@@ -94,7 +102,7 @@ python_optimizations:
       - "/opt/lawnberry/src"
       - "/opt/lawnberry/venv/lib/python3.11/site-packages"
     compile_level: 2  # Maximum optimization
-  
+
   # Async Performance Features (Python 3.11)
   async_optimizations:
     - "Use asyncio.TaskGroup for better task management"
@@ -106,14 +114,14 @@ python_optimizations:
 cpu_optimizations:
   # CPU Governor Configuration
   governor: "ondemand"  # Balanced performance/power efficiency
-  
+
   # CPU Affinity for Critical Processes
   cpu_affinity:
     safety_service: [0]      # Pin safety to CPU 0
-    sensor_fusion: [1]       # Pin sensor fusion to CPU 1  
+    sensor_fusion: [1]       # Pin sensor fusion to CPU 1
     hardware_service: [2]    # Pin hardware interface to CPU 2
     vision_service: [3]      # Pin computer vision to CPU 3
-  
+
   # Process Scheduling
   scheduling_priorities:
     safety_service: -20      # Highest priority
@@ -127,10 +135,10 @@ memory_optimizations:
   vm_swappiness: 10          # Reduce swap usage
   vm_dirty_ratio: 5          # Reduce dirty page ratio
   vm_dirty_background_ratio: 2
-  
+
   # Memory Allocation
   transparent_hugepage: "madvise"  # Conditional huge pages
-  
+
   # Memory Limits per Service
   service_memory_limits:
     system_integration: "512M"
@@ -147,12 +155,12 @@ memory_optimizations:
 io_optimizations:
   # Disk I/O Scheduler
   scheduler: "mq-deadline"   # Better for SSDs
-  
+
   # Filesystem Optimizations
   filesystem_options:
     - "noatime"              # Disable access time updates
     - "commit=60"            # Reduce commit frequency
-  
+
   # Network I/O
   network_optimizations:
     tcp_congestion_control: "bbr"
@@ -166,17 +174,17 @@ hardware_optimizations:
     bus_speed: 400000        # 400kHz for better performance
     timeout: 2000            # 2 second timeout
     retry_count: 3           # Retry failed operations
-  
+
   # GPIO Configuration
   gpio:
     interrupt_handling: "threaded"  # Better real-time response
     debounce_time: 50               # 50ms debounce
-  
+
   # UART Configuration
   uart:
     flow_control: true       # Enable hardware flow control
     buffer_size: 4096        # Larger buffers
-  
+
   # Camera Optimization (picamera2)
   camera:
     use_picamera2: true      # Native Bookworm camera library
@@ -192,12 +200,12 @@ performance_targets:
   motor_control_response_ms: 50    # Target <50ms
   web_ui_page_load_ms: 1500       # Target <1.5s page loads
   boot_time_seconds: 30           # Target <30s boot time
-  
+
   # Resource Utilization Targets
   max_cpu_percent: 80             # Keep CPU usage under 80%
   max_memory_percent: 75          # Keep memory usage under 75%
   max_temperature_celsius: 75     # Keep temperature under 75°C
-  
+
   # Monitoring Intervals
   performance_check_interval: 5   # Check every 5 seconds
   health_check_interval: 10       # Health check every 10 seconds
@@ -210,25 +218,25 @@ validation_checklist:
     - "systemd 252+ available"
   - "8GB RAM detected"
     - "Raspberry Pi 4B detected"
-  
+
   hardware_interfaces:
     - "GPIO pins 15,16,31,32,18,22 accessible"
     - "I2C devices at 0x29,0x30,0x76,0x40,0x3c detected"
     - "UART at /dev/ttyACM0,/dev/ttyAMA4,/dev/ttyACM1 available"
     - "Camera at /dev/video0 functional at 1920x1080@30fps"
-  
+
   software_compatibility:
     - "All requirements.txt packages installed"
     - "OpenCV 4.8+ with hardware acceleration"
     - "FastAPI with async optimizations"
-    - "RPi.GPIO, gpiozero, smbus2, picamera2 available"
-  
+    - "lgpio, gpiozero, smbus2, picamera2 available"
+
   service_configuration:
     - "All 11 microservices configured"
     - "systemd security hardening applied"
     - "Service dependencies properly configured"
     - "Service startup under 30 seconds"
-  
+
   performance_validation:
     - "Boot time under 30 seconds"
     - "Sensor fusion latency under 80ms"
@@ -243,14 +251,14 @@ bookworm_features:
     - "Enhanced cgroup v2 support"
     - "Improved SELinux/AppArmor integration"
     - "Better process isolation"
-  
+
   # Performance Features
   performance:
     - "Enhanced kernel scheduler (CFS improvements)"
     - "Better memory management (MGLRU)"
     - "Improved I/O performance"
     - "Enhanced power management"
-  
+
   # Hardware Support
   hardware:
     - "Native picamera2 support"
@@ -266,7 +274,7 @@ legacy_removal:
     - "Remove Bullseye compatibility shims"
     - "Remove legacy camera interface code"
     - "Remove old systemd service configurations"
-  
+
   # Clean up deprecated imports
   deprecated_imports:
     - "Remove picamera (use picamera2)"

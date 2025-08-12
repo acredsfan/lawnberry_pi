@@ -229,7 +229,7 @@ chmod +x install_system_integration.sh
 
 # This script will:
 # - Install Python dependencies
-# - Install Node.js and web UI dependencies  
+# - Install Node.js and web UI dependencies
 # - Set up system services
 # - Configure hardware interfaces
 # - Create necessary directories
@@ -251,7 +251,8 @@ The Coral Edge TPU provides hardware acceleration for AI inference, significantl
 
 **Software Requirements**:
 - ✅ **Pi OS Bookworm** (required - this guide assumes Bookworm)
-- ✅ **Python 3.11+** (Bookworm default)
+- ✅ **Python 3.11+** for LawnBerryPi runtime
+- ✅ **Python 3.9 via pyenv** for Coral library support
 - ✅ **ARM64 architecture** (64-bit Pi OS)
 
 #### 3.3.2 Installation Methods
@@ -261,12 +262,13 @@ The Coral Edge TPU provides hardware acceleration for AI inference, significantl
 If you didn't install Coral support during the main installation:
 
 ```bash
-# Run Coral-specific installer
-cd /home/pi/lawnberry-pi
-sudo ./scripts/install_coral_runtime.sh
+# Install Python 3.9 and set up pyenv environment
+pyenv install 3.9.18
+pyenv virtualenv 3.9.18 coral-python39
+source activate_coral.sh
 
-# Install Python packages
-sudo ./scripts/install_coral_system_packages.sh
+# Install Coral libraries
+pip install -r requirements-coral.txt
 ```
 
 **Method 2: Manual Installation**
@@ -284,11 +286,12 @@ sudo apt-get install libedgetpu1-std    # Standard frequency (recommended)
 # OR
 sudo apt-get install libedgetpu1-max    # Maximum frequency (runs hotter)
 
-# 3. Install Python library
-sudo apt-get install python3-pycoral
+# 3. Install Python library within pyenv
+source activate_coral.sh
+pip install -r requirements-coral.txt
 
 # 4. Verify installation
-python3 -c "from pycoral.utils import edgetpu; print('Coral packages installed successfully')"
+python -c "from pycoral.utils import edgetpu; print('Coral packages installed successfully')"
 ```
 
 #### 3.3.3 Hardware Detection and Verification
@@ -328,7 +331,7 @@ The Edge TPU runtime supports two performance modes:
 # Switch to standard mode
 sudo apt-get install --reinstall libedgetpu1-std
 
-# Switch to maximum mode  
+# Switch to maximum mode
 sudo apt-get install --reinstall libedgetpu1-max
 
 # Restart services after mode change
@@ -561,7 +564,7 @@ print('I2C devices found:', devices)
 
 # Expected devices:
 # 0x3c (SSD1306 Display)
-# 0x40 (INA3221 Power Monitor) 
+# 0x40 (INA3221 Power Monitor)
 # 0x76 (BME280 Environmental)
 ```
 
@@ -585,7 +588,7 @@ cap.release()
 
 ```bash
 # Check GPS connection
-ls /dev/ttyACM* 
+ls /dev/ttyACM*
 # Should show /dev/ttyACM0 (GPS)
 
 # Test GPS data

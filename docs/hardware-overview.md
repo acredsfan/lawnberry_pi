@@ -6,7 +6,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 
 ```
                     LawnBerryPi Hardware Architecture
-                           
+
     ┌─────────────────────────────────────────────────────────────┐
     │                     POWER SYSTEM                            │
     │  ┌─────────────┐  ┌──────────────┐  ┌─────────────────┐    │
@@ -19,7 +19,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
     ┌─────────────────────────────────────────────┼──────────────┐
     │                 MAIN COMPUTE                │              │
     │  ┌─────────────────────────────────────┐    │              │
-    │  │        Raspberry Pi 4 (8GB)        │    │ 12V Bus      │
+    │  │   Raspberry Pi 4/5 (8GB)        │    │ 12V Bus      │
     │  │  ┌─────────────────────────────┐    │    │              │
     │  │  │      RoboHAT (RP2040)       │    │    │              │
     │  │  │                             │    │    │              │
@@ -68,7 +68,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 
 ## Core Components
 
-### Raspberry Pi 4 (8GB RAM)
+### Raspberry Pi 4/5 (8GB RAM)
 **Function**: Main computing platform running all software systems
 **Specifications**:
 - ARM Cortex-A72 quad-core processor (1.5GHz)
@@ -81,7 +81,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 - Web interface hosting and API services
 - GPS processing and navigation algorithms
 - Computer vision and obstacle detection
-- Weather monitoring and schedule management  
+- Weather monitoring and schedule management
 - Safety system coordination and emergency response
 
 ### RoboHAT with RP2040 Microcontroller

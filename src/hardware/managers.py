@@ -12,12 +12,9 @@ import numpy as np
 import serial
 
 try:
-    import RPi.GPIO as GPIO
     import smbus2
 except ImportError:
-    # Mock for development/testing
     smbus2 = None
-    GPIO = None
 
 from .data_structures import (
     CameraFrame,
@@ -35,6 +32,7 @@ from .exceptions import (
     DeviceTimeoutError,
     HardwareError,
 )
+from .gpio_adapter import GPIO
 
 
 class RetryPolicy:

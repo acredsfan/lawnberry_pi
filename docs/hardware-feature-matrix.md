@@ -1,7 +1,7 @@
 # LawnBerryPi Hardware Feature Matrix
 
-**Version:** 1.0  
-**Purpose:** Comprehensive hardware configuration guide and capability matrix  
+**Version:** 1.0
+**Purpose:** Comprehensive hardware configuration guide and capability matrix
 **Last Updated:** December 2024
 
 ## Overview
@@ -12,7 +12,7 @@ This document provides a complete matrix of hardware components, their capabilit
 
 ## Core Processing Platform
 
-### Raspberry Pi 4 Model B Configuration
+### Raspberry Pi 4/5 Configuration
 
 | Component | Specification | Status | Notes |
 |-----------|---------------|--------|-------|
@@ -45,7 +45,7 @@ This document provides a complete matrix of hardware components, their capabilit
 
 **GPS Feature Matrix:**
 - ✅ Real-time positioning
-- ✅ RTK correction integration  
+- ✅ RTK correction integration
 - ✅ Multi-constellation support (GPS, GLONASS, Galileo)
 - ✅ Autonomous fix acquisition
 - ✅ Position accuracy monitoring
@@ -127,7 +127,7 @@ This document provides a complete matrix of hardware components, their capabilit
 
 **AI Enhancement Matrix:**
 - ❌ TPU-accelerated object detection
-- ❌ Advanced computer vision models  
+- ❌ Advanced computer vision models
 - ❌ Real-time semantic segmentation
 - ❌ Custom lawn-specific AI models
 - ✅ CPU-based OpenCV processing (current)
@@ -345,7 +345,7 @@ This document provides a complete matrix of hardware components, their capabilit
 
 **Available Interfaces:**
 - 5x GPIO pins available for expansion
-- 3x I2C addresses available  
+- 3x I2C addresses available
 - 2x USB 3.0 ports available
 - SPI interface available
 - Additional UART via GPIO
@@ -479,8 +479,8 @@ This document provides a complete matrix of hardware components, their capabilit
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** December 2024  
+**Document Version:** 1.0
+**Last Updated:** December 2024
 **Next Review:** March 2025
 
 This hardware feature matrix provides comprehensive information for planning, deploying, and maintaining LawnBerryPi systems across different hardware configurations and use cases.

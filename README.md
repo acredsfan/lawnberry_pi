@@ -51,7 +51,7 @@ Visit the **[Documentation Index](docs/README.md)** for all available guides, re
 ## 🏗️ System Architecture
 
 ### Hardware Components
-- **Raspberry Pi 4** (8GB RAM) - Main computing platform
+- **Raspberry Pi 4 or 5** (8GB RAM) - Main computing platform
 - **RoboHAT with RP2040** - Motor control and sensor interface
 - **RTK-GPS Module** - Centimeter-accurate positioning
 - **Environmental Sensors** - Weather monitoring and safety
@@ -86,10 +86,24 @@ bash scripts/install_lawnberry.sh
 # - Detect Raspberry Pi OS Bookworm and enable optimizations
 # - Install Python 3.11 specific dependencies
 # - Configure systemd services with enhanced security
-# - Set up hardware interfaces with improved drivers
+# - Set up hardware interfaces with lgpio for Pi 4/5
+# - Optionally set up Coral TPU support using Python 3.9 via pyenv
 
 # Optional: Run the first-time setup wizard
 python3 scripts/first_run_wizard.py
+```
+
+For manual setup or development, install dependencies:
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-dev.txt  # for testing tools
+```
+
+To work with the Coral TPU, activate the Python 3.9 environment:
+
+```bash
+source activate_coral.sh
 ```
 
 ### ✨ Installation Features
@@ -126,26 +140,26 @@ from src.hardware import create_hardware_interface
 async def main():
     # Create hardware interface
     hw = create_hardware_interface("config/hardware.yaml")
-    
+
     try:
         # Initialize all hardware
         await hw.initialize()
-        
+
         # Read sensor data
         sensor_data = await hw.get_all_sensor_data()
         for name, reading in sensor_data.items():
             print(f"{name}: {reading.value} {reading.unit}")
-        
+
         # Control RoboHAT
         await hw.send_robohat_command('rc_disable')
         await hw.send_robohat_command('pwm', 1500, 1500)
-        
+
         # Control GPIO
         await hw.control_gpio_pin('blade_enable', 1)
-        
+
         # Get camera frame
         frame = await hw.get_camera_frame()
-        
+
     finally:
         await hw.shutdown()
 
@@ -204,15 +218,15 @@ class CustomSensorPlugin(HardwarePlugin):
     @property
     def plugin_type(self) -> str:
         return "custom_sensor"
-    
+
     @property
     def required_managers(self) -> list:
         return ["i2c"]
-    
+
     async def initialize(self) -> bool:
         # Initialize your sensor
         return True
-    
+
     async def read_data(self):
         # Read and return sensor data
         pass

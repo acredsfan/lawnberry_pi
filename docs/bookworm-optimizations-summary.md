@@ -9,7 +9,7 @@ This document summarizes all Bookworm-specific optimizations implemented in the 
 - **Updated minimum Python requirement**: 3.8+ → 3.11+ (Bookworm default)
 - **Added version constraints**: All dependencies now have upper bounds for stability
 - **Added Raspberry Pi specific libraries**:
-  - `RPi.GPIO>=0.7.1,<1.0.0`
+  - `lgpio>=0.2.2,<1.0.0`
   - `gpiozero>=1.6.2,<2.0.0`
   - `smbus2>=0.4.0,<1.0.0`
   - `picamera2>=0.3.12,<1.0.0`
@@ -82,7 +82,7 @@ This document summarizes all Bookworm-specific optimizations implemented in the 
 The installation script now performs these Bookworm-specific checks:
 1. **OS Version Detection**: Confirms Bookworm installation
 2. **Python Version Validation**: Ensures 3.11+ availability
-3. **Hardware Detection**: Validates Raspberry Pi 4B compatibility
+3. **Hardware Detection**: Validates Raspberry Pi 4B/5 compatibility
 4. **Service Configuration**: Verifies systemd service syntax
 5. **Dependency Installation**: Confirms all packages install correctly
 
@@ -210,7 +210,7 @@ Future optimizations may leverage:
 
 ---
 
-**Implementation Date**: December 2024  
-**Tested On**: Raspberry Pi OS Bookworm (64-bit) with Python 3.11.2  
-**Hardware**: Raspberry Pi 4 Model B (8GB RAM)  
+**Implementation Date**: December 2024
+**Tested On**: Raspberry Pi OS Bookworm (64-bit) with Python 3.11.2
+**Hardware**: Raspberry Pi 4 Model B / Raspberry Pi 5 (8GB RAM)
 **Status**: Production Ready ✅

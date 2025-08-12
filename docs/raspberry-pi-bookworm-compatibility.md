@@ -7,7 +7,7 @@ This document provides comprehensive information about LawnBerryPi's compatibili
 ## System Requirements
 
 ### Hardware Requirements
-- **Raspberry Pi 4 Model B** (4GB+ RAM recommended, 8GB for optimal performance)
+- **Raspberry Pi 4 Model B or Raspberry Pi 5** (4GB+ RAM recommended, 8GB for optimal performance)
 - **MicroSD Card**: Class 10, 32GB minimum (64GB+ recommended)
 - **All hardware components** as specified in `docs/hardware-overview.md`
 
@@ -118,7 +118,7 @@ i2c:
   bus_number: 1
   clock_speed: 400000  # Increased for Bookworm
   retry_count: 3       # Enhanced error handling
-  
+
 gpio:
   performance_mode: true  # Bookworm-specific optimization
   interrupt_handling: enhanced  # Better interrupt processing
@@ -184,7 +184,7 @@ CPUQuota=100%       # Full CPU access when needed
    ```bash
    # Install LawnBerryPi on fresh Bookworm
    bash scripts/install_lawnberry.sh
-   
+
    # Restore configurations
    sudo tar -xzf lawnberry-backup.tar.gz -C /
    ```
@@ -315,6 +315,6 @@ bash scripts/update_lawnberry.sh
 
 ---
 
-**Last Updated**: December 2024  
-**Tested On**: Raspberry Pi OS Bookworm (64-bit) with Python 3.11.2  
+**Last Updated**: December 2024
+**Tested On**: Raspberry Pi OS Bookworm (64-bit) with Python 3.11.2
 **Hardware**: Raspberry Pi 4 Model B (8GB RAM)
