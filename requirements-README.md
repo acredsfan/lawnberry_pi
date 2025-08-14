@@ -40,6 +40,15 @@ sudo apt-get install python3-pycoral python3-tflite-runtime
 pip install -r requirements-optional.txt
 ```
 
+#### Verifying ARM64 Wheels
+Some heavy dependencies such as `opencv-python`, `scikit-learn`, and `pandas` require ARM64 wheels on Raspberry Pi.
+If a prebuilt wheel is unavailable, compile from source using `pip wheel` with the `--no-binary=:all:` option or
+install via the `piwheels.org` index:
+
+```bash
+pip install --extra-index-url https://www.piwheels.org/simple opencv-python scikit-learn pandas
+```
+
 ### Development Installation
 ```bash
 # Install all dependencies for development
@@ -77,6 +86,10 @@ pip install -r requirements-coral.txt
 ### Coral Installation Issues
 - **Problem**: pip installation fails for pycoral on Python 3.11+
 - **Solution**: Use system packages: `sudo apt-get install python3-pycoral`
+
+### TensorFlow Lite Runtime
+- **Problem**: `tflite-runtime` wheels are only published for ARM64 Linux and specific Python versions.
+- **Solution**: Ensure the target is Raspberry Pi OS 64-bit. On other platforms the package is skipped.
 
 ### Missing Hardware Packages
 - **Problem**: Hardware-specific imports fail

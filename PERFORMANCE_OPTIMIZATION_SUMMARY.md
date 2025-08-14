@@ -80,6 +80,11 @@ Comprehensive performance optimization implementation for LawnBerryPi on Raspber
 - Memory usage: <6GB with controlled growth
 - Vision FPS: 30 FPS sustained (50% improvement)
 
+## Model Resource Planning
+Heavy machine learning libraries such as `numpy` and `scikit-learn` can saturate Raspberry Pi 4
+resources. Evaluate models on target hardware and consider off-device training or lighter
+architectures when real-time performance cannot be met.
+
 ## Implementation Files
 
 ### Core Optimization Scripts
