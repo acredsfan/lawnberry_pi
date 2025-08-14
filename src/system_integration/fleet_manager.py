@@ -17,6 +17,7 @@ import aiofiles
 
 from .config_manager import ConfigManager
 from .deployment_manager import DeploymentManager, DeploymentPackage, DeploymentType
+from ..communication.client import MQTTClient
 
 
 logger = logging.getLogger(__name__)
@@ -75,9 +76,10 @@ class FleetManager:
     Manages fleet-wide deployments and device coordination
     """
     
-    def __init__(self, config_manager: ConfigManager):
+    def __init__(self, config_manager: ConfigManager, mqtt_client: Optional[MQTTClient] = None):
         self.config_manager = config_manager
         self.config = self._load_fleet_config()
+        self.mqtt_client = mqtt_client
         
         # Fleet state
         self.devices: Dict[str, FleetDevice] = {}
@@ -716,4 +718,18 @@ class FleetManager:
     async def _notify_deployment_completion(self, deployment: FleetDeployment):
         """Notify about deployment completion"""
         logger.info(f"Fleet deployment {deployment.deployment_id} completed")
-        # TODO: Send notification via MQTT/web UI
+        if self.mqtt_client:
+            try:
+                await self.mqtt_client.publish(
+                    "lawnberry/fleet/deployment_complete",
+                    {
+                        "deployment_id": deployment.deployment_id,
+                        "success": deployment.success_count,
+                        "failed": deployment.failure_count,
+                        "completed_at": deployment.completed_at.isoformat()
+                        if deployment.completed_at
+                        else datetime.utcnow().isoformat(),
+                    },
+                )
+            except Exception as e:
+                logger.error(f"Failed to publish deployment completion: {e}")

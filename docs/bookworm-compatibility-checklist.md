@@ -77,7 +77,7 @@ python3 -m pytest tests/performance/test_performance_benchmarks.py -v
   ```
 - [ ] **Hardware Dependencies**: Raspberry Pi specific packages
   ```bash
-  /opt/lawnberry/venv/bin/python3 -c "import RPi.GPIO, gpiozero, smbus2, picamera2"
+  /opt/lawnberry/venv/bin/python3 -c "import lgpio, gpiozero, smbus2, picamera2"
   ```
 - [ ] **Version Compatibility**: Bookworm-optimized versions
   ```bash

@@ -9,7 +9,7 @@ This document summarizes all Bookworm-specific optimizations implemented in the 
 - **Updated minimum Python requirement**: 3.8+ → 3.11+ (Bookworm default)
 - **Added version constraints**: All dependencies now have upper bounds for stability
 - **Added Raspberry Pi specific libraries**:
-  - `RPi.GPIO>=0.7.1,<1.0.0`
+  - `lgpio>=0.2.2,<1.0.0`
   - `gpiozero>=1.6.2,<2.0.0`
   - `smbus2>=0.4.0,<1.0.0`
   - `picamera2>=0.3.12,<1.0.0`

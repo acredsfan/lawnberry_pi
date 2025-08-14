@@ -578,9 +578,19 @@ class MLSafetyIntegrator:
                 if detection_id in self.active_responses:
                     del self.active_responses[detection_id]
                 
-                self.logger.info(f"False positive reported for {object_type} (ID: {detection_id})")
-                
-                # TODO: Feed back to learning system
+                self.logger.info(
+                    f"False positive reported for {object_type} (ID: {detection_id})"
+                )
+
+                # Notify adaptive learning system
+                await self.mqtt_client.publish(
+                    "lawnberry/learning/detection_feedback",
+                    {
+                        "detection_id": detection_id,
+                        "object_type": object_type,
+                        "feedback": "false_positive",
+                    },
+                )
                 
         except Exception as e:
             self.logger.error(f"Error handling false positive report: {e}")

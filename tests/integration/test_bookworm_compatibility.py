@@ -73,7 +73,7 @@ class TestBookwormCompatibility:
         """Test hardware interface libraries for Bookworm compatibility"""
         # Test GPIO libraries
         try:
-            import RPi.GPIO as GPIO
+            import lgpio
             import gpiozero
             from gpiozero.pins.pigpio import PiGPIOFactory
             assert True  # GPIO libraries available

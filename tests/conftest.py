@@ -131,7 +131,7 @@ async def mqtt_client():
 async def hardware_interface(test_config, mock_i2c_device, mock_gpio, mock_serial):
     """Mock hardware interface with all sensors"""
     with patch('src.hardware.managers.smbus.SMBus') as mock_smbus, \
-         patch('src.hardware.managers.RPi.GPIO', mock_gpio), \
+         patch('src.hardware.managers.GPIO', mock_gpio), \
          patch('src.hardware.managers.serial.Serial', return_value=mock_serial):
         
         mock_smbus.return_value = mock_i2c_device

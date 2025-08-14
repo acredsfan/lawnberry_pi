@@ -600,11 +600,11 @@ class MotorController:
         self.setup_gpio()
     
     def setup_gpio(self):
-        import RPi.GPIO as GPIO
-        GPIO.setmode(GPIO.BCM)
+        import lgpio
+        chip = lgpio.gpiochip_open(0)
         # Configure motor control pins
         for pin in [*self.left_motor_pins, *self.right_motor_pins]:
-            GPIO.setup(pin, GPIO.OUT)
+            lgpio.gpio_claim_output(chip, pin, 0)
     
     def set_motor_speed(self, left_speed: float, right_speed: float):
         """Set motor speeds (-1.0 to 1.0)"""

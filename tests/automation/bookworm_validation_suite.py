@@ -168,7 +168,7 @@ class BookwormValidationSuite:
         try:
             # Test GPIO libraries
             try:
-                import RPi.GPIO as GPIO
+                import lgpio
                 import gpiozero
                 logger.info("✓ GPIO libraries available")
             except ImportError as e:
