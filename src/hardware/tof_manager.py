@@ -18,17 +18,18 @@ try:
     from digitalio import DigitalInOut
     from adafruit_vl53l0x import VL53L0X
     HAS_HARDWARE = True
-except ImportError:
+except ImportError:  # pragma: no cover - running without hardware
     HAS_HARDWARE = False
     logging.warning("VL53L0X hardware libraries not available - running in simulation mode")
 
 # Import hardware error for proper error handling
 try:
     from .exceptions import HardwareError
-except ImportError:
-    # Fallback if exceptions module doesn't exist
+except ImportError:  # pragma: no cover - fallback if exceptions module missing
     class HardwareError(Exception):
         pass
+
+from .gpio_wrapper import GPIO
 
 
 @dataclass
@@ -117,23 +118,21 @@ class ToFSensorManager:
     async def _setup_shutdown_pins(self):
         """Setup all shutdown pins and turn OFF all sensors"""
         self.logger.info("Setting up ToF sensor shutdown pins...")
-        
+
         for config in self.sensor_configs:
             try:
-                # For Raspberry Pi GPIO with CircuitPython, we need to use a different approach
-                # Since board.D22/D23 may not be available, we'll use RPi.GPIO instead
-                import RPi.GPIO as GPIO
-                
-                # Setup GPIO if not already done
-                GPIO.setmode(GPIO.BCM)
-                GPIO.setwarnings(False)
-                
-                # Setup the pin as output and turn OFF sensor
-                GPIO.setup(config.shutdown_pin, GPIO.OUT, initial=GPIO.LOW)
-                
-                self.logger.debug(f"GPIO {config.shutdown_pin} configured for {config.name} (OFF)")
-                
-            except Exception as e:
+                if GPIO:
+                    GPIO.setmode(GPIO.BCM)
+                    GPIO.setwarnings(False)
+                    GPIO.setup(config.shutdown_pin, GPIO.OUT, initial=GPIO.LOW)
+                    self.logger.debug(
+                        f"GPIO {config.shutdown_pin} configured for {config.name} (OFF)"
+                    )
+                else:  # pragma: no cover - simulation mode
+                    self.logger.debug(
+                        f"Simulation mode: skipping GPIO setup for {config.name}"
+                    )
+            except Exception as e:  # pragma: no cover - hardware failure
                 self.logger.error(f"Failed to setup shutdown pin for {config.name}: {e}")
                 raise
         
@@ -144,16 +143,14 @@ class ToFSensorManager:
     async def _initialize_sensors_sequence(self):
         """Initialize sensors one by one with proper timeout protection"""
         self.logger.info("Starting ToF sensor initialization sequence...")
-        
-        import RPi.GPIO as GPIO
-        
+
         for i, config in enumerate(self.sensor_configs):
             try:
                 self.logger.info(f"Initializing sensor {i+1}/{len(self.sensor_configs)}: {config.name}")
-                
+
                 # Use timeout for each sensor initialization
                 await asyncio.wait_for(
-                    self._initialize_single_sensor_with_timeout(i, config, GPIO),
+                    self._initialize_single_sensor_with_timeout(i, config),
                     timeout=30.0  # 30 second timeout per sensor
                 )
                 self.logger.info(f"✅ {config.name} initialized successfully")
@@ -174,10 +171,11 @@ class ToFSensorManager:
         if self.sensors:
             await self._verify_sensors()
 
-    async def _initialize_single_sensor_with_timeout(self, i: int, config: ToFSensorConfig, GPIO):
+    async def _initialize_single_sensor_with_timeout(self, i: int, config: ToFSensorConfig):
         """Initialize a single ToF sensor with proper error handling"""
         # Step 1: Turn ON this sensor
-        GPIO.output(config.shutdown_pin, GPIO.HIGH)
+        if GPIO:
+            GPIO.output(config.shutdown_pin, GPIO.HIGH)
         await asyncio.sleep(0.1)  # Allow sensor to boot
         self.logger.debug(f"Powered on {config.name} via GPIO {config.shutdown_pin}")
         
@@ -321,27 +319,30 @@ class ToFSensorManager:
         try:
             # Stop continuous mode with timeout
             await asyncio.wait_for(self.stop_continuous_mode(), timeout=5.0)
-            
-            # Turn off all sensors using RPi.GPIO with timeout protection
-            import RPi.GPIO as GPIO
-            
-            cleanup_tasks = []
+
+            # Turn off all sensors using GPIO with timeout protection
             for config in self.sensor_configs:
                 try:
-                    GPIO.output(config.shutdown_pin, GPIO.LOW)
-                    self.logger.debug(f"GPIO {config.shutdown_pin} set LOW for {config.name}")
+                    if GPIO:
+                        GPIO.output(config.shutdown_pin, GPIO.LOW)
+                        self.logger.debug(
+                            f"GPIO {config.shutdown_pin} set LOW for {config.name}"
+                        )
                 except Exception as e:
-                    self.logger.warning(f"Failed to set GPIO {config.shutdown_pin} LOW: {e}")
-            
+                    self.logger.warning(
+                        f"Failed to set GPIO {config.shutdown_pin} LOW: {e}"
+                    )
+
             # Small delay to ensure sensors are off
             await asyncio.sleep(0.1)
-            
+
             # Clean up GPIO
-            try:
-                GPIO.cleanup()
-                self.logger.info("GPIO cleanup completed")
-            except Exception as e:
-                self.logger.warning(f"GPIO cleanup warning: {e}")
+            if GPIO:
+                try:
+                    GPIO.cleanup()
+                    self.logger.info("GPIO cleanup completed")
+                except Exception as e:
+                    self.logger.warning(f"GPIO cleanup warning: {e}")
             
             # Clear data structures
             self.sensors.clear()
@@ -364,11 +365,11 @@ class ToFSensorManager:
             self.logger.error(f"Error during ToF cleanup: {e}")
         finally:
             # Force GPIO cleanup as last resort
-            try:
-                import RPi.GPIO as GPIO
-                GPIO.cleanup()
-            except:
-                pass
+            if GPIO:
+                try:
+                    GPIO.cleanup()
+                except Exception:
+                    pass
     
     async def shutdown(self):
         """Shutdown ToF sensor manager"""
@@ -391,12 +392,13 @@ class ToFSensorManager:
             # Get GPIO pin state
             pin_state = "unknown"
             try:
-                import RPi.GPIO as GPIO
-                if GPIO.input(config.shutdown_pin):
+                if GPIO and GPIO.input(config.shutdown_pin):
                     pin_state = "HIGH (ON)"
-                else:
+                elif GPIO:
                     pin_state = "LOW (OFF)"
-            except:
+                else:
+                    pin_state = "unavailable"
+            except Exception:
                 pin_state = "error"
             
             status[config.name] = {

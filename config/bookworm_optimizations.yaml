@@ -221,7 +221,7 @@ validation_checklist:
     - "All requirements.txt packages installed"
     - "OpenCV 4.8+ with hardware acceleration"
     - "FastAPI with async optimizations"
-    - "RPi.GPIO, gpiozero, smbus2, picamera2 available"
+    - "lgpio, gpiozero, smbus2, picamera2 available"
   
   service_configuration:
     - "All 11 microservices configured"

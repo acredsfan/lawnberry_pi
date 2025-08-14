@@ -1227,6 +1227,14 @@ class PowerManager:
         except Exception as e:
             self.logger.error(f"Error updating existing sunny spot: {e}")
     
+    async def _obstacles_present(self) -> bool:
+        """Check for nearby obstacles using ToF sensors."""
+        try:
+            readings = await self.hardware_interface.tof_manager.read_all_sensors()
+            return any(r.distance_mm < 1000 for r in readings.values())
+        except Exception:
+            return False
+
     async def _create_new_sunny_spot(self, lat: float, lon: float):
         """Create new sunny spot entry"""
         try:
@@ -1239,7 +1247,7 @@ class PowerManager:
                 last_measured=datetime.now(),
                 time_of_day_optimal=[current_hour] if self.solar_metrics.efficiency > 0.5 else [],
                 seasonal_factor=self._calculate_seasonal_factor(),
-                obstacles_nearby=False  # TODO: Use vision system to detect obstacles
+                obstacles_nearby=await self._obstacles_present()
             )
             
             self.sunny_spots.append(new_spot)

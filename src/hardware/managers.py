@@ -11,13 +11,13 @@ import cv2
 import numpy as np
 import serial
 
-try:
-    import RPi.GPIO as GPIO
+# Raspberry Pi 4B/5 compatibility is provided via gpio_wrapper
+from .gpio_wrapper import GPIO
+
+try:  # Hardware I2C library may be unavailable during development
     import smbus2
-except ImportError:
-    # Mock for development/testing
+except ImportError:  # pragma: no cover - development fallback
     smbus2 = None
-    GPIO = None
 
 from .data_structures import (
     CameraFrame,

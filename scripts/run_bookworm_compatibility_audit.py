@@ -151,7 +151,7 @@ class BookwormCompatibilityAuditor:
         # GPIO Pin Mappings Test (pins 15, 16, 31, 32, 18, 22)
         gpio_pins = [15, 16, 31, 32, 18, 22]
         try:
-            # Check if GPIO files exist (basic check without RPi.GPIO)
+            # Check if GPIO files exist (basic check without specific GPIO library)
             gpio_base = Path('/sys/class/gpio')
             if gpio_base.exists():
                 self.results.append(AuditResult(
@@ -269,13 +269,13 @@ class BookwormCompatibilityAuditor:
                 ))
         
         # Test Raspberry Pi specific packages (if available)
-        rpi_packages = ['RPi.GPIO', 'gpiozero', 'smbus2', 'picamera2']
+        rpi_packages = ['lgpio', 'gpiozero', 'smbus2', 'picamera2']
         for package in rpi_packages:
             try:
                 if package == 'smbus2':
                     __import__('smbus2')
-                elif package == 'RPi.GPIO':
-                    __import__('RPi.GPIO')
+                elif package == 'lgpio':
+                    __import__('lgpio')
                 elif package == 'gpiozero':
                     __import__('gpiozero')
                 elif package == 'picamera2':

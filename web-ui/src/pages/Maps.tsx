@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import L from 'leaflet';
 import { useDispatch, useSelector } from 'react-redux';
 import { 
   Box, 
@@ -72,10 +73,32 @@ const Maps: React.FC = () => {
   const [homeLocations, setHomeLocations] = useState<HomeLocation[]>([]);
   const [showHelp, setShowHelp] = useState(false);
   const mapRef = useRef<google.maps.Map | L.Map | null>(null);
-  const handleMapReady = useCallback((mapInstance: any) => {
-    mapRef.current = mapInstance;
-    // TODO: attach geofence overlay layers & heading rotation watchers
-  }, []);
+  const handleMapReady = useCallback(
+    (mapInstance: any) => {
+      mapRef.current = mapInstance;
+
+      boundaries.forEach(boundary => {
+        if (mapInstance && (mapInstance as any).addLayer) {
+          L.polygon(boundary.points).addTo(mapInstance as any);
+        }
+      });
+
+      noGoZones.forEach(zone => {
+        if (mapInstance && (mapInstance as any).addLayer) {
+          L.polygon(zone.points, { color: 'red' }).addTo(mapInstance as any);
+        }
+      });
+
+      if (mapInstance?.addListener) {
+        mapInstance.addListener('heading_changed', () =>
+          setGeofenceStatus(status => ({ ...status }))
+        );
+      } else if (mapInstance?.on) {
+        mapInstance.on('rotate', () => setGeofenceStatus(status => ({ ...status })));
+      }
+    },
+    [boundaries, noGoZones]
+  );
   // Layer visibility toggles
   const [showLayers, setShowLayers] = useState({
     boundaries: true,

@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, Optional
 
+from ..communication.client import MQTTClient
+
 
 class DeploymentLifecycleEvent(str, Enum):
     UPDATE_AVAILABLE = "update_available"
@@ -58,3 +60,14 @@ def build_event(
 class DeploymentEventPublisherProtocol:  # documentation / type aid only
     async def publish_event(self, payload: Dict[str, Any]) -> None:  # pragma: no cover
         raise NotImplementedError
+
+
+class MQTTDeploymentEventPublisher(DeploymentEventPublisherProtocol):
+    """Publish deployment events over MQTT."""
+
+    def __init__(self, mqtt_client: MQTTClient, topic: str = "lawnberry/system/deployment_events"):
+        self.mqtt_client = mqtt_client
+        self.topic = topic
+
+    async def publish_event(self, payload: Dict[str, Any]) -> None:
+        await self.mqtt_client.publish(self.topic, payload)

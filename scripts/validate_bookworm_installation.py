@@ -164,7 +164,7 @@ class BookwormInstallationValidator:
             
             # Test hardware-specific dependencies
             hardware_imports = [
-                ('RPi.GPIO', 'GPIO control'),
+                ('lgpio', 'GPIO control'),
                 ('gpiozero', 'GPIO zero library'),
                 ('smbus2', 'I2C communication'),
                 ('serial', 'Serial communication'),
@@ -246,15 +246,14 @@ class BookwormInstallationValidator:
             
             # Test GPIO interface
             try:
-                import RPi.GPIO as GPIO
-                GPIO.setmode(GPIO.BCM)
-                GPIO.setwarnings(False)
+                import lgpio
+                chip = lgpio.gpiochip_open(0)
                 # Test a safe GPIO pin (not connected to anything critical)
                 test_pin = 18
-                GPIO.setup(test_pin, GPIO.OUT)
-                GPIO.output(test_pin, GPIO.HIGH)
-                GPIO.output(test_pin, GPIO.LOW)
-                GPIO.cleanup()
+                lgpio.gpio_claim_output(chip, test_pin, 0)
+                lgpio.gpio_write(chip, test_pin, 1)
+                lgpio.gpio_write(chip, test_pin, 0)
+                lgpio.gpiochip_close(chip)
                 interface_results['gpio'] = True
                 logger.info("✓ GPIO interface validated")
             except Exception as e:

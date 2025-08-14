@@ -482,7 +482,8 @@ install_dependencies() {
     hardware_packages=(
         "python3-picamera2"
         "python3-gpiozero"
-        "python3-rpi.gpio"
+        "python3-lgpio"
+        "libgpiod-dev"
         "raspi-config"
     )
 

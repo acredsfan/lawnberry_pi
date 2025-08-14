@@ -51,7 +51,7 @@ The comprehensive Raspberry Pi OS Bookworm compatibility audit has been complete
 **Python Dependencies on Bookworm Python 3.11/3.12**
 - ✅ Requirements.txt updated with Bookworm-compatible versions
 - ✅ All critical packages validated: FastAPI, OpenCV 4.8+, Redis, AsyncIO-MQTT
-- ✅ Raspberry Pi specific libraries: RPi.GPIO, gpiozero, smbus2, picamera2
+- ✅ Raspberry Pi specific libraries: lgpio, gpiozero, smbus2, picamera2
 - ✅ Python 3.11 optimization features implemented
 
 **SystemD Service Configurations**
@@ -61,7 +61,7 @@ The comprehensive Raspberry Pi OS Bookworm compatibility audit has been complete
 - ✅ Comprehensive service validation and health monitoring
 
 **Hardware Interface Libraries**
-- ✅ Full compatibility testing for pyserial, RPi.GPIO, OpenCV
+- ✅ Full compatibility testing for pyserial, lgpio, OpenCV
 - ✅ Enhanced error handling and fallback mechanisms
 - ✅ Performance optimization for real-time operations
 

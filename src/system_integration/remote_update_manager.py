@@ -236,8 +236,13 @@ class RemoteUpdateManager:
     
     async def _get_system_info(self) -> Dict[str, str]:
         """Get current system information for update checks"""
-        # Get current version
-        current_version = "1.0.0"  # TODO: Get from system
+        # Get current version from installed package metadata
+        try:
+            from importlib.metadata import version
+
+            current_version = version("lawnberrypi")
+        except Exception:
+            current_version = "0.0.0"
         
         # Get hardware info
         system_metrics = await self.system_monitor.get_current_metrics()

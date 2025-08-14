@@ -50,7 +50,7 @@ class TestHardwareAvailability:
     def test_gpio_available(self):
         """Test GPIO interface is available"""
         try:
-            import RPi.GPIO as GPIO
+            import lgpio
             GPIO.setmode(GPIO.BCM)
             # Test a safe pin
             GPIO.setup(18, GPIO.OUT)
@@ -58,7 +58,7 @@ class TestHardwareAvailability:
             GPIO.cleanup()
             
         except ImportError:
-            pytest.skip("RPi.GPIO not available - running in mock mode")
+            pytest.skip("lgpio not available - running in mock mode")
         except RuntimeError:
             pytest.skip("GPIO access requires root privileges")
     
@@ -640,7 +640,7 @@ def check_hardware_requirements() -> Dict[str, bool]:
         pass
     
     try:
-        import RPi.GPIO as GPIO
+        import lgpio
         GPIO.setmode(GPIO.BCM)
         GPIO.cleanup()
         requirements["gpio_access"] = True
