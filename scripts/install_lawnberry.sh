@@ -646,8 +646,20 @@ setup_coral_packages() {
 
     export PYENV_ROOT="$HOME/.pyenv"
     export PATH="$PYENV_ROOT/bin:$PATH"
-    eval "$(pyenv init -)" 2>/dev/null || true
-    eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
+
+    if ! command -v pyenv >/dev/null 2>&1; then
+        log_info "pyenv not found, installing..."
+        curl https://pyenv.run | bash
+        export PATH="$PYENV_ROOT/bin:$PATH"
+    fi
+
+    if command -v pyenv >/dev/null 2>&1; then
+        eval "$(pyenv init -)" 2>/dev/null || true
+        eval "$(pyenv virtualenv-init -)" 2>/dev/null || true
+    else
+        log_error "pyenv installation failed"
+        exit 1
+    fi
 
     if ! pyenv versions | grep -q "$PYTHON_39_VERSION"; then
         log_info "Installing Python $PYTHON_39_VERSION via pyenv..."
@@ -713,6 +725,10 @@ setup_coral_packages() {
     log_info "Creating helper script to activate Coral environment..."
     cat > "$PROJECT_ROOT/activate_coral.sh" << EOF
 #!/bin/bash
+if ! command -v pyenv >/dev/null 2>&1; then
+  echo "pyenv is required but not installed." >&2
+  exit 1
+fi
 export PYENV_ROOT="\$HOME/.pyenv"
 export PATH="\$PYENV_ROOT/bin:\$PATH"
 eval "\$(pyenv init -)"
