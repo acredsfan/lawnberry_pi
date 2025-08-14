@@ -339,17 +339,19 @@ detect_bookworm() {
         fi
     fi
 
-    # Check available RAM (8GB is target optimal configuration)
+    # Check available RAM (8GB model typically reports ~7GB usable)
     TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo 0)
     TOTAL_RAM_GB=$((TOTAL_RAM_KB / 1024 / 1024))
     log_debug "Total RAM detected: ${TOTAL_RAM_KB} KB (${TOTAL_RAM_GB} GB)"
-    if [[ $TOTAL_RAM_GB -ge 8 ]]; then
+    if [[ $TOTAL_RAM_GB -ge 7 ]]; then
         log_success "RAM: ${TOTAL_RAM_GB}GB detected - enabling memory optimizations"
-        if [[ $TOTAL_RAM_GB -ge 16 ]]; then
-            log_info "High RAM capacity detected - enabling advanced memory management"
+        if [[ $TOTAL_RAM_GB -ge 8 ]]; then
+            log_info "Full 8GB RAM detected - enabling advanced memory management"
         fi
-    else
+    elif [[ $TOTAL_RAM_GB -lt 6 ]]; then
         log_warning "RAM: ${TOTAL_RAM_GB}GB - may limit performance optimizations"
+    else
+        log_info "RAM: ${TOTAL_RAM_GB}GB - near minimum recommended memory"
     fi
 }
 
