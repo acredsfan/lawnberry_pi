@@ -9,7 +9,9 @@ echo "=== LawnBerry Pi Repository Cleanup ==="
 echo "Removing temporary development artifacts..."
 
 # Change to project root
-cd /home/pi/lawnberry_pi
+# Change to repository root dynamically (script's parent directory)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # Track what we remove
 removed_count=0

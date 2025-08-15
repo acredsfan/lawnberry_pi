@@ -120,14 +120,36 @@ class MQTTBridge:
             self.mqtt_client.add_message_handler(full_topic, self._handle_mqtt_message)
             self.logger.debug(f"Subscribed to {full_topic}")
     
-    async def _handle_mqtt_message(self, topic: str, payload: Dict[str, Any]):
-        """Handle incoming MQTT messages"""
+    async def _handle_mqtt_message(self, topic: str, payload: Any):
+        """Handle incoming MQTT messages. Accepts raw string or dict payloads and parses JSON if needed."""
         try:
             # Remove namespace prefix
             clean_topic = topic.replace("lawnberry/", "")
             
+            # Ensure payload is a dictionary
+            data: Dict[str, Any]
+            if isinstance(payload, str):
+                try:
+                    data = json.loads(payload)
+                except Exception:
+                    # If not JSON, wrap as text
+                    data = {"text": payload}
+            elif isinstance(payload, bytes):
+                try:
+                    data = json.loads(payload.decode("utf-8"))
+                except Exception:
+                    data = {"text": payload.decode("utf-8", errors="ignore")}
+            elif isinstance(payload, dict):
+                data = payload
+            else:
+                # Attempt generic conversion
+                try:
+                    data = json.loads(json.dumps(payload, default=str))
+                except Exception:
+                    data = {"value": str(payload)}
+
             # Update cache
-            self._cached_data[clean_topic] = payload
+            self._cached_data[clean_topic] = data
             self._cache_timestamps[clean_topic] = datetime.now()
             
             # Find matching topic pattern
@@ -139,14 +161,14 @@ class MQTTBridge:
             ws_message = WebSocketMessage(
                 type=message_type,
                 topic=clean_topic,
-                data=payload
+                data=data
             )
             
             # Broadcast to WebSocket connections
             await self._broadcast_to_websockets(ws_message)
             
             # Notify subscription handlers
-            await self._notify_handlers(clean_topic, payload)
+            await self._notify_handlers(clean_topic, data)
             
         except Exception as e:
             self.logger.error(f"Error handling MQTT message from {topic}: {e}")

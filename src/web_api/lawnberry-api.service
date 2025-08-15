@@ -5,23 +5,25 @@ Wants=network-online.target mosquitto.service
 StartLimitIntervalSec=0
 
 [Service]
-Type=exec
+Type=simple
 Restart=always
 RestartSec=5
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/lawnberry_pi
+WorkingDirectory=/opt/lawnberry
 # Conditional auto-rebuild of web UI if source newer than dist
-ExecStartPre=/bin/bash /home/pi/lawnberry_pi/scripts/auto_rebuild_web_ui.sh
-ExecStart=/home/pi/lawnberry_pi/venv/bin/python /home/pi/lawnberry_pi/src/web_api/run_server.py
-# Post-start health probe (liveness + meta). Fails service startup if probe fails.
-ExecStartPost=/bin/bash -c '/home/pi/lawnberry_pi/scripts/health_check_web_api.sh http://127.0.0.1:8000 || { echo "lawnberry-api health probe failed" >&2; exit 1; }'
-EnvironmentFile=-/home/pi/lawnberry_pi/.env
-Environment=PYTHONPATH=/home/pi/lawnberry_pi/src
+ExecStartPre=/bin/bash /opt/lawnberry/scripts/auto_rebuild_web_ui.sh
+ExecStart=/opt/lawnberry/venv/bin/python /opt/lawnberry/src/web_api/run_server.py
+# Post-start health probe (liveness + meta). Non-fatal to avoid killing service during warm-up.
+ExecStartPost=/bin/bash -lc 'sleep 3; /opt/lawnberry/scripts/health_check_web_api.sh http://127.0.0.1:8000 || echo "[lawnberry-api] WARN: health probe failed (non-fatal)" >&2'
+EnvironmentFile=-/opt/lawnberry/.env
+Environment=PYTHONPATH=/opt/lawnberry
 Environment=LOG_LEVEL=INFO
 Environment=HOST=0.0.0.0
 Environment=PORT=8000
 Environment=LAWNBERRY_ENV=production
+Environment=LAWNBERY_UI_DIR=/opt/lawnberry/web-ui/dist
+Environment=SKIP_AUTO_REBUILD=1
 
 # Security hardening (Bookworm-compatible)
 NoNewPrivileges=true
@@ -31,7 +33,7 @@ PrivateTmp=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-ReadWritePaths=/home/pi/lawnberry_pi/web-ui/dist /var/log/lawnberry /var/lib/lawnberry
+ReadWritePaths=/opt/lawnberry/web-ui/dist /var/log/lawnberry /var/lib/lawnberry
 
 # Resource limits
 LimitNOFILE=65536

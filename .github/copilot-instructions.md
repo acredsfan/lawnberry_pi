@@ -130,7 +130,7 @@ Primary installation via `scripts/install_lawnberry.sh`:
 - **ToF Sensor Initialization**: Special handling for VL53L0X dual sensor setup with address conflicts
 
 ### Canonical Runtime vs Source Tree
-The editable source repository (typically `/home/pi/lawnberry_pi`) is synced to the immutable runtime directory `/opt/lawnberry` used by all systemd services. Services MUST NOT run directly from the source tree for security and consistency.
+The editable source repository (typically `/home/pi/lawnberry`) is synced to the immutable runtime directory `/opt/lawnberry` used by all systemd services. Services MUST NOT run directly from the source tree for security and consistency.
 
 Fast deploy/update workflow:
 ```bash

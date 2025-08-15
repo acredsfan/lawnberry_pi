@@ -415,7 +415,7 @@ CORAL_TPU_ENABLED=true          # Set to false to force CPU mode
 CORAL_MODEL_PATH=/opt/lawnberry/models/custom/  # Custom model directory
 # Canonical Runtime & Fast Deploy
 
-LawnBerry now uses a canonical runtime directory at `/opt/lawnberry` for all enabled systemd services. Your cloned repository (e.g. `/home/pi/lawnberry_pi`) is the editable source tree. After making code changes, use the fast deploy helper to sync changes into the runtime without a full reinstall:
+LawnBerry now uses a canonical runtime directory at `/opt/lawnberry` for all enabled systemd services. Your cloned repository (e.g. `/home/pi/lawnberry`) is the editable source tree. After making code changes, use the fast deploy helper to sync changes into the runtime without a full reinstall:
 
 ```bash
 ./scripts/install_lawnberry.sh --deploy-update
@@ -462,7 +462,7 @@ sudo rm -rf /opt/lawnberry /var/log/lawnberry /var/lib/lawnberry
 
 Remove any legacy service units referencing a source path (older versions):
 ```bash
-sudo find /etc/systemd/system -maxdepth 1 -name 'lawnberry-*.service' -exec grep -l '/home/pi/lawnberry_pi' {} \; | xargs -r sudo rm
+sudo find /etc/systemd/system -maxdepth 1 -name 'lawnberry-*.service' -exec grep -l '/home/pi/lawnberry' {} \; | xargs -r sudo rm
 sudo systemctl daemon-reload
 ```
 

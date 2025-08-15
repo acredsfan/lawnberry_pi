@@ -16,10 +16,17 @@ LOG_PREFIX="[auto-rebuild-ui]"
 
 MAX_BUILD_SECONDS=${MAX_BUILD_SECONDS:-600}
 NPM_BIN="$(command -v npm || true)"
+SKIP_AUTO_REBUILD=${SKIP_AUTO_REBUILD:-0}
 
 log() { echo "${LOG_PREFIX} $*"; }
 warn() { echo "${LOG_PREFIX} WARN: $*" >&2; }
 err() { echo "${LOG_PREFIX} ERROR: $*" >&2; }
+
+# Allow callers to skip rebuild explicitly (for faster restarts)
+if [[ "$SKIP_AUTO_REBUILD" == "1" ]]; then
+  log "SKIP_AUTO_REBUILD=1 set – skipping UI rebuild check"
+  exit 0
+fi
 
 # Quick pre-flight checks
 if [[ -z "$NPM_BIN" ]]; then

@@ -22,7 +22,6 @@ export interface SensorData {
   tof: {
     left_distance: number;
     right_distance: number;
-    front_distance: number;
     timestamp: string;
   };
   environmental: {
@@ -74,7 +73,6 @@ class SensorDataService {
       tof: {
         left_distance: 0,
         right_distance: 0,
-        front_distance: 0,
         timestamp: now
       },
       environmental: {
@@ -144,7 +142,6 @@ class SensorDataService {
       this.currentData.tof = {
         left_distance: data.left_distance || 0,
         right_distance: data.right_distance || 0,
-        front_distance: data.front_distance || 0,
         timestamp: data.timestamp || new Date().toISOString()
       };
       this.notifyListeners();

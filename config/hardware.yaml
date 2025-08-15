@@ -33,12 +33,45 @@ camera:
   fps: 30
   buffer_size: 5
 plugins:
-  -
-    name: power_monitor
-    enabled: True
+  - name: power_monitor
+    enabled: true
     parameters:
       i2c_address: 0x40
+      auto_detect_address: true
       channel: 1
+      shunt_resistance: 0.1
+  - name: environmental_bme280
+    enabled: true
+    parameters:
+      i2c_address: 0x76
+      auto_detect_address: true
+  - name: tof_left
+    enabled: true
+    parameters:
+      i2c_address: 0x30
+      shutdown_pin: 22
+      interrupt_pin: 6
+  - name: tof_right
+    enabled: true
+    parameters:
+      i2c_address: 0x29
+      shutdown_pin: 23
+      interrupt_pin: 12
+  - name: gps_sensor
+    enabled: true
+    parameters:
+      port: /dev/ttyACM0
+      baud: 38400
+      timeout: 1.0
+  - name: imu_sensor
+    enabled: true
+    parameters:
+      port: /dev/ttyAMA4
+      baud: 3000000
+      timeout: 0.1
+  - name: robohat
+    enabled: true
+    parameters: {}
 logging_level: INFO
 retry_attempts: 3
 retry_base_delay: 0.1

@@ -280,7 +280,7 @@ uvicorn web_api.main:app --reload --host 0.0.0.0 --port 8000
 Add the optional post-start systemd probe (already present in `lawnberry-api.service`):
 
 ```
-ExecStartPost=/bin/bash -c '/home/pi/lawnberry_pi/scripts/health_check_web_api.sh http://127.0.0.1:8000 || { echo "lawnberry-api health probe failed" >&2; exit 1; }'
+ExecStartPost=/bin/bash -c '/home/pi/lawnberry/scripts/health_check_web_api.sh http://127.0.0.1:8000 || { echo "lawnberry-api health probe failed" >&2; exit 1; }'
 ```
 
 This ensures the unit only reports started after the API is responsive.

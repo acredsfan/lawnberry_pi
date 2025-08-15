@@ -10,9 +10,9 @@ Restart=always
 RestartSec=5
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/lawnberry_pi
-ExecStart=/home/pi/lawnberry_pi/venv/bin/python /home/pi/lawnberry_pi/src/web_api/run_server.py
-Environment=PYTHONPATH=/home/pi/lawnberry_pi/src
+WorkingDirectory=/opt/lawnberry
+ExecStart=/opt/lawnberry/venv/bin/python /opt/lawnberry/src/web_api/run_server.py
+Environment=PYTHONPATH=/opt/lawnberry
 Environment=LOG_LEVEL=INFO
 Environment=HOST=0.0.0.0
 Environment=PORT=8000
@@ -24,7 +24,7 @@ ProtectHome=false
 # Security settings (relaxed for development)
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/var/log/lawnberry /tmp /home/pi/lawnberry_pi
+ReadWritePaths=/var/log/lawnberry /tmp /opt/lawnberry
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectKernelModules=true

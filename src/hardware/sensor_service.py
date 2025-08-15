@@ -30,6 +30,14 @@ class SensorService:
         self.mqtt_client: Optional[MQTTClient] = None
         self.running = False
         self.poll_interval = 0.1  # 10Hz sensor polling
+        # Keep last known non-default values per category to avoid publishing zeros
+        self._last_values: Dict[str, Dict[str, Any]] = {
+            'gps': None,            # type: ignore
+            'imu': None,            # type: ignore
+            'tof': None,            # type: ignore
+            'environmental': None,  # type: ignore
+            'power': None           # type: ignore
+        }
         
     async def initialize(self):
         """Initialize hardware interface and MQTT client"""
@@ -59,8 +67,10 @@ class SensorService:
                     }
                 }
             )
-            
-            await self.mqtt_client.connect()
+            # Use initialize() to construct underlying MQTT client and connect
+            initialized = await self.mqtt_client.initialize()
+            if not initialized:
+                raise RuntimeError("MQTT client initialization failed")
             self.logger.info("MQTT client connected")
             
             self.logger.info("Hardware sensor service initialized successfully")
@@ -136,7 +146,6 @@ class SensorService:
             'tof': {
                 'left_distance': 0.0,
                 'right_distance': 0.0,
-                'front_distance': 0.0,
                 'timestamp': datetime.utcnow().isoformat()
             },
             'environmental': {
@@ -157,7 +166,15 @@ class SensorService:
                 'timestamp': datetime.utcnow().isoformat()
             }
         }
-        
+        # Track which categories were updated in this cycle
+        updated: Dict[str, bool] = {
+            'gps': False,
+            'imu': False,
+            'tof': False,
+            'environmental': False,
+            'power': False,
+        }
+
         # Map raw sensor data to formatted structure
         for sensor_id, reading in raw_data.items():
             if 'gps' in sensor_id.lower():
@@ -170,6 +187,7 @@ class SensorService:
                         'satellites': reading.value.get('satellites', 0),
                         'timestamp': reading.timestamp.isoformat() if reading.timestamp else datetime.utcnow().isoformat()
                     })
+                    updated['gps'] = True
             
             elif 'imu' in sensor_id.lower() or 'bno085' in sensor_id.lower():
                 if isinstance(reading.value, dict):
@@ -180,14 +198,24 @@ class SensorService:
                         'temperature': reading.value.get('temperature', 0.0),
                         'timestamp': reading.timestamp.isoformat() if reading.timestamp else datetime.utcnow().isoformat()
                     })
+                    updated['imu'] = True
             
             elif 'tof' in sensor_id.lower() or 'vl53l0x' in sensor_id.lower():
-                # Map the single ToF sensor to all distance fields for compatibility
-                distance_value = reading.value if isinstance(reading.value, (int, float)) else 0.0
-                formatted['tof']['left_distance'] = distance_value  # Use same reading for all
-                formatted['tof']['right_distance'] = distance_value 
-                formatted['tof']['front_distance'] = distance_value
+                # Prefer mapping per-sensor side when name indicates it
+                distance_value = reading.value if isinstance(reading.value, (int, float)) else (
+                    reading.metadata.get('distance_mm') if isinstance(reading.metadata, dict) else 0.0
+                )
+                sensor_lower = sensor_id.lower()
+                if 'left' in sensor_lower:
+                    formatted['tof']['left_distance'] = distance_value
+                elif 'right' in sensor_lower:
+                    formatted['tof']['right_distance'] = distance_value
+                else:
+                    # Unknown side - set all for backward compatibility
+                    formatted['tof']['left_distance'] = distance_value
+                    formatted['tof']['right_distance'] = distance_value
                 formatted['tof']['timestamp'] = reading.timestamp.isoformat() if reading.timestamp else datetime.utcnow().isoformat()
+                updated['tof'] = True
             
             elif 'environmental' in sensor_id.lower() or 'bme280' in sensor_id.lower():
                 if isinstance(reading.value, dict):
@@ -199,24 +227,129 @@ class SensorService:
                         'rain_detected': reading.value.get('rain_detected', False),
                         'timestamp': reading.timestamp.isoformat() if reading.timestamp else datetime.utcnow().isoformat()
                     })
+                    updated['environmental'] = True
             
             elif 'power' in sensor_id.lower() or 'ina3221' in sensor_id.lower():
                 if isinstance(reading.value, dict):
+                    # Accept multiple key aliases from plugins/drivers
+                    bat_v = reading.value.get('battery_voltage', reading.value.get('voltage', 0.0))
+                    bat_c = reading.value.get('battery_current', reading.value.get('current', 0.0))
                     formatted['power'].update({
-                        'battery_voltage': reading.value.get('battery_voltage', 0.0),
-                        'battery_current': reading.value.get('battery_current', 0.0),
+                        'battery_voltage': bat_v,
+                        'battery_current': bat_c,
                         'battery_level': reading.value.get('battery_level', 0.0),
                         'solar_voltage': reading.value.get('solar_voltage', 0.0),
                         'solar_current': reading.value.get('solar_current', 0.0),
-                        'charging': reading.value.get('charging', False),
+                        'charging': reading.value.get('charging', bat_c > 0.0),
                         'timestamp': reading.timestamp.isoformat() if reading.timestamp else datetime.utcnow().isoformat()
                     })
-        
+                    updated['power'] = True
+        # Backfill categories that were not updated to avoid publishing zeros
+        try:
+            # Helper lambdas to detect default (all-zero/false) payloads
+            def _is_default_gps(d: Dict[str, Any]) -> bool:
+                return (d.get('latitude', 0.0) == 0.0 and d.get('longitude', 0.0) == 0.0)
+
+            def _is_default_imu(d: Dict[str, Any]) -> bool:
+                ori = d.get('orientation', {})
+                acc = d.get('acceleration', {})
+                gyro = d.get('gyroscope', {})
+                return (
+                    all(float(ori.get(k, 0.0)) == 0.0 for k in ('roll', 'pitch', 'yaw'))
+                    and all(float(acc.get(k, 0.0)) == 0.0 for k in ('x', 'y', 'z'))
+                    and all(float(gyro.get(k, 0.0)) == 0.0 for k in ('x', 'y', 'z'))
+                )
+
+            def _is_default_tof(d: Dict[str, Any]) -> bool:
+                return all(float(d.get(k, 0.0) or 0.0) == 0.0 for k in ('left_distance','right_distance'))
+
+            def _is_default_env(d: Dict[str, Any]) -> bool:
+                return (
+                    float(d.get('temperature', 0.0) or 0.0) == 0.0
+                    and float(d.get('humidity', 0.0) or 0.0) == 0.0
+                    and float(d.get('pressure', 0.0) or 0.0) == 0.0
+                )
+
+            def _is_default_power(d: Dict[str, Any]) -> bool:
+                return (
+                    float(d.get('battery_voltage', 0.0) or 0.0) == 0.0
+                    and float(d.get('battery_current', 0.0) or 0.0) == 0.0
+                )
+
+            # For each category, if not updated and we have a prior value, backfill it
+            now_iso = datetime.utcnow().isoformat()
+            if (not updated['gps'] or _is_default_gps(formatted['gps'])) and self._last_values.get('gps'):
+                prev = dict(self._last_values['gps'])
+                prev['timestamp'] = now_iso
+                formatted['gps'] = prev
+                self.logger.debug("Backfilled GPS with last known values")
+
+            if (not updated['imu'] or _is_default_imu(formatted['imu'])) and self._last_values.get('imu'):
+                prev = dict(self._last_values['imu'])
+                prev['timestamp'] = now_iso
+                formatted['imu'] = prev
+                self.logger.debug("Backfilled IMU with last known values")
+
+            if (not updated['tof'] or _is_default_tof(formatted['tof'])) and self._last_values.get('tof'):
+                prev = dict(self._last_values['tof'])
+                prev['timestamp'] = now_iso
+                formatted['tof'] = prev
+                self.logger.debug("Backfilled ToF with last known values")
+
+            if (not updated['environmental'] or _is_default_env(formatted['environmental'])) and self._last_values.get('environmental'):
+                prev = dict(self._last_values['environmental'])
+                prev['timestamp'] = now_iso
+                formatted['environmental'] = prev
+                self.logger.debug("Backfilled Environmental with last known values")
+
+            if (not updated['power'] or _is_default_power(formatted['power'])) and self._last_values.get('power'):
+                prev = dict(self._last_values['power'])
+                prev['timestamp'] = now_iso
+                formatted['power'] = prev
+                self.logger.debug("Backfilled Power with last known values")
+        except Exception as e:
+            # Backfill is non-critical; continue on error
+            self.logger.debug(f"Backfill skipped due to error: {e}")
+
         return formatted
     
     async def publish_sensor_data(self, sensor_data: Dict[str, Any]):
         """Publish sensor data to MQTT topics"""
         try:
+            # Update last-known cache with any non-default values so we don't regress to zeros
+            try:
+                def _update_if_non_default(category: str, data: Dict[str, Any]):
+                    if category == 'gps':
+                        if not (data.get('latitude', 0.0) == 0.0 and data.get('longitude', 0.0) == 0.0):
+                            self._last_values['gps'] = data.copy()
+                    elif category == 'imu':
+                        ori = data.get('orientation', {})
+                        acc = data.get('acceleration', {})
+                        gyro = data.get('gyroscope', {})
+                        if (
+                            any(float(ori.get(k, 0.0)) != 0.0 for k in ('roll', 'pitch', 'yaw'))
+                            or any(float(acc.get(k, 0.0)) != 0.0 for k in ('x', 'y', 'z'))
+                            or any(float(gyro.get(k, 0.0)) != 0.0 for k in ('x', 'y', 'z'))
+                        ):
+                            self._last_values['imu'] = data.copy()
+                    elif category == 'tof':
+                        if any(float(data.get(k, 0.0) or 0.0) > 0.0 for k in ('left_distance','right_distance')):
+                            self._last_values['tof'] = data.copy()
+                    elif category == 'environmental':
+                        if any(float(data.get(k, 0.0) or 0.0) != 0.0 for k in ('temperature','humidity','pressure')):
+                            self._last_values['environmental'] = data.copy()
+                    elif category == 'power':
+                        if float(data.get('battery_voltage', 0.0) or 0.0) != 0.0 or float(data.get('battery_current', 0.0) or 0.0) != 0.0:
+                            self._last_values['power'] = data.copy()
+
+                _update_if_non_default('gps', sensor_data.get('gps', {}))
+                _update_if_non_default('imu', sensor_data.get('imu', {}))
+                _update_if_non_default('tof', sensor_data.get('tof', {}))
+                _update_if_non_default('environmental', sensor_data.get('environmental', {}))
+                _update_if_non_default('power', sensor_data.get('power', {}))
+            except Exception as e:
+                self.logger.debug(f"Last-values cache update skipped: {e}")
+
             # Publish individual sensor categories
             topics = {
                 'sensors/gps/data': sensor_data['gps'],
@@ -233,6 +366,25 @@ class SensorService:
             
             # Also publish combined data for comprehensive updates
             await self.mqtt_client.publish("lawnberry/sensors/all", sensor_data, qos=0)
+
+            # Publish per-ToF sensor topics for finer grained consumers (left/right only)
+            try:
+                tof = sensor_data.get('tof', {})
+                tof_ts = tof.get('timestamp', datetime.utcnow().isoformat())
+                per_tof = {
+                    'sensors/tof/left': {
+                        'distance_mm': float(tof.get('left_distance', 0.0) or 0.0),
+                        'timestamp': tof_ts,
+                    },
+                    'sensors/tof/right': {
+                        'distance_mm': float(tof.get('right_distance', 0.0) or 0.0),
+                        'timestamp': tof_ts,
+                    },
+                }
+                for topic, data in per_tof.items():
+                    await self.mqtt_client.publish(f"lawnberry/{topic}", data, qos=0)
+            except Exception as e:
+                self.logger.debug(f"Per-ToF publish skipped: {e}")
             
             # Publish system health status
             health_status = await self.hardware.get_system_health()
@@ -269,14 +421,25 @@ class SensorService:
 
 async def main():
     """Main service entry point with proper shutdown handling"""
-    # Setup logging
+    # Setup logging with safe fallback when /var/log is not writable
+    log_handlers = [logging.StreamHandler()]
+    try:
+        log_dir = Path('/var/log/lawnberry')
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_handlers.insert(0, logging.FileHandler(str(log_dir / 'sensor_service.log')))
+    except Exception:
+        # Fallback to user-local log directory
+        try:
+            home_log_dir = Path.home() / '.lawnberry' / 'logs'
+            home_log_dir.mkdir(parents=True, exist_ok=True)
+            log_handlers.insert(0, logging.FileHandler(str(home_log_dir / 'sensor_service.log')))
+        except Exception:
+            pass
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler('/var/log/lawnberry/sensor_service.log'),
-            logging.StreamHandler()
-        ]
+        handlers=log_handlers,
     )
     
     logger = logging.getLogger(__name__)

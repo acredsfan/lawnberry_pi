@@ -11,6 +11,7 @@ aiosqlite>=0.19.0,<1.0.0
 sqlalchemy>=2.0.0,<3.0.0
 pyyaml>=6.0,<7.0.0
 aiomqtt>=2.1.0,<3.0.0
+paho-mqtt>=2.0.0,<3.0.0
 
 # Computer Vision System Dependencies - Bookworm optimized
 opencv-python>=4.8.0,<5.0.0
@@ -29,6 +30,7 @@ gpiozero>=1.6.2,<2.0.0; sys_platform == "linux"
 smbus2>=0.4.0,<1.0.0; sys_platform == "linux"
 
 # I2C and sensor libraries for Bookworm
+Adafruit-Blinka>=8.29.0; sys_platform == "linux"
 adafruit-circuitpython-bme280; sys_platform == "linux"
 adafruit-circuitpython-vl53l0x>=3.6.0,<4.0.0; sys_platform == "linux"
 adafruit-circuitpython-ssd1306>=2.12.14,<3.0.0; sys_platform == "linux"

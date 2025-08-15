@@ -31,7 +31,7 @@ class HardwareInterface:
         self.camera_manager = CameraManager(self.config.camera.device_path)
         self.gpio_manager = GPIOManager()
         self.tof_manager = ToFSensorManager()
-    self.display_manager = OLEDDisplayManager()
+        self.display_manager = OLEDDisplayManager()
         
         # Plugin system
         self.plugin_manager = PluginManager({
@@ -67,7 +67,10 @@ class HardwareInterface:
             await self.i2c_manager.initialize(self.config.i2c.bus_number)
             await self.gpio_manager.initialize()
             # OLED is optional; initialize but continue on failure
-            await self.display_manager.initialize()
+            try:
+                await self.display_manager.initialize()
+            except Exception as e:
+                self.logger.warning(f"OLED display not available: {e}")
             # Register serial write listener to mirror RoboHAT commands
             try:
                 async def _on_serial_write(device_name: str, command: str, success: bool):
@@ -77,18 +80,25 @@ class HardwareInterface:
             except Exception:
                 pass
             
-            # Initialize ToF sensor manager
-            tof_success = await self.tof_manager.initialize()
-            if tof_success:
-                self.logger.info("ToF sensor manager initialized successfully")
-            else:
-                self.logger.warning("ToF sensor manager initialization failed - continuing without ToF sensors")
+            # Initialize ToF sensor manager (non-fatal)
+            try:
+                tof_success = await self.tof_manager.initialize()
+                if tof_success:
+                    self.logger.info("ToF sensor manager initialized successfully")
+                else:
+                    self.logger.warning("ToF sensor manager initialization failed - continuing without ToF sensors")
+            except Exception as e:
+                self.logger.warning(f"ToF manager init error - continuing without ToF: {e}")
             
-            await self.camera_manager.initialize(
-                width=self.config.camera.width,
-                height=self.config.camera.height,
-                fps=self.config.camera.fps
-            )
+            # Camera is optional for sensor publishing; continue if absent
+            try:
+                await self.camera_manager.initialize(
+                    width=self.config.camera.width,
+                    height=self.config.camera.height,
+                    fps=self.config.camera.fps
+                )
+            except Exception as e:
+                self.logger.warning(f"Camera not available: {e}")
             
             # Load enabled plugins
             for plugin_config in self.config.plugins:

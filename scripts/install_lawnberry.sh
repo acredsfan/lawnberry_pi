@@ -1761,6 +1761,7 @@ EOF
         "lawnberry-hardware"
         "lawnberry-safety"
         "lawnberry-api"
+    "lawnberry-sensor"
     )
 
     log_info "Checking and enabling core services..."

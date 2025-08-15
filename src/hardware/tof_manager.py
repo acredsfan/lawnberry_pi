@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 VL53L0X Time-of-Flight Sensor Manager for LawnBerry Pi
 Based on Adafruit CircuitPython VL53L0X example for multiple sensors
@@ -13,14 +14,20 @@ from dataclasses import dataclass
 from datetime import datetime
 
 try:
-    import board
-    import busio
-    from digitalio import DigitalInOut
-    from adafruit_vl53l0x import VL53L0X
+    import board  # type: ignore
+    import busio  # type: ignore
+    from digitalio import DigitalInOut  # type: ignore
+    from adafruit_vl53l0x import VL53L0X  # type: ignore
     HAS_HARDWARE = True
-except ImportError:  # pragma: no cover - running without hardware
+except Exception as e:  # pragma: no cover - running without hardware or lgpio failure
     HAS_HARDWARE = False
-    logging.warning("VL53L0X hardware libraries not available - running in simulation mode")
+    logging.warning(
+        f"VL53L0X hardware libs not available (Blinka/lgpio issue) - simulation mode: {e}"
+    )
+    board = None  # type: ignore
+    busio = None  # type: ignore
+    DigitalInOut = object  # type: ignore
+    VL53L0X = object  # type: ignore
 
 # Import hardware error for proper error handling
 try:

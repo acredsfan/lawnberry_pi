@@ -205,7 +205,8 @@ class SerialManager:
         self._locks: Dict[str, asyncio.Lock] = {}
         self._health: Dict[str, DeviceHealth] = {}
         self._retry_policy = RetryPolicy()
-    self._write_listeners: list = []  # callbacks: async (device_name: str, command: str, success: bool)
+        # Callbacks: async def cb(device_name: str, command: str, success: bool) -> None
+        self._write_listeners: List[Callable[[str, str, bool], Any]] = []
 
         # Serial device configurations
         self.devices = {

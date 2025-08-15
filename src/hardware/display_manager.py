@@ -31,7 +31,7 @@ class OLEDDisplayManager:
 
     def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
-    self.enabled: bool = False
+        self.enabled: bool = False
         self._disp = None  # type: ignore
         self._width: int = int(os.getenv("OLED_WIDTH", "128"))
         self._height: int = int(os.getenv("OLED_HEIGHT", "32"))
@@ -40,12 +40,12 @@ class OLEDDisplayManager:
         self._lock = asyncio.Lock()
         self._history: Deque[str] = deque(maxlen=4 if self._height <= 32 else 6)
         self._imports_ok: bool = False
-    self._disabled_flag: bool = os.getenv("OLED_DISABLE", "0").lower() in {"1", "true", "yes"}
+        self._disabled_flag: bool = os.getenv("OLED_DISABLE", "0").lower() in {"1", "true", "yes"}
 
-    # File logging (works even if display disabled)
-    self._log_path: str = os.getenv("OLED_LOG_PATH", "data/robohat_commands.log")
-    self._max_log_lines: int = int(os.getenv("OLED_LOG_MAX_LINES", "200"))
-    self._since_trim: int = 0
+        # File logging (works even if display disabled)
+        self._log_path: str = os.getenv("OLED_LOG_PATH", "data/robohat_commands.log")
+        self._max_log_lines: int = int(os.getenv("OLED_LOG_MAX_LINES", "200"))
+        self._since_trim: int = 0
 
         # Pillow drawing state
         self._Image = None

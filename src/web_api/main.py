@@ -162,14 +162,9 @@ def create_app() -> FastAPI:
             "uptime": time.time() - getattr(app.state, 'start_time', time.time())
         }
 
-    # Backward compatibility: redirect old meta path if any code relied on first definition
-    @app.get("/api/v1/status", include_in_schema=False)
-    async def legacy_meta_redirect():  # type: ignore
-        """Redirect legacy meta endpoint to real mower status once meta split implemented."""
-        # We keep this path for actual mower status below; this redirect only fires before override.
-        # FastAPI processes in declaration order, and the real mower status is declared later with same path
-        # so this function will be shadowed; kept for clarity/documentation.
-        return JSONResponse({"detail": "legacy placeholder"})
+    # Note: Previously there was a legacy placeholder route at /api/v1/status declared here.
+    # That caused the real status route (declared later) to be shadowed due to route ordering.
+    # We remove the placeholder to ensure the real status endpoint is active and returns live sensor data.
     
     # Mock mower status endpoint for frontend development
     @app.get("/api/v1/mock/status")
@@ -265,6 +260,37 @@ def create_app() -> FastAPI:
             power_data = mqtt_bridge.get_cached_data("power/battery") or {}
             health_data = mqtt_bridge.get_cached_data("system/health") or {}
             
+            # ToF fallback logic: if aggregated topic missing or zero, try per-ToF topics
+            def _tof_value_meters() -> Dict[str, float]:
+                # Prefer aggregated distances if present and non-zero
+                left_raw = tof_data.get("left_distance")
+                right_raw = tof_data.get("right_distance")
+                left_val = float(left_raw) if left_raw is not None else 0.0
+                right_val = float(right_raw) if right_raw is not None else 0.0
+
+                def _mm_to_meters(v: float) -> float:
+                    # Treat clearly out-of-range small values as already meters
+                    # Our sensor_service publishes ~500-1000 for 0.5-1.0m, so >=5 likely mm.
+                    return v / 1000.0 if v >= 5.0 else v
+
+                if left_val > 0.0 or right_val > 0.0:
+                    return {
+                        "left": _mm_to_meters(left_val),
+                        "right": _mm_to_meters(right_val),
+                    }
+
+                # Fallback to per-sensor topics
+                left_topic = mqtt_bridge.get_cached_data("sensors/tof/left") or {}
+                right_topic = mqtt_bridge.get_cached_data("sensors/tof/right") or {}
+
+                l_mm = float(left_topic.get("distance_mm", 0.0) or 0.0)
+                r_mm = float(right_topic.get("distance_mm", 0.0) or 0.0)
+
+                return {
+                    "left": _mm_to_meters(l_mm),
+                    "right": _mm_to_meters(r_mm),
+                }
+
             # Determine mower state based on available data
             state = "idle"  # Default state
             if power_data.get("charging", False):
@@ -272,6 +298,8 @@ def create_app() -> FastAPI:
             elif gps_data.get("latitude", 0) != 0 and imu_data.get("acceleration", {}).get("x", 0) > 0.1:
                 state = "mowing"
             
+            tof_values = _tof_value_meters()
+
             # Build status response from real sensor data
             return {
                 "state": state,
@@ -296,8 +324,8 @@ def create_app() -> FastAPI:
                         "temperature": imu_data.get("temperature", 0.0)
                     },
                     "tof": {
-                        "left": tof_data.get("left_distance", 0.0),
-                        "right": tof_data.get("right_distance", 0.0)
+                        "left": tof_values.get("left", 0.0),
+                        "right": tof_values.get("right", 0.0)
                     },
                     "environmental": {
                         "temperature": env_data.get("temperature", 0.0),

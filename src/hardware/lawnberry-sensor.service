@@ -8,11 +8,14 @@ StartLimitIntervalSec=0
 Type=exec
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/lawnberry_pi
-Environment=PYTHONPATH=/home/pi/lawnberry_pi/src
+# Use a writable working directory so lgpio can create its notification pipes (.lgd-nfy*)
+WorkingDirectory=/var/lib/lawnberry
+Environment=PYTHONPATH=/opt/lawnberry
 Environment=LAWNBERRY_ENV=production
 Environment=LOG_LEVEL=INFO
-ExecStart=/home/pi/lawnberry_pi/venv/bin/python -m src.hardware.sensor_service
+# Ensure gpiozero uses lgpio on Bookworm (more reliable on Pi 4/5)
+Environment=GPIOZERO_PIN_FACTORY=lgpio
+ExecStart=/opt/lawnberry/venv/bin/python -m src.hardware.sensor_service
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
 RestartSec=5
@@ -29,7 +32,15 @@ TasksMax=100
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry /dev/i2c-1 /dev/ttyAMA0
+# Allow writes to logs, state dir (working dir), and device nodes
+ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry /dev/i2c-1 /dev/ttyAMA0 /dev/ttyAMA4 /dev/ttyACM0 /dev/ttyACM1
+DeviceAllow=/dev/i2c-1 rw
+DeviceAllow=/dev/ttyAMA0 rw
+DeviceAllow=/dev/ttyAMA4 rw
+DeviceAllow=/dev/ttyACM0 rw
+DeviceAllow=/dev/ttyACM1 rw
+DeviceAllow=/dev/gpiochip0 rw
+DeviceAllow=/dev/gpiochip1 rw
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectControlGroups=true

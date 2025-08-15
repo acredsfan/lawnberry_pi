@@ -63,6 +63,7 @@ class MQTTClient:
         self._reconnect_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()
         self._last_heartbeat = time.time()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         
         # Message queuing and retry
         self._message_queue = deque()
@@ -129,9 +130,19 @@ class MQTTClient:
         
         try:
             self.logger.info(f"Initializing MQTT client: {self.client_id}")
+            # Capture current running loop for cross-thread scheduling
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._loop = None
             
-            # Create client
-            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, self.client_id, clean_session=self.config['clean_session'])
+            # Create client (paho-mqtt v2.x) with v1-style callbacks
+            # Use keyword args to avoid positional misbinding across versions
+            self.client = mqtt.Client(
+                client_id=self.client_id,
+                clean_session=self.config['clean_session'],
+                callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
+            )
             self.client.on_connect = self._on_connect
             self.client.on_disconnect = self._on_disconnect
             self.client.on_message = self._on_message
@@ -274,12 +285,12 @@ class MQTTClient:
             try:
                 message = MessageProtocol.from_json(payload)
                 if MessageValidator.validate_message(message):
-                    asyncio.create_task(self._handle_protocol_message(topic, message))
+                    self._schedule_coroutine(self._handle_protocol_message(topic, message))
                 else:
                     self.logger.warning(f"Invalid protocol message on {topic}")
             except (json.JSONDecodeError, KeyError):
                 # Handle as raw message
-                asyncio.create_task(self._handle_raw_message(topic, payload))
+                self._schedule_coroutine(self._handle_raw_message(topic, payload))
                 
         except Exception as e:
             self.logger.error(f"Error handling message: {e}")
@@ -287,6 +298,25 @@ class MQTTClient:
     def _on_publish(self, client, userdata, mid):
         """Handle publish confirmation"""
         self.logger.debug(f"Message published (mid={mid})")
+
+    def _schedule_coroutine(self, coro):
+        """Schedule coroutine safely from non-async threads into the captured event loop."""
+        try:
+            if self._loop and self._loop.is_running():
+                asyncio.run_coroutine_threadsafe(coro, self._loop)
+            else:
+                # As a fallback (shouldn't happen in normal service runtime), attempt to get a loop
+                loop = None
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    pass
+                if loop and loop.is_running():
+                    loop.create_task(coro)
+                else:
+                    self.logger.error("No running event loop to schedule coroutine")
+        except Exception as e:
+            self.logger.error(f"Failed to schedule coroutine: {e}")
     
     async def _handle_protocol_message(self, topic: str, message: MessageProtocol):
         """Handle structured protocol message"""
@@ -305,31 +335,52 @@ class MQTTClient:
             elif msg_type == MessageType.COMMAND:
                 await self._handle_command_message(message)
             
-            # Call registered handlers
-            if topic in self._message_handlers:
-                for handler in self._message_handlers[topic]:
-                    try:
-                        if asyncio.iscoroutinefunction(handler):
-                            await handler(topic, message)
-                        else:
-                            handler(topic, message)
-                    except Exception as e:
-                        self.logger.error(f"Handler error for {topic}: {e}")
+            # Call registered handlers (supports wildcard patterns like + and #)
+            for pattern, handlers in list(self._message_handlers.items()):
+                if self._topic_matches(pattern, topic):
+                    for handler in list(handlers):
+                        try:
+                            if asyncio.iscoroutinefunction(handler):
+                                await handler(topic, message)
+                            else:
+                                handler(topic, message)
+                        except Exception as e:
+                            self.logger.error(f"Handler error for {topic}: {e}")
                         
         except Exception as e:
             self.logger.error(f"Error handling protocol message: {e}")
     
     async def _handle_raw_message(self, topic: str, payload: str):
-        """Handle raw message"""
-        if topic in self._message_handlers:
-            for handler in self._message_handlers[topic]:
-                try:
-                    if asyncio.iscoroutinefunction(handler):
-                        await handler(topic, payload)
-                    else:
-                        handler(topic, payload)
-                except Exception as e:
-                    self.logger.error(f"Handler error for {topic}: {e}")
+        """Handle raw message with wildcard-aware dispatch"""
+        for pattern, handlers in list(self._message_handlers.items()):
+            if self._topic_matches(pattern, topic):
+                for handler in list(handlers):
+                    try:
+                        if asyncio.iscoroutinefunction(handler):
+                            await handler(topic, payload)
+                        else:
+                            handler(topic, payload)
+                    except Exception as e:
+                        self.logger.error(f"Handler error for {topic}: {e}")
+
+    @staticmethod
+    def _topic_matches(pattern: str, topic: str) -> bool:
+        """Check if MQTT topic matches subscription pattern with + and # wildcards."""
+        # Exact match fast-path
+        if pattern == topic:
+            return True
+        p_parts = pattern.split('/')
+        t_parts = topic.split('/')
+        for i, p in enumerate(p_parts):
+            if p == '#':
+                return True
+            if i >= len(t_parts):
+                return False
+            if p == '+':
+                continue
+            if p != t_parts[i]:
+                return False
+        return len(t_parts) == len(p_parts)
     
     async def _handle_command_message(self, message: MessageProtocol):
         """Handle command message"""

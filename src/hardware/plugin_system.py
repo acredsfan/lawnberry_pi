@@ -307,10 +307,10 @@ class ToFSensorPlugin(HardwarePlugin):
             if not reading:
                 raise HardwareError(f"No reading from ToF sensor {self._sensor_name}")
 
-            # Convert to plugin SensorReading format
-            from .data_structures import SensorReading
+            # Convert to standardized ToFReading format
+            from .data_structures import ToFReading as StdToFReading
 
-            sensor_reading = SensorReading(
+            sensor_reading = StdToFReading(
                 timestamp=reading.timestamp,
                 sensor_id=self._sensor_name,
                 value=reading.distance_mm,
@@ -357,12 +357,32 @@ class PowerMonitorPlugin(HardwarePlugin):
 
             try:
                 i2c_manager = self.managers["i2c"]
-                address = self.config.parameters.get("i2c_address", 0x40)
+                configured_addr = self.config.parameters.get("i2c_address")
+                autodetect = bool(self.config.parameters.get("auto_detect_address", True))
+                address = int(configured_addr, 0) if isinstance(configured_addr, str) else (
+                    int(configured_addr) if configured_addr is not None else 0x40
+                )
 
-                # Configure INA3221 (simplified)
-                config_value = 0x7127  # Default configuration
+                # Try auto-detection among common INA3221 addresses 0x40-0x43 by reading config register
+                if autodetect:
+                    detected = None
+                    for probe in (address, 0x40, 0x41, 0x42, 0x43):
+                        try:
+                            data = await i2c_manager.read_register(probe, 0x00, 2)
+                            if len(data) == 2:
+                                detected = probe
+                                break
+                        except Exception:
+                            continue
+                    if detected is not None:
+                        address = detected
+
+                self._address = address
+
+                # Configure INA3221: reset and set average/convert times, enable channels (conservative defaults)
+                config_value = 0x7127  # Averaging 64, VBUS/VSH CT 1.1ms, mode: shunt and bus, continuous
                 await i2c_manager.write_register(
-                    address, 0x00, [config_value >> 8, config_value & 0xFF]
+                    address, 0x00, [config_value >> 8 & 0xFF, config_value & 0xFF]
                 )
 
                 self._initialized = True
@@ -383,27 +403,46 @@ class PowerMonitorPlugin(HardwarePlugin):
 
         try:
             i2c_manager = self.managers["i2c"]
-            address = self.config.parameters.get("i2c_address", 0x40)
-            channel = self.config.parameters.get("channel", 1)
+            address = getattr(self, "_address", int(self.config.parameters.get("i2c_address", 0x40)))
+            channel = int(self.config.parameters.get("channel", 1))
 
-            # Read voltage and current for specified channel
-            voltage_reg = 0x02 + (channel - 1) * 2
-            current_reg = 0x01 + (channel - 1) * 2
+            # Read bus and shunt registers for specified channel
+            bus_reg = 0x02 + (channel - 1) * 2
+            shunt_reg = 0x01 + (channel - 1) * 2
 
-            voltage_data = await i2c_manager.read_register(address, voltage_reg, 2)
-            current_data = await i2c_manager.read_register(address, current_reg, 2)
+            bus_raw = await i2c_manager.read_register(address, bus_reg, 2)
+            shunt_raw = await i2c_manager.read_register(address, shunt_reg, 2)
 
-            # Convert to actual values (simplified)
-            voltage = ((voltage_data[0] << 8) | voltage_data[1]) * 0.008  # V
-            current = ((current_data[0] << 8) | current_data[1]) * 0.04  # mA
-            power = voltage * current / 1000  # W
+            # Combine bytes
+            bus_val = (bus_raw[0] << 8) | bus_raw[1]
+            shunt_val = (shunt_raw[0] << 8) | shunt_raw[1]
+
+            # Per datasheet: bus voltage is a 13-bit value (bits 15..3), LSB=8mV
+            bus_val >>= 3
+            voltage = bus_val * 0.008  # V
+
+            # Shunt voltage is signed 16-bit, LSB = 40uV
+            if shunt_val & 0x8000:
+                shunt_val = shunt_val - 0x10000
+            shunt_v = shunt_val * 0.00004  # V
+
+            shunt_ohms = float(self.config.parameters.get("shunt_resistance", 0.1))
+            current = shunt_v / shunt_ohms  # A
+            power = voltage * current  # W
 
             from .data_structures import PowerReading
 
             reading = PowerReading(
                 timestamp=datetime.now(),
                 sensor_id=self.config.name,
-                value={"voltage": voltage, "current": current, "power": power},
+                value={
+                    "voltage": voltage,
+                    "current": current,
+                    "power": power,
+                    # Provide commonly expected aliases used by UI/service
+                    "battery_voltage": voltage,
+                    "battery_current": current,
+                },
                 unit="mixed",
                 i2c_address=address,
                 voltage=voltage,
@@ -418,6 +457,204 @@ class PowerMonitorPlugin(HardwarePlugin):
             await self.health.record_failure()
             self.logger.error(f"Failed to read power monitor: {e}")
             return None
+
+
+class EnvironmentalSensorPlugin(HardwarePlugin):
+    """BME280 environmental sensor plugin (temperature, humidity, pressure)"""
+
+    @property
+    def plugin_type(self) -> str:
+        return "i2c_sensor"
+
+    @property
+    def required_managers(self) -> List[str]:
+        return ["i2c"]
+
+    async def initialize(self) -> bool:
+        async with self._lock:
+            if self._initialized:
+                return True
+            try:
+                # Prefer Adafruit CircuitPython driver when available
+                try:
+                    import board  # type: ignore
+                    from adafruit_bme280 import basic as adafruit_bme280  # type: ignore
+                    use_adafruit = True
+                except Exception as e:  # pragma: no cover - missing Blinka
+                    self.logger.warning(f"BME280 Adafruit driver unavailable, fallback to smbus2 path: {e}")
+                    use_adafruit = False
+
+                # Determine I2C address: respect configured address, or auto-detect 0x76/0x77 by chip ID
+                configured_addr = self.config.parameters.get("i2c_address")
+                autodetect = bool(self.config.parameters.get("auto_detect_address", True))
+                address = int(configured_addr, 0) if isinstance(configured_addr, str) else (
+                    int(configured_addr) if configured_addr is not None else 0x76
+                )
+
+                detected_addr = None
+                if autodetect:
+                    try:
+                        i2c_mgr = self.managers["i2c"]
+                        for probe in (address, 0x76, 0x77):
+                            try:
+                                chip_id = await i2c_mgr.read_register(probe, 0xD0, 1)
+                                if chip_id and chip_id[0] == 0x60:  # BME280 chip id
+                                    detected_addr = probe
+                                    break
+                            except Exception:
+                                continue
+                    except Exception as e:
+                        self.logger.debug(f"BME280 autodetect skipped: {e}")
+                self._address = detected_addr if detected_addr is not None else address
+
+                if use_adafruit:
+                    try:
+                        import busio  # type: ignore
+                        i2c = busio.I2C(board.SCL, board.SDA)
+                        sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=self._address)
+                        # Optional oversampling/tuning from config
+                        osrs_t = self.config.parameters.get("temperature_oversample")
+                        if osrs_t is not None:
+                            sensor.temperature_oversample = int(osrs_t)
+                        osrs_h = self.config.parameters.get("humidity_oversample")
+                        if osrs_h is not None:
+                            sensor.humidity_oversample = int(osrs_h)
+                        osrs_p = self.config.parameters.get("pressure_oversample")
+                        if osrs_p is not None:
+                            sensor.pressure_oversample = int(osrs_p)
+                        self._driver = ("adafruit", sensor)
+                    except Exception as e:
+                        self.logger.warning(f"Adafruit BME280 init failed, will try smbus2: {e}")
+                        self._driver = None
+                        use_adafruit = False
+
+                if not use_adafruit:
+                    # Ensure I2C bus exists via I2CManager
+                    _ = self.managers["i2c"]
+                    # We'll do on-demand reads using I2CManager in read_data()
+                    self._driver = ("raw", None)
+
+                self._initialized = True
+                await self.health.record_success()
+                self.logger.info(f"Environmental sensor (BME280) initialized at 0x{address:02x}")
+                return True
+            except Exception as e:
+                await self.health.record_failure()
+                self.logger.error(f"Failed to initialize environmental sensor: {e}")
+                return False
+
+    async def read_data(self) -> Optional[SensorReading]:
+        if not self._initialized:
+            if not await self.initialize():
+                return None
+        try:
+            from .data_structures import EnvironmentalReading
+            if self._driver and self._driver[0] == "adafruit":
+                sensor = self._driver[1]
+                temperature = float(sensor.temperature)
+                humidity = float(sensor.humidity)
+                pressure = float(sensor.pressure)
+            else:
+                # Minimal raw read via smbus2 using I2CManager
+                # This block implements a simple read leveraging common BME280 drivers logic.
+                # Read calibration and raw data each time for simplicity; cache could be added later.
+                i2c = self.managers["i2c"]
+                addr = getattr(self, "_address", 0x76)
+
+                # Read calibration data
+                calib = await i2c.read_register(addr, 0x88, 26)
+                dig_T1 = calib[1] << 8 | calib[0]
+                dig_T2 = self._to_signed(calib[3] << 8 | calib[2], 16)
+                dig_T3 = self._to_signed(calib[5] << 8 | calib[4], 16)
+                dig_P1 = calib[7] << 8 | calib[6]
+                dig_P2 = self._to_signed(calib[9] << 8 | calib[8], 16)
+                dig_P3 = self._to_signed(calib[11] << 8 | calib[10], 16)
+                dig_P4 = self._to_signed(calib[13] << 8 | calib[12], 16)
+                dig_P5 = self._to_signed(calib[15] << 8 | calib[14], 16)
+                dig_P6 = self._to_signed(calib[17] << 8 | calib[16], 16)
+                dig_P7 = self._to_signed(calib[19] << 8 | calib[18], 16)
+                dig_P8 = self._to_signed(calib[21] << 8 | calib[20], 16)
+                dig_P9 = self._to_signed(calib[23] << 8 | calib[22], 16)
+                dig_H1 = await i2c.read_register(addr, 0xA1, 1)
+                dig_H1 = dig_H1[0]
+                calib_h = await i2c.read_register(addr, 0xE1, 7)
+                dig_H2 = self._to_signed(calib_h[1] << 8 | calib_h[0], 16)
+                dig_H3 = calib_h[2]
+                e4 = calib_h[3]
+                e5 = calib_h[4]
+                e6 = calib_h[5]
+                dig_H4 = self._to_signed((e4 << 4) | (e5 & 0x0F), 12)
+                dig_H5 = self._to_signed((e6 << 4) | (e5 >> 4), 12)
+                dig_H6 = self._to_signed(calib_h[6], 8)
+
+                # Force mode, normal oversampling (temp x1, press x1, hum x1)
+                await i2c.write_register(addr, 0xF2, 0x01)
+                await i2c.write_register(addr, 0xF4, 0x27)
+                await i2c.write_register(addr, 0xF5, 0xA0)
+                await asyncio.sleep(0.01)
+
+                data = await i2c.read_register(addr, 0xF7, 8)
+                adc_P = (data[0] << 12) | (data[1] << 4) | (data[2] >> 4)
+                adc_T = (data[3] << 12) | (data[4] << 4) | (data[5] >> 4)
+                adc_H = (data[6] << 8) | data[7]
+
+                # Temperature compensation (per datasheet)
+                var1 = (adc_T / 16384.0 - dig_T1 / 1024.0) * dig_T2
+                var2 = ((adc_T / 131072.0 - dig_T1 / 8192.0) * (adc_T / 131072.0 - dig_T1 / 8192.0)) * dig_T3
+                t_fine = var1 + var2
+                temperature = t_fine / 5120.0
+                # Pressure compensation
+                var1_p = t_fine / 2.0 - 64000.0
+                var2_p = var1_p * var1_p * dig_P6 / 32768.0
+                var2_p = var2_p + var1_p * dig_P5 * 2.0
+                var2_p = var2_p / 4.0 + dig_P4 * 65536.0
+                var1_p = (dig_P3 * var1_p * var1_p / 524288.0 + dig_P2 * var1_p) / 524288.0
+                var1_p = (1.0 + var1_p / 32768.0) * dig_P1
+                if var1_p == 0:
+                    pressure = 0.0
+                else:
+                    p = 1048576.0 - adc_P
+                    p = ((p - var2_p / 4096.0) * 6250.0) / var1_p
+                    var1_p = dig_P9 * p * p / 2147483648.0
+                    var2_p = p * dig_P8 / 32768.0
+                    pressure = p + (var1_p + var2_p + dig_P7) / 16.0
+                    pressure = pressure / 100.0  # Pa -> hPa
+                # Humidity compensation (per datasheet)
+                var_h = t_fine - 76800.0
+                var_h = (adc_H - (dig_H4 * 64.0 + (dig_H5 / 16384.0) * var_h)) * (
+                    dig_H2 / 65536.0 * (1.0 + (dig_H6 / 67108864.0) * var_h * (1.0 + (dig_H3 / 67108864.0) * var_h))
+                )
+                var_h = var_h * (1.0 - dig_H1 * var_h / 524288.0)
+                humidity = max(0.0, min(100.0, var_h))
+
+            reading = EnvironmentalReading(
+                timestamp=datetime.now(),
+                sensor_id=self.config.name,
+                value={
+                    "temperature": float(temperature),
+                    "humidity": float(humidity),
+                    "pressure": float(pressure),
+                },
+                unit="mixed",
+                i2c_address=self._address,
+                temperature=float(temperature),
+                humidity=float(humidity),
+                pressure=float(pressure),
+            )
+
+            await self.health.record_success()
+            return reading
+        except Exception as e:
+            await self.health.record_failure()
+            self.logger.error(f"Failed to read environmental sensor: {e}")
+            return None
+
+    @staticmethod
+    def _to_signed(val: int, bits: int) -> int:
+        """Convert unsigned to signed integer of given bit width."""
+        if val & (1 << (bits - 1)):
+            val -= 1 << bits
+        return val
 
 
 class RoboHATPlugin(HardwarePlugin):
@@ -590,7 +827,7 @@ class RoboHATPlugin(HardwarePlugin):
             rc_status = await self.get_rc_status()
 
             if rc_status:
-                from .data_structures import RoboHATStatus
+                from .data_structures import RoboHATStatus, SerialDeviceReading
 
                 status = RoboHATStatus(
                     timestamp=datetime.now(),
@@ -815,6 +1052,7 @@ class PluginManager:
             "robohat": RoboHATPlugin,
             "gps_sensor": GPSPlugin,
             "imu_sensor": IMUPlugin,
+            "environmental_sensor": EnvironmentalSensorPlugin,
         }
 
         # Add weather service plugin if available
