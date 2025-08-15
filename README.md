@@ -92,6 +92,34 @@ bash scripts/install_lawnberry.sh
 python3 scripts/first_run_wizard.py
 ```
 
+### UART4 (IMU) Prerequisite on Pi 5
+
+On Raspberry Pi OS Bookworm (Pi 5), enabling the IMU on UART4 requires adding an overlay to the boot configuration before running the installer end-to-end. This is a one-time change and requires a reboot to take effect.
+
+1) Add the overlay (Bookworm path):
+
+```bash
+sudo sh -c 'grep -q "^dtoverlay=uart4$" /boot/firmware/config.txt || echo dtoverlay=uart4 >> /boot/firmware/config.txt'
+sudo sh -c 'grep -q "^enable_uart=1$" /boot/firmware/config.txt || (
+    grep -q "^enable_uart=" /boot/firmware/config.txt && sed -i "s/^enable_uart=.*/enable_uart=1/" /boot/firmware/config.txt || echo enable_uart=1 >> /boot/firmware/config.txt
+)'
+sync
+```
+
+2) Reboot to apply overlays:
+
+```bash
+sudo reboot
+```
+
+3) After reboot, verify the device (it may appear as `ttyAMA4`):
+
+```bash
+ls -l /dev/ttyAMA4 || ls -l /dev/ttyS4 || true
+```
+
+If you prefer an automated check, run `scripts/check_uart4.sh` for a quick status and guidance.
+
 ### ✨ Installation Features
 
 - 🔍 **Automatic Hardware Detection** - Scans and configures connected sensors, GPS, camera, and controllers

@@ -453,8 +453,10 @@ enable_uart4_for_imu() {
     [[ -f /boot/config.txt ]] && BOOT_CONFIG="/boot/config.txt"
 
     # Ensure serial port is enabled and login shell disabled (0 = disable login shell, keep UART enabled)
+    # Bound with timeout to avoid hangs on some setups.
     if command -v raspi-config >/dev/null 2>&1; then
-        sudo raspi-config nonint do_serial 0 >/dev/null 2>&1 || true
+        timeout 6s sudo -n raspi-config nonint do_serial 0 >/dev/null 2>&1 || \
+            log_debug "raspi-config do_serial skipped or timed out"
     fi
 
     # Ensure UART is enabled and overlay for uart4 is set
@@ -471,10 +473,15 @@ enable_uart4_for_imu() {
     fi
 
     # Try to apply overlay immediately without reboot (non-fatal if unavailable)
+    # Bound with timeouts; on Bookworm/Pi 5 this may only take effect after reboot.
     if command -v dtoverlay >/dev/null 2>&1; then
-        sudo dtoverlay -r uart4 >/dev/null 2>&1 || true
-        sudo dtoverlay uart4 >/dev/null 2>&1 || true
+        timeout 4s sudo -n dtoverlay -r uart4 >/dev/null 2>&1 || true
+        timeout 4s sudo -n dtoverlay uart4 >/dev/null 2>&1 || \
+            log_debug "Runtime dtoverlay apply skipped (will take effect after reboot)"
     fi
+
+    # Ensure changes are flushed
+    sync || true
 
     # Verify device presence
     if [[ -e /dev/ttyAMA4 ]]; then
@@ -482,7 +489,7 @@ enable_uart4_for_imu() {
     elif [[ -e /dev/ttyS4 ]]; then
         log_warning "/dev/ttyAMA4 not found; /dev/ttyS4 is present (check overlay/IMU wiring)"
     else
-        log_warning "UART4 device not found yet; a reboot may be required for changes to take effect"
+    log_info "UART4 configured in ${BOOT_CONFIG}; a reboot may be required for /dev/ttyAMA4 to appear"
     fi
 }
 
@@ -620,9 +627,9 @@ install_dependencies() {
     # Enable I2C and SPI
     log_info "Enabling I2C and SPI interfaces..."
     log_debug "Running raspi-config to enable I2C, SPI, and camera."
-    sudo raspi-config nonint do_i2c 0 2>/dev/null || log_warning "Could not enable I2C"
-    sudo raspi-config nonint do_spi 0 2>/dev/null || log_warning "Could not enable SPI"
-    sudo raspi-config nonint do_camera 0 2>/dev/null || log_warning "Could not enable camera"
+    timeout 6s sudo -n raspi-config nonint do_i2c 0 2>/dev/null || log_warning "Could not enable I2C (skipped or timed out)"
+    timeout 6s sudo -n raspi-config nonint do_spi 0 2>/dev/null || log_warning "Could not enable SPI (skipped or timed out)"
+    timeout 6s sudo -n raspi-config nonint do_camera 0 2>/dev/null || log_warning "Could not enable camera (skipped or timed out)"
 
     # Add user to required groups
     log_info "Adding user to required groups..."
