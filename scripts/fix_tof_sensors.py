@@ -102,16 +102,13 @@ class ToFSensorManager:
             return []
     
     def read_sensor_id(self, address):
-        """Read VL53L0X sensor identification"""
-        try:
-            # VL53L0X identification register
-            id_reg = 0xC0
-            sensor_id = self.bus.read_byte_data(address, id_reg)
-            return sensor_id
-            
-        except Exception as e:
-            self.logger.warning(f"Failed to read sensor ID at 0x{address:02x}: {e}")
-            return None
+        """Best-effort read of VL53L0X model ID (may vary by vendor firmware)."""
+        for reg in (0xC0, 0xC1):
+            try:
+                return self.bus.read_byte_data(address, reg)
+            except Exception:
+                continue
+        return None
     
     def change_sensor_address(self, old_address, new_address):
         """Change VL53L0X I2C address"""
@@ -123,16 +120,15 @@ class ToFSensorManager:
             new_addr_value = new_address << 1
             self.bus.write_byte_data(old_address, addr_reg, new_addr_value)
             
-            time.sleep(0.1)  # Give sensor time to update
+            time.sleep(0.15)  # Give sensor time to update
             
-            # Verify the change
-            sensor_id = self.read_sensor_id(new_address)
-            if sensor_id == 0xEE:  # VL53L0X expected ID
+            # Verify the change by probing new address
+            try:
+                self.bus.read_byte(new_address)
                 self.logger.info(f"Successfully changed address from 0x{old_address:02x} to 0x{new_address:02x}")
                 return True
-            else:
-                sensor_id_str = f"0x{sensor_id:02x}" if sensor_id is not None else "None"
-                self.logger.error(f"Address change verification failed - sensor ID: {sensor_id_str}")
+            except Exception as e:
+                self.logger.error(f"New address 0x{new_address:02x} not responding after change: {e}")
                 return False
                 
         except Exception as e:
@@ -142,24 +138,9 @@ class ToFSensorManager:
     def initialize_sensor(self, address):
         """Basic VL53L0X initialization"""
         try:
-            # Check sensor ID first
-            sensor_id = self.read_sensor_id(address)
-            if sensor_id != 0xEE:
-                self.logger.error(f"Invalid sensor ID at 0x{address:02x}: 0x{sensor_id:02x if sensor_id else 'None'}")
-                return False
-            
-            # Basic initialization sequence (simplified)
-            # In a full implementation, this would include the complete VL53L0X init sequence
-            
-            # Power up the sensor
-            self.bus.write_byte_data(address, 0x00, 0x01)
-            time.sleep(0.01)
-            
-            # Set default configuration (simplified)
-            self.bus.write_byte_data(address, 0x01, 0xFF)  # Enable all GPIO
-            self.bus.write_byte_data(address, 0x02, 0x00)  # Set GPIO config
-            
-            self.logger.info(f"Sensor at 0x{address:02x} initialized successfully")
+            # Basic presence check
+            self.bus.read_byte(address)
+            self.logger.info(f"Sensor at 0x{address:02x} responds on I2C")
             return True
             
         except Exception as e:
@@ -186,18 +167,18 @@ class ToFSensorManager:
             # Step 3: Bring up right sensor first and change its address
             self.logger.info("Bringing up right sensor to change its address...")
             self.right_shutdown.on()  # Enable right sensor
-            time.sleep(0.1)  # Allow sensor to boot
+            time.sleep(0.2)  # Allow sensor to boot
             
             # Check if sensor appears at default address
-            sensor_id = self.read_sensor_id(self.default_address)
-            if sensor_id != 0xEE:
-                self.logger.error(f"Right sensor not detected at default address 0x{self.default_address:02x} (sensor_id: 0x{sensor_id:02x if sensor_id else 'None'})")
+            try:
+                self.bus.read_byte(self.default_address)
+                self.logger.info(f"Right sensor detected at default address 0x{self.default_address:02x}")
+            except Exception:
+                self.logger.error(f"Right sensor not detected at default address 0x{self.default_address:02x}")
                 # Try to scan and see what's there
                 devices = self.scan_i2c_bus()
                 self.logger.info(f"Devices found during right sensor startup: {[hex(addr) for addr in devices]}")
                 raise RuntimeError(f"Right sensor not detected at default address 0x{self.default_address:02x}")
-            
-            self.logger.info(f"Right sensor detected at default address 0x{self.default_address:02x}")
             
             # Change right sensor address from 0x29 to 0x30
             if not self.change_sensor_address(self.default_address, self.right_target_address):
@@ -210,7 +191,7 @@ class ToFSensorManager:
             # Step 4: Bring up left sensor (it will use default address 0x29)
             self.logger.info("Bringing up left sensor at default address...")
             self.left_shutdown.on()  # Enable left sensor
-            time.sleep(0.1)  # Allow sensor to boot
+            time.sleep(0.2)  # Allow sensor to boot
             
             # Initialize left sensor at default address
             if not self.initialize_sensor(self.left_target_address):

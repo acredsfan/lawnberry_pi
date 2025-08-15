@@ -296,22 +296,21 @@ detect_bookworm() {
             BOOKWORM_OPTIMIZATIONS=true
             log_success "Raspberry Pi OS Bookworm detected - enabling full optimizations"
 
-            # Check Python version for Bookworm compatibility
-            PYTHON_VERSION=$(python3 --version 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+' | head -n1)
-            log_debug "Detected Python version: $PYTHON_VERSION"
-            if [[ $(echo "$PYTHON_VERSION >= 3.11" | bc -l 2>/dev/null || echo 0) -eq 1 ]]; then
-                log_success "Python $PYTHON_VERSION meets Bookworm requirements (3.11+)"
+            # Check Python version for Bookworm compatibility (avoid bc dependency)
+            if python3 -c "import sys; exit(0 if sys.version_info >= (3,11) else 1)" 2>/dev/null; then
+                PYVER=$(python3 -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+                log_success "Python ${PYVER} meets Bookworm requirements (3.11+)"
             else
-                log_warning "Python $PYTHON_VERSION may not be optimal for Bookworm"
-                log_info "Consider upgrading to Python 3.11+ for best performance"
+                PYVER=$(python3 -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "unknown")
+                log_info "Python ${PYVER} detected 3.11+ recommended on Bookworm"
             fi
 
-            # Check for Raspberry Pi 4B specifically
+            # Check for Raspberry Pi 4B/5 specifically
             if [[ -f /proc/device-tree/model ]]; then
                 PI_MODEL=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0')
                 log_debug "Detected Raspberry Pi model: $PI_MODEL"
-                if [[ "$PI_MODEL" == *"Raspberry Pi 4"* ]]; then
-                    log_success "Raspberry Pi 4 Model B detected - optimal hardware"
+                if [[ "$PI_MODEL" == *"Raspberry Pi 4"* || "$PI_MODEL" == *"Raspberry Pi 5"* ]]; then
+                    log_success "${PI_MODEL} detected - optimal hardware"
                 else
                     log_warning "Hardware: $PI_MODEL - some optimizations may not apply"
                 fi
@@ -394,8 +393,8 @@ check_system() {
                 log_error "Please ensure you're running the latest Bookworm with Python 3.11+"
                 exit 1
             else
-                log_warning "Python 3.11+ recommended for optimal performance"
-                log_info "Minimum Python 3.8 detected - some optimizations may not be available"
+                log_info "Python 3.11+ recommended for optimal performance"
+                log_info "Minimum Python 3.8 supported - some optimizations may not be available"
                 if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" 2>/dev/null; then
                     log_error "Python 3.8 or higher is required"
                     exit 1
@@ -642,6 +641,29 @@ install_dependencies() {
 setup_coral_packages() {
     print_section "Setting up Google Coral TPU Environment (Optional)"
 
+    # Auto-skip if Coral appears already set up (runtime + venv with pycoral working)
+    local CORAL_ALREADY_OK=false
+    local CORAL_VENV_DIR_CHECK="$PROJECT_ROOT/venv_coral_pyenv"
+    local CORAL_PY="$CORAL_VENV_DIR_CHECK/bin/python"
+
+    if [[ -x "$CORAL_PY" ]]; then
+        if timeout 6s "$CORAL_PY" - <<'PY' >/dev/null 2>&1; then CORAL_ALREADY_OK=true; fi
+from pycoral.utils.edgetpu import list_edge_tpus
+try:
+    list_edge_tpus()
+except Exception:
+    pass
+PY
+    fi
+
+    # Also ensure Edge TPU runtime is installed via APT
+    if [[ "$CORAL_ALREADY_OK" == true ]]; then
+        if dpkg -s libedgetpu1-std >/dev/null 2>&1 || dpkg -s libedgetpu1-max >/dev/null 2>&1; then
+            log_success "Coral TPU environment already present — skipping setup"
+            return 0
+        fi
+    fi
+
     if [[ "$NON_INTERACTIVE" == true ]]; then
         log_info "Non-interactive mode - skipping Coral TPU setup"
         return 0
@@ -693,6 +715,10 @@ setup_coral_packages() {
         [[ -f /usr/share/keyrings/coral-archive-keyring.gpg ]] || {
             curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/coral-archive-keyring.gpg
         }
+        # Normalize existing list file to use signed-by
+        if ! grep -q 'signed-by=/usr/share/keyrings/coral-archive-keyring.gpg' /etc/apt/sources.list.d/coral-edgetpu.list; then
+            sudo sed -i 's#^deb .*packages.cloud.google.com/apt.*#deb [signed-by=/usr/share/keyrings/coral-archive-keyring.gpg] https://packages.cloud.google.com/apt coral-edgetpu-stable main#' /etc/apt/sources.list.d/coral-edgetpu.list || true
+        fi
     fi
     sudo apt-get update -qq
     sudo apt-get install -y "$EDGE_TPU_PACKAGE" || {
@@ -933,6 +959,8 @@ detect_hardware() {
 
     cd "$PROJECT_ROOT"
     source venv/bin/activate
+    # Prefer lgpio pin factory on Bookworm to avoid fallback warnings
+    export GPIOZERO_PIN_FACTORY=lgpio
 
     log_info "Running hardware detection..."
     if python3 scripts/hardware_detection.py; then
@@ -973,7 +1001,10 @@ initialize_tof_sensors() {
     print_section "ToF Sensor Initialization"
 
     cd "$PROJECT_ROOT"
-    source venv/bin/activate
+    # Activate venv if present; otherwise use system Python (i2c access via group membership)
+    if [[ -f "venv/bin/activate" ]]; then
+        source venv/bin/activate
+    fi
 
     log_info "Initializing dual VL53L0X ToF sensors (set right sensor to 0x30 first)..."
     log_info "This ensures both sensors are configured at different I2C addresses"
@@ -983,37 +1014,55 @@ initialize_tof_sensors() {
 
     # Run I2C detection first
     if command -v i2cdetect >/dev/null 2>&1; then
-        # Look for any devices at 0x29 or 0x30 (typical ToF addresses)
-        if i2cdetect -y 1 | grep -E "(29|30)" >/dev/null 2>&1; then
-            log_info "ToF sensors detected on I2C bus"
+        # Precise check for 0x29 and 0x30 on bus 1 with timeout
+        local has_29=false
+        local has_30=false
+        local scan_output
+        if scan_output=$(timeout 6s i2cdetect -y 1 2>/dev/null); then
+            echo "$scan_output" | grep -q " 29 " && has_29=true
+            echo "$scan_output" | grep -q " 30 " && has_30=true
+        fi
 
-            # Run ToF address fixer to ensure right sensor moves to 0x30 before any detection
-            if timeout 60s python3 scripts/fix_tof_sensors.py >/dev/null 2>&1; then
-                log_success "✅ Dual ToF sensors initialized successfully"
+        if [[ "$has_29" == true || "$has_30" == true ]]; then
+            log_info "ToF sensor(s) detected on I2C bus 1 (29: $has_29, 30: $has_30)"
+
+            # If both present, we're already good — no need to run the fixer
+            if [[ "$has_29" == true && "$has_30" == true ]]; then
+                log_success "✅ Both ToF sensors already present at 0x29 and 0x30"
                 log_success "  - Left sensor (tof_left): 0x29"
                 log_success "  - Right sensor (tof_right): 0x30"
-
-                # Verify both sensors are accessible
-                log_info "Verifying sensor accessibility..."
-                if i2cdetect -y 1 | grep -E " 29 " >/dev/null 2>&1 && i2cdetect -y 1 | grep -E " 30 " >/dev/null 2>&1; then
-                    log_success "✅ Both ToF sensors accessible at correct addresses"
-
-                    # Update hardware configuration to reflect both sensors
-                    log_info "Updating hardware configuration..."
-                    if [[ -f "config/hardware.yaml" ]]; then
-                        # The setup script already updated the config, so we're good
-                        log_success "✅ Hardware configuration updated"
+            else
+                # Only one address present; attempt to run the fixer to move right sensor to 0x30
+                log_info "Attempting to configure right sensor to 0x30..."
+                # Use lgpio pin factory for gpiozero during fixer
+                export GPIOZERO_PIN_FACTORY=lgpio
+                if timeout 60s python3 scripts/fix_tof_sensors.py >/dev/null 2>&1; then
+                    # Re-scan to verify
+                    # Retry scan a few times to allow sensors to settle
+                    for attempt in 1 2 3; do
+                        if scan_output=$(timeout 6s i2cdetect -y 1 2>/dev/null); then
+                            echo "$scan_output" | grep -q " 29 " && has_29=true || has_29=false
+                            echo "$scan_output" | grep -q " 30 " && has_30=true || has_30=false
+                            [[ "$has_29" == true && "$has_30" == true ]] && break
+                        fi
+                        sleep 0.3
+                    done
+                    if [[ "$has_29" == true && "$has_30" == true ]]; then
+                        log_success "✅ Dual ToF sensors initialized successfully"
+                        log_success "  - Left sensor (tof_left): 0x29"
+                        log_success "  - Right sensor (tof_right): 0x30"
+                        log_success "✅ Both ToF sensors accessible at correct addresses"
+                    else
+                        log_warning "\u26a0\ufe0f ToF sensors initialization attempted but address verification failed (29: $has_29, 30: $has_30)"
+                        log_info "If only 0x29 is present, ensure XSHUT pins (GPIO 22/23) are wired and sensors are powered"
                     fi
                 else
-                    log_warning "⚠️ ToF sensors initialized but address verification failed"
+                    log_warning "ToF sensor initialization failed (addressing script error)"
+                    log_info "ToF sensors may still work with default configuration"
                 fi
-
-            else
-                log_warning "ToF sensor initialization failed (addressing script error)"
-                log_info "ToF sensors may still work with default configuration"
             fi
         else
-            log_info "No ToF sensors detected on I2C bus"
+            log_info "No ToF sensors detected on I2C bus 1"
             log_info "This is normal if ToF sensors are not yet connected"
         fi
     else

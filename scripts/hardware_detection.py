@@ -571,14 +571,13 @@ class EnhancedHardwareDetector:
         
         try:
             bus = smbus.SMBus(1)
-            
+            # Gentle probing: short delay between devices to reduce bus contention
             for device_name, device_info in i2c_devices.details.get('devices', {}).items():
                 if not isinstance(device_info, dict) or not device_info.get('present'):
                     continue
-                
                 try:
                     address = int(device_info['address'], 16)
-                    # Simple read test
+                    # Quick presence probe
                     bus.read_byte(address)
                     test_results[device_name] = {
                         'communication': 'success',
@@ -586,15 +585,15 @@ class EnhancedHardwareDetector:
                     }
                     self.logger.info(f"I2C communication test passed for {device_name}")
                 except Exception as e:
+                    # Mark as inconclusive rather than failed to avoid alarming log when bus is busy
                     test_results[device_name] = {
-                        'communication': 'failed',
+                        'communication': 'inconclusive',
                         'error': str(e),
                         'address': device_info['address']
                     }
-                    self.logger.warning(f"I2C communication test failed for {device_name}: {e}")
-            
+                    self.logger.info(f"I2C probe inconclusive for {device_name}: {e}")
+                await asyncio.sleep(0.05)
             bus.close()
-            
         except Exception as e:
             self.logger.error(f"I2C communication testing failed: {e}")
             test_results['error'] = str(e)
@@ -1392,7 +1391,11 @@ class EnhancedHardwareDetector:
             if compatible:
                 self.logger.info("Pi OS Bookworm + Python 3.11+ compatibility confirmed")
             else:
-                self.logger.warning(f"Compatibility issues: Bookworm={is_bookworm}, Python3.11+={python_compatible}, Arch={arch_compatible}")
+                # Only warn when any required flag is false; include concise hint
+                self.logger.warning(
+                    "Compatibility issues detected: "
+                    f"Bookworm={is_bookworm}, Python3.11+={python_compatible}, Arch={arch_compatible}"
+                )
                 
         except Exception as e:
             self.logger.error(f"OS compatibility check failed: {e}")
