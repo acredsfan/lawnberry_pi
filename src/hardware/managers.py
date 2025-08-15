@@ -205,6 +205,7 @@ class SerialManager:
         self._locks: Dict[str, asyncio.Lock] = {}
         self._health: Dict[str, DeviceHealth] = {}
         self._retry_policy = RetryPolicy()
+    self._write_listeners: list = []  # callbacks: async (device_name: str, command: str, success: bool)
 
         # Serial device configurations
         self.devices = {
@@ -252,18 +253,45 @@ class SerialManager:
                     conn.write(f"{command}\n".encode())
                     conn.flush()
                     await self._health[device_name].record_success()
+                    # Notify listeners (fire-and-forget)
+                    await self._notify_write_listeners(device_name, command, True)
                     return True
 
                 except Exception as e:
                     await self._health[device_name].record_failure()
 
                     if attempt == self._retry_policy.max_retries:
+                        # Final failure, notify listeners then raise
+                        await self._notify_write_listeners(device_name, command, False)
                         raise CommunicationError(f"Failed to write to {device_name}: {e}")
 
                     delay = self._retry_policy.get_delay(attempt)
                     await asyncio.sleep(delay)
 
         return False
+
+    def add_write_listener(self, callback):
+        """Register an async callback called after write attempts.
+
+        Callback signature: async def cb(device_name: str, command: str, success: bool) -> None
+        """
+        self._write_listeners.append(callback)
+
+    async def _notify_write_listeners(self, device_name: str, command: str, success: bool) -> None:
+        """Notify listeners without blocking failures from propagating."""
+        if not self._write_listeners:
+            return
+        for cb in list(self._write_listeners):
+            try:
+                # If callback is async, await; if sync, call in thread
+                if asyncio.iscoroutinefunction(cb):
+                    await cb(device_name, command, success)
+                else:
+                    # Run sync callback in default loop executor
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, cb, device_name, command, success)
+            except Exception as e:
+                self.logger.debug(f"Write listener error: {e}")
 
     async def read_line(self, device_name: str, timeout: float = 1.0) -> Optional[str]:
         """Read line from serial device"""

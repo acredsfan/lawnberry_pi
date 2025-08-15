@@ -31,6 +31,7 @@ smbus2>=0.4.0,<1.0.0; sys_platform == "linux"
 # I2C and sensor libraries for Bookworm
 adafruit-circuitpython-bme280; sys_platform == "linux"
 adafruit-circuitpython-vl53l0x>=3.6.0,<4.0.0; sys_platform == "linux"
+adafruit-circuitpython-ssd1306>=2.12.14,<3.0.0; sys_platform == "linux"
 adafruit-circuitpython-ina219>=3.4.0,<4.0.0; sys_platform == "linux"
 
 # Web API Backend Dependencies

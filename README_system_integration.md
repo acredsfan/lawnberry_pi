@@ -381,3 +381,22 @@ The system integration layer coordinates with:
 - **Hardware Interface**: Resource sharing and coordination
 
 This provides a robust, production-ready orchestration system for the autonomous mower with comprehensive monitoring, automatic recovery, and safe operation.
+
+## OLED Command Monitor (Optional)
+
+- Default hardware: SSD1306 128x32 at I2C `0x3C`.
+- The system mirrors RoboHAT-bound serial commands on the OLED in real-time, if present.
+- Environment overrides:
+  - `OLED_HEIGHT=32` (default `32`), `OLED_WIDTH=128` (default `128`)
+  - `OLED_ADDR=0x3C` (I2C address)
+  - `OLED_DRIVER=ssd1306` (or `sh1106` if that module is installed)
+  - `OLED_DISABLE=1` to disable display rendering at runtime (file logging still enabled)
+  - `OLED_LOG_PATH=data/robohat_commands.log` rolling log file (default path)
+
+Quick test:
+
+```bash
+source venv/bin/activate
+export PYTHONPATH=$PWD
+OLED_HEIGHT=32 timeout 25s python3 tests/hardware/robohat_oled_monitor_test.py
+```

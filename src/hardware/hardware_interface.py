@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .managers import I2CManager, SerialManager, CameraManager, GPIOManager
+from .display_manager import OLEDDisplayManager
 from .plugin_system import PluginManager, HardwarePlugin
 from .config import ConfigManager, HardwareInterfaceConfig
 from .data_structures import SensorReading, DeviceHealth
@@ -30,6 +31,7 @@ class HardwareInterface:
         self.camera_manager = CameraManager(self.config.camera.device_path)
         self.gpio_manager = GPIOManager()
         self.tof_manager = ToFSensorManager()
+    self.display_manager = OLEDDisplayManager()
         
         # Plugin system
         self.plugin_manager = PluginManager({
@@ -64,6 +66,16 @@ class HardwareInterface:
             # Initialize managers
             await self.i2c_manager.initialize(self.config.i2c.bus_number)
             await self.gpio_manager.initialize()
+            # OLED is optional; initialize but continue on failure
+            await self.display_manager.initialize()
+            # Register serial write listener to mirror RoboHAT commands
+            try:
+                async def _on_serial_write(device_name: str, command: str, success: bool):
+                    if device_name == 'robohat' and self.display_manager.enabled:
+                        await self.display_manager.log_robohat_command(command, success)
+                self.serial_manager.add_write_listener(_on_serial_write)
+            except Exception:
+                pass
             
             # Initialize ToF sensor manager
             tof_success = await self.tof_manager.initialize()
@@ -209,6 +221,12 @@ class HardwareInterface:
             raise DeviceNotFoundError("RoboHAT plugin not found")
         
         try:
+            # Mirror high-level command intent on OLED (pre-send)
+            if self.display_manager.enabled:
+                try:
+                    await self.display_manager.log_robohat_command(f"CMD {command} {','.join(map(str, args))}", None)
+                except Exception:
+                    pass
             if command == 'pwm' and len(args) == 2:
                 return await robohat.send_pwm_command(args[0], args[1])
             elif command == 'rc_disable':
@@ -674,6 +692,7 @@ class HardwareInterface:
                         name="camera_cleanup"
                     )
                 )
+            # Display manager has no explicit cleanup; screen remains with last frame
             
             # Wait for all cleanup tasks to complete
             if cleanup_tasks:
