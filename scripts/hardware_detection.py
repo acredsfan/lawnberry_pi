@@ -513,20 +513,25 @@ class EnhancedHardwareDetector:
             # Python version
             system_info['python_version'] = sys.version.split()[0]
             
-            # I2C enabled check
+            # I2C/SPI enabled check (use Python glob to avoid shell glob pitfalls)
             try:
-                result = subprocess.run(['ls', '/dev/i2c-*'], 
-                                      capture_output=True, text=True)
-                system_info['i2c_enabled'] = result.returncode == 0
-            except:
+                i2c_nodes = list(Path('/dev').glob('i2c-*'))
+                system_info['i2c_enabled'] = len(i2c_nodes) > 0
+            except Exception:
                 system_info['i2c_enabled'] = False
-            
-            # SPI enabled check
+            # Fallback: attempt to open I2C bus 1 with smbus to infer availability
+            if not system_info.get('i2c_enabled') and smbus:
+                try:
+                    _bus_probe = smbus.SMBus(1)
+                    _bus_probe.close()
+                    system_info['i2c_enabled'] = True
+                except Exception:
+                    pass
+
             try:
-                result = subprocess.run(['ls', '/dev/spidev*'], 
-                                      capture_output=True, text=True)
-                system_info['spi_enabled'] = result.returncode == 0
-            except:
+                spi_nodes = list(Path('/dev').glob('spidev*'))
+                system_info['spi_enabled'] = len(spi_nodes) > 0
+            except Exception:
                 system_info['spi_enabled'] = False
             
             self.logger.info("System information gathered")
@@ -564,40 +569,123 @@ class EnhancedHardwareDetector:
     async def _test_i2c_communication(self) -> Dict[str, Any]:
         """Test I2C device communication"""
         i2c_devices = self.detection_results.get('i2c_devices')
-        test_results = {}
-        
+        test_results: Dict[str, Any] = {}
+
         if not smbus or not i2c_devices or not i2c_devices.detected:
             return {'error': 'I2C not available or no devices detected'}
-        
+
         try:
             bus = smbus.SMBus(1)
-            # Gentle probing: short delay between devices to reduce bus contention
+
             for device_name, device_info in i2c_devices.details.get('devices', {}).items():
                 if not isinstance(device_info, dict) or not device_info.get('present'):
                     continue
+
+                address_hex = device_info['address']
+                address = int(address_hex, 16)
+
                 try:
-                    address = int(device_info['address'], 16)
-                    # Quick presence probe
-                    bus.read_byte(address)
-                    test_results[device_name] = {
-                        'communication': 'success',
-                        'address': device_info['address']
-                    }
-                    self.logger.info(f"I2C communication test passed for {device_name}")
+                    if device_name in ("environmental",):
+                        # BME280 check: CHIP_ID register 0xD0 should be 0x60; fallback to presence
+                        try:
+                            chip_id = bus.read_byte_data(address, 0xD0)
+                            ok = (chip_id == 0x60)
+                            ok = (chip_id in (0x60, 0x58))  # BME280=0x60, BMP280=0x58
+                            test_results[device_name] = {
+                                'communication': 'success' if ok else 'failed',
+                                'check': 'BME/BMP280 CHIP_ID',
+                                'chip_id': f"0x{chip_id:02x}",
+                                'address': address_hex
+                            }
+                            self.logger.info(f"I2C test for BME/BMP280 at {address_hex}: chip_id=0x{chip_id:02x}")
+                        except Exception as e:
+                            try:
+                                bus.read_byte(address)
+                                test_results[device_name] = {
+                                    'communication': 'success',
+                                    'check': 'presence',
+                                    'address': address_hex
+                                }
+                                self.logger.info(f"I2C presence for BME280 at {address_hex}")
+                            except Exception:
+                                raise e
+
+                    elif device_name in ("power_monitor",):
+                        # INA3221/INA226: Manufacturer ID at 0xFE should be 0x5449 ('TI'); fallback to presence
+                        man_id = None
+                        die_id = None
+                        try:
+                            raw_man = bus.read_word_data(address, 0xFE)
+                            man_id = ((raw_man & 0xFF) << 8) | ((raw_man >> 8) & 0xFF)
+                            try:
+                                raw_die = bus.read_word_data(address, 0xFF)
+                                die_id = ((raw_die & 0xFF) << 8) | ((raw_die >> 8) & 0xFF)
+                            except Exception:
+                                die_id = None
+                        except Exception as e:
+                            try:
+                                bus.read_byte(address)
+                            except Exception:
+                                raise e
+                        ok = (man_id == 0x5449)
+                        test_results[device_name] = {
+                            'communication': 'success' if ok or man_id is None else 'failed',
+                            'check': 'INA32xx Manufacturer ID' if man_id is not None else 'presence',
+                            'manufacturer_id': (f"0x{man_id:04x}" if man_id is not None else None),
+                            'die_id': (f"0x{die_id:04x}" if die_id is not None else None),
+                            'address': address_hex
+                        }
+                        self.logger.info(
+                            f"I2C test for INA32xx at {address_hex}: "
+                            f"mfg={(('0x%04x' % man_id) if man_id is not None else 'N/A')}, "
+                            f"die={(('0x%04x' % die_id) if die_id is not None else 'N/A')}"
+                        )
+
+                    elif device_name.startswith("tof_"):
+                        # Conservative presence check for VL53L0X; optionally read I2C address register (0x8A)
+                        present = self._test_i2c_address(bus, address)
+                        addr_reg = None
+                        if present:
+                            try:
+                                addr_reg = bus.read_byte_data(address, 0x8A) & 0x7F
+                            except Exception:
+                                addr_reg = None
+                        test_results[device_name] = {
+                            'communication': 'success' if present else 'failed',
+                            'check': 'VL53L0X presence',
+                            'reported_addr': (f"0x{addr_reg:02x}" if addr_reg is not None else None),
+                            'address': address_hex
+                        }
+                        self.logger.info(
+                            f"I2C presence for VL53L0X at {address_hex}: present={present}, "
+                            f"reg_8A={(('0x%02x' % addr_reg) if addr_reg is not None else 'N/A')}"
+                        )
+
+                    else:
+                        # Fallback: presence probe
+                        bus.read_byte(address)
+                        test_results[device_name] = {
+                            'communication': 'success',
+                            'check': 'presence',
+                            'address': address_hex
+                        }
+                        self.logger.info(f"I2C presence check passed for {device_name} at {address_hex}")
+
                 except Exception as e:
-                    # Mark as inconclusive rather than failed to avoid alarming log when bus is busy
                     test_results[device_name] = {
-                        'communication': 'inconclusive',
+                        'communication': 'failed',
                         'error': str(e),
-                        'address': device_info['address']
+                        'address': address_hex
                     }
-                    self.logger.info(f"I2C probe inconclusive for {device_name}: {e}")
+                    self.logger.warning(f"I2C test failed for {device_name} at {address_hex}: {e}")
+
                 await asyncio.sleep(0.05)
+
             bus.close()
         except Exception as e:
             self.logger.error(f"I2C communication testing failed: {e}")
             test_results['error'] = str(e)
-        
+
         return test_results
     
     async def _test_serial_communication(self) -> Dict[str, Any]:
@@ -640,28 +728,46 @@ class EnhancedHardwareDetector:
     
     async def _test_camera_capture(self) -> Dict[str, Any]:
         """Test camera capture capability"""
-        camera_info = self.detection_results.get('camera', {})
-        
-        if not camera_info.get('present'):
+        camera_result = self.detection_results.get('camera')
+        # Support both dict and HardwareDetectionResult
+        if isinstance(camera_result, dict):
+            camera_present = camera_result.get('present')
+            camera_type = camera_result.get('type')
+            camera_device = camera_result.get('device_path')
+        elif camera_result is not None:
+            camera_present = getattr(camera_result, 'detected', False)
+            details = getattr(camera_result, 'details', {}) or {}
+            camera_type = details.get('type')
+            camera_device = details.get('device_path')
+        else:
+            camera_present = False
+            camera_type = None
+            camera_device = None
+
+        if not camera_present:
             return {'error': 'No camera detected'}
         
         try:
-            if camera_info.get('type') == 'picamera' and picamera2:
-                picam2 = picamera2.Picamera2()
-                picam2.configure(picam2.create_preview_configuration())
-                picam2.start()
-                time.sleep(1)  # Let camera warm up
-                
-                # Capture test image
-                array = picam2.capture_array()
-                picam2.stop()
-                picam2.close()
-                
-                return {
-                    'capture': 'success',
-                    'type': 'picamera',
-                    'image_shape': array.shape
-                }
+            if camera_type and 'Pi Camera' in camera_type and picamera2:
+                # Use still configuration suitable for headless systems (no preview requirements)
+                try:
+                    from picamera2 import Picamera2
+                except Exception:
+                    Picamera2 = None
+                if Picamera2 is not None:
+                    picam2 = Picamera2()
+                    cfg = picam2.create_still_configuration(buffer_count=1)
+                    picam2.configure(cfg)
+                    picam2.start()
+                    time.sleep(0.8)
+                    array = picam2.capture_array("main")
+                    picam2.stop()
+                    picam2.close()
+                    return {
+                        'capture': 'success',
+                        'type': 'picamera2',
+                        'image_shape': array.shape
+                    }
                 
             elif cv2:
                 cap = cv2.VideoCapture(0)
@@ -693,6 +799,20 @@ class EnhancedHardwareDetector:
                 
         except Exception as e:
             self.logger.error(f"Camera test failed: {e}")
+            # Fallback: try rpicam-still headless capture with timeout
+            try:
+                result = subprocess.run(
+                    ['timeout', '6s', 'rpicam-still', '-n', '-t', '100', '-o', '/tmp/lawnberry_cam_test.jpg'],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0 and os.path.exists('/tmp/lawnberry_cam_test.jpg'):
+                    return {
+                        'capture': 'success',
+                        'type': 'rpicam-still',
+                        'image_path': '/tmp/lawnberry_cam_test.jpg'
+                    }
+            except Exception as e2:
+                self.logger.debug(f"rpicam-still fallback failed: {e2}")
             return {
                 'capture': 'failed',
                 'error': str(e)
@@ -867,7 +987,7 @@ class EnhancedHardwareDetector:
             system_details = system.details
         else:
             system_details = system
-        
+
         print(f"\nSystem Information:")
         print(f"  Pi Model: {system_details.get('pi_model', 'Unknown')}")
         print(f"  Memory: {system_details.get('memory_mb', 'Unknown')} MB")
@@ -909,7 +1029,7 @@ class EnhancedHardwareDetector:
             device = camera.details.get('device_path', 'Unknown')
             print(f"  Type: {cam_type}")
             print(f"  Device: {device}")
-            print(f"  Status: ✓ Present")
+            print(f"  Status: ✓ Present (confidence={camera.confidence.value})")
         else:
             print(f"  Status: ✗ Not detected")
         
@@ -942,9 +1062,10 @@ class EnhancedHardwareDetector:
             
             camera_tests = self.test_results.get('camera_tests', {})
             if camera_tests.get('capture') == 'success':
-                print(f"  Camera Capture: ✓ Working")
+                print(f"  Camera Capture: ✓ Working ({camera_tests.get('type')})")
             else:
-                print(f"  Camera Capture: ✗ Failed")
+                err = camera_tests.get('error', 'unknown error')
+                print(f"  Camera Capture: ✗ Failed ({err})")
         
         print("\n" + "="*60)
 
@@ -980,44 +1101,74 @@ class EnhancedHardwareDetector:
         try:
             bus = smbus.SMBus(1)
             expected_devices = {
-                'tof_left': {'address': 0x29, 'alternatives': [0x52, 0x53]},
-                'tof_right': {'address': 0x30, 'alternatives': [0x52, 0x53]},
+                'tof_left': {'address': 0x29, 'alternatives': [0x30]},
+                'tof_right': {'address': 0x30, 'alternatives': [0x29]},
                 'power_monitor': {'address': 0x40, 'alternatives': [0x41, 0x44, 0x45]},
-                'environmental': {'address': 0x76, 'alternatives': [0x77, 0x40]},
+                'environmental': {'address': 0x76, 'alternatives': [0x77]},
                 'display': {'address': 0x3c, 'alternatives': [0x3d]}
             }
             
             detected_devices = {}
             any_detected = False
-            
+
+            claimed_addrs = set()
             for device_name, config in expected_devices.items():
                 primary_addr = config['address']
                 alternatives = config['alternatives']
-                
-                # Try primary address
-                detected = self._test_i2c_address(bus, primary_addr)
+
+                # Try primary address with device-specific probing
+                if device_name.startswith('tof_'):
+                    detected = (primary_addr not in claimed_addrs) and self._probe_tof_presence(bus, primary_addr)
+                else:
+                    detected = self._test_i2c_address(bus, primary_addr)
                 confidence = DetectionConfidence.HIGH if detected else DetectionConfidence.UNKNOWN
                 alternative_options = []
                 actual_addr = primary_addr
-                
+
                 if not detected:
                     # Try alternatives
                     for alt_addr in alternatives:
-                        if self._test_i2c_address(bus, alt_addr):
+                        if alt_addr in claimed_addrs:
+                            continue
+                        if device_name.startswith('tof_'):
+                            alt_ok = self._probe_tof_presence(bus, alt_addr)
+                        else:
+                            alt_ok = self._test_i2c_address(bus, alt_addr)
+                        if alt_ok:
                             detected = True
                             confidence = DetectionConfidence.MEDIUM
                             alternative_options.append(f"Found at 0x{alt_addr:02x}")
                             actual_addr = alt_addr
                             break
-                
+
+                # If still not detected and this is ToF, run a quick bus scan to confirm
+                if not detected and device_name.startswith('tof_'):
+                    scanned = self._i2c_scan_addresses()
+                    if primary_addr in scanned or any(a in scanned for a in alternatives):
+                        # Presence suggested by scan; mark as low confidence and pick seen address
+                        detected = True
+                        confidence = DetectionConfidence.LOW
+                        seen = None
+                        if primary_addr in scanned:
+                            seen = primary_addr
+                        else:
+                            for a in alternatives:
+                                if a in scanned:
+                                    seen = a
+                                    break
+                        if seen is not None:
+                            actual_addr = seen
+                            alternative_options.append(f"Seen by i2cdetect at 0x{seen:02x}")
+
                 if detected:
                     any_detected = True
+                    claimed_addrs.add(actual_addr)
                     detected_devices[device_name] = {
                         'address': f"0x{actual_addr:02x}",
                         'present': True,
                         'confidence': confidence.value
                     }
-                
+
                 individual_results[device_name] = HardwareDetectionResult(
                     component_name=device_name,
                     detected=detected,
@@ -1268,12 +1419,34 @@ class EnhancedHardwareDetector:
             except:
                 pass
             
+            # I2C/SPI enabled checks
+            try:
+                i2c_nodes = list(Path('/dev').glob('i2c-*'))
+                i2c_enabled = len(i2c_nodes) > 0
+            except Exception:
+                i2c_enabled = False
+            if not i2c_enabled and smbus:
+                try:
+                    _bus_probe = smbus.SMBus(1)
+                    _bus_probe.close()
+                    i2c_enabled = True
+                except Exception:
+                    pass
+
+            try:
+                spi_nodes = list(Path('/dev').glob('spidev*'))
+                spi_enabled = len(spi_nodes) > 0
+            except Exception:
+                spi_enabled = False
+
             confidence = DetectionConfidence.HIGH
             system_details = {
                 'pi_model': pi_model,
                 'memory_mb': memory_mb,
                 'os': os_info,
-                'python_version': sys.version.split()[0]
+                'python_version': sys.version.split()[0],
+                'i2c_enabled': i2c_enabled,
+                'spi_enabled': spi_enabled
             }
             
             results['system'] = HardwareDetectionResult(
@@ -1595,6 +1768,89 @@ class EnhancedHardwareDetector:
             return True
         except:
             return False
+
+    def _probe_tof_presence(self, bus, address: int) -> bool:
+        """Conservative probe for VL53L0X presence without full init.
+        Tries model id registers; falls back to a simple read ping.
+        """
+        # Try reading known ID registers (won't harm if device present)
+        for reg in (0xC0, 0xC1):
+            try:
+                _ = bus.read_byte_data(address, reg)
+                return True
+            except Exception:
+                continue
+        # Final fallback: generic presence probe
+        return self._test_i2c_address(bus, address)
+
+    def _attempt_tof_readdress(self, bus) -> Optional[Dict[str, int]]:
+        """Attempt to ensure left/right ToF are on 0x29 and 0x30 respectively using XSHUT pins.
+        Returns a mapping {name: address} if successful, else None. Non-fatal on errors.
+        """
+        if not gpiozero:
+            return None
+        try:
+            from gpiozero import OutputDevice
+            # Pin mapping from project conventions
+            left_xshut_pin = 22
+            right_xshut_pin = 23
+
+            left = OutputDevice(left_xshut_pin, active_high=True, initial_value=False)
+            right = OutputDevice(right_xshut_pin, active_high=True, initial_value=False)
+
+            # Reset both
+            left.off(); right.off(); time.sleep(0.05)
+
+            # Bring up RIGHT first alone at default 0x29, then readdress to 0x30
+            right.on(); time.sleep(0.05)
+            right_at_default = self._probe_tof_presence(bus, 0x29)
+            if right_at_default:
+                try:
+                    # I2C_SLAVE__DEVICE_ADDRESS (0x8A) expects 7-bit address value
+                    bus.write_byte_data(0x29, 0x8A, 0x30 & 0x7F)
+                    time.sleep(0.02)
+                except Exception:
+                    # If write fails, proceed — detection will fall back later
+                    pass
+            # Verify right now at 0x30
+            right_ok = self._probe_tof_presence(bus, 0x30)
+
+            # Bring up LEFT, it should be at default 0x29 and not collide now
+            left.on(); time.sleep(0.05)
+            left_ok = self._probe_tof_presence(bus, 0x29)
+
+            # Cleanup devices
+            left.close(); right.close()
+
+            result = {}
+            if left_ok:
+                result['tof_left'] = 0x29
+            if right_ok:
+                result['tof_right'] = 0x30
+            return result if result else None
+        except Exception:
+            return None
+
+    def _i2c_scan_addresses(self) -> List[int]:
+        """Best-effort scan using i2cdetect for robustness; returns list of addresses.
+        Uses a short timeout to avoid hangs on misbehaving buses.
+        """
+        addrs: List[int] = []
+        try:
+            result = subprocess.run(
+                ['timeout', '5s', 'i2cdetect', '-y', '1'], capture_output=True, text=True
+            )
+            if result.returncode == 0 and result.stdout:
+                for tok in result.stdout.split():
+                    if len(tok) == 2 and all(c in '0123456789abcdef' for c in tok.lower()):
+                        try:
+                            addrs.append(int(tok, 16))
+                        except Exception:
+                            pass
+        except Exception:
+            # Ignore failures; fallback is empty list
+            pass
+        return sorted(set(a for a in addrs if 0x03 <= a <= 0x77))
 
 
 async def main():

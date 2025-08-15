@@ -25,6 +25,7 @@ INSTALL_SYSTEM_CONFIG=true
 SKIP_HARDWARE=false
 SKIP_ENV=false
 SKIP_VALIDATION=false
+AUTO_APPLY_DETECTED_CONFIG=false
 
 # Parse command line arguments for modular installation
 show_help() {
@@ -54,6 +55,7 @@ Control Options:
   --skip-validation        Skip post-installation validation
   --non-interactive        Run in non-interactive mode
   --debug                  Enable debug output
+    --auto-apply-detected-config  Automatically apply detected hardware configuration (use with non-interactive)
 
 Examples:
   ./install_lawnberry.sh                    # Full installation
@@ -172,6 +174,9 @@ parse_arguments() {
                 INSTALL_SYSTEM_CONFIG=false
                 SKIP_VALIDATION=true
                 SKIP_HARDWARE=true
+                ;;
+            --auto-apply-detected-config)
+                AUTO_APPLY_DETECTED_CONFIG=true
                 ;;
             --skip-hardware)
                 SKIP_HARDWARE=true
@@ -630,6 +635,18 @@ install_dependencies() {
     timeout 6s sudo -n raspi-config nonint do_spi 0 2>/dev/null || log_warning "Could not enable SPI (skipped or timed out)"
     timeout 6s sudo -n raspi-config nonint do_camera 0 2>/dev/null || log_warning "Could not enable camera (skipped or timed out)"
 
+    # Verify device nodes presence
+    if ls /dev/i2c-* >/dev/null 2>&1; then
+        log_success "I2C device nodes present: $(ls /dev/i2c-* | xargs -n1 basename | tr '\n' ' ')"
+    else
+        log_warning "I2C device nodes not present yet; a reboot may be required"
+    fi
+    if ls /dev/spidev* >/dev/null 2>&1; then
+        log_success "SPI device nodes present: $(ls /dev/spidev* | xargs -n1 basename | tr '\n' ' ')"
+    else
+        log_warning "SPI device nodes not present yet; a reboot may be required"
+    fi
+
     # Add user to required groups
     log_info "Adding user to required groups..."
     log_debug "Adding user '$USER' to groups: i2c, spi, gpio, dialout"
@@ -963,11 +980,11 @@ detect_hardware() {
     export GPIOZERO_PIN_FACTORY=lgpio
 
     log_info "Running hardware detection..."
-    if python3 scripts/hardware_detection.py; then
+    if timeout 90s python3 scripts/hardware_detection.py; then
         log_success "Hardware detection completed"
 
         # Check if hardware config was generated
-        if [[ -f "hardware_detected.yaml" ]]; then
+    if [[ -f "hardware_detected.yaml" ]]; then
             log_info "Hardware configuration generated"
 
             # Backup original config if it exists
@@ -976,15 +993,20 @@ detect_hardware() {
                 log_info "Backed up original hardware.yaml"
             fi
 
-            # Ask user if they want to use detected config
-            echo
-            read -p "Use detected hardware configuration? (Y/n): " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$|^$ ]]; then
+            # Apply detected config based on flags/mode
+            if [[ "$AUTO_APPLY_DETECTED_CONFIG" == true || "$NON_INTERACTIVE" == true ]]; then
                 cp hardware_detected.yaml config/hardware.yaml
-                log_success "Using detected hardware configuration"
+                log_success "Using detected hardware configuration (auto-applied)"
             else
-                log_info "Keeping original hardware configuration"
+                echo
+                read -p "Use detected hardware configuration? (Y/n): " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$|^$ ]]; then
+                    cp hardware_detected.yaml config/hardware.yaml
+                    log_success "Using detected hardware configuration"
+                else
+                    log_info "Keeping original hardware configuration"
+                fi
             fi
         fi
 
@@ -1036,7 +1058,7 @@ initialize_tof_sensors() {
                 log_info "Attempting to configure right sensor to 0x30..."
                 # Use lgpio pin factory for gpiozero during fixer
                 export GPIOZERO_PIN_FACTORY=lgpio
-                if timeout 60s python3 scripts/fix_tof_sensors.py >/dev/null 2>&1; then
+                if timeout 60s python3 scripts/fix_tof_sensors.py; then
                     # Re-scan to verify
                     # Retry scan a few times to allow sensors to settle
                     for attempt in 1 2 3; do

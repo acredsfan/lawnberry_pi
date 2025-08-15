@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Fix ToF Sensor Address Configuration
-This script properly initializes dual VL53L0X ToF sensors to use different I2C addresses
+Strict one-at-a-time power-up for dual VL53L0X sensors to split addresses (0x29, 0x30)
 """
 
 import time
@@ -9,7 +9,7 @@ import logging
 import sys
 import os
 
-# Add src to path for imports
+# Add src to path for imports (not strictly needed here)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 try:
@@ -21,283 +21,173 @@ except ImportError:
         smbus = None
 
 try:
-    import gpiozero
     from gpiozero import DigitalOutputDevice
 except ImportError:
-    gpiozero = None
+    DigitalOutputDevice = None
 
-def setup_logging():
-    """Setup logging"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
+
+def setup_logging() -> logging.Logger:
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     return logging.getLogger(__name__)
 
+
 class ToFSensorManager:
-    """Manages dual VL53L0X ToF sensors with address configuration"""
-    
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = setup_logging()
-        
-        # GPIO pins from hardware.yaml
+        # Pins per hardware.yaml
         self.left_shutdown_pin = 22
         self.right_shutdown_pin = 23
-        
+
         # I2C addresses
         self.default_address = 0x29
-        self.left_target_address = 0x29   # Left sensor stays at default
-        self.right_target_address = 0x30  # Right sensor moves to 0x30
-        
-        # I2C bus
+        self.left_target_address = 0x29
+        self.right_target_address = 0x30
+
+        # I2C
         self.bus_number = 1
         self.bus = None
-        
-        # GPIO objects
-        self.left_shutdown = None
-        self.right_shutdown = None
-    
-    def initialize_hardware(self):
-        """Initialize I2C bus and GPIO pins"""
+
+        # GPIO
+        self.left_shutdown: DigitalOutputDevice | None = None
+        self.right_shutdown: DigitalOutputDevice | None = None
+
+        # Leave sensors on after setup
+        self.keep_powered = True
+
+    def initialize_hardware(self) -> bool:
         try:
-            # Initialize I2C bus
             if not smbus:
-                raise RuntimeError("SMBus not available. Install python3-smbus")
-            
+                raise RuntimeError("SMBus not available. Install python3-smbus or smbus2")
+            if DigitalOutputDevice is None:
+                raise RuntimeError("gpiozero not available. Install python3-gpiozero")
+
             self.bus = smbus.SMBus(self.bus_number)
-            self.logger.info(f"I2C bus {self.bus_number} initialized")
-            
-            # Initialize GPIO pins
-            if not gpiozero:
-                raise RuntimeError("GPIOZero not available. Install python3-gpiozero")
-            
             self.left_shutdown = DigitalOutputDevice(self.left_shutdown_pin, initial_value=False)
             self.right_shutdown = DigitalOutputDevice(self.right_shutdown_pin, initial_value=False)
-            self.logger.info("GPIO pins initialized (both sensors in shutdown)")
-            
+            self.logger.info("I2C bus initialized; both sensors in shutdown (XSHUT low)")
             return True
-            
         except Exception as e:
             self.logger.error(f"Hardware initialization failed: {e}")
             return False
-    
-    def scan_i2c_bus(self):
-        """Scan I2C bus for devices"""
-        self.logger.info("Scanning I2C bus...")
-        devices = []
-        
+
+    def scan_i2c_bus(self) -> list[int]:
+        devices: list[int] = []
         try:
             for address in range(0x03, 0x78):
                 try:
                     self.bus.read_byte(address)
                     devices.append(address)
-                    self.logger.info(f"Found device at 0x{address:02x}")
                 except OSError:
                     pass
-            
-            return devices
-            
         except Exception as e:
             self.logger.error(f"I2C scan failed: {e}")
-            return []
-    
-    def read_sensor_id(self, address):
-        """Best-effort read of VL53L0X model ID (may vary by vendor firmware)."""
-        for reg in (0xC0, 0xC1):
-            try:
-                return self.bus.read_byte_data(address, reg)
-            except Exception:
-                continue
-        return None
-    
-    def change_sensor_address(self, old_address, new_address):
-        """Change VL53L0X I2C address"""
+        return devices
+
+    def power_both_off(self) -> None:
+        assert self.left_shutdown and self.right_shutdown
+        self.left_shutdown.off()
+        self.right_shutdown.off()
+        time.sleep(0.2)
+
+    def power_right_only(self) -> None:
+        assert self.left_shutdown and self.right_shutdown
+        self.left_shutdown.off()
+        self.right_shutdown.on()
+        time.sleep(0.4)
+
+    def power_left_only(self) -> None:
+        assert self.left_shutdown and self.right_shutdown
+        self.right_shutdown.off()
+        self.left_shutdown.on()
+        time.sleep(0.4)
+
+    def power_both_on(self) -> None:
+        assert self.left_shutdown and self.right_shutdown
+        self.left_shutdown.on()
+        self.right_shutdown.on()
+        time.sleep(0.4)
+
+    def change_sensor_address(self, old_address: int, new_address: int) -> bool:
         try:
-            # VL53L0X address change register
-            addr_reg = 0x8A
-            
-            # Write new address (shifted left by 1 for 7-bit addressing)
-            new_addr_value = new_address << 1
-            self.bus.write_byte_data(old_address, addr_reg, new_addr_value)
-            
-            time.sleep(0.15)  # Give sensor time to update
-            
-            # Verify the change by probing new address
+            self.bus.write_byte_data(old_address, 0x8A, new_address & 0x7F)
+            time.sleep(0.1)
+            # Verify by pinging new address
             try:
                 self.bus.read_byte(new_address)
-                self.logger.info(f"Successfully changed address from 0x{old_address:02x} to 0x{new_address:02x}")
                 return True
-            except Exception as e:
-                self.logger.error(f"New address 0x{new_address:02x} not responding after change: {e}")
-                return False
-                
-        except Exception as e:
-            self.logger.error(f"Failed to change address from 0x{old_address:02x} to 0x{new_address:02x}: {e}")
-            return False
-    
-    def initialize_sensor(self, address):
-        """Basic VL53L0X initialization"""
-        try:
-            # Basic presence check
-            self.bus.read_byte(address)
-            self.logger.info(f"Sensor at 0x{address:02x} responds on I2C")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to initialize sensor at 0x{address:02x}: {e}")
-            return False
-    
-    def setup_dual_sensors(self):
-        """Setup dual ToF sensors with proper addressing"""
-        self.logger.info("Starting dual ToF sensor setup...")
-        
-        try:
-            # Step 1: Ensure both sensors are in shutdown
-            self.left_shutdown.off()   # Shutdown left sensor
-            self.right_shutdown.off()  # Shutdown right sensor
-            time.sleep(0.1)
-            self.logger.info("Both sensors in shutdown mode")
-            
-            # Step 2: Scan bus (should be empty of ToF sensors)
-            initial_devices = self.scan_i2c_bus()
-            tof_devices = [addr for addr in initial_devices if addr in [0x29, 0x30]]
-            if tof_devices:
-                self.logger.warning(f"ToF sensors still detected during shutdown: {[hex(addr) for addr in tof_devices]}")
-            
-            # Step 3: Bring up right sensor first and change its address
-            self.logger.info("Bringing up right sensor to change its address...")
-            self.right_shutdown.on()  # Enable right sensor
-            time.sleep(0.2)  # Allow sensor to boot
-            
-            # Check if sensor appears at default address
-            try:
-                self.bus.read_byte(self.default_address)
-                self.logger.info(f"Right sensor detected at default address 0x{self.default_address:02x}")
             except Exception:
-                self.logger.error(f"Right sensor not detected at default address 0x{self.default_address:02x}")
-                # Try to scan and see what's there
-                devices = self.scan_i2c_bus()
-                self.logger.info(f"Devices found during right sensor startup: {[hex(addr) for addr in devices]}")
-                raise RuntimeError(f"Right sensor not detected at default address 0x{self.default_address:02x}")
-            
-            # Change right sensor address from 0x29 to 0x30
-            if not self.change_sensor_address(self.default_address, self.right_target_address):
-                raise RuntimeError("Failed to change right sensor address")
-            
-            # Initialize right sensor at new address
-            if not self.initialize_sensor(self.right_target_address):
-                raise RuntimeError("Failed to initialize right sensor")
-            
-            # Step 4: Bring up left sensor (it will use default address 0x29)
-            self.logger.info("Bringing up left sensor at default address...")
-            self.left_shutdown.on()  # Enable left sensor
-            time.sleep(0.2)  # Allow sensor to boot
-            
-            # Initialize left sensor at default address
-            if not self.initialize_sensor(self.left_target_address):
-                raise RuntimeError("Failed to initialize left sensor")
-            
-            # Step 5: Final verification
-            self.logger.info("Verifying both sensors are working...")
-            final_devices = self.scan_i2c_bus()
-            
-            left_present = self.left_target_address in final_devices
-            right_present = self.right_target_address in final_devices
-            
-            if left_present and right_present:
-                self.logger.info("SUCCESS: Both ToF sensors are now properly configured!")
-                self.logger.info(f"  Left sensor:  0x{self.left_target_address:02x}")
-                self.logger.info(f"  Right sensor: 0x{self.right_target_address:02x}")
-                return True
-            else:
-                self.logger.error(f"FAILED: Left present: {left_present}, Right present: {right_present}")
                 return False
-                
         except Exception as e:
-            self.logger.error(f"Dual sensor setup failed: {e}")
+            self.logger.error(f"Address change failed 0x{old_address:02x} -> 0x{new_address:02x}: {e}")
             return False
-    
-    def test_sensor_readings(self):
-        """Test basic distance readings from both sensors"""
-        self.logger.info("Testing sensor readings...")
-        
+
+    def setup_dual_sensors(self) -> bool:
+        self.logger.info("Starting strict one-at-a-time ToF address setup...")
         try:
-            for name, address in [("Left", self.left_target_address), ("Right", self.right_target_address)]:
-                try:
-                    # Start measurement (simplified)
-                    self.bus.write_byte_data(address, 0x00, 0x01)
-                    time.sleep(0.05)  # Wait for measurement
-                    
-                    # Read result (this is a simplified read - real VL53L0X has complex protocol)
-                    # Just verify we can communicate
-                    status = self.bus.read_byte_data(address, 0x13)  # Range status
-                    self.logger.info(f"{name} sensor (0x{address:02x}) communication test: OK (status: 0x{status:02x})")
-                    
-                except Exception as e:
-                    self.logger.error(f"{name} sensor (0x{address:02x}) communication test: FAILED - {e}")
-                    
+            # 1) Both OFF
+            self.power_both_off()
+
+            # 2) RIGHT only ON -> must see 0x29
+            self.power_right_only()
+            dev = self.scan_i2c_bus()
+            self.logger.info(f"Scan (right only): {[hex(a) for a in dev]}")
+            if self.default_address not in dev:
+                raise RuntimeError("Right sensor not detected at 0x29 with left OFF")
+
+            # 3) Change RIGHT to 0x30 (retries)
+            for attempt in range(3):
+                if self.change_sensor_address(self.default_address, self.right_target_address):
+                    time.sleep(0.2)
+                    dev = self.scan_i2c_bus()
+                    self.logger.info(f"Post-change scan: {[hex(a) for a in dev]}")
+                    if self.right_target_address in dev and self.default_address not in dev:
+                        break
+                time.sleep(0.2)
+            else:
+                raise RuntimeError("Failed to set right sensor to 0x30 after retries")
+
+            # 4) Turn LEFT ON while keeping RIGHT ON
+            self.left_shutdown.on()
+            time.sleep(0.5)
+            dev = self.scan_i2c_bus()
+            self.logger.info(f"Scan (both on): {[hex(a) for a in dev]}")
+            if not (self.left_target_address in dev and self.right_target_address in dev):
+                raise RuntimeError("Expected both 0x29 and 0x30 present after enabling left")
+
+            self.logger.info("SUCCESS: LEFT=0x29, RIGHT=0x30")
+            if self.keep_powered:
+                self.power_both_on()
+            return True
         except Exception as e:
-            self.logger.error(f"Sensor testing failed: {e}")
-    
-    def cleanup(self):
-        """Clean up resources"""
+            self.logger.error(f"Setup failed: {e}")
+            if self.keep_powered:
+                # Best effort: leave both on for debugging
+                try:
+                    self.power_both_on()
+                except Exception:
+                    pass
+            return False
+
+    def cleanup(self) -> None:
         try:
-            if self.left_shutdown:
-                self.left_shutdown.close()
-            if self.right_shutdown:
-                self.right_shutdown.close()
             if self.bus:
                 self.bus.close()
-            self.logger.info("Resources cleaned up")
-        except Exception as e:
-            self.logger.error(f"Cleanup failed: {e}")
+        except Exception:
+            pass
 
-def main():
-    """Main function"""
-    logger = setup_logging()
-    logger.info("=== ToF Sensor Address Configuration Tool ===")
-    
-    manager = ToFSensorManager()
-    
+
+def main() -> bool:
+    log = setup_logging()
+    log.info("=== ToF Sensor Address Configuration Tool ===")
+    mgr = ToFSensorManager()
+    if not mgr.initialize_hardware():
+        return False
     try:
-        # Initialize hardware
-        if not manager.initialize_hardware():
-            logger.error("Hardware initialization failed")
-            return False
-        
-        # Show initial state
-        logger.info("Initial I2C bus state:")
-        initial_devices = manager.scan_i2c_bus()
-        
-        # Setup dual sensors
-        success = manager.setup_dual_sensors()
-        
-        if success:
-            # Test communication
-            manager.test_sensor_readings()
-            
-            logger.info("\n=== CONFIGURATION COMPLETE ===")
-            logger.info("ToF sensors are now properly configured:")
-            logger.info("  Left sensor (tof_left):   0x29")
-            logger.info("  Right sensor (tof_right): 0x30")
-            logger.info("\nYou can now run the hardware detection again to verify both sensors are detected.")
-        else:
-            logger.error("\n=== CONFIGURATION FAILED ===")
-            logger.error("Please check hardware connections and try again.")
-        
-        return success
-        
-    except KeyboardInterrupt:
-        logger.info("Configuration interrupted by user")
-        return False
-        
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        return False
-        
+        ok = mgr.setup_dual_sensors()
+        return ok
     finally:
-        manager.cleanup()
+        mgr.cleanup()
+
 
 if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)
+    sys.exit(0 if main() else 1)

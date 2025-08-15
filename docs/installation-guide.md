@@ -217,23 +217,66 @@ cd /home/pi
 git clone https://github.com/your-repo/lawnberry-pi.git
 cd lawnberry-pi
 
-# Make installation script executable
-chmod +x install_system_integration.sh
+# Make installation script executable (modern installer)
+chmod +x scripts/install_lawnberry.sh
 ```
 
-### 3.2 Install System Dependencies
+### 3.2 Install Using the Installer Script
 
 ```bash
 # Run the automated installation script
-./install_system_integration.sh
+./scripts/install_lawnberry.sh
 
 # This script will:
-# - Install Python dependencies
-# - Install Node.js and web UI dependencies  
-# - Set up system services
-# - Configure hardware interfaces
-# - Create necessary directories
+# - Install system dependencies (APT)
+# - Create Python virtualenv and install Python packages
+# - Install Node.js and web UI dependencies
+# - Enable I2C/SPI/Camera and verify device nodes
+# - Initialize ToF sensors (VL53L0X) addressing and run hardware detection
+# - Create and install systemd services (runtime at /opt/lawnberry)
+# - Save hardware detection to hardware_detection_results.json and hardware_detected.yaml
 # - Prompt for optional Coral TPU installation
+```
+
+#### Installer CLI Options
+
+Run `./scripts/install_lawnberry.sh --help` to see all options. Common flags:
+
+- `--dependencies-only` — Only install system packages.
+- `--python-only` — Only create Python venv and install Python requirements.
+- `--web-ui-only` — Only build/install the web UI.
+- `--services-only` — Only install/update systemd services.
+- `--database-only` — Only initialize the database.
+- `--system-config-only` — Only configure system files (logrotate, control scripts, etc.).
+- `--backend-only` — Dependencies + Python + services + database.
+- `--frontend-only` — Web UI only.
+- `--minimal` — Core components, no validation/hardware detection.
+- `--deploy-update` — Fast deploy to `/opt/lawnberry` and restart core services.
+
+Control flags:
+
+- `--skip-hardware` — Skip sensor setup and hardware detection.
+- `--skip-env` — Skip `.env` interactive setup.
+- `--skip-validation` — Skip post-install checks/tests.
+- `--non-interactive` — Run without prompts (for automation/CI).
+- `--debug` — Enable verbose logging to `lawnberry_install.log`.
+- `--auto-apply-detected-config` — Automatically apply `hardware_detected.yaml` as `config/hardware.yaml` after detection (useful with `--non-interactive`).
+
+Examples:
+
+```bash
+# Full install with no prompts, auto-apply detected hardware config
+./scripts/install_lawnberry.sh --non-interactive --auto-apply-detected-config
+
+# Backend-only install (no web UI), then run hardware detection only
+./scripts/install_lawnberry.sh --backend-only
+./scripts/install_lawnberry.sh --system-config-only --skip-validation
+
+# Skip hardware steps (e.g., building UI only)
+./scripts/install_lawnberry.sh --web-ui-only
+
+# Fast deploy updated source into /opt and restart services
+./scripts/install_lawnberry.sh --deploy-update
 ```
 
 **Coral TPU Installation Prompt**: During installation, you'll be asked if you want to install Coral Edge TPU support. This is optional and provides AI acceleration for object detection. See [Section 3.3 Coral TPU Setup](#33-coral-tpu-setup-optional) for details.
