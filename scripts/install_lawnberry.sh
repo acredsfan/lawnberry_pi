@@ -363,7 +363,7 @@ check_system() {
     if [[ ! -f /proc/device-tree/model ]] || ! grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
         log_warning "Not running on Raspberry Pi - some features may not work"
     else
-        model=$(cat /proc/device-tree/model)
+        model=$(tr -d '\0' </proc/device-tree/model 2>/dev/null)
         log_info "Detected: $model"
 
         # Check for Pi 4B specifically for optimizations
@@ -442,6 +442,48 @@ check_system() {
     fi
 
     log_success "System requirements check passed"
+}
+
+enable_uart4_for_imu() {
+    print_section "Enable UART4 for IMU"
+    log_info "Enabling UART4 for BNO085 IMU (expect /dev/ttyAMA4)"
+
+    # Determine boot config path (Bookworm uses /boot/firmware/config.txt)
+    local BOOT_CONFIG="/boot/firmware/config.txt"
+    [[ -f /boot/config.txt ]] && BOOT_CONFIG="/boot/config.txt"
+
+    # Ensure serial port is enabled and login shell disabled (0 = disable login shell, keep UART enabled)
+    if command -v raspi-config >/dev/null 2>&1; then
+        sudo raspi-config nonint do_serial 0 >/dev/null 2>&1 || true
+    fi
+
+    # Ensure UART is enabled and overlay for uart4 is set
+    if ! grep -q "^enable_uart=1" "$BOOT_CONFIG" 2>/dev/null; then
+        if grep -q "^enable_uart=" "$BOOT_CONFIG" 2>/dev/null; then
+            sudo sed -i 's/^enable_uart=.*/enable_uart=1/' "$BOOT_CONFIG" || true
+        else
+            echo "enable_uart=1" | sudo tee -a "$BOOT_CONFIG" >/dev/null || true
+        fi
+    fi
+
+    if ! grep -q "^dtoverlay=uart4" "$BOOT_CONFIG" 2>/dev/null; then
+        echo "dtoverlay=uart4" | sudo tee -a "$BOOT_CONFIG" >/dev/null || true
+    fi
+
+    # Try to apply overlay immediately without reboot (non-fatal if unavailable)
+    if command -v dtoverlay >/dev/null 2>&1; then
+        sudo dtoverlay -r uart4 >/dev/null 2>&1 || true
+        sudo dtoverlay uart4 >/dev/null 2>&1 || true
+    fi
+
+    # Verify device presence
+    if [[ -e /dev/ttyAMA4 ]]; then
+        log_success "/dev/ttyAMA4 is available"
+    elif [[ -e /dev/ttyS4 ]]; then
+        log_warning "/dev/ttyAMA4 not found; /dev/ttyS4 is present (check overlay/IMU wiring)"
+    else
+        log_warning "UART4 device not found yet; a reboot may be required for changes to take effect"
+    fi
 }
 
 install_dependencies() {
@@ -632,8 +674,19 @@ setup_coral_packages() {
         log_info "Installing standard runtime"
     fi
 
-    echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list
-    curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+    # Configure Coral APT repository with modern signed-by keyring (avoid deprecated apt-key)
+    if [[ ! -f /etc/apt/sources.list.d/coral-edgetpu.list ]]; then
+        log_info "Configuring Google Coral APT repository (signed-by keyring)"
+        sudo mkdir -p /usr/share/keyrings
+        curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/coral-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/coral-archive-keyring.gpg] https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list >/dev/null
+    else
+        log_info "Coral repository already present"
+        # Ensure keyring exists even if list file pre-existed
+        [[ -f /usr/share/keyrings/coral-archive-keyring.gpg ]] || {
+            curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/coral-archive-keyring.gpg
+        }
+    fi
     sudo apt-get update -qq
     sudo apt-get install -y "$EDGE_TPU_PACKAGE" || {
         log_error "Failed to install Edge TPU runtime"
@@ -663,9 +716,20 @@ setup_coral_packages() {
         exit 1
     fi
 
+    # Install build prerequisites for compiling Python via pyenv on Debian 12 (Bookworm)
+    log_info "Installing build prerequisites for Python $PYTHON_39_VERSION (pyenv)"
+    sudo apt-get install -y \
+        make build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+        wget curl llvm libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev \
+        liblzma-dev libgdbm-dev libnss3-dev ca-certificates >/dev/null 2>&1 || true
+
     if ! pyenv versions | grep -q "$PYTHON_39_VERSION"; then
         log_info "Installing Python $PYTHON_39_VERSION via pyenv..."
-        pyenv install "$PYTHON_39_VERSION"
+        if ! pyenv install "$PYTHON_39_VERSION"; then
+            log_error "pyenv failed to build Python $PYTHON_39_VERSION. See pyenv wiki for common build problems."
+            log_info "Ensure the build prerequisites above installed successfully, then re-run installation."
+            return 1
+        fi
     fi
 
     log_info "Creating virtualenv for Coral: $CORAL_VENV_NAME"
@@ -682,6 +746,29 @@ setup_coral_packages() {
     log_info "Python binary: $PYENV_PYTHON"
     log_info "Upgrading pip"
     $PYENV_PIP install --upgrade pip
+
+    # Verify essential stdlib modules compiled correctly (bz2, ssl, readline, curses, ctypes)
+    log_info "Verifying Python stdlib modules in Coral venv (ssl, bz2, readline, curses, ctypes)"
+    if ! $PYENV_PYTHON - <<'EOF'
+import sys
+mods = ["ssl","bz2","readline","curses","ctypes"]
+failed = []
+for m in mods:
+    try:
+        __import__(m)
+    except Exception as e:
+        failed.append((m, str(e)))
+if failed:
+    print("Missing/failed modules:", failed)
+    raise SystemExit(1)
+print("All core modules present")
+EOF
+    then
+        log_error "Python build is missing required modules (ssl/bz2/readline/curses/ctypes)."
+        log_error "This usually indicates missing -dev packages during build."
+        log_info  "Re-run the installer after confirming build prerequisites are installed."
+        return 1
+    fi
 
     # Install PyCoral wheel
     WHEEL_URL="https://github.com/google-coral/pycoral/releases/download/v2.0.0/pycoral-2.0.0-cp39-cp39-linux_aarch64.whl"
@@ -881,7 +968,7 @@ initialize_tof_sensors() {
     cd "$PROJECT_ROOT"
     source venv/bin/activate
 
-    log_info "Initializing dual VL53L0X ToF sensors..."
+    log_info "Initializing dual VL53L0X ToF sensors (set right sensor to 0x30 first)..."
     log_info "This ensures both sensors are configured at different I2C addresses"
 
     # Check if ToF sensors are physically connected
@@ -893,11 +980,11 @@ initialize_tof_sensors() {
         if i2cdetect -y 1 | grep -E "(29|30)" >/dev/null 2>&1; then
             log_info "ToF sensors detected on I2C bus"
 
-            # Run our ToF initialization script
-            if python3 setup_dual_tof.py >/dev/null 2>&1; then
+            # Run ToF address fixer to ensure right sensor moves to 0x30 before any detection
+            if timeout 60s python3 scripts/fix_tof_sensors.py >/dev/null 2>&1; then
                 log_success "✅ Dual ToF sensors initialized successfully"
-                log_success "  - Left sensor (tof_left): 0x30"
-                log_success "  - Right sensor (tof_right): 0x29"
+                log_success "  - Left sensor (tof_left): 0x29"
+                log_success "  - Right sensor (tof_right): 0x30"
 
                 # Verify both sensors are accessible
                 log_info "Verifying sensor accessibility..."
@@ -915,7 +1002,7 @@ initialize_tof_sensors() {
                 fi
 
             else
-                log_warning "ToF sensor initialization script failed"
+                log_warning "ToF sensor initialization failed (addressing script error)"
                 log_info "ToF sensors may still work with default configuration"
             fi
         else
@@ -2042,8 +2129,10 @@ main() {
     fi
 
     if [[ "$SKIP_HARDWARE" != true ]] && [[ "$INSTALL_DEPENDENCIES" == true || "$INSTALL_PYTHON_ENV" == true ]]; then
-        detect_hardware
+        # Correct initialization order: prepare UART4 (IMU), then ToF addressing, then general detection
+        enable_uart4_for_imu
         initialize_tof_sensors
+        detect_hardware
     fi
 
     if [[ "$SKIP_ENV" != true ]] && [[ "$INSTALL_SYSTEM_CONFIG" == true ]]; then

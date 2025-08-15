@@ -2,7 +2,6 @@ i2c:
   bus_number: 1
   devices:
     tof_left: 41
-    tof_right: 48
     power_monitor: 64
     environmental: 118
     display: 60
@@ -16,10 +15,6 @@ serial:
       port: /dev/ttyACM0
       baud: 38400
       timeout: 1.0
-    imu:
-      port: /dev/ttyAMA4
-      baud: 3000000
-      timeout: 1.0
 gpio:
   pins:
     tof_left_shutdown: 22
@@ -29,11 +24,7 @@ gpio:
     blade_enable: 24
     blade_direction: 25
 camera:
-  device_path: /dev/video0
-  width: 1920
-  height: 1080
-  fps: 30
-  buffer_size: 5
+
 plugins:
   -
     name: tof_left
@@ -43,32 +34,11 @@ plugins:
       shutdown_pin: 22
       interrupt_pin: 6
   -
-    name: tof_right
-    enabled: True
-    parameters:
-      i2c_address: 0x30
-      shutdown_pin: 23
-      interrupt_pin: 12
-  -
     name: power_monitor
     enabled: True
     parameters:
       i2c_address: 0x40
       channel: 1
-  -
-    name: gps
-    enabled: True
-    parameters:
-      port: /dev/ttyACM0
-      baud: 38400
-      timeout: 1.0
-  -
-    name: imu
-    enabled: True
-    parameters:
-      port: /dev/ttyAMA4
-      baud: 3000000
-      timeout: 0.1
 logging_level: INFO
 retry_attempts: 3
 retry_base_delay: 0.1

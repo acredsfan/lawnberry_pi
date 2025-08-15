@@ -76,7 +76,7 @@ For first-time installation on a fresh Raspberry Pi:
 
 ```bash
 # Clone the repository
-git clone <repository-url> lawnberry
+git clone https://github.com/acredsfan/lawnberry_pi lawnberry
 cd lawnberry
 
 # Run the Bookworm-optimized installer

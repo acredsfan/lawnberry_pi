@@ -226,17 +226,18 @@ configure_coral_repository() {
     
     log_info "Adding Google Coral repository to system sources..."
     
-    # Add Google's GPG key
-    log_info "Adding Google's GPG key..."
-    if ! curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add - 2>/dev/null; then
-        log_error "Failed to add Google's GPG key"
+    # Add Google's GPG key using signed-by keyring (avoid deprecated apt-key)
+    log_info "Adding Google's GPG key (signed-by keyring)..."
+    sudo mkdir -p /usr/share/keyrings
+    if ! curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/coral-archive-keyring.gpg 2>/dev/null; then
+        log_error "Failed to fetch/dearmor Google's GPG key"
         log_error "Please check your internet connection and try again"
         return 1
     fi
-    
-    # Add repository
+
+    # Add repository with signed-by
     log_info "Adding Coral Edge TPU repository..."
-    echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list >/dev/null
+    echo "deb [signed-by=/usr/share/keyrings/coral-archive-keyring.gpg] https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list >/dev/null
     
     # Update package lists
     log_info "Updating package lists..."
@@ -478,7 +479,7 @@ EOF
     echo
     echo "Next steps:"
     echo "1. Connect your Coral device (if not already connected)"
-    echo "2. Test with: python3 -c \"from pycoral.utils import edgetpu; print(edgetpu.list_edge_tpus())\"
+    echo "2. Test with: python3 -c \"from pycoral.utils import edgetpu; print(edgetpu.list_edge_tpus())\""
     echo
     if [[ "$HARDWARE_PRESENT" != true ]]; then
         echo "Note: No Coral hardware was detected during installation."

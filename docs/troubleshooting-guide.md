@@ -548,6 +548,70 @@ Is blade sharp and undamaged?
    sudo ./scripts/install_coral_system_packages.sh
    ```
 
+### Problem: PyCoral Requires Python 3.9 but pyenv Build Fails (bz2/ssl/readline missing)
+
+**Symptoms**: During Coral optional setup, `pyenv install 3.9.18` completes with warnings/errors:
+
+- `ModuleNotFoundError: No module named '_bz2'`
+- `ModuleNotFoundError: No module named '_ssl'`
+- `ModuleNotFoundError: No module named '_ctypes'`
+- `ModuleNotFoundError: No module named 'readline'`
+- `ModuleNotFoundError: No module named '_curses'`
+
+This means Debian build prerequisites were missing when compiling Python.
+
+**Fix (Debian 12 Bookworm)**:
+
+1. Install build prerequisites:
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y \
+     make build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+     wget curl llvm libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev \
+     liblzma-dev libgdbm-dev libnss3-dev ca-certificates
+   ```
+
+2. Re-run the installer Coral step or build Python 3.9 manually via pyenv:
+   ```bash
+   # Ensure pyenv is on PATH for current shell
+   export PYENV_ROOT="$HOME/.pyenv"
+   export PATH="$PYENV_ROOT/bin:$PATH"
+   eval "$(pyenv init -)"
+   eval "$(pyenv virtualenv-init -)"
+
+   # Rebuild Python 3.9.18
+   pyenv uninstall -f 3.9.18 || true
+   pyenv install 3.9.18
+   ```
+
+3. Validate core modules in the Coral venv:
+   ```bash
+   pyenv virtualenv-delete -f coral-python39 || true
+   pyenv virtualenv 3.9.18 coral-python39
+   pyenv activate coral-python39
+   python - <<'PY'
+import sys
+failed = []
+for m in ["ssl","bz2","readline","curses","ctypes"]:
+    try: __import__(m)
+    except Exception as e: failed.append((m, str(e)))
+print("OK" if not failed else failed)
+PY
+   ```
+
+If any module import fails, re-check step 1 packages and reinstall Python 3.9.
+
+### Note: Coral APT Repository Setup (Avoid apt-key Warning)
+
+If you see `Key is stored in legacy trusted.gpg keyring` or `apt-key is deprecated`, switch to the modern signed-by method:
+
+```bash
+sudo mkdir -p /usr/share/keyrings
+curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/coral-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/coral-archive-keyring.gpg] https://packages.cloud.google.com/apt coral-edgetpu-stable main" | sudo tee /etc/apt/sources.list.d/coral-edgetpu.list >/dev/null
+sudo apt-get update
+```
+
 ### Problem: Coral Performance Issues
 
 **Symptoms**: Coral detected but inference is slow or unreliable
