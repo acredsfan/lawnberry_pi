@@ -12,6 +12,9 @@ from .data_structures import (
     LocalizationData, ObstacleData, HazardAlert
 )
 
+# Re-export safety/obstacle related types for tests and callers
+from .data_structures import ObstacleInfo, ObstacleType, HazardLevel
+
 __all__ = [
     'SensorFusionEngine',
     'LocalizationSystem', 
@@ -24,4 +27,5 @@ __all__ = [
     'LocalizationData',
     'ObstacleData',
     'HazardAlert'
+    ,'ObstacleInfo', 'ObstacleType', 'HazardLevel'
 ]

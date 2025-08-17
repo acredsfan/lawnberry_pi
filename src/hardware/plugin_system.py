@@ -255,7 +255,14 @@ class ToFSensorPlugin(HardwarePlugin):
                     not hasattr(self.__class__, "_shared_tof_manager")
                     or self.__class__._shared_tof_manager is None
                 ):
-                    self.__class__._shared_tof_manager = ToFSensorManager()
+                    # Pass shared GPIO manager from system managers so ToF manager
+                    # uses centralized GPIO claims and avoids double-claiming pins.
+                    gpio_mgr = self.managers.get("gpio")
+                    try:
+                        self.__class__._shared_tof_manager = ToFSensorManager(gpio_manager=gpio_mgr)
+                    except Exception:
+                        # Fallback to default constructor if signature differs
+                        self.__class__._shared_tof_manager = ToFSensorManager()
 
                 tof_manager = self.__class__._shared_tof_manager
 
@@ -367,6 +374,8 @@ class PowerMonitorPlugin(HardwarePlugin):
                 if autodetect:
                     detected = None
                     for probe in (address, 0x40, 0x41, 0x42, 0x43):
+                        # Debug: record each probe attempt to aid diagnostics
+                        self.logger.debug(f"Probing INA3221 at 0x{probe:02x}")
                         try:
                             data = await i2c_manager.read_register(probe, 0x00, 2)
                             if len(data) == 2:
@@ -378,6 +387,8 @@ class PowerMonitorPlugin(HardwarePlugin):
                         address = detected
 
                 self._address = address
+
+                self.logger.info(f"Power monitor: initialized with I2C address 0x{address:02x}")
 
                 # Configure INA3221: reset and set average/convert times, enable channels (conservative defaults)
                 config_value = 0x7127  # Averaging 64, VBUS/VSH CT 1.1ms, mode: shunt and bus, continuous
@@ -495,14 +506,18 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
                 if autodetect:
                     try:
                         i2c_mgr = self.managers["i2c"]
-                        for probe in (address, 0x76, 0x77):
+                        probes = (address, 0x76, 0x77)
+                        self.logger.debug(f"BME280 autodetect probes={[hex(p) for p in probes]}")
+                        for probe in probes:
                             try:
+                                self.logger.debug(f"Probing BME280 at 0x{probe:02x}")
                                 chip_id = await i2c_mgr.read_register(probe, 0xD0, 1)
                                 if chip_id and chip_id[0] == 0x60:  # BME280 chip id
                                     detected_addr = probe
+                                    self.logger.info(f"BME280 detected at 0x{probe:02x}")
                                     break
-                            except Exception:
-                                continue
+                            except Exception as e:
+                                self.logger.debug(f"BME280 probe 0x{probe:02x} failed: {e}")
                     except Exception as e:
                         self.logger.debug(f"BME280 autodetect skipped: {e}")
                 self._address = detected_addr if detected_addr is not None else address
@@ -523,6 +538,7 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
                         if osrs_p is not None:
                             sensor.pressure_oversample = int(osrs_p)
                         self._driver = ("adafruit", sensor)
+                        self.logger.info("Environmental sensor: using Adafruit driver path")
                     except Exception as e:
                         self.logger.warning(f"Adafruit BME280 init failed, will try smbus2: {e}")
                         self._driver = None
@@ -533,10 +549,12 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
                     _ = self.managers["i2c"]
                     # We'll do on-demand reads using I2CManager in read_data()
                     self._driver = ("raw", None)
+                    self.logger.info("Environmental sensor: using raw smbus2 read path")
 
                 self._initialized = True
                 await self.health.record_success()
                 self.logger.info(f"Environmental sensor (BME280) initialized at 0x{address:02x}")
+                self.logger.debug(f"Environmental sensor driver={self._driver[0]} address=0x{self._address:02x}")
                 return True
             except Exception as e:
                 await self.health.record_failure()
@@ -838,13 +856,24 @@ class RoboHATPlugin(HardwarePlugin):
                     connection_active=True,
                 )
 
+                # Use actual serial device settings
+                serial_manager = self.managers.get("serial")
+                port = None
+                baud = None
+                try:
+                    if serial_manager and hasattr(serial_manager, 'devices'):
+                        port = serial_manager.devices.get("robohat", {}).get("port")
+                        baud = serial_manager.devices.get("robohat", {}).get("baud")
+                except Exception:
+                    pass
+
                 reading = SerialDeviceReading(
                     timestamp=datetime.now(),
                     sensor_id=self.config.name,
                     value=status,
                     unit="status",
-                    port="/dev/ttyACM1",
-                    baud_rate=115200,
+                    port=port or "/dev/ttyACM1",
+                    baud_rate=baud or 115200,
                 )
 
                 await self.health.record_success()
@@ -875,14 +904,98 @@ class GPSPlugin(HardwarePlugin):
                 return True
             try:
                 serial_manager = self.managers["serial"]
-                port = self.config.parameters.get("port")
-                baud = self.config.parameters.get("baud", 38400)
-                timeout = self.config.parameters.get("timeout", 1.0)
-                await serial_manager.initialize_device("gps", port=port, baud=baud, timeout=timeout)
                 self.device_name = "gps"
-                self._initialized = True
-                await self.health.record_success()
-                self.logger.info(f"GPS plugin initialized on {port}")
+                self._timeout = float(self.config.parameters.get("timeout", 1.0))
+                # Start with configured values
+                cfg_port = self.config.parameters.get("port")
+                cfg_baud = int(self.config.parameters.get("baud", 38400))
+                import glob
+
+                async def try_init(port: str, baud: int) -> bool:
+                    try:
+                        await serial_manager.initialize_device("gps", port=port, baud=baud, timeout=self._timeout)
+                        # quick sanity read - look for any NMEA sentence
+                        for _ in range(5):
+                            line = await serial_manager.read_line("gps", timeout=0.6)
+                            if line and line.startswith("$"):
+                                return True
+                        # no NMEA seen; close connection to avoid stealing port
+                        try:
+                            conn = serial_manager._connections.get("gps")
+                            if conn and conn.is_open:
+                                conn.close()
+                        except Exception:
+                            pass
+                        return False
+                    except Exception:
+                        return False
+
+                # Start with configured candidates then broaden to all tty nodes
+                candidates_ports = []
+                if cfg_port:
+                    candidates_ports.append(cfg_port)
+                candidates_ports += ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyAMA0", "/dev/ttyAMA4"]
+                # Add any discovered device nodes
+                for pattern in ("/dev/ttyACM*", "/dev/ttyUSB*", "/dev/ttyAMA*"):
+                    for p in glob.glob(pattern):
+                        if p not in candidates_ports:
+                            candidates_ports.append(p)
+
+                # Prefer 115200 first (user observed RMC at 115200), then configured baud, then common baud rates
+                candidates_bauds = [115200, cfg_baud, 9600, 38400]
+
+                selected = None
+                for p in candidates_ports:
+                    for b in candidates_bauds:
+                        if await try_init(p, b):
+                            selected = (p, b)
+                            break
+                    if selected:
+                        break
+
+                if selected:
+                    self._port, self._baud = selected
+                    self._last_failures = 0
+                    self._last_hdop = 0.0
+                    self._last_sats = 0
+                    self._initialized = True
+                    await self.health.record_success()
+                    self.logger.info(f"GPS plugin initialized on {self._port} @ {self._baud}")
+                    return True
+
+                # Broadened scan failed — don't bind to an incorrect default port that may be RoboHAT.
+                # Mark plugin loaded but not yet initialized and start a background re-detect loop.
+                self._initialized = False
+                self._last_failures = getattr(self, "_last_failures", 0)
+                await self.health.record_failure()
+                self.logger.warning("GPS auto-detect failed; will continue background re-detect")
+
+                # background re-detection task
+                async def _redetect_loop():
+                    try:
+                        while not self._initialized:
+                            for p in candidates_ports:
+                                for b in candidates_bauds:
+                                    if await try_init(p, b):
+                                        try:
+                                            await serial_manager.initialize_device("gps", port=p, baud=b, timeout=self._timeout)
+                                            self._port, self._baud = (p, b)
+                                            self._initialized = True
+                                            await self.health.record_success()
+                                            self.logger.info(f"GPS plugin background-initialized on {p} @ {b}")
+                                            return
+                                        except Exception:
+                                            continue
+                            await asyncio.sleep(10.0)
+                    except asyncio.CancelledError:
+                        return
+
+                # launch background re-detect without blocking initialization
+                try:
+                    self._redetect_task = asyncio.create_task(_redetect_loop())
+                except Exception:
+                    pass
+
                 return True
             except Exception as e:
                 await self.health.record_failure()
@@ -897,27 +1010,87 @@ class GPSPlugin(HardwarePlugin):
             serial_manager = self.managers["serial"]
             line = await serial_manager.read_line(self.device_name, timeout=1.0)
             if not line:
+                self._last_failures = getattr(self, "_last_failures", 0) + 1
+                if self._last_failures % 20 == 0:
+                    # Periodically attempt re-detect
+                    self._initialized = False
+                    self.logger.debug("GPS no data; attempting auto re-detect")
+                    await self.initialize()
                 return None
-            if "GGA" not in line:
+
+            # Debug: log raw NMEA sentences seen so we can diagnose parse failures
+            try:
+                self.logger.debug(f"GPS raw sentence: {line}")
+            except Exception:
+                pass
+
+            lat = lon = altitude = hdop = 0.0
+            satellites = 0
+            fix_type = "none"
+
+            if "$GPGGA" in line or "$GNGGA" in line:
+                data = line.split(",")
+                if len(data) >= 15:
+                    lat = self._convert_to_decimal(data[2], data[3])
+                    lon = self._convert_to_decimal(data[4], data[5])
+                    quality = data[6]
+                    satellites = int(data[7] or 0)
+                    hdop = float(data[8] or 0.0)
+                    altitude = float(data[9] or 0.0)
+                    fix_map = {"0": "none", "1": "gps", "2": "dgps", "4": "rtk", "5": "rtk", "9": "rtk"}
+                    fix_type = fix_map.get(quality, "none")
+            elif "$GPRMC" in line or "$GNRMC" in line:
+                data = line.split(",")
+                if len(data) >= 12:
+                    status = data[2]
+                    if status == "A":
+                        lat = self._convert_to_decimal(data[3], data[4])
+                        lon = self._convert_to_decimal(data[5], data[6])
+                        fix_type = "gps"
+            elif "$GPGLL" in line or "$GNGLL" in line:
+                data = line.split(",")
+                if len(data) >= 7:
+                    status = data[6]
+                    if status in ("A", "D"):
+                        lat = self._convert_to_decimal(data[1], data[2])
+                        lon = self._convert_to_decimal(data[3], data[4])
+                        fix_type = "gps"
+            elif "$GPGSA" in line or "$GNGSA" in line:
+                # DOP and active satellites
+                try:
+                    data = line.split(",")
+                    # PDOP, HDOP, VDOP at indices -3, -2, -1 before checksum
+                    if len(data) >= 17:
+                        hdop_val = data[16].split("*")[0] if "*" in data[16] else data[16]
+                        self._last_hdop = float(hdop_val or 0.0)
+                except Exception:
+                    pass
                 return None
-            data = line.split(",")
-            if len(data) < 15:
+            elif "$GPGSV" in line or "$GLGSV" in line or "$GAGSV" in line or "$BDGSV" in line or "$GNGSV" in line:
+                # Satellites in view; we can approximate satellites used after a few frames
+                try:
+                    data = line.split(",")
+                    # total satellites in view at index 3 for many talkers
+                    if len(data) >= 4:
+                        total = data[3]
+                        # Strip checksum if present
+                        total = total.split("*")[0]
+                        self._last_sats = max(self._last_sats, int(total or 0))
+                except Exception:
+                    pass
                 return None
-            lat = self._convert_to_decimal(data[2], data[3])
-            lon = self._convert_to_decimal(data[4], data[5])
-            quality = data[6]
-            satellites = int(data[7] or 0)
-            hdop = float(data[8] or 0.0)
-            altitude = float(data[9] or 0.0)
-            fix_map = {
-                "0": "none",
-                "1": "gps",
-                "2": "dgps",
-                "4": "rtk",
-                "5": "rtk",
-                "9": "rtk",
-            }
-            fix_type = fix_map.get(quality, "none")
+            else:
+                # Unrecognized sentence; count as a soft failure
+                self._last_failures = getattr(self, "_last_failures", 0) + 1
+                if self._last_failures % 40 == 0:
+                    self.logger.debug("GPS unrecognized sentences; attempting auto re-detect")
+                    self._initialized = False
+                    await self.initialize()
+                return None
+
+            if lat == 0.0 and lon == 0.0:
+                self._last_failures = getattr(self, "_last_failures", 0) + 1
+                return None
             from .data_structures import GPSReading
 
             reading = GPSReading(
@@ -937,8 +1110,8 @@ class GPSPlugin(HardwarePlugin):
                 latitude=lat,
                 longitude=lon,
                 altitude=altitude,
-                accuracy=hdop,
-                satellites=satellites,
+                accuracy=hdop if hdop > 0 else getattr(self, "_last_hdop", 0.0),
+                satellites=satellites if satellites > 0 else getattr(self, "_last_sats", 0),
                 fix_type=fix_type,
             )
             await self.health.record_success()
@@ -983,14 +1156,50 @@ class IMUPlugin(HardwarePlugin):
                 return True
             try:
                 serial_manager = self.managers["serial"]
-                port = self.config.parameters.get("port")
-                baud = self.config.parameters.get("baud", 115200)
-                timeout = self.config.parameters.get("timeout", 0.1)
-                await serial_manager.initialize_device("imu", port=port, baud=baud, timeout=timeout)
                 self.device_name = "imu"
+                self._timeout = float(self.config.parameters.get("timeout", 0.1))
+                cfg_port = self.config.parameters.get("port")
+                cfg_baud = int(self.config.parameters.get("baud", 115200))
+
+                async def try_init(port: str, baud: int) -> bool:
+                    try:
+                        await serial_manager.initialize_device("imu", port=port, baud=baud, timeout=self._timeout)
+                        # quick sanity read
+                        for _ in range(3):
+                            line = await serial_manager.read_line("imu", timeout=self._timeout)
+                            if line:
+                                return True
+                        return False
+                    except Exception:
+                        return False
+
+                candidates_ports = list(dict.fromkeys([cfg_port, "/dev/ttyAMA4", "/dev/ttyAMA0"]))
+                candidates_ports = [p for p in candidates_ports if p]
+                candidates_bauds = [cfg_baud, 3000000, 921600, 115200]
+
+                selected = None
+                for p in candidates_ports:
+                    for b in candidates_bauds:
+                        if await try_init(p, b):
+                            selected = (p, b)
+                            break
+                    if selected:
+                        break
+
+                if not selected:
+                    # Initialize anyway to allow later re-detect
+                    await serial_manager.initialize_device("imu", port=cfg_port or "/dev/ttyAMA4", baud=cfg_baud, timeout=self._timeout)
+                    self._last_failures = 0
+                    self._initialized = True
+                    await self.health.record_failure()
+                    self.logger.warning("IMU auto-detect failed; initialized with configured defaults")
+                    return True
+
+                self._port, self._baud = selected
+                self._last_failures = 0
                 self._initialized = True
                 await self.health.record_success()
-                self.logger.info(f"IMU plugin initialized on {port}")
+                self.logger.info(f"IMU plugin initialized on {self._port} @ {self._baud}")
                 return True
             except Exception as e:
                 await self.health.record_failure()
@@ -1003,13 +1212,32 @@ class IMUPlugin(HardwarePlugin):
                 return None
         try:
             serial_manager = self.managers["serial"]
-            line = await serial_manager.read_line(self.device_name, timeout=0.1)
+            line = await serial_manager.read_line(self.device_name, timeout=self._timeout)
             if not line:
+                self._last_failures = getattr(self, "_last_failures", 0) + 1
+                if self._last_failures % 50 == 0:
+                    # Periodically attempt re-detect if no data
+                    self._initialized = False
+                    self.logger.debug("IMU no data; attempting auto re-detect")
+                    await self.initialize()
                 return None
             parts = line.split(",")
             if len(parts) < 9:
+                self._last_failures = getattr(self, "_last_failures", 0) + 1
+                if self._last_failures % 50 == 0:
+                    self.logger.debug("IMU short/invalid line; attempting auto re-detect")
+                    self._initialized = False
+                    await self.initialize()
                 return None
-            roll, pitch, yaw, ax, ay, az, gx, gy, gz = map(float, parts[:9])
+            try:
+                roll, pitch, yaw, ax, ay, az, gx, gy, gz = map(float, parts[:9])
+            except Exception:
+                self._last_failures = getattr(self, "_last_failures", 0) + 1
+                if self._last_failures % 50 == 0:
+                    self.logger.debug("IMU parse error; attempting auto re-detect")
+                    self._initialized = False
+                    await self.initialize()
+                return None
             from .data_structures import IMUReading
 
             reading = IMUReading(

@@ -193,7 +193,7 @@ class EnvironmentalSafetySystem:
             magnetometer_x=data.get('magnetometer_x', 0.0),
             magnetometer_y=data.get('magnetometer_y', 0.0),
             magnetometer_z=data.get('magnetometer_z', 0.0),
-            temperature=data.get('temperature', 20.0)
+                # IMU does not provide temperature; environmental sensor provides it
         )
         
         self.imu_buffer.append(imu_reading)

@@ -149,18 +149,82 @@ class LocalizationSystem:
     async def _handle_imu_data(self, topic: str, message: MessageProtocol):
         """Handle IMU sensor data"""
         try:
-            imu_data = message.payload
+            # Accept either (topic, message) where message has .payload, or
+            # direct dict-like payloads used by some tests. Support nested
+            # shapes where sensor values may be under a 'value' key.
+            raw = None
+            if isinstance(message, dict):
+                raw = message
+                timestamp_val = message.get('timestamp', None)
+            else:
+                raw = getattr(message, 'payload', None) or {}
+                timestamp_val = getattr(getattr(message, 'metadata', None), 'timestamp', None)
+
+            def _get(key, default=None):
+                # Look in raw, then in raw.get('value', {}) for legacy shapes
+                if not raw:
+                    return default
+                if key in raw:
+                    return raw.get(key)
+                val = raw.get('value') if isinstance(raw, dict) else None
+                if isinstance(val, dict) and key in val:
+                    return val.get(key)
+                return default
+
+            quat = _get('quaternion') or _get('orientation')
+            accel = _get('acceleration')
+            angvel = _get('angular_velocity') or _get('gyroscope')
+            mag = _get('magnetic_field')
+
+            # Normalize to tuples with sensible defaults
+            try:
+                quaternion = tuple(quat) if quat is not None else (0.0, 0.0, 0.0, 1.0)
+            except Exception:
+                quaternion = (0.0, 0.0, 0.0, 1.0)
+
+            try:
+                acceleration = tuple(accel) if accel is not None else (0.0, 0.0, 0.0)
+            except Exception:
+                # Accept dict with x,y,z
+                if isinstance(accel, dict):
+                    acceleration = (
+                        float(accel.get('x', 0.0)),
+                        float(accel.get('y', 0.0)),
+                        float(accel.get('z', 0.0))
+                    )
+                else:
+                    acceleration = (0.0, 0.0, 0.0)
+
+            try:
+                angular_velocity = tuple(angvel) if angvel is not None else (0.0, 0.0, 0.0)
+            except Exception:
+                if isinstance(angvel, dict):
+                    angular_velocity = (
+                        float(angvel.get('x', 0.0)),
+                        float(angvel.get('y', 0.0)),
+                        float(angvel.get('z', 0.0))
+                    )
+                else:
+                    angular_velocity = (0.0, 0.0, 0.0)
+
+            try:
+                magnetic_field = tuple(mag) if mag is not None else None
+            except Exception:
+                magnetic_field = None
+
+            ts = datetime.fromtimestamp(timestamp_val) if timestamp_val is not None else datetime.now()
+
             self._latest_imu = IMUReading(
-                timestamp=datetime.fromtimestamp(message.metadata.timestamp),
-                sensor_id=imu_data.get('sensor_id', 'bno085'),
-                value=imu_data,
+                timestamp=ts,
+                sensor_id=_get('sensor_id', 'bno085'),
+                value=raw,
                 unit='mixed',
-                port=imu_data.get('port', '/dev/ttyAMA4'),
-                baud_rate=imu_data.get('baud_rate', 3000000),
-                quaternion=tuple(imu_data['quaternion']),
-                acceleration=tuple(imu_data['acceleration']),
-                angular_velocity=tuple(imu_data['angular_velocity']),
-                magnetic_field=tuple(imu_data.get('magnetic_field', [0, 0, 0]))
+                port=_get('port', '/dev/ttyAMA4'),
+                baud_rate=_get('baud_rate', 3000000),
+                quaternion=quaternion,
+                acceleration=acceleration,
+                angular_velocity=angular_velocity,
+                magnetic_field=magnetic_field
             )
         except Exception as e:
             logger.error(f"Error processing IMU data: {e}")

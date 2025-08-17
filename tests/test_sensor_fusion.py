@@ -19,40 +19,44 @@ from src.hardware.data_structures import GPSReading, IMUReading, ToFReading
 from src.communication import MQTTClient
 
 
-class TestSensorFusionEngine:
-    """Test sensor fusion engine integration and performance"""
-    
-    @pytest.fixture
-    async def fusion_engine(self):
-        """Create sensor fusion engine for testing"""
-        config = {
-            'mqtt': {
-                'host': 'localhost',
-                'port': 1883,
-                'start_local_broker': False
-            },
-            'hardware': {
-                'i2c_devices': {},
-                'serial_devices': {},
-                'gpio_pins': {}
-            }
+@pytest.fixture
+def fusion_engine(event_loop):
+    """Create sensor fusion engine for testing (synchronous wrapper)."""
+    config = {
+        'mqtt': {
+            'host': 'localhost',
+            'port': 1883,
+            'start_local_broker': False
+        },
+        'hardware': {
+            'i2c_devices': {},
+            'serial_devices': {},
+            'gpio_pins': {}
         }
-        
-        engine = SensorFusionEngine(config)
-        
-        # Mock dependencies
-        engine.mqtt_client = Mock(spec=MQTTClient)
-        engine.mqtt_client.connect = AsyncMock()
-        engine.mqtt_client.disconnect = AsyncMock()
-        engine.mqtt_client.publish = AsyncMock()
-        engine.mqtt_client.subscribe = AsyncMock()
-        engine.mqtt_client.is_connected = Mock(return_value=True)
-        
-        # Mock hardware interface
+    }
+
+    engine = SensorFusionEngine(config)
+
+    # Mock dependencies
+    engine.mqtt_client = Mock(spec=MQTTClient)
+    engine.mqtt_client.connect = AsyncMock()
+    engine.mqtt_client.disconnect = AsyncMock()
+    engine.mqtt_client.publish = AsyncMock()
+    engine.mqtt_client.subscribe = AsyncMock()
+    engine.mqtt_client.is_connected = Mock(return_value=True)
+
+    # Run async initialize on the session event loop while patching HardwareInterface
+    async def _init():
         with patch('src.sensor_fusion.fusion_engine.HardwareInterface'):
             await engine.initialize()
-        
-        return engine
+
+    event_loop.run_until_complete(_init())
+    return engine
+
+
+class TestSensorFusionEngine:
+    """Test sensor fusion engine integration and performance"""
+    pass
     
     @pytest.mark.asyncio
     async def test_fusion_engine_initialization(self, fusion_engine):

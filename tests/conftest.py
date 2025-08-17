@@ -1,71 +1,65 @@
-"""
-Pytest configuration and shared fixtures for the testing framework.
-Provides common test utilities, mock hardware interfaces, and test data.
-"""
-
-import pytest
 import asyncio
+import inspect
 import tempfile
 import shutil
-import json
-import yaml
 from pathlib import Path
-from unittest.mock import Mock, AsyncMock, MagicMock, patch
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from unittest.mock import Mock, AsyncMock, patch
+import pytest
 
-# Import all the main modules for testing
-from src.communication import MQTTClient
-from src.hardware.hardware_interface import HardwareInterface
-from src.sensor_fusion.fusion_engine import SensorFusionEngine
-from src.safety.safety_service import SafetyService, SafetyConfig
-from src.power_management.power_manager import PowerManager
-from src.vision.vision_manager import VisionManager
-from src.data_management.data_manager import DataManager
-from src.weather.weather_service import WeatherService
+# Basic pytest configuration
+def pytest_configure(config):
+    config.addinivalue_line("markers", "asyncio: mark async tests")
 
 
-# Test configurations
 @pytest.fixture(scope="session")
-def test_config():
-    """Provide comprehensive test configuration"""
-    return {
-        "hardware": {
-            "i2c_bus": 1,
-            "mock_mode": True,
-            "retry_attempts": 3,
-            "timeout_ms": 1000
-        },
-        "safety": {
-            "emergency_response_time_ms": 100,
-            "person_safety_radius_m": 3.0,
-            "pet_safety_radius_m": 1.5,
-            "max_safe_tilt_deg": 15.0,
-            "critical_tilt_deg": 25.0
-        },
-        "sensor_fusion": {
-            "update_rate_hz": 20,
-            "gps_timeout_s": 5.0,
-            "imu_timeout_s": 1.0,
-            "localization_accuracy_m": 0.2
-        },
-        "power": {
-            "critical_battery_level": 0.15,
-            "low_battery_level": 0.20,
-            "charging_current_limit_a": 5.0
-        },
-        "vision": {
-            "detection_confidence_threshold": 0.7,
-            "max_detection_distance_m": 10.0,
-            "frame_rate_fps": 30
-        }
-    }
+def event_loop():
+    loop = asyncio.new_event_loop()
+    yield loop
+    try:
+        loop.close()
+    except Exception:
+        pass
 
 
-# Mock Hardware Fixtures
+def pytest_fixture_setup(fixturedef, request):
+    """Run async fixtures using the session event loop when pytest-asyncio is not available."""
+    func = fixturedef.func
+    if inspect.iscoroutinefunction(func):
+        loop = request.getfixturevalue("event_loop")
+        # Resolve any dependent fixtures required by this fixture
+        kwargs = {name: request.getfixturevalue(name) for name in getattr(fixturedef, "argnames", [])}
+        return loop.run_until_complete(func(**kwargs))
+
+
+def pytest_pyfunc_call(pyfuncitem):
+    """Execute async test functions by running them on the session event loop."""
+    testfunc = pyfuncitem.obj
+    if inspect.iscoroutinefunction(testfunc):
+        # Use already-prepared funcargs (which may include sync fixture results)
+        loop = pyfuncitem.funcargs.get("event_loop")
+        created_loop = False
+        if loop is None:
+            loop = asyncio.new_event_loop()
+            created_loop = True
+        try:
+            # Only pass the funcargs that match the test function's parameter names.
+            sig = inspect.signature(testfunc)
+            accept_names = set(sig.parameters.keys())
+            filtered_kwargs = {k: v for k, v in pyfuncitem.funcargs.items() if k in accept_names}
+            loop.run_until_complete(testfunc(**filtered_kwargs))
+        finally:
+            if created_loop:
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+        return True
+    return None
+
+
+# Mock hardware fixtures
 @pytest.fixture
 def mock_i2c_device():
-    """Mock I2C device for sensor testing"""
     device = Mock()
     device.read_register = Mock(return_value=0x42)
     device.write_register = Mock()
@@ -76,7 +70,6 @@ def mock_i2c_device():
 
 @pytest.fixture
 def mock_gpio():
-    """Mock GPIO interface"""
     gpio = Mock()
     gpio.setup = Mock()
     gpio.output = Mock()
@@ -88,7 +81,6 @@ def mock_gpio():
 
 @pytest.fixture
 def mock_serial():
-    """Mock serial interface for UART communication"""
     serial = Mock()
     serial.write = Mock()
     serial.read = Mock(return_value=b"OK\r\n")
@@ -100,25 +92,21 @@ def mock_serial():
 
 @pytest.fixture
 def mock_camera():
-    """Mock camera interface"""
     import numpy as np
-    
     camera = Mock()
-    # Create a fake 640x480 RGB image
     fake_frame = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
     camera.read = Mock(return_value=(True, fake_frame))
     camera.isOpened = Mock(return_value=True)
     camera.release = Mock()
     camera.set = Mock()
-    camera.get = Mock(return_value=30.0)  # FPS
+    camera.get = Mock(return_value=30.0)
     return camera
 
 
-# Service Fixtures
+# Common service fixtures
 @pytest.fixture
 async def mqtt_client():
-    """Mock MQTT client for communication testing"""
-    client = Mock(spec=MQTTClient)
+    client = Mock()
     client.connect = AsyncMock()
     client.disconnect = AsyncMock()
     client.subscribe = AsyncMock()
@@ -128,20 +116,30 @@ async def mqtt_client():
 
 
 @pytest.fixture
-async def hardware_interface(test_config, mock_i2c_device, mock_gpio, mock_serial):
-    """Mock hardware interface with all sensors"""
+async def hardware_interface(mock_i2c_device, mock_gpio, mock_serial):
+    # Patch lower-level hardware managers that may touch system resources
     with patch('src.hardware.managers.smbus.SMBus') as mock_smbus, \
          patch('src.hardware.managers.GPIO', mock_gpio), \
          patch('src.hardware.managers.serial.Serial', return_value=mock_serial):
-        
         mock_smbus.return_value = mock_i2c_device
-        
-        interface = HardwareInterface(test_config["hardware"])
+        from src.hardware.hardware_interface import HardwareInterface
+        interface = HardwareInterface({'mock_mode': True})
         await interface.initialize()
         yield interface
         await interface.shutdown()
 
 
+# Cleanup fixture to cancel remaining tasks
+@pytest.fixture(autouse=True)
+async def cleanup_background_tasks():
+    yield
+    tasks = [task for task in asyncio.all_tasks() if not task.done()]
+    for task in tasks:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 @pytest.fixture
 async def safety_service(mqtt_client, test_config):
     """Safety service with mock dependencies"""
@@ -332,12 +330,6 @@ def safety_test_scenarios():
 
 
 # Async Test Utilities
-@pytest.fixture
-def event_loop():
-    """Create event loop for async tests"""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 # Cleanup fixture

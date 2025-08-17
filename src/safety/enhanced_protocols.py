@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 import json
 import smtplib
-from email.mime.text import MimeText
-from email.mime.multipart import MimeMultipart
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 from ..communication import MQTTClient, MessageProtocol
 from ..hardware.data_structures import GPSReading
@@ -628,12 +628,12 @@ class EnhancedSafetyProtocols:
                 logger.warning("No SMTP configuration found for email notifications")
                 return
             
-            msg = MimeMultipart()
+            msg = MIMEMultipart()
             msg['From'] = smtp_config['from_email']
             msg['To'] = contact.email
             msg['Subject'] = f"Lawnberry Safety Alert - {event.severity.value.upper()}"
             
-            msg.attach(MimeText(message, 'plain'))
+            msg.attach(MIMEText(message, 'plain'))
             
             server = smtplib.SMTP(smtp_config['server'], smtp_config['port'])
             if smtp_config.get('use_tls', True):

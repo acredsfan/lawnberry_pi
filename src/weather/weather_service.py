@@ -12,10 +12,63 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, cast
 from dataclasses import dataclass, asdict
 from enum import Enum
-import aiohttp
+try:
+    import aiohttp
+    from aiohttp import ClientTimeout
+    AIOHTTP_AVAILABLE = True
+except Exception:
+    aiohttp = None
+    ClientTimeout = None
+    AIOHTTP_AVAILABLE = False
+
 import yaml
 from pathlib import Path
-from dotenv import load_dotenv
+
+# dotenv may not be available in test environments
+try:
+    from dotenv import load_dotenv
+except Exception:
+    def load_dotenv():
+        return None
+
+# Minimal aiohttp stubs when aiohttp is not installed (testing fallback)
+if not AIOHTTP_AVAILABLE:
+    class _DummyResponse:
+        def __init__(self, status=200, data=None):
+            self.status = status
+            self._data = data or {}
+
+        async def json(self):
+            return self._data
+
+    class _DummyContext:
+        def __init__(self, resp: _DummyResponse):
+            self._resp = resp
+
+        async def __aenter__(self):
+            return self._resp
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _DummySession:
+        def __init__(self, timeout=None):
+            self.timeout = timeout
+
+        async def get(self, url, params=None):
+            # Return an async context manager
+            return _DummyContext(_DummyResponse(status=200, data={}))
+
+        async def close(self):
+            return None
+
+    class _DummyTimeout:
+        def __init__(self, total=None):
+            self.total = total
+
+    aiohttp = None
+    ClientTimeout = _DummyTimeout
+    _AIOHTTP_SESSION = _DummySession
 
 from ..location import LocationCoordinator, LocationData
 from ..communication import MQTTClient

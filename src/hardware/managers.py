@@ -7,9 +7,19 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-import cv2
-import numpy as np
-import serial
+try:
+    import serial
+except Exception:
+    serial = None
+try:
+    import cv2
+except Exception:
+    cv2 = None
+
+try:
+    import numpy as np
+except Exception:
+    np = None
 
 # Raspberry Pi 4B/5 compatibility is provided via gpio_wrapper
 from .gpio_wrapper import GPIO
@@ -150,7 +160,7 @@ class I2CManager:
                     )
                     await asyncio.sleep(delay)
 
-    async def write_register(self, address: int, register: int, data: int | List[int]):
+    async def write_register(self, address: int, register: int, data: Any):
         """Write to I2C device register with retry logic"""
         async with self.device_access(address):
             for attempt in range(self._retry_policy.max_retries + 1):
@@ -231,6 +241,15 @@ class SerialManager:
             self._connections[device_name] = conn
             self._locks[device_name] = asyncio.Lock()
             self._health[device_name] = DeviceHealth(device_name)
+            # Persist the effective configuration so metadata reflects reality
+            try:
+                self.devices[device_name] = {
+                    "port": config.get("port"),
+                    "baud": config.get("baud"),
+                    "timeout": config.get("timeout"),
+                }
+            except Exception:
+                pass
 
             self.logger.info(f"Serial device {device_name} initialized on {config['port']}")
 
@@ -356,6 +375,11 @@ class GPIOManager:
                     gpio_dir = GPIO.OUT if direction == "output" else GPIO.IN
                     pud = {"up": GPIO.PUD_UP, "down": GPIO.PUD_DOWN, "none": GPIO.PUD_OFF}
 
+                    # If gpio_wrapper exposes claimant info, log it for diagnostics
+                    claimant = getattr(GPIO, 'get_claimant', lambda p: None)(pin) if hasattr(GPIO, 'get_claimant') else None
+                    if claimant:
+                        self.logger.debug(f"GPIOManager.setup_pin: pin {pin} currently claimed by {claimant} before setup")
+
                     GPIO.setup(pin, gpio_dir, pull_up_down=pud[pull_up_down], initial=initial)
 
                 self._pins[pin] = {
@@ -377,6 +401,9 @@ class GPIOManager:
         async with self._lock:
             try:
                 if GPIO:
+                    claimant = getattr(GPIO, 'get_claimant', lambda p: None)(pin) if hasattr(GPIO, 'get_claimant') else None
+                    if claimant:
+                        self.logger.debug(f"GPIOManager.write_pin: writing to pin {pin} claimed by {claimant}")
                     GPIO.output(pin, value)
 
                 self.logger.debug(f"GPIO pin {pin} set to {value}")

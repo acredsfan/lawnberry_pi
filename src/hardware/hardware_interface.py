@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
 from pathlib import Path
 
@@ -18,21 +18,43 @@ from .tof_manager import ToFSensorManager
 class HardwareInterface:
     """Main hardware interface coordinating all subsystems"""
     
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[Union[str, Dict[str, Any]]] = None):
         self.logger = logging.getLogger(__name__)
-        
+
         # Configuration
-        self.config_manager = ConfigManager(config_path)
-        self.config = self.config_manager.load_config()
+        # Accept either a path to config or an in-memory dict for tests
+        if isinstance(config_path, dict):
+            # Create a ConfigManager with default path but inject the provided dict
+            self.config_manager = ConfigManager(None)
+            try:
+                # Build HardwareInterfaceConfig from provided dict
+                self.config = HardwareInterfaceConfig(**config_path)
+            except Exception:
+                # Fallback: load defaults if provided dict is incomplete
+                self.config = self.config_manager.get_default_config()
+            # Store into manager for later updates
+            self.config_manager._config = self.config
+        else:
+            self.config_manager = ConfigManager(config_path)
+            self.config = self.config_manager.load_config()
         
         # Hardware managers
         self.i2c_manager = I2CManager()
         self.serial_manager = SerialManager()
+        # Apply serial device mapping from configuration so plugins use correct ports/bauds
+        try:
+            if self.config and getattr(self.config, 'serial', None):
+                # Ensure we copy to avoid accidental shared mutations
+                self.serial_manager.devices = dict(self.config.serial.devices or {})
+        except Exception:
+            # Fall back to defaults if config mapping is unavailable
+            pass
+
         self.camera_manager = CameraManager(self.config.camera.device_path)
         self.gpio_manager = GPIOManager()
-        self.tof_manager = ToFSensorManager()
+        self.tof_manager = ToFSensorManager(gpio_manager=self.gpio_manager)
         self.display_manager = OLEDDisplayManager()
-        
+
         # Plugin system
         self.plugin_manager = PluginManager({
             'i2c': self.i2c_manager,
@@ -114,8 +136,14 @@ class HardwareInterface:
                             f"Failed to load plugin: {plugin_config.name}"
                         )
             
-            # Start camera capture
-            await self.camera_manager.start_capture()
+            # Start camera capture only if camera manager initialized successfully
+            try:
+                if getattr(self.camera_manager, '_camera', None) is not None:
+                    await self.camera_manager.start_capture()
+                else:
+                    self.logger.debug("Camera manager not initialized; skipping start_capture")
+            except Exception as e:
+                self.logger.debug(f"Skipping camera start_capture due to error: {e}")
             
             # Start health monitoring
             self._health_check_task = asyncio.create_task(self._health_check_loop())
@@ -724,7 +752,40 @@ class HardwareInterface:
             raise
 
 
-# Convenience function for creating hardware interface
-def create_hardware_interface(config_path: Optional[str] = None) -> HardwareInterface:
-    """Create and return hardware interface instance"""
-    return HardwareInterface(config_path)
+# Module-level registry for shared hardware interface instances
+_shared_hardware_interfaces: Dict[Optional[str], HardwareInterface] = {}
+
+
+def create_hardware_interface(config_path: Optional[str] = None, *, shared: bool = True, force_new: bool = False) -> HardwareInterface:
+    """Create and return a HardwareInterface instance.
+
+    By default this returns a process-wide shared instance for a given
+    `config_path` to avoid multiple components initializing the same
+    hardware devices. Pass `shared=False` or `force_new=True` to get a
+    fresh instance (useful for tests).
+    """
+    # Normalize the config_path to a hashable key. If a dict/list is provided
+    # (e.g., tests passing an in-memory config), convert to a stable JSON string.
+    import json
+    if config_path is None:
+        key = '__default__'
+    elif isinstance(config_path, (dict, list)):
+        try:
+            key = json.dumps(config_path, sort_keys=True)
+        except Exception:
+            # Fallback to string representation if it can't be JSON serialized
+            key = str(config_path)
+    else:
+        key = str(config_path)
+    if not shared or force_new:
+        return HardwareInterface(config_path)
+
+    # Return existing shared instance if present
+    existing = _shared_hardware_interfaces.get(key)
+    if existing is not None:
+        return existing
+
+    # Create, cache and return shared instance
+    hw = HardwareInterface(config_path)
+    _shared_hardware_interfaces[key] = hw
+    return hw

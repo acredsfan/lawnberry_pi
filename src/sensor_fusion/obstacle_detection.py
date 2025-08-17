@@ -4,7 +4,10 @@ Obstacle detection system combining ToF sensors and computer vision
 
 import asyncio
 import numpy as np
-import cv2
+try:
+    import cv2
+except Exception:
+    cv2 = None
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 import logging

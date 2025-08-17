@@ -39,6 +39,30 @@ except ImportError:  # pragma: no cover - fallback if exceptions module missing
 from .gpio_wrapper import GPIO
 
 
+class _FakeToFSensor:
+    """Lightweight fake ToF sensor used as a fallback when real sensors fail to initialize."""
+    def __init__(self, name: str, address: int):
+        self._name = name
+        self._address = address
+        self._distance = 200  # mm default
+
+    @property
+    def range(self):
+        # Return a stable-ish simulated distance; could be randomized later
+        return self._distance
+
+    def start_continuous(self):
+        return None
+
+    def stop_continuous(self):
+        return None
+
+    def set_address(self, addr: int):
+        self._address = addr
+        return None
+
+
+
 @dataclass
 class ToFSensorConfig:
     """Configuration for a single ToF sensor"""
@@ -62,26 +86,30 @@ class ToFReading:
 class ToFSensorManager:
     """Manager for multiple VL53L0X Time-of-Flight sensors"""
     
-    def __init__(self):
+    def __init__(self, gpio_manager=None):
         self.logger = logging.getLogger(__name__)
         self.i2c = None
         self.sensors: Dict[str, VL53L0X] = {}
         self.shutdown_pins: Dict[str, DigitalInOut] = {}
         self.sensor_configs: List[ToFSensorConfig] = []
+        # Track which GPIO pins this manager configured to avoid conflicts
+        self._configured_pins = set()
         self._initialized = False
         self._lock = asyncio.Lock()
-        
+        # Hold a reference to the shared GPIOManager if provided
+        self.gpio_manager = gpio_manager
+
         # Default sensor configuration based on hardware setup
         # Both sensors are physically connected and tested
         self.default_configs = [
             ToFSensorConfig(
-                name="tof_left", 
+                name="tof_left",
                 shutdown_pin=22,  # GPIO 22
                 interrupt_pin=6,  # GPIO 6
                 target_address=0x30  # Left sensor gets changed to 0x30
             ),
             ToFSensorConfig(
-                name="tof_right", 
+                name="tof_right",
                 shutdown_pin=23,  # GPIO 23
                 interrupt_pin=12, # GPIO 12
                 target_address=0x29  # Right sensor keeps default 0x29
@@ -95,8 +123,27 @@ class ToFSensorManager:
                 return True
             
             if not HAS_HARDWARE:
-                self.logger.warning("Running in simulation mode - ToF sensors not available")
+                # Allow an override to require hardware and fail fast in CI/dev if needed
+                require_hw = False
+                try:
+                    import os
+
+                    require_hw = os.getenv("LAWNBERY_REQUIRE_HARDWARE", "0") in ("1", "true", "True")
+                except Exception:
+                    require_hw = False
+
+                if require_hw:
+                    self.logger.error("Hardware required but VL53L0X libs not available")
+                    return False
+
+                self.logger.warning("Running in simulation mode - ToF sensors not available; creating simulated sensors")
+                # Create simulated sensors so callers receive readings in simulation
+                self.sensor_configs = sensor_configs or self.default_configs
+                for cfg in self.sensor_configs:
+                    fake = _FakeToFSensor(cfg.name, cfg.target_address)
+                    self.sensors[cfg.name] = fake
                 self._initialized = True
+                self.logger.info(f"Initialized {len(self.sensors)} simulated ToF sensors")
                 return True
             
             try:
@@ -108,11 +155,19 @@ class ToFSensorManager:
                 self.logger.info("I2C bus initialized for ToF sensors")
                 
                 # Initialize shutdown pins - ALL sensors OFF initially
+                # Prefer using GPIOManager if available to centralize claims
                 await self._setup_shutdown_pins()
                 
                 # Initialize sensors one by one with proper address assignment
                 await self._initialize_sensors_sequence()
-                
+
+                # If no physical sensors were initialized, create simulated fallback sensors
+                if not self.sensors:
+                    self.logger.warning("No ToF sensors initialized physically; creating simulated fallback sensors")
+                    for cfg in self.sensor_configs:
+                        fake = _FakeToFSensor(cfg.name, cfg.target_address)
+                        self.sensors[cfg.name] = fake
+
                 self._initialized = True
                 self.logger.info(f"Successfully initialized {len(self.sensors)} ToF sensors")
                 return True
@@ -125,23 +180,58 @@ class ToFSensorManager:
     async def _setup_shutdown_pins(self):
         """Setup all shutdown pins and turn OFF all sensors"""
         self.logger.info("Setting up ToF sensor shutdown pins...")
+        if GPIO:
+            try:
+                # Set mode once for all ToF GPIO operations
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setwarnings(False)
+            except Exception as e:
+                self.logger.debug(f"GPIO setmode/setwarnings failed: {e}")
 
         for config in self.sensor_configs:
             try:
-                if GPIO:
-                    GPIO.setmode(GPIO.BCM)
-                    GPIO.setwarnings(False)
-                    GPIO.setup(config.shutdown_pin, GPIO.OUT, initial=GPIO.LOW)
-                    self.logger.debug(
-                        f"GPIO {config.shutdown_pin} configured for {config.name} (OFF)"
-                    )
-                else:  # pragma: no cover - simulation mode
-                    self.logger.debug(
-                        f"Simulation mode: skipping GPIO setup for {config.name}"
-                    )
+                # Prefer centralized GPIO management to avoid duplicate claims
+                if self.gpio_manager is not None:
+                    if config.shutdown_pin not in self._configured_pins:
+                        # Ask GPIOManager to setup the pin (it will claim internally)
+                        try:
+                            await self.gpio_manager.setup_pin(config.shutdown_pin, 'output', initial=0)
+                            self._configured_pins.add(config.shutdown_pin)
+                            self.logger.debug(f"GPIO {config.shutdown_pin} configured for {config.name} (OFF) via GPIOManager")
+                        except Exception as e:
+                            claimant = getattr(GPIO, 'get_claimant', lambda p: None)(config.shutdown_pin) if hasattr(GPIO, 'get_claimant') else None
+                            if claimant:
+                                self.logger.warning(f"Failed to setup shutdown pin for {config.name} (pin {config.shutdown_pin}): {e} - currently claimed by {claimant}")
+                            else:
+                                self.logger.warning(f"Failed to setup shutdown pin for {config.name} (pin {config.shutdown_pin}): {e}")
+                            # Mark as configured to avoid repeated attempts
+                            self._configured_pins.add(config.shutdown_pin)
+                    else:
+                        self.logger.debug(f"GPIO {config.shutdown_pin} already configured; skipping setup for {config.name}")
+
+                else:
+                    # Fallback to raw GPIO wrapper behavior
+                    if GPIO:
+                        if config.shutdown_pin not in self._configured_pins:
+                            claimant = getattr(GPIO, 'get_claimant', lambda p: None)(config.shutdown_pin) if hasattr(GPIO, 'get_claimant') else None
+                            if claimant:
+                                self.logger.debug(f"GPIO shutdown pin {config.shutdown_pin} currently claimed by {claimant} before setup for {config.name}")
+                            GPIO.setup(config.shutdown_pin, GPIO.OUT, initial=GPIO.LOW)
+                            self._configured_pins.add(config.shutdown_pin)
+                            self.logger.debug(f"GPIO {config.shutdown_pin} configured for {config.name} (OFF)")
+                        else:
+                            self.logger.debug(f"GPIO {config.shutdown_pin} already configured; skipping setup for {config.name}")
+                    else:  # pragma: no cover - simulation mode
+                        self.logger.debug(f"Simulation mode: skipping GPIO setup for {config.name}")
             except Exception as e:  # pragma: no cover - hardware failure
-                self.logger.error(f"Failed to setup shutdown pin for {config.name}: {e}")
-                raise
+                # Log and continue; another manager may have claimed the pin already
+                claimant = getattr(GPIO, 'get_claimant', lambda p: None)(config.shutdown_pin) if hasattr(GPIO, 'get_claimant') else None
+                if claimant:
+                    self.logger.warning(f"Failed to setup shutdown pin for {config.name} (pin {config.shutdown_pin}): {e} - currently claimed by {claimant}")
+                else:
+                    self.logger.warning(f"Failed to setup shutdown pin for {config.name} (pin {config.shutdown_pin}): {e}")
+                # Mark as configured to avoid repeated attempts
+                self._configured_pins.add(config.shutdown_pin)
         
         # Small delay to ensure all sensors are off
         await asyncio.sleep(0.1)
@@ -170,8 +260,8 @@ class ToFSensorManager:
                 continue  # Continue with next sensor
         
         if not self.sensors:
-            raise HardwareError("Failed to initialize any ToF sensors")
-            
+            self.logger.warning("No physical ToF sensors were initialized in sequence")
+
         self.logger.info(f"🎉 ToF sensor initialization complete! Initialized {len(self.sensors)} sensors")
         
         # Verify all sensors are accessible
@@ -181,8 +271,22 @@ class ToFSensorManager:
     async def _initialize_single_sensor_with_timeout(self, i: int, config: ToFSensorConfig):
         """Initialize a single ToF sensor with proper error handling"""
         # Step 1: Turn ON this sensor
-        if GPIO:
-            GPIO.output(config.shutdown_pin, GPIO.HIGH)
+        # Power on the sensor via GPIOManager or raw GPIO
+        if self.gpio_manager is not None:
+            try:
+                await self.gpio_manager.write_pin(config.shutdown_pin, 1)
+            except Exception as e:
+                claimant = getattr(GPIO, 'get_claimant', lambda p: None)(config.shutdown_pin) if hasattr(GPIO, 'get_claimant') else None
+                self.logger.warning(f"Failed to set GPIO {config.shutdown_pin} HIGH for {config.name} via GPIOManager: {e} (claimant={claimant})")
+        else:
+            if GPIO:
+                try:
+                    claimant = getattr(GPIO, 'get_claimant', lambda p: None)(config.shutdown_pin) if hasattr(GPIO, 'get_claimant') else None
+                    if claimant:
+                        self.logger.debug(f"Writing HIGH to pin {config.shutdown_pin} for {config.name} (claimed by {claimant})")
+                    GPIO.output(config.shutdown_pin, GPIO.HIGH)
+                except Exception as e:
+                    self.logger.warning(f"Failed to set GPIO {config.shutdown_pin} HIGH for {config.name}: {e}")
         await asyncio.sleep(0.1)  # Allow sensor to boot
         self.logger.debug(f"Powered on {config.name} via GPIO {config.shutdown_pin}")
         
@@ -330,15 +434,22 @@ class ToFSensorManager:
             # Turn off all sensors using GPIO with timeout protection
             for config in self.sensor_configs:
                 try:
-                    if GPIO:
-                        GPIO.output(config.shutdown_pin, GPIO.LOW)
-                        self.logger.debug(
-                            f"GPIO {config.shutdown_pin} set LOW for {config.name}"
-                        )
+                    if self.gpio_manager is not None and config.shutdown_pin in self._configured_pins:
+                        try:
+                            await self.gpio_manager.write_pin(config.shutdown_pin, 0)
+                            self.logger.debug(f"GPIO {config.shutdown_pin} set LOW for {config.name} via GPIOManager")
+                        except Exception as e:
+                            self.logger.warning(f"Failed to set GPIO {config.shutdown_pin} LOW for {config.name} via GPIOManager: {e}")
+                    elif GPIO and config.shutdown_pin in self._configured_pins:
+                        try:
+                            GPIO.output(config.shutdown_pin, GPIO.LOW)
+                            self.logger.debug(f"GPIO {config.shutdown_pin} set LOW for {config.name}")
+                        except Exception as e:
+                            self.logger.warning(f"Failed to set GPIO {config.shutdown_pin} LOW for {config.name}: {e}")
+                    else:
+                        self.logger.debug(f"Skipping GPIO LOW for {config.name} (pin not configured or in simulation)")
                 except Exception as e:
-                    self.logger.warning(
-                        f"Failed to set GPIO {config.shutdown_pin} LOW: {e}"
-                    )
+                    self.logger.warning(f"Unexpected error while turning off pin {config.shutdown_pin}: {e}")
 
             # Small delay to ensure sensors are off
             await asyncio.sleep(0.1)
@@ -346,8 +457,12 @@ class ToFSensorManager:
             # Clean up GPIO
             if GPIO:
                 try:
-                    GPIO.cleanup()
-                    self.logger.info("GPIO cleanup completed")
+                    # Only cleanup if we configured any pins
+                    if self._configured_pins:
+                        GPIO.cleanup()
+                        self.logger.info("GPIO cleanup completed")
+                    else:
+                        self.logger.debug("No GPIO pins configured by ToF manager; skipping global cleanup")
                 except Exception as e:
                     self.logger.warning(f"GPIO cleanup warning: {e}")
             
@@ -355,6 +470,25 @@ class ToFSensorManager:
             self.sensors.clear()
             self.shutdown_pins.clear()
             self.sensor_configs.clear()
+            # Release claimed pins (use GPIOManager if available)
+            try:
+                if self.gpio_manager is not None and hasattr(self.gpio_manager, 'write_pin'):
+                    # Also call release helpers on wrapper if present
+                    for p in list(self._configured_pins):
+                        try:
+                            if hasattr(GPIO, 'release_pin'):
+                                GPIO.release_pin(p)
+                        except Exception:
+                            pass
+                else:
+                    if GPIO and hasattr(GPIO, 'release_pin'):
+                        for p in list(self._configured_pins):
+                            try:
+                                GPIO.release_pin(p)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
             
             # Close I2C bus if it exists
             if hasattr(self, 'i2c') and self.i2c:

@@ -63,6 +63,8 @@ class ToFReading(I2CDeviceReading):
     """Time-of-Flight sensor reading in millimeters"""
     distance_mm: int = 0
     range_status: str = "valid"
+    # Optional ambient temperature reported by some ToF sensors
+    temperature: float = 0.0
 
 
 @dataclass
@@ -99,6 +101,12 @@ class EnvironmentalReading(I2CDeviceReading):
     temperature: float = 0.0  # °C
     humidity: float = 0.0     # %
     pressure: float = 0.0     # hPa
+    # Additional optional environmental fields used elsewhere in the codebase
+    light_level: float = 0.0
+    uv_index: float = 0.0
+    wind_speed: float = 0.0
+    wind_direction: float = 0.0
+    precipitation: bool = False
 
 
 @dataclass

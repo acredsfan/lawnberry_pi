@@ -1,78 +1,61 @@
+camera:
+  buffer_size: 5
+  device_path: /dev/video0
+  fps: 30
+  height: 1080
+  width: 1920
+gpio:
+  pins:
+    blade_direction: 25
+    blade_enable: 24
+    tof_left_interrupt: 6
+    tof_left_shutdown: 22
+    tof_right_interrupt: 12
+    tof_right_shutdown: 23
 i2c:
   bus_number: 1
   devices:
-    power_monitor: 64
-    environmental: 118
     display: 60
-serial:
-  devices:
-    robohat:
-      port: /dev/ttyACM1
-      baud: 115200
-      timeout: 1.0
-    gps:
-      port: /dev/ttyACM0
-      baud: 38400
-      timeout: 1.0
-    imu:
-      port: /dev/ttyAMA4
-      baud: 3000000
-      timeout: 1.0
-gpio:
-  pins:
-    tof_left_shutdown: 22
-    tof_right_shutdown: 23
-    tof_left_interrupt: 6
-    tof_right_interrupt: 12
-    blade_enable: 24
-    blade_direction: 25
-camera:
-  device_path: /dev/video0
-  width: 1920
-  height: 1080
-  fps: 30
-  buffer_size: 5
-plugins:
-  - name: power_monitor
-    enabled: true
-    parameters:
-      i2c_address: 0x40
-      auto_detect_address: true
-      channel: 1
-      shunt_resistance: 0.1
-  - name: environmental_bme280
-    enabled: true
-    parameters:
-      i2c_address: 0x76
-      auto_detect_address: true
-  - name: tof_left
-    enabled: true
-    parameters:
-      i2c_address: 0x30
-      shutdown_pin: 22
-      interrupt_pin: 6
-  - name: tof_right
-    enabled: true
-    parameters:
-      i2c_address: 0x29
-      shutdown_pin: 23
-      interrupt_pin: 12
-  - name: gps_sensor
-    enabled: true
-    parameters:
-      port: /dev/ttyACM0
-      baud: 38400
-      timeout: 1.0
-  - name: imu_sensor
-    enabled: true
-    parameters:
-      port: /dev/ttyAMA4
-      baud: 3000000
-      timeout: 0.1
-  - name: robohat
-    enabled: true
-    parameters: {}
+    environmental: 118
+    power_monitor: 64
+    tof_left: 41
+    tof_right: 48
 logging_level: INFO
+plugins:
+- enabled: true
+  name: tof_left
+  parameters:
+    i2c_address: 41
+    interrupt_pin: 6
+    shutdown_pin: 22
+- enabled: true
+  name: tof_right
+  parameters:
+    i2c_address: 48
+    interrupt_pin: 12
+    shutdown_pin: 23
+- enabled: true
+  name: power_monitor
+  parameters:
+    channel: 1
+    i2c_address: 64
+- enabled: true
+  name: robohat
+  parameters: {}
 retry_attempts: 3
 retry_base_delay: 0.1
 retry_max_delay: 5.0
+serial:
+  devices:
+    gps:
+      baud: 38400
+      port: /dev/ttyACM0
+      timeout: 1.0
+    imu:
+      baud: 3000000
+      port: /dev/ttyAMA4
+      timeout: 0.1
+    robohat:
+      baud: 115200
+      port: /dev/ttyACM1
+      timeout: 1.0

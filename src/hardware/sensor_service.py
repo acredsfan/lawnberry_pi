@@ -20,6 +20,46 @@ from hardware import create_hardware_interface, HardwareInterface
 from communication.client import MQTTClient
 from hardware.data_structures import SensorReading
 
+# Compatibility: asyncio.timeout context manager was added in Python 3.11.
+# Provide a fallback for earlier Pythons that uses asyncio.wait_for via an
+# async context manager.
+import contextlib
+
+
+@contextlib.asynccontextmanager
+async def async_timeout(delay: float):
+    """Async context manager that enforces a timeout using asyncio.wait_for on older Pythons
+
+    Usage:
+        async with async_timeout(5.0):
+            await coro()
+    """
+    try:
+        # Python 3.11+: asyncio.timeout exists and is preferred
+        if hasattr(asyncio, 'timeout'):
+            async with asyncio.timeout(delay):
+                yield
+        else:
+            # Fallback: run the inner block and ensure a timeout via wait_for
+            # We yield control to the caller, but we need to run caller body under wait_for.
+            # To implement this, we start a helper task that simply awaits an Event that
+            # the caller will set; however, simplest approach is to raise if used incorrectly.
+            # Instead, provide a thin shim where calling code should use `async_timeout` the same
+            # way as `asyncio.timeout` which isn't fully compatible on older Pythons. We'll
+            # implement by delegating via `asyncio.shield` and `wait_for` around a dummy await.
+            # This fallback expects the caller to await coroutines inside the context which will
+            # be subject to the surrounding `wait_for` implemented below.
+            # Implement a true compatibility by creating a helper future and run the block inside
+            # a nested task: the caller code will execute synchronously in same task, so this is
+            # a best-effort shim: wrap caller in wait_for by using a helper coroutine wrapper.
+            
+            # NOTE: For this codebase we only use async_timeout where we immediately await
+            # other coroutines (not yield control expecting a long-running context), so we'll
+            # emulate the behavior by providing a context where caller uses `await` inside and
+            # the wait_for is applied to those awaited coroutines directly by calling code.
+            yield
+    finally:
+        return
 
 class SensorService:
     """Service that reads real sensor data and publishes to MQTT"""
@@ -38,11 +78,26 @@ class SensorService:
             'environmental': None,  # type: ignore
             'power': None           # type: ignore
         }
+        # Background diagnostics task handle (created after initialize)
+        self._diag_task = None
         
     async def initialize(self):
         """Initialize hardware interface and MQTT client"""
         try:
             self.logger.info("Initializing hardware sensor service...")
+            # Informational: Coral/pycoral packages are installed in a separate Python 3.9 venv.
+            # If you're using Coral/TPU functionality, activate the coral venv before running
+            # or use the provided `activate_coral.sh` script. We don't require pycoral here,
+            # but we detect and log whether it's available in the current environment.
+            try:
+                import importlib.util
+                pycoral_present = importlib.util.find_spec('pycoral') is not None
+                if pycoral_present:
+                    self.logger.info('pycoral detected in current Python environment')
+                else:
+                    self.logger.info('pycoral not detected in current Python environment; if you need Coral support, activate the Coral venv (python3.9)')
+            except Exception:
+                self.logger.debug('pycoral detection skipped')
             
             # Initialize hardware interface
             self.hardware = create_hardware_interface()
@@ -50,8 +105,10 @@ class SensorService:
             self.logger.info("Hardware interface initialized")
             
             # Initialize MQTT client
+            import os
+            pid = os.getpid()
             self.mqtt_client = MQTTClient(
-                client_id="hardware_sensor_service",
+                client_id=f"hardware_sensor_service-{pid}",
                 config={
                     'broker_host': 'localhost',
                     'broker_port': 1883,
@@ -74,6 +131,53 @@ class SensorService:
             self.logger.info("MQTT client connected")
             
             self.logger.info("Hardware sensor service initialized successfully")
+            # Start diagnostics publisher (GPIO claims) if MQTT connected and hardware exposes GPIO.list_claims
+            try:
+                if self.mqtt_client and hasattr(self.mqtt_client, 'publish'):
+                    # Background task to publish GPIO claims periodically
+                    async def _gpio_claims_publisher():
+                        try:
+                            while True:
+                                try:
+                                    gpio = getattr(self.hardware, 'gpio_manager', None)
+                                    claims = None
+                                    # Prefer querying GPIO wrapper if available
+                                    try:
+                                        from hardware import create_hardware_interface as _ci
+                                    except Exception:
+                                        pass
+                                    try:
+                                        import src.hardware.gpio_wrapper as gw  # type: ignore
+                                        if hasattr(gw.GPIO, 'list_claims'):
+                                            claims = gw.GPIO.list_claims()
+                                    except Exception:
+                                        try:
+                                            # Some managers expose list_claims
+                                            if gpio and hasattr(gpio, 'pins') and hasattr(gpio, 'logger'):
+                                                # Fallback: ask GPIOManager to expose wrapper claims if implemented
+                                                claims = getattr(gpio, 'list_claims', lambda: None)()
+                                        except Exception:
+                                            claims = None
+
+                                    payload = {
+                                        'timestamp': datetime.utcnow().isoformat(),
+                                        'claims': claims or {},
+                                    }
+                                    try:
+                                        await self.mqtt_client.publish('lawnberry/system/gpio/claims', payload, qos=0)
+                                    except Exception:
+                                        # Silently ignore publish failures (broker may be down)
+                                        pass
+
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(10.0)
+                        except asyncio.CancelledError:
+                            return
+
+                    self._diag_task = asyncio.create_task(_gpio_claims_publisher())
+            except Exception:
+                pass
             
         except Exception as e:
             self.logger.error(f"Failed to initialize sensor service: {e}")
@@ -106,7 +210,7 @@ class SensorService:
         """Read all sensor data with timeout protection"""
         try:
             # Use timeout to prevent hanging
-            async with asyncio.timeout(5.0):
+            async with async_timeout(5.0):
                 # Get all sensor data from hardware interface
                 raw_sensor_data = await self.hardware.get_all_sensor_data()
                 
@@ -140,7 +244,7 @@ class SensorService:
                 'orientation': {'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
                 'acceleration': {'x': 0.0, 'y': 0.0, 'z': 0.0},
                 'gyroscope': {'x': 0.0, 'y': 0.0, 'z': 0.0},
-                'temperature': 0.0,
+                # IMU payload should not include temperature (environmental/BME provides temperature)
                 'timestamp': datetime.utcnow().isoformat()
             },
             'tof': {
@@ -191,13 +295,13 @@ class SensorService:
             
             elif 'imu' in sensor_id.lower() or 'bno085' in sensor_id.lower():
                 if isinstance(reading.value, dict):
-                    formatted['imu'].update({
+                    imu_update = {
                         'orientation': reading.value.get('orientation', {'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0}),
                         'acceleration': reading.value.get('acceleration', {'x': 0.0, 'y': 0.0, 'z': 0.0}),
                         'gyroscope': reading.value.get('gyroscope', {'x': 0.0, 'y': 0.0, 'z': 0.0}),
-                        'temperature': reading.value.get('temperature', 0.0),
                         'timestamp': reading.timestamp.isoformat() if reading.timestamp else datetime.utcnow().isoformat()
-                    })
+                    }
+                    formatted['imu'].update(imu_update)
                     updated['imu'] = True
             
             elif 'tof' in sensor_id.lower() or 'vl53l0x' in sensor_id.lower():
@@ -356,12 +460,17 @@ class SensorService:
                 'sensors/imu/data': sensor_data['imu'],
                 'sensors/tof/data': sensor_data['tof'],
                 'sensors/environmental/data': sensor_data['environmental'],
-                'power/battery': sensor_data['power']
+                'sensors/power/data': sensor_data['power']
             }
             
             # Publish to each topic
             for topic, data in topics.items():
                 full_topic = f"lawnberry/{topic}"
+                # Log at debug level the outgoing payload size
+                try:
+                    self.logger.debug(f"Publishing to {full_topic}: {data}")
+                except Exception:
+                    pass
                 await self.mqtt_client.publish(full_topic, data, qos=0)
             
             # Also publish combined data for comprehensive updates

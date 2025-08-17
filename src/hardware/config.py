@@ -1,7 +1,10 @@
 """Configuration management for hardware interface layer"""
 
 import json
-import yaml
+try:
+    import yaml
+except Exception:
+    yaml = None
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
@@ -105,23 +108,35 @@ class ConfigManager:
         """Load configuration from file"""
         try:
             if self.config_path.exists():
-                with open(self.config_path, 'r') as f:
-                    if self.config_path.suffix.lower() == '.json':
+                # If yaml not present and file is YAML, skip parsing and use defaults
+                if self.config_path.suffix.lower() == '.json':
+                    with open(self.config_path, 'r') as f:
                         data = json.load(f)
-                    else:
-                        data = yaml.safe_load(f)
-                
-                # Convert plugin configs
-                if 'plugins' in data:
-                    plugins = []
-                    for plugin_data in data['plugins']:
-                        plugins.append(PluginConfig(**plugin_data))
-                    data['plugins'] = plugins
                 else:
-                    data['plugins'] = []
-                
-                self._config = HardwareInterfaceConfig(**data)
-                self.logger.info(f"Configuration loaded from {self.config_path}")
+                    if yaml is None:
+                        self.logger.warning("PyYAML not available; falling back to default in-memory config")
+                        data = None
+                    else:
+                        with open(self.config_path, 'r') as f:
+                            data = yaml.safe_load(f)
+
+                if data:
+                    # Convert plugin configs
+                    if 'plugins' in data:
+                        plugins = []
+                        for plugin_data in data['plugins']:
+                            plugins.append(PluginConfig(**plugin_data))
+                        data['plugins'] = plugins
+                    else:
+                        data['plugins'] = []
+
+                    self._config = HardwareInterfaceConfig(**data)
+                    self.logger.info(f"Configuration loaded from {self.config_path}")
+                else:
+                    # Use defaults when config file couldn't be parsed
+                    self._config = self.get_default_config()
+                    self.logger.info("Using default configuration due to missing/invalid config")
+                    self.save_config()
             else:
                 self._config = self.get_default_config()
                 self.save_config()
@@ -143,14 +158,21 @@ class ConfigManager:
             
             # Convert to dict and handle special types
             data = asdict(self._config)
-            
-            with open(self.config_path, 'w') as f:
-                if self.config_path.suffix.lower() == '.json':
+            # If PyYAML is unavailable, fall back to JSON output. If the configured
+            # path has a YAML suffix but we don't have yaml, write to a .json sibling
+            # file instead to avoid calling yaml.dump on None.
+            target_path = self.config_path
+            if yaml is None and self.config_path.suffix.lower() not in ('.json',):
+                target_path = self.config_path.with_suffix('.json')
+
+            with open(target_path, 'w') as f:
+                if target_path.suffix.lower() == '.json':
                     json.dump(data, f, indent=2)
                 else:
+                    # yaml is available here
                     yaml.dump(data, f, default_flow_style=False, indent=2)
-            
-            self.logger.info(f"Configuration saved to {self.config_path}")
+
+            self.logger.info(f"Configuration saved to {target_path}")
             
         except Exception as e:
             self.logger.error(f"Failed to save configuration: {e}")

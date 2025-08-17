@@ -11,7 +11,10 @@ import json
 import threading
 import hashlib
 import queue
-import psutil
+try:
+    import psutil
+except Exception:
+    psutil = None
 from collections import deque
 
 # Try to import Coral TPU libraries first
