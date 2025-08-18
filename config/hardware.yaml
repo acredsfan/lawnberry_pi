@@ -42,6 +42,29 @@ plugins:
 - enabled: true
   name: robohat
   parameters: {}
+  
+  # Add environmental sensor (BME280) plugin
+- enabled: true
+  name: environmental
+  parameters:
+    i2c_address: 118
+    auto_detect_address: true
+
+  # Add GPS plugin
+- enabled: true
+  name: gps
+  parameters:
+    port: /dev/ttyACM1
+    baud: 115200
+    timeout: 1.0
+
+  # Add IMU plugin
+- enabled: true
+  name: imu
+  parameters:
+    port: /dev/ttyAMA4
+    baud: 3000000
+    timeout: 0.2
 retry_attempts: 3
 retry_base_delay: 0.1
 retry_max_delay: 5.0
@@ -49,7 +72,7 @@ serial:
   devices:
     gps:
       baud: 38400
-      port: /dev/ttyACM0
+      port: /dev/ttyACM1
       timeout: 1.0
     imu:
       baud: 3000000
@@ -57,5 +80,5 @@ serial:
       timeout: 0.1
     robohat:
       baud: 115200
-      port: /dev/ttyACM1
+      port: /dev/ttyACM0
       timeout: 1.0

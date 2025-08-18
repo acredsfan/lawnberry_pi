@@ -1157,10 +1157,10 @@ class IMUPlugin(HardwarePlugin):
             try:
                 serial_manager = self.managers["serial"]
                 self.device_name = "imu"
-            # Use a slightly more generous default timeout for initial detection
-            self._timeout = float(self.config.parameters.get("timeout", 0.2))
-            cfg_port = self.config.parameters.get("port")
-            cfg_baud = int(self.config.parameters.get("baud", 115200))
+                # Use a slightly more generous default timeout for initial detection
+                self._timeout = float(self.config.parameters.get("timeout", 0.2))
+                cfg_port = self.config.parameters.get("port")
+                cfg_baud = int(self.config.parameters.get("baud", 115200))
 
                 async def try_init(port: str, baud: int) -> bool:
                     try:
