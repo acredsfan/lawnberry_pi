@@ -69,13 +69,18 @@ class HardwareInterface:
         
         # State
         self._initialized = False
+        self._initialized_at: Optional[datetime] = None
         self._shutdown_event = asyncio.Event()
         self._health_check_task = None
         self._sensor_data_cache: Dict[str, SensorReading] = {}
         self._cache_lock = asyncio.Lock()
         
         # Setup logging
-        logging.basicConfig(level=getattr(logging, self.config.logging_level))
+        try:
+            logging.basicConfig(level=getattr(logging, self.config.logging_level))
+        except Exception:
+            # Fallback to INFO if config is missing or malformed
+            logging.basicConfig(level=logging.INFO)
     
     async def initialize(self) -> bool:
         """Initialize all hardware components"""
@@ -147,6 +152,12 @@ class HardwareInterface:
             
             # Start health monitoring
             self._health_check_task = asyncio.create_task(self._health_check_loop())
+
+            # Record the time of initialization to allow a short grace period
+            try:
+                self._initialized_at = datetime.now()
+            except Exception:
+                self._initialized_at = None
             
             self._initialized = True
             self.logger.info("Hardware interface layer initialized successfully")
@@ -193,7 +204,13 @@ class HardwareInterface:
                 pass
         
         # Shutdown plugins
-        await self.plugin_manager.shutdown_all()
+        # Shutdown plugins with bounded timeout to avoid blocking
+        try:
+            await asyncio.wait_for(self.plugin_manager.shutdown_all(), timeout=10.0)
+        except asyncio.TimeoutError:
+            self.logger.warning("Plugin manager shutdown timed out; proceeding with cleanup")
+        except Exception as e:
+            self.logger.warning(f"Plugin manager shutdown error: {e}")
         
         # Stop camera
         await self.camera_manager.stop_capture()
@@ -542,11 +559,14 @@ class HardwareInterface:
             return {}
     
     def get_tof_sensor_status(self) -> Dict[str, Dict]:
-        """Get status of all ToF sensors"""
-        if not self.tof_manager._initialized:
+        """Get status of all ToF sensors. Always ask the manager for status -
+        the manager can surface lifecycle information even before marking
+        itself fully initialized (useful for health aggregation and diagnostics).
+        """
+        try:
+            return self.tof_manager.get_sensor_status()
+        except Exception:
             return {"status": "not_initialized"}
-        
-        return self.tof_manager.get_sensor_status()
     
     async def get_system_health(self) -> Dict[str, Any]:
         """Get overall system health status"""
@@ -573,26 +593,72 @@ class HardwareInterface:
                 'last_success': device_health.last_successful_read
             }
         
-        # Check ToF sensors specifically
-        if self.tof_manager._initialized:
+        # Check ToF sensors specifically. Ask manager for per-sensor lifecycle
+        # statuses and decide whether ToF health should factor into overall
+        # system health. This is more flexible than requiring the manager's
+        # `_initialized` flag because it surfaces progress (initializing -> ok).
+        try:
             tof_status = self.get_tof_sensor_status()
             health_status['sensors']['tof'] = tof_status
-            
-            # Check if any ToF sensors are failing
-            tof_healthy = all(sensor_info.get('status', 'unknown') == 'ok' 
-                             for sensor_info in tof_status.values() 
-                             if 'status' in sensor_info)
-            if not tof_healthy:
-                health_status['overall_healthy'] = False
-        else:
+
+            grace_seconds = getattr(self.config, 'health_grace_seconds', 5)
+            now = datetime.now()
+            initialized_age = None
+            if self._initialized_at:
+                try:
+                    initialized_age = (now - self._initialized_at).total_seconds()
+                except Exception:
+                    initialized_age = None
+
+            # Collect lifecycle statuses reported by the manager
+            if isinstance(tof_status, dict):
+                sensor_statuses = [s.get('status', 'unknown') for s in tof_status.values()]
+            else:
+                sensor_statuses = []
+
+            sensor_ok = any(st == 'ok' for st in sensor_statuses)
+            sensor_initializing = any(st == 'initializing' for st in sensor_statuses)
+
+            # If any sensor is 'ok', consider ToF portion healthy. If none are 'ok'
+            # but some are 'initializing', allow a grace period after interface
+            # startup before declaring overall unhealthy.
+            if sensor_ok:
+                # nothing to change - sensors are producing valid reads
+                pass
+            else:
+                # No sensor reported 'ok'
+                if initialized_age is None or (initialized_age < grace_seconds):
+                    # Within grace - don't mark overall unhealthy yet
+                    health_status['sensors']['tof_status'] = 'initializing'
+                else:
+                    # Past grace period - mark overall unhealthy
+                    health_status['overall_healthy'] = False
+
+        except Exception:
+            # If we can't query ToF manager at all, conservatively mark unhealthy
             health_status['sensors']['tof'] = {"status": "not_initialized"}
             health_status['overall_healthy'] = False
         
         # Overall health check
-        all_healthy = all(plugin_health.values()) and all(
-            dev['healthy'] for dev in health_status['devices'].values()
-        ) and health_status['overall_healthy']
-        health_status['overall_healthy'] = all_healthy
+        # Require core plugins to be healthy (robohat/power_monitor if present) and
+        # require at least one device health to be True (to avoid false negatives
+        # from optional/unavailable devices). Finally combine with sensor checks
+        try:
+            core_plugins_ok = True
+            # If these plugins exist, prefer them as core checks
+            for core in ('robohat', 'power_monitor'):
+                if core in plugin_health:
+                    core_plugins_ok = core_plugins_ok and bool(plugin_health.get(core))
+        except Exception:
+            core_plugins_ok = all(plugin_health.values()) if plugin_health else True
+
+        try:
+            any_device_ok = any(dev.get('healthy', False) for dev in health_status['devices'].values()) if health_status['devices'] else True
+        except Exception:
+            any_device_ok = True
+
+        all_healthy = core_plugins_ok and any_device_ok and health_status['overall_healthy']
+        health_status['overall_healthy'] = bool(all_healthy)
         
         return health_status
     
@@ -686,14 +752,24 @@ class HardwareInterface:
             # Cleanup all managers with timeout protection
             cleanup_tasks = []
             
-            # ToF manager cleanup
-            if hasattr(self.tof_manager, '_cleanup'):
-                cleanup_tasks.append(
-                    asyncio.create_task(
-                        asyncio.wait_for(self.tof_manager._cleanup(), timeout=10.0),
-                        name="tof_cleanup"
+            # ToF manager cleanup (use _cleanup if available else shutdown)
+            try:
+                if hasattr(self.tof_manager, '_cleanup'):
+                    cleanup_tasks.append(
+                        asyncio.create_task(
+                            asyncio.wait_for(self.tof_manager._cleanup(), timeout=10.0),
+                            name="tof_cleanup"
+                        )
                     )
-                )
+                elif hasattr(self.tof_manager, 'shutdown'):
+                    cleanup_tasks.append(
+                        asyncio.create_task(
+                            asyncio.wait_for(self.tof_manager.shutdown(), timeout=10.0),
+                            name="tof_shutdown"
+                        )
+                    )
+            except Exception as e:
+                self.logger.debug(f"Error scheduling ToF cleanup: {e}")
             
             # GPIO manager cleanup  
             if hasattr(self.gpio_manager, 'cleanup'):

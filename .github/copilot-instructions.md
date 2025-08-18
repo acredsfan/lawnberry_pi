@@ -13,9 +13,38 @@
 - **Always keep user and developer documentation up-to-date** - Update README, API docs, and inline comments with every change.
 - **Double and Triple check all changes** - Review code thoroughly before committing.
 - **Ensure all changes made are also integrated into the installation script** - Update installation scripts and deployment configurations accordingly.
+- **Use docs/SENSOR-LIBRARY-EXAMPLE-LINKS.md to understand the sensor library structure** - Follow the example links to ensure proper integration of new and existing sensors.
+- **Use the `#server-memory` toolset for persistent context management** - Always read the current graph first, prune aggressively, and never store sensitive data.
+- **Use the '#sequential-thinking' toolset for managing state across multiple steps** - This helps in maintaining context and ensuring coherent interactions.
+
+## Agent venv enforcement (MANDATORY)
+
+Agents and automation MUST verify and use the repository virtual environments before running any Python commands or tooling. This prevents ABI mismatches and missing native drivers on Raspberry Pi (Bookworm) and ensures consistent, repeatable runs.
+
+Required checks and behaviour for agents:
+- Always read `/home/pi/lawnberry/.github/copilot-instructions.md` and the `VirtualEnvs` server-memory entity before running Python commands to determine which venv to use.
+- Verify the chosen venv exists before running commands. Example checks:
+    - `test -f venv/bin/activate || echo "venv missing"`
+    - `test -x venv/bin/python || echo "venv python missing or not executable"`
+- Run commands inside the venv using one of these patterns (prefer these over system `python3`):
+    - Non-interactive: `venv/bin/python -m module_or_script` (preferred)
+    - Interactive / long debugging: `source venv/bin/activate && python -m module_or_script`
+- For Coral/TPU tasks that require Python 3.9 runtimes use `venv_coral_pyenv/bin/python` (do NOT mix runtimes in a single process).
+- If a venv check fails, do NOT proceed with system `python3` unless the user explicitly approves a fallback. Log the venv failure and recommended remediation.
+- Always combine venv execution with project timeout and isolation rules (e.g., `timeout 60s venv/bin/python -m ...` or `systemd-run --user --scope --property=TimeoutStopSec=30s venv/bin/python -m ...`).
+
+Example quick verification snippet agents should run before Python work:
+```bash
+# prefer non-interactive execution
+test -f venv/bin/activate || (echo "ERROR: venv missing"; exit 2)
+venv/bin/python -V || (echo "ERROR: venv python not runnable"; exit 2)
+venv/bin/python -c "import pkgutil; print('FOUND' if pkgutil.find_loader('adafruit_vl53l0x') else 'MISSING')"
+```
+
+These rules are mandatory for agent runs and automated scripts. If the venv layout differs on a target device, prefer `venv` for main services and `venv_coral_pyenv` for Coral workloads; document any deviations in the `VirtualEnvs` server-memory entity.
 
 ### server-memory Usage (Persistent Context Management)
-**Always** Use the `#server-memory` toolset to maintain high-value, current project knowledge (avoid stale or unrelated domains).
+**Always** Use the `#server-memory` toolset to maintain persistent context across sessions. This allows agents to store and retrieve observations, entities, and relationships without losing critical information.
 
 Core rules:
 1. Always read current graph first: `mcp_server-memory_read_graph`.
@@ -268,3 +297,50 @@ systemctl --user is-active lawnberry-api || echo "Service not running"
 - **Error Recovery**: Exponential backoff with jitter for communication retries
 - **Resource Management**: Exclusive device access prevents I2C/serial bus conflicts
 - **Health Monitoring**: Continuous background health checks with automatic recovery
+
+## Virtual environments in this repository
+
+The repository contains multiple Python virtual environments used for different runtime roles; document them here so agents and operators know which to use:
+
+- `venv` (Python 3.11) — Primary runtime venv used for most services in `/opt/lawnberry` and for local development. This venv normally contains general-purpose packages (MQTT client, FastAPI, hardware drivers for I2C/GPIO where available) and is the default for running `src` services such as the sensor service unless another venv is explicitly required.
+
+- `venv_coral_pyenv` (Python 3.9) — Coral / TPU venv. This venv contains `pycoral`, `tflite_runtime` (or an equivalent Coral runtime) and other Coral-specific packages; use this environment when running Coral-accelerated vision models (object detection inference). It is NOT the default for general services because it targets Python 3.9 and contains binary wheels compiled for TPU/Coral usage.
+
+- `venv_coral` (possible alias) — If present, treat similarly to `venv_coral_pyenv` (Python 3.9). Confirm which coral venv is present on the device before running Coral-specific tasks.
+
+- `venv_test_mqtt` (Python 3.11) — Lightweight test venv used in CI/quick-tests for MQTT tooling, local smoke tests, and developer experiments. Contains tools like `mosquitto` clients or test helpers but may not have full hardware drivers.
+
+Guidelines for venv usage:
+
+- For hardware sensor services (ToF, GPS, IMU, power monitor), prefer the `venv` Python 3.11 environment unless the code requires a Coral-specific runtime. The repo's service entrypoints assume Python 3.11 compatibility unless a Coral model is used.
+- For Coral/TPU model execution (vision `src/vision` tasks, TFLite+Coral accelerators), activate `venv_coral_pyenv` or run via `venv_coral_pyenv/bin/python` so the correct binary runtime is available.
+- Always check for the presence of required drivers (for example `adafruit_vl53l0x`) in the chosen venv before running hardware-mode services. You can quickly inspect with:
+
+```bash
+# from repo root
+venv/bin/python -c "import pkgutil; print('FOUND' if pkgutil.find_loader('adafruit_vl53l0x') else 'MISSING')"
+venv_coral_pyenv/bin/python -c "import pkgutil; print('FOUND' if pkgutil.find_loader('pycoral') else 'MISSING')"
+```
+
+- If a service is to be run by systemd in production, ensure the systemd service uses the same venv that was used during local validation to avoid ABI mismatches.
+
+Keep the venv list up to date when adding or removing environments; add notes here explaining when and why to use each.
+
+Agent runtime enforcement (appendix):
+
+- Before any automated or manual Python execution, agents MUST run a venv verification and then execute via the venv binary. Example (non-interactive):
+
+```bash
+# verify and run a sensor service safely
+test -f venv/bin/activate || { echo "venv missing - aborting"; exit 2; }
+timeout 90s venv/bin/python -m src.hardware.sensor_service
+```
+
+- For interactive debug sessions, prefer activating the venv first:
+
+```bash
+source venv/bin/activate
+python -m src.web_api.main
+```
+
+Record any intentional deviations from these rules in server-memory under `VirtualEnvs` with the reason and approval.

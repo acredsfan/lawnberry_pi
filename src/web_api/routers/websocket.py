@@ -107,11 +107,19 @@ ws_manager = WebSocketManager()
 async def websocket_endpoint(websocket: WebSocket):
     """Main WebSocket endpoint for real-time communication"""
     user_info = None
-    mqtt_bridge = None
+    # Obtain MQTT bridge from application state so we can access cached data
+    mqtt_bridge = getattr(websocket.app.state, 'mqtt_bridge', None)
     
     try:
         # Get MQTT bridge from app state (we'll handle this in the connection)
         await ws_manager.connect(websocket, user_info)
+
+        # Register this websocket with the MQTT bridge so MQTTBridge can broadcast directly
+        try:
+            if mqtt_bridge and hasattr(mqtt_bridge, 'add_websocket_connection'):
+                mqtt_bridge.add_websocket_connection(websocket)
+        except Exception:
+            logger.debug("Failed to register websocket with MQTT bridge; continuing")
         
         # Send welcome message
         welcome_message = {
@@ -158,6 +166,13 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
+        # Unregister websocket from MQTT bridge (if previously registered)
+        try:
+            if mqtt_bridge and hasattr(mqtt_bridge, 'remove_websocket_connection'):
+                mqtt_bridge.remove_websocket_connection(websocket)
+        except Exception:
+            logger.debug("Failed to unregister websocket from MQTT bridge; continuing")
+
         ws_manager.disconnect(websocket)
 
 
@@ -311,6 +326,8 @@ def setup_websocket_mqtt_integration(mqtt_bridge: MQTTBridge):
     # Subscribe to relevant MQTT topics
     topics_to_forward = [
         "system/status",
+    "system/health",
+    "system/tof_status",
         "sensors/+/data",
         "navigation/position",
         "power/battery",

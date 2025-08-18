@@ -296,8 +296,7 @@ async def get_environmental_conditions(
     return {
         "temperature": conditions.get("temperature", 0.0),
         "humidity": conditions.get("humidity", 0.0),
-        "pressure": conditions.get("pressure", 0.0),
-        "light_level": conditions.get("light_level", 0.0),
+    "pressure": conditions.get("pressure", 0.0),
         "rain_detected": conditions.get("rain_detected", False),
         "timestamp": env_data.get("timestamp", datetime.utcnow().isoformat()),
         "sensor_health": conditions.get("sensor_health", "unknown")

@@ -34,6 +34,8 @@ class MQTTBridge:
         
         # Topic mapping for API endpoints
         self._topic_mappings = {
+            'system/health': 'system_health',
+            'system/tof_status': 'system_tof_status',
             'system/status': 'system_status',
             'system/services/+/status': 'service_status',
             'sensors/+/data': 'sensor_data',

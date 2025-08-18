@@ -28,7 +28,6 @@ export interface SensorData {
     temperature: number;
     humidity: number;
     pressure: number;
-    light_level: number;
     rain_detected: boolean;
     timestamp: string;
   };
@@ -79,7 +78,6 @@ class SensorDataService {
         temperature: 0,
         humidity: 0,
         pressure: 0,
-        light_level: 0,
         rain_detected: false,
         timestamp: now
       },
@@ -153,7 +151,6 @@ class SensorDataService {
         temperature: data.temperature || 0,
         humidity: data.humidity || 0,
         pressure: data.pressure || 0,
-        light_level: data.light_level || 0,
         rain_detected: data.rain_detected || false,
         timestamp: data.timestamp || new Date().toISOString()
       };

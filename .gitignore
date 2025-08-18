@@ -126,6 +126,7 @@ Thumbs.db
 .python-version
 .venv/
 venv/
+venv_test_mqtt/
 env/
 ENV/
 env.bak/

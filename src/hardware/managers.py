@@ -121,6 +121,22 @@ class I2CManager:
                 except Exception as e:
                     raise HardwareError(f"Failed to initialize I2C bus: {e}")
 
+        async def cleanup(self):
+            """Clean up I2C resources and release bus handles"""
+            async with self._lock:
+                try:
+                    if self._bus and hasattr(self._bus, 'close'):
+                        try:
+                            self._bus.close()
+                        except Exception as e:
+                            self.logger.debug(f"I2C bus close error: {e}")
+                    self._bus = None
+                finally:
+                    # Clear device locks/health to allow reinitialization
+                    self._device_locks.clear()
+                    self._device_health.clear()
+            self.logger.info("I2C manager cleaned up")
+
     @asynccontextmanager
     async def device_access(self, address: int):
         """Async context manager for exclusive device access"""
@@ -318,7 +334,25 @@ class SerialManager:
         async with self.device_access(device_name) as conn:
             try:
                 conn.timeout = timeout
-                line = conn.readline().decode().strip()
+                raw = conn.readline()
+                if not raw:
+                    return None
+                # Decode defensively; ignore errors and strip terminal control sequences
+                try:
+                    line = raw.decode(errors="ignore").strip()
+                except Exception:
+                    # Fallback if decode fails for any reason
+                    line = ''.join((chr(b) for b in raw if 32 <= b <= 126)).strip()
+
+                # Strip common ANSI/terminal escape sequences that sometimes prefix serial output
+                # Remove OSC/CSI sequences e.g. '\x1b]0;...\x1b\\' or '\x1b[...m'
+                import re
+
+                # Remove OSC sequences \x1b]...\x1b\
+                line = re.sub(r"\x1b\].*?\x1b\\", "", line)
+                # Remove CSI sequences \x1b[...m or similar
+                line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
+
                 if line:
                     await self._health[device_name].record_success()
                     return line
@@ -327,6 +361,24 @@ class SerialManager:
             except Exception as e:
                 await self._health[device_name].record_failure()
                 raise CommunicationError(f"Failed to read from {device_name}: {e}")
+
+    async def cleanup(self):
+        """Close all serial connections and clear state"""
+        # Close connections synchronously (pyserial is blocking) but do it quickly
+        for name, conn in list(self._connections.items()):
+            try:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception as e:
+                        self.logger.debug(f"Error closing serial connection {name}: {e}")
+            finally:
+                self._connections.pop(name, None)
+
+        # Clear locks and health - leave locks to be recreated on demand
+        self._locks.clear()
+        self._health.clear()
+        self.logger.info("Serial manager cleaned up")
 
 
 class GPIOManager:
@@ -425,6 +477,21 @@ class GPIOManager:
             except Exception as e:
                 raise HardwareError(f"Failed to read GPIO pin {pin}: {e}")
 
+    async def cleanup(self):
+        """Reset GPIO state and release any claimed pins"""
+        async with self._lock:
+            try:
+                if GPIO and hasattr(GPIO, 'cleanup'):
+                    try:
+                        GPIO.cleanup()
+                    except Exception as e:
+                        self.logger.debug(f"GPIO cleanup error: {e}")
+            finally:
+                self._pins.clear()
+                self._initialized = False
+
+        self.logger.info("GPIO manager cleaned up")
+
 
 class CameraManager:
     """Manager for camera access with frame buffering"""
@@ -518,6 +585,30 @@ class CameraManager:
         """Get all buffered frames"""
         async with self._lock:
             return self._frame_buffer.copy()
+
+    async def cleanup(self):
+        """Stop capture and release camera device resources"""
+        # Stop capture loop first
+        try:
+            await self.stop_capture()
+        except Exception:
+            # Best-effort stop
+            pass
+
+        async with self._lock:
+            try:
+                if self._camera is not None:
+                    try:
+                        self._camera.release()
+                    except Exception as e:
+                        self.logger.debug(f"Error releasing camera: {e}")
+                    self._camera = None
+            finally:
+                self._frame_buffer.clear()
+                self._capturing = False
+                self._capture_task = None
+
+        self.logger.info("Camera manager cleaned up")
 
 
 class MockSMBus:

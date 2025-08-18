@@ -9,6 +9,7 @@ Handles proper address assignment for dual ToF sensors
 import time
 import asyncio
 import logging
+import os
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
@@ -98,6 +99,19 @@ class ToFSensorManager:
         self._lock = asyncio.Lock()
         # Hold a reference to the shared GPIOManager if provided
         self.gpio_manager = gpio_manager
+
+        # Number of consecutive valid (non-zero, in-range) reads required
+        # before a sensor is considered healthy. Allow override from env.
+        try:
+            self._required_good_reads = int(os.getenv('LAWNBERY_TOF_REQUIRED_GOOD_READS', '3'))
+        except Exception:
+            self._required_good_reads = 3
+
+        # Maximum age for a 'good' read in seconds
+        try:
+            self._good_read_age_s = float(os.getenv('LAWNBERY_TOF_GOOD_READ_AGE_S', '10'))
+        except Exception:
+            self._good_read_age_s = 10.0
 
         # Default sensor configuration based on hardware setup
         # Both sensors are physically connected and tested
@@ -380,6 +394,32 @@ class ToFSensorManager:
         try:
             sensor = self.sensors[sensor_name]
             distance_mm = sensor.range
+            # Cache last read on the sensor object for status reporting
+            try:
+                setattr(sensor, '_last_distance', distance_mm)
+                setattr(sensor, '_last_read_ts', datetime.now().isoformat())
+                # Update consecutive good-read streak tracking on the sensor.
+                # Consider a 'good' read one that is >0 and within expected max
+                # (use measurement_timing_budget or a sensible default).
+                try:
+                    prev_streak = int(getattr(sensor, '_good_read_streak', 0))
+                except Exception:
+                    prev_streak = 0
+
+                try:
+                    val = float(distance_mm)
+                except Exception:
+                    val = 0.0
+
+                # Define in-range as >0 and less than 2000mm (2m) as a sensible
+                # heuristic; sensor reports large sentinel values for out-of-range.
+                if val > 0 and val < 2000:
+                    setattr(sensor, '_good_read_streak', prev_streak + 1)
+                    setattr(sensor, '_last_good_ts', datetime.now().isoformat())
+                else:
+                    setattr(sensor, '_good_read_streak', 0)
+            except Exception:
+                pass
             
             # Find the target address for this sensor
             target_address = 0x29  # default
@@ -542,12 +582,69 @@ class ToFSensorManager:
             except Exception:
                 pin_state = "error"
             
+            # Attempt to surface last-read information if available on the sensor
+            last_read = None
+            last_read_ts = None
+            try:
+                sensor = self.sensors.get(config.name)
+                if sensor is not None and hasattr(sensor, 'range'):
+                    # We don't call sensor.range here to avoid triggering hardware reads,
+                    # but if the manager stored a cached last_read we can expose it. If not
+                    # present, keep None.
+                    last_read = getattr(sensor, '_last_distance', None)
+                    last_read_ts = getattr(sensor, '_last_read_ts', None)
+            except Exception:
+                last_read = None
+                last_read_ts = None
+
+            # Determine a richer sensor lifecycle status:
+            # - 'not_initialized' : manager hasn't finished initialization
+            # - 'initializing'    : manager initialized but no valid non-zero read yet
+            # - 'ok'              : manager initialized and recent non-zero read available
+            lifecycle_status = "not_initialized"
+            last_read_age = None
+            try:
+                if last_read_ts:
+                    # last_read_ts stored as ISO string
+                    last_dt = datetime.fromisoformat(last_read_ts)
+                    last_read_age = (datetime.now() - last_dt).total_seconds()
+            except Exception:
+                last_read_age = None
+
+            if not self._initialized:
+                lifecycle_status = "not_initialized"
+            else:
+                # Manager initialized. Require a stable run of consecutive good
+                # reads before considering a sensor 'ok'. This filters transient
+                # zeros and out-of-range artifacts during warm-up.
+                good_streak = int(getattr(sensor, '_good_read_streak', 0)) if sensor is not None else 0
+                last_good_ts = getattr(sensor, '_last_good_ts', None) if sensor is not None else None
+                last_good_age = None
+                try:
+                    if last_good_ts:
+                        last_good_age = (datetime.now() - datetime.fromisoformat(last_good_ts)).total_seconds()
+                except Exception:
+                    last_good_age = None
+
+                # Determine if the last good read is recent enough
+                recent_good = (last_good_age is None) or (last_good_age <= self._good_read_age_s)
+
+                if good_streak >= self._required_good_reads and recent_good:
+                    lifecycle_status = "ok"
+                else:
+                    lifecycle_status = "initializing"
+
             status[config.name] = {
                 "initialized": sensor_active,
                 "shutdown_pin": config.shutdown_pin,
                 "target_address": f"0x{config.target_address:02x}",
                 "measurement_timing_budget": config.measurement_timing_budget,
-                "pin_state": pin_state
+                "pin_state": pin_state,
+                # richer lifecycle status
+                "status": lifecycle_status,
+                "last_read_mm": last_read,
+                "last_read_ts": last_read_ts,
+                "last_read_age_s": last_read_age,
             }
         
         return status

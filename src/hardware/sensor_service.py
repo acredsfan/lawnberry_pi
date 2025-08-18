@@ -78,8 +78,10 @@ class SensorService:
             'environmental': None,  # type: ignore
             'power': None           # type: ignore
         }
+
         # Background diagnostics task handle (created after initialize)
         self._diag_task = None
+        self._tof_status_task = None
         
     async def initialize(self):
         """Initialize hardware interface and MQTT client"""
@@ -112,7 +114,6 @@ class SensorService:
                 config={
                     'broker_host': 'localhost',
                     'broker_port': 1883,
-                    'keepalive': 60,
                     'reconnect_delay': 5.0,
                     'max_reconnect_delay': 60.0,
                     'message_timeout': 30.0,
@@ -176,6 +177,34 @@ class SensorService:
                             return
 
                     self._diag_task = asyncio.create_task(_gpio_claims_publisher())
+                    # Also publish ToF manager status periodically for debugging
+                    async def _tof_status_publisher():
+                        try:
+                            while True:
+                                try:
+                                    tof_mgr = getattr(self.hardware, 'tof_manager', None)
+                                    status = None
+                                    if tof_mgr is not None:
+                                        try:
+                                            status = tof_mgr.get_sensor_status()
+                                        except Exception:
+                                            # get_sensor_status is synchronous and may raise; ignore
+                                            status = None
+                                    payload = {
+                                        'timestamp': datetime.utcnow().isoformat(),
+                                        'tof_status': status or {}
+                                    }
+                                    try:
+                                        await self.mqtt_client.publish('lawnberry/system/tof_status', payload, qos=0)
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(2.0)
+                        except asyncio.CancelledError:
+                            return
+
+                    self._tof_status_task = asyncio.create_task(_tof_status_publisher())
             except Exception:
                 pass
             
@@ -207,23 +236,31 @@ class SensorService:
             raise
     
     async def read_sensor_data(self) -> Optional[Dict[str, Any]]:
-        """Read all sensor data with timeout protection"""
+        """Read all sensor data with timeout protection.
+
+        Uses `asyncio.wait_for` to reliably enforce a timeout and ensure
+        cancellation (CancelledError) propagates to the caller so the
+        service can shut down promptly.
+        """
         try:
-            # Use timeout to prevent hanging
-            async with async_timeout(5.0):
-                # Get all sensor data from hardware interface
-                raw_sensor_data = await self.hardware.get_all_sensor_data()
-                
-                if not raw_sensor_data:
-                    return None
-                
-                # Convert to structured format for MQTT
-                formatted_data = await self.format_sensor_data(raw_sensor_data)
-                return formatted_data
-                
+            # Ensure the potentially-blocking hardware call is timeboxed.
+            raw_sensor_data = await asyncio.wait_for(
+                self.hardware.get_all_sensor_data(), timeout=5.0
+            )
+
+            if not raw_sensor_data:
+                return None
+
+            # Convert to structured format for MQTT
+            formatted_data = await self.format_sensor_data(raw_sensor_data)
+            return formatted_data
+
         except asyncio.TimeoutError:
             self.logger.warning("Sensor data read timed out")
             return None
+        except asyncio.CancelledError:
+            # Let cancellation propagate so the run loop can stop immediately
+            raise
         except Exception as e:
             self.logger.error(f"Failed to read sensor data: {e}")
             return None
@@ -256,7 +293,6 @@ class SensorService:
                 'temperature': 0.0,
                 'humidity': 0.0,
                 'pressure': 0.0,
-                'light_level': 0.0,
                 'rain_detected': False,
                 'timestamp': datetime.utcnow().isoformat()
             },
@@ -327,7 +363,6 @@ class SensorService:
                         'temperature': reading.value.get('temperature', 0.0),
                         'humidity': reading.value.get('humidity', 0.0),
                         'pressure': reading.value.get('pressure', 0.0),
-                        'light_level': reading.value.get('light_level', 0.0),
                         'rain_detected': reading.value.get('rain_detected', False),
                         'timestamp': reading.timestamp.isoformat() if reading.timestamp else datetime.utcnow().isoformat()
                     })
@@ -524,6 +559,21 @@ class SensorService:
                 self.logger.error("Hardware cleanup timed out")
             except Exception as e:
                 self.logger.error(f"Hardware cleanup error: {e}")
+        # Cancel background diagnostic tasks
+        # Cancel and await diagnostic tasks to ensure they don't keep the loop alive
+        for task_name in ('_diag_task', '_tof_status_task'):
+            task = getattr(self, task_name, None)
+            if task:
+                try:
+                    task.cancel()
+                    try:
+                        await asyncio.wait_for(task, timeout=2.0)
+                    except asyncio.TimeoutError:
+                        self.logger.warning(f"{task_name} did not cancel in time")
+                    except asyncio.CancelledError:
+                        pass
+                except Exception as e:
+                    self.logger.debug(f"Error cancelling {task_name}: {e}")
         
         self.logger.info("Hardware sensor service stopped")
 

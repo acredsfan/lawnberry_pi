@@ -1157,9 +1157,10 @@ class IMUPlugin(HardwarePlugin):
             try:
                 serial_manager = self.managers["serial"]
                 self.device_name = "imu"
-                self._timeout = float(self.config.parameters.get("timeout", 0.1))
-                cfg_port = self.config.parameters.get("port")
-                cfg_baud = int(self.config.parameters.get("baud", 115200))
+            # Use a slightly more generous default timeout for initial detection
+            self._timeout = float(self.config.parameters.get("timeout", 0.2))
+            cfg_port = self.config.parameters.get("port")
+            cfg_baud = int(self.config.parameters.get("baud", 115200))
 
                 async def try_init(port: str, baud: int) -> bool:
                     try:
@@ -1175,7 +1176,8 @@ class IMUPlugin(HardwarePlugin):
 
                 candidates_ports = list(dict.fromkeys([cfg_port, "/dev/ttyAMA4", "/dev/ttyAMA0"]))
                 candidates_ports = [p for p in candidates_ports if p]
-                candidates_bauds = [cfg_baud, 3000000, 921600, 115200]
+                # Prefer common lower rates first (115200) then higher custom rates
+                candidates_bauds = [115200, cfg_baud, 921600, 3000000]
 
                 selected = None
                 for p in candidates_ports:
