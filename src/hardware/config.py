@@ -6,6 +6,7 @@ try:
 except Exception:
     yaml = None
 from pathlib import Path
+import os
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
 import logging
@@ -39,9 +40,9 @@ class SerialConfig:
     def __post_init__(self):
         if self.devices is None:
             self.devices = {
-                'robohat': {'port': '/dev/ttyACM1', 'baud': 115200, 'timeout': 1.0},
-                'gps': {'port': '/dev/ttyACM0', 'baud': 38400, 'timeout': 1.0},
-                'imu': {'port': '/dev/ttyAMA4', 'baud': 3000000, 'timeout': 0.1}
+                'robohat': {'port': '/dev/ttyACM0', 'baud': 115200, 'timeout': 1.0},
+                'gps': {'port': '/dev/ttyACM1', 'baud': 115200, 'timeout': 1.0},
+                'imu': {'port': '/dev/ttyAMA4', 'baud': 115200, 'timeout': 0.2}
             }
 
 
@@ -101,7 +102,55 @@ class ConfigManager:
     
     def __init__(self, config_path: Optional[Path] = None):
         self.logger = logging.getLogger(__name__)
-        self.config_path = config_path or Path("config/hardware.yaml")
+        # Resolve configuration path with robust fallbacks so services running with
+        # WorkingDirectory=/var/lib/lawnberry still load the repository config
+        # from /opt/lawnberry/config/hardware.yaml by default.
+        resolved_path: Optional[Path] = None
+
+        # 1) Explicit path provided
+        if config_path:
+            try:
+                resolved_path = Path(config_path)
+            except Exception:
+                resolved_path = None
+
+        # 2) PYTHONPATH root hint (systemd sets PYTHONPATH=/opt/lawnberry)
+        if resolved_path is None:
+            try:
+                py_path = os.environ.get("PYTHONPATH", "").split(os.pathsep)[0]
+                if py_path:
+                    py_candidate = Path(py_path) / "config" / "hardware.yaml"
+                    if py_candidate.exists():
+                        resolved_path = py_candidate
+            except Exception:
+                pass
+
+        # 3) Repository root inferred from this file location: /opt/lawnberry/src/hardware/config.py
+        # parents[2] -> /opt/lawnberry
+        if resolved_path is None:
+            try:
+                repo_root = Path(__file__).resolve().parents[2]
+                repo_candidate = repo_root / "config" / "hardware.yaml"
+                if repo_candidate.exists():
+                    resolved_path = repo_candidate
+            except Exception:
+                resolved_path = None
+
+        # 4) Working-directory relative path (last resort; systemd WorkingDirectory=/var/lib/lawnberry)
+        if resolved_path is None:
+            wd_candidate = Path("config/hardware.yaml")
+            if wd_candidate.exists():
+                resolved_path = wd_candidate
+
+        # 5) Final fallback to a working-directory path even if it doesn't exist
+        if resolved_path is None:
+            resolved_path = Path("config/hardware.yaml")
+
+        # Always store absolute path for clearer logging
+        try:
+            self.config_path = resolved_path.resolve()
+        except Exception:
+            self.config_path = resolved_path
         self._config: Optional[HardwareInterfaceConfig] = None
     
     def load_config(self) -> HardwareInterfaceConfig:

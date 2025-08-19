@@ -85,11 +85,6 @@ This installs:
 - Systemd service files for all components
 - Log rotation configuration
 - System control scripts
-- Health check utilities
-
-## Configuration
-
-System configuration is centralized in `config/system.yaml`:
 
 ```yaml
 system:
@@ -97,7 +92,6 @@ system:
   version: "1.0.0"
   log_level: "INFO"
   max_cpu_percent: 80.0
-  max_memory_percent: 75.0
 
 services:
   communication:
@@ -110,9 +104,7 @@ monitoring:
   alert_thresholds:
     cpu_percent: 90.0
     memory_percent: 85.0
-    temperature_celsius: 75.0
 ```
-
 Environment-specific overrides can be placed in `config/overrides/production/`.
 
 ## Service Management
@@ -354,6 +346,34 @@ asyncio.run(test())
 - State persistence: `/var/lib/lawnberry/system_state.json`
 
 ## Development
+## ToF (VL53L0X) address assignment and no-GPIO mode
+
+For dual VL53L0X sensors, assign addresses once using the Adafruit-style script and then run in strict no-GPIO mode to avoid GPIO contention on Bookworm.
+
+- One-time address assignment (runs in repo venv):
+  - `timeout 90s venv/bin/python scripts/assign_vl53l0x_adafruit.py`
+  - Confirms `0x29` and `0x30` and persists `data/tof_no_gpio.json`
+
+- Runtime modes (env):
+  - `LAWNBERY_TOF_NO_GPIO=always` — never toggle GPIO; requires both addresses present.
+  - `LAWNBERY_TOF_NO_GPIO=auto` (default) — use GPIO unless both addresses already present.
+  - `LAWNBERY_TOF_NO_GPIO=never` — force GPIO sequencing every start.
+  - Optional auto-assign if missing: `LAWNBERY_TOF_AUTO_ASSIGN_ON_MISSING=1`
+  - Auto-assign timeout: `LAWNBERY_TOF_AUTO_ASSIGN_TIMEOUT_S=60`
+
+- Persist in systemd (`/etc/systemd/system/lawnberry-sensor.service`):
+  - Ensure these lines exist in the `[Service]` section:
+    - `Environment=LAWNBERY_TOF_NO_GPIO=always`
+    - `Environment=LAWNBERY_TOF_AUTO_ASSIGN_ON_MISSING=1`
+    - `Environment=LAWNBERY_TOF_AUTO_ASSIGN_TIMEOUT_S=60`
+  - Then run:
+    - `sudo systemctl daemon-reload`
+    - `sudo systemctl restart lawnberry-sensor.service`
+
+- Health and recovery:
+  - The sensor service publishes ToF status to `lawnberry/system/tof_status`.
+  - If a sensor disappears, a soft no-GPIO recovery is attempted. On success, an alert is published to `lawnberry/safety/alerts/tof`.
+
 
 ### Adding New Services
 

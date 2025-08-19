@@ -15,6 +15,11 @@ Environment=LAWNBERRY_ENV=production
 Environment=LOG_LEVEL=INFO
 # Ensure gpiozero uses lgpio on Bookworm (more reliable on Pi 4/5)
 Environment=GPIOZERO_PIN_FACTORY=lgpio
+Environment=LAWNBERY_TOF_NO_GPIO=always
+# Optional: enable one-time address assignment if a sensor is missing at startup (0/1)
+Environment=LAWNBERY_TOF_AUTO_ASSIGN_ON_MISSING=1
+# Optional: max seconds to allow the auto-assign script to run
+Environment=LAWNBERY_TOF_AUTO_ASSIGN_TIMEOUT_S=60
 ExecStart=/opt/lawnberry/venv/bin/python -m src.hardware.sensor_service
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always

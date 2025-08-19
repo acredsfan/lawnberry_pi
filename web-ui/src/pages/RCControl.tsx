@@ -169,7 +169,7 @@ const RCControl: React.FC = () => {
   // Handle blade control
   const handleBladeToggle = async (enabled: boolean) => {
     try {
-      await api.rc.sendCommand('blade', { enabled });
+      await api.rc.blade(enabled);
       await fetchStatus();
     } catch (err) {
       setError('Failed to control blade');
@@ -179,12 +179,30 @@ const RCControl: React.FC = () => {
   // Handle emergency stop
   const handleEmergencyStop = async () => {
     try {
-      await api.rc.sendCommand('emergency_stop');
+      await api.rc.emergencyStop();
       await fetchStatus();
     } catch (err) {
       setError('Failed to trigger emergency stop');
     }
   };
+
+  // Manual PWM controls (steer/throttle)
+  const [steer, setSteer] = useState<number>(1500)
+  const [throttle, setThrottle] = useState<number>(1500)
+  const [pwmSending, setPwmSending] = useState<boolean>(false)
+
+  const sendPwm = async (s: number, t: number) => {
+    try {
+      setPwmSending(true)
+      await api.rc.pwm(Math.round(s), Math.round(t))
+      setError(null)
+    } catch (err) {
+      console.error('PWM send failed', err)
+      setError('Failed to send PWM command')
+    } finally {
+      setPwmSending(false)
+    }
+  }
 
   // Handle channel configuration
   const handleChannelConfig = async () => {
@@ -404,6 +422,75 @@ const RCControl: React.FC = () => {
                   No channel configuration available
                 </Typography>
               )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Manual Control */}
+        <Grid item xs={12}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Manual Control
+              </Typography>
+
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                Use carefully. Values are clamped between 1000–2000 μs. Ensure area is clear.
+              </Alert>
+
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="body2">Steer ({steer} μs)</Typography>
+                  <input
+                    type="range"
+                    min={1000}
+                    max={2000}
+                    step={5}
+                    value={steer}
+                    onChange={(e) => setSteer(Number(e.target.value))}
+                    style={{ width: '100%' }}
+                    disabled={!status?.rc_enabled}
+                  />
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="body2">Throttle ({throttle} μs)</Typography>
+                  <input
+                    type="range"
+                    min={1000}
+                    max={2000}
+                    step={5}
+                    value={throttle}
+                    onChange={(e) => setThrottle(Number(e.target.value))}
+                    style={{ width: '100%' }}
+                    disabled={!status?.rc_enabled}
+                  />
+                </Grid>
+              </Grid>
+
+              <Box display="flex" gap={2} mt={2}>
+                <Button
+                  variant="contained"
+                  disabled={!status?.rc_enabled || pwmSending}
+                  onClick={() => sendPwm(steer, throttle)}
+                >
+                  Send PWM
+                </Button>
+                <Button
+                  variant="outlined"
+                  disabled={!status?.rc_enabled || pwmSending}
+                  onClick={() => { setSteer(1500); setThrottle(1500); sendPwm(1500, 1500) }}
+                >
+                  Center (1500/1500)
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  disabled={!status?.rc_enabled || pwmSending}
+                  onClick={() => { setThrottle(1500); sendPwm(steer, 1500) }}
+                >
+                  Throttle Stop
+                </Button>
+              </Box>
             </CardContent>
           </Card>
         </Grid>

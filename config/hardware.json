@@ -23,8 +23,8 @@
       },
       "imu": {
         "port": "/dev/ttyAMA4",
-        "baud": 3000000,
-        "timeout": 0.1
+  "baud": 115200,
+  "timeout": 0.2
       }
     }
   },

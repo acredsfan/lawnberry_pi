@@ -46,8 +46,32 @@ class HardwareInterface:
             if self.config and getattr(self.config, 'serial', None):
                 # Ensure we copy to avoid accidental shared mutations
                 self.serial_manager.devices = dict(self.config.serial.devices or {})
+                # Diagnostics: log effective serial mapping for verification under systemd
+                try:
+                    self.logger.info(
+                        "Serial mapping applied from config: %s",
+                        {k: {"port": v.get("port"), "baud": v.get("baud"), "timeout": v.get("timeout")} for k, v in self.serial_manager.devices.items()}
+                    )
+                except Exception:
+                    pass
         except Exception:
             # Fall back to defaults if config mapping is unavailable
+            pass
+
+        # Apply I2C device mapping from configuration to the I2C manager
+        try:
+            if self.config and getattr(self.config, 'i2c', None):
+                cfg_i2c_devices = dict(self.config.i2c.devices or {})
+                if cfg_i2c_devices:
+                    self.i2c_manager.devices.update(cfg_i2c_devices)
+                    try:
+                        self.logger.info(
+                            "I2C mapping applied from config: %s",
+                            {name: f"0x{addr:02x}" for name, addr in self.i2c_manager.devices.items()}
+                        )
+                    except Exception:
+                        pass
+        except Exception:
             pass
 
         self.camera_manager = CameraManager(self.config.camera.device_path)
@@ -81,6 +105,11 @@ class HardwareInterface:
         except Exception:
             # Fallback to INFO if config is missing or malformed
             logging.basicConfig(level=logging.INFO)
+        # Always log config source path and basic I2C map for visibility
+        try:
+            self.logger.info("HardwareInterface using config at: %s", getattr(self.config_manager, 'config_path', 'unknown'))
+        except Exception:
+            pass
     
     async def initialize(self) -> bool:
         """Initialize all hardware components"""
@@ -92,6 +121,14 @@ class HardwareInterface:
             
             # Initialize managers
             await self.i2c_manager.initialize(self.config.i2c.bus_number)
+            # Diagnostics: log effective I2C device map
+            try:
+                self.logger.info(
+                    "I2C device map: %s",
+                    {name: f"0x{addr:02x}" for name, addr in self.i2c_manager.devices.items()}
+                )
+            except Exception:
+                pass
             await self.gpio_manager.initialize()
             # OLED is optional; initialize but continue on failure
             try:

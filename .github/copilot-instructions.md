@@ -7,6 +7,8 @@
 **Critical Agent Guidelines**:
 - **NEVER run commands without timeouts** - Agents cannot use Ctrl+C to exit hanging processes
 - **Always use `timeout` command**: `timeout 30s python script.py` or implement internal timeouts
+- **Cancel stuck terminals proactively** - If any command appears interactive or hangs (e.g., terminal shows a trailing `>` prompt or no output), use the terminal cancel command to send an interrupt and recover the session. Prefer canceling over leaving a stuck terminal.
+- **Cancel hung terminals explicitly** - If a command still hangs despite timeouts or opens an interactive prompt, send a cancel signal using `#terminal-tools_cancelCommand` for the named terminal to emulate Ctrl+C and recover cleanly.
 - **Clean workspace obsessively** - Delete ALL temporary test files, debug scripts, and verification files
 - **Never commit sensitive data** - Check for API keys, passwords, or personal information before any commits
 - **NEVER use workarounds or shortcuts** - Always make sure fixes are complete and ensure intended design/functionality.
@@ -44,6 +46,13 @@ venv/bin/python -c "import pkgutil; print('FOUND' if pkgutil.find_loader('adafru
 These rules are mandatory for agent runs and automated scripts. If the venv layout differs on a target device, prefer `venv` for main services and `venv_coral_pyenv` for Coral workloads; document any deviations in the `VirtualEnvs` server-memory entity.
 
 ### server-memory Usage (Persistent Context Management)
+### Terminal management (canceling stuck commands)
+
+Agents can cancel a long-running or stuck terminal session without manual Ctrl+C by invoking the provided cancel capability. Use it whenever a command appears to block, become interactive (e.g., stray Python REPL prompts), or exceed expected timeouts.
+
+- Cancel the currently active command in a named terminal: use `terminal-tools_cancelCommand`.
+- Pattern of use in sessions: attempt with `timeout`, and if the command still becomes interactive, immediately cancel the terminal command and rerun with corrected flags or shorter timeouts.
+
 **Always** Use the `#server-memory` toolset to maintain persistent context across sessions. This allows agents to store and retrieve observations, entities, and relationships without losing critical information.
 
 Core rules:
@@ -141,6 +150,13 @@ timeout 60s python scripts/setup_dual_tof.py || echo "Hardware setup timed out"
 # Always check Python version compatibility (3.11+)
 python3 --version  # Must be 3.11+ for Bookworm
 ```
+
+### Terminal Management and Cancellation
+
+- Prefer named terminals for grouped operations (e.g., `test`, `build`, `scripts`). This keeps context and makes it easy to cancel.
+- If a long-running command becomes unresponsive or enters an interpreter (prompt shows `>`), send a cancel to that terminal:
+    - Use `#terminal-tools_cancelCommand` with `terminalName: "test"` (or whichever name you used)
+- Always combine this with timeouts to prevent hangs in the first place. Cancellation is a fallback for unexpected interactive modes.
 
 ### ARM64/Raspberry Pi Compatibility Assessment (Summer 2025)
 **BEFORE implementing any solution, consider ARM64 compatibility**:

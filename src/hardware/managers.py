@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import random
+import subprocess
+import shlex
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -236,9 +238,10 @@ class SerialManager:
 
         # Serial device configurations
         self.devices = {
-            "robohat": {"port": "/dev/ttyACM1", "baud": 115200, "timeout": 1.0},
-            "gps": {"port": "/dev/ttyACM0", "baud": 38400, "timeout": 1.0},
-            "imu": {"port": "/dev/ttyAMA4", "baud": 3000000, "timeout": 0.1},
+            # Mapped to observed typical ports in logs
+            "robohat": {"port": "/dev/ttyACM0", "baud": 115200, "timeout": 1.0},
+            "gps": {"port": "/dev/ttyACM1", "baud": 115200, "timeout": 1.0},
+            "imu": {"port": "/dev/ttyAMA4", "baud": 115200, "timeout": 0.2},
         }
 
     async def initialize_device(self, device_name: str, **kwargs):
@@ -248,6 +251,19 @@ class SerialManager:
 
         config = self.devices[device_name].copy()
         config.update(kwargs)
+
+        # Warn if another configured device points to the same port (potential conflict)
+        try:
+            same_port = [
+                name for name, cfg in self.devices.items()
+                if name != device_name and cfg and cfg.get("port") == config.get("port")
+            ]
+            if same_port:
+                self.logger.warning(
+                    f"Serial port {config.get('port')} for '{device_name}' also configured for {same_port} — potential conflict"
+                )
+        except Exception:
+            pass
 
         try:
             conn = serial.Serial(
@@ -422,28 +438,53 @@ class GPIOManager:
         await self.initialize()
 
         async with self._lock:
-            try:
-                if GPIO:
-                    gpio_dir = GPIO.OUT if direction == "output" else GPIO.IN
-                    pud = {"up": GPIO.PUD_UP, "down": GPIO.PUD_DOWN, "none": GPIO.PUD_OFF}
+            # Add short retry with backoff to mitigate transient 'GPIO busy'
+            policy = RetryPolicy(max_retries=2, base_delay=0.06, max_delay=0.25, backoff_factor=2.0)
+            last_err: Optional[Exception] = None
+            for attempt in range(policy.max_retries + 1):
+                try:
+                    if GPIO:
+                        gpio_dir = GPIO.OUT if direction == "output" else GPIO.IN
+                        pud = {"up": GPIO.PUD_UP, "down": GPIO.PUD_DOWN, "none": GPIO.PUD_OFF}
 
-                    # If gpio_wrapper exposes claimant info, log it for diagnostics
-                    claimant = getattr(GPIO, 'get_claimant', lambda p: None)(pin) if hasattr(GPIO, 'get_claimant') else None
-                    if claimant:
-                        self.logger.debug(f"GPIOManager.setup_pin: pin {pin} currently claimed by {claimant} before setup")
+                        # If gpio_wrapper exposes claimant info, log it for diagnostics
+                        claimant = getattr(GPIO, 'get_claimant', lambda p: None)(pin) if hasattr(GPIO, 'get_claimant') else None
+                        if claimant:
+                            self.logger.debug(f"GPIOManager.setup_pin: pin {pin} currently claimed by {claimant} before setup")
 
-                    GPIO.setup(pin, gpio_dir, pull_up_down=pud[pull_up_down], initial=initial)
+                        GPIO.setup(pin, gpio_dir, pull_up_down=pud[pull_up_down], initial=initial)
 
-                self._pins[pin] = {
-                    "direction": direction,
-                    "pull_up_down": pull_up_down,
-                    "initial": initial,
-                }
+                    self._pins[pin] = {
+                        "direction": direction,
+                        "pull_up_down": pull_up_down,
+                        "initial": initial,
+                    }
 
-                self.logger.debug(f"GPIO pin {pin} setup as {direction}")
+                    self.logger.debug(f"GPIO pin {pin} setup as {direction}")
+                    last_err = None
+                    break
+                except Exception as e:
+                    last_err = e
+                    # Only retry on likely contention
+                    msg = str(e).lower()
+                    if attempt < policy.max_retries and ("busy" in msg or "in use" in msg):
+                        delay = policy.get_delay(attempt)
+                        self.logger.warning(
+                            f"GPIO setup busy for pin {pin} (attempt {attempt+1}/{policy.max_retries+1}); retrying in {delay:.2f}s: {e}"
+                        )
+                        # Try to surface OS-level consumer info (gpioinfo) for diagnostics
+                        try:
+                            info = self._get_gpio_consumer_info(pin)
+                            if info:
+                                self.logger.warning(f"GPIO pin {pin} consumer (gpioinfo): {info}")
+                        except Exception:
+                            pass
+                        await asyncio.sleep(delay)
+                        continue
+                    break
 
-            except Exception as e:
-                raise HardwareError(f"Failed to setup GPIO pin {pin}: {e}")
+            if last_err is not None:
+                raise HardwareError(f"Failed to setup GPIO pin {pin}: {last_err}")
 
     async def write_pin(self, pin: int, value: int):
         """Write to GPIO pin"""
@@ -451,17 +492,80 @@ class GPIOManager:
             await self.setup_pin(pin, "output")
 
         async with self._lock:
-            try:
-                if GPIO:
-                    claimant = getattr(GPIO, 'get_claimant', lambda p: None)(pin) if hasattr(GPIO, 'get_claimant') else None
-                    if claimant:
-                        self.logger.debug(f"GPIOManager.write_pin: writing to pin {pin} claimed by {claimant}")
-                    GPIO.output(pin, value)
+            policy = RetryPolicy(max_retries=2, base_delay=0.05, max_delay=0.2, backoff_factor=2.0)
+            last_err: Optional[Exception] = None
+            for attempt in range(policy.max_retries + 1):
+                try:
+                    if GPIO:
+                        claimant = getattr(GPIO, 'get_claimant', lambda p: None)(pin) if hasattr(GPIO, 'get_claimant') else None
+                        if claimant:
+                            self.logger.debug(f"GPIOManager.write_pin: writing to pin {pin} claimed by {claimant}")
+                        GPIO.output(pin, value)
 
-                self.logger.debug(f"GPIO pin {pin} set to {value}")
+                    self.logger.debug(f"GPIO pin {pin} set to {value}")
+                    last_err = None
+                    break
+                except Exception as e:
+                    last_err = e
+                    msg = str(e).lower()
+                    if attempt < policy.max_retries and ("busy" in msg or "in use" in msg):
+                        delay = policy.get_delay(attempt)
+                        self.logger.warning(
+                            f"GPIO write busy for pin {pin} (attempt {attempt+1}/{policy.max_retries+1}); retrying in {delay:.2f}s: {e}"
+                        )
+                        # Log OS-level consumer for diagnostics
+                        try:
+                            info = self._get_gpio_consumer_info(pin)
+                            if info:
+                                self.logger.warning(f"GPIO pin {pin} consumer (gpioinfo): {info}")
+                        except Exception:
+                            pass
+                        await asyncio.sleep(delay)
+                        continue
+                    break
 
-            except Exception as e:
-                raise HardwareError(f"Failed to write GPIO pin {pin}: {e}")
+            if last_err is not None:
+                raise HardwareError(f"Failed to write GPIO pin {pin}: {last_err}")
+
+    def _get_gpio_consumer_info(self, pin: int) -> Optional[str]:
+        """Return a short string of gpioinfo consumer for a specific BCM line, if available."""
+        try:
+            # Call gpioinfo and search for the given line number
+            proc = subprocess.run(["/usr/bin/gpioinfo"], capture_output=True, text=True, timeout=1.5)
+            if proc.returncode != 0:
+                return None
+            lines = proc.stdout.splitlines()
+            chip_header = None
+            result = None
+            for line in lines:
+                if line.startswith("gpiochip"):
+                    chip_header = line.strip()
+                elif line.strip().startswith("line"):
+                    parts = line.strip().split()
+                    # Format: line <num>: "NAME" <consumer?> <dir> ... [used]
+                    try:
+                        num = int(parts[1].strip(":"))
+                    except Exception:
+                        continue
+                    if num == pin:
+                        # Build concise consumer info
+                        consumer = None
+                        # Attempt to extract quoted name and consumer token if present
+                        try:
+                            # The consumer appears after the quoted name; find tokens in quotes
+                            import re
+                            m = re.findall(r'"([^"]*)"', line)
+                            if len(m) >= 2:
+                                consumer = m[1]
+                        except Exception:
+                            pass
+                        result = f"{chip_header} | {line.strip()}" if chip_header else line.strip()
+                        if consumer:
+                            result += f" | consumer={consumer}"
+                        break
+            return result
+        except Exception:
+            return None
 
     async def read_pin(self, pin: int) -> int:
         """Read from GPIO pin"""
@@ -481,9 +585,19 @@ class GPIOManager:
         """Reset GPIO state and release any claimed pins"""
         async with self._lock:
             try:
-                if GPIO and hasattr(GPIO, 'cleanup'):
+                if GPIO:
                     try:
-                        GPIO.cleanup()
+                        # Prefer per-pin cleanup to avoid closing global handles in use elsewhere
+                        if hasattr(GPIO, 'cleanup_pins'):
+                            GPIO.cleanup_pins(list(self._pins.keys()))  # type: ignore
+                        elif hasattr(GPIO, 'free_pin'):
+                            for p in list(self._pins.keys()):
+                                try:
+                                    GPIO.free_pin(p)  # type: ignore
+                                except Exception as e:
+                                    self.logger.debug(f"GPIO free_pin error for {p}: {e}")
+                        elif hasattr(GPIO, 'cleanup'):
+                            GPIO.cleanup()
                     except Exception as e:
                         self.logger.debug(f"GPIO cleanup error: {e}")
             finally:

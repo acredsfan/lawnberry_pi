@@ -10,9 +10,13 @@ import time
 import asyncio
 import logging
 import os
+import json
+from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
+import subprocess
+import sys
 
 try:
     import board  # type: ignore
@@ -113,6 +117,52 @@ class ToFSensorManager:
         except Exception:
             self._good_read_age_s = 10.0
 
+        # Control GPIO usage for ToF init. Modes:
+        # - 'never': require GPIO sequencing (default if not set and GPIO available)
+        # - 'auto': use GPIO; if GPIO fails and both 0x29 and 0x30 are present, fall back to no-GPIO
+        # - 'always': skip GPIO and require both 0x29 and 0x30 present (pre-assigned)
+        try:
+            self._no_gpio_mode = os.getenv('LAWNBERY_TOF_NO_GPIO', 'auto').lower()
+            if self._no_gpio_mode not in ('never', 'auto', 'always'):
+                self._no_gpio_mode = 'auto'
+        except Exception:
+            self._no_gpio_mode = 'auto'
+
+        # Per-sensor initialization timeout (seconds). Keep this modest so overall
+        # service startup doesn't block for too long if a sensor is slow or absent.
+        try:
+            self._per_sensor_timeout_s = float(os.getenv('LAWNBERY_TOF_PER_SENSOR_TIMEOUT_S', '12.0'))
+        except Exception:
+            self._per_sensor_timeout_s = 12.0
+
+        # Path to persisted state enabling no-GPIO after addresses are confirmed once
+        try:
+            # Repo root is three parents up from this file: src/hardware/tof_manager.py
+            self._repo_root = Path(__file__).resolve().parents[2]
+        except Exception:
+            self._repo_root = Path('.')
+        self._state_file = self._repo_root / 'data' / 'tof_no_gpio.json'
+        self._persist_no_gpio = False
+        try:
+            if self._state_file.exists():
+                data = json.loads(self._state_file.read_text())
+                self._persist_no_gpio = bool(data.get('no_gpio_always', False))
+        except Exception:
+            self._persist_no_gpio = False
+
+        # Track auto-assign attempt (prevent repeated GPIO toggling attempts in one process)
+        self._auto_assign_attempted = False
+
+        # Auto-assign feature flags (env-driven)
+        try:
+            self._auto_assign_enabled = os.getenv('LAWNBERY_TOF_AUTO_ASSIGN_ON_MISSING', '0') in ('1','true','True')
+        except Exception:
+            self._auto_assign_enabled = False
+        try:
+            self._auto_assign_timeout_s = float(os.getenv('LAWNBERY_TOF_AUTO_ASSIGN_TIMEOUT_S', '60'))
+        except Exception:
+            self._auto_assign_timeout_s = 60.0
+
         # Default sensor configuration based on hardware setup
         # Both sensors are physically connected and tested
         self.default_configs = [
@@ -120,13 +170,13 @@ class ToFSensorManager:
                 name="tof_left",
                 shutdown_pin=22,  # GPIO 22
                 interrupt_pin=6,  # GPIO 6
-                target_address=0x30  # Left sensor gets changed to 0x30
+                target_address=0x29  # Left sensor stays at default 0x29
             ),
             ToFSensorConfig(
                 name="tof_right",
                 shutdown_pin=23,  # GPIO 23
                 interrupt_pin=12, # GPIO 12
-                target_address=0x29  # Right sensor keeps default 0x29
+                target_address=0x30  # Right sensor is changed to 0x30
             )
         ]
     
@@ -160,6 +210,52 @@ class ToFSensorManager:
                 self.logger.info(f"Initialized {len(self.sensors)} simulated ToF sensors")
                 return True
             
+            # Optional pre-scan helper
+            def _scan_bus() -> List[int]:
+                addrs: List[int] = []
+                try:
+                    i2c = board.I2C()
+                    if i2c.try_lock():
+                        try:
+                            addrs = i2c.scan()
+                        finally:
+                            i2c.unlock()
+                except Exception:
+                    pass
+                return addrs
+
+            # Determine effective no-GPIO mode: env override 'never' wins, otherwise
+            # if a persisted flag exists (addresses confirmed previously), prefer 'always'
+            effective_no_gpio = self._no_gpio_mode
+            if effective_no_gpio != 'never' and self._persist_no_gpio:
+                effective_no_gpio = 'always'
+
+            # If in 'always' no-GPIO mode, DO NOT use GPIO under any circumstance.
+            # Attempt to initialize without GPIO; this will safely initialize any sensors
+            # already present on distinct addresses (partial init allowed). If that fails,
+            # bail out without touching GPIO so we don't power cycle or re-sequence sensors.
+            if effective_no_gpio == 'always':
+                ok = await self._initialize_without_gpio_if_possible(sensor_configs)
+                if ok:
+                    self._initialized = True
+                    return True
+                # Optional: attempt one-time auto assignment if explicitly enabled
+                if self._auto_assign_enabled and not self._auto_assign_attempted:
+                    self.logger.warning("No-GPIO mode 'always' and addresses missing - attempting one-time auto assignment via script")
+                    tried = await self._attempt_auto_assign_addresses()
+                    if tried:
+                        # Retry no-GPIO init after assignment
+                        ok2 = await self._initialize_without_gpio_if_possible(sensor_configs)
+                        if ok2:
+                            self._initialized = True
+                            return True
+                self.logger.error(
+                    "ToF no-GPIO mode is 'always' but required I2C addresses were not accessible. "
+                    "Skipping GPIO sequencing by design. Ensure sensors are assigned to 0x29 and 0x30 "
+                    "(use scripts/assign_vl53l0x_adafruit.py), then retry."
+                )
+                return False
+
             try:
                 # Use provided configs or defaults
                 self.sensor_configs = sensor_configs or self.default_configs
@@ -175,7 +271,25 @@ class ToFSensorManager:
                 # Initialize sensors one by one with proper address assignment
                 await self._initialize_sensors_sequence()
 
-                # If no physical sensors were initialized, create simulated fallback sensors
+                # If no physical sensors were initialized, attempt no-GPIO fallback in 'auto' mode
+                if not self.sensors and effective_no_gpio in ("auto",):
+                    try:
+                        ok = await self._initialize_without_gpio_if_possible(sensor_configs)
+                        if not ok:
+                            self.logger.debug("No-GPIO fallback did not succeed; will use simulated sensors")
+                    except Exception as fe:
+                        self.logger.debug(f"No-GPIO fallback error: {fe}")
+
+                # If sensors initialized (either via GPIO or no-GPIO), and both addresses are present,
+                # persist the no-GPIO flag so future runs can skip GPIO sequencing.
+                try:
+                    addrs_after = await asyncio.get_event_loop().run_in_executor(None, _scan_bus)
+                    if 0x29 in addrs_after and 0x30 in addrs_after:
+                        self._persist_no_gpio_flag()
+                except Exception:
+                    pass
+
+                # If still no sensors, create simulated fallback sensors
                 if not self.sensors:
                     self.logger.warning("No ToF sensors initialized physically; creating simulated fallback sensors")
                     for cfg in self.sensor_configs:
@@ -187,7 +301,19 @@ class ToFSensorManager:
                 return True
                 
             except Exception as e:
-                self.logger.error(f"Failed to initialize ToF sensors: {e}")
+                self.logger.warning(f"GPIO-based ToF initialization failed: {e}")
+                # In 'auto' mode, attempt no-GPIO fallback if both addresses present already
+                if self._no_gpio_mode == 'auto':
+                    try:
+                        addrs = await asyncio.get_event_loop().run_in_executor(None, _scan_bus)
+                        if 0x29 in addrs and 0x30 in addrs:
+                            ok = await self._initialize_without_gpio_if_possible(sensor_configs)
+                            if ok:
+                                self._initialized = True
+                                return True
+                    except Exception as fe:
+                        self.logger.debug(f"No-GPIO fallback attempt failed: {fe}")
+                # Cleanup on failure
                 await self._cleanup()
                 return False
     
@@ -262,12 +388,12 @@ class ToFSensorManager:
                 # Use timeout for each sensor initialization
                 await asyncio.wait_for(
                     self._initialize_single_sensor_with_timeout(i, config),
-                    timeout=30.0  # 30 second timeout per sensor
+                    timeout=self._per_sensor_timeout_s  # configurable per-sensor timeout
                 )
                 self.logger.info(f"✅ {config.name} initialized successfully")
                 
             except asyncio.TimeoutError:
-                self.logger.error(f"❌ {config.name} initialization timed out after 30 seconds")
+                self.logger.error(f"❌ {config.name} initialization timed out after {self._per_sensor_timeout_s:.0f} seconds")
                 continue  # Continue with next sensor
             except Exception as e:
                 self.logger.error(f"❌ Failed to initialize {config.name}: {e}")
@@ -326,8 +452,12 @@ class ToFSensorManager:
             await asyncio.get_event_loop().run_in_executor(None, set_timing)
             self.logger.debug(f"Set timing budget to {config.measurement_timing_budget}us for {config.name}")
         
-        # Step 5: Change address if NOT the last sensor
-        if i < len(self.sensor_configs) - 1:
+        # Step 5: Change address if target_address differs from default 0x29
+        try:
+            desired = int(getattr(config, 'target_address', 0x29))
+        except Exception:
+            desired = 0x29
+        if desired != 0x29:
             await self._change_sensor_address_with_timeout(sensor, config)
         
         # Step 6: Store sensor reference
@@ -380,6 +510,213 @@ class ToFSensorManager:
                     self.logger.info(f"✅ {config.name} verified - distance: {distance}mm")
                 except Exception as e:
                     self.logger.warning(f"⚠️ {config.name} verification failed: {e}")
+
+    async def _initialize_without_gpio_if_possible(self, sensor_configs: Optional[List[ToFSensorConfig]] = None) -> bool:
+        """Initialize ToF sensors without using GPIO sequencing.
+
+        Only safe if the bus already has distinct addresses (0x29 and 0x30) present.
+        Returns True on success, False otherwise.
+        """
+        try:
+            # Scan I2C bus to validate addresses
+            addrs: List[int] = []
+            try:
+                tmp_i2c = board.I2C()
+                if tmp_i2c.try_lock():
+                    try:
+                        addrs = tmp_i2c.scan()
+                    finally:
+                        tmp_i2c.unlock()
+            except Exception:
+                pass
+
+            # Filter to only known ToF addresses present
+            present_tof_addrs = [a for a in addrs if a in (0x29, 0x30)]
+            if not present_tof_addrs:
+                self.logger.warning("No-GPIO init skipped: no ToF addresses (0x29/0x30) detected on the bus")
+                return False
+
+            # Create dedicated I2C bus
+            self.i2c = busio.I2C(board.SCL, board.SDA)
+
+            cfgs = sensor_configs or self.default_configs
+            # Build an available address pool from bus
+            address_pool: List[int] = list(present_tof_addrs)
+            for cfg in cfgs:
+                target = int(getattr(cfg, 'target_address', 0x29))
+                # Choose target if available, otherwise use the other one if present
+                addr = target if target in address_pool else (0x30 if 0x30 in address_pool else 0x29 if 0x29 in address_pool else None)
+                if addr is None:
+                    # Allow partial initialization without failing the whole process
+                    self.logger.warning(f"No available ToF address for {cfg.name} during no-GPIO init; skipping this sensor")
+                    continue
+                try:
+                    sensor = VL53L0X(self.i2c, address=addr)
+                    # Start continuous mode in executor
+                    await asyncio.get_event_loop().run_in_executor(None, sensor.start_continuous)
+                    self.sensors[cfg.name] = sensor
+                    # Consume address so next sensor uses the remaining one
+                    try:
+                        address_pool.remove(addr)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize VL53L0X at {hex(addr)} for {cfg.name} without GPIO: {e}")
+                    # Continue attempting other sensors if possible
+                    continue
+
+            # If none could be initialized, indicate failure
+            if not self.sensors:
+                self.logger.warning("No-GPIO ToF init found no accessible sensors at 0x29/0x30")
+                return False
+
+            # Verify access by reading once
+            await self._verify_sensors()
+            self.logger.info("ToF sensors initialized without GPIO sequencing")
+
+            # If both addresses are now present, persist flag for future runs
+            try:
+                if 0x29 in addrs and 0x30 in addrs:
+                    self._persist_no_gpio_flag()
+            except Exception:
+                pass
+            return True
+        except Exception as e:
+            self.logger.error(f"No-GPIO ToF initialization encountered an error: {e}")
+            return False
+
+    async def _attempt_auto_assign_addresses(self) -> bool:
+        """Attempt one-time auto assignment by invoking the Adafruit-style script.
+
+        Returns True if the script was invoked (regardless of success). The caller
+        will rescan and verify addresses.
+        """
+        self._auto_assign_attempted = True
+        try:
+            script_path = self._repo_root / 'scripts' / 'assign_vl53l0x_adafruit.py'
+            if not script_path.exists():
+                self.logger.error(f"Auto-assign script not found: {script_path}")
+                return False
+            # Use the current interpreter (assumed to be the correct venv) and timeout
+            cmd = [sys.executable, str(script_path)]
+            self.logger.info(f"Running auto-assign script with timeout {self._auto_assign_timeout_s:.0f}s: {cmd}")
+            try:
+                subprocess.run(cmd, check=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=self._auto_assign_timeout_s)
+            except subprocess.TimeoutExpired:
+                self.logger.error("Auto-assign script timed out")
+                return True
+            except Exception as e:
+                self.logger.error(f"Auto-assign script error: {e}")
+                return True
+            return True
+        except Exception as e:
+            self.logger.error(f"Auto-assign attempt failed unexpectedly: {e}")
+            return True
+
+    async def recover_if_missing(self) -> bool:
+        """Attempt a soft, no-GPIO recovery if sensors appear missing or unhealthy.
+
+        Strategy:
+        - Quickly scan the bus for 0x29/0x30.
+        - If both present and manager already has sensors, and recent good reads exist, do nothing.
+        - Otherwise, stop continuous mode on any existing sensors and re-run the no-GPIO init path.
+
+        Returns True if a recovery attempt was made and resulted in sensors being (re)initialized; False if no action was needed or recovery failed.
+        """
+        if not HAS_HARDWARE:
+            return False
+
+        # Helper to scan bus safely
+        def _scan_bus_now() -> List[int]:
+            addrs: List[int] = []
+            try:
+                i2c = board.I2C()
+                if i2c.try_lock():
+                    try:
+                        addrs = i2c.scan()
+                    finally:
+                        i2c.unlock()
+            except Exception:
+                pass
+            return addrs
+
+        addrs = await asyncio.get_event_loop().run_in_executor(None, _scan_bus_now)
+        present = [a for a in addrs if a in (0x29, 0x30)]
+
+        # Quick health assessment from cached status
+        status = {}
+        try:
+            status = self.get_sensor_status()
+        except Exception:
+            status = {}
+
+        # Determine if we need recovery: either addresses missing or lifecycle not ok
+        need_recover = False
+        if not (0x29 in present and 0x30 in present):
+            need_recover = True
+        else:
+            # If both addresses present but manager not in 'ok' state, attempt recovery
+            try:
+                # Consider recovery when any sensor not 'ok'
+                for name, info in status.items():
+                    if info.get('status') != 'ok':
+                        need_recover = True
+                        break
+            except Exception:
+                need_recover = True
+
+        if not need_recover:
+            return False
+
+        self.logger.warning("ToF health check triggered soft recovery (no-GPIO)")
+        try:
+            # Stop current continuous modes quickly (best-effort)
+            try:
+                await asyncio.wait_for(self.stop_continuous_mode(), timeout=3.0)
+            except Exception:
+                pass
+
+            # Attempt re-initialization without GPIO with timeout
+            try:
+                ok = await asyncio.wait_for(self._initialize_without_gpio_if_possible(self.sensor_configs or self.default_configs), timeout=8.0)
+            except asyncio.TimeoutError:
+                self.logger.error("No-GPIO recovery timed out")
+                return False
+            except Exception as e:
+                self.logger.error(f"No-GPIO recovery error: {e}")
+                return False
+
+            if ok:
+                self.logger.info("ToF soft recovery completed successfully")
+                return True
+            else:
+                self.logger.error("ToF soft recovery path did not reinitialize sensors")
+                return False
+        except Exception as e:
+            self.logger.error(f"Unexpected error during ToF recovery: {e}")
+            return False
+
+    def _persist_no_gpio_flag(self) -> None:
+        """Persist a flag indicating we can safely run in no-GPIO mode on future runs.
+
+        This only writes when both 0x29 and 0x30 have been confirmed on the bus.
+        Honors env override LAWNBERY_TOF_NO_GPIO=never by not forcing future behavior.
+        """
+        try:
+            # Do not persist if user explicitly set 'never'
+            if self._no_gpio_mode == 'never':
+                return
+            self._state_file.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                'no_gpio_always': True,
+                'confirmed_at': datetime.now().isoformat(),
+                'note': 'ToF addresses 0x29 and 0x30 confirmed; safe to skip GPIO sequencing on future runs.'
+            }
+            self._state_file.write_text(json.dumps(payload, indent=2))
+            self._persist_no_gpio = True
+            self.logger.info(f"Persisted ToF no-GPIO flag at {self._state_file}")
+        except Exception as e:
+            self.logger.debug(f"Failed to persist no-GPIO flag: {e}")
     
     async def read_sensor(self, sensor_name: str) -> Optional[ToFReading]:
         """Read distance from a specific sensor"""
@@ -494,17 +831,23 @@ class ToFSensorManager:
             # Small delay to ensure sensors are off
             await asyncio.sleep(0.1)
 
-            # Clean up GPIO
+            # Clean up GPIO (per-pin) to avoid closing the global chip handle
             if GPIO:
                 try:
-                    # Only cleanup if we configured any pins
-                    if self._configured_pins:
-                        GPIO.cleanup()
-                        self.logger.info("GPIO cleanup completed")
+                    if self._configured_pins and hasattr(GPIO, 'cleanup_pins'):
+                        GPIO.cleanup_pins(list(self._configured_pins))  # type: ignore
+                        self.logger.info("GPIO per-pin cleanup completed")
+                    elif self._configured_pins and hasattr(GPIO, 'free_pin'):
+                        for p in list(self._configured_pins):
+                            try:
+                                GPIO.free_pin(p)  # type: ignore
+                            except Exception as e:
+                                self.logger.warning(f"GPIO free_pin warning for {p}: {e}")
+                        self.logger.info("GPIO free_pin cleanup completed")
                     else:
-                        self.logger.debug("No GPIO pins configured by ToF manager; skipping global cleanup")
+                        self.logger.debug("No GPIO pins configured by ToF manager; skipping cleanup")
                 except Exception as e:
-                    self.logger.warning(f"GPIO cleanup warning: {e}")
+                    self.logger.warning(f"GPIO per-pin cleanup warning: {e}")
             
             # Clear data structures
             self.sensors.clear()
@@ -545,12 +888,8 @@ class ToFSensorManager:
         except Exception as e:
             self.logger.error(f"Error during ToF cleanup: {e}")
         finally:
-            # Force GPIO cleanup as last resort
-            if GPIO:
-                try:
-                    GPIO.cleanup()
-                except Exception:
-                    pass
+            # Do not globally close the GPIO chip; per-pin cleanup already done above
+            pass
     
     async def shutdown(self):
         """Shutdown ToF sensor manager"""

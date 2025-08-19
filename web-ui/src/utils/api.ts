@@ -73,8 +73,9 @@ export const api = {
       api.post('/api/v1/rc/enable', { enabled }),
     setMode: (mode: string) => 
       api.post('/api/v1/rc/mode', { mode }),
-    sendCommand: (command: string, parameters?: any) =>
-      api.post('/api/v1/rc/command', { command, parameters }),
+    blade: (enabled: boolean) => api.post('/api/v1/rc/blade', { enabled }),
+    emergencyStop: () => api.post('/api/v1/rc/emergency_stop'),
+    pwm: (steer: number, throttle: number) => api.post('/api/v1/rc/pwm', { steer, throttle }),
   },
 
   // Mower control methods

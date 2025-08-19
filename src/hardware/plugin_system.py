@@ -251,20 +251,29 @@ class ToFSensorPlugin(HardwarePlugin):
                 )
 
                 # Create or get shared ToF manager instance
-                if (
-                    not hasattr(self.__class__, "_shared_tof_manager")
-                    or self.__class__._shared_tof_manager is None
-                ):
-                    # Pass shared GPIO manager from system managers so ToF manager
-                    # uses centralized GPIO claims and avoids double-claiming pins.
-                    gpio_mgr = self.managers.get("gpio")
-                    try:
-                        self.__class__._shared_tof_manager = ToFSensorManager(gpio_manager=gpio_mgr)
-                    except Exception:
-                        # Fallback to default constructor if signature differs
-                        self.__class__._shared_tof_manager = ToFSensorManager()
+                # Always prefer an existing manager provided by the HardwareInterface via managers["tof"],
+                # even if a previous class-level instance exists from a prior run.
+                try:
+                    existing_mgr = self.managers.get("tof")
+                except Exception:
+                    existing_mgr = None
 
-                tof_manager = self.__class__._shared_tof_manager
+                if existing_mgr and isinstance(existing_mgr, ToFSensorManager):
+                    tof_manager = existing_mgr
+                    # Update class-level shared reference to ensure all plugins use the same instance
+                    self.__class__._shared_tof_manager = existing_mgr
+                else:
+                    # Fall back to any previously created class-level manager
+                    if hasattr(self.__class__, "_shared_tof_manager") and isinstance(self.__class__._shared_tof_manager, ToFSensorManager):
+                        tof_manager = self.__class__._shared_tof_manager
+                    else:
+                        # As a last resort, create a new manager; pass shared GPIO manager to avoid duplicate claims
+                        gpio_mgr = self.managers.get("gpio")
+                        try:
+                            tof_manager = ToFSensorManager(gpio_manager=gpio_mgr)
+                        except Exception:
+                            tof_manager = ToFSensorManager()
+                        self.__class__._shared_tof_manager = tof_manager
 
                 # Initialize manager if not already done
                 if not tof_manager._initialized:
@@ -296,9 +305,7 @@ class ToFSensorPlugin(HardwarePlugin):
         # This should ideally come from the hardware interface configuration
         return [
             ToFSensorConfig(name="tof_left", shutdown_pin=22, interrupt_pin=6, target_address=0x29),
-            ToFSensorConfig(
-                name="tof_right", shutdown_pin=23, interrupt_pin=12, target_address=0x30
-            ),
+            ToFSensorConfig(name="tof_right", shutdown_pin=23, interrupt_pin=12, target_address=0x30),
         ]
 
     async def read_data(self) -> Optional[SensorReading]:
@@ -553,8 +560,13 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
 
                 self._initialized = True
                 await self.health.record_success()
-                self.logger.info(f"Environmental sensor (BME280) initialized at 0x{address:02x}")
-                self.logger.debug(f"Environmental sensor driver={self._driver[0]} address=0x{self._address:02x}")
+                # Log the actual address selected (may be autodetected)
+                try:
+                    eff_addr = getattr(self, "_address", address)
+                except Exception:
+                    eff_addr = address
+                self.logger.info(f"Environmental sensor (BME280) initialized at 0x{eff_addr:02x}")
+                self.logger.debug(f"Environmental sensor driver={self._driver[0]} address=0x{eff_addr:02x}")
                 return True
             except Exception as e:
                 await self.health.record_failure()
@@ -872,7 +884,7 @@ class RoboHATPlugin(HardwarePlugin):
                     sensor_id=self.config.name,
                     value=status,
                     unit="status",
-                    port=port or "/dev/ttyACM1",
+                    port=port or "/dev/ttyACM0",
                     baud_rate=baud or 115200,
                 )
 
@@ -908,7 +920,7 @@ class GPSPlugin(HardwarePlugin):
                 self._timeout = float(self.config.parameters.get("timeout", 1.0))
                 # Start with configured values
                 cfg_port = self.config.parameters.get("port")
-                cfg_baud = int(self.config.parameters.get("baud", 38400))
+                cfg_baud = int(self.config.parameters.get("baud", 115200))
                 import glob
 
                 async def try_init(port: str, baud: int) -> bool:
@@ -930,19 +942,42 @@ class GPSPlugin(HardwarePlugin):
                     except Exception:
                         return False
 
-                # Start with configured candidates then broaden to all tty nodes
+                # Start with configured candidates then broaden to all tty nodes.
+                # Avoid the RoboHAT default port (usually /dev/ttyACM0) to prevent stealing its port.
                 candidates_ports = []
                 if cfg_port:
                     candidates_ports.append(cfg_port)
-                candidates_ports += ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyAMA0", "/dev/ttyAMA4"]
+                # Prefer ACM1 for GPS first; include others but skip ACM0 unless explicitly configured
+                candidates_ports += [
+                    "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyAMA0", "/dev/ttyAMA4"
+                ]
                 # Add any discovered device nodes
                 for pattern in ("/dev/ttyACM*", "/dev/ttyUSB*", "/dev/ttyAMA*"):
                     for p in glob.glob(pattern):
+                        # Skip known RoboHAT default port unless user configured it
+                        if p.endswith("ACM0") and (not cfg_port or cfg_port != p):
+                            continue
                         if p not in candidates_ports:
                             candidates_ports.append(p)
 
                 # Prefer 115200 first (user observed RMC at 115200), then configured baud, then common baud rates
-                candidates_bauds = [115200, cfg_baud, 9600, 38400]
+                # Deduplicate while preserving order
+                raw_bauds = [115200, cfg_baud, 9600, 38400]
+                seen = set()
+                candidates_bauds = []
+                for b in raw_bauds:
+                    try:
+                        bi = int(b)
+                    except Exception:
+                        continue
+                    if bi not in seen:
+                        seen.add(bi)
+                        candidates_bauds.append(bi)
+                # Debug: log candidate lists
+                try:
+                    self.logger.debug(f"GPS autodetect candidates: ports={candidates_ports}, bauds={candidates_bauds}")
+                except Exception:
+                    pass
 
                 selected = None
                 for p in candidates_ports:
@@ -1165,10 +1200,13 @@ class IMUPlugin(HardwarePlugin):
                 async def try_init(port: str, baud: int) -> bool:
                     try:
                         await serial_manager.initialize_device("imu", port=port, baud=baud, timeout=self._timeout)
-                        # quick sanity read
-                        for _ in range(3):
+                        # quick sanity read requiring parseable content
+                        for _ in range(6):
                             line = await serial_manager.read_line("imu", timeout=self._timeout)
-                            if line:
+                            if not line:
+                                continue
+                            parsed = self._parse_imu_line(line)
+                            if parsed is not None:
                                 return True
                         return False
                     except Exception:
@@ -1176,8 +1214,11 @@ class IMUPlugin(HardwarePlugin):
 
                 candidates_ports = list(dict.fromkeys([cfg_port, "/dev/ttyAMA4", "/dev/ttyAMA0"]))
                 candidates_ports = [p for p in candidates_ports if p]
-                # Prefer common lower rates first (115200) then higher custom rates
-                candidates_bauds = [115200, cfg_baud, 921600, 3000000]
+                # Try configured baud first, then common rates
+                candidates_bauds = []
+                for b in (cfg_baud, 115200, 921600, 3000000):
+                    if b not in candidates_bauds:
+                        candidates_bauds.append(b)
 
                 selected = None
                 for p in candidates_ports:
@@ -1223,23 +1264,16 @@ class IMUPlugin(HardwarePlugin):
                     self.logger.debug("IMU no data; attempting auto re-detect")
                     await self.initialize()
                 return None
-            parts = line.split(",")
-            if len(parts) < 9:
-                self._last_failures = getattr(self, "_last_failures", 0) + 1
-                if self._last_failures % 50 == 0:
-                    self.logger.debug("IMU short/invalid line; attempting auto re-detect")
-                    self._initialized = False
-                    await self.initialize()
-                return None
-            try:
-                roll, pitch, yaw, ax, ay, az, gx, gy, gz = map(float, parts[:9])
-            except Exception:
+            # Parse IMU line into roll/pitch/yaw + accel + gyro and compute quality
+            parsed = self._parse_imu_line(line)
+            if parsed is None:
                 self._last_failures = getattr(self, "_last_failures", 0) + 1
                 if self._last_failures % 50 == 0:
                     self.logger.debug("IMU parse error; attempting auto re-detect")
                     self._initialized = False
                     await self.initialize()
                 return None
+            roll, pitch, yaw, ax, ay, az, gx, gy, gz, quality = parsed
             from .data_structures import IMUReading
 
             reading = IMUReading(
@@ -1253,6 +1287,7 @@ class IMUPlugin(HardwarePlugin):
                 unit="mixed",
                 port=serial_manager.devices[self.device_name]["port"],
                 baud_rate=serial_manager.devices[self.device_name]["baud"],
+                quality=float(quality),
                 quaternion=(0.0, 0.0, 0.0, 1.0),
                 acceleration=(ax, ay, az),
                 angular_velocity=(gx, gy, gz),
@@ -1263,6 +1298,60 @@ class IMUPlugin(HardwarePlugin):
             await self.health.record_failure()
             self.logger.error(f"Failed to read IMU data: {e}")
             return None
+
+    @staticmethod
+    def _parse_imu_line(line: str) -> Optional[tuple[float, float, float, float, float, float, float, float, float, float]]:
+        """Extract IMU values from a serial line.
+
+        Returns (roll, pitch, yaw, ax, ay, az, gx, gy, gz, quality) or None if unparseable.
+        Quality is a heuristic in [0,1] based on available fields and zero checks.
+        """
+        try:
+            import re
+            floats = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", line)
+            vals: List[float] = [float(x) for x in floats]
+        except Exception:
+            return None
+
+        roll = pitch = yaw = 0.0
+        ax = ay = az = 0.0
+        gx = gy = gz = 0.0
+        available = 0
+        if len(vals) >= 9:
+            roll, pitch, yaw, ax, ay, az, gx, gy, gz = vals[:9]
+            available = 9
+        elif len(vals) == 6:
+            ax, ay, az, gx, gy, gz = vals[:6]
+            available = 6
+        elif len(vals) >= 3:
+            roll, pitch, yaw = vals[:3]
+            available = 3
+        else:
+            return None
+
+        # Heuristic quality: base on count of fields and zero-only detection
+        if available >= 9:
+            base_q = 0.9
+        elif available == 6:
+            base_q = 0.6
+        else:
+            base_q = 0.3
+
+        # If all reported values in the chosen set are zero, degrade quality
+        chosen = []
+        if available >= 9:
+            chosen = [roll, pitch, yaw, ax, ay, az, gx, gy, gz]
+        elif available == 6:
+            chosen = [ax, ay, az, gx, gy, gz]
+        else:
+            chosen = [roll, pitch, yaw]
+
+        if all(abs(v) < 1e-6 for v in chosen):
+            base_q *= 0.2
+
+        # Clamp
+        quality = max(0.0, min(1.0, base_q))
+        return (float(roll), float(pitch), float(yaw), float(ax), float(ay), float(az), float(gx), float(gy), float(gz), float(quality))
 
 
 class PluginManager:
@@ -1297,6 +1386,7 @@ class PluginManager:
         """Load and initialize a hardware plugin"""
         async with self._lock:
             try:
+                self.logger.info(f"Loading plugin '{plugin_name}' of type '{plugin_type}'")
                 # Get plugin class
                 if plugin_type in self._builtin_plugins:
                     plugin_class = self._builtin_plugins[plugin_type]
@@ -1318,7 +1408,7 @@ class PluginManager:
                     self.logger.info(f"Plugin '{plugin_name}' loaded successfully")
                     return True
                 else:
-                    self.logger.error(f"Failed to initialize plugin '{plugin_name}'")
+                    self.logger.error(f"Failed to initialize plugin '{plugin_name}' (initialize returned False)")
                     return False
 
             except Exception as e:

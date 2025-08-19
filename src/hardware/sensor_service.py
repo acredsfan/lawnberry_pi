@@ -79,9 +79,11 @@ class SensorService:
             'power': None           # type: ignore
         }
 
-        # Background diagnostics task handle (created after initialize)
+        # Background diagnostics task handles (created after initialize)
         self._diag_task = None
         self._tof_status_task = None
+        self._tof_health_task = None
+    self._rc_status_task = None
         
     async def initialize(self):
         """Initialize hardware interface and MQTT client"""
@@ -101,8 +103,13 @@ class SensorService:
             except Exception:
                 self.logger.debug('pycoral detection skipped')
             
-            # Initialize hardware interface
-            self.hardware = create_hardware_interface()
+            # Initialize hardware interface with explicit absolute config path to avoid
+            # WorkingDirectory pitfalls under systemd. Prefer PYTHONPATH hint (set to /opt/lawnberry).
+            import os
+            repo_root = os.environ.get('PYTHONPATH', '/opt/lawnberry').split(os.pathsep)[0]
+            cfg_path = str(Path(repo_root) / 'config' / 'hardware.yaml')
+            self.logger.info(f"Creating hardware interface with config: {cfg_path}")
+            self.hardware = create_hardware_interface(cfg_path)
             await self.hardware.initialize()
             self.logger.info("Hardware interface initialized")
             
@@ -130,6 +137,74 @@ class SensorService:
             if not initialized:
                 raise RuntimeError("MQTT client initialization failed")
             self.logger.info("MQTT client connected")
+            # Subscribe to RC control command topics and register handler
+            try:
+                await self.mqtt_client.subscribe('lawnberry/hardware/rc/#')
+                # Wildcard-aware handler for RC topics
+                async def _rc_handler(topic: str, payload: str):
+                    try:
+                        # Normalize payload to dict
+                        data: Dict[str, Any]
+                        try:
+                            data = json.loads(payload) if isinstance(payload, str) else payload  # type: ignore
+                            if not isinstance(data, dict):
+                                data = {}
+                        except Exception:
+                            data = {}
+
+                        # Strip prefix and route
+                        clean = topic.replace('lawnberry/', '')
+                        if clean.endswith('/control'):
+                            enabled = bool(data.get('enabled', True))
+                            cmd = 'rc_enable' if enabled else 'rc_disable'
+                            try:
+                                await self.hardware.send_robohat_command(cmd)  # type: ignore[union-attr]
+                            except Exception:
+                                pass
+                        elif clean.endswith('/set_mode'):
+                            mode = str(data.get('mode', 'emergency'))
+                            try:
+                                await self.hardware.send_robohat_command('rc_mode', mode)  # type: ignore[union-attr]
+                            except Exception:
+                                pass
+                        elif clean.endswith('/blade'):
+                            enabled = bool(data.get('enabled', False))
+                            try:
+                                await self.hardware.send_robohat_command('blade_control', 'true' if enabled else 'false')  # type: ignore[union-attr]
+                            except Exception:
+                                pass
+                        elif clean.endswith('/configure_channel'):
+                            try:
+                                ch = int(data.get('channel', 1))
+                                fn = str(data.get('function', 'steer'))
+                                vmin = int(data.get('min_value', 1000))
+                                vmax = int(data.get('max_value', 2000))
+                                ctr = int(data.get('center_value', 1500))
+                                await self.hardware.send_robohat_command('configure_channel', ch, fn, vmin, vmax, ctr)  # type: ignore[union-attr]
+                            except Exception:
+                                pass
+                        elif clean.endswith('/pwm'):
+                            try:
+                                steer = int(data.get('steer', 1500))
+                                throttle = int(data.get('throttle', 1500))
+                                # Clamp for safety
+                                steer = max(1000, min(2000, steer))
+                                throttle = max(1000, min(2000, throttle))
+                                await self.hardware.send_robohat_command('pwm', steer, throttle)  # type: ignore[union-attr]
+                            except Exception:
+                                pass
+                        elif clean.endswith('/get_status'):
+                            # Will be handled by periodic publisher as well
+                            await self._publish_rc_status_once()
+                    except Exception:
+                        # Do not let handler exceptions crash service
+                        pass
+
+                # Register wildcard handler
+                self.mqtt_client.add_message_handler('lawnberry/hardware/rc/#', _rc_handler)
+            except Exception:
+                # Continue even if subscription fails (MQTT may reconnect later)
+                pass
             
             self.logger.info("Hardware sensor service initialized successfully")
             # Start diagnostics publisher (GPIO claims) if MQTT connected and hardware exposes GPIO.list_claims
@@ -205,6 +280,47 @@ class SensorService:
                             return
 
                     self._tof_status_task = asyncio.create_task(_tof_status_publisher())
+
+                    # Add ToF health checker that attempts soft recovery without GPIO
+                    async def _tof_health_checker():
+                        try:
+                            while True:
+                                try:
+                                    tof_mgr = getattr(self.hardware, 'tof_manager', None)
+                                    if tof_mgr is not None and hasattr(tof_mgr, 'recover_if_missing'):
+                                        recovered = await tof_mgr.recover_if_missing()
+                                        if recovered:
+                                            # Publish an alert indicating recovery occurred
+                                            payload = {
+                                                'timestamp': datetime.utcnow().isoformat(),
+                                                'event': 'tof_soft_recovery',
+                                                'message': 'ToF recovery attempted and completed successfully.'
+                                            }
+                                            try:
+                                                await self.mqtt_client.publish('lawnberry/safety/alerts/tof', payload, qos=0)
+                                            except Exception:
+                                                pass
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(5.0)
+                        except asyncio.CancelledError:
+                            return
+
+                    self._tof_health_task = asyncio.create_task(_tof_health_checker())
+
+                    # Periodic RC status publisher for UI/API
+                    async def _rc_status_publisher():
+                        try:
+                            while True:
+                                try:
+                                    await self._publish_rc_status_once()
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(1.0)
+                        except asyncio.CancelledError:
+                            return
+
+                    self._rc_status_task = asyncio.create_task(_rc_status_publisher())
             except Exception:
                 pass
             
@@ -574,8 +690,59 @@ class SensorService:
                         pass
                 except Exception as e:
                     self.logger.debug(f"Error cancelling {task_name}: {e}")
+        # Cancel ToF health checker as well
+        task = getattr(self, '_tof_health_task', None)
+        if task:
+            try:
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=2.0)
+                except asyncio.TimeoutError:
+                    self.logger.warning("_tof_health_task did not cancel in time")
+                except asyncio.CancelledError:
+                    pass
+            except Exception as e:
+                self.logger.debug(f"Error cancelling _tof_health_task: {e}")
+        # Cancel RC status publisher
+        task = getattr(self, '_rc_status_task', None)
+        if task:
+            try:
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=2.0)
+                except asyncio.TimeoutError:
+                    self.logger.warning("_rc_status_task did not cancel in time")
+                except asyncio.CancelledError:
+                    pass
+            except Exception as e:
+                self.logger.debug(f"Error cancelling _rc_status_task: {e}")
         
         self.logger.info("Hardware sensor service stopped")
+
+    async def _publish_rc_status_once(self):
+        """Fetch RC status from hardware (if available) and publish to MQTT topics.
+        Publishes to both lawnberry/rc/status and lawnberry/hardware/rc/status for compatibility.
+        """
+        try:
+            if not self.hardware:
+                return
+            status = await self.hardware.get_rc_status_data()
+            if not status:
+                return
+            payload = {
+                **status,
+                'timestamp': datetime.utcnow().isoformat(),
+            }
+            try:
+                await self.mqtt_client.publish('lawnberry/rc/status', payload, qos=0)  # type: ignore[arg-type]
+            except Exception:
+                pass
+            try:
+                await self.mqtt_client.publish('lawnberry/hardware/rc/status', payload, qos=0)  # type: ignore[arg-type]
+            except Exception:
+                pass
+        except Exception:
+            pass
 
 
 async def main():

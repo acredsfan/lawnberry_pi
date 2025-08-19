@@ -15,70 +15,64 @@ gpio:
 i2c:
   bus_number: 1
   devices:
-    display: 60
-    environmental: 118
-    power_monitor: 64
-    tof_left: 41
-    tof_right: 48
+    display: 60         # 0x3C
+    environmental: 118  # 0x76
+    power_monitor: 64   # 0x40
+    tof_left: 41        # 0x29
+    tof_right: 48       # 0x30
 logging_level: INFO
 plugins:
-- enabled: true
-  name: tof_left
-  parameters:
-    i2c_address: 41
-    interrupt_pin: 6
-    shutdown_pin: 22
-- enabled: true
-  name: tof_right
-  parameters:
-    i2c_address: 48
-    interrupt_pin: 12
-    shutdown_pin: 23
-- enabled: true
-  name: power_monitor
-  parameters:
-    channel: 1
-    i2c_address: 64
-- enabled: true
-  name: robohat
-  parameters: {}
-  
-  # Add environmental sensor (BME280) plugin
-- enabled: true
-  name: environmental
-  parameters:
-    i2c_address: 118
-    auto_detect_address: true
-
-  # Add GPS plugin
-- enabled: true
-  name: gps
-  parameters:
-    port: /dev/ttyACM1
-    baud: 115200
-    timeout: 1.0
-
-  # Add IMU plugin
-- enabled: true
-  name: imu
-  parameters:
-    port: /dev/ttyAMA4
-    baud: 3000000
-    timeout: 0.2
+  - name: tof_left
+    enabled: true
+    parameters:
+      i2c_address: 41
+      interrupt_pin: 6
+      shutdown_pin: 22
+  - name: tof_right
+    enabled: true
+    parameters:
+      i2c_address: 48
+      interrupt_pin: 12
+      shutdown_pin: 23
+  - name: power_monitor
+    enabled: true
+    parameters:
+      channel: 1
+      i2c_address: 64
+  - name: robohat
+    enabled: true
+    parameters: {}
+  - name: environmental
+    enabled: true
+    parameters:
+      i2c_address: 118
+      auto_detect_address: true
+  - name: gps
+    enabled: true
+    parameters:
+      port: /dev/ttyACM1
+      baud: 115200
+      timeout: 1.0
+  - name: imu
+    enabled: true
+    parameters:
+      port: /dev/ttyAMA4
+      baud: 3000000
+      timeout: 0.2
 retry_attempts: 3
 retry_base_delay: 0.1
 retry_max_delay: 5.0
 serial:
   devices:
     gps:
-      baud: 38400
       port: /dev/ttyACM1
+      baud: 115200
       timeout: 1.0
     imu:
-      baud: 3000000
       port: /dev/ttyAMA4
-      timeout: 0.1
+      baud: 3000000
+      timeout: 0.2
     robohat:
-      baud: 115200
       port: /dev/ttyACM0
+      baud: 115200
       timeout: 1.0

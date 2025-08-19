@@ -27,7 +27,7 @@ localization:
   # GPS Configuration
   gps:
     port: "/dev/ttyACM0"
-    baud_rate: 38400
+  baud_rate: 115200
     rtk_enabled: true
     min_satellites: 6
     rtk_accuracy_threshold_m: 0.05
@@ -35,7 +35,7 @@ localization:
   # IMU Configuration
   imu:
     port: "/dev/ttyAMA4"
-    baud_rate: 3000000
+  baud_rate: 115200
     calibration_required: true
     update_rate_hz: 100
   

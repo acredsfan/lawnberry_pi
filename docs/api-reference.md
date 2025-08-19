@@ -303,6 +303,7 @@ The WebSocket connection provides real-time updates for:
 - Power consumption
 - Safety alerts
 - Navigation progress
+ - RC control status (topic `rc/status`)
 
 ### Message Format
 ```json
@@ -325,6 +326,32 @@ The WebSocket connection provides real-time updates for:
 - `safety_alert` - Safety system notifications
 - `navigation_update` - Navigation progress
 - `weather_update` - Weather condition changes
+
+### RC Status Forwarding
+
+Subscribe to `rc/status` (and `hardware/rc/status` for compatibility) to receive RC control status as MQTT-backed WebSocket messages of type `mqtt_data`:
+
+```
+{
+  "type": "mqtt_data",
+  "topic": "rc/status",
+  "data": { "rc_enabled": true, "rc_mode": "manual", ... }
+}
+```
+
+## RC Control API
+
+Endpoints under `/api/v1/rc` manage manual control and configuration:
+
+- `GET /api/v1/rc/status` – RC system status
+- `POST /api/v1/rc/mode` – Set RC mode (`emergency|manual|assisted|training`)
+- `POST /api/v1/rc/enable` – Enable RC control
+- `POST /api/v1/rc/disable` – Disable RC control (autonomous)
+- `POST /api/v1/rc/blade` – Control blade motor (`{ enabled: true|false }`)
+- `POST /api/v1/rc/channel/configure` – Configure channel mapping
+- `GET /api/v1/rc/channels` – Current channel configuration
+- `POST /api/v1/rc/emergency_stop` – Trigger emergency stop
+- `POST /api/v1/rc/pwm` – Direct PWM drive `{ steer, throttle }` (clamped to 1000–2000 μs)
 
 ## Error Handling
 

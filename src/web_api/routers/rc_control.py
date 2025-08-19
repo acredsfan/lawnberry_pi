@@ -36,6 +36,10 @@ class RCStatus(BaseModel):
 class BladeControlRequest(BaseModel):
     enabled: bool
 
+class RCDriveRequest(BaseModel):
+    steer: int  # 1000-2000 µs
+    throttle: int  # 1000-2000 µs
+
 @router.get("/status", response_model=RCStatus)
 async def get_rc_status(
     request: Request,
@@ -198,6 +202,36 @@ async def control_blade(
     except Exception as e:
         raise ServiceUnavailableError("rc_control", f"Failed to control blade: {str(e)}")
 
+@router.post("/pwm")
+async def send_pwm(
+    drive: RCDriveRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(require_permission("write"))
+):
+    """Send direct PWM command (steer/throttle) to RoboHAT via MQTT."""
+    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
+    if not mqtt_bridge or not mqtt_bridge.is_connected():
+        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
+
+    steer = max(1000, min(2000, int(drive.steer)))
+    throttle = max(1000, min(2000, int(drive.throttle)))
+    try:
+        success = await mqtt_bridge.publish_message(
+            "hardware/rc/pwm",
+            {
+                "steer": steer,
+                "throttle": throttle,
+                "requested_by": current_user.get("username", "unknown"),
+                "timestamp": datetime.utcnow().isoformat()
+            },
+            qos=1
+        )
+        if not success:
+            raise ServiceUnavailableError("rc_control", "Failed to send PWM command")
+        return {"success": True, "message": "PWM command sent", "steer": steer, "throttle": throttle}
+    except Exception as e:
+        raise ServiceUnavailableError("rc_control", f"Failed to send PWM: {str(e)}")
+
 @router.post("/channel/configure")
 async def configure_rc_channel(
     channel_config: RCChannelConfig,
@@ -299,3 +333,22 @@ async def emergency_stop(
         
     except Exception as e:
         raise ServiceUnavailableError("safety", f"Failed to trigger emergency stop: {str(e)}")
+
+# Compatibility route: some UIs may PUT /channels/{id}
+@router.put("/channels/{channel}")
+async def update_channel_compat(
+    channel: int,
+    channel_config: Dict[str, Any],
+    request: Request,
+    current_user: Dict[str, Any] = Depends(require_permission("admin"))
+):
+    """Compatibility endpoint mapping to /channel/configure."""
+    cfg = RCChannelConfig(
+        channel=channel,
+        function=str(channel_config.get("function", "steer")),
+        min_value=int(channel_config.get("min_value", channel_config.get("min", 1000))),
+        max_value=int(channel_config.get("max_value", channel_config.get("max", 2000))),
+        center_value=int(channel_config.get("center_value", channel_config.get("center", 1500)))
+    )
+    # Delegate to main handler
+    return await configure_rc_channel(cfg, request, current_user)

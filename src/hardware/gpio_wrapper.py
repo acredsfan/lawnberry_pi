@@ -38,7 +38,34 @@ try:  # Prefer lgpio for Raspberry Pi 5 compatibility
         LOW = 0
 
         def __init__(self) -> None:
-            self._chip = lgpio.gpiochip_open(0)
+            # Lazily open/reopen the chip as needed to avoid stale handle issues
+            self._chip = None
+            self._open_chip()
+
+        def _open_chip(self) -> None:
+            if self._chip is None:
+                self._chip = lgpio.gpiochip_open(0)
+
+        def _reopen_on_unknown_handle(self, exc: Exception) -> bool:
+            """If the exception suggests an invalid/unknown handle, reopen the chip.
+            Returns True if reopened, False otherwise.
+            """
+            msg = str(exc).lower()
+            if "unknown handle" in msg or "bad handle" in msg or "invalid handle" in msg:
+                logging.getLogger(__name__).warning("GPIO: detected unknown/bad handle; reopening chip 0 and retrying")
+                try:
+                    # Best-effort close before reopen
+                    try:
+                        if self._chip is not None:
+                            lgpio.gpiochip_close(self._chip)
+                    except Exception:
+                        pass
+                    self._chip = None
+                    self._open_chip()
+                    return True
+                except Exception as e:
+                    logging.getLogger(__name__).error(f"GPIO: failed to reopen chip after unknown handle: {e}")
+            return False
 
         def setmode(self, mode):
             """Ignored: lgpio does not require pin numbering mode."""
@@ -52,10 +79,21 @@ try:  # Prefer lgpio for Raspberry Pi 5 compatibility
             if existing and existing != claimant:
                 logging.getLogger(__name__).warning(f"GPIO.setup: pin {pin} already claimed by {existing}; {claimant} is also attempting to claim it")
 
-            if direction == self.OUT:
-                lgpio.gpio_claim_output(self._chip, pin, initial)
-            else:
-                lgpio.gpio_claim_input(self._chip, pin)
+            # Ensure chip is open and attempt the claim, retry once on unknown handle
+            self._open_chip()
+            try:
+                if direction == self.OUT:
+                    lgpio.gpio_claim_output(self._chip, pin, initial)
+                else:
+                    lgpio.gpio_claim_input(self._chip, pin)
+            except Exception as e:
+                if self._reopen_on_unknown_handle(e):
+                    if direction == self.OUT:
+                        lgpio.gpio_claim_output(self._chip, pin, initial)
+                    else:
+                        lgpio.gpio_claim_input(self._chip, pin)
+                else:
+                    raise
 
             _PIN_CLAIMS[pin] = claimant
 
@@ -73,15 +111,65 @@ try:  # Prefer lgpio for Raspberry Pi 5 compatibility
             claimant = _PIN_CLAIMS.get(pin, None)
             if claimant is None:
                 logging.getLogger(__name__).warning(f"GPIO.output: pin {pin} written without a recorded claimant")
-            lgpio.gpio_write(self._chip, pin, value)
+            # Ensure chip open and write, retry once on unknown handle
+            self._open_chip()
+            try:
+                lgpio.gpio_write(self._chip, pin, value)
+            except Exception as e:
+                if self._reopen_on_unknown_handle(e):
+                    lgpio.gpio_write(self._chip, pin, value)
+                else:
+                    raise
 
         def input(self, pin: int) -> int:
-            return lgpio.gpio_read(self._chip, pin)
+            # Ensure chip open and read, retry once on unknown handle
+            self._open_chip()
+            try:
+                return lgpio.gpio_read(self._chip, pin)
+            except Exception as e:
+                if self._reopen_on_unknown_handle(e):
+                    return lgpio.gpio_read(self._chip, pin)
+                else:
+                    raise
+
+        def free_pin(self, pin: int) -> None:
+            """Free a previously claimed pin without closing the chip."""
+            try:
+                if pin in _PIN_CLAIMS:
+                    self._open_chip()
+                    try:
+                        lgpio.gpio_free(self._chip, pin)
+                    except Exception as e:
+                        if not self._reopen_on_unknown_handle(e):
+                            raise
+                        lgpio.gpio_free(self._chip, pin)
+            finally:
+                _PIN_CLAIMS.pop(pin, None)
+
+        def cleanup_pins(self, pins: list[int]) -> None:
+            for p in pins:
+                try:
+                    self.free_pin(p)
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"GPIO.cleanup_pins: failed to free pin {p}: {e}")
 
         def cleanup(self) -> None:
-            lgpio.gpiochip_close(self._chip)
-            # Clear all claims for this chip (best-effort)
-            _PIN_CLAIMS.clear()
+            """Free all claimed pins but keep the chip open to avoid 'unknown handle' later."""
+            try:
+                self.cleanup_pins(list(_PIN_CLAIMS.keys()))
+            finally:
+                _PIN_CLAIMS.clear()
+
+        def close(self) -> None:
+            """Close the underlying chip; use sparingly (typically at process shutdown)."""
+            try:
+                try:
+                    self.cleanup()
+                finally:
+                    if self._chip is not None:
+                        lgpio.gpiochip_close(self._chip)
+            finally:
+                self._chip = None
 
     GPIO = _GPIO()
     # Expose diagnostic helpers on the lgpio-based instance
@@ -153,8 +241,31 @@ except Exception:  # pragma: no cover - fallback for non-Pi environments
                 return _GPIO.input(pin)
 
             def cleanup(self) -> None:
-                _GPIO.cleanup()
-                _PIN_CLAIMS.clear()
+                # Prefer per-pin cleanup to avoid side effects on unrelated pins
+                pins = list(_PIN_CLAIMS.keys())
+                try:
+                    if pins:
+                        _GPIO.cleanup(pins)
+                    else:
+                        _GPIO.cleanup()
+                finally:
+                    _PIN_CLAIMS.clear()
+
+            def free_pin(self, pin: int) -> None:
+                try:
+                    _GPIO.cleanup(pin)
+                except Exception:
+                    pass
+                finally:
+                    _PIN_CLAIMS.pop(pin, None)
+
+            def cleanup_pins(self, pins: list[int]) -> None:
+                try:
+                    if pins:
+                        _GPIO.cleanup(pins)
+                finally:
+                    for p in pins:
+                        _PIN_CLAIMS.pop(p, None)
 
         # Expose diagnostic helpers on the instance
         GPIO = _GPIOWrapper()

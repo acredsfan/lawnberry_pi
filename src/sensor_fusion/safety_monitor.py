@@ -116,7 +116,7 @@ class SafetyMonitor:
                 value=imu_data,
                 unit='mixed',
                 port=imu_data.get('port', '/dev/ttyAMA4'),
-                baud_rate=imu_data.get('baud_rate', 3000000),
+                baud_rate=imu_data.get('baud_rate', 115200),
                 quaternion=tuple(imu_data['quaternion']),
                 acceleration=tuple(imu_data['acceleration']),
                 angular_velocity=tuple(imu_data['angular_velocity'])

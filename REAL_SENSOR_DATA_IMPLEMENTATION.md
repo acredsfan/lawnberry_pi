@@ -63,6 +63,12 @@ Hardware Interface → Sensor Service → MQTT → Web API → WebSocket → Fro
 - Performance optimization (nice level, IO scheduling)
 - Logging integration with systemd journal
 
+ToF runtime configuration (recommended on Bookworm):
+- `Environment=LAWNBERY_TOF_NO_GPIO=always` ensures we never toggle XSHUT at runtime.
+- Optionally enable one-time auto-assign if a sensor is missing at startup:
+  - `Environment=LAWNBERY_TOF_AUTO_ASSIGN_ON_MISSING=1`
+  - `Environment=LAWNBERY_TOF_AUTO_ASSIGN_TIMEOUT_S=60`
+
 ### 5. Installation Integration (`scripts/install_lawnberry.sh`)
 **Change**: Added `lawnberry-sensor.service` to installation script
 **Impact**:

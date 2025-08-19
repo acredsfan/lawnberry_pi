@@ -117,9 +117,9 @@ Blade Direction:      GPIO 25 (Pin 22)`}
                     
                     <Typography variant="subtitle2" sx={{ mt: 2 }}>Serial Connections:</Typography>
                     <pre>
-{`RoboHAT:    /dev/ttyACM1 @ 115200 baud
-GPS:        /dev/ttyACM0 @ 38400 baud
-BNO085 IMU: /dev/ttyAMA4 @ 3000000 baud`}
+{`RoboHAT:    /dev/ttyACM0 @ 115200 baud
+GPS:        /dev/ttyACM1 @ 115200 baud
+BNO085 IMU: /dev/ttyAMA4 @ 115200 baud`}
                     </pre>
                   </Box>
                 </AccordionDetails>

@@ -54,16 +54,29 @@ async def lifespan(app: FastAPI):
             password=settings.redis.password,
             max_connections=settings.redis.max_connections
         )
-        await redis_client.ping()
+        # Cap Redis ping to 1s to avoid startup hangs when Redis is unreachable
+        try:
+            await asyncio.wait_for(redis_client.ping(), timeout=1.0)
+        except asyncio.TimeoutError:
+            raise TimeoutError("Redis ping timed out (>1s)")
         app.state.redis_client = redis_client
         logger.info("Redis client initialized successfully")
     except Exception as e:
         logger.warning(f"Redis initialization failed: {e}. Caching will be disabled.")
         app.state.redis_client = None
     
-    # Initialize MQTT bridge
+    # Initialize MQTT bridge with a short connection timeout to avoid blocking startup
     mqtt_bridge = MQTTBridge(settings.mqtt)
-    await mqtt_bridge.connect()
+    async def _safe_startup(coro, name: str, timeout: float):
+        try:
+            await asyncio.wait_for(coro, timeout=timeout)
+            logger.info(f"{name} startup complete")
+        except asyncio.TimeoutError:
+            logger.warning(f"Timed out waiting for {name} startup (>{timeout}s); continuing")
+        except Exception as e:
+            logger.warning(f"Error during {name} startup: {e}")
+
+    await _safe_startup(mqtt_bridge.connect(), "MQTT bridge", 2.0)
     app.state.mqtt_bridge = mqtt_bridge
 
     # Integrate MQTT bridge with WebSocket manager for real-time data

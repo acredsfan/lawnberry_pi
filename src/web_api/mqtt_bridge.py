@@ -10,7 +10,12 @@ from typing import Dict, Any, Optional, Callable, Set
 from datetime import datetime
 import weakref
 
-from communication.client import MQTTClient
+# Import MQTTClient with a robust relative-then-absolute strategy to support
+# both package execution (uvicorn src.web_api.main:app) and direct module runs.
+try:
+    from ..communication import MQTTClient  # type: ignore
+except Exception:  # pragma: no cover - fallback for dev/test contexts
+    from communication import MQTTClient  # type: ignore
 from .models import WebSocketMessage
 
 
@@ -52,7 +57,10 @@ class MQTTBridge:
             'maps/boundaries': 'map_boundaries',
             'maps/coverage': 'map_coverage',
             'deployment/events': 'deployment_event',
-            'deployment/status': 'deployment_status'
+            'deployment/status': 'deployment_status',
+            # RC topics
+            'rc/status': 'mqtt_data',
+            'hardware/rc/status': 'mqtt_data'
         }
     
     async def connect(self) -> bool:

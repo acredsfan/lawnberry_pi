@@ -261,6 +261,43 @@ python -m pytest tests/test_hardware_interface.py::TestI2CManager -v
 python -m pytest tests/ --cov=src/hardware --cov-report=html
 ```
 
+## Live Hardware Validation & ToF Setup
+
+Use the helper script to run the live stack with strict timeouts and confirm the API is publishing real data:
+
+```bash
+cd /home/pi/lawnberry
+timeout 220s bash scripts/run_live_stack.sh
+```
+
+### ToF (VL53L0X) One-Time Address Assignment
+
+Dual ToF requires distinct I2C addresses (`0x29` and `0x30`). If both sensors are at default, run the one‑time helper to perform GPIO sequencing and persist a flag to allow future no‑GPIO runs:
+
+```bash
+cd /home/pi/lawnberry
+test -x venv/bin/python || echo "venv missing"
+sudo systemctl stop lawnberry-sensor lawnberry-api 2>/dev/null || true
+timeout 90s venv/bin/python scripts/assign_tof_addresses.py
+```
+
+If both addresses are detected, the script writes `data/tof_no_gpio.json`. Future runs can skip GPIO sequencing by setting:
+
+```bash
+export LAWNBERY_TOF_NO_GPIO=always
+```
+
+### Verify ToF MQTT data quickly
+
+```bash
+cd /home/pi/lawnberry
+timeout 40s venv/bin/python scripts/verify_tof_live.py || true
+```
+
+Notes:
+- All commands are wrapped with `timeout` to avoid hangs on headless systems.
+- If `gpioinfo` shows pins 22/23 with consumer `lg`, another process holds them; stop the conflicting service or use no‑GPIO mode once addresses are assigned.
+
 ## API Reference
 
 ### HardwareInterface
