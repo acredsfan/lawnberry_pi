@@ -304,6 +304,8 @@ The WebSocket connection provides real-time updates for:
 - Safety alerts
 - Navigation progress
  - RC control status (topic `rc/status`)
+ - Sensor service heartbeat (topic `sensors/heartbeat`)
+ - System service status (retained, topic `system/status`)
 
 ### Message Format
 ```json
@@ -338,6 +340,39 @@ Subscribe to `rc/status` (and `hardware/rc/status` for compatibility) to receive
   "data": { "rc_enabled": true, "rc_mode": "manual", ... }
 }
 ```
+
+### Heartbeat and Service Status
+
+The hardware sensor service publishes the following to support UI readiness and monitoring:
+
+- `sensors/heartbeat` (QoS 0, every ~2s)
+  - Example:
+  ```json
+  {
+    "service": "hardware_sensor_service",
+    "timestamp": "2025-08-21T12:34:56.789Z"
+  }
+  ```
+
+- `system/status` (retained, QoS 1)
+  - Published on start and stop with retained flag so late subscribers can immediately determine service state.
+  - Example (running):
+  ```json
+  {
+    "service": "hardware_sensor_service",
+    "status": "running",
+    "started_at": "2025-08-21T12:34:00.000Z",
+    "timestamp": "2025-08-21T12:34:00.000Z"
+  }
+  ```
+  - Example (stopped):
+  ```json
+  {
+    "service": "hardware_sensor_service",
+    "status": "stopped",
+    "timestamp": "2025-08-21T12:45:00.000Z"
+  }
+  ```
 
 ## RC Control API
 

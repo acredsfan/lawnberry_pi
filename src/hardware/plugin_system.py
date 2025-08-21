@@ -1391,9 +1391,35 @@ class PluginManager:
                 if plugin_type in self._builtin_plugins:
                     plugin_class = self._builtin_plugins[plugin_type]
                 else:
-                    # Try to import custom plugin
-                    module = importlib.import_module(f"plugins.{plugin_type}")
-                    plugin_class = getattr(module, f"{plugin_type.title()}Plugin")
+                    # Try to import custom plugin using robust resolution
+                    module = None
+                    import_error: Optional[Exception] = None
+                    for mod_path in (
+                        f"src.hardware.plugins.{plugin_type}",
+                        f"hardware.plugins.{plugin_type}",
+                        f"plugins.{plugin_type}",
+                    ):
+                        try:
+                            module = importlib.import_module(mod_path)
+                            break
+                        except Exception as e:
+                            import_error = e
+                            module = None
+                    if module is None:
+                        # Try relative to this package as a last resort
+                        try:
+                            module = importlib.import_module(f".plugins.{plugin_type}", package=__package__)
+                        except Exception as e:
+                            import_error = e
+                            module = None
+
+                    if module is None:
+                        raise ImportError(f"Unable to import custom plugin module for type '{plugin_type}': {import_error}")
+
+                    class_name = f"{plugin_type.title()}Plugin"
+                    if not hasattr(module, class_name):
+                        raise AttributeError(f"Custom plugin module '{module.__name__}' missing class '{class_name}'")
+                    plugin_class = getattr(module, class_name)
 
                 # Verify required managers are available
                 plugin_instance = plugin_class(config, self.managers)
@@ -1440,11 +1466,33 @@ class PluginManager:
         if plugin_name not in self._plugins:
             return False
 
+        # Preserve the existing plugin class and configuration to avoid mis-resolving types
+        old_plugin = self._plugins[plugin_name]
+        plugin_class = old_plugin.__class__
         config = self._plugin_configs[plugin_name]
-        plugin_type = self._plugins[plugin_name].plugin_type
 
+        # Unload the existing plugin instance
         await self.unload_plugin(plugin_name)
-        return await self.load_plugin(plugin_name, plugin_type, config)
+
+        # Recreate and initialize a new instance of the same class
+        try:
+            plugin_instance = plugin_class(config, self.managers)
+            # Verify required managers are available
+            for manager_type in plugin_instance.required_managers:
+                if manager_type not in self.managers:
+                    raise HardwareError(f"Required manager '{manager_type}' not available")
+
+            if await plugin_instance.initialize():
+                self._plugins[plugin_name] = plugin_instance
+                self._plugin_configs[plugin_name] = config
+                self.logger.info(f"Plugin '{plugin_name}' reloaded successfully")
+                return True
+            else:
+                self.logger.error(f"Failed to initialize plugin '{plugin_name}' during reload")
+                return False
+        except Exception as e:
+            self.logger.error(f"Failed to reload plugin '{plugin_name}': {e}")
+            return False
 
     def get_plugin(self, plugin_name: str) -> Optional[HardwarePlugin]:
         """Get plugin instance by name"""

@@ -961,6 +961,20 @@ class PluginManager:
         return self.plugins.get(name)
 ```
 
+### Plugin reload behavior (August 2025 fix)
+
+Background: A bug in the plugin manager caused reloads to fail for built-in plugins. When the health checker attempted to recover a plugin (e.g., `imu` or `tof_right`), it used the plugin's runtime `plugin_type` (values like `i2c_sensor` or `serial_device`) as the registry key, which does not match the built-in registry keys (e.g., `tof_sensor`, `imu_sensor`, `robohat`). This led to attempts to import a non-existent module path like `plugins.i2c_sensor` and errors such as `No module named 'plugins'`, stalling telemetry and MQTT publishing.
+
+Resolution: The plugin reload path now reuses the exact plugin class of the existing instance instead of re-resolving by type string. This guarantees correct re-instantiation and initialization using the same class and avoids bad import paths.
+
+Action items for developers/operators:
+- Ensure your runtime includes the updated `PluginManager.reload_plugin` implementation (August 2025).
+- After updating the source and deploying to `/opt/lawnberry`, restart the sensor service to pick up changes:
+    - `timeout 15s sudo systemctl restart lawnberry-sensor.service || echo 'restart timed out'`
+- Verify logs show successful plugin reloads without `No module named 'plugins'` and that MQTT topics (e.g., `lawnberry/rc/status`) are being published again.
+
+This change is backward compatible and does not alter public APIs.
+
 ---
 
 ## Shell Scripting Best Practices

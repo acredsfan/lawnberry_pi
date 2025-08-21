@@ -42,6 +42,7 @@ class MQTTBridge:
             'system/health': 'system_health',
             'system/tof_status': 'system_tof_status',
             'system/status': 'system_status',
+            'sensors/heartbeat': 'sensor_status',
             'system/services/+/status': 'service_status',
             'sensors/+/data': 'sensor_data',
             'sensors/+/status': 'sensor_status',

@@ -78,12 +78,14 @@ class SensorService:
             'environmental': None,  # type: ignore
             'power': None           # type: ignore
         }
-
         # Background diagnostics task handles (created after initialize)
         self._diag_task = None
         self._tof_status_task = None
         self._tof_health_task = None
+        # RC status publisher task handle (created during start)
     self._rc_status_task = None
+    # Heartbeat/status publisher task handle
+    self._heartbeat_task = None
         
     async def initialize(self):
         """Initialize hardware interface and MQTT client"""
@@ -137,6 +139,23 @@ class SensorService:
             if not initialized:
                 raise RuntimeError("MQTT client initialization failed")
             self.logger.info("MQTT client connected")
+            # Publish an initial retained system status so subscribers (API/UI) immediately see presence
+            try:
+                started_at = datetime.utcnow().isoformat()
+                await self.mqtt_client.publish(
+                    'lawnberry/system/status',
+                    {
+                        'service': 'hardware_sensor_service',
+                        'status': 'running',
+                        'started_at': started_at,
+                        'timestamp': started_at,
+                    },
+                    qos=1,
+                    retain=True,
+                )
+            except Exception:
+                # Non-fatal if broker is temporarily unavailable; the reconnect task will deliver later
+                pass
             # Subscribe to RC control command topics and register handler
             try:
                 await self.mqtt_client.subscribe('lawnberry/hardware/rc/#')
@@ -321,6 +340,28 @@ class SensorService:
                             return
 
                     self._rc_status_task = asyncio.create_task(_rc_status_publisher())
+                    try:
+                        self.logger.info("RC status publisher task started")
+                    except Exception:
+                        pass
+
+                    # Periodic heartbeat publisher for quick UI readiness checks
+                    async def _heartbeat_publisher():
+                        try:
+                            while True:
+                                try:
+                                    payload = {
+                                        'service': 'hardware_sensor_service',
+                                        'timestamp': datetime.utcnow().isoformat(),
+                                    }
+                                    await self.mqtt_client.publish('lawnberry/sensors/heartbeat', payload, qos=0)
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(2.0)
+                        except asyncio.CancelledError:
+                            return
+
+                    self._heartbeat_task = asyncio.create_task(_heartbeat_publisher())
             except Exception:
                 pass
             
@@ -716,6 +757,34 @@ class SensorService:
                     pass
             except Exception as e:
                 self.logger.debug(f"Error cancelling _rc_status_task: {e}")
+        # Cancel heartbeat task
+        task = getattr(self, '_heartbeat_task', None)
+        if task:
+            try:
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=2.0)
+                except asyncio.TimeoutError:
+                    self.logger.warning("_heartbeat_task did not cancel in time")
+                except asyncio.CancelledError:
+                    pass
+            except Exception as e:
+                self.logger.debug(f"Error cancelling _heartbeat_task: {e}")
+
+        # Publish retained stopped status so late subscribers know service state
+        try:
+            await self.mqtt_client.publish(
+                'lawnberry/system/status',
+                {
+                    'service': 'hardware_sensor_service',
+                    'status': 'stopped',
+                    'timestamp': datetime.utcnow().isoformat(),
+                },
+                qos=1,
+                retain=True,
+            )
+        except Exception:
+            pass
         
         self.logger.info("Hardware sensor service stopped")
 
@@ -726,19 +795,33 @@ class SensorService:
         try:
             if not self.hardware:
                 return
-            status = await self.hardware.get_rc_status_data()
-            if not status:
-                return
-            payload = {
-                **status,
-                'timestamp': datetime.utcnow().isoformat(),
-            }
+            payload = None
             try:
-                await self.mqtt_client.publish('lawnberry/rc/status', payload, qos=0)  # type: ignore[arg-type]
+                status = await self.hardware.get_rc_status_data()
+                if status:
+                    payload = {**status}
+            except Exception:
+                # Swallow and publish a disconnected payload below
+                payload = None
+
+            # If no status available (e.g., RoboHAT missing), publish a clear disconnected status
+            if not payload:
+                payload = {
+                    'present': False,
+                    'rc_enabled': False,
+                    'rc_mode': 'unavailable',
+                }
+            payload['timestamp'] = datetime.utcnow().isoformat()
+            try:
+                self.logger.info("Publishing RC status to MQTT")
             except Exception:
                 pass
             try:
-                await self.mqtt_client.publish('lawnberry/hardware/rc/status', payload, qos=0)  # type: ignore[arg-type]
+                await self.mqtt_client.publish('lawnberry/rc/status', payload, qos=0, retain=True)  # type: ignore[arg-type]
+            except Exception:
+                pass
+            try:
+                await self.mqtt_client.publish('lawnberry/hardware/rc/status', payload, qos=0, retain=True)  # type: ignore[arg-type]
             except Exception:
                 pass
         except Exception:
