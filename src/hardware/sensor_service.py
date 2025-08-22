@@ -83,9 +83,9 @@ class SensorService:
         self._tof_status_task = None
         self._tof_health_task = None
         # RC status publisher task handle (created during start)
-    self._rc_status_task = None
-    # Heartbeat/status publisher task handle
-    self._heartbeat_task = None
+        self._rc_status_task = None
+        # Heartbeat/status publisher task handle
+        self._heartbeat_task = None
         
     async def initialize(self):
         """Initialize hardware interface and MQTT client"""

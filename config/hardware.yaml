@@ -71,8 +71,8 @@ serial:
     imu:
       port: /dev/ttyAMA4
       baud: 3000000
-      timeout: 0.2
+      timeout: 0.3
     robohat:
-      port: /dev/ttyACM0
+      port: /dev/ttyACM2
       baud: 115200
       timeout: 1.0

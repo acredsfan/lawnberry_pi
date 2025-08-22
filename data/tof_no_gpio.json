@@ -1,5 +1,5 @@
 {
   "no_gpio_always": true,
-  "confirmed_at": "2025-08-19T14:00:36.832906",
-  "note": "ToF addresses 0x29 and 0x30 confirmed; safe to skip GPIO sequencing on future runs."
+  "confirmed_at": "2025-08-22T14:11:32",
+  "note": "ToF addresses 0x29 and 0x30 confirmed by adafruit-style assigner."
 }

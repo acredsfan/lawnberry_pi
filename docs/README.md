@@ -29,6 +29,7 @@ Welcome to the comprehensive documentation for the LawnBerryPi autonomous lawn m
 - **[Hardware Overview](hardware-overview.md)** - Understanding your LawnBerryPi hardware
 - **[Software Architecture](software-architecture.md)** - How the system works
 - **[API Documentation](api-documentation.md)** - For advanced users and integrations
+- **[Dual ToF Setup](tof-dual-vl53l0x-setup.md)** - One-time address assignment and no-GPIO policy
 
 ## Documentation Formats
 

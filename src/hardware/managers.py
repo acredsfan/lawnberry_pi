@@ -18,6 +18,14 @@ try:
 except Exception:
     cv2 = None
 
+# Picamera2 (preferred on Raspberry Pi OS Bookworm)
+try:
+    from picamera2 import Picamera2
+    _PICAMERA2_AVAILABLE = True
+except Exception:
+    Picamera2 = None  # type: ignore
+    _PICAMERA2_AVAILABLE = False
+
 try:
     import numpy as np
 except Exception:
@@ -123,21 +131,21 @@ class I2CManager:
                 except Exception as e:
                     raise HardwareError(f"Failed to initialize I2C bus: {e}")
 
-        async def cleanup(self):
-            """Clean up I2C resources and release bus handles"""
-            async with self._lock:
-                try:
-                    if self._bus and hasattr(self._bus, 'close'):
-                        try:
-                            self._bus.close()
-                        except Exception as e:
-                            self.logger.debug(f"I2C bus close error: {e}")
-                    self._bus = None
-                finally:
-                    # Clear device locks/health to allow reinitialization
-                    self._device_locks.clear()
-                    self._device_health.clear()
-            self.logger.info("I2C manager cleaned up")
+    async def cleanup(self):
+        """Clean up I2C resources and release bus handles"""
+        async with self._lock:
+            try:
+                if self._bus and hasattr(self._bus, 'close'):
+                    try:
+                        self._bus.close()
+                    except Exception as e:
+                        self.logger.debug(f"I2C bus close error: {e}")
+                self._bus = None
+            finally:
+                # Clear device locks/health to allow reinitialization
+                self._device_locks.clear()
+                self._device_health.clear()
+        self.logger.info("I2C manager cleaned up")
 
     @asynccontextmanager
     async def device_access(self, address: int):
@@ -620,24 +628,115 @@ class CameraManager:
         self._frame_id = 0
         self._capturing = False
         self._capture_task = None
+        self._first_frame_logged = False
+        self._backend: str = "opencv"  # or "picamera2"
+        self._picam2 = None
 
     async def initialize(self, width: int = 1920, height: int = 1080, fps: int = 30):
         """Initialize camera"""
         async with self._lock:
             try:
                 # Use V4L2 backend for compatibility with Raspberry Pi rpicam stack
+                if cv2 is None:
+                    self.logger.warning("OpenCV (cv2) not available; attempting Picamera2 backend if present")
+                    if _PICAMERA2_AVAILABLE:
+                        await self._initialize_picamera2(width, height, fps)
+                        return
+                    raise HardwareError("Neither OpenCV nor Picamera2 available for camera capture")
+
                 self._camera = cv2.VideoCapture(self.device_path, cv2.CAP_V4L2)
-                self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-                self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-                self._camera.set(cv2.CAP_PROP_FPS, fps)
+                # Prefer MJPG on Pi V4L2 for broader compatibility
+                try:
+                    fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+                    self._camera.set(cv2.CAP_PROP_FOURCC, fourcc)
+                except Exception:
+                    pass
+
+                # Apply requested dimensions and fps
+                try:
+                    self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                    self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                    self._camera.set(cv2.CAP_PROP_FPS, fps)
+                except Exception:
+                    pass
 
                 if not self._camera.isOpened():
                     raise HardwareError(f"Cannot open camera {self.device_path}")
 
-                self.logger.info(f"Camera initialized: {width}x{height}@{fps}fps")
+                # Warm-up: attempt a few reads to let the pipeline settle
+                read_ok = False
+                for i in range(10):
+                    try:
+                        ok, frame = self._camera.read()
+                        if ok and frame is not None:
+                            read_ok = True
+                            break
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.05)
+
+                # If still not ok, try a smaller fallback resolution quickly
+                if not read_ok:
+                    try:
+                        self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                        for i in range(10):
+                            ok, frame = self._camera.read()
+                            if ok and frame is not None:
+                                read_ok = True
+                                break
+                            await asyncio.sleep(0.05)
+                    except Exception:
+                        pass
+
+                if not read_ok:
+                    # Leave device open for later attempts but log a clear warning
+                    self.logger.warning(
+                        f"Camera opened but no frames read from {self.device_path}; will retry during capture loop"
+                    )
+
+                    # Attempt fallback to Picamera2 if available and V4L2 isn't producing frames
+                    if _PICAMERA2_AVAILABLE:
+                        try:
+                            # Release V4L2 handle before switching to Picamera2
+                            try:
+                                if self._camera is not None:
+                                    self._camera.release()
+                            except Exception:
+                                pass
+                            self._camera = None
+                            await self._initialize_picamera2(width, height, fps)
+                            return
+                        except Exception as e2:
+                            self.logger.warning(f"Picamera2 fallback failed: {e2}")
+
+                self.logger.info(f"Camera initialized: {width}x{height}@{fps}fps (device {self.device_path})")
 
             except Exception as e:
                 raise HardwareError(f"Failed to initialize camera: {e}")
+
+    async def _initialize_picamera2(self, width: int, height: int, fps: int):
+        """Initialize Picamera2 backend."""
+        if not _PICAMERA2_AVAILABLE:
+            raise HardwareError("Picamera2 not available")
+        try:
+            self._picam2 = Picamera2()
+            # Video configuration: choose format with good OpenCV compatibility
+            try:
+                config = self._picam2.create_video_configuration(
+                    main={"size": (int(width), int(height)), "format": "RGB888"},
+                    controls={"FrameRate": int(fps)}
+                )
+            except Exception:
+                # Fallback to a safe default
+                config = self._picam2.create_video_configuration(
+                    main={"size": (640, 480), "format": "RGB888"}
+                )
+            self._picam2.configure(config)
+            self._backend = "picamera2"
+            self.logger.info(f"Picamera2 backend initialized: {width}x{height}@{fps}fps")
+        except Exception as e:
+            raise HardwareError(f"Failed to initialize Picamera2: {e}")
 
     async def start_capture(self):
         """Start continuous frame capture"""
@@ -645,6 +744,12 @@ class CameraManager:
             return
 
         self._capturing = True
+        # Start underlying backend if required
+        if self._backend == "picamera2" and self._picam2 is not None:
+            try:
+                self._picam2.start()
+            except Exception as e:
+                self.logger.warning(f"Picamera2 start failed: {e}")
         self._capture_task = asyncio.create_task(self._capture_loop())
         self.logger.info("Camera capture started")
 
@@ -658,13 +763,62 @@ class CameraManager:
 
     async def _capture_loop(self):
         """Continuous frame capture loop"""
+        no_frame_count = 0
+        last_reconfig = 0
         while self._capturing:
             try:
-                ret, frame = self._camera.read()
-                if ret:
+                if self._backend == "picamera2":
+                    ret = False
+                    frame = None
+                    try:
+                        if self._picam2 is not None:
+                            arr = self._picam2.capture_array("main")
+                            frame = arr
+                            ret = frame is not None
+                    except Exception as e:
+                        self.logger.debug(f"Picamera2 capture error: {e}")
+                else:
+                    ret, frame = (False, None)
+                    try:
+                        ret, frame = self._camera.read()
+                    except Exception as e:
+                        # Transient read error; log once per occurrence at debug
+                        self.logger.debug(f"Camera read error: {e}")
+
+                if ret and frame is not None:
+                    # Log once on the first successfully captured frame for diagnostics
+                    if not self._first_frame_logged:
+                        try:
+                            h, w = frame.shape[:2]
+                            src = self.device_path if self._backend != "picamera2" else "picamera2"
+                            self.logger.info(f"First camera frame captured: {w}x{h} from {src}")
+                        except Exception:
+                            self.logger.info(f"First camera frame captured from {self.device_path}")
+                        self._first_frame_logged = True
+                    no_frame_count = 0
                     # Convert to bytes
-                    _, buffer = cv2.imencode(".jpg", frame)
-                    frame_data = buffer.tobytes()
+                    if cv2 is not None:
+                        # Ensure correct color order for JPEG when using Picamera2 (RGB -> BGR)
+                        if self._backend == "picamera2":
+                            try:
+                                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                            except Exception:
+                                pass
+                        _, buffer = cv2.imencode(".jpg", frame)
+                    else:
+                        # Minimal fallback encoding (rare, since cv2 usually present); skip if unavailable
+                        buffer = None
+                        try:
+                            import PIL.Image as Image
+                            import io
+                            img = Image.fromarray(frame)
+                            bio = io.BytesIO()
+                            img.save(bio, format="JPEG", quality=85)
+                            buffer = bio.getvalue()
+                        except Exception as e:
+                            self.logger.error(f"JPEG encode failed: {e}")
+                            buffer = b""
+                    frame_data = buffer.tobytes() if hasattr(buffer, 'tobytes') else (buffer or b"")
 
                     # Create frame object
                     camera_frame = CameraFrame(
@@ -683,6 +837,41 @@ class CameraManager:
                             self._frame_buffer.pop(0)
 
                     self._frame_id += 1
+
+                else:
+                    no_frame_count += 1
+                    # After a short series of failures, attempt a gentle reconfiguration
+                    if no_frame_count in (15, 60):
+                        if self._backend == "picamera2":
+                            # Allow Picamera2 to stabilize; reconfigure at lower res if needed later
+                            if no_frame_count == 60:
+                                try:
+                                    # Reconfigure down to 640x480
+                                    cfg = self._picam2.create_video_configuration(
+                                        main={"size": (640, 480), "format": "RGB888"}
+                                    )
+                                    self._picam2.stop()
+                                    self._picam2.configure(cfg)
+                                    self._picam2.start()
+                                    self.logger.warning("Picamera2 produced no frames; adjusted resolution to 640x480")
+                                except Exception as e:
+                                    self.logger.debug(f"Picamera2 reconfig failed: {e}")
+                        else:
+                            try:
+                                # First try ensure MJPG and a modest resolution
+                                fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+                                self._camera.set(cv2.CAP_PROP_FOURCC, fourcc)
+                                if no_frame_count == 15:
+                                    self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                                    self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                                else:
+                                    self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                                    self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                                self.logger.warning(
+                                    f"Camera produced no frames for {no_frame_count} reads; reapplied MJPG and adjusted resolution"
+                                )
+                            except Exception as e:
+                                self.logger.debug(f"Camera reconfig attempt failed: {e}")
 
                 await asyncio.sleep(1 / 30)  # 30fps
 
@@ -711,6 +900,16 @@ class CameraManager:
 
         async with self._lock:
             try:
+                if self._backend == "picamera2" and self._picam2 is not None:
+                    try:
+                        self._picam2.stop()
+                    except Exception:
+                        pass
+                    try:
+                        self._picam2.close()
+                    except Exception:
+                        pass
+                    self._picam2 = None
                 if self._camera is not None:
                     try:
                         self._camera.release()
@@ -721,6 +920,8 @@ class CameraManager:
                 self._frame_buffer.clear()
                 self._capturing = False
                 self._capture_task = None
+                self._first_frame_logged = False
+                self._backend = "opencv"
 
         self.logger.info("Camera manager cleaned up")
 

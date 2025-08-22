@@ -62,6 +62,7 @@ This document summarizes all Bookworm-specific optimizations implemented in the 
 - **Enhanced error handling**: Better retry logic and timeout management
 - **CPU affinity**: Critical processes pinned to specific CPU cores
 - **Memory optimization**: Reduced memory footprint for embedded operations
+- **Camera backend fallback**: Automatic fallback to Picamera2 when OpenCV/V4L2 yields no frames, improving reliability on Bookworm
 
 ## Compatibility Matrix
 

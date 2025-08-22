@@ -611,17 +611,36 @@ print('I2C devices found:', devices)
 ### 4.2 Test Camera
 
 ```bash
-# Test camera functionality
-python3 -c "
-import cv2
-cap = cv2.VideoCapture(0)
-ret, frame = cap.read()
-if ret:
-    print('Camera working: Frame size', frame.shape)
-else:
-    print('Camera not detected')
-cap.release()
-"
+# Test camera functionality (tries OpenCV first, then Picamera2)
+python3 - <<'PY'
+try:
+   import cv2
+except Exception:
+   cv2 = None
+
+ok = False
+if cv2 is not None:
+   cap = cv2.VideoCapture(0)
+   ret, frame = cap.read()
+   if ret:
+      print('Camera working via OpenCV/V4L2:', frame.shape)
+      ok = True
+   cap.release()
+
+if not ok:
+   try:
+      from picamera2 import Picamera2
+      picam2 = Picamera2()
+      cfg = picam2.create_video_configuration(main={"size": (640, 480), "format": "RGB888"})
+      picam2.configure(cfg)
+      picam2.start()
+      import time; time.sleep(0.3)
+      arr = picam2.capture_array("main")
+      print('Camera working via Picamera2:', arr.shape)
+      picam2.stop()
+   except Exception as e:
+      print('Camera test failed:', e)
+PY
 ```
 
 ### 4.3 Test GPS
@@ -723,8 +742,16 @@ The web interface should show:
 - **Command**: `sudo raspi-config` → Interface Options → I2C → Enable
 
 **Problem**: Camera not working
-- **Solution**: Check camera cable connection, enable camera interface
-- **Command**: `sudo raspi-config` → Interface Options → Camera → Enable
+- **Solutions**:
+   - Check camera cable connection at both the camera and Pi ends; ensure the blue tab faces the correct direction.
+   - Enable camera interface: `sudo raspi-config` → Interface Options → Camera → Enable (or ensure `libcamera` stack is active on Bookworm)
+   - Verify the service has permissions to access video devices when running under systemd:
+      - Ensure the hardware service unit includes DeviceAllow entries for `/dev/video0-7` and `/dev/media0-3`.
+      - Confirm user `pi` is in the `video` group: `groups pi`
+   - Enumerate supported V4L2 formats and resolutions:
+      - `v4l2-ctl --device=/dev/video0 --list-formats-ext`
+   - If OpenCV returns no frames, rely on Picamera2 (Bookworm-native) which our stack auto-falls back to.
+   - Restart the hardware service after changes: `sudo systemctl restart lawnberry-hardware`
 
 **Problem**: GPS not receiving data
 - **Solution**: Ensure outdoor location with sky view, check USB connection
