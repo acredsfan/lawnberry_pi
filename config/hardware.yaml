@@ -73,6 +73,6 @@ serial:
       baud: 3000000
       timeout: 0.3
     robohat:
-      port: /dev/ttyACM2
+      port: /dev/serial0
       baud: 115200
       timeout: 1.0

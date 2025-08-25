@@ -449,12 +449,15 @@ check_system() {
 }
 
 enable_uart4_for_imu() {
-    print_section "Enable UART4 for IMU"
-    log_info "Enabling UART4 for BNO085 IMU (expect /dev/ttyAMA4)"
+    print_section "Enable IMU UART"
+    log_info "Configuring UART for BNO085 IMU (Pi 4/CM4 → UART4; Pi 5 → UART1 on GPIO12/13)"
 
     # Determine boot config path (Bookworm uses /boot/firmware/config.txt)
     local BOOT_CONFIG="/boot/firmware/config.txt"
     [[ -f /boot/config.txt ]] && BOOT_CONFIG="/boot/config.txt"
+
+    # Detect board model
+    local PI_MODEL="$(tr -d '\0' </proc/device-tree/model 2>/dev/null)"
 
     # Ensure serial port is enabled and login shell disabled (0 = disable login shell, keep UART enabled)
     # Bound with timeout to avoid hangs on some setups.
@@ -463,7 +466,7 @@ enable_uart4_for_imu() {
             log_debug "raspi-config do_serial skipped or timed out"
     fi
 
-    # Ensure UART is enabled and overlay for uart4 is set
+    # Ensure UART is enabled
     if ! grep -q "^enable_uart=1" "$BOOT_CONFIG" 2>/dev/null; then
         if grep -q "^enable_uart=" "$BOOT_CONFIG" 2>/dev/null; then
             sudo sed -i 's/^enable_uart=.*/enable_uart=1/' "$BOOT_CONFIG" || true
@@ -472,28 +475,55 @@ enable_uart4_for_imu() {
         fi
     fi
 
-    if ! grep -q "^dtoverlay=uart4" "$BOOT_CONFIG" 2>/dev/null; then
-        echo "dtoverlay=uart4" | sudo tee -a "$BOOT_CONFIG" >/dev/null || true
-    fi
-
-    # Try to apply overlay immediately without reboot (non-fatal if unavailable)
-    # Bound with timeouts; on Bookworm/Pi 5 this may only take effect after reboot.
-    if command -v dtoverlay >/dev/null 2>&1; then
-        timeout 4s sudo -n dtoverlay -r uart4 >/dev/null 2>&1 || true
-        timeout 4s sudo -n dtoverlay uart4 >/dev/null 2>&1 || \
-            log_debug "Runtime dtoverlay apply skipped (will take effect after reboot)"
+    # Apply UART overlay
+    # - Pi 4/CM4: use UART4 overlay (pins selected by overlay defaults)
+    # - Pi 5: map UART1 to GPIO12/13 (these pins expose TX1/RX1 functions on Pi 5), keeping existing wiring
+    if [[ "$PI_MODEL" == *"Raspberry Pi 4"* || "$PI_MODEL" == *"Compute Module 4"* ]]; then
+        if ! grep -q "^dtoverlay=uart4" "$BOOT_CONFIG" 2>/dev/null; then
+            echo "dtoverlay=uart4" | sudo tee -a "$BOOT_CONFIG" >/dev/null || true
+        fi
+        # Try to apply overlay immediately without reboot (bounded)
+        if command -v dtoverlay >/dev/null 2>&1; then
+            timeout 4s sudo -n dtoverlay -r uart4 >/dev/null 2>&1 || true
+            timeout 4s sudo -n dtoverlay uart4 >/dev/null 2>&1 || \
+                log_debug "Runtime dtoverlay apply skipped (will take effect after reboot)"
+        fi
+    else
+        # Raspberry Pi 5 explicit mapping for UART1 on GPIO12/13 (TX1/RX1)
+        if grep -q "^dtoverlay=uart1" "$BOOT_CONFIG" 2>/dev/null; then
+            sudo sed -i 's/^dtoverlay=uart1.*/dtoverlay=uart1,txd1_pin=12,rxd1_pin=13/' "$BOOT_CONFIG" || true
+        else
+            echo "dtoverlay=uart1,txd1_pin=12,rxd1_pin=13" | sudo tee -a "$BOOT_CONFIG" >/dev/null || true
+        fi
+        # Attempt runtime apply with explicit params (non-fatal if it fails)
+        if command -v dtoverlay >/dev/null 2>&1; then
+            timeout 4s sudo -n dtoverlay -r uart1 >/dev/null 2>&1 || true
+            timeout 4s sudo -n dtoverlay uart1 txd1_pin=12 rxd1_pin=13 >/dev/null 2>&1 || \
+                log_debug "Runtime dtoverlay apply (Pi 5 uart1 pins 12/13) skipped; will take effect after reboot"
+        fi
+        log_info "Board model: $PI_MODEL — configured 'dtoverlay=uart1,txd1_pin=12,rxd1_pin=13' for Pi 5 wiring on GPIO12/13"
     fi
 
     # Ensure changes are flushed
     sync || true
 
-    # Verify device presence
-    if [[ -e /dev/ttyAMA4 ]]; then
-        log_success "/dev/ttyAMA4 is available"
-    elif [[ -e /dev/ttyS4 ]]; then
-        log_warning "/dev/ttyAMA4 not found; /dev/ttyS4 is present (check overlay/IMU wiring)"
+    # Verify device presence (board-aware)
+    if [[ "$PI_MODEL" == *"Raspberry Pi 4"* || "$PI_MODEL" == *"Compute Module 4"* ]]; then
+        if [[ -e /dev/ttyAMA4 ]]; then
+            log_success "/dev/ttyAMA4 is available"
+        elif [[ -e /dev/ttyS4 ]]; then
+            log_warning "/dev/ttyAMA4 not found; /dev/ttyS4 is present (check overlay/IMU wiring)"
+        else
+            log_info "UART4 configured in ${BOOT_CONFIG}; a reboot may be required for /dev/ttyAMA4 to appear"
+        fi
     else
-    log_info "UART4 configured in ${BOOT_CONFIG}; a reboot may be required for /dev/ttyAMA4 to appear"
+        if [[ -e /dev/ttyAMA1 ]]; then
+            log_success "/dev/ttyAMA1 is available (Pi 5 UART1)"
+        elif [[ -e /dev/ttyS1 ]]; then
+            log_warning "/dev/ttyAMA1 not found; /dev/ttyS1 is present (check overlay/IMU wiring)"
+        else
+            log_info "UART1 configured in ${BOOT_CONFIG}; a reboot may be required for /dev/ttyAMA1 to appear"
+        fi
     fi
 }
 
@@ -1092,6 +1122,39 @@ initialize_tof_sensors() {
     fi
 
     log_info "ToF sensor initialization complete"
+}
+
+patch_hardware_yaml_for_board() {
+    print_section "Board-Aware hardware.yaml adjustments (ToF right interrupt)"
+    local model="$(tr -d '\0' </proc/device-tree/model 2>/dev/null)"
+    if [[ -z "$model" ]]; then
+        log_warning "Unable to detect Pi model; skipping board-aware hardware.yaml patch"
+        return 0
+    fi
+    local hw_yaml="$PROJECT_ROOT/config/hardware.yaml"
+    [[ -f "$hw_yaml" ]] || { log_warning "hardware.yaml not found; skipping patch"; return 0; }
+
+    if [[ "$model" == *"Raspberry Pi 5"* ]]; then
+        # On Pi 5, default ToF right interrupt should be BCM8 (avoid UART4 on 12/13)
+        if grep -qE '^\s*tof_right_interrupt:\s*12\b' "$hw_yaml"; then
+            log_info "Patching gpio.pins.tof_right_interrupt: 12 -> 8 for Pi 5"
+            sed -i 's/^\(\s*tof_right_interrupt:\s*\)12\b/\18/' "$hw_yaml"
+        fi
+        # Also patch plugin parameter if present
+        if grep -qE '^\s*- name:\s*tof_right' "$hw_yaml"; then
+            # Narrow replace within the tof_right plugin block
+            awk 'BEGIN{inblock=0} 
+                /^\s*- name:\s*tof_right/{inblock=1}
+                inblock && /interrupt_pin:\s*12/{sub(/12/,"8");}
+                {print}
+                inblock && /^\s*- name:/ && !/tof_right/{inblock=0}
+            ' "$hw_yaml" > "$hw_yaml.tmp" && mv "$hw_yaml.tmp" "$hw_yaml"
+            log_info "Adjusted tof_right plugin interrupt_pin to 8 for Pi 5"
+        fi
+        log_success "hardware.yaml updated for Pi 5 ToF right interrupt defaults"
+    else
+        log_info "Board model: $model — no hardware.yaml ToF interrupt adjustments needed"
+    fi
 }
 
 setup_environment() {
@@ -2212,6 +2275,12 @@ main() {
         enable_uart4_for_imu
         initialize_tof_sensors
         detect_hardware
+        # Apply board-specific hardware.yaml adjustments (e.g., Pi 5 ToF right interrupt GPIO8)
+        if declare -F patch_hardware_yaml_for_board >/dev/null; then
+            patch_hardware_yaml_for_board || log_warning "Board-specific hardware.yaml patch skipped"
+        else
+            log_debug "patch_hardware_yaml_for_board not defined (older script variant)"
+        fi
     fi
 
     if [[ "$SKIP_ENV" != true ]] && [[ "$INSTALL_SYSTEM_CONFIG" == true ]]; then

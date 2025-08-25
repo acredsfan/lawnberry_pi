@@ -42,8 +42,10 @@ ProtectHome=true
 # Device access is controlled below via DeviceAllow entries.
 ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry
 DeviceAllow=/dev/i2c-1 rw
-DeviceAllow=/dev/ttyAMA0 rw
+DeviceAllow=/dev/serial0 rw
 DeviceAllow=/dev/ttyAMA4 rw
+DeviceAllow=/dev/ttyAMA1 rw
+DeviceAllow=/dev/ttyS1 rw
 DeviceAllow=/dev/ttyACM0 rw
 DeviceAllow=/dev/ttyACM1 rw
 DeviceAllow=/dev/ttyACM2 rw

@@ -230,6 +230,7 @@ class ToFSensorPlugin(HardwarePlugin):
             try:
                 # Import ToF manager
                 from .tof_manager import ToFSensorConfig, ToFSensorManager
+                from .board_utils import maybe_override_tof_right_interrupt, default_tof_right_interrupt_pin
 
                 # Get configuration parameters
                 sensor_name = self.config.name
@@ -243,10 +244,18 @@ class ToFSensorPlugin(HardwarePlugin):
                     )
 
                 # Create sensor configuration
+                # Apply board-aware override for right sensor legacy pin on Pi 5
+                effective_interrupt = interrupt_pin
+                try:
+                    if sensor_name == "tof_right":
+                        effective_interrupt = maybe_override_tof_right_interrupt(interrupt_pin)
+                except Exception:
+                    pass
+
                 sensor_config = ToFSensorConfig(
                     name=sensor_name,
                     shutdown_pin=shutdown_pin,
-                    interrupt_pin=interrupt_pin,
+                    interrupt_pin=effective_interrupt,
                     target_address=target_address,
                 )
 
@@ -300,12 +309,13 @@ class ToFSensorPlugin(HardwarePlugin):
     def _get_all_tof_configs(self) -> List:
         """Get all ToF sensor configurations from the system"""
         from .tof_manager import ToFSensorConfig
+        from .board_utils import default_tof_right_interrupt_pin
 
         # Default configuration based on hardware setup
         # This should ideally come from the hardware interface configuration
         return [
             ToFSensorConfig(name="tof_left", shutdown_pin=22, interrupt_pin=6, target_address=0x29),
-            ToFSensorConfig(name="tof_right", shutdown_pin=23, interrupt_pin=12, target_address=0x30),
+            ToFSensorConfig(name="tof_right", shutdown_pin=23, interrupt_pin=default_tof_right_interrupt_pin(), target_address=0x30),
         ]
 
     async def read_data(self) -> Optional[SensorReading]:

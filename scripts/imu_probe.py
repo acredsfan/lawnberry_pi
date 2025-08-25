@@ -33,8 +33,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--ports",
         nargs="+",
-        default=["/dev/ttyAMA4", "/dev/ttyAMA0"],
-        help="Serial ports to probe (default: /dev/ttyAMA4 /dev/ttyAMA0)",
+        default=["/dev/ttyAMA1", "/dev/ttyS1", "/dev/ttyAMA4", "/dev/ttyAMA0"],
+        help=(
+            "Serial ports to probe (default tries: /dev/ttyAMA1 /dev/ttyS1 /dev/ttyAMA4 /dev/ttyAMA0). "
+            "Pi 5 IMU is typically on AMA1 or S1 when mapped to GPIO12/13; Pi 4/CM4 often uses AMA4."
+        ),
     )
     p.add_argument(
         "--bauds",
@@ -161,8 +164,11 @@ def main() -> int:
                 any_success = True
 
     if not any_success:
-        print("No data observed in ASCII or raw modes. Check UART overlay, wiring (TXD4/RXD4), and IMU power/mode.")
-        print("Hints: enable_uart=1, dtoverlay=uart4, PS1=3.3V for BNO085 UART mode.")
+        print("No data observed in ASCII or raw modes. Check UART overlay, wiring, and IMU power/mode.")
+        print(
+            "Hints: Pi 5 → use dtoverlay=uart1,txd1_pin=12,rxd1_pin=13 and probe /dev/ttyAMA1 or /dev/ttyS1; "
+            "Pi 4/CM4 → dtoverlay=uart4 and probe /dev/ttyAMA4. Ensure enable_uart=1 and IMU PS1=3.3V (UART mode)."
+        )
         return 1
     return 0
 

@@ -11,6 +11,8 @@ w1thermsensor>=2.0.1,<3.0.0; sys_platform == "linux"
 adafruit-circuitpython-dht>=3.7.0,<4.0.0; sys_platform == "linux"
 adafruit-circuitpython-gps>=3.9.0,<4.0.0; sys_platform == "linux"
 adafruit-circuitpython-lsm9ds1>=2.1.0,<3.0.0; sys_platform == "linux"
+adafruit-circuitpython-bno08x>=1.3.0; sys_platform == "linux"
+adafruit-blinka>=8.0.0; sys_platform == "linux"
 
 # GPS and Navigation
 gpsd-py3>=0.3.0,<1.0.0; sys_platform == "linux"

@@ -33,6 +33,7 @@ except Exception:
 
 # Raspberry Pi 4B/5 compatibility is provided via gpio_wrapper
 from .gpio_wrapper import GPIO
+from .board_utils import default_tof_right_interrupt_pin
 
 try:  # Hardware I2C library may be unavailable during development
     import smbus2
@@ -246,9 +247,12 @@ class SerialManager:
 
         # Serial device configurations
         self.devices = {
-            # Mapped to observed typical ports in logs
-            "robohat": {"port": "/dev/ttyACM0", "baud": 115200, "timeout": 1.0},
+            # Default serial mappings; overridden by config/hardware.yaml when present
+            # RoboHAT on Pi header UART0 via stable alias /dev/serial0
+            "robohat": {"port": "/dev/serial0", "baud": 115200, "timeout": 1.0},
+            # GPS often appears as CDC-ACM; keep typical default
             "gps": {"port": "/dev/ttyACM1", "baud": 115200, "timeout": 1.0},
+            # IMU on UART4; baud overridden by plugin/config (3000000 typical for BNO085)
             "imu": {"port": "/dev/ttyAMA4", "baud": 115200, "timeout": 0.2},
         }
 
@@ -415,11 +419,12 @@ class GPIOManager:
         self._initialized = False
 
         # GPIO pin assignments
+        # Note: ToF right interrupt default is board-aware (Pi 5 => 8, else 12)
         self.pins = {
             "tof_left_shutdown": 22,
             "tof_right_shutdown": 23,
             "tof_left_interrupt": 6,
-            "tof_right_interrupt": 12,
+            "tof_right_interrupt": default_tof_right_interrupt_pin(),
             "blade_enable": 24,
             "blade_direction": 25,
         }

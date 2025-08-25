@@ -42,6 +42,7 @@ except ImportError:  # pragma: no cover - fallback if exceptions module missing
         pass
 
 from .gpio_wrapper import GPIO
+from .board_utils import default_tof_right_interrupt_pin
 
 
 class _FakeToFSensor:
@@ -175,7 +176,8 @@ class ToFSensorManager:
             ToFSensorConfig(
                 name="tof_right",
                 shutdown_pin=23,  # GPIO 23
-                interrupt_pin=12, # GPIO 12
+                # Board-aware default: Pi 5 => BCM8 to avoid UART4 on 12/13
+                interrupt_pin=default_tof_right_interrupt_pin(),
                 target_address=0x30  # Right sensor is changed to 0x30
             )
         ]

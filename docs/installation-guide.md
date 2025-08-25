@@ -167,6 +167,52 @@ sudo reboot
      - TX → RXD 4 (Pin 21)
      - PS1 → 3.3V (for UART mode)
 
+   > Note (Raspberry Pi 5 + RoboHAT): On Pi 5, `GPIO12/13` (physical pins 32/33) expose UART1 (TX1/RX1). The installer explicitly maps UART1 to these pins so your existing wiring on pins 32/33 works without changes. Verify actual mapping with:
+   >
+   > ```bash
+   > pinctrl -c bcm2835 12-13
+   > ```
+   >
+   > If you see `GPIO12 = TXD1` and `GPIO13 = RXD1`:
+   > - Cross-connect IMU UART accordingly:
+   >   - IMU `SDA/MISO/TX` (IMU TX) → Pi `GPIO13` `RXD1` (physical pin 33)
+   >   - IMU `SCL/SCK/RX` (IMU RX) → Pi `GPIO12` `TXD1` (physical pin 32)
+   > - Keep `PS1` tied to 3.3V (UART mode) and tie `PS0` to GND.
+   > - `INT`, `CS`, `ADDR/MOSI` are not used for UART and may be left unconnected; `RST` is optional and can be wired to a free GPIO (e.g., `GPIO5`, pin 29) for software reset pulses.
+   >
+   > RoboHAT caveat: RoboHAT often covers pins 33–40 physically. If you need access to 32/33, use a stacking/double height header (example accessory: an extra-tall 40-pin GPIO stacking header/adapter) so you can access pins on the top or bottom rows. If a pin conflict exists (e.g., your ToF interrupt currently uses pin 32), move that interrupt to a free GPIO such as `GPIO5` (pin 29) or `GPIO7` (pin 26) and update your configuration.
+   >
+   > Installer automation (Pi 5): The installer automatically moves the ToF right interrupt to `GPIO8` on Raspberry Pi 5 to avoid UART conflicts on `GPIO12/13`. On Pi 4/CM4 the default remains `GPIO12`. You can verify after install:
+   >
+   > ```bash
+   > grep -nE 'tof_right_interrupt|interrupt_pin' config/hardware.yaml
+   > ```
+   >
+   > Boot config behavior: The installer ensures `enable_uart=1` for all boards. It adds `dtoverlay=uart4` on Pi 4/CM4, and on Pi 5 it writes `dtoverlay=uart1,txd1_pin=12,rxd1_pin=13` so UART1 is bound to pins 32/33 explicitly. You can check with:
+
+   > - `grep -E "^enable_uart|^dtoverlay=uart(1|4)" /boot/firmware/config.txt /boot/config.txt 2>/dev/null`
+   > - `pinctrl -c bcm2835 12-13` (should show `TXD1`/`RXD1` on Pi 5)
+   > - `ls -l /dev/ttyAMA1 /dev/ttyS1 /dev/ttyAMA4 2>/dev/null` (expect AMA1 or S1 on Pi 5; AMA4 on Pi 4)
+
+   After wiring and verifying the device node, you can actively initialize the IMU and read quaternions using the Adafruit library with our helper script:
+
+   ```bash
+   # Ensure venv exists
+   test -x venv/bin/python || echo "venv missing"
+
+   # Install optional IMU dependencies if missing
+   timeout 60s venv/bin/python -m pip install adafruit-circuitpython-bno08x adafruit-blinka
+
+   # Run the bounded UART test (8s)
+   timeout 20s venv/bin/python scripts/imu_bno08x_uart.py --port /dev/ttyAMA1 --baud 3000000 --duration 8 --interval 0.2 --pre-reset
+   ```
+
+   You should see several `quat: ...` lines printed. If initialization times out:
+   - Re-check TX/RX crossover on GPIO12/13 (Pi 5)
+   - Confirm `PS1=3.3V` and `PS0=GND` on the IMU to select UART mode
+   - Try a lower baud (e.g., `--baud 115200`) temporarily to confirm link
+   - Use `scripts/uart_loopback_test.py` to electrically validate the UART path with a jumper on pins 32/33
+
 3. **Install Environmental Sensor**
    - Mount BME280 sensor in weather-protected location
    - **I2C connections**:
