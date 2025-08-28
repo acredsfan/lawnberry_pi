@@ -22,33 +22,36 @@ StartLimitBurst=3
 # Resource limits
 MemoryLimit=512M
 CPUQuota=75%
-TasksMax=150
+[Unit]
+Description=LawnBerry Data Management Service
+After=network-online.target
+Wants=network-online.target
 
-# Security settings
-NoNewPrivileges=true
+[Service]
+Type=simple
+User=lawnberry
+Group=lawnberry
+WorkingDirectory=/var/lib/lawnberry
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/lawnberry
+ExecStart=/opt/lawnberry/venv/bin/python -m src.data_management.data_service
+Restart=on-failure
+RestartSec=3
+# Hardening options
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry /opt/lawnberry/data
 PrivateTmp=true
-ProtectKernelTunables=true
-ProtectControlGroups=true
+NoNewPrivileges=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictRealtime=true
-SystemCallFilter=@system-service
-SystemCallErrorNumber=EPERM
-
-# Performance settings
-Nice=0
-IOSchedulingClass=1
-IOSchedulingPriority=4
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=lawnberry-data
-
-# Watchdog
-WatchdogSec=30
-NotifyAccess=main
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+ReadOnlyPaths=/
+ReadWritePaths=/var/lib/lawnberry /var/log/lawnberry /run /tmp
+DeviceAllow=/dev/tty* rw
+MemoryMax=512M
 
 [Install]
 WantedBy=multi-user.target

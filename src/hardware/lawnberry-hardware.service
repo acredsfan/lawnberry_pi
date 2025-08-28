@@ -1,41 +1,42 @@
+{# Updated service to use writable working directory and correct entrypoint #}
 [Unit]
-Description=Lawnberry Hardware Interface Layer
-Documentation=https://github.com/lawnberry/hardware-interface
-After=network.target lawnberry-communication.service lawnberry-data.service
-Requires=lawnberry-communication.service lawnberry-data.service
-StartLimitIntervalSec=0
+Description=LawnBerry Hardware Service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/opt/lawnberry
+User=lawnberry
+Group=lawnberry
+# lgpio creates .lgd-nfy* in the CWD; use a writable location
+WorkingDirectory=/var/lib/lawnberry
+Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/opt/lawnberry
-Environment=LAWNBERRY_ENV=production
-ExecStart=/opt/lawnberry/venv/bin/python -m src.hardware.hardware_interface
-ExecReload=/bin/kill -s HUP $MAINPID
-Restart=always
+Environment=GPIOZERO_PIN_FACTORY=lgpio
+# Use the sensor service entrypoint which is the long-running hardware publisher
+ExecStart=/opt/lawnberry/venv/bin/python -m src.hardware.sensor_service
+Restart=on-failure
 RestartSec=3
-StartLimitBurst=3
-
-# Resource limits
-MemoryMax=256M
-CPUQuota=75%
-TasksMax=100
-
-# Security settings
-NoNewPrivileges=true
+# Hardening options
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry /dev
 PrivateTmp=true
-ProtectKernelTunables=true
-ProtectControlGroups=true
+NoNewPrivileges=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictRealtime=true
-SystemCallFilter=@system-service
-SystemCallErrorNumber=EPERM
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+ReadOnlyPaths=/
+ReadWritePaths=/var/lib/lawnberry /var/log/lawnberry /run /tmp
+DeviceAllow=/dev/i2c-1 rw
+DeviceAllow=/dev/gpiomem rw
+DeviceAllow=/dev/tty* rw
+MemoryMax=512M
 
-# Hardware access
+[Install]
+WantedBy=multi-user.target
 SupplementaryGroups=gpio i2c spi dialout
 
 # Performance settings

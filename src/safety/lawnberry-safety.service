@@ -1,15 +1,16 @@
 [Unit]
 Description=Lawnberry Safety Monitoring System
 Documentation=https://github.com/lawnberry/safety-system
-After=network.target mosquitto.service
-Wants=network.target
+After=network-online.target mosquitto.service
+Wants=network-online.target
 Requires=mosquitto.service
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/opt/lawnberry
+User=lawnberry
+Group=lawnberry
+# Use writable CWD to avoid lgpio .lgd-nfy* pipe issues if GPIO is touched
+WorkingDirectory=/var/lib/lawnberry
 Environment=PYTHONPATH=/opt/lawnberry
 Environment=LAWNBERRY_ENV=production
 ExecStart=/opt/lawnberry/venv/bin/python -m src.safety.safety_main
@@ -20,7 +21,7 @@ StartLimitInterval=60
 StartLimitBurst=3
 
 # Resource limits
-MemoryLimit=1024M
+MemoryMax=1024M
 CPUQuota=50%
 TasksMax=100
 
@@ -28,7 +29,7 @@ TasksMax=100
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry
+ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry /run /tmp
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
@@ -45,10 +46,6 @@ IOSchedulingPriority=4
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=lawnberry-safety
-
-# Watchdog
-WatchdogSec=30
-NotifyAccess=main
 
 [Install]
 WantedBy=multi-user.target

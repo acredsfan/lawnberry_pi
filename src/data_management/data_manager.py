@@ -96,6 +96,15 @@ class DataManager:
         except Exception as e:
             self.logger.error(f"Data management initialization failed: {e}")
             return False
+
+    # Convenience lifecycle wrappers for services that expect start/stop
+    async def start(self) -> bool:
+        """Alias for initialize() to satisfy existing service code."""
+        return await self.initialize()
+
+    async def stop(self) -> None:
+        """Alias for shutdown() to satisfy existing service code."""
+        await self.shutdown()
     
     # Sensor Data Operations
     async def store_sensor_reading(self, reading: SensorReading) -> bool:
