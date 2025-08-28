@@ -1,4 +1,3 @@
-{# Updated service to use writable working directory and correct entrypoint #}
 [Unit]
 Description=LawnBerry Hardware Service
 After=network-online.target
@@ -17,12 +16,13 @@ Environment=GPIOZERO_PIN_FACTORY=lgpio
 ExecStart=/opt/lawnberry/venv/bin/python -m src.hardware.sensor_service
 Restart=on-failure
 RestartSec=3
+SupplementaryGroups=gpio i2c spi dialout
 # Hardening options
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
-PrivateDevices=true
+PrivateDevices=false
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictRealtime=true
 LockPersonality=true
@@ -30,28 +30,13 @@ MemoryDenyWriteExecute=true
 RestrictNamespaces=true
 ReadOnlyPaths=/
 ReadWritePaths=/var/lib/lawnberry /var/log/lawnberry /run /tmp
+DevicePolicy=closed
 DeviceAllow=/dev/i2c-1 rw
 DeviceAllow=/dev/gpiomem rw
+DeviceAllow=/dev/gpiochip* rw
 DeviceAllow=/dev/tty* rw
 MemoryMax=512M
 
 [Install]
 WantedBy=multi-user.target
-SupplementaryGroups=gpio i2c spi dialout
-
-# Performance settings
-Nice=-3
-IOSchedulingClass=1
-IOSchedulingPriority=3
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=lawnberry-hardware
-
-# Watchdog
-WatchdogSec=30
-NotifyAccess=main
-
-[Install]
-WantedBy=multi-user.target
+ 

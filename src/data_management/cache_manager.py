@@ -36,6 +36,40 @@ class CacheManager:
         self.redis_host = config.get('host', 'localhost')
         self.redis_port = config.get('port', 6379)
         self.redis_db = config.get('db', 0)
+        # Optional password support
+        self.redis_password = config.get('password')
+
+        # Connection state and synchronization
+        self._connection_lock = asyncio.Lock()
+        self._connected: bool = False
+        self.redis_pool = None
+        self.redis_client = None
+
+        # In-memory fallback stores and statistics
+        self._store: Dict[str, Any] = {}
+        self._streams: Dict[str, list] = {}
+        self._pubsub_history: list = []
+        self.stats = {
+            'hits': 0,
+            'misses': 0,
+            'sets': 0,
+            'deletes': 0,
+            'errors': 0,
+        }
+
+        # Key prefixes per data type and TTLs
+        self.key_prefixes = {
+            DataType.SENSOR: 'sensor:',
+            DataType.CONFIGURATION: 'config:',
+            DataType.OPERATIONAL: 'state:',
+            DataType.NAVIGATION: 'nav:',
+            DataType.PERFORMANCE: 'perf:',
+        }
+        # Default TTLs (seconds)
+        self.default_ttl = int(config.get('default_ttl', 3600))
+        self.sensor_ttl = int(config.get('sensor_ttl', 30))
+        self.config_ttl = int(config.get('config_ttl', 600))
+        self.state_ttl = int(config.get('state_ttl', 60))
         
     
     async def connect(self) -> bool:

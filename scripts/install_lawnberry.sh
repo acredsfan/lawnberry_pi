@@ -26,6 +26,7 @@ SKIP_HARDWARE=false
 SKIP_ENV=false
 SKIP_VALIDATION=false
 AUTO_APPLY_DETECTED_CONFIG=false
+FORCE_UNIT_REPLACE=false
 
 # Parse command line arguments for modular installation
 show_help() {
@@ -111,6 +112,7 @@ parse_arguments() {
                 INSTALL_SYSTEM_CONFIG=false
                 SKIP_VALIDATION=true
                 SKIP_HARDWARE=true
+                FORCE_UNIT_REPLACE=true
                 ;;
             --database-only)
                 INSTALL_DEPENDENCIES=false
@@ -1392,6 +1394,45 @@ create_directories() {
     log_success "System directories created"
 }
 
+# Ensure a dedicated non-login service user and group exist for running services
+ensure_service_user() {
+    print_section "Ensuring Service User and Permissions"
+    local svc_user="lawnberry"
+    local svc_group="lawnberry"
+
+    if ! getent group "$svc_group" >/dev/null 2>&1; then
+        log_info "Creating group: $svc_group"
+        sudo groupadd --system "$svc_group" || true
+    else
+        log_debug "Group already exists: $svc_group"
+    fi
+
+    if ! id -u "$svc_user" >/dev/null 2>&1; then
+        log_info "Creating service user: $svc_user (system, no-login)"
+        sudo useradd \
+            --system \
+            --gid "$svc_group" \
+            --home "$INSTALL_DIR" \
+            --shell /usr/sbin/nologin \
+            "$svc_user" || true
+    else
+        log_debug "User already exists: $svc_user"
+    fi
+
+    # Ensure hardware group memberships
+    log_info "Adding $svc_user to hardware groups (i2c,spi,gpio,dialout,video)"
+    sudo usermod -a -G i2c,spi,gpio,dialout,video "$svc_user" 2>/dev/null || true
+
+    # Ensure ownership of runtime directories
+    log_info "Setting ownership of runtime directories to $svc_user:$svc_group"
+    sudo chown -R "$svc_user:$svc_group" "$INSTALL_DIR" || true
+    sudo chown -R "$svc_user:$svc_group" "$LOG_DIR" || true
+    sudo chown -R "$svc_user:$svc_group" "$DATA_DIR" || true
+
+    # Permissions
+    sudo chmod 755 "$INSTALL_DIR" "$LOG_DIR" "$DATA_DIR" 2>/dev/null || true
+}
+
 deploy_update() {
     print_section "Fast Deploy Update (Sync to /opt)"
     local deploy_start_ts=$(date +%s)
@@ -1716,6 +1757,24 @@ install_services() {
 
     log_info "Checking and installing systemd service files with Bookworm optimizations..."
 
+    # Proactively ensure the service user exists to avoid 217/USER failures
+    ensure_service_user
+
+    # Minimal hardware enablement for services-only runs: ensure I2C is enabled so /dev/i2c-1 exists
+    if [[ ! -e /dev/i2c-1 ]]; then
+        log_info "I2C device /dev/i2c-1 not found — attempting to enable I2C interface"
+        if command -v raspi-config >/dev/null 2>&1; then
+            timeout 6s sudo -n raspi-config nonint do_i2c 0 >/dev/null 2>&1 || log_warning "raspi-config do_i2c skipped or timed out"
+        else
+            log_warning "raspi-config not available; please enable I2C manually in /boot config and reboot"
+        fi
+        if [[ ! -e /dev/i2c-1 ]]; then
+            log_warning "I2C still not present; a reboot may be required for overlays to take effect"
+        else
+            log_success "I2C interface enabled (\"/dev/i2c-1\")"
+        fi
+    fi
+
     installed_services=()
     services_needing_update=()
 
@@ -1725,72 +1784,43 @@ install_services() {
             target_service="$SERVICE_DIR/$service_name"
             needs_install=false
 
-            # Check if service needs to be installed/updated
-            if [[ ! -f "$target_service" ]]; then
-                log_info "Service not found: $service_name - installing..."
-                needs_install=true
-            else
-                # Check if source service file is newer than installed one
-                if [[ "$service_file" -nt "$target_service" ]]; then
-                    log_info "Service outdated: $service_name - updating..."
-                    needs_install=true
-                    services_needing_update+=("$service_name")
-                else
-                    # Check if Python path in service file needs updating (canonical runtime = INSTALL_DIR)
-                        if ! grep -q "$INSTALL_DIR/venv/bin/python" "$target_service" 2>/dev/null; then
-                        log_info "Service paths outdated: $service_name - updating..."
-                        needs_install=true
-                        services_needing_update+=("$service_name")
-                    else
-                        log_debug "Service up-to-date: $service_name - skipping"
-                    fi
-                fi
+            # Always build a normalized temporary unit for deterministic install
+            temp_service="/tmp/$service_name"
+            cp "$service_file" "$temp_service"
+            
+            # Ensure canonical python path if unit uses /usr/bin/python3; otherwise leave ExecStart untouched
+            sed -i "s|/usr/bin/python3|$INSTALL_DIR/venv/bin/python3|g" "$temp_service" 2>/dev/null || true
+            # Do not override WorkingDirectory or service User/Group — honor source units (some need /var/lib and 'lawnberry')
+            # Optionally normalize PYTHONPATH to canonical runtime when present
+            if grep -q '^Environment=PYTHONPATH=' "$temp_service"; then
+                sed -i "s|^Environment=PYTHONPATH=.*|Environment=PYTHONPATH=$INSTALL_DIR|" "$temp_service" || true
             fi
 
-            if [[ "$needs_install" == true ]]; then
-                log_info "Installing/updating $service_name..."
+            # Normalize Type and MemoryLimit->MemoryMax (Bookworm)
+            if grep -q '^Type=' "$temp_service"; then
+                sed -i 's/^Type=.*/Type=simple/' "$temp_service" || true
+            else
+                awk 'BEGIN{ins=0} {print} /^\[Service\]/{if(!ins){print "Type=simple"; ins=1}}' "$temp_service" > /tmp/unit_norm && mv /tmp/unit_norm "$temp_service"
+            fi
+            if grep -q '^MemoryLimit=' "$temp_service"; then
+                sed -i 's/^MemoryLimit=/MemoryMax=/' "$temp_service" || true
+            fi
 
-                # Stop service if it's running and being updated
-                if [[ " ${services_needing_update[*]} " =~ " ${service_name} " ]]; then
-                    service_base="${service_name%.service}"
-                    if systemctl is-active --quiet "$service_name" 2>/dev/null; then
-                        log_info "Stopping $service_name for update..."
-                        sudo systemctl stop "$service_name" || log_warning "Could not stop $service_name"
-                    fi
-                fi
+            # Remove any previously inlined hardening block in the source (avoid duplicates)
+            # This drops lines between the marker comment and the next section header
+            if grep -q '^# Additional Bookworm Security Features' "$temp_service"; then
+                awk 'BEGIN{skip=0} 
+                    /^# Additional Bookworm Security Features/{skip=1; next}
+                    /^\[/{skip=0}
+                    {if(!skip) print}
+                ' "$temp_service" > /tmp/unit_no_dup && mv /tmp/unit_no_dup "$temp_service"
+            fi
 
-                # Update service file paths BUT retain /opt canonical deployment (Option A)
-                # We intentionally keep WorkingDirectory=/opt/lawnberry so runtime is isolated from dev tree
-                temp_service="/tmp/$service_name"
-                cp "$service_file" "$temp_service"
-                # Ensure python path points to canonical venv if template used /usr/bin/python3
-                sed -i "s|/usr/bin/python3|$INSTALL_DIR/venv/bin/python3|g" "$temp_service"
-                # Normalize WorkingDirectory & PYTHONPATH explicitly (idempotent when already correct)
-                sed -i "s|WorkingDirectory=.*|WorkingDirectory=$INSTALL_DIR|g" "$temp_service"
-                sed -i "s|Environment=PYTHONPATH=.*|Environment=PYTHONPATH=$INSTALL_DIR|g" "$temp_service"
-                # Fix user and group to match current user (templates may specify placeholder)
-                sed -i "s|User=.*|User=$USER|g" "$temp_service"
-                sed -i "s|Group=.*|Group=$GROUP|g" "$temp_service"
-                # (No replacement of /opt/lawnberry with project root — by design per Option A decision)
-
-                # Normalize service type and memory limits for Bookworm
-                if grep -q '^Type=' "$temp_service"; then
-                    sed -i 's/^Type=.*/Type=simple/' "$temp_service" || true
-                else
-                    # Insert Type=simple under [Service] if Type not present
-                    awk 'BEGIN{ins=0} {print} /^\[Service\]/{if(!ins){print "Type=simple"; ins=1}}' "$temp_service" > /tmp/unit_norm && mv /tmp/unit_norm "$temp_service"
-                fi
-                # Migrate deprecated MemoryLimit to MemoryMax
-                if grep -q '^MemoryLimit=' "$temp_service"; then
-                    sed -i 's/^MemoryLimit=/MemoryMax=/' "$temp_service" || true
-                fi
-
-                # Apply Bookworm-specific security hardening if supported, inside [Service]
-                if [[ $SYSTEMD_VERSION -ge 252 ]]; then
-                    if ! grep -q '^ProtectClock=' "$temp_service"; then
-                        log_info "Inserting hardening keys into [Service] for $service_name (systemd >=252)"
-                        # Prepare hardening block in a temp file
-                        cat > /tmp/lawnberry_hardening_block.$$ << 'HARDEN'
+            # Inject canonical hardening block once, under [Service], if not already present
+            if [[ $SYSTEMD_VERSION -ge 252 ]]; then
+                if ! grep -q '^ProtectClock=' "$temp_service"; then
+                    log_debug "Inserting hardening keys into [Service] for $service_name"
+                    cat > /tmp/lawnberry_hardening_block.$$ << 'HARDEN'
 # Additional Bookworm Security Features
 ProtectClock=true
 ProtectHostname=true
@@ -1803,23 +1833,60 @@ RestrictSUIDSGID=true
 SystemCallArchitectures=native
 UMask=0027
 HARDEN
-                        # Insert the block immediately after the [Service] header
-                        awk -v f="/tmp/lawnberry_hardening_block.$$" 'BEGIN{ins=0} {
-                            print $0;
-                            if ($0 ~ /^\[Service\]/ && !ins) {
-                                while ((getline l < f) > 0) print l;
-                                close(f);
-                                ins=1;
-                            }
-                        }' "$temp_service" > /tmp/unit_harden && mv /tmp/unit_harden "$temp_service"
-                        rm -f /tmp/lawnberry_hardening_block.$$
+                    awk -v f="/tmp/lawnberry_hardening_block.$$" 'BEGIN{ins=0} {
+                        print $0;
+                        if ($0 ~ /^\[Service\]/ && !ins) {
+                            while ((getline l < f) > 0) print l;
+                            close(f);
+                            ins=1;
+                        }
+                    }' "$temp_service" > /tmp/unit_harden && mv /tmp/unit_harden "$temp_service"
+                    rm -f /tmp/lawnberry_hardening_block.$$
+                fi
+            fi
+
+            # Decide if install/update is required
+            if [[ "$FORCE_UNIT_REPLACE" == true ]]; then
+                needs_install=true
+                services_needing_update+=("$service_name")
+            else
+                if [[ ! -f "$target_service" ]]; then
+                    log_info "Service not found: $service_name - installing..."
+                    needs_install=true
+                    services_needing_update+=("$service_name")
+                else
+                    if ! sudo cmp -s "$temp_service" "$target_service" 2>/dev/null; then
+                        log_info "Service content changed: $service_name - replacing file"
+                        needs_install=true
+                        services_needing_update+=("$service_name")
                     else
-                        log_debug "Hardening keys already present in $service_name"
+                        log_debug "No changes for $service_name"
                     fi
                 fi
+            fi
 
-                sudo cp "$temp_service" "$SERVICE_DIR/"
-                sudo chmod 644 "$SERVICE_DIR/$service_name"
+            if [[ "$needs_install" == true ]]; then
+                log_info "Installing/updating $service_name (overwrite mode)..."
+
+                # Stop service if running before replacement
+                service_base="${service_name%.service}"
+                if systemctl is-active --quiet "$service_name" 2>/dev/null; then
+                    sudo systemctl stop "$service_name" || log_warning "Could not stop $service_name"
+                fi
+
+                # Backup existing unit (one timestamped backup retained per run)
+                if [[ -f "$target_service" ]]; then
+                    ts=$(date +%Y%m%d-%H%M%S)
+                    sudo cp "$target_service" "$target_service.bak-$ts" 2>/dev/null || true
+                fi
+
+                # Overwrite atomically using install -T (backup first to avoid partial writes)
+                ts=$(date +%Y%m%d-%H%M%S)
+                if [[ -f "$target_service" ]]; then
+                    sudo cp -f "$target_service" "$target_service.preclean-$ts" 2>/dev/null || true
+                fi
+                sudo install -m 0644 -T "$temp_service" "$target_service"
+                sudo chmod 644 "$target_service"
                 rm -f "$temp_service"
 
                 installed_services+=("${service_name%.service}")

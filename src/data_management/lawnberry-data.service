@@ -1,31 +1,8 @@
 [Unit]
-Description=Lawnberry Data Management System
-Documentation=https://github.com/lawnberry/data-management
-After=network.target redis.service lawnberry-communication.service
-Wants=redis.service
-Requires=lawnberry-communication.service
-StartLimitIntervalSec=0
-
-[Service]
-Type=exec
-User=lawnberry
-Group=lawnberry
-WorkingDirectory=/opt/lawnberry
-Environment=PYTHONPATH=/opt/lawnberry
-Environment=LAWNBERRY_ENV=production
-ExecStart=/opt/lawnberry/venv/bin/python -m src.data_management.data_manager
-ExecReload=/bin/kill -s HUP $MAINPID
-Restart=always
-RestartSec=5
-StartLimitBurst=3
-
-# Resource limits
-MemoryLimit=512M
-CPUQuota=75%
-[Unit]
 Description=LawnBerry Data Management Service
-After=network-online.target
+After=network-online.target lawnberry-communication.service
 Wants=network-online.target
+Requires=lawnberry-communication.service
 
 [Service]
 Type=simple
@@ -34,9 +11,11 @@ Group=lawnberry
 WorkingDirectory=/var/lib/lawnberry
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/opt/lawnberry
+Environment=LAWNBERRY_ENV=production
 ExecStart=/opt/lawnberry/venv/bin/python -m src.data_management.data_service
 Restart=on-failure
 RestartSec=3
+
 # Hardening options
 ProtectSystem=strict
 ProtectHome=true

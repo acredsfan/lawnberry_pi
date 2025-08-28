@@ -19,7 +19,7 @@ RestartSec=5
 StartLimitBurst=3
 
 # Resource limits
-MemoryLimit=384M
+MemoryMax=384M
 CPUQuota=100%
 TasksMax=100
 
@@ -45,9 +45,7 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=lawnberry-sensor-fusion
 
-# Watchdog
-WatchdogSec=30
-NotifyAccess=main
+# Watchdog removed (sd_notify not used by service)
 
 [Install]
 WantedBy=multi-user.target

@@ -26,6 +26,17 @@ class AnalyticsResult:
     confidence: float = 1.0
     metadata: Dict[str, Any] = None
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize the result to a dictionary for caching/transport."""
+        return {
+            'metric_name': self.metric_name,
+            'value': self.value,
+            'unit': self.unit,
+            'timestamp': self.timestamp.isoformat() if isinstance(self.timestamp, datetime) else self.timestamp,
+            'confidence': self.confidence,
+            'metadata': self.metadata or {},
+        }
+
 
 class AnalyticsEngine:
     """Advanced analytics and performance monitoring engine"""

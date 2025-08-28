@@ -7,8 +7,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=pi
-Group=pi
+User=lawnberry
+Group=lawnberry
 WorkingDirectory=/opt/lawnberry
 Environment=PYTHONPATH=/opt/lawnberry
 Environment=LAWNBERRY_ENV=production

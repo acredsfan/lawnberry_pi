@@ -17,7 +17,7 @@ ExecStart=/opt/lawnberry/venv/bin/python -m src.safety.safety_main
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
 RestartSec=5
-StartLimitInterval=60
+StartLimitIntervalSec=60
 StartLimitBurst=3
 
 # Resource limits

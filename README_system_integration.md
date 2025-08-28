@@ -345,6 +345,34 @@ asyncio.run(test())
 - Health metrics: `/var/lib/lawnberry/health_metrics.json`
 - State persistence: `/var/lib/lawnberry/system_state.json`
 
+## Bookworm service unit notes (updated)
+
+On Raspberry Pi OS Bookworm, systemd has changed some directives and tightened defaults. We updated LawnBerryPi units accordingly:
+
+- Use `Type=simple` for long-running asyncio services (was `Type=exec`).
+- Replace deprecated `MemoryLimit` with `MemoryMax` under the `[Service]` section.
+- Ensure hardening keys (e.g., `ProtectSystem`, `PrivateTmp`, `RestrictAddressFamilies`) live under `[Service]`, not `[Install]`.
+- Hardware service runs with `WorkingDirectory=/var/lib/lawnberry` and `Environment=GPIOZERO_PIN_FACTORY=lgpio` to avoid `.lgd-*` FIFO creation under read-only paths.
+- Data service entrypoint is `-m src.data_management.data_service` and uses `/var/lib/lawnberry` as its working directory.
+
+Redeploy units and restart:
+
+```bash
+# From repo root, deploy code+units to /opt and reload units (uses timeouts internally)
+./scripts/install_lawnberry.sh --deploy-update
+
+# Reload and restart critical services
+sudo systemctl daemon-reload
+sudo systemctl restart lawnberry-data.service
+sudo systemctl restart lawnberry-hardware.service
+sudo systemctl restart lawnberry-safety.service
+
+# Follow logs
+journalctl -u lawnberry-data.service -u lawnberry-hardware.service -u lawnberry-safety.service -f
+```
+
+If a service reports a “bad unit file setting,” verify there are no duplicate `[Unit]`/`[Install]` sections and that Bookworm directives are used (e.g., `StartLimitIntervalSec`).
+
 ## Development
 ## ToF (VL53L0X) address assignment and no-GPIO mode
 

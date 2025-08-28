@@ -6,7 +6,7 @@ Requires=lawnberry-communication.service lawnberry-data.service
 StartLimitIntervalSec=0
 
 [Service]
-Type=exec
+Type=simple
 User=lawnberry
 Group=lawnberry
 WorkingDirectory=/opt/lawnberry
@@ -19,7 +19,7 @@ RestartSec=10
 StartLimitBurst=2
 
 # Resource limits
-MemoryLimit=256M
+MemoryMax=256M
 CPUQuota=50%
 TasksMax=50
 
@@ -48,9 +48,7 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=lawnberry-weather
 
-# Watchdog
-WatchdogSec=60
-NotifyAccess=main
+# Watchdog removed (sd_notify not used by service)
 
 [Install]
 WantedBy=multi-user.target
