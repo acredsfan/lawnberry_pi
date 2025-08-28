@@ -212,8 +212,16 @@ class ServiceOrchestrator:
             status.state = ServiceState.STARTING
             
             # Use systemctl to start the service
+            systemctl_cmd = ['systemctl']
+            try:
+                import os
+                if os.geteuid() != 0:
+                    # Running unprivileged (as user 'pi' under hardened service), use --user scope
+                    systemctl_cmd.append('--user')
+            except Exception:
+                pass
             result = await asyncio.create_subprocess_exec(
-                'systemctl', 'start', config.service_file,
+                *systemctl_cmd, 'start', config.service_file,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -273,8 +281,15 @@ class ServiceOrchestrator:
             status.state = ServiceState.STOPPING
             
             # Use systemctl to stop the service
+            systemctl_cmd = ['systemctl']
+            try:
+                import os
+                if os.geteuid() != 0:
+                    systemctl_cmd.append('--user')
+            except Exception:
+                pass
             result = await asyncio.create_subprocess_exec(
-                'systemctl', 'stop', config.service_file,
+                *systemctl_cmd, 'stop', config.service_file,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -380,8 +395,15 @@ class ServiceOrchestrator:
             config = self.services[service_name]
             
             # Force stop using systemctl
+            systemctl_cmd = ['systemctl']
+            try:
+                import os
+                if os.geteuid() != 0:
+                    systemctl_cmd.append('--user')
+            except Exception:
+                pass
             result = await asyncio.create_subprocess_exec(
-                'systemctl', 'kill', '--signal=SIGKILL', config.service_file,
+                *systemctl_cmd, 'kill', '--signal=SIGKILL', config.service_file,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -397,8 +419,15 @@ class ServiceOrchestrator:
     async def _get_service_pid(self, service_file: str) -> Optional[int]:
         """Get the PID of a systemd service"""
         try:
+            systemctl_cmd = ['systemctl']
+            try:
+                import os
+                if os.geteuid() != 0:
+                    systemctl_cmd.append('--user')
+            except Exception:
+                pass
             result = await asyncio.create_subprocess_exec(
-                'systemctl', 'show', '--property=MainPID', service_file,
+                *systemctl_cmd, 'show', '--property=MainPID', service_file,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )

@@ -76,7 +76,8 @@ class BuildSystem:
         
         # Build directories
         self.build_dir = Path("/tmp/lawnberry_build")
-        self.output_dir = Path("/opt/lawnberry/builds")
+        # Output artifacts should be written to /var/lib (writable), not /opt
+        self.output_dir = Path("/var/lib/lawnberry/builds")
         self.source_dir = Path("/opt/lawnberry")
         
         # Signing key
@@ -95,7 +96,7 @@ class BuildSystem:
         """Default build configuration"""
         return {
             'build_dir': '/tmp/lawnberry_build',
-            'output_dir': '/opt/lawnberry/builds',
+            'output_dir': '/var/lib/lawnberry/builds',
             'compression_level': 6,
             'include_tests': False,
             'include_docs': True,
@@ -123,13 +124,17 @@ class BuildSystem:
     def _load_private_key(self):
         """Load private key for package signing"""
         try:
-            private_key_path = Path("/opt/lawnberry/keys/deployment_private.pem")
-            if private_key_path.exists():
-                with open(private_key_path, 'rb') as f:
-                    return serialization.load_pem_private_key(f.read(), password=None)
-            else:
-                logger.warning("Deployment private key not found, package signing disabled")
-                return None
+            # Prefer writable var-lib location; fall back to read-only /opt if provisioned there
+            candidates = [
+                Path("/var/lib/lawnberry/keys/deployment_private.pem"),
+                Path("/opt/lawnberry/keys/deployment_private.pem"),
+            ]
+            for private_key_path in candidates:
+                if private_key_path.exists():
+                    with open(private_key_path, 'rb') as f:
+                        return serialization.load_pem_private_key(f.read(), password=None)
+            logger.warning("Deployment private key not found, package signing disabled")
+            return None
         except Exception as e:
             logger.error(f"Failed to load private key: {e}")
             return None
@@ -167,8 +172,8 @@ class BuildSystem:
             # Get public key
             public_key = private_key.public_key()
             
-            # Create keys directory
-            key_dir = Path("/opt/lawnberry/keys")
+            # Create keys directory in writable var-lib location
+            key_dir = Path("/var/lib/lawnberry/keys")
             key_dir.mkdir(parents=True, exist_ok=True)
             
             # Save private key

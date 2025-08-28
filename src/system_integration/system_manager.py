@@ -8,7 +8,7 @@ import asyncio
 import logging
 import signal
 import sys
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
@@ -111,7 +111,7 @@ class SystemManager:
 
             # Wire deployment event publisher via communication (MQTT) service if available later.
             # We defer lookup slightly to allow communication service startup to attach MQTT bridge.
-            async def _publish_deployment_event(topic: str, payload: Dict[str, Any]):
+            async def _publish_deployment_event(topic: str, payload: dict):
                 """Publish deployment events over MQTT if communication layer exposes bridge.
 
                 This function is resilient: it logs on failure instead of raising so deployment

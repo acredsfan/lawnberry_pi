@@ -30,6 +30,14 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 
+# Device access for camera/video (API streams MJPEG)
+DeviceAllow=/dev/video0 rw
+DeviceAllow=/dev/video1 rw
+DeviceAllow=/dev/video2 rw
+DeviceAllow=/dev/video3 rw
+DeviceAllow=/dev/media0 rw
+DeviceAllow=/dev/media1 rw
+
 # Resource limits
 LimitNOFILE=65536
 MemoryMax=512M

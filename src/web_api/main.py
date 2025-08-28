@@ -82,6 +82,32 @@ async def lifespan(app: FastAPI):
     # Integrate MQTT bridge with WebSocket manager for real-time data
     from .routers.websocket import setup_websocket_mqtt_integration
     setup_websocket_mqtt_integration(mqtt_bridge)
+
+    # Initialize shared hardware interface for camera access in API process
+    try:
+        import os
+        # When API owns the camera, instruct hardware service not to, by setting env in its unit
+        from ..hardware.hardware_interface import create_hardware_interface  # type: ignore
+        cfg_path = os.path.join(os.environ.get('PYTHONPATH', '/opt/lawnberry').split(os.pathsep)[0], 'config', 'hardware.yaml')
+        hw = create_hardware_interface(cfg_path, shared=True)
+        # Initialize minimally and start camera capture for streaming; bounded time
+        try:
+            await asyncio.wait_for(hw.initialize(), timeout=8.0)
+        except Exception:
+            pass
+        app.state.system_manager = type('SysMgr', (), {
+            'hardware_interface': hw,
+            'camera_manager': getattr(hw, 'camera_manager', None)
+        })()
+        # Ensure camera capture running
+        cam = getattr(hw, 'camera_manager', None)
+        if cam:
+            try:
+                await asyncio.wait_for(cam.start_capture(), timeout=2.0)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"API hardware/camera init skipped: {e}")
     
     # Initialize auth manager and register globally for dependency helpers
     auth_manager = AuthManager(settings.auth)

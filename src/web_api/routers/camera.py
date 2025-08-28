@@ -1,126 +1,13 @@
 """
-Camera streaming API endpoints
-Provides camera stream access and control for the web interface.
+Camera streaming API endpoints used by the web UI.
+This router pulls frames from the shared HardwareInterface stored on app.state.
 """
 
 import asyncio
 import logging
-from typing import Dict, Any, Optional
-
-# Optional heavy dependencies (OpenCV, numpy) may not be installed on minimal systems.
-try:  # pragma: no cover
-    import cv2  # type: ignore
-except Exception:  # noqa
-    cv2 = None  # type: ignore
-try:  # pragma: no cover
-    import numpy as np  # type: ignore
-except Exception:  # noqa
-    np = None  # type: ignore
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import StreamingResponse
-import io
-import time
-
-logger = logging.getLogger(__name__)
-router = APIRouter()
-
-
-@router.get("/camera/stream")
-async def camera_stream(request: Request):
-    """
-    Stream camera feed as MJPEG
-    """
-    try:
-        # Try to get camera manager from application state
-        system_manager = getattr(request.app.state, 'system_manager', None)
-        camera_manager = getattr(system_manager, 'camera_manager', None) if system_manager else None
-        
-        if not camera_manager:
-            logger.warning("Camera manager not available, using placeholder stream")
-            return StreamingResponse(
-                generate_placeholder_stream(),
-                media_type="multipart/x-mixed-replace; boundary=frame"
-            )
-        
-        return StreamingResponse(
-            generate_camera_stream(camera_manager),
-            media_type="multipart/x-mixed-replace; boundary=frame"
-        )
-    except Exception as e:
-        logger.error(f"Camera stream error: {e}")
-        raise HTTPException(status_code=500, detail=f"Camera stream failed: {str(e)}")
-
-
-@router.get("/camera/frame")
-async def get_camera_frame(request: Request):
-    """
-    Get a single camera frame as JPEG
-    """
-    try:
-        # Try to get camera manager from application state
-        system_manager = getattr(request.app.state, 'system_manager', None)
-        camera_manager = getattr(system_manager, 'camera_manager', None) if system_manager else None
-        
-        if not camera_manager:
-            # Return placeholder frame (minimal JPEG if cv2 unavailable)
-            return StreamingResponse(io.BytesIO(_generate_placeholder_frame()), media_type="image/jpeg")
-        
-        # Get frame from camera manager
-        frame = await camera_manager.get_frame()
-        if frame is None:
-            return StreamingResponse(io.BytesIO(_generate_placeholder_frame()), media_type="image/jpeg")
-        return StreamingResponse(io.BytesIO(frame), media_type="image/jpeg")
-        
-    except Exception as e:
-        logger.error(f"Camera frame error: {e}")
-        # Return placeholder on error
-    return StreamingResponse(io.BytesIO(_generate_placeholder_frame()), media_type="image/jpeg")
-
-
-@router.get("/camera/status")
-async def get_camera_status(request: Request) -> Dict[str, Any]:
-    """
-    Get camera system status
-    """
-    try:
-        # Try to get camera manager from application state
-        system_manager = getattr(request.app.state, 'system_manager', None)
-        camera_manager = getattr(system_manager, 'camera_manager', None) if system_manager else None
-        
-        if not camera_manager:
-            return {
-                "available": False,
-                "active": False,
-                "resolution": None,
-                "fps": 0,
-                "error": "Camera manager not available"
-            }
-        
-        # Get status from camera manager
-        status = await camera_manager.get_status()
-        return {
-            "available": True,
-            "active": status.get("active", False),
-            "resolution": status.get("resolution", "640x480"),
-            "fps": status.get("fps", 30),
-            "error": None
-        }
-        
-    except Exception as e:
-        logger.error(f"Camera status error: {e}")
-        return {
-            "available": False,
-            "active": False,
-            "resolution": None,
-            "fps": 0,
-            "error": str(e)
-        }
-
-import asyncio
-import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 try:  # pragma: no cover
     import cv2  # type: ignore
@@ -141,7 +28,7 @@ router = APIRouter(prefix="/camera", tags=["camera"])
 async def camera_stream(system_manager=Depends(get_system_manager)) -> StreamingResponse:
     """Get live camera stream as MJPEG"""
     try:
-        # Get hardware interface
+        # Get hardware interface (exposed in app.state)
         hardware_interface = getattr(system_manager, 'hardware_interface', None)
         if not hardware_interface:
             logger.warning("Hardware interface not available, using placeholder stream")
@@ -153,7 +40,7 @@ async def camera_stream(system_manager=Depends(get_system_manager)) -> Streaming
             try:
                 while True:
                     try:
-                        # Get latest camera frame
+                        # Get latest camera frame (already JPEG bytes)
                         frame = await hardware_interface.get_camera_frame()
                         if frame and frame.data:
                             # Frame is already in JPEG format from CameraManager

@@ -8,6 +8,14 @@ from datetime import datetime
 import time
 
 from ..hardware.managers import CameraManager
+try:
+    import psutil  # type: ignore
+except Exception:
+    class _PsutilShim:
+        @staticmethod
+        def cpu_percent():
+            return 0.0
+    psutil = _PsutilShim()  # type: ignore
 from ..communication.client import MQTTClient
 from .camera_processor import CameraProcessor
 from .object_detector import ObjectDetector

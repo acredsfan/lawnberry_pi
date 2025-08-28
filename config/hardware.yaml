@@ -56,6 +56,10 @@ plugins:
   - name: imu
     enabled: true
     parameters:
+      # IMU UART: Pi 4 default is UART4 = /dev/ttyAMA4. On Pi 5, UART4 is on GPIO12/13
+      # (physical pins 32/33) and still exposed as /dev/ttyAMA4 when enabled in overlays.
+      # If your Pi 5 exposes IMU on /dev/ttyAMA1 per overlay choice, the IMU plugin will
+      # auto-detect /dev/ttyAMA1 as well. Keep this default for cross-board compatibility.
       port: /dev/ttyAMA4
       baud: 3000000
       timeout: 0.2
@@ -69,6 +73,9 @@ serial:
       baud: 115200
       timeout: 1.0
     imu:
+      # Pi 4: UART4 (/dev/ttyAMA4). Pi 5: UART4 is on GPIO12/13 (pins 32/33) and is still
+      # /dev/ttyAMA4 when enabled in boot overlays. Some configs may expose UART1 as AMA1;
+      # the IMU plugin auto-detects AMA1 as a fallback without breaking Pi 4 defaults.
       port: /dev/ttyAMA4
       baud: 3000000
       timeout: 0.3

@@ -6,9 +6,9 @@ Requires=lawnberry-communication.service lawnberry-data.service
 StartLimitIntervalSec=0
 
 [Service]
-Type=exec
-User=lawnberry
-Group=lawnberry
+Type=simple
+User=pi
+Group=pi
 WorkingDirectory=/opt/lawnberry
 Environment=PYTHONPATH=/opt/lawnberry
 Environment=LAWNBERRY_ENV=production
@@ -19,7 +19,7 @@ RestartSec=3
 StartLimitBurst=3
 
 # Resource limits
-MemoryLimit=256M
+MemoryMax=256M
 CPUQuota=75%
 TasksMax=100
 

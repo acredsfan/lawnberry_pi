@@ -5,7 +5,7 @@ Wants=network-online.target mosquitto.service
 StartLimitIntervalSec=0
 
 [Service]
-Type=exec
+Type=simple
 User=pi
 Group=pi
 # Use a writable working directory so lgpio can create its notification pipes (.lgd-nfy*)
@@ -20,6 +20,8 @@ Environment=LAWNBERY_TOF_NO_GPIO=always
 Environment=LAWNBERY_TOF_AUTO_ASSIGN_ON_MISSING=1
 # Optional: max seconds to allow the auto-assign script to run
 Environment=LAWNBERY_TOF_AUTO_ASSIGN_TIMEOUT_S=60
+# Avoid camera device contention: let the Web API own /dev/video* for streaming
+Environment=LAWNBERY_DISABLE_CAMERA=1
 ExecStart=/opt/lawnberry/venv/bin/python -m src.hardware.sensor_service
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
@@ -61,6 +63,7 @@ DeviceAllow=/dev/media0 rw
 DeviceAllow=/dev/media1 rw
 DeviceAllow=/dev/media2 rw
 DeviceAllow=/dev/media3 rw
+DeviceAllow=/dev/vchiq rw
 DeviceAllow=/dev/gpiochip0 rw
 DeviceAllow=/dev/gpiochip1 rw
 PrivateTmp=true

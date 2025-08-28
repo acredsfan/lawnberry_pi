@@ -6,9 +6,9 @@ Wants=network.target
 Requires=mosquitto.service
 
 [Service]
-Type=exec
-User=lawnberry
-Group=lawnberry
+Type=simple
+User=pi
+Group=pi
 WorkingDirectory=/opt/lawnberry
 Environment=PYTHONPATH=/opt/lawnberry
 Environment=LAWNBERRY_ENV=production
@@ -20,7 +20,7 @@ StartLimitInterval=60
 StartLimitBurst=3
 
 # Resource limits
-MemoryLimit=256M
+MemoryLimit=1024M
 CPUQuota=50%
 TasksMax=100
 

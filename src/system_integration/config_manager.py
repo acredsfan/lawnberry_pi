@@ -240,16 +240,26 @@ class ConfigManager:
     async def _validate_config(self, config_name: str, content: Dict[str, Any]):
         """Validate a specific configuration"""
         # Basic validation - ensure required sections exist
+        # NOTE: Validation rules must reflect the actual top-level keys present in each
+        # config file. Several configs are organized by functional sections rather than
+        # a single wrapper key. Keep requirements minimal-but-meaningful to avoid false
+        # negatives while still catching empty/missing configs.
         validation_rules = {
             'system.yaml': ['system', 'services'],
             'hardware.yaml': ['i2c', 'serial', 'gpio'],
-            'communication.yaml': ['mqtt'],
+            # Communication config uses top-level sections like 'broker', 'client', 'topics'
+            'communication.yaml': ['broker', 'topics'],
             'safety.yaml': ['safety'],
-            'data_management.yaml': ['redis', 'sqlite'],
-            'sensor_fusion.yaml': ['fusion'],
-            'weather.yaml': ['weather'],
-            'vision.yaml': ['vision'],
-            'power_management.yaml': ['power']
+            # Data management uses 'redis' and 'database' (not 'sqlite')
+            'data_management.yaml': ['redis', 'database'],
+            # Sensor fusion config is composed of these core sections
+            'sensor_fusion.yaml': ['localization', 'obstacle_detection', 'safety'],
+            # Weather config isn't wrapped; require integration block for MQTT wiring
+            'weather.yaml': ['integration'],
+            # Vision config requires at least model definitions and MQTT topics
+            'vision.yaml': ['models', 'mqtt'],
+            # Power management config centers on battery and mode definitions
+            'power_management.yaml': ['battery', 'power_modes']
         }
         
         required_sections = validation_rules.get(config_name, [])

@@ -6,9 +6,9 @@ Wants=mosquitto.service
 StartLimitIntervalSec=0
 
 [Service]
-Type=exec
-User=lawnberry
-Group=lawnberry
+Type=simple
+User=pi
+Group=pi
 WorkingDirectory=/opt/lawnberry
 Environment=PYTHONPATH=/opt/lawnberry
 Environment=LAWNBERRY_ENV=production
@@ -19,7 +19,7 @@ RestartSec=5
 StartLimitBurst=5
 
 # Resource limits
-MemoryLimit=256M
+MemoryMax=256M
 CPUQuota=50%
 TasksMax=100
 
@@ -44,10 +44,6 @@ IOSchedulingPriority=4
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=lawnberry-communication
-
-# Watchdog
-WatchdogSec=30
-NotifyAccess=main
 
 [Install]
 WantedBy=multi-user.target

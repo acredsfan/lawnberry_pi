@@ -93,8 +93,11 @@ class DeploymentManager:
         # Deployment configuration
         self.config = self._load_deployment_config()
         
-        # System paths
-        self.deployment_dir = Path("/opt/lawnberry/deployments")
+        # System paths (use writable location under /var/lib for state)
+        # NOTE: /opt/lawnberry is treated as an immutable runtime. All writable
+        # deployment state must live under /var/lib/lawnberry to satisfy system
+        # hardening and avoid read-only filesystem errors.
+        self.deployment_dir = Path("/var/lib/lawnberry/deployments")
         self.partition_a_path = self.deployment_dir / "partition_a"
         self.partition_b_path = self.deployment_dir / "partition_b"
         self.backup_dir = Path("/var/lib/lawnberry/backups")
@@ -195,13 +198,17 @@ class DeploymentManager:
     def _load_public_key(self):
         """Load public key for signature verification"""
         try:
-            public_key_path = Path("/opt/lawnberry/keys/deployment_public.pem")
-            if public_key_path.exists():
-                with open(public_key_path, 'rb') as f:
-                    return serialization.load_pem_public_key(f.read())
-            else:
-                logger.warning("Deployment public key not found, signature verification disabled")
-                return None
+            # Prefer var-lib writable location; fall back to /opt if provisioned there
+            candidates = [
+                Path("/var/lib/lawnberry/keys/deployment_public.pem"),
+                Path("/opt/lawnberry/keys/deployment_public.pem"),
+            ]
+            for public_key_path in candidates:
+                if public_key_path.exists():
+                    with open(public_key_path, 'rb') as f:
+                        return serialization.load_pem_public_key(f.read())
+            logger.warning("Deployment public key not found, signature verification disabled")
+            return None
         except Exception as e:
             logger.error(f"Failed to load public key: {e}")
             return None

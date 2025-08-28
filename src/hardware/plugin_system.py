@@ -953,19 +953,40 @@ class GPSPlugin(HardwarePlugin):
                         return False
 
                 # Start with configured candidates then broaden to all tty nodes.
-                # Avoid the RoboHAT default port (usually /dev/ttyACM0) to prevent stealing its port.
+                # Avoid any ports already assigned to other serial devices (e.g., RoboHAT)
                 candidates_ports = []
                 if cfg_port:
                     candidates_ports.append(cfg_port)
-                # Prefer ACM1 for GPS first; include others but skip ACM0 unless explicitly configured
-                candidates_ports += [
+
+                # Build a blocklist of ports already assigned to other devices
+                try:
+                    assigned_ports = set()
+                    for name, cfg in (serial_manager.devices or {}).items():
+                        try:
+                            if name != "gps" and cfg and cfg.get("port"):
+                                assigned_ports.add(cfg.get("port"))
+                        except Exception:
+                            continue
+                except Exception:
+                    assigned_ports = set()
+
+                # Prefer ACM1 for GPS first; include others. Allow ACM0 as well if not assigned
+                preferred = [
                     "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyAMA0", "/dev/ttyAMA4"
                 ]
+                for p in preferred:
+                    if p in candidates_ports:
+                        continue
+                    # Skip if port is already assigned to another device (e.g., RoboHAT)
+                    if p in assigned_ports:
+                        continue
+                    candidates_ports.append(p)
+
                 # Add any discovered device nodes
                 for pattern in ("/dev/ttyACM*", "/dev/ttyUSB*", "/dev/ttyAMA*"):
                     for p in glob.glob(pattern):
-                        # Skip known RoboHAT default port unless user configured it
-                        if p.endswith("ACM0") and (not cfg_port or cfg_port != p):
+                        # Skip if port is assigned to another device
+                        if p in assigned_ports:
                             continue
                         if p not in candidates_ports:
                             candidates_ports.append(p)
@@ -1222,7 +1243,8 @@ class IMUPlugin(HardwarePlugin):
                     except Exception:
                         return False
 
-                candidates_ports = list(dict.fromkeys([cfg_port, "/dev/ttyAMA4", "/dev/ttyAMA0"]))
+                # Include UART1 (ttyAMA1) for Raspberry Pi 5 on GPIO12/13, while retaining Pi 4/CM defaults
+                candidates_ports = list(dict.fromkeys([cfg_port, "/dev/ttyAMA1", "/dev/ttyAMA4", "/dev/ttyAMA0"]))
                 candidates_ports = [p for p in candidates_ports if p]
                 # Try configured baud first, then common rates
                 candidates_bauds = []

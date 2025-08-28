@@ -6,9 +6,9 @@ Requires=lawnberry-hardware.service lawnberry-communication.service
 StartLimitIntervalSec=0
 
 [Service]
-Type=exec
-User=lawnberry
-Group=lawnberry
+Type=simple
+User=pi
+Group=pi
 WorkingDirectory=/opt/lawnberry
 Environment=PYTHONPATH=/opt/lawnberry
 Environment=LAWNBERRY_ENV=production

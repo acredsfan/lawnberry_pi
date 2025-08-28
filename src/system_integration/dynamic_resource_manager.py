@@ -113,8 +113,8 @@ class DynamicResourceManager:
         self.adaptation_cooldown = 10.0  # seconds between adaptations
         self.last_adaptation_time = 0.0
         
-    # Hardware capabilities (Pi 4B specific - 8GB model target)
-    self.max_memory_mb = 8192  # 8GB Pi 4B
+        # Hardware capabilities (Pi 4B specific - 8GB model target)
+        self.max_memory_mb = 8192  # 8GB Pi 4B
         self.cpu_cores = 4
         self.cpu_threads = 4
         

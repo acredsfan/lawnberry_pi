@@ -74,6 +74,7 @@ class HardwareInterface:
         except Exception:
             pass
 
+        # Managers that depend on config but are not bus-mapped
         self.camera_manager = CameraManager(self.config.camera.device_path)
         self.gpio_manager = GPIOManager()
         self.tof_manager = ToFSensorManager(gpio_manager=self.gpio_manager)
@@ -154,15 +155,21 @@ class HardwareInterface:
             except Exception as e:
                 self.logger.warning(f"ToF manager init error - continuing without ToF: {e}")
             
-            # Camera is optional for sensor publishing; continue if absent
-            try:
-                await self.camera_manager.initialize(
-                    width=self.config.camera.width,
-                    height=self.config.camera.height,
-                    fps=self.config.camera.fps
-                )
-            except Exception as e:
-                self.logger.warning(f"Camera not available: {e}")
+            # Camera may be owned by the Web API process; allow disabling here via env
+            import os
+            disable_camera = os.environ.get("LAWNBERY_DISABLE_CAMERA", "0").lower() in ("1", "true", "yes")
+            if disable_camera:
+                self.logger.info("Camera initialization disabled by LAWNBERY_DISABLE_CAMERA")
+            else:
+                # Camera is optional for sensor publishing; continue if absent
+                try:
+                    await self.camera_manager.initialize(
+                        width=self.config.camera.width,
+                        height=self.config.camera.height,
+                        fps=self.config.camera.fps
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Camera not available: {e}")
             
             # Load enabled plugins
             for plugin_config in self.config.plugins:
@@ -180,10 +187,11 @@ class HardwareInterface:
             
             # Start camera capture only if camera manager initialized successfully
             try:
-                if getattr(self.camera_manager, '_camera', None) is not None:
-                    await self.camera_manager.start_capture()
-                else:
-                    self.logger.debug("Camera manager not initialized; skipping start_capture")
+                if not disable_camera:
+                    if getattr(self.camera_manager, '_camera', None) is not None or getattr(self.camera_manager, '_picam2', None) is not None:
+                        await self.camera_manager.start_capture()
+                    else:
+                        self.logger.debug("Camera manager not initialized; skipping start_capture")
             except Exception as e:
                 self.logger.debug(f"Skipping camera start_capture due to error: {e}")
             

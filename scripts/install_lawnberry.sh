@@ -1773,13 +1773,24 @@ install_services() {
                 sed -i "s|Group=.*|Group=$GROUP|g" "$temp_service"
                 # (No replacement of /opt/lawnberry with project root — by design per Option A decision)
 
-                # Apply Bookworm-specific security hardening if supported
-                if [[ $SYSTEMD_VERSION -ge 252 ]]; then
-                    # Only append hardening block if not already present
-                    if ! grep -q 'ProtectClock=' "$temp_service"; then
-                        log_info "Appending hardening block to $service_name (systemd >=252)"
-                        cat >> "$temp_service" << 'EOF'
+                # Normalize service type and memory limits for Bookworm
+                if grep -q '^Type=' "$temp_service"; then
+                    sed -i 's/^Type=.*/Type=simple/' "$temp_service" || true
+                else
+                    # Insert Type=simple under [Service] if Type not present
+                    awk 'BEGIN{ins=0} {print} /^\[Service\]/{if(!ins){print "Type=simple"; ins=1}}' "$temp_service" > /tmp/unit_norm && mv /tmp/unit_norm "$temp_service"
+                fi
+                # Migrate deprecated MemoryLimit to MemoryMax
+                if grep -q '^MemoryLimit=' "$temp_service"; then
+                    sed -i 's/^MemoryLimit=/MemoryMax=/' "$temp_service" || true
+                fi
 
+                # Apply Bookworm-specific security hardening if supported, inside [Service]
+                if [[ $SYSTEMD_VERSION -ge 252 ]]; then
+                    if ! grep -q '^ProtectClock=' "$temp_service"; then
+                        log_info "Inserting hardening keys into [Service] for $service_name (systemd >=252)"
+                        # Prepare hardening block in a temp file
+                        cat > /tmp/lawnberry_hardening_block.$$ << 'HARDEN'
 # Additional Bookworm Security Features
 ProtectClock=true
 ProtectHostname=true
@@ -1791,7 +1802,17 @@ RestrictNamespaces=true
 RestrictSUIDSGID=true
 SystemCallArchitectures=native
 UMask=0027
-EOF
+HARDEN
+                        # Insert the block immediately after the [Service] header
+                        awk -v f="/tmp/lawnberry_hardening_block.$$" 'BEGIN{ins=0} {
+                            print $0;
+                            if ($0 ~ /^\[Service\]/ && !ins) {
+                                while ((getline l < f) > 0) print l;
+                                close(f);
+                                ins=1;
+                            }
+                        }' "$temp_service" > /tmp/unit_harden && mv /tmp/unit_harden "$temp_service"
+                        rm -f /tmp/lawnberry_hardening_block.$$
                     else
                         log_debug "Hardening keys already present in $service_name"
                     fi
@@ -1820,6 +1841,7 @@ EOF
     # Enable core services (check if they need enabling)
     core_services=(
         "lawnberry-system"
+        "lawnberry-communication"
         "lawnberry-data"
         "lawnberry-hardware"
         "lawnberry-safety"

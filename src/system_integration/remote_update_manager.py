@@ -98,7 +98,16 @@ class RemoteUpdateManager:
         # Security
         self.update_server_url = self.config.get('update_server_url', '')
         self.api_key = self.config.get('api_key', '')
-        self.public_key_path = Path(self.config.get('public_key_path', '/opt/lawnberry/keys/update_public.pem'))
+        # Prefer var-lib location for keys; fall back to /opt if configured or present there
+        default_public_key_candidates = [
+            Path('/var/lib/lawnberry/keys/update_public.pem'),
+            Path('/opt/lawnberry/keys/update_public.pem'),
+        ]
+        configured_path = self.config.get('public_key_path')
+        if configured_path:
+            self.public_key_path = Path(configured_path)
+        else:
+            self.public_key_path = next((p for p in default_public_key_candidates if p.exists()), default_public_key_candidates[0])
         
         # Update state
         self.last_check_time: Optional[datetime] = None

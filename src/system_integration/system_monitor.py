@@ -278,8 +278,15 @@ class SystemMonitor:
             # Save active alerts
             for alert in self.active_alerts.values():
                 alert_data = asdict(alert)
+                # Normalize enum and datetime fields
                 alert_data['level'] = alert_data['level'].value
                 alert_data['timestamp'] = alert_data['timestamp'].isoformat()
+                # Ensure metadata is JSON-serializable (convert any datetimes)
+                metadata = alert_data.get('metadata')
+                if isinstance(metadata, dict):
+                    for k, v in list(metadata.items()):
+                        if isinstance(v, datetime):
+                            metadata[k] = v.isoformat()
                 state_data['active_alerts'].append(alert_data)
             
             self.state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -647,9 +654,10 @@ class SystemMonitor:
         """Check deployment system health"""
         try:
             deployment_paths = [
-                Path("/opt/lawnberry/deployments"),
+                # Deployments and keys live under /var/lib (writable); accept /opt keys as fallback
+                Path("/var/lib/lawnberry/deployments"),
                 Path("/var/lib/lawnberry/backups"),
-                Path("/opt/lawnberry/keys")
+                Path("/var/lib/lawnberry/keys")
             ]
             
             issues = []
@@ -688,8 +696,17 @@ class SystemMonitor:
                     pass
             
             # Check deployment keys
-            private_key = Path("/opt/lawnberry/keys/deployment_private.pem")
-            public_key = Path("/opt/lawnberry/keys/deployment_public.pem")
+            # Prefer keys under /var/lib; accept /opt as fallback for read-only provisioned keys
+            private_key_candidates = [
+                Path("/var/lib/lawnberry/keys/deployment_private.pem"),
+                Path("/opt/lawnberry/keys/deployment_private.pem"),
+            ]
+            public_key_candidates = [
+                Path("/var/lib/lawnberry/keys/deployment_public.pem"),
+                Path("/opt/lawnberry/keys/deployment_public.pem"),
+            ]
+            private_key = next((p for p in private_key_candidates if p.exists()), private_key_candidates[0])
+            public_key = next((p for p in public_key_candidates if p.exists()), public_key_candidates[0])
             
             keys_status = {
                 'private_key_exists': private_key.exists(),

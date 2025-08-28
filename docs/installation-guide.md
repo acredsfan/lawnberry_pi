@@ -160,12 +160,17 @@ sudo reboot
 
 2. **Install IMU Sensor**
    - Mount BNO085 IMU sensor
-   - **Connections**:
-     - VCC → 3.3V (Pin 17)
-     - GND → Ground
-     - RX → TXD 4 (Pin 24)
-     - TX → RXD 4 (Pin 21)
-     - PS1 → 3.3V (for UART mode)
+    - **Connections**:
+       - VCC → 3.3V (Pin 17)
+       - GND → Ground
+       - PS1 → 3.3V (UART mode) and PS0 → GND
+       - UART pins depend on Pi model and installer mapping:
+          - Pi 4/CM4 (default): UART4 on GPIO8/9
+             - IMU TX → Pi RXD4 (GPIO9, pin 21)
+             - IMU RX → Pi TXD4 (GPIO8, pin 24)
+          - Pi 5 (recommended): UART1 on GPIO12/13
+             - IMU TX → Pi RXD1 (GPIO13, pin 33)
+             - IMU RX → Pi TXD1 (GPIO12, pin 32)
 
    > Note (Raspberry Pi 5 + RoboHAT): On Pi 5, `GPIO12/13` (physical pins 32/33) expose UART1 (TX1/RX1). The installer explicitly maps UART1 to these pins so your existing wiring on pins 32/33 works without changes. Verify actual mapping with:
    >
@@ -182,13 +187,13 @@ sudo reboot
    >
    > RoboHAT caveat: RoboHAT often covers pins 33–40 physically. If you need access to 32/33, use a stacking/double height header (example accessory: an extra-tall 40-pin GPIO stacking header/adapter) so you can access pins on the top or bottom rows. If a pin conflict exists (e.g., your ToF interrupt currently uses pin 32), move that interrupt to a free GPIO such as `GPIO5` (pin 29) or `GPIO7` (pin 26) and update your configuration.
    >
-   > Installer automation (Pi 5): The installer automatically moves the ToF right interrupt to `GPIO8` on Raspberry Pi 5 to avoid UART conflicts on `GPIO12/13`. On Pi 4/CM4 the default remains `GPIO12`. You can verify after install:
+   > Installer automation (Pi 5): The installer automatically moves the ToF right interrupt to `GPIO8` on Raspberry Pi 5 to avoid UART conflicts on `GPIO12/13`. On Pi 4/CM4 the default remains a non-conflicting pin (commonly `GPIO12` when UART4 uses GPIO8/9). You can verify after install:
    >
    > ```bash
    > grep -nE 'tof_right_interrupt|interrupt_pin' config/hardware.yaml
    > ```
    >
-   > Boot config behavior: The installer ensures `enable_uart=1` for all boards. It adds `dtoverlay=uart4` on Pi 4/CM4, and on Pi 5 it writes `dtoverlay=uart1,txd1_pin=12,rxd1_pin=13` so UART1 is bound to pins 32/33 explicitly. You can check with:
+   > Boot config behavior: The installer ensures `enable_uart=1` for all boards. It adds `dtoverlay=uart4` on Pi 4/CM4 (binding UART4 to GPIO8/9), and on Pi 5 it writes `dtoverlay=uart1,txd1_pin=12,rxd1_pin=13` so UART1 is bound to pins 32/33 explicitly. You can check with:
 
    > - `grep -E "^enable_uart|^dtoverlay=uart(1|4)" /boot/firmware/config.txt /boot/config.txt 2>/dev/null`
    > - `pinctrl -c bcm2835 12-13` (should show `TXD1`/`RXD1` on Pi 5)
@@ -693,38 +698,59 @@ PY
 
 ```bash
 # Check GPS connection
-ls /dev/ttyACM* 
-# Should show /dev/ttyACM0 (GPS)
-
-# Test GPS data
-python3 -c "
-import serial
-try:
-    gps = serial.Serial('/dev/ttyACM0', 38400, timeout=5)
-    data = gps.read(100)
-    print('GPS data received:', len(data), 'bytes')
-    gps.close()
-except Exception as e:
-    print('GPS error:', e)
-"
+ls /dev/ttyACM* 2>/dev/null || echo "No /dev/ttyACM* devices found"
+# Typical: /dev/ttyACM0 or /dev/ttyACM1
 ```
+
+#### 4.3.1 Quick GPS verification (bounded)
+
+For an end-to-end check using the same parser as the main service:
+
+```bash
+# Prefer venv if present
+test -x venv/bin/python && PY=venv/bin/python || PY=python3
+
+# Run for 20 seconds at 2 Hz (bounded)
+timeout 45s "$PY" scripts/gps_smoke_test.py --duration 20 --interval 0.5 --log-level INFO
+
+# If your GPS is on /dev/ttyACM0
+timeout 45s "$PY" scripts/gps_smoke_test.py --port /dev/ttyACM0 --baud 115200 --duration 20 --interval 0.5
+```
+
+Expected output includes lines like:
+
+```
+GPS selected: /dev/ttyACM1 @ 115200
+GPS fix: lat=40.712800, lon=-74.006000, hdop=0.9, sats=10
+Reads=40, Fixes=12
+Last fix: lat=40.712800, lon=-74.006000, hdop=0.9, sats=10
+```
+
+Notes:
+- The GPS plugin avoids serial ports already assigned to other devices (like RoboHAT) and prefers `/dev/ttyACM1` by default.
+- If no fixes appear, ensure clear sky view and try a longer duration (e.g., `--duration 60`).
 
 ### 4.4 Start System Services
 
+Core services provided by this repo:
+- `lawnberry-system` — Orchestrator
+- `lawnberry-sensor` — Hardware sensor/MQTT bridge
+- `lawnberry-api` — FastAPI backend (serves API + camera stream)
+
 ```bash
-# Enable and start LawnBerryPi services
-sudo systemctl enable lawnberry-hardware
-sudo systemctl enable lawnberry-web-api
-sudo systemctl enable lawnberry-web-ui
+# Enable and start core services
+sudo systemctl enable lawnberry-system lawnberry-sensor lawnberry-api
+sudo systemctl start lawnberry-system lawnberry-sensor lawnberry-api
 
-sudo systemctl start lawnberry-hardware
-sudo systemctl start lawnberry-web-api
-sudo systemctl start lawnberry-web-ui
+# Quick status overview
+systemctl --no-pager --full --type=service | grep -E "lawnberry|mosquitto"
+```
 
-# Check service status
-sudo systemctl status lawnberry-hardware
-sudo systemctl status lawnberry-web-api
-sudo systemctl status lawnberry-web-ui
+If you edit any unit files, reload and restart:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart lawnberry-system lawnberry-sensor lawnberry-api
 ```
 
 ## Step 5: Web Interface Access
@@ -805,9 +831,9 @@ The web interface should show:
 
 **Problem**: Web interface not accessible
 - **Solutions**:
-  - Check service status: `sudo systemctl status lawnberry-web-ui`
-  - Restart services: `sudo systemctl restart lawnberry-web-ui`
-  - Check firewall: `sudo ufw allow 3000`
+   - Check service status: `sudo systemctl status lawnberry-api`
+   - Restart services: `sudo systemctl restart lawnberry-api`
+   - Check firewall: `sudo ufw allow 3000`
 
 **Problem**: API keys not working
 - **Solutions**:
@@ -821,8 +847,8 @@ If you encounter issues:
 
 1. **Check system logs**:
 ```bash
-journalctl -u lawnberry-hardware -f
-journalctl -u lawnberry-web-api -f
+journalctl -u lawnberry-sensor -f
+journalctl -u lawnberry-api -f
 ```
 
 2. **Run hardware diagnostics**:

@@ -514,3 +514,88 @@ class ServiceManager:
             'metrics': self.metrics.copy(),
             'mqtt_stats': self.mqtt_client.get_stats()
         }
+
+
+# --- Lightweight service wrapper and executable module entrypoint ---
+class CommunicationService:
+    """Top-level Communication Service wrapper around ServiceManager.
+
+    Provides a simple run() coroutine to initialize MQTT communication
+    and keep the service alive until cancelled (SIGTERM) or shutdown command.
+    """
+
+    def __init__(self, service_id: str = "communication", service_type: str = "communication"):
+        self.logger = logging.getLogger(f"communication.{service_id}")
+        self._stop_event = asyncio.Event()
+        self.manager = ServiceManager(service_id=service_id, service_type=service_type)
+
+    async def _setup_logging(self):
+        # Ensure log directory exists; ignore errors in restricted environments
+        try:
+            import os
+            from pathlib import Path
+            log_dir = Path('/var/log/lawnberry')
+            log_dir.mkdir(parents=True, exist_ok=True)
+            if not any(isinstance(h, logging.FileHandler) for h in self.logger.handlers):
+                fh = logging.FileHandler(str(log_dir / 'communication.log'))
+                fh.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+                self.logger.addHandler(fh)
+        except Exception:
+            # Fallback to stdout-only if file logging fails
+            pass
+
+        if not any(isinstance(h, logging.StreamHandler) for h in self.logger.handlers):
+            sh = logging.StreamHandler()
+            sh.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            self.logger.addHandler(sh)
+        self.logger.setLevel(logging.INFO)
+
+    async def run(self):
+        """Initialize and run the communication service until stopped."""
+        await self._setup_logging()
+        self.logger.info("Initializing CommunicationService")
+
+        # Initialize the underlying service manager (no strict deps to avoid boot loops)
+        ok = await self.manager.initialize(
+            dependencies=[],
+            metadata={
+                'component': 'communication',
+                'description': 'MQTT coordination and service discovery',
+            },
+        )
+        if not ok:
+            self.logger.error("Initialization failed; exiting")
+            return
+
+        # Install signal handlers to allow graceful shutdown
+        try:
+            loop = asyncio.get_running_loop()
+            for sig_name in ("SIGINT", "SIGTERM"):
+                try:
+                    import signal
+                    loop.add_signal_handler(getattr(signal, sig_name), self._stop_event.set)
+                except Exception:
+                    # Not supported on some platforms/threads; ignore
+                    pass
+        except Exception:
+            pass
+
+        self.logger.info("CommunicationService started; entering run loop")
+        try:
+            await self._stop_event.wait()
+        finally:
+            self.logger.info("Shutting down CommunicationService")
+            await self.manager.shutdown()
+
+
+async def _main():
+    service = CommunicationService()
+    await service.run()
+
+
+if __name__ == "__main__":
+    # Allow execution via: python -m src.communication.service_manager
+    try:
+        asyncio.run(_main())
+    except KeyboardInterrupt:
+        pass
