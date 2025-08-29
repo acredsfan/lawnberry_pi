@@ -71,22 +71,28 @@ class VisionIntegrationManager:
     async def _setup_mqtt_integrations(self):
         """Setup MQTT-based integrations"""
         try:
+            def wrap(func):
+                async def _w(topic, message):
+                    payload = message.payload if hasattr(message, 'payload') else message
+                    await func(topic, payload)
+                return _w
+
             # Subscribe to navigation commands
-            await self.mqtt_client.subscribe(
-                "navigation/obstacle_request", 
-                self._handle_obstacle_request
+            await self.mqtt_client.subscribe("lawnberry/navigation/obstacle_request")
+            self.mqtt_client.add_message_handler(
+                "lawnberry/navigation/obstacle_request", wrap(self._handle_obstacle_request)
             )
             
             # Subscribe to safety system commands
-            await self.mqtt_client.subscribe(
-                "safety/vision_request",
-                self._handle_safety_request
+            await self.mqtt_client.subscribe("lawnberry/safety/vision_request")
+            self.mqtt_client.add_message_handler(
+                "lawnberry/safety/vision_request", wrap(self._handle_safety_request)
             )
             
             # Subscribe to power management requests
-            await self.mqtt_client.subscribe(
-                "power/vision_mode",
-                self._handle_power_mode_change
+            await self.mqtt_client.subscribe("lawnberry/power/vision_mode")
+            self.mqtt_client.add_message_handler(
+                "lawnberry/power/vision_mode", wrap(self._handle_power_mode_change)
             )
             
             self.logger.info("MQTT integrations setup complete")
@@ -122,7 +128,7 @@ class VisionIntegrationManager:
                     }
                     
                     await self.mqtt_client.publish(
-                        "sensor_fusion/obstacle_confirmation",
+                        "lawnberry/sensor_fusion/obstacle_confirmation",
                         obstacle_data,
                         qos=1
                     )
@@ -189,14 +195,14 @@ class VisionIntegrationManager:
             
             # Send to safety system
             await self.mqtt_client.publish(
-                "safety/emergency_alert",
+                "lawnberry/safety/emergency_alert",
                 alert_data,
                 qos=2  # Ensure delivery
             )
             
             # Send to navigation system for immediate response
             await self.mqtt_client.publish(
-                "navigation/emergency_stop",
+                "lawnberry/navigation/emergency_stop",
                 {
                     'reason': alert_type,
                     'timestamp': datetime.now().isoformat(),
@@ -235,7 +241,7 @@ class VisionIntegrationManager:
                 }
                 
                 await self.mqtt_client.publish(
-                    "navigation/obstacle_response",
+                    "lawnberry/navigation/obstacle_response",
                     response,
                     qos=1
                 )
@@ -255,7 +261,7 @@ class VisionIntegrationManager:
                 }
                 
                 await self.mqtt_client.publish(
-                    "navigation/scan_response",
+                    "lawnberry/navigation/scan_response",
                     response,
                     qos=1
                 )
@@ -288,7 +294,7 @@ class VisionIntegrationManager:
                 }
                 
                 await self.mqtt_client.publish(
-                    "safety/scan_response",
+                    "lawnberry/safety/scan_response",
                     response,
                     qos=1
                 )

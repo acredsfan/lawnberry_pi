@@ -371,6 +371,32 @@ sudo systemctl restart lawnberry-safety.service
 journalctl -u lawnberry-data.service -u lawnberry-hardware.service -u lawnberry-safety.service -f
 ```
 
+### Validate systemd units (Bookworm)
+
+Run a quick syntax and placement check:
+
+```bash
+timeout 30s sudo systemd-analyze verify /etc/systemd/system/lawnberry-*.service || true
+timeout 20s bash /opt/lawnberry/scripts/check_units.sh || true
+```
+
+If any hardening keys show up under `[Install]`, they must be moved under `[Service]`. Re-run `sudo systemctl daemon-reload` after fixing.
+
+### Service user and permissions (critical)
+
+All LawnBerry services run as the default Raspberry Pi user `pi` for compatibility with typical setups. The installer now ensures:
+
+- `pi` is a member of `i2c`, `gpio`, `spi`, `dialout`, and `video` groups
+- Ownership of runtime directories `/opt/lawnberry`, `/var/lib/lawnberry`, and `/var/log/lawnberry` is set to `pi:pi`
+- The environment file `/opt/lawnberry/.env` is readable by the service user with secure permissions (`sudo chown pi:pi /opt/lawnberry/.env && sudo chmod 640 /opt/lawnberry/.env`)
+
+After any changes to unit files, run:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart lawnberry-communication lawnberry-data lawnberry-hardware lawnberry-safety lawnberry-api
+```
+
 If a service reports a “bad unit file setting,” verify there are no duplicate `[Unit]`/`[Install]` sections and that Bookworm directives are used (e.g., `StartLimitIntervalSec`).
 
 ## Development

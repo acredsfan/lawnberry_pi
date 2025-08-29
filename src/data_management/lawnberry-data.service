@@ -6,8 +6,8 @@ Requires=lawnberry-communication.service
 
 [Service]
 Type=simple
-User=lawnberry
-Group=lawnberry
+User=pi
+Group=pi
 WorkingDirectory=/var/lib/lawnberry
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/opt/lawnberry

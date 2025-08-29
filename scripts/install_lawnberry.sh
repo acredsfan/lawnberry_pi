@@ -1397,33 +1397,20 @@ create_directories() {
 # Ensure a dedicated non-login service user and group exist for running services
 ensure_service_user() {
     print_section "Ensuring Service User and Permissions"
-    local svc_user="lawnberry"
-    local svc_group="lawnberry"
+    local svc_user="pi"
+    local svc_group="pi"
 
-    if ! getent group "$svc_group" >/dev/null 2>&1; then
-        log_info "Creating group: $svc_group"
-        sudo groupadd --system "$svc_group" || true
-    else
-        log_debug "Group already exists: $svc_group"
-    fi
-
+    # Do not create the 'pi' user; assume it exists per environment standard
     if ! id -u "$svc_user" >/dev/null 2>&1; then
-        log_info "Creating service user: $svc_user (system, no-login)"
-        sudo useradd \
-            --system \
-            --gid "$svc_group" \
-            --home "$INSTALL_DIR" \
-            --shell /usr/sbin/nologin \
-            "$svc_user" || true
-    else
-        log_debug "User already exists: $svc_user"
+        log_error "Required user 'pi' does not exist. Please create it or adjust service units."
+        exit 1
     fi
 
-    # Ensure hardware group memberships
+    # Ensure hardware group memberships for 'pi'
     log_info "Adding $svc_user to hardware groups (i2c,spi,gpio,dialout,video)"
     sudo usermod -a -G i2c,spi,gpio,dialout,video "$svc_user" 2>/dev/null || true
 
-    # Ensure ownership of runtime directories
+    # Ensure ownership of runtime directories for 'pi'
     log_info "Setting ownership of runtime directories to $svc_user:$svc_group"
     sudo chown -R "$svc_user:$svc_group" "$INSTALL_DIR" || true
     sudo chown -R "$svc_user:$svc_group" "$LOG_DIR" || true
@@ -1482,7 +1469,22 @@ deploy_update() {
 
     # Incremental directory-by-directory rsync to avoid long single timeouts
     RSYNC_TIMEOUT_PER=${RSYNC_TIMEOUT_PER:-40}
-    RSYNC_OPTS=(-a --no-times --omit-dir-times --delete --exclude 'venv/' --exclude 'node_modules/' --exclude '.git/' --exclude 'build/' --exclude 'dist/' --exclude '*.log' --exclude 'data/' --exclude 'reports/')
+    # Exclude local dev artifacts and venvs; we'll manage ownership via --chown to service user
+    RSYNC_OPTS=(
+        -a --no-times --omit-dir-times --delete
+        --exclude 'venv/'
+        --exclude 'venv_coral_pyenv/'
+        --exclude 'venv_test_mqtt/'
+        --exclude '.vscode/'
+        --exclude 'node_modules/'
+        --exclude '.git/'
+        --exclude 'build/'
+        --exclude 'dist/'
+        --exclude '*.log'
+        --exclude 'data/'
+        --exclude 'reports/'
+    --owner --group --chown=pi:pi
+    )
     # Determine top-level entries to sync
     mapfile -t SYNC_DIRS < <(find "$PROJECT_ROOT" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | grep -Ev '^(venv|venv_coral_pyenv|node_modules|data|reports|tests|\.git|__pycache__)$' | sort)
     # Optionally include tests if requested
@@ -1500,9 +1502,9 @@ deploy_update() {
         fi
         [[ -d "$PROJECT_ROOT/$d" ]] || continue
         log_info "Syncing directory: $d (timeout ${RSYNC_TIMEOUT_PER}s)"
-    if ! timeout ${RSYNC_TIMEOUT_PER}s ionice -c3 nice -n 10 rsync "${RSYNC_OPTS[@]}" "$PROJECT_ROOT/$d/" "$INSTALL_DIR/$d/" 2>/dev/null; then
+        if ! timeout ${RSYNC_TIMEOUT_PER}s sudo ionice -c3 nice -n 10 rsync "${RSYNC_OPTS[@]}" "$PROJECT_ROOT/$d/" "$INSTALL_DIR/$d/" 2>/dev/null; then
             log_warning "Timeout or error syncing $d - retrying without timeout"
-            if ! ionice -c3 nice -n 10 rsync "${RSYNC_OPTS[@]}" "$PROJECT_ROOT/$d/" "$INSTALL_DIR/$d/"; then
+            if ! sudo ionice -c3 nice -n 10 rsync "${RSYNC_OPTS[@]}" "$PROJECT_ROOT/$d/" "$INSTALL_DIR/$d/"; then
                 log_error "Failed to sync directory $d"
             fi
         fi
@@ -1514,14 +1516,14 @@ deploy_update() {
         case "$f" in
             lawnberry_install.log|*.pyc) continue;;
             *)
-                rsync -a "$PROJECT_ROOT/$f" "$INSTALL_DIR/$f" 2>/dev/null || true
+                sudo rsync -a --owner --group --chown=lawnberry:lawnberry "$PROJECT_ROOT/$f" "$INSTALL_DIR/$f" 2>/dev/null || true
             ;;
         esac
     done
     log_success "Incremental rsync synchronization complete"
 
-    # Ensure ownership remains correct
-    sudo chown -R "$USER:$GROUP" "$INSTALL_DIR" || sudo chown -R "$USER:$USER" "$INSTALL_DIR"
+    # Ensure ownership remains correct for service user
+    sudo chown -R pi:pi "$INSTALL_DIR" || true
 
     # --- Optimized web UI dist sync with mode selection ---
     # Modes: skip|minimal|full (default: minimal). Set FAST_DEPLOY_DIST_MODE env variable.
@@ -1558,7 +1560,7 @@ deploy_update() {
                 if [[ "$DIST_SYNC_SKIPPED" != 1 ]]; then
                     if [[ "$DIST_MODE" == "full" ]]; then
                         log_info "Syncing web UI dist (full mode, timeout 35s)"
-                        if ! timeout 35s rsync -a --delete "$PROJECT_ROOT/web-ui/dist/" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null; then
+                        if ! timeout 35s sudo rsync -a --delete --owner --group --chown=lawnberry:lawnberry "$PROJECT_ROOT/web-ui/dist/" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null; then
                             log_warning "Full dist sync timed out - falling back to minimal subset"
                             DIST_MODE="minimal"
                         else
@@ -1569,13 +1571,13 @@ deploy_update() {
                         log_info "Syncing web UI dist (minimal core files)"
                         # Copy critical entry files
                         for coref in index.html manifest*.json favicon.* robots.txt asset-manifest.json registerSW.js sw.js service-worker.js; do
-                            cp "$PROJECT_ROOT/web-ui/dist/$coref" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null || true
+                            sudo cp "$PROJECT_ROOT/web-ui/dist/$coref" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null || true
                         done
                         # Sync new hashed assets only (do not delete old to avoid 404 during rolling reload)
                         while IFS= read -r asset; do
                             rel=${asset#"$PROJECT_ROOT/web-ui/dist/"}
                             if [[ ! -f "$INSTALL_DIR/web-ui/dist/$rel" ]]; then
-                                cp "$asset" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null || true
+                                sudo cp "$asset" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null || true
                             fi
                         done < <(find "$PROJECT_ROOT/web-ui/dist" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[^/]+\.[a-f0-9]{8,}\.[a-z0-9]{2,4}$' 2>/dev/null)
                         DIST_SYNC_DONE=1
@@ -1760,6 +1762,13 @@ install_services() {
     # Proactively ensure the service user exists to avoid 217/USER failures
     ensure_service_user
 
+    # Ensure .env is readable by service user if present (avoid PermissionError from python-dotenv)
+    if [[ -f "$INSTALL_DIR/.env" ]]; then
+        log_info "Normalizing permissions on $INSTALL_DIR/.env for service user"
+        sudo chown pi:pi "$INSTALL_DIR/.env" 2>/dev/null || true
+        sudo chmod 640 "$INSTALL_DIR/.env" 2>/dev/null || true
+    fi
+
     # Minimal hardware enablement for services-only runs: ensure I2C is enabled so /dev/i2c-1 exists
     if [[ ! -e /dev/i2c-1 ]]; then
         log_info "I2C device /dev/i2c-1 not found — attempting to enable I2C interface"
@@ -1767,6 +1776,10 @@ install_services() {
             timeout 6s sudo -n raspi-config nonint do_i2c 0 >/dev/null 2>&1 || log_warning "raspi-config do_i2c skipped or timed out"
         else
             log_warning "raspi-config not available; please enable I2C manually in /boot config and reboot"
+        fi
+        # Try to load i2c-dev kernel module immediately
+        if command -v modprobe >/dev/null 2>&1; then
+            timeout 4s sudo modprobe i2c-dev 2>/dev/null || true
         fi
         if [[ ! -e /dev/i2c-1 ]]; then
             log_warning "I2C still not present; a reboot may be required for overlays to take effect"
@@ -2105,7 +2118,7 @@ case "$1" in
         done
         ;;
     hardware)
-        cd /opt/lawnberry || cd /home/lawnberry/lawnberry
+        cd /opt/lawnberry || cd /home/pi/lawnberry
         python3 scripts/hardware_detection.py
         ;;
     *)
@@ -2159,7 +2172,7 @@ fi
 # Hardware status
 echo ""
 echo "Hardware Status:"
-if [[ -f /dev/i2c-1 ]]; then
+if [[ -e /dev/i2c-1 ]]; then
     echo "✓ I2C: Available"
 else
     echo "✗ I2C: Not available"
@@ -2169,7 +2182,7 @@ if [[ -e /dev/video0 ]]; then
     echo "✓ Camera: Detected"
 else
     echo "✗ Camera: Not detected"
-}
+fi
 
 # Network connectivity
 echo ""

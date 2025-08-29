@@ -58,6 +58,8 @@ class EmergencyController:
         self._emergency_task: Optional[asyncio.Task] = None
         self._watchdog_task: Optional[asyncio.Task] = None
         self._running = False
+        # Heartbeat tracking (used by watchdog)
+        self._last_heartbeat_time: datetime = datetime.now()
         
     async def start(self):
         """Start the emergency controller"""
@@ -143,7 +145,7 @@ class EmergencyController:
         ]
     
     async def _subscribe_to_emergency_topics(self):
-        """Subscribe to emergency-related MQTT topics"""
+        """Subscribe to emergency-related MQTT topics using standardized API"""
         topics = [
             ("lawnberry/emergency/acknowledge", self._handle_emergency_acknowledge),
             ("lawnberry/emergency/reset", self._handle_emergency_reset),
@@ -151,9 +153,10 @@ class EmergencyController:
             ("lawnberry/blade/status", self._handle_blade_status),
             ("lawnberry/system/heartbeat", self._handle_system_heartbeat)
         ]
-        
+
         for topic, handler in topics:
-            await self.mqtt_client.subscribe(topic, handler)
+            await self.mqtt_client.subscribe(topic)
+            self.mqtt_client.add_message_handler(topic, handler)
     
     async def execute_emergency_stop(self, reason: str = "Emergency stop requested") -> bool:
         """Execute immediate emergency stop sequence"""
@@ -300,16 +303,16 @@ class EmergencyController:
     
     async def _watchdog_loop(self):
         """Watchdog to ensure system responsiveness"""
-        last_heartbeat = datetime.now()
+        # Use instance heartbeat timestamp updated by _handle_system_heartbeat
         watchdog_timeout = 10.0  # seconds
         
         while self._running:
             try:
                 # Check for system heartbeat timeout
-                if (datetime.now() - last_heartbeat).total_seconds() > watchdog_timeout:
+                if (datetime.now() - self._last_heartbeat_time).total_seconds() > watchdog_timeout:
                     logger.error("System heartbeat timeout detected")
                     await self.execute_emergency_stop("System heartbeat timeout")
-                    last_heartbeat = datetime.now()  # Reset to avoid spam
+                    self._last_heartbeat_time = datetime.now()  # Reset to avoid spam
                 
                 await asyncio.sleep(1.0)
                 
@@ -417,6 +420,36 @@ class EmergencyController:
         except Exception as e:
             logger.error(f"Error resetting emergency: {e}")
             return False
+
+    async def _publish_emergency_status(self):
+        """Publish current emergency status for dashboards and other services."""
+        try:
+            status_payload = {
+                'timestamp': datetime.now().isoformat(),
+                'emergency_active': self._emergency_active,
+                'emergency_reason': self._emergency_reason,
+                'emergency_timestamp': self._emergency_timestamp.isoformat() if self._emergency_timestamp else None,
+                'acknowledged': self._emergency_acknowledged,
+                'motors_stopped': self._motors_stopped,
+                'blade_disabled': self._blade_disabled,
+                'system_shutdown_requested': self._system_shutdown_requested,
+                'last_response_time_ms': self._last_emergency_response_time,
+                'emergency_count': self._emergency_count,
+                'failed_responses': self._failed_emergency_responses,
+            }
+
+            message = SensorData.create(
+                sender="emergency_controller",
+                sensor_type="emergency_status",
+                data=status_payload,
+            )
+
+            # Publish to a status topic and to safety alerts for visibility
+            await self.mqtt_client.publish("lawnberry/emergency/status", message)
+            if self._emergency_active:
+                await self.mqtt_client.publish("lawnberry/safety/alerts/emergency", message)
+        except Exception as e:
+            logger.error(f"Error publishing emergency status: {e}")
     
     async def _handle_emergency_acknowledge(self, topic: str, message: MessageProtocol):
         """Handle emergency acknowledgment message"""
@@ -438,8 +471,45 @@ class EmergencyController:
     
     async def _handle_system_heartbeat(self, topic: str, message: MessageProtocol):
         """Handle system heartbeat to reset watchdog"""
-        # Heartbeat received, system is responsive
-        pass
+        try:
+            # Heartbeat received, system is responsive
+            self._last_heartbeat_time = datetime.now()
+        except Exception as e:
+            logger.error(f"Error handling system heartbeat: {e}")
+
+    async def _handle_motor_status(self, topic: str, message: MessageProtocol):
+        """Handle motor status updates to confirm emergency enforcement"""
+        try:
+            data = message.payload if hasattr(message, 'payload') else {}
+            # Accept multiple schemas for robustness
+            # Prefer explicit stopped/enabled flags; fall back to PWM neutral or state strings
+            stopped = (
+                bool(data.get('stopped')) or
+                (str(data.get('state', '')).lower() in {'stopped', 'disabled', 'idle'}) or
+                (isinstance(data.get('throttle_pwm'), (int, float)) and 1475 <= float(data['throttle_pwm']) <= 1525)
+            )
+            if stopped:
+                if not self._motors_stopped:
+                    logger.info("Motor status indicates motors are stopped")
+                self._motors_stopped = True
+        except Exception as e:
+            logger.error(f"Error handling motor status: {e}")
+
+    async def _handle_blade_status(self, topic: str, message: MessageProtocol):
+        """Handle blade status updates to confirm blade is disabled"""
+        try:
+            data = message.payload if hasattr(message, 'payload') else {}
+            # Consider blade_enabled False, or state 'disabled' as confirmation
+            disabled = (
+                (data.get('blade_enabled') is False) or
+                (str(data.get('state', '')).lower() in {'disabled', 'stopped', 'off'})
+            )
+            if disabled:
+                if not self._blade_disabled:
+                    logger.info("Blade status indicates blade is disabled")
+                self._blade_disabled = True
+        except Exception as e:
+            logger.error(f"Error handling blade status: {e}")
     
     def get_current_status(self) -> Dict[str, Any]:
         """Get current emergency controller status"""

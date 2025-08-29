@@ -786,20 +786,31 @@ class MLObstacleDetector:
     async def _subscribe_to_safety(self):
         """Subscribe to safety system topics"""
         try:
-            # Subscribe to safety system status
-            await self.mqtt_client.subscribe(
-                "lawnberry/safety/status",
-                self._handle_safety_status
-            )
-            
-            # Subscribe to system reset
-            await self.mqtt_client.subscribe(
-                "lawnberry/system/reset",
-                self._handle_system_reset
-            )
+            # Standardized pattern: subscribe() then add_message_handler()
+            mappings = [
+                ("lawnberry/safety/status", self._wrap_protocol_handler(self._handle_safety_status)),
+                ("lawnberry/system/reset", self._wrap_protocol_handler(self._handle_system_reset)),
+            ]
+            for topic, handler in mappings:
+                await self.mqtt_client.subscribe(topic)
+                self.mqtt_client.add_message_handler(topic, handler)
             
         except Exception as e:
             self.logger.error(f"Error subscribing to safety topics: {e}")
+
+    def _wrap_protocol_handler(self, handler):
+        """Wrap a (topic, MessageProtocol) handler to accept raw payloads too."""
+        async def _wrapped(topic: str, msg_or_payload):
+            try:
+                if isinstance(msg_or_payload, MessageProtocol):
+                    await handler(topic, msg_or_payload)
+                else:
+                    payload = msg_or_payload
+                    fake = MessageProtocol(metadata=None, payload=payload if isinstance(payload, dict) else {"value": payload})
+                    await handler(topic, fake)
+            except Exception as ex:
+                self.logger.error(f"Wrapped handler error for {topic}: {ex}")
+        return _wrapped
     
     async def _handle_safety_status(self, topic: str, message: MessageProtocol):
         """Handle safety system status updates"""

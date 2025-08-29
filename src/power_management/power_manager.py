@@ -1079,7 +1079,7 @@ class PowerManager:
             
             # Publish mode change
             await self.mqtt.publish(
-                "power/mode_change",
+                "lawnberry/power/mode_change",
                 {
                     "old_mode": old_mode.value,
                     "new_mode": new_mode.value,
@@ -1345,7 +1345,7 @@ class PowerManager:
             self.logger.info(f"Navigating to sunny spot at ({spot.latitude:.6f}, {spot.longitude:.6f})")
             
             # Send navigation command
-            await self.mqtt.publish("commands/navigation", {
+            await self.mqtt.publish("lawnberry/commands/navigation", {
                 "command": "navigate_to_position",
                 "latitude": spot.latitude,
                 "longitude": spot.longitude,
@@ -1526,7 +1526,7 @@ class PowerManager:
             if should_save_power != self.power_saving_enabled:
                 self.power_saving_enabled = should_save_power
                 
-                await self.mqtt.publish("power/power_saving", {
+                await self.mqtt.publish("lawnberry/power/power_saving", {
                     "enabled": should_save_power,
                     "reason": "low_battery" if should_save_power else "battery_recovered",
                     "battery_soc": soc
@@ -1542,7 +1542,7 @@ class PowerManager:
             
             # Critical battery level
             if battery.state_of_charge <= self.CRITICAL_BATTERY_LEVEL:
-                await self.mqtt.publish("safety/power_critical", {
+                await self.mqtt.publish("lawnberry/safety/power_critical", {
                     "level": "critical",
                     "message": f"Battery critically low: {battery.state_of_charge:.1%}",
                     "action_required": "immediate_charging_or_shutdown"
@@ -1551,13 +1551,13 @@ class PowerManager:
             # Temperature checks
             if battery.temperature:
                 if battery.temperature > self.MAX_TEMPERATURE:
-                    await self.mqtt.publish("safety/power_temperature", {
+                    await self.mqtt.publish("lawnberry/safety/power_temperature", {
                         "level": "warning",
                         "message": f"Battery temperature high: {battery.temperature:.1f}°C",
                         "action_required": "reduce_power_consumption"
                     })
                 elif battery.temperature < self.MIN_TEMPERATURE:
-                    await self.mqtt.publish("safety/power_temperature", {
+                    await self.mqtt.publish("lawnberry/safety/power_temperature", {
                         "level": "warning", 
                         "message": f"Battery temperature low: {battery.temperature:.1f}°C",
                         "action_required": "warming_required"
@@ -1565,7 +1565,7 @@ class PowerManager:
             
             # Voltage checks
             if battery.voltage < self.MIN_DISCHARGE_VOLTAGE:
-                await self.mqtt.publish("safety/power_voltage", {
+                await self.mqtt.publish("lawnberry/safety/power_voltage", {
                     "level": "critical",
                     "message": f"Battery voltage critically low: {battery.voltage:.2f}V",
                     "action_required": "immediate_shutdown"
@@ -1592,7 +1592,7 @@ class PowerManager:
                 "timestamp": datetime.now().isoformat()
             }
             
-            await self.mqtt.publish("power/battery", battery_data)
+            await self.mqtt.publish("lawnberry/power/battery", battery_data)
             
             # Solar data
             solar_data = {
@@ -1604,13 +1604,13 @@ class PowerManager:
                 "timestamp": datetime.now().isoformat()
             }
             
-            await self.mqtt.publish("power/solar", solar_data)
+            await self.mqtt.publish("lawnberry/power/solar", solar_data)
             
             # Consumption data
             consumption_data = asdict(self.power_consumption)
             consumption_data["timestamp"] = datetime.now().isoformat()
             
-            await self.mqtt.publish("power/consumption", consumption_data)
+            await self.mqtt.publish("lawnberry/power/consumption", consumption_data)
             
         except Exception as e:
             self.logger.error(f"Error publishing power data: {e}")
@@ -1637,17 +1637,28 @@ class PowerManager:
     async def _setup_mqtt_subscriptions(self):
         """Setup MQTT subscriptions for power management"""
         try:
-            # Subscribe to power commands
-            await self.mqtt.subscribe("commands/power", self._handle_power_command)
-            
-            # Subscribe to navigation status for sunny spot tracking
-            await self.mqtt.subscribe("navigation/status", self._handle_navigation_status)
-            
-            # Subscribe to weather updates
-            await self.mqtt.subscribe("weather/current", self._handle_weather_update)
+            # Subscribe using standardized API, then attach handlers
+            subs = [
+                ("lawnberry/commands/power", self._wrap_protocol_handler(self._handle_power_command)),
+                ("lawnberry/navigation/status", self._wrap_protocol_handler(self._handle_navigation_status)),
+                ("lawnberry/weather/current", self._wrap_protocol_handler(self._handle_weather_update)),
+            ]
+            for topic, handler in subs:
+                await self.mqtt.subscribe(topic)
+                self.mqtt.add_message_handler(topic, handler)
             
         except Exception as e:
             self.logger.error(f"Error setting up MQTT subscriptions: {e}")
+
+    def _wrap_protocol_handler(self, func):
+        """Wrap legacy (topic, payload) handlers to accept MessageProtocol."""
+        async def _wrapped(topic: str, message):
+            try:
+                payload = message.payload if hasattr(message, 'payload') else message
+                await func(topic, payload)
+            except Exception as e:
+                self.logger.error(f"Wrapped handler error for {func.__name__}: {e}")
+        return _wrapped
     
     async def _handle_power_command(self, topic: str, payload: Dict[str, Any]):
         """Handle power management commands"""
@@ -1718,14 +1729,14 @@ class PowerManager:
             await self._switch_power_mode(PowerMode.EMERGENCY_MODE)
             
             # Publish emergency shutdown notice
-            await self.mqtt.publish("system/emergency_shutdown", {
+            await self.mqtt.publish("lawnberry/system/emergency_shutdown", {
                 "reason": "power_critical",
                 "battery_soc": self.battery_metrics.state_of_charge,
                 "timestamp": datetime.now().isoformat()
             })
             
             # Navigate to safe location
-            await self.mqtt.publish("commands/navigation", {
+            await self.mqtt.publish("lawnberry/commands/navigation", {
                 "command": "emergency_return_home",
                 "reason": "power_emergency"
             })

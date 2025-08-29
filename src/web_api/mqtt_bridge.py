@@ -159,6 +159,11 @@ class MQTTBridge:
                 except Exception:
                     data = {"value": str(payload)}
 
+            # Ensure data is a dictionary for downstream models
+            if not isinstance(data, dict):
+                # Wrap arbitrary payloads into a dict to satisfy API schemas
+                data = {"value": data if isinstance(data, (int, float, bool)) else str(data)}
+
             # Update cache
             self._cached_data[clean_topic] = data
             self._cache_timestamps[clean_topic] = datetime.now()

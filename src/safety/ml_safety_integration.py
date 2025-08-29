@@ -5,6 +5,7 @@ Provides graduated response system and seamless integration
 
 import asyncio
 import logging
+import numpy as np
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple, Set
 from enum import Enum
@@ -213,23 +214,36 @@ class MLSafetyIntegrator:
     async def _subscribe_to_topics(self):
         """Subscribe to relevant MQTT topics"""
         try:
-            await self.mqtt_client.subscribe(
-                "lawnberry/safety/manual_override",
-                self._handle_manual_override
-            )
-            
-            await self.mqtt_client.subscribe(
-                "lawnberry/safety/false_positive_report",
-                self._handle_false_positive_report
-            )
-            
-            await self.mqtt_client.subscribe(
-                "lawnberry/navigation/position",
-                self._handle_position_update
-            )
+            # Subscribe using the standardized pattern: subscribe() then add_message_handler()
+            topics_and_handlers = [
+                ("lawnberry/safety/manual_override", self._wrap_protocol_handler(self._handle_manual_override)),
+                ("lawnberry/safety/false_positive_report", self._wrap_protocol_handler(self._handle_false_positive_report)),
+                ("lawnberry/navigation/position", self._wrap_protocol_handler(self._handle_position_update)),
+            ]
+            for topic, handler in topics_and_handlers:
+                await self.mqtt_client.subscribe(topic)
+                self.mqtt_client.add_message_handler(topic, handler)
             
         except Exception as e:
             self.logger.error(f"Error subscribing to topics: {e}")
+
+    def _wrap_protocol_handler(self, handler):
+        """Wrap handlers that expect (topic, MessageProtocol) to accept raw payloads too."""
+        async def _wrapped(topic: str, msg_or_payload):
+            try:
+                if isinstance(msg_or_payload, MessageProtocol):
+                    await handler(topic, msg_or_payload)
+                else:
+                    # Normalize raw payload into a MessageProtocol-like object
+                    payload = msg_or_payload
+                    fake = MessageProtocol(
+                        metadata=None,  # Not used by these handlers
+                        payload=payload if isinstance(payload, dict) else {"value": payload}
+                    )
+                    await handler(topic, fake)
+            except Exception as ex:
+                self.logger.error(f"Wrapped handler error for {topic}: {ex}")
+        return _wrapped
     
     async def _integration_loop(self):
         """Main integration loop"""

@@ -250,7 +250,8 @@ class AdaptiveLearningSystem:
             ]
             
             for topic in feedback_topics:
-                await self.mqtt_client.subscribe(topic, self._handle_feedback)
+                await self.mqtt_client.subscribe(topic)
+                self.mqtt_client.add_message_handler(topic, self._handle_feedback)
             
         except Exception as e:
             self.logger.error(f"Error subscribing to feedback topics: {e}")

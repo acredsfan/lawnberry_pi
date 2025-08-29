@@ -111,9 +111,14 @@ class LocalizationSystem:
     
     async def _subscribe_to_sensors(self):
         """Subscribe to sensor data topics"""
-        await self.mqtt_client.subscribe("lawnberry/sensors/gps", self._handle_gps_data)
-        await self.mqtt_client.subscribe("lawnberry/sensors/imu", self._handle_imu_data)
-        await self.mqtt_client.subscribe("lawnberry/sensors/robohat", self._handle_encoder_data)
+        topics = [
+            ("lawnberry/sensors/gps", self._handle_gps_data),
+            ("lawnberry/sensors/imu", self._handle_imu_data),
+            ("lawnberry/sensors/robohat", self._handle_encoder_data),
+        ]
+        for topic, handler in topics:
+            await self.mqtt_client.subscribe(topic)
+            self.mqtt_client.add_message_handler(topic, handler)
     
     async def _handle_gps_data(self, topic: str, message: MessageProtocol):
         """Handle GPS sensor data"""

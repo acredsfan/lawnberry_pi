@@ -234,12 +234,41 @@ class MaintenanceSafetySystem:
                     pass
     
     async def _subscribe_to_sensors(self):
-        """Subscribe to sensor data for maintenance monitoring"""
-        await self.mqtt_client.subscribe("motor/current", self._handle_motor_current)
-        await self.mqtt_client.subscribe("sensor/vibration", self._handle_vibration_data)
-        await self.mqtt_client.subscribe("battery/status", self._handle_battery_data)
-        await self.mqtt_client.subscribe("sensor/temperature", self._handle_temperature_data)
-        await self.mqtt_client.subscribe("maintenance/command", self._handle_maintenance_command)
+        """Subscribe to sensor data for maintenance monitoring using separate handler registration and namespaced topics"""
+        async def _wrap(handler: Callable, topic: str, message):
+            try:
+                if hasattr(message, 'payload'):
+                    payload = message.payload
+                else:
+                    payload = message if isinstance(message, dict) else {}
+                await handler(payload)
+            except Exception as e:
+                logger.error(f"MaintenanceSafety handler error for {topic}: {e}")
+
+        # Motor current (map to power data if available)
+        motor_topic = "lawnberry/sensors/power/data"
+        await self.mqtt_client.subscribe(motor_topic)
+        self.mqtt_client.add_message_handler(motor_topic, lambda t, m: _wrap(self._handle_motor_current, t, m))
+
+        # Vibration data (if published by a sensor service under sensors/vibration)
+        vib_topic = "lawnberry/sensors/vibration"
+        await self.mqtt_client.subscribe(vib_topic)
+        self.mqtt_client.add_message_handler(vib_topic, lambda t, m: _wrap(self._handle_vibration_data, t, m))
+
+        # Battery/status maps to sensors/power/data, already subscribed above; still listen to a named status topic if present
+        batt_topic = "lawnberry/system/power/status"
+        await self.mqtt_client.subscribe(batt_topic)
+        self.mqtt_client.add_message_handler(batt_topic, lambda t, m: _wrap(self._handle_battery_data, t, m))
+
+        # Temperature readings typically come from environmental data
+        temp_topic = "lawnberry/sensors/environmental/data"
+        await self.mqtt_client.subscribe(temp_topic)
+        self.mqtt_client.add_message_handler(temp_topic, lambda t, m: _wrap(self._handle_temperature_data, t, m))
+
+        # Maintenance commands
+        cmd_topic = "lawnberry/maintenance/command"
+        await self.mqtt_client.subscribe(cmd_topic)
+        self.mqtt_client.add_message_handler(cmd_topic, lambda t, m: _wrap(self._handle_maintenance_command, t, m))
     
     async def _handle_motor_current(self, data: Dict[str, Any]):
         """Handle motor current data for blade wear analysis"""
@@ -400,7 +429,7 @@ class MaintenanceSafetySystem:
                 logger.error(f"Error in blade callback: {e}")
         
         # Publish blade data
-        await self.mqtt_client.publish("maintenance/blade_status", {
+        await self.mqtt_client.publish("lawnberry/maintenance/blade_status", {
             'blade_id': blade_data.blade_id,
             'condition': blade_data.condition.value,
             'wear_percentage': blade_data.wear_percentage,
@@ -486,7 +515,7 @@ class MaintenanceSafetySystem:
                 logger.error(f"Error in battery callback: {e}")
         
         # Publish battery data
-        await self.mqtt_client.publish("maintenance/battery_status", {
+        await self.mqtt_client.publish("lawnberry/maintenance/battery_status", {
             'battery_id': battery_id,
             'health_status': health_status.value,
             'capacity_percentage': capacity_percentage,
@@ -525,8 +554,10 @@ class MaintenanceSafetySystem:
         logger.critical(f"Battery overheating detected: {temperature:.1f}°C")
         
         # Create immediate safety lockout
-        await self._create_battery_safety_lockout_direct("overheating", 
-                                                       f"Battery temperature: {temperature:.1f}°C")
+        await self._create_battery_safety_lockout_direct(
+            "overheating",
+            f"Battery temperature: {temperature:.1f}°C"
+        )
     
     async def _create_blade_safety_lockout(self, blade_data: BladeWearData):
         """Create blade safety lockout"""
@@ -628,7 +659,7 @@ class MaintenanceSafetySystem:
                 logger.error(f"Error in lockout callback: {e}")
         
         # Publish lockout
-        await self.mqtt_client.publish("maintenance/lockout_activated", {
+        await self.mqtt_client.publish("lawnberry/maintenance/lockout_activated", {
             'lockout_id': lockout.lockout_id,
             'type': lockout.lockout_type.value,
             'severity': lockout.severity.value,
@@ -651,7 +682,7 @@ class MaintenanceSafetySystem:
         # Check if override is possible
         if not lockout.override_possible:
             logger.warning(f"Override not possible for lockout: {lockout_id}")
-            await self.mqtt_client.publish("maintenance/override_denied", {
+            await self.mqtt_client.publish("lawnberry/maintenance/override_denied", {
                 'lockout_id': lockout_id,
                 'reason': 'override_not_permitted',
                 'user': user,
@@ -666,7 +697,7 @@ class MaintenanceSafetySystem:
         
         if not user_has_access:
             logger.warning(f"User {user} does not have access to override lockout {lockout_id}")
-            await self.mqtt_client.publish("maintenance/override_denied", {
+            await self.mqtt_client.publish("lawnberry/maintenance/override_denied", {
                 'lockout_id': lockout_id,
                 'reason': 'insufficient_access_level',
                 'user': user,
@@ -685,7 +716,7 @@ class MaintenanceSafetySystem:
             f"Override of maintenance lockout: {lockout.description}"
         )
         
-        await self.mqtt_client.publish("maintenance/lockout_overridden", {
+        await self.mqtt_client.publish("lawnberry/maintenance/lockout_overridden", {
             'lockout_id': lockout_id,
             'user': user,
             'timestamp': datetime.now().isoformat()
@@ -711,7 +742,7 @@ class MaintenanceSafetySystem:
                     lockout.resolved_at = current_time
                     del self.active_lockouts[lockout_id]
                     
-                    await self.mqtt_client.publish("maintenance/lockout_expired", {
+                    await self.mqtt_client.publish("lawnberry/maintenance/lockout_expired", {
                         'lockout_id': lockout_id,
                         'timestamp': current_time.isoformat()
                     })
@@ -1011,7 +1042,7 @@ class MaintenanceSafetySystem:
         self.maintenance_reminders.append(reminder)
         
         # Publish reminder
-        await self.mqtt_client.publish("maintenance/reminder", reminder)
+        await self.mqtt_client.publish("lawnberry/maintenance/reminder", reminder)
         
         logger.info(f"Maintenance reminder scheduled: {maintenance_type}")
     

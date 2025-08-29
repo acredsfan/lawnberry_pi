@@ -242,12 +242,44 @@ class EnhancedSafetyProtocols:
                     pass
     
     async def _subscribe_to_events(self):
-        """Subscribe to system events"""
-        await self.mqtt_client.subscribe("location/gps", self._handle_location_update)
-        await self.mqtt_client.subscribe("sensor/environmental", self._handle_environmental_data)
-        await self.mqtt_client.subscribe("safety/violation", self._handle_safety_violation)
-        await self.mqtt_client.subscribe("system/emergency", self._handle_emergency_event)
-        await self.mqtt_client.subscribe("remote/shutdown", self._handle_remote_shutdown)
+        """Subscribe to system events (standardized lawnberry/* topics)"""
+        # GPS updates
+        gps_topic = "lawnberry/sensors/gps/data"
+        await self.mqtt_client.subscribe(gps_topic)
+        self.mqtt_client.add_message_handler(gps_topic, lambda t, m: asyncio.create_task(self._wrapped_handler(self._handle_location_update, t, m)))
+
+        # Environmental data (BME280 etc.)
+        env_topic = "lawnberry/sensors/environmental/data"
+        await self.mqtt_client.subscribe(env_topic)
+        self.mqtt_client.add_message_handler(env_topic, lambda t, m: asyncio.create_task(self._wrapped_handler(self._handle_environmental_data, t, m)))
+
+        # Safety violation notifications
+        violation_topic = "lawnberry/safety/violation"
+        await self.mqtt_client.subscribe(violation_topic)
+        self.mqtt_client.add_message_handler(violation_topic, lambda t, m: asyncio.create_task(self._wrapped_handler(self._handle_safety_violation, t, m)))
+
+        # System-wide emergency events
+        emergency_topic = "lawnberry/safety/emergency"
+        await self.mqtt_client.subscribe(emergency_topic)
+        self.mqtt_client.add_message_handler(emergency_topic, lambda t, m: asyncio.create_task(self._wrapped_handler(self._handle_emergency_event, t, m)))
+
+        # Remote shutdown requests
+        remote_shutdown_topic = "lawnberry/system/remote_shutdown"
+        await self.mqtt_client.subscribe(remote_shutdown_topic)
+        self.mqtt_client.add_message_handler(remote_shutdown_topic, lambda t, m: asyncio.create_task(self._wrapped_handler(self._handle_remote_shutdown, t, m)))
+
+    async def _wrapped_handler(self, handler: Callable, topic: str, message):
+        """Normalize MQTT handler payloads to dict for internal handlers."""
+        try:
+            payload: Dict[str, Any]
+            if hasattr(message, 'payload'):
+                payload = message.payload  # MessageProtocol
+            else:
+                import json as _json
+                payload = _json.loads(message) if isinstance(message, str) else {}
+            await handler(payload)
+        except Exception as e:
+            logger.error(f"EnhancedProtocols handler error for {topic}: {e}")
     
     async def _handle_location_update(self, data: Dict[str, Any]):
         """Handle GPS location updates for geofencing"""
@@ -511,7 +543,7 @@ class EnhancedSafetyProtocols:
     
     async def _send_warning_notification(self, event: SafetyEvent):
         """Send warning notification"""
-        await self.mqtt_client.publish("notifications/warning", {
+        await self.mqtt_client.publish("lawnberry/notifications/warning", {
             'event_id': event.event_id,
             'message': f"Safety warning: {event.description}",
             'timestamp': event.timestamp.isoformat()
@@ -519,7 +551,7 @@ class EnhancedSafetyProtocols:
     
     async def _send_caution_notification(self, event: SafetyEvent):
         """Send caution notification"""
-        await self.mqtt_client.publish("notifications/caution", {
+        await self.mqtt_client.publish("lawnberry/notifications/caution", {
             'event_id': event.event_id,
             'message': f"Safety caution: {event.description}",
             'timestamp': event.timestamp.isoformat(),
@@ -528,7 +560,7 @@ class EnhancedSafetyProtocols:
     
     async def _send_urgent_notification(self, event: SafetyEvent):
         """Send urgent notification"""
-        await self.mqtt_client.publish("notifications/urgent", {
+        await self.mqtt_client.publish("lawnberry/notifications/urgent", {
             'event_id': event.event_id,
             'message': f"Urgent safety issue: {event.description}",
             'timestamp': event.timestamp.isoformat(),
@@ -537,7 +569,7 @@ class EnhancedSafetyProtocols:
     
     async def _send_emergency_notification(self, event: SafetyEvent):
         """Send emergency notification"""
-        await self.mqtt_client.publish("notifications/emergency", {
+        await self.mqtt_client.publish("lawnberry/notifications/emergency", {
             'event_id': event.event_id,
             'message': f"EMERGENCY: {event.description}",
             'timestamp': event.timestamp.isoformat(),
@@ -546,7 +578,7 @@ class EnhancedSafetyProtocols:
     
     async def _send_critical_notification(self, event: SafetyEvent):
         """Send critical system notification"""
-        await self.mqtt_client.publish("notifications/critical", {
+        await self.mqtt_client.publish("lawnberry/notifications/critical", {
             'event_id': event.event_id,
             'message': f"CRITICAL SYSTEM EVENT: {event.description}",
             'timestamp': event.timestamp.isoformat(),
@@ -583,7 +615,7 @@ class EnhancedSafetyProtocols:
     
     async def _trigger_emergency_stop(self, event: SafetyEvent):
         """Trigger emergency stop"""
-        await self.mqtt_client.publish("system/emergency_stop", {
+        await self.mqtt_client.publish("lawnberry/system/emergency_stop", {
             'event_id': event.event_id,
             'reason': event.description,
             'timestamp': event.timestamp.isoformat()
@@ -591,7 +623,7 @@ class EnhancedSafetyProtocols:
     
     async def _trigger_system_shutdown(self, event: SafetyEvent):
         """Trigger complete system shutdown"""
-        await self.mqtt_client.publish("system/shutdown", {
+        await self.mqtt_client.publish("lawnberry/system/shutdown", {
             'event_id': event.event_id,
             'reason': event.description,
             'timestamp': event.timestamp.isoformat(),
@@ -657,7 +689,7 @@ class EnhancedSafetyProtocols:
     
     async def _activate_emergency_protocols(self, event: SafetyEvent):
         """Activate emergency protocols"""
-        await self.mqtt_client.publish("system/emergency_protocols", {
+        await self.mqtt_client.publish("lawnberry/system/emergency_protocols", {
             'event_id': event.event_id,
             'protocols': ['secure_system', 'preserve_data', 'prepare_diagnostics'],
             'timestamp': event.timestamp.isoformat()

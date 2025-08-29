@@ -166,19 +166,39 @@ class SensorFusionSafetySystem:
                     pass
     
     async def _subscribe_to_sensors(self):
-        """Subscribe to all sensor data streams"""
-        # Subscribe to ToF sensors
-        await self.mqtt_client.subscribe("sensor/tof/left", self._handle_tof_left_data)
-        await self.mqtt_client.subscribe("sensor/tof/right", self._handle_tof_right_data)
-        
-        # Subscribe to vision data
-        await self.mqtt_client.subscribe("vision/obstacles", self._handle_vision_data)
-        
+        """Subscribe to all sensor data streams using separate handler registration with namespaced topics"""
+        async def _wrap(handler: Callable, topic: str, message):
+            try:
+                if hasattr(message, 'payload'):
+                    payload = message.payload
+                else:
+                    payload = json.loads(message) if isinstance(message, str) else (message or {})
+                await handler(payload)
+            except Exception as e:
+                logger.error(f"SensorFusion handler error for {topic}: {e}")
+
+        # Subscribe to ToF sensors (per-sensor topics published by hardware service)
+        tof_left = "lawnberry/sensors/tof/left"
+        await self.mqtt_client.subscribe(tof_left)
+        self.mqtt_client.add_message_handler(tof_left, lambda t, m: _wrap(self._handle_tof_left_data, t, m))
+        tof_right = "lawnberry/sensors/tof/right"
+        await self.mqtt_client.subscribe(tof_right)
+        self.mqtt_client.add_message_handler(tof_right, lambda t, m: _wrap(self._handle_tof_right_data, t, m))
+
+        # Subscribe to fused obstacles from vision pipeline
+        vision_topic = "lawnberry/sensors/obstacles"
+        await self.mqtt_client.subscribe(vision_topic)
+        self.mqtt_client.add_message_handler(vision_topic, lambda t, m: _wrap(self._handle_vision_data, t, m))
+
         # Subscribe to IMU data
-        await self.mqtt_client.subscribe("sensor/imu", self._handle_imu_data)
-        
+        imu_topic = "lawnberry/sensors/imu/data"
+        await self.mqtt_client.subscribe(imu_topic)
+        self.mqtt_client.add_message_handler(imu_topic, lambda t, m: _wrap(self._handle_imu_data, t, m))
+
         # Subscribe to environmental data
-        await self.mqtt_client.subscribe("sensor/environmental", self._handle_environmental_data)
+        env_topic = "lawnberry/sensors/environmental/data"
+        await self.mqtt_client.subscribe(env_topic)
+        self.mqtt_client.add_message_handler(env_topic, lambda t, m: _wrap(self._handle_environmental_data, t, m))
     
     async def _handle_tof_left_data(self, data: Dict[str, Any]):
         """Handle ToF left sensor data"""

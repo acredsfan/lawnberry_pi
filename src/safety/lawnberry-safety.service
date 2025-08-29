@@ -4,20 +4,23 @@ Documentation=https://github.com/lawnberry/safety-system
 After=network-online.target mosquitto.service
 Wants=network-online.target
 Requires=mosquitto.service
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
-User=lawnberry
-Group=lawnberry
-# Use writable CWD to avoid lgpio .lgd-nfy* pipe issues if GPIO is touched
+User=pi
+Group=pi
 WorkingDirectory=/var/lib/lawnberry
+# Use writable CWD to avoid lgpio .lgd-nfy* pipe issues if GPIO is touched
+Environment=GPIOZERO_PIN_FACTORY=lgpio
+Environment=XDG_RUNTIME_DIR=/run/lawnberry
+Environment=LG_GPIO_CHIP=0
 Environment=PYTHONPATH=/opt/lawnberry
 Environment=LAWNBERRY_ENV=production
 ExecStart=/opt/lawnberry/venv/bin/python -m src.safety.safety_main
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=60
 StartLimitBurst=3
 
 # Resource limits
@@ -30,6 +33,8 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry /run /tmp
+RuntimeDirectory=lawnberry
+RuntimeDirectoryMode=0755
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectControlGroups=true

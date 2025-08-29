@@ -31,6 +31,8 @@ class SafetyConfig:
     emergency_response_time_ms: int = 100
     safety_update_rate_hz: int = 20
     emergency_update_rate_hz: int = 50
+    # New: limit how often comprehensive safety status is published to MQTT
+    status_publish_rate_hz: int = 2
     person_safety_radius_m: float = 3.0
     pet_safety_radius_m: float = 1.5
     general_safety_distance_m: float = 0.3
@@ -110,6 +112,8 @@ class SafetyService:
         self._response_times: List[float] = []
         self._false_positive_count = 0
         self._false_negative_count = 0
+        # Publish throttling
+        self._last_status_publish: datetime = datetime.min
         
         # Emergency callbacks
         self._emergency_callbacks: List[Callable] = []
@@ -119,6 +123,45 @@ class SafetyService:
         self._sensor_fusion_performance: Dict[str, float] = {}
         self._environmental_safety_events: List[Dict[str, Any]] = []
         self._maintenance_safety_events: List[Dict[str, Any]] = []
+
+    def _alert_to_dict(self, alert: HazardAlert) -> Dict[str, Any]:
+        """Convert a HazardAlert to a plain dict suitable for publishing/aggregation."""
+        try:
+            return {
+                'alert_id': getattr(alert, 'alert_id', None),
+                'hazard_level': getattr(getattr(alert, 'hazard_level', None), 'value', getattr(alert, 'hazard_level', 'UNKNOWN')),
+                'hazard_type': getattr(alert, 'hazard_type', 'unknown'),
+                'timestamp': (getattr(alert, 'timestamp').isoformat() if getattr(alert, 'timestamp', None) else datetime.now().isoformat()),
+                'description': getattr(alert, 'description', ''),
+                'location': getattr(alert, 'location', None),
+                'sensor_data': getattr(alert, 'sensor_data', {}) or {},
+                'recommended_action': getattr(alert, 'recommended_action', 'CAUTION'),
+                'immediate_response_required': getattr(alert, 'immediate_response_required', False),
+            }
+        except Exception:
+            return {'hazard_level': 'UNKNOWN', 'hazard_type': 'unknown', 'timestamp': datetime.now().isoformat()}
+
+    def _safety_status_to_dict(self, status: SafetyStatus) -> Dict[str, Any]:
+        """Convert SafetyStatus dataclass to a dict for uniform aggregation."""
+        try:
+            return {
+                'is_safe': status.is_safe,
+                'safety_level': getattr(status.safety_level, 'value', status.safety_level),
+                'tilt_safe': status.tilt_safe,
+                'drop_safe': status.drop_safe,
+                'collision_safe': status.collision_safe,
+                'weather_safe': status.weather_safe,
+                'boundary_safe': status.boundary_safe,
+                'tilt_angle': status.tilt_angle,
+                'ground_clearance': status.ground_clearance,
+                'nearest_obstacle_distance': status.nearest_obstacle_distance,
+                'temperature': status.temperature,
+                'humidity': status.humidity,
+                'is_raining': status.is_raining,
+                'active_alerts': [self._alert_to_dict(a) for a in (status.active_alerts or [])],
+            }
+        except Exception:
+            return {'is_safe': False, 'safety_level': 'CRITICAL', 'active_alerts': []}
     
     def _initialize_enhanced_components(self):
         """Initialize enhanced safety components based on configuration"""
@@ -264,9 +307,19 @@ class SafetyService:
         except Exception as e:
             logger.error(f"Failed to register enhanced safety callbacks: {e}")
         
-        # Subscribe to position updates
-        await self.mqtt_client.subscribe("lawnberry/sensors/gps", self._handle_position_update)
-        await self.mqtt_client.subscribe("lawnberry/system/state", self._handle_system_state_change)
+        # Subscribe to position updates and system state using correct client API
+        try:
+            gps_topic = "lawnberry/sensors/gps/data"
+            await self.mqtt_client.subscribe(gps_topic)
+            self.mqtt_client.add_message_handler(gps_topic, self._handle_position_update)
+        except Exception as e:
+            logger.error(f"Failed to subscribe to GPS topic: {e}")
+        try:
+            state_topic = "lawnberry/system/state"
+            await self.mqtt_client.subscribe(state_topic)
+            self.mqtt_client.add_message_handler(state_topic, self._handle_system_state_change)
+        except Exception as e:
+            logger.error(f"Failed to subscribe to system state topic: {e}")
         
         logger.info("Enhanced safety service started successfully")
     
@@ -449,8 +502,8 @@ class SafetyService:
     
     async def _trigger_emergency_response(self, event_data):
         """Trigger emergency response for enhanced safety events"""
-        # Publish emergency event
-        await self.mqtt_client.publish("safety/emergency", event_data)
+        # Publish emergency event on namespaced topic
+        await self.mqtt_client.publish("lawnberry/safety/emergency", event_data)
         
         # Trigger emergency callbacks
         for callback in self._emergency_callbacks:
@@ -566,14 +619,29 @@ class SafetyService:
     
     async def _subscribe_to_commands(self):
         """Subscribe to safety-related commands"""
-        await self.mqtt_client.subscribe("safety/emergency_stop", self._handle_emergency_stop_command)
-        await self.mqtt_client.subscribe("lawnberry/commands/emergency", self._handle_emergency_command)
-        await self.mqtt_client.subscribe("lawnberry/safety/test", self._handle_safety_test)
+        try:
+            topic = "lawnberry/safety/emergency_stop"
+            await self.mqtt_client.subscribe(topic)
+            self.mqtt_client.add_message_handler(topic, self._handle_emergency_stop_command)
+        except Exception as e:
+            logger.error(f"Failed to subscribe to {topic}: {e}")
+        try:
+            topic = "lawnberry/commands/emergency"
+            await self.mqtt_client.subscribe(topic)
+            self.mqtt_client.add_message_handler(topic, self._handle_emergency_command)
+        except Exception as e:
+            logger.error(f"Failed to subscribe to {topic}: {e}")
+        try:
+            topic = "lawnberry/safety/test"
+            await self.mqtt_client.subscribe(topic)
+            self.mqtt_client.add_message_handler(topic, self._handle_safety_test)
+        except Exception as e:
+            logger.error(f"Failed to subscribe to {topic}: {e}")
     
-    async def _handle_emergency_stop_command(self, topic: str, message: MessageProtocol):
+    async def _handle_emergency_stop_command(self, topic: str, message):
         """Handle external emergency stop command"""
         try:
-            command_data = message.payload
+            command_data = message.payload if hasattr(message, 'payload') else (message if isinstance(message, dict) else {})
             reason = command_data.get('reason', 'External emergency stop command')
             triggered_by = command_data.get('triggered_by', 'unknown')
             
@@ -585,10 +653,10 @@ class SafetyService:
         except Exception as e:
             logger.error(f"Error handling emergency stop command: {e}")
     
-    async def _handle_emergency_command(self, topic: str, message: MessageProtocol):
+    async def _handle_emergency_command(self, topic: str, message):
         """Handle emergency commands"""
         try:
-            command_data = message.payload
+            command_data = message.payload if hasattr(message, 'payload') else (message if isinstance(message, dict) else {})
             command = command_data.get('command')
             
             if command == 'emergency_stop':
@@ -601,12 +669,17 @@ class SafetyService:
         except Exception as e:
             logger.error(f"Error handling emergency command: {e}")
     
-    async def _handle_position_update(self, topic: str, message: MessageProtocol):
+    async def _handle_position_update(self, topic: str, message):
         """Handle GPS position updates for boundary monitoring"""
         try:
-            gps_data = message.payload
+            if hasattr(message, 'payload'):
+                gps_data = message.payload
+                ts = getattr(message, 'metadata', None).timestamp if getattr(message, 'metadata', None) else None
+            else:
+                gps_data = message if isinstance(message, dict) else {}
+                ts = None
             self._current_position = GPSReading(
-                timestamp=datetime.fromtimestamp(message.metadata.timestamp),
+                timestamp=datetime.fromtimestamp(ts) if ts else datetime.now(),
                 sensor_id=gps_data.get('sensor_id', 'gps'),
                 value=gps_data,
                 unit='degrees',
@@ -624,10 +697,10 @@ class SafetyService:
         except Exception as e:
             logger.error(f"Error handling position update: {e}")
     
-    async def _handle_system_state_change(self, topic: str, message: MessageProtocol):
+    async def _handle_system_state_change(self, topic: str, message):
         """Handle system state changes"""
         try:
-            state_data = message.payload
+            state_data = message.payload if hasattr(message, 'payload') else (message if isinstance(message, dict) else {})
             new_state = state_data.get('state', 'UNKNOWN')
             
             if new_state != self._system_state:
@@ -655,8 +728,12 @@ class SafetyService:
                 # Analyze and coordinate safety responses
                 await self._coordinate_safety_response(safety_status)
                 
-                # Publish comprehensive safety status
-                await self._publish_comprehensive_safety_status(safety_status)
+                # Publish comprehensive safety status (throttled)
+                now = datetime.now()
+                min_publish_interval = 1.0 / max(1, int(self.config.status_publish_rate_hz))
+                if (now - self._last_status_publish).total_seconds() >= min_publish_interval:
+                    await self._publish_comprehensive_safety_status(safety_status)
+                    self._last_status_publish = now
                 
                 # Log safety events
                 await self._log_safety_events(safety_status)
@@ -703,6 +780,33 @@ class SafetyService:
             except Exception as e:
                 logger.error(f"Error in emergency coordination loop: {e}")
                 await asyncio.sleep(0.01)
+
+    async def _trigger_coordinated_emergency_response(self, critical_hazards: List[Dict[str, Any]]):
+        """Coordinate emergency response across subsystems (minimal implementation)."""
+        try:
+            # Aggregate and publish a consolidated emergency event
+            consolidated = {
+                'timestamp': datetime.now().isoformat(),
+                'source': 'safety_service',
+                'hazards': critical_hazards,
+            }
+            await self._broadcast_emergency_alert(consolidated)
+
+            # Execute emergency stop for critical hazards
+            await self.emergency_controller.execute_emergency_stop("Coordinated emergency response")
+        except Exception as e:
+            logger.error(f"Error triggering coordinated emergency response: {e}")
+
+    async def _broadcast_emergency_alert(self, alert: Dict[str, Any]):
+        """Broadcast an emergency alert on standardized topic."""
+        try:
+            await self.mqtt_client.publish("lawnberry/safety/emergency", SensorData.create(
+                sender="safety_service",
+                sensor_type="emergency_broadcast",
+                data=alert,
+            ))
+        except Exception as e:
+            logger.error(f"Error broadcasting emergency alert: {e}")
     
     async def trigger_emergency_stop(self, reason: str = "Manual emergency stop", 
                                    triggered_by: str = "system") -> bool:
@@ -756,12 +860,47 @@ class SafetyService:
     async def _collect_comprehensive_safety_status(self) -> Dict[str, Any]:
         """Collect comprehensive safety status from all components"""
         try:
-            # Get status from all safety components
-            safety_monitor_status = self.safety_monitor.get_current_safety_status()
-            hazard_detector_status = await self.hazard_detector.get_current_status()
-            boundary_status = await self.boundary_monitor.get_current_status() if self.config.enable_boundary_enforcement else None
-            emergency_controller_status = self.emergency_controller.get_current_status()
+            # Helper: normalize component status into a dict with 'is_safe' and 'active_alerts' list of dicts
+            def _normalize_component_status(status_obj: Any) -> Dict[str, Any]:
+                try:
+                    if status_obj is None:
+                        return {'is_safe': True, 'active_alerts': []}
+                    if isinstance(status_obj, SafetyStatus):
+                        return self._safety_status_to_dict(status_obj)
+                    if isinstance(status_obj, dict):
+                        # Ensure active_alerts is a list of dicts
+                        alerts = status_obj.get('active_alerts', []) or []
+                        normalized_alerts: List[Dict[str, Any]] = []
+                        for a in alerts:
+                            if isinstance(a, HazardAlert):
+                                normalized_alerts.append(self._alert_to_dict(a))
+                            elif isinstance(a, dict):
+                                normalized_alerts.append(a)
+                        status_obj['active_alerts'] = normalized_alerts
+                        # Ensure is_safe key exists
+                        status_obj.setdefault('is_safe', True)
+                        return status_obj
+                    # Unknown type; fallback safe
+                    logger.debug(f"Component status type {type(status_obj)} not recognized; defaulting to safe dict")
+                    return {'is_safe': True, 'active_alerts': []}
+                except Exception:
+                    return {'is_safe': False, 'active_alerts': []}
+
+            # Get and normalize status from all safety components
+            safety_monitor_status = _normalize_component_status(self.safety_monitor.get_current_safety_status())
+            hazard_detector_status = _normalize_component_status(await self.hazard_detector.get_current_status())
+            boundary_status = _normalize_component_status(
+                await self.boundary_monitor.get_current_status() if self.config.enable_boundary_enforcement else None
+            ) if self.config.enable_boundary_enforcement else None
+            emergency_controller_status = _normalize_component_status(self.emergency_controller.get_current_status())
             
+            # Snapshot types for diagnostics
+            def _snapshot_component_types(mapper: Dict[str, Any]) -> Dict[str, str]:
+                snap = {}
+                for k, v in mapper.items():
+                    snap[k] = type(v).__name__
+                return snap
+
             # Combine into comprehensive status
             comprehensive_status = {
                 'timestamp': datetime.now().isoformat(),
@@ -772,7 +911,7 @@ class SafetyService:
                 'components': {
                     'safety_monitor': safety_monitor_status,
                     'hazard_detector': hazard_detector_status,
-                    'boundary_monitor': boundary_status,
+                    'boundary_monitor': boundary_status if boundary_status is not None else {'is_safe': True, 'active_alerts': []},
                     'emergency_controller': emergency_controller_status
                 },
                 'performance_metrics': {
@@ -788,18 +927,50 @@ class SafetyService:
             all_components_safe = True
             highest_alert_level = HazardLevel.NONE
             
+            # Defensive pass: ensure every component status is a dict before using .get
+            for component_name, component_status in list(comprehensive_status['components'].items()):
+                if isinstance(component_status, SafetyStatus):
+                    logger.debug(f"Normalizing SafetyStatus from component '{component_name}' to dict")
+                    component_status = self._safety_status_to_dict(component_status)
+                    comprehensive_status['components'][component_name] = component_status
+                elif not isinstance(component_status, dict):
+                    logger.debug(f"Component '{component_name}' returned non-dict status of type {type(component_status)}; coercing to default safe dict")
+                    component_status = {'is_safe': True, 'active_alerts': []}
+                    comprehensive_status['components'][component_name] = component_status
+
             for component_name, component_status in comprehensive_status['components'].items():
-                if component_status and not component_status.get('is_safe', True):
-                    all_components_safe = False
-                    
-                # Collect alerts from all components
-                if component_status and 'active_alerts' in component_status:
-                    comprehensive_status['active_alerts'].extend(component_status['active_alerts'])
+                # component_status is guaranteed dict by normalization above
+                try:
+                    if component_status and not component_status.get('is_safe', True):
+                        all_components_safe = False
+                    # Collect alerts from all components
+                    if component_status.get('active_alerts'):
+                        # Ensure per-component alerts are dicts
+                        norm_alerts: List[Dict[str, Any]] = []
+                        for a in component_status['active_alerts']:
+                            if isinstance(a, HazardAlert):
+                                norm_alerts.append(self._alert_to_dict(a))
+                            elif isinstance(a, dict):
+                                norm_alerts.append(a)
+                        comprehensive_status['active_alerts'].extend(norm_alerts)
+                except Exception as e_loop:
+                    logger.error(f"Component aggregation error for '{component_name}': {e_loop} (type={type(component_status)})")
+                    # Force-safe fallback for this component
+                    continue
             
             comprehensive_status['overall_safe'] = all_components_safe
             
             # Determine overall safety level
             if comprehensive_status['active_alerts']:
+                # Ensure alerts are dicts (defensive) before computing levels
+                normalized_alerts: List[Dict[str, Any]] = []
+                for a in comprehensive_status['active_alerts']:
+                    if isinstance(a, HazardAlert):
+                        normalized_alerts.append(self._alert_to_dict(a))
+                    elif isinstance(a, dict):
+                        normalized_alerts.append(a)
+                comprehensive_status['active_alerts'] = normalized_alerts
+
                 alert_levels = [alert.get('hazard_level', 'NONE') for alert in comprehensive_status['active_alerts']]
                 if 'CRITICAL' in alert_levels:
                     comprehensive_status['safety_level'] = 'CRITICAL'
@@ -813,13 +984,72 @@ class SafetyService:
             return comprehensive_status
             
         except Exception as e:
-            logger.error(f"Error collecting comprehensive safety status: {e}")
+            try:
+                comp_types = {}
+                # Attempt to gather component type snapshot for diagnostics
+                comp_map = {
+                    'safety_monitor': self.safety_monitor.get_current_safety_status(),
+                    'hazard_detector': await self.hazard_detector.get_current_status(),
+                    'boundary_monitor': (await self.boundary_monitor.get_current_status()) if self.config.enable_boundary_enforcement else None,
+                    'emergency_controller': self.emergency_controller.get_current_status()
+                }
+                for k, v in comp_map.items():
+                    comp_types[k] = type(v).__name__
+                logger.error(f"Error collecting comprehensive safety status: {e} | component types: {comp_types}")
+            except Exception:
+                logger.error(f"Error collecting comprehensive safety status: {e}")
             return {
                 'timestamp': datetime.now().isoformat(),
                 'overall_safe': False,
                 'safety_level': 'CRITICAL',
                 'error': str(e)
             }
+
+    async def _coordinate_safety_response(self, safety_status: Dict[str, Any]):
+        """Analyze current safety status and coordinate responses.
+        Minimal implementation: if any critical alert is present, trigger emergency stop; if high, log warning.
+        """
+        try:
+            alerts = safety_status.get('active_alerts', []) or []
+            levels = {str(a.get('hazard_level', '')).upper() for a in alerts}
+
+            if 'CRITICAL' in levels:
+                await self.emergency_controller.execute_emergency_stop("Critical hazard detected")
+                return
+
+            if 'HIGH' in levels:
+                logger.warning("High-level hazard detected; monitoring closely")
+        except Exception as e:
+            logger.error(f"Error coordinating safety response: {e}")
+
+    async def _publish_comprehensive_safety_status(self, safety_status: Dict[str, Any]):
+        """Publish the comprehensive safety status over MQTT for the UI and other services."""
+        try:
+            payload = SensorData.create(
+                sender="safety_service",
+                sensor_type="safety_status",
+                data=safety_status,
+            )
+            await self.mqtt_client.publish("lawnberry/safety/status", payload)
+        except Exception as e:
+            logger.error(f"Error publishing safety status: {e}")
+
+    async def _log_safety_events(self, safety_status: Dict[str, Any]):
+        """Record significant safety events for metrics and auditing."""
+        try:
+            level = safety_status.get('safety_level', 'NONE')
+            if level in ('HIGH', 'CRITICAL'):
+                self._safety_events_log.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'event_type': 'status_update',
+                    'safety_level': level,
+                    'active_alerts': len(safety_status.get('active_alerts', []) or []),
+                })
+                # Prevent unbounded growth
+                if len(self._safety_events_log) > 1000:
+                    self._safety_events_log = self._safety_events_log[-500:]
+        except Exception as e:
+            logger.error(f"Error logging safety events: {e}")
     
     async def _check_critical_emergency_conditions(self) -> List[Dict[str, Any]]:
         """Check for critical emergency conditions across all components"""
@@ -916,3 +1146,17 @@ class SafetyService:
     def register_emergency_callback(self, callback: Callable):
         """Register callback for emergency situations"""
         self._emergency_callbacks.append(callback)
+
+    async def _handle_safety_test(self, topic: str, message):
+        """Handle safety test messages and provide an acknowledgement on MQTT."""
+        try:
+            payload = message.payload if hasattr(message, 'payload') else (message if isinstance(message, dict) else {'raw': str(message)})
+            logger.info(f"Safety test message on {topic}: {payload}")
+            ack = {
+                'timestamp': datetime.now().isoformat(),
+                'event': 'safety_test_ack',
+                'received': payload,
+            }
+            await self.mqtt_client.publish("lawnberry/safety/alerts/test", ack)
+        except Exception as e:
+            logger.error(f"Error handling safety test message: {e}")

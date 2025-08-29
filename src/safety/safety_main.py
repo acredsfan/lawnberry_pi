@@ -52,9 +52,41 @@ class SafetySystemMain:
             self.data_manager = DataManager()
             await self.data_manager.start()
             
-            # Initialize MQTT client
-            self.mqtt_client = MQTTClient()
-            await self.mqtt_client.connect()
+            # Initialize MQTT client with explicit client_id and config
+            import socket
+            host = "unknown"
+            try:
+                host = socket.gethostname()
+            except Exception:
+                pass
+            client_id = f"lawnberry-safety-{host}"
+            self.mqtt_client = MQTTClient(
+                client_id=client_id,
+                config={
+                    'broker_host': 'localhost',
+                    'broker_port': 1883,
+                    'keepalive': 60,
+                    'clean_session': True,
+                    'reconnect_delay': 5,
+                    'max_reconnect_delay': 300,
+                    'reconnect_backoff': 2.0,
+                    'message_timeout': 30,
+                    'auth': {
+                        'enabled': False,
+                        'username': None,
+                        'password': None
+                    },
+                    'tls': {
+                        'enabled': False,
+                        'ca_certs': None,
+                        'certfile': None,
+                        'keyfile': None
+                    }
+                }
+            )
+            initialized = await self.mqtt_client.initialize()
+            if not initialized:
+                raise RuntimeError("MQTT client initialization failed")
             
             # Initialize safety service
             self.safety_service = SafetyService(self.mqtt_client, config)
@@ -84,6 +116,7 @@ class SafetySystemMain:
                 emergency_response_time_ms=safety_params['emergency_response_time_ms'],
                 safety_update_rate_hz=safety_params['safety_update_rate_hz'],
                 emergency_update_rate_hz=safety_params['emergency_update_rate_hz'],
+                status_publish_rate_hz=safety_params.get('status_publish_rate_hz', 2),
                 person_safety_radius_m=safety_params['person_safety_radius_m'],
                 pet_safety_radius_m=safety_params['pet_safety_radius_m'],
                 general_safety_distance_m=safety_params['general_safety_distance_m'],

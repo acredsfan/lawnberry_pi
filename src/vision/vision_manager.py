@@ -241,7 +241,7 @@ class VisionManager:
             
             # Publish safety alert
             await self.mqtt_client.publish(
-                "safety/vision_alert",
+                "lawnberry/safety/vision_alert",
                 safety_alert,
                 qos=2  # Ensure delivery
             )
@@ -289,7 +289,7 @@ class VisionManager:
                 detection_msg['objects'].append(obj_data)
             
             # Publish detection results
-            await self.mqtt_client.publish("vision/detections", detection_msg, qos=1)
+            await self.mqtt_client.publish("lawnberry/vision/detections", detection_msg, qos=1)
             
             # Publish frame analysis summary
             analysis_msg = {
@@ -304,7 +304,7 @@ class VisionManager:
                 }
             }
             
-            await self.mqtt_client.publish("vision/frame_analysis", analysis_msg, qos=0)
+            await self.mqtt_client.publish("lawnberry/vision/frame_analysis", analysis_msg, qos=0)
             
         except Exception as e:
             self.logger.error(f"Error publishing detection results: {e}")
@@ -389,13 +389,27 @@ class VisionManager:
         """Setup MQTT subscriptions for vision commands"""
         try:
             # Subscribe to vision commands
-            await self.mqtt_client.subscribe("commands/vision", self._handle_vision_command)
+            # Standardized API: subscribe then add handler with wrapper
+            await self.mqtt_client.subscribe("lawnberry/commands/vision")
+            self.mqtt_client.add_message_handler(
+                "lawnberry/commands/vision",
+                self._wrap_protocol_handler(self._handle_vision_command)
+            )
             
             self.logger.info("MQTT subscriptions setup complete")
             
         except Exception as e:
             self.logger.error(f"Error setting up MQTT subscriptions: {e}")
     
+    def _wrap_protocol_handler(self, func):
+        async def _wrapped(topic: str, message):
+            try:
+                payload = message.payload if hasattr(message, 'payload') else message
+                await func(topic, payload)
+            except Exception as e:
+                self.logger.error(f"Wrapped handler error for {func.__name__}: {e}")
+        return _wrapped
+
     async def _handle_vision_command(self, topic: str, payload: Dict[str, Any]):
         """Handle incoming MQTT vision commands"""
         try:

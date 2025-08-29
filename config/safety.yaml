@@ -6,6 +6,7 @@ safety:
   emergency_response_time_ms: 100     # Target emergency response time
   safety_update_rate_hz: 20           # Regular safety monitoring rate
   emergency_update_rate_hz: 50        # Emergency detection rate
+  status_publish_rate_hz: 2           # Max rate to publish safety status to MQTT
   
   # Safety Zones and Distances
   person_safety_radius_m: 3.0         # Stop distance when person detected

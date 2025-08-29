@@ -124,9 +124,10 @@ class BoundaryMonitor:
             ("lawnberry/maps/no_go_zones", self._handle_no_go_zones_update),
             ("lawnberry/maps/boundary_test", self._handle_boundary_test)
         ]
-        
+
         for topic, handler in subscriptions:
-            await self.mqtt_client.subscribe(topic, handler)
+            await self.mqtt_client.subscribe(topic)
+            self.mqtt_client.add_message_handler(topic, handler)
     
     async def _load_boundary_configuration(self):
         """Load boundary configuration from persistent storage"""
@@ -204,6 +205,28 @@ class BoundaryMonitor:
                 
         except Exception as e:
             logger.error(f"Error handling no-go zones update: {e}")
+
+    async def _handle_boundary_test(self, topic: str, message: MessageProtocol):
+        """Handle boundary test messages for validation and smoke tests.
+
+        Publishes an acknowledgement on a safety alerts topic so the Web UI and
+        test scripts can verify end-to-end wiring.
+        """
+        try:
+            payload = message.payload if hasattr(message, 'payload') else (message if isinstance(message, dict) else {'raw': str(message)})
+            logger.info(f"Boundary test message on {topic}: {payload}")
+            ack = {
+                'timestamp': datetime.now().isoformat(),
+                'event': 'boundary_test_ack',
+                'received': payload,
+            }
+            await self.mqtt_client.publish("lawnberry/safety/alerts/boundary", SensorData.create(
+                sender="boundary_monitor",
+                sensor_type="boundary_test",
+                data=ack
+            ))
+        except Exception as e:
+            logger.error(f"Error handling boundary test message: {e}")
     
     async def _update_no_go_zone(self, zone_data: Dict[str, Any]):
         """Update or create a no-go zone"""
@@ -508,6 +531,21 @@ class BoundaryMonitor:
             except Exception as e:
                 logger.error(f"Error in boundary monitoring loop: {e}")
                 await asyncio.sleep(1.0)
+
+    async def _publish_monitoring_status(self):
+        """Publish periodic monitoring status (lightweight stub)."""
+        try:
+            status = await self.get_current_status()
+            await self.mqtt_client.publish(
+                "lawnberry/safety/boundary_status",
+                SensorData.create(
+                    sender="boundary_monitor",
+                    sensor_type="boundary_status",
+                    data=status,
+                ),
+            )
+        except Exception as e:
+            logger.debug(f"Boundary status publish skipped: {e}")
     
     async def check_critical_violations(self) -> List[Dict[str, Any]]:
         """Check for critical boundary violations"""

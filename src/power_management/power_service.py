@@ -112,17 +112,28 @@ class PowerService:
     async def _setup_service_subscriptions(self):
         """Setup additional MQTT subscriptions for service coordination"""
         try:
-            # Subscribe to system commands
-            await self.mqtt.subscribe("commands/system", self._handle_system_command)
-            
-            # Subscribe to service health requests
-            await self.mqtt.subscribe("system/health_check", self._handle_health_check)
-            
-            # Subscribe to configuration updates
-            await self.mqtt.subscribe("config/power", self._handle_config_update)
+            # Subscribe using standardized API, then attach handlers
+            subs = [
+                ("lawnberry/commands/system", self._wrap_protocol_handler(self._handle_system_command)),
+                ("lawnberry/system/health_check", self._wrap_protocol_handler(self._handle_health_check)),
+                ("lawnberry/config/power", self._wrap_protocol_handler(self._handle_config_update)),
+            ]
+            for topic, handler in subs:
+                await self.mqtt.subscribe(topic)
+                self.mqtt.add_message_handler(topic, handler)
             
         except Exception as e:
             self.logger.error(f"Error setting up service subscriptions: {e}")
+
+    def _wrap_protocol_handler(self, func):
+        """Wrap legacy (topic, payload) handlers to accept MessageProtocol."""
+        async def _wrapped(topic: str, message):
+            try:
+                payload = message.payload if hasattr(message, 'payload') else message
+                await func(topic, payload)
+            except Exception as e:
+                self.logger.error(f"Wrapped handler error for {func.__name__}: {e}")
+        return _wrapped
     
     async def _handle_system_command(self, topic: str, payload: Dict[str, Any]):
         """Handle system-level commands"""
@@ -141,7 +152,7 @@ class PowerService:
             
             elif command == "get_power_status":
                 status = await self.power_manager.get_power_status()
-                await self.mqtt.publish("responses/system", {
+                await self.mqtt.publish("lawnberry/responses/system", {
                     "command": command,
                     "status": "success",
                     "data": status,
@@ -159,7 +170,7 @@ class PowerService:
             if service_name == "power_service" or service_name == "all":
                 health_status = await self._get_health_status()
                 
-                await self.mqtt.publish("system/health_response", {
+                await self.mqtt.publish("lawnberry/system/health_response", {
                     "service": "power_service",
                     "status": health_status,
                     "timestamp": datetime.now().isoformat()
@@ -200,7 +211,7 @@ class PowerService:
         try:
             health_status = await self._get_health_status()
             
-            await self.mqtt.publish("system/service_health", {
+            await self.mqtt.publish("lawnberry/system/service_health", {
                 "service": "power_service",
                 "status": health_status,
                 "timestamp": datetime.now().isoformat()
@@ -260,7 +271,7 @@ class PowerService:
             
             # Critical battery level
             if battery["state_of_charge"] <= 0.05:  # 5%
-                await self.mqtt.publish("alerts/critical", {
+                await self.mqtt.publish("lawnberry/alerts/critical", {
                     "type": "battery_critical",
                     "level": "critical",
                     "message": f"Battery critically low: {battery['state_of_charge']:.1%}",
@@ -274,7 +285,7 @@ class PowerService:
             
             # High temperature warning
             if battery.get("temperature") and battery["temperature"] > 50.0:
-                await self.mqtt.publish("alerts/warning", {
+                await self.mqtt.publish("lawnberry/alerts/warning", {
                     "type": "battery_temperature_high",
                     "level": "warning",
                     "message": f"Battery temperature high: {battery['temperature']:.1f}°C",
@@ -291,7 +302,7 @@ class PowerService:
                 power_status["solar"]["power"] < 1.0 and 
                 battery["state_of_charge"] < 0.5):
                 
-                await self.mqtt.publish("alerts/warning", {
+                await self.mqtt.publish("lawnberry/alerts/warning", {
                     "type": "solar_charging_low",
                     "level": "warning",
                     "message": "Solar charging is very low during daylight hours",

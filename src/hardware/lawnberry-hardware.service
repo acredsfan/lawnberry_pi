@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=lawnberry
-Group=lawnberry
+User=pi
+Group=pi
 # lgpio creates .lgd-nfy* in the CWD; use a writable location
 WorkingDirectory=/var/lib/lawnberry
 Environment=PYTHONUNBUFFERED=1

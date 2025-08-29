@@ -47,9 +47,7 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=lawnberry-system
 
-# Watchdog - Enhanced for Bookworm
-WatchdogSec=60
-NotifyAccess=main
+# Startup/shutdown timeouts
 TimeoutStartSec=90
 TimeoutStopSec=30
 

@@ -14,7 +14,8 @@ from .adaptive_learning_system import AdaptiveLearningSystem
 from .data_structures import VisionFrame, VisionConfig, SafetyLevel
 from ..safety.ml_safety_integration import MLSafetyIntegrator
 from ..sensor_fusion.obstacle_detection import ObstacleDetectionSystem
-from ..communication import MQTTClient, MessageProtocol
+from ..communication.client import MQTTClient
+from ..communication.message_protocols import MessageProtocol
 
 
 class MLIntegrationManager:
@@ -152,7 +153,8 @@ class MLIntegrationManager:
             ]
             
             for topic, handler in system_topics:
-                await self.mqtt_client.subscribe(topic, handler)
+                await self.mqtt_client.subscribe(topic)
+                self.mqtt_client.add_message_handler(topic, handler)
                 
         except Exception as e:
             self.logger.error(f"Error subscribing to system topics: {e}")

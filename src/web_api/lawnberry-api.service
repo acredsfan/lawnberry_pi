@@ -8,8 +8,8 @@ StartLimitIntervalSec=0
 Type=simple
 Restart=always
 RestartSec=5
-User=lawnberry
-Group=lawnberry
+User=pi
+Group=pi
 WorkingDirectory=/opt/lawnberry
 # Conditional auto-rebuild of web UI if source newer than dist
 ExecStartPre=/bin/bash -c '[ -x /opt/lawnberry/scripts/auto_rebuild_web_ui.sh ] && /opt/lawnberry/scripts/auto_rebuild_web_ui.sh || echo "[lawnberry-api] Skipping auto_rebuild_web_ui.sh (not present)"'

@@ -99,12 +99,17 @@ class SafetyMonitor:
     
     async def _subscribe_to_sensors(self):
         """Subscribe to safety-critical sensor data"""
-        await self.mqtt_client.subscribe("lawnberry/sensors/imu", self._handle_imu_data)
-        await self.mqtt_client.subscribe("lawnberry/sensors/tof_left", self._handle_tof_left_data)
-        await self.mqtt_client.subscribe("lawnberry/sensors/tof_right", self._handle_tof_right_data)
-        await self.mqtt_client.subscribe("lawnberry/sensors/weather", self._handle_weather_data)
-        await self.mqtt_client.subscribe("lawnberry/sensors/localization", self._handle_pose_data)
-        await self.mqtt_client.subscribe("lawnberry/sensors/obstacles", self._handle_obstacles_data)
+        topics = [
+            ("lawnberry/sensors/imu", self._handle_imu_data),
+            ("lawnberry/sensors/tof_left", self._handle_tof_left_data),
+            ("lawnberry/sensors/tof_right", self._handle_tof_right_data),
+            ("lawnberry/sensors/weather", self._handle_weather_data),
+            ("lawnberry/sensors/localization", self._handle_pose_data),
+            ("lawnberry/sensors/obstacles", self._handle_obstacles_data),
+        ]
+        for topic, handler in topics:
+            await self.mqtt_client.subscribe(topic)
+            self.mqtt_client.add_message_handler(topic, handler)
     
     async def _handle_imu_data(self, topic: str, message: MessageProtocol):
         """Handle IMU sensor data for tilt and collision detection"""

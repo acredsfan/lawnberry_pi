@@ -107,10 +107,15 @@ class ObstacleDetectionSystem:
     
     async def _subscribe_to_sensors(self):
         """Subscribe to sensor data topics"""
-        await self.mqtt_client.subscribe("lawnberry/sensors/tof_left", self._handle_tof_left_data)
-        await self.mqtt_client.subscribe("lawnberry/sensors/tof_right", self._handle_tof_right_data)
-        await self.mqtt_client.subscribe("lawnberry/sensors/camera", self._handle_camera_data)
-        await self.mqtt_client.subscribe("lawnberry/sensors/localization", self._handle_pose_data)
+        topics = [
+            ("lawnberry/sensors/tof_left", self._handle_tof_left_data),
+            ("lawnberry/sensors/tof_right", self._handle_tof_right_data),
+            ("lawnberry/sensors/camera", self._handle_camera_data),
+            ("lawnberry/sensors/localization", self._handle_pose_data),
+        ]
+        for topic, handler in topics:
+            await self.mqtt_client.subscribe(topic)
+            self.mqtt_client.add_message_handler(topic, handler)
     
     async def _handle_tof_left_data(self, topic: str, message: MessageProtocol):
         """Handle left ToF sensor data"""

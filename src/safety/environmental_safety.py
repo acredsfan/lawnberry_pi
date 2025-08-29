@@ -174,11 +174,41 @@ class EnvironmentalSafetySystem:
                     pass
     
     async def _subscribe_to_sensors(self):
-        """Subscribe to sensor data streams"""
-        await self.mqtt_client.subscribe("sensor/imu", self._handle_imu_data)
-        await self.mqtt_client.subscribe("sensor/tof/combined", self._handle_tof_data)
-        await self.mqtt_client.subscribe("vision/analysis", self._handle_vision_data)
-        await self.mqtt_client.subscribe("sensor/environmental", self._handle_environmental_data)
+        """Subscribe to sensor data streams using separate handler registration.
+        Topics are aligned to the namespaced scheme published by hardware/services.
+        """
+        # Helper to wrap incoming messages (MessageProtocol or raw JSON string) into dict for existing handlers
+        async def _wrap_and_dispatch(handler: Callable, topic: str, message):
+            try:
+                if hasattr(message, 'payload'):
+                    payload = message.payload  # MessageProtocol payload already dict-like
+                else:
+                    # Raw string payload; attempt JSON decode
+                    import json
+                    payload = json.loads(message) if isinstance(message, str) else (message or {})
+                await handler(payload)
+            except Exception as e:
+                logger.error(f"EnvironmentalSafety handler error for {topic}: {e}")
+
+        # IMU data
+        imu_topic = "lawnberry/sensors/imu/data"
+        await self.mqtt_client.subscribe(imu_topic)
+        self.mqtt_client.add_message_handler(imu_topic, lambda t, m: _wrap_and_dispatch(self._handle_imu_data, t, m))
+
+        # Combined ToF data (published by hardware as lawnberry/sensors/tof/data)
+        tof_topic = "lawnberry/sensors/tof/data"
+        await self.mqtt_client.subscribe(tof_topic)
+        self.mqtt_client.add_message_handler(tof_topic, lambda t, m: _wrap_and_dispatch(self._handle_tof_data, t, m))
+
+        # Vision analysis stream (if produced by vision pipeline)
+        vision_topic = "lawnberry/vision/analysis"
+        await self.mqtt_client.subscribe(vision_topic)
+        self.mqtt_client.add_message_handler(vision_topic, lambda t, m: _wrap_and_dispatch(self._handle_vision_data, t, m))
+
+        # Environmental sensor data
+        env_topic = "lawnberry/sensors/environmental/data"
+        await self.mqtt_client.subscribe(env_topic)
+        self.mqtt_client.add_message_handler(env_topic, lambda t, m: _wrap_and_dispatch(self._handle_environmental_data, t, m))
     
     async def _handle_imu_data(self, data: Dict[str, Any]):
         """Handle IMU data for slope analysis"""
@@ -496,7 +526,7 @@ class EnvironmentalSafetySystem:
                 logger.error(f"Error in slope callback: {e}")
         
         # Publish slope data
-        await self.mqtt_client.publish("safety/slope_analysis", {
+        await self.mqtt_client.publish("lawnberry/safety/slope_analysis", {
             'angle_degrees': analysis.angle_degrees,
             'safety_assessment': analysis.safety_assessment.value,
             'stability_factor': analysis.stability_factor,
@@ -525,7 +555,7 @@ class EnvironmentalSafetySystem:
                 logger.error(f"Error in surface callback: {e}")
         
         # Publish surface data
-        await self.mqtt_client.publish("safety/surface_analysis", {
+        await self.mqtt_client.publish("lawnberry/safety/surface_analysis", {
             'surface_type': analysis.surface_type.value,
             'moisture_level': analysis.moisture_level,
             'grip_factor': analysis.grip_factor,
@@ -560,7 +590,7 @@ class EnvironmentalSafetySystem:
         self.environmental_hazards[hazard_id] = hazard
         
         # Publish safety alert
-        await self.mqtt_client.publish("safety/environmental_hazard", {
+        await self.mqtt_client.publish("lawnberry/safety/environmental_hazard", {
             'hazard_id': hazard_id,
             'type': 'unsafe_slope',
             'slope_angle': analysis.angle_degrees,
@@ -597,7 +627,7 @@ class EnvironmentalSafetySystem:
         self.environmental_hazards[hazard_id] = hazard
         
         # Publish safety alert
-        await self.mqtt_client.publish("safety/environmental_hazard", {
+        await self.mqtt_client.publish("lawnberry/safety/environmental_hazard", {
             'hazard_id': hazard_id,
             'type': 'unsuitable_surface',
             'surface_type': analysis.surface_type.value,
@@ -748,7 +778,7 @@ class EnvironmentalSafetySystem:
                 logger.error(f"Error in wildlife callback: {e}")
         
         # Publish wildlife detection
-        await self.mqtt_client.publish("safety/wildlife_detection", {
+        await self.mqtt_client.publish("lawnberry/safety/wildlife_detection", {
             'wildlife_type': detection.wildlife_type.value,
             'position': detection.position,
             'threat_level': detection.threat_level,

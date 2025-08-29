@@ -147,12 +147,13 @@ class HazardDetector:
         subscriptions = [
             ("lawnberry/vision/detections", self._handle_vision_detections),
             ("lawnberry/sensors/weather", self._handle_weather_data),
-            ("lawnberry/sensors/environmental", self._handle_environmental_data),
+            ("lawnberry/sensors/environmental/data", self._handle_environmental_data),
             ("lawnberry/vision/alerts", self._handle_vision_alerts)
         ]
-        
+
         for topic, handler in subscriptions:
-            await self.mqtt_client.subscribe(topic, handler)
+            await self.mqtt_client.subscribe(topic)
+            self.mqtt_client.add_message_handler(topic, handler)
     
     async def _handle_vision_detections(self, topic: str, message: MessageProtocol):
         """Handle object detections from vision system"""
@@ -165,6 +166,52 @@ class HazardDetector:
                 
         except Exception as e:
             logger.error(f"Error handling vision detections: {e}")
+
+    async def _handle_vision_alerts(self, topic: str, message: MessageProtocol):
+        """Handle high-level alerts coming from the vision pipeline.
+
+        Expected payload schema (best-effort):
+        {
+          'alert_id': str,
+          'alert_type': str,    # e.g., 'person', 'pet', 'obstacle'
+          'hazard_level': str,  # 'LOW'|'MEDIUM'|'HIGH'|'CRITICAL'
+          'description': str,
+          'position': [x, y],
+          'distance': float,
+          'confidence': float,
+          'timestamp': iso8601
+        }
+        """
+        try:
+            data = message.payload if hasattr(message, 'payload') else {}
+            alert = {
+                'alert_id': data.get('alert_id', f"vision_{int(datetime.now().timestamp())}"),
+                'hazard_level': data.get('hazard_level', 'MEDIUM'),
+                'hazard_type': data.get('alert_type', 'vision_alert'),
+                'timestamp': data.get('timestamp', datetime.now().isoformat()),
+                'description': data.get('description', 'Vision alert'),
+                'location': data.get('position'),
+                'sensor_data': {
+                    'distance': data.get('distance'),
+                    'confidence': data.get('confidence'),
+                },
+                'recommended_action': 'STOP' if data.get('hazard_level', 'MEDIUM') in {'HIGH','CRITICAL'} else 'CAUTION',
+                'immediate_response_required': data.get('hazard_level', 'MEDIUM') == 'CRITICAL'
+            }
+
+            # Publish via the same internal path as other hazards
+            await self._publish_hazard_alert(alert)
+
+            # If critical, invoke emergency callbacks
+            if alert['hazard_level'] == 'CRITICAL':
+                for callback in self._emergency_callbacks:
+                    try:
+                        await callback([alert])
+                    except Exception as e:
+                        logger.error(f"Error in emergency callback: {e}")
+
+        except Exception as e:
+            logger.error(f"Error handling vision alerts: {e}")
     
     async def _process_object_detection(self, detection: Dict[str, Any]):
         """Process individual object detection"""
@@ -404,6 +451,33 @@ class HazardDetector:
             
         except Exception as e:
             logger.error(f"Error handling immediate hazard: {e}")
+
+    async def _publish_hazard_alert(self, alert: Dict[str, Any]):
+        """Publish a hazard alert on standardized topics for the UI and other services.
+
+        Accepts either a dict (already serialized for MQTT) or HazardAlert-like dicts.
+        """
+        try:
+            payload = alert
+            # Backfill defaults if needed
+            if 'timestamp' not in payload:
+                payload['timestamp'] = datetime.now().isoformat()
+            if 'hazard_level' not in payload:
+                payload['hazard_level'] = 'MEDIUM'
+            if 'immediate_response_required' not in payload:
+                payload['immediate_response_required'] = (payload.get('hazard_level') == 'CRITICAL')
+
+            message = SensorData.create(
+                sender="hazard_detector",
+                sensor_type="hazard_alert",
+                data=payload
+            )
+
+            # Publish to UI-facing safety alerts channel and a consolidated hazards topic
+            await self.mqtt_client.publish("lawnberry/safety/alerts/vision", message)
+            await self.mqtt_client.publish("lawnberry/safety/hazards", message)
+        except Exception as e:
+            logger.error(f"Error publishing hazard alert: {e}")
     
     async def _hazard_detection_loop(self):
         """Main hazard detection and analysis loop"""
@@ -412,7 +486,7 @@ class HazardDetector:
                 # Clean up old detections
                 await self._cleanup_old_detections()
                 
-                # Analyze current hazard situation
+                # Analyze current hazard situation (minimal stub)
                 hazard_analysis = await self._analyze_hazard_situation()
                 
                 # Update detection accuracy metrics
@@ -439,6 +513,38 @@ class HazardDetector:
             except Exception as e:
                 logger.error(f"Error in object tracking loop: {e}")
                 await asyncio.sleep(0.05)
+
+    async def _analyze_hazard_situation(self) -> Dict[str, Any]:
+        """Minimal analysis stub to maintain loop health.
+
+        Returns an empty analysis dict; real implementations may score scene risk.
+        """
+        return {}
+
+    async def _update_object_predictions(self):
+        """Minimal prediction stub for tracked objects.
+
+        Could be extended to extrapolate positions; currently a no-op.
+        """
+        return None
+
+    async def _check_collision_predictions(self):
+        """Minimal collision prediction stub.
+
+        Keeps structure for future predictive collision checks.
+        """
+        return None
+
+    def _update_detection_metrics(self):
+        """Update detection metrics (placeholder).
+
+        Keeps counters within sane bounds; real accuracy computation deferred.
+        """
+        # Prevent division by zero and bound counters
+        self._detection_count = int(self._detection_count)
+        self._false_positive_count = int(self._false_positive_count)
+        if self._detection_count < self._false_positive_count:
+            self._false_positive_count = self._detection_count
     
     async def check_critical_hazards(self) -> List[Dict[str, Any]]:
         """Check for critical hazards requiring immediate response"""
@@ -503,12 +609,12 @@ class HazardDetector:
             if (current_time - obj.timestamp).total_seconds() < 10.0
         ]
         
-        # Count active hazards by level
-        hazard_counts = {level.value: 0 for level in HazardLevel}
+        # Count active hazards by level (string-based keys to avoid KeyError)
+        hazard_counts = {level.name: 0 for level in HazardLevel}
         for obj in self._detected_objects.values():
             if (current_time - obj.timestamp).total_seconds() < 5.0:
-                hazard_counts[obj.threat_level.value] += 1
-        
+                hazard_counts[obj.threat_level.name] += 1
+
         return {
             'is_safe': hazard_counts['CRITICAL'] == 0 and hazard_counts['HIGH'] == 0,
             'total_detections': len(recent_detections),
