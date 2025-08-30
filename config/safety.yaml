@@ -283,3 +283,8 @@ testing:
     validate_response_times: true     # Validate response time requirements
     validate_detection_accuracy: true # Validate detection accuracy requirements
     generate_test_reports: true       # Generate test performance reports
+
+# Maintenance warmup configuration
+maintenance:
+  startup_grace_seconds: 180          # Duration after startup to tolerate missing metrics
+  allow_missing_data_during_warmup: true  # Treat missing data as non-critical during warmup

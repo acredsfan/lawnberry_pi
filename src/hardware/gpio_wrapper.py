@@ -38,13 +38,25 @@ try:  # Prefer lgpio for Raspberry Pi 5 compatibility
         LOW = 0
 
         def __init__(self) -> None:
-            # Lazily open/reopen the chip as needed to avoid stale handle issues
+            # Defer opening the chip until first real use to avoid failures during import/startup
             self._chip = None
-            self._open_chip()
+            self._failed_open_logged = False
 
-        def _open_chip(self) -> None:
-            if self._chip is None:
+        def _ensure_chip(self) -> bool:
+            """Ensure gpiochip handle is open. Returns True on success, False otherwise."""
+            if self._chip is not None:
+                return True
+            try:
                 self._chip = lgpio.gpiochip_open(0)
+                return True
+            except Exception as e:
+                if not self._failed_open_logged:
+                    logging.getLogger(__name__).error(
+                        "GPIO: can not open /dev/gpiochip0: %s. Check group membership (gpio) and systemd DeviceAllow.",
+                        e,
+                    )
+                    self._failed_open_logged = True
+                return False
 
         def _reopen_on_unknown_handle(self, exc: Exception) -> bool:
             """If the exception suggests an invalid/unknown handle, reopen the chip.
@@ -61,7 +73,8 @@ try:  # Prefer lgpio for Raspberry Pi 5 compatibility
                     except Exception:
                         pass
                     self._chip = None
-                    self._open_chip()
+                    if not self._ensure_chip():
+                        return False
                     return True
                 except Exception as e:
                     logging.getLogger(__name__).error(f"GPIO: failed to reopen chip after unknown handle: {e}")
@@ -80,7 +93,8 @@ try:  # Prefer lgpio for Raspberry Pi 5 compatibility
                 logging.getLogger(__name__).warning(f"GPIO.setup: pin {pin} already claimed by {existing}; {claimant} is also attempting to claim it")
 
             # Ensure chip is open and attempt the claim, retry once on unknown handle
-            self._open_chip()
+            if not self._ensure_chip():
+                raise RuntimeError("GPIO chip unavailable (/dev/gpiochip0 open failed)")
             try:
                 if direction == self.OUT:
                     lgpio.gpio_claim_output(self._chip, pin, initial)
@@ -112,7 +126,8 @@ try:  # Prefer lgpio for Raspberry Pi 5 compatibility
             if claimant is None:
                 logging.getLogger(__name__).warning(f"GPIO.output: pin {pin} written without a recorded claimant")
             # Ensure chip open and write, retry once on unknown handle
-            self._open_chip()
+            if not self._ensure_chip():
+                raise RuntimeError("GPIO chip unavailable (/dev/gpiochip0 open failed)")
             try:
                 lgpio.gpio_write(self._chip, pin, value)
             except Exception as e:
@@ -123,7 +138,8 @@ try:  # Prefer lgpio for Raspberry Pi 5 compatibility
 
         def input(self, pin: int) -> int:
             # Ensure chip open and read, retry once on unknown handle
-            self._open_chip()
+            if not self._ensure_chip():
+                raise RuntimeError("GPIO chip unavailable (/dev/gpiochip0 open failed)")
             try:
                 return lgpio.gpio_read(self._chip, pin)
             except Exception as e:
@@ -136,7 +152,8 @@ try:  # Prefer lgpio for Raspberry Pi 5 compatibility
             """Free a previously claimed pin without closing the chip."""
             try:
                 if pin in _PIN_CLAIMS:
-                    self._open_chip()
+                    if not self._ensure_chip():
+                        raise RuntimeError("GPIO chip unavailable (/dev/gpiochip0 open failed)")
                     try:
                         lgpio.gpio_free(self._chip, pin)
                     except Exception as e:

@@ -37,6 +37,8 @@ class SafetyConfig:
     pet_safety_radius_m: float = 1.5
     general_safety_distance_m: float = 0.3
     emergency_stop_distance_m: float = 0.15
+    # Heartbeat watchdog timeout (seconds) used by EmergencyController
+    heartbeat_timeout_s: float = 15.0
     max_safe_tilt_deg: float = 15.0
     critical_tilt_deg: float = 25.0
     min_operating_temp_c: float = 5.0
@@ -69,6 +71,9 @@ class SafetyConfig:
     battery_capacity_threshold: float = 80.0
     battery_temp_max: float = 45.0
     vibration_threshold: float = 2.0
+    # Maintenance warmup behavior
+    maintenance_startup_grace_seconds: float = 180.0
+    maintenance_allow_missing_data_during_warmup: bool = True
 
 
 class SafetyService:
@@ -144,6 +149,10 @@ class SafetyService:
     def _safety_status_to_dict(self, status: SafetyStatus) -> Dict[str, Any]:
         """Convert SafetyStatus dataclass to a dict for uniform aggregation."""
         try:
+            import math
+            nearest = status.nearest_obstacle_distance
+            if isinstance(nearest, float) and not math.isfinite(nearest):
+                nearest = None
             return {
                 'is_safe': status.is_safe,
                 'safety_level': getattr(status.safety_level, 'value', status.safety_level),
@@ -154,7 +163,7 @@ class SafetyService:
                 'boundary_safe': status.boundary_safe,
                 'tilt_angle': status.tilt_angle,
                 'ground_clearance': status.ground_clearance,
-                'nearest_obstacle_distance': status.nearest_obstacle_distance,
+                'nearest_obstacle_distance': nearest,
                 'temperature': status.temperature,
                 'humidity': status.humidity,
                 'is_raining': status.is_raining,
@@ -211,7 +220,9 @@ class SafetyService:
                     'blade_wear_threshold': self.config.blade_wear_threshold,
                     'battery_capacity_threshold': self.config.battery_capacity_threshold,
                     'battery_temp_max': self.config.battery_temp_max,
-                    'vibration_threshold': self.config.vibration_threshold
+                    'vibration_threshold': self.config.vibration_threshold,
+                    'startup_grace_seconds': self.config.maintenance_startup_grace_seconds,
+                    'allow_missing_data_during_warmup': self.config.maintenance_allow_missing_data_during_warmup
                 }
                 self.maintenance_safety = MaintenanceSafetySystem(
                     self.mqtt_client, self.access_controller, maintenance_config
@@ -670,30 +681,52 @@ class SafetyService:
             logger.error(f"Error handling emergency command: {e}")
     
     async def _handle_position_update(self, topic: str, message):
-        """Handle GPS position updates for boundary monitoring"""
+        """Handle GPS position updates for boundary monitoring.
+        Accepts MessageProtocol, dict, or JSON string payloads. Handles nested shapes like {'data': {...}}.
+        """
         try:
+            import json
+            ts = None
+            gps_data: Dict[str, Any] = {}
+            # Unwrap message into dict
             if hasattr(message, 'payload'):
                 gps_data = message.payload
-                ts = getattr(message, 'metadata', None).timestamp if getattr(message, 'metadata', None) else None
-            else:
-                gps_data = message if isinstance(message, dict) else {}
-                ts = None
+                if getattr(message, 'metadata', None) is not None:
+                    ts = getattr(message.metadata, 'timestamp', None)
+            elif isinstance(message, str):
+                try:
+                    gps_data = json.loads(message)
+                except Exception:
+                    gps_data = {}
+            elif isinstance(message, dict):
+                gps_data = message
+            # Handle nested data field
+            if isinstance(gps_data, dict) and 'data' in gps_data and isinstance(gps_data['data'], dict):
+                gps_data = gps_data['data']
+
+            # Guard against missing keys
+            lat = gps_data.get('latitude')
+            lon = gps_data.get('longitude')
+            if lat is None or lon is None:
+                # Silently ignore malformed update rather than spamming logs
+                return
+
             self._current_position = GPSReading(
                 timestamp=datetime.fromtimestamp(ts) if ts else datetime.now(),
                 sensor_id=gps_data.get('sensor_id', 'gps'),
                 value=gps_data,
                 unit='degrees',
-                latitude=gps_data['latitude'],
-                longitude=gps_data['longitude'],
-                altitude=gps_data.get('altitude', 0.0),
-                accuracy=gps_data.get('accuracy', 10.0),
-                satellites=gps_data.get('satellites', 0)
+                latitude=float(lat),
+                longitude=float(lon),
+                altitude=float(gps_data.get('altitude', 0.0)),
+                accuracy=float(gps_data.get('accuracy', 10.0)),
+                satellites=int(gps_data.get('satellites', 0))
             )
-            
+
             # Update boundary monitor with current position
             if self.config.enable_boundary_enforcement:
                 await self.boundary_monitor.update_position(self._current_position)
-                
+
         except Exception as e:
             logger.error(f"Error handling position update: {e}")
     
@@ -712,6 +745,77 @@ class SafetyService:
                 
         except Exception as e:
             logger.error(f"Error handling system state change: {e}")
+
+    async def _adjust_safety_monitoring_for_state(self, new_state: str):
+        """Adjust safety behavior based on system state (minimal, safe implementation).
+
+        - MOWING: ensure boundary enforcement enabled; keep normal rates
+        - EMERGENCY: trigger emergency stop and prioritize emergency loop
+        - SHUTDOWN: reduce activity and stop publishing frequent status
+        - READY/INITIALIZING: normal behavior
+        """
+        try:
+            state = (new_state or "").upper()
+            if state == "MOWING":
+                # Ensure boundary enforcement running
+                if self.config.enable_boundary_enforcement and self.boundary_monitor:
+                    # Boundary monitor already manages its own task; no action needed
+                    logger.debug("MOWING state: boundary enforcement active")
+            elif state == "EMERGENCY":
+                await self.emergency_controller.execute_emergency_stop("System entered EMERGENCY state")
+            elif state == "SHUTDOWN":
+                # Avoid chatty status during shutdown; publish one last status soon
+                self._last_status_publish = datetime.now()
+            # READY/INITIALIZING -> nothing special
+        except Exception as e:
+            logger.error(f"Error adjusting safety monitoring for state {new_state}: {e}")
+
+    async def _handle_safety_override(self, data: Dict[str, Any]):
+        """Process safety override requests.
+
+        Supports forwarding a maintenance lockout override request and toggling flags.
+        Expected keys: { 'lockout_id': str, 'user': str }
+        """
+        try:
+            user = data.get('user', 'system')
+            lockout_id = data.get('lockout_id')
+
+            # Forward to maintenance safety via its command topic to keep coupling low
+            if lockout_id:
+                payload = {
+                    'command': 'override_lockout',
+                    'lockout_id': lockout_id,
+                    'user': user,
+                }
+                await self.mqtt_client.publish("lawnberry/maintenance/command", payload)
+                logger.info(f"Forwarded lockout override for {lockout_id} by {user}")
+
+            # Optional feature toggles (best-effort)
+            if data.get('disable_boundary_enforcement') is True:
+                self.config.enable_boundary_enforcement = False
+                logger.warning("Boundary enforcement temporarily disabled via safety_override")
+            if data.get('enable_boundary_enforcement') is True:
+                self.config.enable_boundary_enforcement = True
+                logger.info("Boundary enforcement re-enabled via safety_override")
+        except Exception as e:
+            logger.error(f"Error handling safety override: {e}")
+
+    async def _handle_safety_reset(self, data: Dict[str, Any]):
+        """Reset safety systems following an emergency.
+
+        Acknowledge and reset the emergency controller and clear transient state.
+        """
+        try:
+            user = data.get('user', 'system') if isinstance(data, dict) else 'system'
+            # Acknowledge then reset
+            await self.emergency_controller.acknowledge_emergency(user)
+            await self.emergency_controller.reset_emergency(user)
+            # Return system to READY if it was in EMERGENCY
+            if self._system_state == "EMERGENCY":
+                self._system_state = "READY"
+            logger.info("Safety reset sequence completed")
+        except Exception as e:
+            logger.error(f"Error handling safety reset: {e}")
     
     async def _safety_coordination_loop(self):
         """Main safety coordination loop"""

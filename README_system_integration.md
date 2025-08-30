@@ -415,14 +415,14 @@ For dual VL53L0X sensors, assign addresses once using the Adafruit-style script 
   - Optional auto-assign if missing: `LAWNBERY_TOF_AUTO_ASSIGN_ON_MISSING=1`
   - Auto-assign timeout: `LAWNBERY_TOF_AUTO_ASSIGN_TIMEOUT_S=60`
 
-- Persist in systemd (`/etc/systemd/system/lawnberry-sensor.service`):
-  - Ensure these lines exist in the `[Service]` section:
+ - Persist in systemd (hardware sensor service unit):
+  - Add the following lines in the `[Service]` section of your unit (typically `/etc/systemd/system/lawnberry-hardware.service` in production; in-source template at `src/hardware/lawnberry-hardware.service` already includes them):
     - `Environment=LAWNBERY_TOF_NO_GPIO=always`
     - `Environment=LAWNBERY_TOF_AUTO_ASSIGN_ON_MISSING=1`
     - `Environment=LAWNBERY_TOF_AUTO_ASSIGN_TIMEOUT_S=60`
   - Then run:
     - `sudo systemctl daemon-reload`
-    - `sudo systemctl restart lawnberry-sensor.service`
+    - `sudo systemctl restart lawnberry-hardware.service`
 
 - Health and recovery:
   - The sensor service publishes ToF status to `lawnberry/system/tof_status`.

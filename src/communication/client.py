@@ -12,6 +12,7 @@ from datetime import datetime
 from collections import defaultdict, deque
 import threading
 from dataclasses import is_dataclass, asdict
+import math
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -82,9 +83,11 @@ class MQTTClient:
         # Rate limiting
         self._rate_limiter = defaultdict(deque)
         self._rate_limits = {
-            'sensor_data': 100,  # messages per minute
+            # Allow higher throughput for sensor_data to reduce warning noise; service-level throttles still apply
+            'sensor_data': 600,  # messages per minute
             'commands': 60,
-            'status': 20
+            # Increase status to support periodic heartbeats and service status updates
+            'status': 120
         }
     
     def _merge_config(self, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -343,7 +346,10 @@ class MQTTClient:
                             if asyncio.iscoroutinefunction(handler):
                                 await handler(topic, message)
                             else:
-                                handler(topic, message)
+                                # Support handlers that are regular functions but return a coroutine
+                                result = handler(topic, message)
+                                if asyncio.iscoroutine(result):
+                                    self._schedule_coroutine(result)
                         except Exception as e:
                             self.logger.error(f"Handler error for {topic}: {e}")
                         
@@ -359,7 +365,10 @@ class MQTTClient:
                         if asyncio.iscoroutinefunction(handler):
                             await handler(topic, payload)
                         else:
-                            handler(topic, payload)
+                            # Support regular functions that return a coroutine
+                            result = handler(topic, payload)
+                            if asyncio.iscoroutine(result):
+                                self._schedule_coroutine(result)
                     except Exception as e:
                         self.logger.error(f"Handler error for {topic}: {e}")
 
@@ -503,11 +512,41 @@ class MQTTClient:
     async def publish(self, topic: str, message: Any, qos: int = 1, retain: bool = False) -> bool:
         """Publish message with reliability features"""
         try:
+            # Helper: sanitize objects so JSON never contains NaN/Infinity (invalid per RFC 8259)
+            def _sanitize_for_json(obj: Any):
+                try:
+                    # Replace non-finite floats with None
+                    if isinstance(obj, float):
+                        return obj if math.isfinite(obj) else None
+                    # ints are always fine
+                    if isinstance(obj, (int, str, bool)) or obj is None:
+                        return obj
+                    if isinstance(obj, list):
+                        return [_sanitize_for_json(i) for i in obj]
+                    if isinstance(obj, dict):
+                        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+                    # Dataclasses converted above; for unknown objects, string-coerce
+                    return obj
+                except Exception:
+                    # Fallback: string representation
+                    try:
+                        return str(obj)
+                    except Exception:
+                        return None
+
             # Serialize message
             if isinstance(message, MessageProtocol):
                 payload = message.to_json()
                 category = message.metadata.message_type.value
                 qos = self._qos_map.get(message.metadata.priority, qos)
+                # Sanitize MessageProtocol JSON payload to remove NaN/Infinity
+                try:
+                    parsed = json.loads(payload)
+                    parsed = _sanitize_for_json(parsed)
+                    payload = json.dumps(parsed, cls=DateTimeEncoder, default=str, allow_nan=False)
+                except Exception:
+                    # If parsing fails, keep original payload (best effort)
+                    pass
             else:
                 # Convert dataclass instances
                 if is_dataclass(message):
@@ -529,7 +568,9 @@ class MQTTClient:
                     return obj
                 if isinstance(message, (dict, list)):
                     message = _convert(message)
-                payload = message if isinstance(message, str) else json.dumps(message, cls=DateTimeEncoder, default=str)
+                    # Sanitize numbers to avoid NaN/Infinity in JSON
+                    message = _sanitize_for_json(message)
+                payload = message if isinstance(message, str) else json.dumps(message, cls=DateTimeEncoder, default=str, allow_nan=False)
                 category = 'general'
             
             # Check rate limiting

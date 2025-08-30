@@ -126,6 +126,10 @@ class MaintenanceSafetySystem:
         self.mqtt_client = mqtt_client
         self.access_controller = access_controller
         self.config = config
+        # Startup grace period to avoid premature lockouts when metrics aren't available yet
+        self.startup_grace_seconds: float = float(self.config.get('startup_grace_seconds', 180.0))
+        self._start_time: datetime = datetime.now()
+        self.allow_missing_data: bool = bool(self.config.get('allow_missing_data_during_warmup', True))
         
         # Safety thresholds
         self.blade_wear_threshold = config.get('blade_wear_threshold', 70.0)  # Percentage
@@ -925,12 +929,15 @@ class MaintenanceSafetySystem:
         issues = []
         recommendations = []
         safety_impact = False
+        in_warmup = (datetime.now() - self._start_time).total_seconds() < self.startup_grace_seconds
         
         # Check sensor data availability
         if not self.motor_current_history:
             issues.append("No motor current data")
             recommendations.append("Check motor current sensor")
-            safety_impact = True
+            # Treat missing data as non-critical during warmup if allowed
+            if not (in_warmup and self.allow_missing_data):
+                safety_impact = True
         
         if not self.vibration_history:
             issues.append("No vibration data")
@@ -939,7 +946,8 @@ class MaintenanceSafetySystem:
         if not self.battery_voltage_history:
             issues.append("No battery voltage data")
             recommendations.append("Check battery monitoring system")
-            safety_impact = True
+            if not (in_warmup and self.allow_missing_data):
+                safety_impact = True
         
         # Determine status
         if safety_impact:

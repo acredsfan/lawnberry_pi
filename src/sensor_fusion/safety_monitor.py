@@ -28,6 +28,12 @@ class SafetyMonitor:
         self.mqtt_client = mqtt_client
         self.update_rate = 20  # Hz for safety monitoring
         self.emergency_response_time_ms = 100  # Maximum response time
+        # Status publish control (consolidated status is published by SafetyService)
+        # Keep monitor self-publishing disabled by default to avoid duplicate traffic
+        from datetime import datetime as _dt
+        self._publish_status_updates: bool = False
+        self._status_publish_rate_hz: float = 1.0
+        self._last_status_publish: _dt = _dt.min
         
         # Safety thresholds
         self.max_safe_tilt_angle = 15.0  # degrees
@@ -103,7 +109,8 @@ class SafetyMonitor:
             ("lawnberry/sensors/imu", self._handle_imu_data),
             ("lawnberry/sensors/tof_left", self._handle_tof_left_data),
             ("lawnberry/sensors/tof_right", self._handle_tof_right_data),
-            ("lawnberry/sensors/weather", self._handle_weather_data),
+            # Use unified environmental data topic published by hardware service
+            ("lawnberry/sensors/environmental/data", self._handle_weather_data),
             ("lawnberry/sensors/localization", self._handle_pose_data),
             ("lawnberry/sensors/obstacles", self._handle_obstacles_data),
         ]
@@ -171,19 +178,67 @@ class SafetyMonitor:
             logger.error(f"Error processing right ToF data: {e}")
     
     async def _handle_weather_data(self, topic: str, message: MessageProtocol):
-        """Handle weather sensor data"""
+        """Handle weather sensor data with robust payload unwrapping and key safety."""
         try:
-            weather_data = message.payload
+            # Accept SensorData wrapper or plain dicts and unwrap nested {data: {...}}
+            payload = message.payload if hasattr(message, 'payload') else (message if isinstance(message, dict) else {})
+            if isinstance(payload, dict) and 'data' in payload and isinstance(payload['data'], dict):
+                payload = payload['data']
+
+            # Some publishers may nest environmental data under a key
+            weather_data = None
+            if isinstance(payload, dict):
+                # Direct shape
+                if any(k in payload for k in ('temperature', 'humidity', 'pressure')):
+                    weather_data = payload
+                else:
+                    # Common nestings
+                    for k in ('environmental', 'environment', 'bme280'):
+                        if k in payload and isinstance(payload[k], dict):
+                            weather_data = payload[k]
+                            break
+
+            if not isinstance(weather_data, dict):
+                logger.debug("Weather payload missing expected structure; skipping")
+                return
+
+            # Tolerate alias keys
+            temp = weather_data.get('temperature', weather_data.get('temp_c', weather_data.get('temp')))
+            hum = weather_data.get('humidity', weather_data.get('rh'))
+            press = weather_data.get('pressure', weather_data.get('pressure_hpa'))
+            # Convert pressure in hPa to Pa if needed
+            if press is not None and 'pressure_hpa' in weather_data:
+                try:
+                    press = float(press) * 100.0
+                except Exception:
+                    pass
+
+            # If still missing core values, skip to avoid publishing zeros
+            if temp is None or hum is None or press is None:
+                logger.debug("Incomplete weather data (missing temperature/humidity/pressure); skipping")
+                return
+
+            ts = None
+            try:
+                if getattr(message, 'metadata', None) and getattr(message.metadata, 'timestamp', None):
+                    ts = datetime.fromtimestamp(message.metadata.timestamp)
+            except Exception:
+                ts = None
+
             self._latest_weather = EnvironmentalReading(
-                timestamp=datetime.fromtimestamp(message.metadata.timestamp),
+                timestamp=ts or datetime.now(),
                 sensor_id=weather_data.get('sensor_id', 'bme280'),
                 value=weather_data,
                 unit='mixed',
                 i2c_address=weather_data.get('i2c_address', 0x76),
-                temperature=weather_data['temperature'],
-                humidity=weather_data['humidity'],
-                pressure=weather_data['pressure']
+                temperature=float(temp),
+                humidity=float(hum),
+                pressure=float(press)
             )
+        except KeyError as e:
+            # Some publishers may omit keys intermittently; avoid error spam
+            logger.debug(f"Weather data missing key {e}; skipping this update")
+            return
         except Exception as e:
             logger.error(f"Error processing weather data: {e}")
     
@@ -601,7 +656,17 @@ class SafetyMonitor:
         await self.mqtt_client.publish("lawnberry/safety/emergency", message)
     
     async def _publish_safety_status(self, safety_status: SafetyStatus):
-        """Publish safety status"""
+        """Optionally publish raw monitor safety status (debug/diagnostics).
+        Disabled by default; SafetyService publishes consolidated status to the UI.
+        """
+        # Respect publish disable flag
+        if not getattr(self, "_publish_status_updates", False):
+            return
+        # Throttle publishes
+        now = datetime.now()
+        min_interval = 1.0 / max(0.1, float(getattr(self, "_status_publish_rate_hz", 1.0)))
+        if (now - getattr(self, "_last_status_publish", now)).total_seconds() < min_interval:
+            return
         # Prepare active alerts data
         alerts_data = []
         for alert in safety_status.active_alerts:
@@ -615,6 +680,10 @@ class SafetyMonitor:
             })
         
         # Prepare safety status data
+        import math
+        nearest = safety_status.nearest_obstacle_distance
+        if isinstance(nearest, float) and not math.isfinite(nearest):
+            nearest = None
         status_data = {
             'timestamp': safety_status.timestamp.isoformat(),
             'is_safe': safety_status.is_safe,
@@ -626,7 +695,7 @@ class SafetyMonitor:
             'boundary_safe': safety_status.boundary_safe,
             'tilt_angle': safety_status.tilt_angle,
             'ground_clearance': safety_status.ground_clearance,
-            'nearest_obstacle_distance': safety_status.nearest_obstacle_distance,
+            'nearest_obstacle_distance': nearest,
             'temperature': safety_status.temperature,
             'humidity': safety_status.humidity,
             'is_raining': safety_status.is_raining,
@@ -641,8 +710,9 @@ class SafetyMonitor:
             sensor_type="safety_status",
             data=status_data
         )
-        
-        await self.mqtt_client.publish("lawnberry/safety/status", message)
+        # Publish to a monitor-specific topic to avoid conflicting with the primary UI topic
+        await self.mqtt_client.publish("lawnberry/safety/monitor_status", message)
+        self._last_status_publish = now
     
     def register_emergency_callback(self, callback: Callable):
         """Register callback for emergency situations"""

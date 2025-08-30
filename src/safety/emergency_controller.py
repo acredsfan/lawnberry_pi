@@ -304,7 +304,7 @@ class EmergencyController:
     async def _watchdog_loop(self):
         """Watchdog to ensure system responsiveness"""
         # Use instance heartbeat timestamp updated by _handle_system_heartbeat
-        watchdog_timeout = 10.0  # seconds
+        watchdog_timeout = float(getattr(self.config, 'heartbeat_timeout_s', 10.0))
         
         while self._running:
             try:
@@ -474,6 +474,7 @@ class EmergencyController:
         try:
             # Heartbeat received, system is responsive
             self._last_heartbeat_time = datetime.now()
+            logger.debug("System heartbeat received; watchdog timer reset")
         except Exception as e:
             logger.error(f"Error handling system heartbeat: {e}")
 

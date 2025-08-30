@@ -10,6 +10,11 @@
 
 The LawnBerryPi system provides a comprehensive REST API with WebSocket support for real-time communication. The API follows RESTful principles and uses JSON for data exchange.
 
+### JSON compliance and numeric values
+- All API and MQTT JSON payloads are strictly RFC 8259 compliant.
+- Any non-finite numeric values (NaN, +Infinity, -Infinity) are serialized as `null`.
+- Example: in safety status messages, when no obstacles are present the field `nearest_obstacle_distance` is `null` to represent an unbounded or unknown distance (previously emitted `Infinity`). Consumers should treat `null` as "no reading / not applicable" and handle defaults accordingly.
+
 ## Authentication
 
 Most API endpoints require authentication (token-based with role-based access control). However, the following read-only endpoints are intentionally exposed for unauthenticated access to support public map viewing and basic service diagnostics:
@@ -191,6 +196,24 @@ Available sensor types:
   }
 }
 ```
+
+### Environmental Safety Inputs (MQTT)
+
+The Environmental Safety subsystem consumes the following MQTT topics published by the hardware sensor service:
+
+- `lawnberry/sensors/imu/data`
+  - Shape:
+    - `orientation`: `{ roll: number, pitch: number, yaw: number }`
+    - `acceleration`: `{ x: number, y: number, z: number }` (m/s²)
+    - `gyroscope`: `{ x: number, y: number, z: number }` (rad/s)
+- `lawnberry/sensors/tof/data`
+  - Shape: `{ left_distance: number, right_distance: number, timestamp: iso8601 }` (distances in mm)
+- `lawnberry/sensors/environmental/data`
+  - Shape: `{ temperature: number, humidity: number, pressure: number, rain_detected?: boolean, timestamp: iso8601 }`
+
+Notes:
+- Internally, `IMUReading` stores `acceleration` and `angular_velocity` as 3-tuples; `ToFReading` uses `distance_mm` in millimeters.
+- Environmental hazard alerts are published at `lawnberry/safety/environmental_hazard`.
 
 ## Power API
 

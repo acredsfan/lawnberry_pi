@@ -12,10 +12,15 @@ WorkingDirectory=/var/lib/lawnberry
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONPATH=/opt/lawnberry
 Environment=GPIOZERO_PIN_FACTORY=lgpio
+# Prefer no-GPIO ToF init once addresses are assigned; allow auto-assign on first run
+Environment=LAWNBERY_TOF_NO_GPIO=always
+Environment=LAWNBERY_TOF_AUTO_ASSIGN_ON_MISSING=1
+Environment=LAWNBERY_TOF_AUTO_ASSIGN_TIMEOUT_S=60
 # Use the sensor service entrypoint which is the long-running hardware publisher
 ExecStart=/opt/lawnberry/venv/bin/python -m src.hardware.sensor_service
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=15s
 SupplementaryGroups=gpio i2c spi dialout
 # Hardening options
 ProtectSystem=strict
@@ -35,8 +40,14 @@ DeviceAllow=/dev/i2c-1 rw
 DeviceAllow=/dev/gpiomem rw
 DeviceAllow=/dev/gpiochip* rw
 DeviceAllow=/dev/tty* rw
+# Be explicit about common serial device nodes and majors to avoid EPERM under cgroup devices
+DeviceAllow=/dev/ttyACM* rw
+DeviceAllow=/dev/ttyUSB* rw
+DeviceAllow=/dev/ttyAMA* rw
+DeviceAllow=/dev/serial* rw
+DeviceAllow=char-major-166 rw
 MemoryMax=512M
 
 [Install]
 WantedBy=multi-user.target
- 
+

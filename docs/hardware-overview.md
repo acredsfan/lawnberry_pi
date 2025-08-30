@@ -40,9 +40,9 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
     │  └─ SSD1306 Display     - 0x3C            │           │
     │                                            │           │
     │  Serial/UART:                              │           │
-    │  ├─ GPS RTK Module   - /dev/ttyACM0       │           │
-    │  ├─ BNO085 IMU       - /dev/ttyAMA4       │           │
-    │  └─ RoboHAT Comms    - /dev/ttyACM1       │           │
+    │  ├─ GPS RTK Module   - /dev/ttyACM1       │           │
+    │  ├─ BNO085 IMU       - /dev/ttyAMA4 (Pi 5 UART4, GPIO12/13) │           │
+    │  └─ RoboHAT Comms    - /dev/serial0       │           │
     │                                            │           │
     │  Camera:                                   │           │
     │  └─ Pi Camera        - /dev/video0        │           │
@@ -108,7 +108,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 - u-blox ZED-F9P GNSS receiver
 - Multi-constellation support (GPS, GLONASS, Galileo, BeiDou)
 - RTK corrections for centimeter-level accuracy
-- USB interface to Raspberry Pi
+- USB interface to Raspberry Pi (typically `/dev/ttyACM1`)
 - External antenna for optimal satellite reception
 
 **Accuracy Levels**:
@@ -122,7 +122,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 **Specifications**:
 - 3-axis accelerometer, gyroscope, and magnetometer
 - Built-in sensor fusion algorithms
-- UART interface for high-speed data
+- UART interface for high-speed data (3,000,000 baud typical)
 - Calibration storage in internal flash
 
 **Capabilities**:
@@ -130,6 +130,14 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 - Linear acceleration measurement
 - Rotation vector and quaternion output
 - Compass heading with magnetic declination correction
+
+Note: On Raspberry Pi 5 the IMU is typically wired to UART4 on GPIO12 (TXD4) and GPIO13 (RXD4), exposed as `/dev/ttyAMA4`. The IMU plugin uses the Adafruit BNO08x UART driver and publishes quaternion, acceleration, and gyro to MQTT at `lawnberry/sensors/imu/data`.
+
+Quick GPS smoke test (bounded, venv-enforced):
+
+```
+venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
+```
 
 ## Environmental Sensing
 

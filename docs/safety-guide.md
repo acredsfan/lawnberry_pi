@@ -199,6 +199,51 @@ Consider:
 
 ## Operational Safety Procedures
 
+### Safety Telemetry and Status Publishing
+
+- The consolidated safety status message for the Web UI and other services is published by the Safety Service to `lawnberry/safety/status`.
+- The internal Safety Monitor can optionally publish its raw status for diagnostics, but this is disabled by default to avoid duplicate traffic.
+- You can tune the consolidated publish rate using the `status_publish_rate_hz` setting in `config/safety.yaml` (default: `2`). Higher values increase UI update frequency but also network traffic.
+- If you enable the monitor’s debug publishing, it will emit to `lawnberry/safety/monitor_status` (not used by the UI).
+
+Sensors and topics used by the safety stack:
+- IMU: `lawnberry/sensors/imu`
+- ToF left/right: `lawnberry/sensors/tof_left`, `lawnberry/sensors/tof_right`
+- Environmental: `lawnberry/sensors/environmental/data` (temperature, humidity, pressure)
+- GPS: `lawnberry/sensors/gps/data`
+- Emergency Alerts: `lawnberry/safety/emergency` (consolidated broadcast)
+
+### System Heartbeat and Watchdogs
+
+To prevent false emergency triggers from watchdogs during normal operation, the safety system emits a lightweight periodic heartbeat that other services (like the EmergencyController) can consume to reset their timers.
+
+- Topic: `lawnberry/system/heartbeat`
+- Publisher: Safety system (sender `safety_system`)
+- Payload type: `StatusMessage`
+- Payload details: `{ "component": "safety_system", "heartbeat": true }`
+- Frequency: every 2 seconds (0.5 Hz)
+
+If a consumer requires a different frequency, keep this baseline heartbeat enabled and add complementary heartbeats from those components as needed.
+
+Config:
+- `safety.heartbeat_timeout_s` in `config/safety.yaml` controls how long the EmergencyController waits before declaring a heartbeat timeout (default 15s). Increase during bring-up if needed.
+
+### Maintenance Warmup and Lockouts
+
+During bring-up, some maintenance metrics (motor current, vibration, battery voltage) may not be present immediately at service start.
+To prevent premature maintenance lockouts blocking operation:
+- The maintenance safety subsystem observes a startup grace period during which missing data is not treated as a critical diagnostic failure.
+- Defaults: `startup_grace_seconds: 180` and `allow_missing_data_during_warmup: true`.
+- You can tune these in `config/safety.yaml` under a `maintenance:` section. Example:
+
+```
+maintenance:
+   startup_grace_seconds: 180
+   allow_missing_data_during_warmup: true
+```
+
+This does not suppress real safety issues (e.g., battery overheating) which are always treated as critical.
+
 ### Pre-Operation Safety Protocol
 
 **Every time before starting**:

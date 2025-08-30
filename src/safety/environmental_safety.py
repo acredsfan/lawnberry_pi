@@ -211,39 +211,69 @@ class EnvironmentalSafetySystem:
         self.mqtt_client.add_message_handler(env_topic, lambda t, m: _wrap_and_dispatch(self._handle_environmental_data, t, m))
     
     async def _handle_imu_data(self, data: Dict[str, Any]):
-        """Handle IMU data for slope analysis"""
+        """Handle IMU data for slope analysis.
+        Expected payload shape (from hardware service):
+        {
+          "orientation": {"roll": float, "pitch": float, "yaw": float},
+          "acceleration": {"x": float, "y": float, "z": float},
+          "gyroscope": {"x": float, "y": float, "z": float},
+          ...
+        }
+        """
+        acc = data.get('acceleration', {}) or {}
+        gyro = data.get('gyroscope', {}) or {}
+        mag = data.get('magnetometer', {}) or {}
+
         imu_reading = IMUReading(
             timestamp=datetime.now(),
-            acceleration_x=data.get('acceleration_x', 0.0),
-            acceleration_y=data.get('acceleration_y', 0.0),
-            acceleration_z=data.get('acceleration_z', 0.0),
-            gyroscope_x=data.get('gyroscope_x', 0.0),
-            gyroscope_y=data.get('gyroscope_y', 0.0),
-            gyroscope_z=data.get('gyroscope_z', 0.0),
-            magnetometer_x=data.get('magnetometer_x', 0.0),
-            magnetometer_y=data.get('magnetometer_y', 0.0),
-            magnetometer_z=data.get('magnetometer_z', 0.0),
-                # IMU does not provide temperature; environmental sensor provides it
+            sensor_id='imu',
+            value=data,
+            unit='',
+            acceleration=(float(acc.get('x', 0.0)), float(acc.get('y', 0.0)), float(acc.get('z', 0.0))),
+            angular_velocity=(float(gyro.get('x', 0.0)), float(gyro.get('y', 0.0)), float(gyro.get('z', 0.0))),
+            magnetic_field=(
+                float(mag.get('x', 0.0)),
+                float(mag.get('y', 0.0)),
+                float(mag.get('z', 0.0)),
+            ) if mag else None,
         )
-        
+
         self.imu_buffer.append(imu_reading)
         if len(self.imu_buffer) > self.analysis_window_size:
             self.imu_buffer.pop(0)
     
     async def _handle_tof_data(self, data: Dict[str, Any]):
-        """Handle ToF data for surface analysis"""
-        tof_reading = ToFReading(
-            timestamp=datetime.now(),
-            distance=data.get('distance', 0.0),
-            signal_strength=data.get('signal_strength', 0),
-            ambient_light=data.get('ambient_light', 0),
-            temperature=data.get('temperature', 20.0),
-            sensor_id=data.get('sensor_id', 'combined')
-        )
-        
-        self.tof_buffer.append(tof_reading)
+        """Handle ToF data for surface analysis.
+        Expected combined payload shape (from hardware service):
+        {"left_distance": int|float, "right_distance": int|float, ...}
+        Append readings for available sensors.
+        """
+        now = datetime.now()
+        left = data.get('left_distance')
+        right = data.get('right_distance')
+
+        readings: List[ToFReading] = []
+        if left is not None:
+            readings.append(ToFReading(
+                timestamp=now,
+                sensor_id='tof_left',
+                value={'distance_mm': int(left)},
+                unit='mm',
+                distance_mm=int(left),
+            ))
+        if right is not None:
+            readings.append(ToFReading(
+                timestamp=now,
+                sensor_id='tof_right',
+                value={'distance_mm': int(right)},
+                unit='mm',
+                distance_mm=int(right),
+            ))
+
+        for r in readings:
+            self.tof_buffer.append(r)
         if len(self.tof_buffer) > self.analysis_window_size:
-            self.tof_buffer.pop(0)
+            self.tof_buffer = self.tof_buffer[-self.analysis_window_size:]
     
     async def _handle_vision_data(self, data: Dict[str, Any]):
         """Handle vision data for surface and wildlife analysis"""
@@ -255,19 +285,24 @@ class EnvironmentalSafetySystem:
             self.camera_buffer.pop(0)
     
     async def _handle_environmental_data(self, data: Dict[str, Any]):
-        """Handle environmental sensor data"""
+        """Handle environmental sensor data.
+        Maps hardware payload to EnvironmentalReading dataclass, ensuring required base fields are set.
+        """
         env_reading = EnvironmentalReading(
             timestamp=datetime.now(),
-            temperature=data.get('temperature', 20.0),
-            humidity=data.get('humidity', 50.0),
-            pressure=data.get('pressure', 1013.25),
-            light_level=data.get('light_level', 1000.0),
-            uv_index=data.get('uv_index', 0.0),
-            wind_speed=data.get('wind_speed', 0.0),
-            wind_direction=data.get('wind_direction', 0.0),
-            precipitation=data.get('precipitation', False)
+            sensor_id='environmental',
+            value=data,
+            unit='',
+            temperature=float(data.get('temperature', 20.0)),
+            humidity=float(data.get('humidity', 50.0)),
+            pressure=float(data.get('pressure', 1013.25)),
+            light_level=float(data.get('light_level', 0.0)),
+            uv_index=float(data.get('uv_index', 0.0)),
+            wind_speed=float(data.get('wind_speed', 0.0)),
+            wind_direction=float(data.get('wind_direction', 0.0)),
+            precipitation=bool(data.get('precipitation', data.get('rain_detected', False))),
         )
-        
+
         self.env_buffer.append(env_reading)
         if len(self.env_buffer) > self.analysis_window_size:
             self.env_buffer.pop(0)
@@ -304,9 +339,10 @@ class EnvironmentalSafetySystem:
         recent_readings = self.imu_buffer[-10:]
         
         # Calculate average accelerometer readings
-        acc_x_values = [r.acceleration_x for r in recent_readings]
-        acc_y_values = [r.acceleration_y for r in recent_readings]
-        acc_z_values = [r.acceleration_z for r in recent_readings]
+        # IMUReading stores acceleration as a 3-tuple (x, y, z)
+        acc_x_values = [float(r.acceleration[0]) for r in recent_readings]
+        acc_y_values = [float(r.acceleration[1]) for r in recent_readings]
+        acc_z_values = [float(r.acceleration[2]) for r in recent_readings]
         
         avg_acc_x = statistics.mean(acc_x_values)
         avg_acc_y = statistics.mean(acc_y_values)
@@ -365,7 +401,8 @@ class EnvironmentalSafetySystem:
         
         # Analyze ToF data for surface roughness
         recent_tof = self.tof_buffer[-10:]
-        distances = [r.distance for r in recent_tof]
+        # ToFReading uses distance_mm (integer millimeters)
+        distances = [float(r.distance_mm) / 1000.0 for r in recent_tof]  # convert to meters for analysis
         
         if not distances:
             return None
@@ -810,7 +847,7 @@ class EnvironmentalSafetySystem:
         self.environmental_hazards[hazard_id] = hazard
         
         # Publish safety alert
-        await self.mqtt_client.publish("safety/environmental_hazard", {
+        await self.mqtt_client.publish("lawnberry/safety/environmental_hazard", {
             'hazard_id': hazard_id,
             'type': 'wildlife_detected',
             'wildlife_type': detection.wildlife_type.value,

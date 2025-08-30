@@ -11,10 +11,7 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/var/lib/lawnberry
-# Use writable CWD to avoid lgpio .lgd-nfy* pipe issues if GPIO is touched
-Environment=GPIOZERO_PIN_FACTORY=lgpio
 Environment=XDG_RUNTIME_DIR=/run/lawnberry
-Environment=LG_GPIO_CHIP=0
 Environment=PYTHONPATH=/opt/lawnberry
 Environment=LAWNBERRY_ENV=production
 ExecStart=/opt/lawnberry/venv/bin/python -m src.safety.safety_main

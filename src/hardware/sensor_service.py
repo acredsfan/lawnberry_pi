@@ -699,24 +699,7 @@ class SensorService:
         """Stop the sensor service"""
         self.logger.info("Stopping hardware sensor service...")
         self.running = False
-        
-        if self.mqtt_client:
-            try:
-                await asyncio.wait_for(self.mqtt_client.disconnect(), timeout=5.0)
-            except asyncio.TimeoutError:
-                self.logger.warning("MQTT disconnect timed out")
-            except Exception as e:
-                self.logger.warning(f"MQTT disconnect error: {e}")
-            
-        if self.hardware:
-            try:
-                await asyncio.wait_for(self.hardware.cleanup(), timeout=15.0)
-                self.logger.info("Hardware cleanup completed")
-            except asyncio.TimeoutError:
-                self.logger.error("Hardware cleanup timed out")
-            except Exception as e:
-                self.logger.error(f"Hardware cleanup error: {e}")
-        # Cancel background diagnostic tasks
+        # Cancel background tasks first to stop periodic hardware access quickly
         # Cancel and await diagnostic tasks to ensure they don't keep the loop alive
         for task_name in ('_diag_task', '_tof_status_task'):
             task = getattr(self, task_name, None)
@@ -770,6 +753,24 @@ class SensorService:
                     pass
             except Exception as e:
                 self.logger.debug(f"Error cancelling _heartbeat_task: {e}")
+
+        # Now disconnect MQTT and cleanup hardware
+        if self.mqtt_client:
+            try:
+                await asyncio.wait_for(self.mqtt_client.disconnect(), timeout=5.0)
+            except asyncio.TimeoutError:
+                self.logger.warning("MQTT disconnect timed out")
+            except Exception as e:
+                self.logger.warning(f"MQTT disconnect error: {e}")
+            
+        if self.hardware:
+            try:
+                await asyncio.wait_for(self.hardware.cleanup(), timeout=12.0)
+                self.logger.info("Hardware cleanup completed")
+            except asyncio.TimeoutError:
+                self.logger.error("Hardware cleanup timed out")
+            except Exception as e:
+                self.logger.error(f"Hardware cleanup error: {e}")
 
         # Publish retained stopped status so late subscribers know service state
         try:

@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Optional
 
 from ..communication import MQTTClient
+from ..communication.message_protocols import StatusMessage, SensorData
 from .safety_service import SafetyService, SafetyConfig
 from ..data_management import DataManager
 
@@ -39,6 +40,7 @@ class SafetySystemMain:
         self.data_manager: Optional[DataManager] = None
         self.running = False
         self.shutdown_event = asyncio.Event()
+        self._heartbeat_task: Optional[asyncio.Task] = None
         
     async def initialize(self):
         """Initialize the safety system"""
@@ -117,6 +119,7 @@ class SafetySystemMain:
                 safety_update_rate_hz=safety_params['safety_update_rate_hz'],
                 emergency_update_rate_hz=safety_params['emergency_update_rate_hz'],
                 status_publish_rate_hz=safety_params.get('status_publish_rate_hz', 2),
+                heartbeat_timeout_s=safety_params.get('heartbeat_timeout_s', 15.0),
                 person_safety_radius_m=safety_params['person_safety_radius_m'],
                 pet_safety_radius_m=safety_params['pet_safety_radius_m'],
                 general_safety_distance_m=safety_params['general_safety_distance_m'],
@@ -130,6 +133,15 @@ class SafetySystemMain:
                 enable_vision_safety=safety_params['enable_vision_safety'],
                 enable_boundary_enforcement=safety_params['enable_boundary_enforcement']
             )
+            # Optional maintenance warmup config
+            try:
+                maint = config_data.get('maintenance', {}) or {}
+                if 'startup_grace_seconds' in maint:
+                    config.maintenance_startup_grace_seconds = float(maint['startup_grace_seconds'])
+                if 'allow_missing_data_during_warmup' in maint:
+                    config.maintenance_allow_missing_data_during_warmup = bool(maint['allow_missing_data_during_warmup'])
+            except Exception:
+                pass
             
             logger.info(f"Configuration loaded: {config}")
             return config
@@ -166,6 +178,9 @@ class SafetySystemMain:
             
             # Set up performance monitoring
             performance_task = asyncio.create_task(self._performance_monitoring_loop())
+
+            # Start system heartbeat publisher to satisfy emergency controller watchdog
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
             
             logger.info("Safety system is running")
             
@@ -175,6 +190,8 @@ class SafetySystemMain:
             # Cancel monitoring tasks
             health_task.cancel()
             performance_task.cancel()
+            if self._heartbeat_task:
+                self._heartbeat_task.cancel()
             
             try:
                 await health_task
@@ -191,6 +208,25 @@ class SafetySystemMain:
             raise
         finally:
             await self._cleanup()
+
+    async def _heartbeat_loop(self):
+        """Publish a periodic system heartbeat for watchdogs."""
+        try:
+            interval = 2.0  # seconds
+            while self.running and self.mqtt_client:
+                try:
+                    msg = StatusMessage.create(
+                        sender="safety_system",
+                        status="healthy",
+                        details={"component": "safety_system", "heartbeat": True}
+                    )
+                    # EmergencyController listens on this topic to reset its watchdog timer
+                    await self.mqtt_client.publish("lawnberry/system/heartbeat", msg)
+                except Exception as e:
+                    logger.error(f"Heartbeat publish error: {e}")
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            pass
     
     async def _publish_startup_status(self):
         """Publish safety system startup status"""

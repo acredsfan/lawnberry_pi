@@ -64,10 +64,31 @@ class MessageProtocol:
     
     def to_json(self) -> str:
         """Serialize to JSON"""
-        return json.dumps({
+        # Ensure JSON is RFC 8259 compliant: replace NaN/Infinity with null
+        import math
+
+        def _sanitize(obj):
+            try:
+                if isinstance(obj, float):
+                    return obj if math.isfinite(obj) else None
+                if isinstance(obj, (int, str, bool)) or obj is None:
+                    return obj
+                if isinstance(obj, list):
+                    return [_sanitize(i) for i in obj]
+                if isinstance(obj, dict):
+                    return {k: _sanitize(v) for k, v in obj.items()}
+                return obj
+            except Exception:
+                try:
+                    return str(obj)
+                except Exception:
+                    return None
+
+        data = {
             'metadata': self.metadata.to_dict(),
-            'payload': self.payload
-        })
+            'payload': _sanitize(self.payload),
+        }
+        return json.dumps(data, allow_nan=False)
     
     @classmethod
     def from_json(cls, json_str: str) -> 'MessageProtocol':

@@ -1206,7 +1206,13 @@ class GPSPlugin(HardwarePlugin):
 
 
 class IMUPlugin(HardwarePlugin):
-    """Simple IMU plugin parsing comma-separated orientation and motion data"""
+    """IMU plugin with BNO08x UART support and a safe text-parser fallback.
+
+    Preferred path: use Adafruit's `adafruit_bno08x.uart.BNO08X_UART` against the
+    configured serial device (e.g., `/dev/ttyAMA4` at 3_000_000 baud). If the
+    library is not available or initialization fails, fall back to parsing
+    comma-separated text lines for basic IMU telemetry (legacy/dev boards).
+    """
 
     @property
     def plugin_type(self) -> str:
@@ -1228,10 +1234,69 @@ class IMUPlugin(HardwarePlugin):
                 cfg_port = self.config.parameters.get("port")
                 cfg_baud = int(self.config.parameters.get("baud", 115200))
 
+                # Attempt to set up BNO08x UART driver if available
+                self._use_bno08x = False
+                self._bno = None
+                try:
+                    from adafruit_bno08x.uart import BNO08X_UART  # type: ignore
+                    from adafruit_bno08x import (
+                        BNO_REPORT_ROTATION_VECTOR,
+                        BNO_REPORT_ACCELEROMETER,
+                        BNO_REPORT_GYROSCOPE,
+                    )  # type: ignore
+                    self._adafruit_available = True
+                except Exception as e:
+                    self._adafruit_available = False
+                    self.logger.debug(f"BNO08x driver not available, will use text parser fallback: {e}")
+
                 async def try_init(port: str, baud: int) -> bool:
                     try:
                         await serial_manager.initialize_device("imu", port=port, baud=baud, timeout=self._timeout)
-                        # quick sanity read requiring parseable content
+                        # Preferred: BNO08x UART initialization path
+                        if self._adafruit_available and baud >= 921600:
+                            try:
+                                # Access underlying pyserial object
+                                ser = serial_manager._connections.get("imu")
+                                if ser is None:
+                                    return False
+                                # Initialize Adafruit BNO08x UART driver
+                                bno = BNO08X_UART(ser)
+                                # Enable core features
+                                try:
+                                    bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
+                                except Exception:
+                                    pass
+                                try:
+                                    bno.enable_feature(BNO_REPORT_ACCELEROMETER)
+                                except Exception:
+                                    pass
+                                try:
+                                    bno.enable_feature(BNO_REPORT_GYROSCOPE)
+                                except Exception:
+                                    pass
+                                # Try a couple reads to verify
+                                ok_reads = 0
+                                for _ in range(6):
+                                    try:
+                                        q = bno.quaternion  # type: ignore[attr-defined]
+                                        if q and any(abs(float(x)) > 1e-6 for x in q):
+                                            ok_reads += 1
+                                            if ok_reads >= 1:
+                                                self._bno = bno
+                                                self._use_bno08x = True
+                                                return True
+                                    except Exception:
+                                        await asyncio.sleep(0.05)
+                                # If quaternion not ready yet, still accept BNO path but mark initialized
+                                if bno is not None:
+                                    self._bno = bno
+                                    self._use_bno08x = True
+                                    return True
+                            except Exception as e:
+                                # If BNO path fails, fall through to text parser
+                                self.logger.debug(f"BNO08x init failed on {port}@{baud}: {e}; trying text parser")
+
+                        # Fallback: quick sanity read requiring parseable text content
                         for _ in range(6):
                             line = await serial_manager.read_line("imu", timeout=self._timeout)
                             if not line:
@@ -1274,7 +1339,10 @@ class IMUPlugin(HardwarePlugin):
                 self._last_failures = 0
                 self._initialized = True
                 await self.health.record_success()
-                self.logger.info(f"IMU plugin initialized on {self._port} @ {self._baud}")
+                if getattr(self, "_use_bno08x", False):
+                    self.logger.info(f"IMU (BNO08x) initialized on {self._port} @ {self._baud}")
+                else:
+                    self.logger.info(f"IMU (text-parser) initialized on {self._port} @ {self._baud}")
                 return True
             except Exception as e:
                 await self.health.record_failure()
@@ -1287,6 +1355,102 @@ class IMUPlugin(HardwarePlugin):
                 return None
         try:
             serial_manager = self.managers["serial"]
+            # Preferred BNO08x path
+            if getattr(self, "_use_bno08x", False) and getattr(self, "_bno", None) is not None:
+                try:
+                    bno = self._bno  # type: ignore[attr-defined]
+                    # Try to read quaternion, accel, and gyro
+                    quat = None
+                    acc = None
+                    gyro = None
+                    try:
+                        quat = bno.quaternion  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                    try:
+                        acc = bno.acceleration  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                    try:
+                        gyro = bno.gyro  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+
+                    # If nothing available yet, don't publish zeros; allow warm-up
+                    if not quat and not acc and not gyro:
+                        self._last_failures = getattr(self, "_last_failures", 0) + 1
+                        if self._last_failures % 80 == 0:
+                            # Attempt internal re-init by toggling features
+                            try:
+                                from adafruit_bno08x import (
+                                    BNO_REPORT_ROTATION_VECTOR,
+                                    BNO_REPORT_ACCELEROMETER,
+                                    BNO_REPORT_GYROSCOPE,
+                                )  # type: ignore
+                                try:
+                                    bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
+                                except Exception:
+                                    pass
+                                try:
+                                    bno.enable_feature(BNO_REPORT_ACCELEROMETER)
+                                except Exception:
+                                    pass
+                                try:
+                                    bno.enable_feature(BNO_REPORT_GYROSCOPE)
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+                        return None
+
+                    # Prepare output values
+                    qi = qj = qk = qr = 0.0
+                    if quat:
+                        try:
+                            qi, qj, qk, qr = [float(x) for x in quat]
+                        except Exception:
+                            pass
+                    ax = ay = az = 0.0
+                    if acc:
+                        try:
+                            ax, ay, az = [float(x) for x in acc]
+                        except Exception:
+                            pass
+                    gx = gy = gz = 0.0
+                    if gyro:
+                        try:
+                            gx, gy, gz = [float(x) for x in gyro]
+                        except Exception:
+                            pass
+
+                    from .data_structures import IMUReading
+                    quality = 0.9 if quat else (0.7 if acc or gyro else 0.3)
+                    reading = IMUReading(
+                        timestamp=datetime.now(),
+                        sensor_id=self.config.name,
+                        value={
+                            "orientation": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
+                            # UI currently expects Euler in value; maintain fields but keep zeros when using quaternion
+                            "acceleration": {"x": ax, "y": ay, "z": az},
+                            "gyroscope": {"x": gx, "y": gy, "z": gz},
+                        },
+                        unit="mixed",
+                        port=serial_manager.devices[self.device_name]["port"],
+                        baud_rate=serial_manager.devices[self.device_name]["baud"],
+                        quality=float(quality),
+                        quaternion=(qi, qj, qk, qr),
+                        acceleration=(ax, ay, az),
+                        angular_velocity=(gx, gy, gz),
+                    )
+                    await self.health.record_success()
+                    return reading
+                except Exception as e:
+                    # If BNO path errors repeatedly, degrade to text parser on next cycle
+                    self.logger.debug(f"BNO08x read error: {e}")
+                    self._use_bno08x = False
+                    # Do not tear down serial; next cycle will try text parser
+
+            # Fallback: text line based IMU
             line = await serial_manager.read_line(self.device_name, timeout=self._timeout)
             if not line:
                 self._last_failures = getattr(self, "_last_failures", 0) + 1
@@ -1296,7 +1460,6 @@ class IMUPlugin(HardwarePlugin):
                     self.logger.debug("IMU no data; attempting auto re-detect")
                     await self.initialize()
                 return None
-            # Parse IMU line into roll/pitch/yaw + accel + gyro and compute quality
             parsed = self._parse_imu_line(line)
             if parsed is None:
                 self._last_failures = getattr(self, "_last_failures", 0) + 1
@@ -1307,7 +1470,6 @@ class IMUPlugin(HardwarePlugin):
                 return None
             roll, pitch, yaw, ax, ay, az, gx, gy, gz, quality = parsed
             from .data_structures import IMUReading
-
             reading = IMUReading(
                 timestamp=datetime.now(),
                 sensor_id=self.config.name,
