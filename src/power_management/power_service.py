@@ -6,7 +6,7 @@ MQTT-based service for power management coordination.
 import asyncio
 import logging
 import json
-from typing import Dict, Any, Optional
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from ..communication.client import MQTTClient

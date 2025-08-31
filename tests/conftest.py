@@ -4,57 +4,13 @@ import tempfile
 import shutil
 from pathlib import Path
 from unittest.mock import Mock, AsyncMock, patch
+from datetime import datetime
 import pytest
 
 # Basic pytest configuration
 def pytest_configure(config):
+    # Markers are already configured in pytest.ini; keep lightweight customization only
     config.addinivalue_line("markers", "asyncio: mark async tests")
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    try:
-        loop.close()
-    except Exception:
-        pass
-
-
-def pytest_fixture_setup(fixturedef, request):
-    """Run async fixtures using the session event loop when pytest-asyncio is not available."""
-    func = fixturedef.func
-    if inspect.iscoroutinefunction(func):
-        loop = request.getfixturevalue("event_loop")
-        # Resolve any dependent fixtures required by this fixture
-        kwargs = {name: request.getfixturevalue(name) for name in getattr(fixturedef, "argnames", [])}
-        return loop.run_until_complete(func(**kwargs))
-
-
-def pytest_pyfunc_call(pyfuncitem):
-    """Execute async test functions by running them on the session event loop."""
-    testfunc = pyfuncitem.obj
-    if inspect.iscoroutinefunction(testfunc):
-        # Use already-prepared funcargs (which may include sync fixture results)
-        loop = pyfuncitem.funcargs.get("event_loop")
-        created_loop = False
-        if loop is None:
-            loop = asyncio.new_event_loop()
-            created_loop = True
-        try:
-            # Only pass the funcargs that match the test function's parameter names.
-            sig = inspect.signature(testfunc)
-            accept_names = set(sig.parameters.keys())
-            filtered_kwargs = {k: v for k, v in pyfuncitem.funcargs.items() if k in accept_names}
-            loop.run_until_complete(testfunc(**filtered_kwargs))
-        finally:
-            if created_loop:
-                try:
-                    loop.close()
-                except Exception:
-                    pass
-        return True
-    return None
 
 
 # Mock hardware fixtures
@@ -129,15 +85,16 @@ async def hardware_interface(mock_i2c_device, mock_gpio, mock_serial):
         await interface.shutdown()
 
 
-# Cleanup fixture to cancel remaining tasks
 @pytest.fixture(autouse=True)
 async def cleanup_background_tasks():
+    """Ensure all background tasks are cleaned up after tests (single definition)."""
     yield
-    tasks = [task for task in asyncio.all_tasks() if not task.done()]
-    for task in tasks:
-        task.cancel()
+    # Cancel any remaining tasks created by tests to avoid bleed-over
+    tasks = [t for t in asyncio.all_tasks() if not t.done()]
+    for t in tasks:
+        t.cancel()
         try:
-            await task
+            await t
         except asyncio.CancelledError:
             pass
 @pytest.fixture
@@ -332,17 +289,4 @@ def safety_test_scenarios():
 # Async Test Utilities
 
 
-# Cleanup fixture
-@pytest.fixture(autouse=True)
-async def cleanup_background_tasks():
-    """Ensure all background tasks are cleaned up after tests"""
-    yield
-    
-    # Cancel any remaining tasks
-    tasks = [task for task in asyncio.all_tasks() if not task.done()]
-    for task in tasks:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+# Note: Duplicate cleanup fixture removed above to prevent redefinition warnings

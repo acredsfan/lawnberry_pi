@@ -53,6 +53,8 @@ class MQTTBridge:
             'power/solar': 'solar_status',
             'weather/current': 'weather_current',
             'weather/forecast': 'weather_forecast',
+            # Safety streams
+            'safety/status': 'mqtt_data',
             'safety/alerts/+': 'safety_alert',
             'safety/emergency_stop': 'emergency_stop',
             'maps/boundaries': 'map_boundaries',
@@ -132,14 +134,33 @@ class MQTTBridge:
             self.logger.debug(f"Subscribed to {full_topic}")
     
     async def _handle_mqtt_message(self, topic: str, payload: Any):
-        """Handle incoming MQTT messages. Accepts raw string or dict payloads and parses JSON if needed."""
+        """Handle incoming MQTT messages.
+        Accepts raw string, bytes, dict, and MessageProtocol-like objects. Unwraps
+        protocol envelopes to plain dicts and flattens common {'data': {...}} structures
+        for UI consumption.
+        """
         try:
             # Remove namespace prefix
             clean_topic = topic.replace("lawnberry/", "")
             
             # Ensure payload is a dictionary
             data: Dict[str, Any]
-            if isinstance(payload, str):
+            # Prefer unwrapping known protocol objects first
+            try:
+                from ..communication.message_protocols import MessageProtocol as _MP  # type: ignore
+            except Exception:
+                _MP = None  # type: ignore
+
+            if _MP is not None and isinstance(payload, _MP):  # type: ignore
+                # Unwrap MessageProtocol into plain dict
+                data = getattr(payload, 'payload', {}) or {}
+            elif hasattr(payload, 'payload') and hasattr(payload, 'metadata'):
+                # Looks like a protocol object but import failed; best-effort unwrap
+                try:
+                    data = getattr(payload, 'payload', {}) or {}
+                except Exception:
+                    data = {}
+            elif isinstance(payload, str):
                 try:
                     data = json.loads(payload)
                 except Exception:
@@ -163,6 +184,14 @@ class MQTTBridge:
             if not isinstance(data, dict):
                 # Wrap arbitrary payloads into a dict to satisfy API schemas
                 data = {"value": data if isinstance(data, (int, float, bool)) else str(data)}
+
+            # Flatten common SensorData envelope: {'sensor_type': ..., 'data': {...}, ...}
+            if 'data' in data and isinstance(data['data'], dict):
+                inner = data['data']
+                meta = {k: v for k, v in data.items() if k != 'data'}
+                if meta:
+                    inner = {**inner, '_meta': meta}
+                data = inner
 
             # Update cache
             self._cached_data[clean_topic] = data

@@ -1,5 +1,5 @@
 {
   "no_gpio_always": true,
-  "confirmed_at": "2025-08-29T23:16:05.171168",
+  "confirmed_at": "2025-08-30T19:45:23.789730",
   "note": "ToF addresses 0x29 and 0x30 confirmed; safe to skip GPIO sequencing on future runs."
 }

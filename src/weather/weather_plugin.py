@@ -8,8 +8,8 @@ import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
-from ..hardware.plugin_system import HardwarePlugin, PluginConfig
-from ..hardware.data_structures import SensorReading
+from src.hardware.plugin_system import HardwarePlugin, PluginConfig
+from src.hardware.data_structures import SensorReading
 from .weather_service import WeatherService, WeatherCondition, MowingConditions
 
 
@@ -47,14 +47,14 @@ class WeatherPlugin(HardwarePlugin):
                     self.logger.error("Failed to initialize weather service")
                     return False
                 
-                self.health.mark_success()
+                await self.health.record_success()
                 self._initialized = True
                 self.logger.info("Weather plugin initialized successfully")
                 return True
                 
             except Exception as e:
                 self.logger.error(f"Failed to initialize weather plugin: {e}")
-                self.health.mark_failure()
+                await self.health.record_failure()
                 return False
     
     async def read_data(self) -> Optional[SensorReading]:
@@ -66,7 +66,7 @@ class WeatherPlugin(HardwarePlugin):
             # Get current weather conditions
             weather = await self.weather_service.get_current_weather()
             if not weather:
-                self.health.mark_failure()
+                await self.health.record_failure()
                 return None
             
             # Evaluate mowing conditions with local sensor data
@@ -93,7 +93,7 @@ class WeatherPlugin(HardwarePlugin):
                 'reasons': conditions.reasons
             }
             
-            self.health.mark_success()
+            await self.health.record_success()
             
             return SensorReading(
                 timestamp=weather.timestamp,
@@ -103,16 +103,23 @@ class WeatherPlugin(HardwarePlugin):
                 quality=1.0,
                 metadata={
                     'source': 'google_weather_api',
-                    'location': {
-                        'lat': self.weather_service.config['location']['latitude'],
-                        'lon': self.weather_service.config['location']['longitude']
-                    }
+                    # Guard against mocked weather_service without real config
+                    'location': (lambda svc: (
+                        (
+                            {
+                                'lat': (svc.get('location', {}).get('latitude')),
+                                'lon': (svc.get('location', {}).get('longitude')),
+                            }
+                            if isinstance(svc, dict) and isinstance(svc.get('location', {}), dict)
+                            else None
+                        )
+                    ))(getattr(self.weather_service, 'config', {}))
                 }
             )
             
         except Exception as e:
             self.logger.error(f"Failed to read weather data: {e}")
-            self.health.mark_failure()
+            await self.health.record_failure()
             return None
     
     async def get_forecast_data(self, days: int = 7) -> Optional[List[Dict[str, Any]]]:

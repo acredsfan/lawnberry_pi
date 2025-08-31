@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-Quick GPS smoke test for LawnBerryPi.
+Quick IMU smoke test for LawnBerryPi.
 
-Runs the HardwareInterface, reads GPS data for a short bounded duration, and prints
-JSON lines when valid GPS readings are obtained. Enforces strict timeouts to avoid
-hanging terminals as per Bookworm agent guidelines.
+Runs the HardwareInterface, reads IMU data for a short bounded duration, and prints
+JSON lines when valid IMU readings are obtained. Enforces strict timeouts.
 
 Usage:
-  venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
+  venv/bin/python -m scripts.imu_smoke_test --duration 15 --interval 0.2
 
 Notes:
   - Uses the repo config at config/hardware.yaml by default.
-  - Will not seize RoboHAT serial port; GPSPlugin already avoids conflicting ports.
+  - The IMU is expected to be BNO08x on /dev/ttyAMA4 @ 3000000 baud per config.
 """
 
 import argparse
@@ -28,7 +27,6 @@ if str(REPO_ROOT) not in sys.path:
 
 
 async def run(duration: float, interval: float) -> int:
-    # Lazy import to avoid heavy deps during module load
     from src.hardware.hardware_interface import create_hardware_interface
 
     hw = create_hardware_interface(str(Path("config/hardware.yaml")), shared=False, force_new=True)
@@ -44,29 +42,39 @@ async def run(duration: float, interval: float) -> int:
         print(json.dumps({"level": "error", "msg": f"initialize_exception: {e}"}))
         return 4
 
-    # Read loop
     end_time = asyncio.get_event_loop().time() + duration
     printed = 0
     try:
         while asyncio.get_event_loop().time() < end_time:
             try:
-                reading = await asyncio.wait_for(hw.get_sensor_data("gps"), timeout=1.2)
+                reading = await asyncio.wait_for(hw.get_sensor_data("imu"), timeout=1.0)
             except asyncio.TimeoutError:
                 reading = None
             except Exception:
                 reading = None
 
             if reading is not None and getattr(reading, "value", None):
-                # Serialize a compact line for quick verification
                 val = reading.value if isinstance(reading.value, dict) else {}
+                ori = val.get("orientation", {})
+                acc = val.get("acceleration", {})
+                gyro = val.get("gyroscope", {})
                 out = {
                     "timestamp": getattr(reading, "timestamp", None).isoformat() if getattr(reading, "timestamp", None) else None,
-                    "lat": val.get("latitude"),
-                    "lon": val.get("longitude"),
-                    "alt": val.get("altitude"),
-                    "acc": val.get("accuracy"),
-                    "sats": val.get("satellites"),
-                    "fix": val.get("fix_type"),
+                    "orientation": {
+                        "roll": float(ori.get("roll", 0.0) or 0.0),
+                        "pitch": float(ori.get("pitch", 0.0) or 0.0),
+                        "yaw": float(ori.get("yaw", 0.0) or 0.0),
+                    },
+                    "acceleration": {
+                        "x": float(acc.get("x", 0.0) or 0.0),
+                        "y": float(acc.get("y", 0.0) or 0.0),
+                        "z": float(acc.get("z", 0.0) or 0.0),
+                    },
+                    "gyroscope": {
+                        "x": float(gyro.get("x", 0.0) or 0.0),
+                        "y": float(gyro.get("y", 0.0) or 0.0),
+                        "z": float(gyro.get("z", 0.0) or 0.0),
+                    },
                 }
                 print(json.dumps(out, separators=(",", ":")))
                 printed += 1
@@ -78,17 +86,15 @@ async def run(duration: float, interval: float) -> int:
         except Exception:
             pass
 
-    # Exit code 0 even if no GPS lock yet; the purpose is smoke visibility
     return 0 if printed > 0 else 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--duration", type=float, default=20.0, help="Seconds to run the test")
-    parser.add_argument("--interval", type=float, default=0.5, help="Seconds between reads")
+    parser.add_argument("--duration", type=float, default=15.0, help="Seconds to run the test")
+    parser.add_argument("--interval", type=float, default=0.2, help="Seconds between reads")
     args = parser.parse_args()
 
-    # Respect environment flag that may be used by sensor service to disable camera init
     os.environ.setdefault("LAWNBERY_DISABLE_CAMERA", "1")
 
     try:

@@ -8,9 +8,10 @@ from datetime import datetime
 
 from src.hardware import (
     HardwareInterface, I2CManager, SerialManager, CameraManager, GPIOManager,
-    PluginManager, HardwarePlugin, PluginConfig,
+    PluginManager, HardwarePlugin,
     HardwareError, DeviceNotFoundError, CommunicationError
 )
+from src.hardware.plugin_system import PluginConfig
 from src.hardware.data_structures import SensorReading, DeviceHealth
 
 

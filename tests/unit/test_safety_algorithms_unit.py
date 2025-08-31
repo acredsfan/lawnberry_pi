@@ -14,7 +14,29 @@ from typing import Dict, List, Any
 from src.safety.hazard_detector import HazardDetector, HazardLevel
 from src.safety.emergency_controller import EmergencyController
 from src.safety.boundary_monitor import BoundaryMonitor
-from src.sensor_fusion.data_structures import SensorReading, IMUReading, GPSReading
+from src.hardware.data_structures import SensorReading
+# Define IMUReading and GPSReading locally if not available
+from dataclasses import dataclass
+from datetime import datetime
+
+@dataclass
+class IMUReading:
+    timestamp: datetime
+    sensor_id: str
+    value: float
+    unit: str
+    quality: float = 1.0
+    metadata: dict = None
+
+@dataclass
+class GPSReading:
+    timestamp: datetime
+    sensor_id: str
+    latitude: float
+    longitude: float
+    altitude: float
+    quality: float = 1.0
+    metadata: dict = None
 from src.hardware.data_structures import ToFReading
 
 

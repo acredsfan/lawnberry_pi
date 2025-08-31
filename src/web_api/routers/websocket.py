@@ -332,6 +332,8 @@ def setup_websocket_mqtt_integration(mqtt_bridge: MQTTBridge):
         "navigation/position",
         "power/battery",
         "weather/current",
+    # Forward safety status frames to the UI
+    "safety/status",
     "safety/alerts/+",
     # RC control status topics (exact match required by MQTTBridge handler)
     "rc/status",

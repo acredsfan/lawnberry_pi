@@ -108,6 +108,7 @@ class WebSocketService {
       'navigation/status',
       'power/battery',
       'weather/current',
+      'safety/status',
       'safety/alerts/+'
     ]
 

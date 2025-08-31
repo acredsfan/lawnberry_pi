@@ -5,6 +5,7 @@ Tests weather service functionality, plugin integration, and MQTT communication
 
 import asyncio
 import pytest
+import pytest_asyncio
 import json
 import tempfile
 from pathlib import Path
@@ -23,13 +24,13 @@ from weather import (
     WeatherSafety,
     MowingConditions
 )
-from hardware.plugin_system import PluginConfig
+from src.hardware.plugin_system import PluginConfig
 
 
 class TestWeatherService:
     """Test weather service core functionality"""
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def weather_service(self):
         """Create weather service with mock configuration"""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
@@ -44,33 +45,35 @@ class TestWeatherService:
             yaml.dump(config, f)
             config_path = f.name
         
+        # Pass only config_path; WeatherService accepts this and can run in offline/test mode
         service = WeatherService(config_path)
-        
-        # Mock the API calls
-        with patch.object(service, '_fetch_current_weather') as mock_fetch:
-            mock_weather = WeatherCondition(
-                timestamp=datetime.now(),
-                temperature=20.0,
-                humidity=65.0,
-                precipitation=0.0,
-                wind_speed=3.5,
-                wind_direction=180,
-                pressure=1013.25,
-                visibility=10.0,
-                uv_index=5.0,
-                cloud_cover=25.0,
-                condition_code="partly_cloudy",
-                condition_text="Partly Cloudy"
-            )
-            mock_fetch.return_value = mock_weather
-            
-            if await service.initialize():
-                yield service
-            else:
-                pytest.fail("Failed to initialize weather service")
-        
-        await service.shutdown()
-        Path(config_path).unlink()
+
+        # Mock the API calls to avoid network
+        with patch.object(service, '_fetch_current_weather', new=AsyncMock()) as mock_fetch:
+            with patch.object(service, '_fetch_forecast', new=AsyncMock(return_value=[])):
+                mock_weather = WeatherCondition(
+                    timestamp=datetime.now(),
+                    temperature=20.0,
+                    humidity=65.0,
+                    precipitation=0.0,
+                    wind_speed=3.5,
+                    wind_direction=180,
+                    pressure=1013.25,
+                    visibility=10.0,
+                    uv_index=5.0,
+                    cloud_cover=25.0,
+                    condition_code="partly_cloudy",
+                    condition_text="Partly Cloudy"
+                )
+                mock_fetch.return_value = mock_weather
+
+                # For tests, bypass real API requirement: mark initialized without creating HTTP session
+                service._initialized = True
+                try:
+                    yield service
+                finally:
+                    await service.shutdown()
+                    Path(config_path).unlink(missing_ok=True)
     
     @pytest.mark.asyncio
     async def test_current_weather(self, weather_service):
@@ -223,7 +226,7 @@ class TestWeatherService:
 class TestWeatherPlugin:
     """Test weather plugin integration"""
     
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def weather_plugin(self):
         """Create weather plugin with mock weather service"""
         config = PluginConfig(
@@ -429,17 +432,19 @@ class TestWeatherIntegration:
                 condition_text="Test"
             )
             
-            with patch.object(service, '_fetch_current_weather', return_value=mock_weather):
-                if await service.initialize():
-                    conditions = await service.evaluate_mowing_conditions()
-                    
-                    assert conditions.can_mow == scenario['expected_safe'], \
-                        f"Scenario '{scenario['name']}' failed: expected can_mow={scenario['expected_safe']}, got {conditions.can_mow}"
-                    
-                    assert conditions.safety_level == scenario['expected_level'], \
-                        f"Scenario '{scenario['name']}' failed: expected level={scenario['expected_level']}, got {conditions.safety_level}"
-                    
-                    await service.shutdown()
+            with patch.object(service, '_fetch_current_weather', new=AsyncMock(return_value=mock_weather)):
+                # Bypass real initialization and networking
+                service._initialized = True
+                # Proceed to evaluate conditions directly
+                conditions = await service.evaluate_mowing_conditions()
+                
+                assert conditions.can_mow == scenario['expected_safe'], \
+                    f"Scenario '{scenario['name']}' failed: expected can_mow={scenario['expected_safe']}, got {conditions.can_mow}"
+                
+                assert conditions.safety_level == scenario['expected_level'], \
+                    f"Scenario '{scenario['name']}' failed: expected level={scenario['expected_level']}, got {conditions.safety_level}"
+                
+                await service.shutdown()
             
             Path(config_path).unlink()
 

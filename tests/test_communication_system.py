@@ -16,9 +16,13 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from src.communication import (
     MQTTBroker, MQTTClient, ServiceManager, MessageProtocol,
-    SensorData, CommandMessage, ResponseMessage, StatusMessage,
-    EventMessage, AlertMessage, MessageValidator, topic_manager
+    SensorData, CommandMessage, StatusMessage,
+    topic_manager
 )
+from src.communication.message_protocols import MessageValidator
+from src.communication.message_protocols import AlertMessage
+from src.communication.message_protocols import EventMessage
+from src.communication.message_protocols import ResponseMessage
 from src.communication.message_protocols import MessageType, Priority
 
 

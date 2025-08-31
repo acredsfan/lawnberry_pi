@@ -131,6 +131,7 @@ class WebSocketService {
       'navigation/status',
       'power/battery',
       'weather/current',
+  'safety/status',
   'safety/alerts/+',
   // RC control status updates (added for RCControl real-time view)
   'rc/status'
