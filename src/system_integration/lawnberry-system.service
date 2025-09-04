@@ -1,8 +1,8 @@
 [Unit]
 Description=Lawnberry System Integration Manager
 Documentation=https://github.com/lawnberry/system-integration
-After=multi-user.target network.target
-Wants=network.target
+After=network-online.target dbus.service multi-user.target
+Wants=network-online.target dbus.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -10,13 +10,15 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/opt/lawnberry
+EnvironmentFile=-/opt/lawnberry/.env
 Environment=PYTHONPATH=/opt/lawnberry
 Environment=LAWNBERRY_ENV=production
 ExecStart=/opt/lawnberry/venv/bin/python -m src.system_integration.system_manager
 ExecReload=/bin/kill -s HUP $MAINPID
-Restart=always
-RestartSec=10
-StartLimitBurst=5
+Restart=on-failure
+RestartSec=30
+StartLimitBurst=3
+StartLimitIntervalSec=300
 
 # Resource limits
 MemoryMax=512M
@@ -27,7 +29,11 @@ TasksMax=200
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry /opt/lawnberry/config
+ReadWritePaths=/var/log/lawnberry /var/lib/lawnberry /opt/lawnberry/config /opt/lawnberry/data
+# If your app ever needs to write to /run/lawnberry or other locations, add them here.
+# Security settings
+## NOTE: Runs as user pi from a system unit. If your code ever tries to reach the user session bus (systemctl --user ...),
+## there is often no user bus for a background system unit. System bus is fine; user bus needs an active user session/linger.
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectControlGroups=true

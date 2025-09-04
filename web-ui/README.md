@@ -165,6 +165,28 @@ web-ui/
 - `POST /api/v1/navigation/start` – Start mowing
 - `POST /api/v1/navigation/stop` – Stop mowing
 - `GET /api/v1/camera/stream` – Live camera feed
+### Runtime Public Config (Maps)
+
+The Web UI now reads non-sensitive runtime config from the backend so you don't need to bake keys during `npm run build`:
+
+- `GET /api/v1/public/config` – Public runtime configuration (no auth). Returns:
+	- `google_maps.available`: boolean
+	- `google_maps.api_key`: string (required by Google Maps JS loader in the browser)
+	- `google_maps.usage_level`: string
+
+To enable Google Maps on a deployed device, set the key in the backend `.env` that lives alongside the running services (for example `/opt/lawnberry/.env`):
+
+```
+REACT_APP_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_JS_API_KEY
+REACT_APP_GOOGLE_MAPS_USAGE_LEVEL=medium
+```
+
+Then restart the API service and reload the page. The UI will fetch the key at runtime and load the Google Maps provider automatically; otherwise it will fall back to OpenStreetMap.
+
+Notes:
+- The Google Maps JavaScript API key must be exposed to the browser to load the SDK; it is considered a public token. Restrict its usage via HTTP referrers and quota limits in Google Cloud.
+- The backend also provides authenticated Google Maps helper endpoints under `/api/v1/google-maps/*` for server-side tasks.
+
 - `POST /api/v1/boundaries` – Boundary management
 - `GET /api/v1/weather` – Weather data
 

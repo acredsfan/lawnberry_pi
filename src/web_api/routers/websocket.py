@@ -55,6 +55,25 @@ class WebSocketManager:
             logger.error(f"Error sending personal message: {e}")
             self.disconnect(websocket)
     
+    def _topic_matches(self, topic: str, pattern: str) -> bool:
+        """MQTT-style topic matching supporting '+' (single level) and '#' (multi-level)."""
+        if not pattern:
+            return False
+        t_parts = topic.split('/')
+        p_parts = pattern.split('/')
+        i = 0
+        while i < len(t_parts) and i < len(p_parts):
+            if p_parts[i] == '#':
+                return True
+            if p_parts[i] != '+' and p_parts[i] != t_parts[i]:
+                return False
+            i += 1
+        if i == len(t_parts) and i == len(p_parts):
+            return True
+        if i == len(t_parts) and i < len(p_parts) and all(part == '#' for part in p_parts[i:]):
+            return True
+        return False
+
     async def broadcast(self, message: Dict[str, Any], topic: str = None):
         """Broadcast message to all connected clients or topic subscribers"""
         if not self.active_connections:
@@ -65,9 +84,13 @@ class WebSocketManager:
         
         for websocket in self.active_connections:
             try:
-                # Check if client is subscribed to this topic
-                if topic and topic not in self.subscriptions.get(websocket, set()):
-                    continue
+                # Check if client is subscribed to this topic (supports wildcards)
+                if topic:
+                    subs = self.subscriptions.get(websocket, set())
+                    if not subs:
+                        continue
+                    if not any(self._topic_matches(topic, pat) for pat in subs):
+                        continue
                 
                 await websocket.send_text(message_json)
             except Exception as e:

@@ -76,7 +76,9 @@ async def camera_stream(system_manager=Depends(get_system_manager)) -> Streaming
             headers={
                 "Cache-Control": "no-cache, no-store, must-revalidate",
                 "Pragma": "no-cache",
-                "Expires": "0"
+                "Expires": "0",
+                # Disable any reverse proxy buffering for low-latency streaming
+                "X-Accel-Buffering": "no"
             }
         )
         

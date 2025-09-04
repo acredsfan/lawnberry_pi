@@ -6,6 +6,7 @@ import { RootState } from '../store/store'
 import { setCurrentPattern, addCommand } from '../store/slices/mowerSlice'
 import { setMapCenter, setMapZoom, toggleCoverage, toggleObstacles, togglePath } from '../store/slices/navigationSlice'
 import { Loader } from '@googlemaps/js-api-loader'
+import { mapService } from '../services/mapService'
 
 const Navigation: React.FC = () => {
   const dispatch = useDispatch()
@@ -21,8 +22,10 @@ const Navigation: React.FC = () => {
       if (!mapRef.current) return
 
       try {
+        // Prefer runtime public config (via MapService) over build-time env
+        const cfg = mapService.getConfig()
         const loader = new Loader({
-          apiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY || 'YOUR_API_KEY_HERE',
+          apiKey: cfg.apiKey || '',
           version: 'weekly',
           libraries: ['geometry', 'drawing']
         })

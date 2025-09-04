@@ -10,7 +10,7 @@ class WebSocketService {
   private reconnectDelay = 1000
   private eventHandlers: Map<string, Function[]> = new Map()
   public connectionState: 'connected' | 'disconnected' | 'connecting' | 'error' = 'disconnected'
-  private reconnectTimer: NodeJS.Timeout | null = null
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   connect(): void {
     if (this.socket?.readyState === WebSocket.OPEN) {
@@ -22,7 +22,7 @@ class WebSocketService {
   perfMetrics.setWebSocketConnectStart()
     
     // Use relative WebSocket URL that works with nginx proxy
-    const wsUrl = process.env.NODE_ENV === 'development' 
+    const wsUrl = import.meta.env.DEV 
       ? 'ws://localhost:8000/ws/realtime'
       : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/realtime`
 
@@ -230,9 +230,13 @@ class WebSocketService {
         break
         
       case 'mqtt_data':
+      case 'data':
+      case 'sensor_data':
         // Forward MQTT data to appropriate handlers
         this.emit('data', message.data, message.topic)
-        this.emit(message.topic, message.data)
+        if (message.topic) {
+          this.emit(message.topic, message.data)
+        }
         // Normalize RC status topic to a simpler event name for UI components
         if (message.topic === 'rc/status') {
           this.emit('rc_status', message.data)

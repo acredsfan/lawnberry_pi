@@ -53,6 +53,13 @@
     "vite-plugin-pwa": "^0.16.7",
     "vitest": "^0.34.6"
   },
+  "overrides": {
+    "sourcemap-codec": "npm:@jridgewell/sourcemap-codec@^1.5.0",
+    "source-map": "^0.7.4",
+    "rimraf": "^5.0.5",
+    "glob": "^10.3.10",
+    "minimatch": "^9.0.5"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

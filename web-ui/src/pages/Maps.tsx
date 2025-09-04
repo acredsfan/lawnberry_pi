@@ -47,7 +47,9 @@ import {
   setUsageLevel,
   setPreferredProvider,
   setAutoFallback,
-  initializeMapFromEnvironment
+  initializeMapFromEnvironment,
+  setError,
+  updateConfig
 } from '../store/slices/mapSlice';
 import { setCurrentPattern } from '../store/slices/mowerSlice';
 import { RootState, AppDispatch } from '../store/store';
@@ -196,30 +198,33 @@ const Maps: React.FC = () => {
   }, [showHelp]);
 
   useEffect(() => {
-    // Initialize map configuration from environment on component mount
+    // Initialize from build-time env, then override via runtime public config
     console.log('🗺️ Maps page initializing...');
-    console.log('🔑 Environment check:', {
-      viteKey: import.meta.env.VITE_REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
-      reactKey: import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found',
-      processKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY ? 'Found' : 'Not found'
-    });
-    
-    // Initialize with Google Maps as preferred if API key is available
-    const hasGoogleApiKey = !!(
-      import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY || 
-      import.meta.env.VITE_REACT_APP_GOOGLE_MAPS_API_KEY ||
-      process.env.REACT_APP_GOOGLE_MAPS_API_KEY
-    );
-    
-    if (hasGoogleApiKey) {
-      dispatch(setPreferredProvider('google'));
-      console.log('✅ Google Maps API key found - setting Google as preferred provider');
-    } else {
-      dispatch(setPreferredProvider('openstreetmap'));
-      console.log('⚠️ No Google Maps API key - falling back to OpenStreetMap');
-    }
-    
     dispatch(initializeMapFromEnvironment());
+
+    (async () => {
+      try {
+        const res = await fetch('/api/v1/public/config', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const gmaps = data?.google_maps || {};
+          if (gmaps.api_key) {
+            dispatch(setError(null));
+            dispatch(updateConfig({ usageLevel: gmaps.usage_level || 'medium' } as any));
+            dispatch(setPreferredProvider('google'));
+            console.log('✅ Runtime Google Maps key found - selecting Google');
+          } else {
+            dispatch(setPreferredProvider('openstreetmap'));
+            console.log('ℹ️ No runtime Google Maps key - using OpenStreetMap');
+          }
+        } else {
+          console.warn('Public config fetch failed with status', res.status);
+        }
+      } catch (e) {
+        console.warn('Failed to fetch public config; proceeding with env defaults', e);
+      }
+    })();
+
     loadBoundaries();
     loadNoGoZones();
     loadHomeLocations();

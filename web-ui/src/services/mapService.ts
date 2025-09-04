@@ -9,27 +9,42 @@ export class MapService {
   private config: MapConfig;
 
   private constructor() {
-    // Try multiple environment variable patterns for better compatibility
-    const apiKey = import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY || 
-                   import.meta.env.VITE_REACT_APP_GOOGLE_MAPS_API_KEY ||
-                   process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-    
-    console.log('🔧 MapService initialization:', {
-      metaEnv: !!import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY,
-      viteEnv: !!import.meta.env.VITE_REACT_APP_GOOGLE_MAPS_API_KEY,
-      processEnv: !!process.env.REACT_APP_GOOGLE_MAPS_API_KEY,
-      finalApiKey: !!apiKey
-    });
-    
+    // Initialize with env vars; will be overridden by runtime public config if available
+    const envApiKey = (import.meta as any).env?.REACT_APP_GOOGLE_MAPS_API_KEY ||
+                      (import.meta as any).env?.VITE_REACT_APP_GOOGLE_MAPS_API_KEY ||
+                      undefined;
+
     this.config = {
       provider: 'google',
       usageLevel: 'medium',
-      apiKey: apiKey,
+      apiKey: envApiKey,
       defaultCenter: { lat: 40.7128, lng: -74.0060 },
       defaultZoom: 15,
       enableCaching: true,
       offlineMode: false
     };
+  }
+
+  private _publicConfigLoaded = false;
+
+  private async loadPublicConfig(): Promise<void> {
+    if (this._publicConfigLoaded) return;
+    try {
+      const res = await fetch('/api/v1/public/config', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`Public config HTTP ${res.status}`);
+      const data = await res.json();
+      const gmaps = data?.google_maps || {};
+      if (gmaps.api_key) {
+        this.config.apiKey = gmaps.api_key;
+      }
+      if (gmaps.usage_level) {
+        this.config.usageLevel = gmaps.usage_level;
+      }
+      this._publicConfigLoaded = true;
+      console.log('🌐 Loaded runtime public config for maps:', { hasKey: !!this.config.apiKey, usage: this.config.usageLevel });
+    } catch (e) {
+      console.warn('Public config load failed; continuing with build-time env', e);
+    }
   }
 
   public static getInstance(): MapService {
@@ -40,10 +55,12 @@ export class MapService {
   }
 
   public async initializeProvider(preferredProvider?: MapProvider): Promise<MapProvider> {
+    // Attempt to load runtime config first (no-op if already loaded)
+    await this.loadPublicConfig();
     const provider = preferredProvider || this.config.provider;
     
     try {
-      if (provider === 'google' && this.config.apiKey) {
+  if (provider === 'google' && this.config.apiKey) {
         await this.loadGoogleMaps();
         this.currentProvider = 'google';
         return 'google';

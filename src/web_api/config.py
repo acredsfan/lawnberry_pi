@@ -191,7 +191,8 @@ class Settings(BaseSettings):
     rate_limit: RateLimitSettings = Field(default_factory=RateLimitSettings)
     
     class Config:
-        env_file = ".env"
+        # Use absolute path to project root .env so systemd WorkingDirectory doesn't affect loading
+        env_file = str(Path(__file__).resolve().parent.parent.parent / ".env")
         env_file_encoding = "utf-8"
         case_sensitive = False
         extra = "ignore"

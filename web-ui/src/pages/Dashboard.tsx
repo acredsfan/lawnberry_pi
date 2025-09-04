@@ -10,14 +10,16 @@ import { useUnits } from '../hooks/useUnits'
 import { batteryLevelColor, guardDottedPaletteMisuse } from '../utils/color'
 import PowerManagementPanel from '../components/PowerManagement/PowerManagementPanel'
 import PerformanceMetricsPanel from '../components/Instrumentation/PerformanceMetricsPanel'
+import SafetyStatusPanel from '../components/SafetyStatusPanel'
 
 const Dashboard: React.FC = () => {
+
   const dispatch = useDispatch()
   const { status, isConnected } = useSelector((state: RootState) => state.mower)
   const { data: weatherData } = useSelector((state: RootState) => state.weather)
   const { connectionStatus } = useSelector((state: RootState) => state.ui)
-    const { format: formatUnits, convert: converters, unitPreferences: unitsPrefs } = useUnits()
-  
+  const { format: formatUnits, convert: converters, unitPreferences: unitsPrefs } = useUnits()
+
   const [sensorHistory, setSensorHistory] = useState<Array<{
     time: string
     battery: number
@@ -26,7 +28,27 @@ const Dashboard: React.FC = () => {
   }>>([])
 
   const [videoStream, setVideoStream] = useState<string | null>(null)
+  const [cameraErrorCount, setCameraErrorCount] = useState(0)
   const [lastDataUpdate, setLastDataUpdate] = useState<Date | null>(null)
+
+  // Hydrate dashboard with backend status on mount
+  useEffect(() => {
+    async function hydrateStatus() {
+      try {
+        const res = await fetch('/api/v1/status', { cache: 'no-store' })
+        if (res.ok) {
+          const data = await res.json()
+          dispatch(setStatus(data))
+          setLastDataUpdate(new Date())
+        } else {
+          console.warn('Failed to fetch initial status:', res.status)
+        }
+      } catch (e) {
+        console.warn('Error hydrating dashboard status:', e)
+      }
+    }
+    hydrateStatus()
+  }, [dispatch])
 
   // Track last update timestamp whenever status changes
   useEffect(() => {
@@ -35,11 +57,20 @@ const Dashboard: React.FC = () => {
 
   // Initialize camera stream once
   useEffect(() => {
-    const streamUrl = process.env.NODE_ENV === 'development'
-      ? 'http://localhost:8000/api/v1/camera/stream'
-      : `/api/v1/camera/stream`
-    setVideoStream(streamUrl)
-  }, [])
+    // Camera stream with cache-busting and auto-retry
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    const getStreamUrl = () => {
+      const baseUrl = import.meta.env.DEV
+        ? 'http://localhost:8000/api/v1/camera/stream'
+        : `/api/v1/camera/stream`
+      // Add cache-busting param
+      return `${baseUrl}?t=${Date.now()}`
+    }
+    setVideoStream(getStreamUrl())
+    return () => {
+      if (retryTimer) clearTimeout(retryTimer)
+    }
+  }, [cameraErrorCount])
 
   const getBatteryColor = (level?: number) => {
     if (typeof level !== 'number') return 'default'
@@ -221,7 +252,12 @@ const Dashboard: React.FC = () => {
                         height: '100%', 
                         objectFit: 'cover'
                       }}
-                      onError={() => setVideoStream(null)}
+                      onError={() => {
+                        setCameraErrorCount(c => c + 1)
+                        setTimeout(() => setVideoStream(null), 100)
+                        // Retry after 2s
+                        setTimeout(() => setCameraErrorCount(c => c + 1), 2000)
+                      }}
                     />
                     <Box className="camera-overlay" />
                   </>
@@ -344,6 +380,11 @@ const Dashboard: React.FC = () => {
           </Card>
         </Grid>
 
+        {/* Safety Status */}
+        <Grid item xs={12}>
+          <SafetyStatusPanel />
+        </Grid>
+
         {/* Power Management UI (Task 6) */}
         <Grid item xs={12}>
           <PowerManagementPanel />
@@ -358,3 +399,4 @@ const Dashboard: React.FC = () => {
 }
 
 export default Dashboard
+ 

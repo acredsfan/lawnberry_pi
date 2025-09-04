@@ -9,7 +9,7 @@ from datetime import datetime
 from math import cos, radians
 
 from ..models import MapData, Boundary, NoGoZone, Position, HomeLocation, HomeLocationType, SuccessResponse
-from maps import storage as map_storage  # Absolute import (sibling package under src)
+from ..services.map_storage import map_storage
 from ..auth import get_current_user, require_permission, get_user_or_anonymous
 from ..exceptions import ServiceUnavailableError, NotFoundError
 from ..mqtt_bridge import MQTTBridge
@@ -22,10 +22,7 @@ async def get_map_data(
     current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Get complete map data with current location"""
-    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
-    
-    if not mqtt_bridge or not mqtt_bridge.is_connected():
-        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
+    mqtt_bridge: MQTTBridge = getattr(request.app.state, 'mqtt_bridge', None)
     
     # Get map data from cache / storage
     coverage_data = mqtt_bridge.get_cached_data("maps/coverage") if mqtt_bridge else None
@@ -58,11 +55,7 @@ async def get_boundaries(
     current_user: Dict[str, Any] = Depends(get_user_or_anonymous)
 ):
     """Get yard boundaries"""
-    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
-    
-    if not mqtt_bridge or not mqtt_bridge.is_connected():
-        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
-    
+    mqtt_bridge: MQTTBridge = getattr(request.app.state, 'mqtt_bridge', None)
     # Retrieve from persistent storage; ignore MQTT cache for canonical list
     return await map_storage.get_boundaries()
 
@@ -73,12 +66,8 @@ async def create_boundary(
     current_user: Dict[str, Any] = Depends(require_permission("write"))
 ):
     """Create new boundary"""
-    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
-    
-    if not mqtt_bridge or not mqtt_bridge.is_connected():
-        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
-    
-    # Persist
+    mqtt_bridge: MQTTBridge = getattr(request.app.state, 'mqtt_bridge', None)
+    # Persist regardless of MQTT availability; publish is best-effort
     await map_storage.add_boundary(boundary)
     # Fire-and-forget publish (best effort) for subscribers
     if mqtt_bridge and mqtt_bridge.is_connected():
@@ -101,10 +90,7 @@ async def delete_boundary(
     current_user: Dict[str, Any] = Depends(require_permission("write"))
 ):
     """Delete a boundary"""
-    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
-    
-    if not mqtt_bridge or not mqtt_bridge.is_connected():
-        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
+    mqtt_bridge: MQTTBridge = getattr(request.app.state, 'mqtt_bridge', None)
     
     deleted = await map_storage.delete_boundary_by_name(boundary_id)
     if not deleted:
@@ -225,10 +211,7 @@ async def create_no_go_zone(
     current_user: Dict[str, Any] = Depends(require_permission("write"))
 ):
     """Create new no-go zone"""
-    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
-    
-    if not mqtt_bridge or not mqtt_bridge.is_connected():
-        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
+    mqtt_bridge: MQTTBridge = getattr(request.app.state, 'mqtt_bridge', None)
     
     await map_storage.add_no_go_zone(zone)
     if mqtt_bridge and mqtt_bridge.is_connected():
@@ -252,10 +235,7 @@ async def update_no_go_zone(
     current_user: Dict[str, Any] = Depends(require_permission("write"))
 ):
     """Update existing no-go zone"""
-    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
-    
-    if not mqtt_bridge or not mqtt_bridge.is_connected():
-        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
+    mqtt_bridge: MQTTBridge = getattr(request.app.state, 'mqtt_bridge', None)
     
     changed = await map_storage.update_no_go_zone(zone_id, zone_updates)
     if not changed:
@@ -281,10 +261,7 @@ async def delete_no_go_zone(
     current_user: Dict[str, Any] = Depends(require_permission("write"))
 ):
     """Delete no-go zone"""
-    mqtt_bridge: MQTTBridge = request.app.state.mqtt_bridge
-    
-    if not mqtt_bridge or not mqtt_bridge.is_connected():
-        raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
+    mqtt_bridge: MQTTBridge = getattr(request.app.state, 'mqtt_bridge', None)
     
     deleted = await map_storage.delete_no_go_zone(zone_id)
     if not deleted:

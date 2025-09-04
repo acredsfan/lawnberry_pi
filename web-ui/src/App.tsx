@@ -20,6 +20,7 @@ const Documentation = lazy(() => import('./pages/Documentation'))
 import Logo from './components/Logo'
 import { webSocketService } from './services/websocket'
 import { sensorDataService } from './services/sensorDataService'
+import { dataService } from './services/dataService'
 import { usePerformanceMonitor } from './hooks/usePerformanceMonitor'
 import { useUnits } from './hooks/useUnits'
 
@@ -173,7 +174,14 @@ const App: React.FC = () => {
           dispatch(setWeatherData(mockWeatherData))
           console.log('✅ Mock data initialized (VITE_USE_MOCKS=true)')
         } else {
-          console.log('⏳ Skipping mock data (VITE_USE_MOCKS!=true) waiting for live streams')
+          console.log('⏳ Skipping mock data (VITE_USE_MOCKS!=true); fetching initial live status...')
+          try {
+            const liveStatus = await dataService.fetchMowerStatus()
+            dispatch(setStatus(liveStatus))
+            console.log('✅ Hydrated UI with initial live status')
+          } catch (e) {
+            console.warn('Initial live status fetch failed; UI will update via WS when available', e)
+          }
         }
 
         // Set up WebSocket event handlers early

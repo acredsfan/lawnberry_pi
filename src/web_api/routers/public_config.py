@@ -1,0 +1,38 @@
+"""
+Public, non-sensitive runtime configuration for the Web UI.
+This allows the UI to obtain settings like Google Maps API keys at runtime
+so keys can live in server-side .env and do not need to be baked at build time.
+
+Endpoint is intentionally unauthenticated and should only expose safe values.
+"""
+
+from fastapi import APIRouter
+import os
+from ..config import get_settings
+
+router = APIRouter()
+
+
+@router.get("/config")
+async def get_public_config():
+    """Return public runtime configuration for the Web UI.
+
+    Includes only non-sensitive values: map provider preferences and API key needed by
+    the client libraries (Google Maps JavaScript requires the key in the client).
+    """
+    settings = get_settings()
+    gmaps = settings.google_maps
+    # Resolve API key with robust fallbacks: BaseSettings first, then environment variables.
+    api_key = (
+        (gmaps.api_key or "").strip()
+        or os.getenv("REACT_APP_GOOGLE_MAPS_API_KEY", "").strip()
+        or os.getenv("VITE_REACT_APP_GOOGLE_MAPS_API_KEY", "").strip()
+    )
+    # Note: Google Maps JS API requires key in browser. This is considered public.
+    return {
+        "google_maps": {
+            "available": bool(api_key and api_key != "your_google_maps_api_key_here"),
+            "api_key": api_key,
+            "usage_level": gmaps.usage_level,
+        }
+    }

@@ -86,7 +86,7 @@ const ProgressTracker: React.FC<ProgressTrackerProps> = ({
   const [robotMarker, setRobotMarker] = useState<google.maps.Marker | L.Marker | null>(null);
   
   const wsRef = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pathHistoryRef = useRef<PathPoint[]>([]);
 
   // Adaptive update frequency based on robot state
@@ -106,9 +106,9 @@ const ProgressTracker: React.FC<ProgressTrackerProps> = ({
     if (!isConnected) return;
 
     const connectWebSocket = () => {
-      const wsUrl = process.env.NODE_ENV === 'development' 
+      const wsUrl = import.meta.env.DEV 
         ? 'ws://localhost:9002' 
-        : `ws://${window.location.hostname}:9002`;
+        : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:9002`;
       
       wsRef.current = new WebSocket(wsUrl);
       

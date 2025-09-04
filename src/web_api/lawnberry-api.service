@@ -34,6 +34,7 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 ReadWritePaths=/opt/lawnberry/web-ui/dist /var/log/lawnberry /var/lib/lawnberry
+ReadWritePaths=/opt/lawnberry/data
 DeviceAllow=/dev/video0 rw
 DeviceAllow=/dev/video1 rw
 DeviceAllow=/dev/video2 rw

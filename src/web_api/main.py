@@ -25,11 +25,19 @@ from .config import get_settings
 from .auth import get_current_user, AuthManager, set_auth_manager
 from .routers import (
     system, sensors, navigation, patterns, 
-    configuration, maps, weather, power, websocket, progress, rc_control, google_maps, camera
+    configuration, maps, weather, power, websocket, progress, rc_control, google_maps, camera,
+    public_config
 )
+from .routers import auth_routes
 from .middleware import RateLimitMiddleware, RequestLoggingMiddleware
 from .mqtt_bridge import MQTTBridge
-from .exceptions import APIException, api_exception_handler, http_exception_handler
+from .exceptions import (
+    APIException,
+    api_exception_handler,
+    http_exception_handler,
+    validation_exception_handler,
+    general_exception_handler,
+)
 
 
 # Application lifecycle management
@@ -87,7 +95,8 @@ async def lifespan(app: FastAPI):
     try:
         import os
         # When API owns the camera, instruct hardware service not to, by setting env in its unit
-        from ..hardware.hardware_interface import create_hardware_interface  # type: ignore
+        # Use absolute import to avoid relative import errors when running under uvicorn/module
+        from src.hardware.hardware_interface import create_hardware_interface  # type: ignore
         cfg_path = os.path.join(os.environ.get('PYTHONPATH', '/opt/lawnberry').split(os.pathsep)[0], 'config', 'hardware.yaml')
         hw = create_hardware_interface(cfg_path, shared=True)
         # Initialize minimally and start camera capture for streaming; bounded time
@@ -173,9 +182,12 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestLoggingMiddleware)
     
     # Add exception handlers
-    # Correct exception handler mapping: HTTPException -> http_exception_handler
+    # Correct exception handler mapping and comprehensive handlers for validation and general errors
     app.add_exception_handler(APIException, api_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
+    from fastapi.exceptions import RequestValidationError  # local import to avoid unused at top
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
     
     # Health check endpoint
     @app.get("/health")
@@ -574,6 +586,8 @@ def create_app() -> FastAPI:
     
     # Include routers
     app.include_router(system.router, prefix="/api/v1/system", tags=["system"])
+    # Auth endpoints (login/logout/me)
+    app.include_router(auth_routes.router, prefix="/auth", tags=["auth"])
     app.include_router(sensors.router, prefix="/api/v1/sensors", tags=["sensors"])
     app.include_router(navigation.router, prefix="/api/v1/navigation", tags=["navigation"])
     app.include_router(patterns.router, prefix="/api/v1/patterns", tags=["patterns"])
@@ -584,6 +598,8 @@ def create_app() -> FastAPI:
     app.include_router(power.router, prefix="/api/v1/power", tags=["power"])
     app.include_router(progress.router, prefix="/api/v1/progress", tags=["progress"])
     app.include_router(rc_control.router, prefix="/api/v1/rc", tags=["rc_control"])
+    # Public runtime config for UI (safe values only)
+    app.include_router(public_config.router, prefix="/api/v1/public", tags=["public"])
     app.include_router(camera.router, prefix="/api/v1", tags=["camera"])
     app.include_router(websocket.router, prefix="/ws", tags=["websocket"])
     

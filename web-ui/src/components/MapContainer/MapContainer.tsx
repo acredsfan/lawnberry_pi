@@ -114,13 +114,9 @@ const MapContainer: React.FC<MapContainerProps> = ({
         defaultZoom: zoom
       });
 
-      // Check Google Maps API key availability
-      const apiKey = import.meta.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-      console.log('🔑 Google Maps API Key status:', apiKey ? 'Available' : 'Missing');
-
-      // Initialize the preferred provider, with Google as priority if API key is available
-      const targetProvider = apiKey ? 'google' : 'openstreetmap';
-      const actualProvider = await mapService.initializeProvider(targetProvider);
+  // Initialize provider; MapService will fetch runtime config and choose appropriately
+  const targetProvider = preferredProvider || 'google';
+  const actualProvider = await mapService.initializeProvider(targetProvider);
       
       console.log('📍 Map initialized with provider:', actualProvider);
       
