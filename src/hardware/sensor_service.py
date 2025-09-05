@@ -108,6 +108,9 @@ class SensorService:
             # Initialize hardware interface with explicit absolute config path to avoid
             # WorkingDirectory pitfalls under systemd. Prefer PYTHONPATH hint (set to /opt/lawnberry).
             import os
+            os.environ.setdefault('LAWNBERY_DISABLE_CAMERA', '1')
+            if os.environ.get('LAWNBERY_DISABLE_CAMERA') == '1':
+                self.logger.info('Camera disabled for sensor service to avoid device contention')
             repo_root = os.environ.get('PYTHONPATH', '/opt/lawnberry').split(os.pathsep)[0]
             cfg_path = str(Path(repo_root) / 'config' / 'hardware.yaml')
             self.logger.info(f"Creating hardware interface with config: {cfg_path}")
