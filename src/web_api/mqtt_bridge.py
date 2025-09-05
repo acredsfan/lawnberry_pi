@@ -263,9 +263,16 @@ class MQTTBridge:
             self._websocket_connections.discard(ws)
     
     async def _notify_handlers(self, topic: str, data: Dict[str, Any]):
-        """Notify subscription handlers"""
-        handlers = self._subscription_handlers.get(topic, set())
-        for handler in handlers:
+        """Notify subscription handlers supporting MQTT wildcards."""
+        matched_handlers = []
+        for pattern, handlers in self._subscription_handlers.items():
+            try:
+                if self._topic_matches(topic, pattern):
+                    matched_handlers.extend(list(handlers))
+            except Exception:
+                continue
+
+        for handler in matched_handlers:
             try:
                 if asyncio.iscoroutinefunction(handler):
                     await handler(topic, data)
