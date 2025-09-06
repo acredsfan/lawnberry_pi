@@ -4,18 +4,18 @@ Provides improved UI responsiveness, mobile compatibility, and user onboarding
 """
 
 import asyncio
-import logging
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, BackgroundTasks
-from pydantic import BaseModel, Field
 import json
+import logging
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from ..auth import get_current_user, get_user_permissions
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, WebSocket
+from pydantic import BaseModel, Field
+
+from ..auth import get_current_user
+from ..middleware import rate_limit
 from ..models import APIResponse
-from ..middleware import rate_limit, validate_input
-
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/ux", tags=["user-experience"])
@@ -24,6 +24,7 @@ router = APIRouter(prefix="/api/v1/ux", tags=["user-experience"])
 # Data Models
 class UserPreferences(BaseModel):
     """User preference settings"""
+
     theme: str = Field(default="auto", pattern="^(light|dark|auto)$")
     language: str = Field(default="en", pattern="^[a-z]{2}$")
     units: str = Field(default="metric", pattern="^(metric|imperial)$")
@@ -37,6 +38,7 @@ class UserPreferences(BaseModel):
 
 class OnboardingStep(BaseModel):
     """Onboarding step information"""
+
     step_id: str
     title: str
     description: str
@@ -49,6 +51,7 @@ class OnboardingStep(BaseModel):
 
 class OnboardingProgress(BaseModel):
     """User onboarding progress"""
+
     user_id: str
     started_at: datetime
     last_updated: datetime
@@ -61,6 +64,7 @@ class OnboardingProgress(BaseModel):
 
 class HelpContent(BaseModel):
     """Contextual help content"""
+
     content_id: str
     title: str
     content: str
@@ -74,6 +78,7 @@ class HelpContent(BaseModel):
 
 class UserFeedback(BaseModel):
     """User feedback submission"""
+
     feedback_type: str = Field(pattern="^(bug|feature|improvement|general)$")
     title: str = Field(min_length=5, max_length=100)
     description: str = Field(min_length=10, max_length=1000)
@@ -85,6 +90,7 @@ class UserFeedback(BaseModel):
 
 class UIComponent(BaseModel):
     """UI component configuration"""
+
     component_id: str
     component_type: str
     position: Dict[str, int]
@@ -97,6 +103,7 @@ class UIComponent(BaseModel):
 
 class DashboardLayout(BaseModel):
     """Dashboard layout configuration"""
+
     layout_id: str
     name: str
     description: str
@@ -110,19 +117,19 @@ class DashboardLayout(BaseModel):
 # Enhanced User Experience Service
 class EnhancedUXService:
     """Service for enhanced user experience features"""
-    
+
     def __init__(self):
         self.user_preferences: Dict[str, UserPreferences] = {}
         self.onboarding_progress: Dict[str, OnboardingProgress] = {}
         self.help_content: Dict[str, HelpContent] = {}
         self.dashboard_layouts: Dict[str, DashboardLayout] = {}
         self.feedback_submissions: List[UserFeedback] = []
-        
+
         # Load default content
         self._load_default_help_content()
         self._load_default_onboarding_steps()
         self._load_default_dashboard_layouts()
-    
+
     def _load_default_help_content(self):
         """Load default help content"""
         default_help = [
@@ -135,7 +142,7 @@ class EnhancedUXService:
                 tags=["dashboard", "overview"],
                 related_features=["status", "metrics"],
                 last_updated=datetime.now(),
-                view_count=0
+                view_count=0,
             ),
             HelpContent(
                 content_id="safety_features",
@@ -146,7 +153,7 @@ class EnhancedUXService:
                 tags=["safety", "features"],
                 related_features=["emergency_stop", "boundary_detection"],
                 last_updated=datetime.now(),
-                view_count=0
+                view_count=0,
             ),
             HelpContent(
                 content_id="mowing_patterns",
@@ -157,13 +164,13 @@ class EnhancedUXService:
                 tags=["patterns", "mowing"],
                 related_features=["pattern_selection", "custom_patterns"],
                 last_updated=datetime.now(),
-                view_count=0
-            )
+                view_count=0,
+            ),
         ]
-        
+
         for help_item in default_help:
             self.help_content[help_item.content_id] = help_item
-    
+
     def _load_default_onboarding_steps(self):
         """Load default onboarding steps"""
         self.default_onboarding_steps = [
@@ -172,7 +179,7 @@ class EnhancedUXService:
                 title="Welcome to LawnBerry",
                 description="Get started with your autonomous lawn mower system",
                 estimated_time_minutes=2,
-                required=False
+                required=False,
             ),
             OnboardingStep(
                 step_id="safety_setup",
@@ -180,7 +187,7 @@ class EnhancedUXService:
                 description="Configure safety settings and emergency procedures",
                 estimated_time_minutes=10,
                 required=True,
-                help_url="/help/safety_features"
+                help_url="/help/safety_features",
             ),
             OnboardingStep(
                 step_id="boundary_mapping",
@@ -188,7 +195,7 @@ class EnhancedUXService:
                 description="Define your lawn boundaries and no-go zones",
                 estimated_time_minutes=15,
                 required=True,
-                prerequisites=["safety_setup"]
+                prerequisites=["safety_setup"],
             ),
             OnboardingStep(
                 step_id="hardware_setup",
@@ -196,7 +203,7 @@ class EnhancedUXService:
                 description="Configure and test hardware components",
                 estimated_time_minutes=20,
                 required=True,
-                prerequisites=["safety_setup"]
+                prerequisites=["safety_setup"],
             ),
             OnboardingStep(
                 step_id="pattern_selection",
@@ -204,7 +211,7 @@ class EnhancedUXService:
                 description="Choose and customize your mowing patterns",
                 estimated_time_minutes=8,
                 required=False,
-                prerequisites=["boundary_mapping", "hardware_setup"]
+                prerequisites=["boundary_mapping", "hardware_setup"],
             ),
             OnboardingStep(
                 step_id="schedule_setup",
@@ -212,7 +219,7 @@ class EnhancedUXService:
                 description="Set up your mowing schedule",
                 estimated_time_minutes=5,
                 required=False,
-                prerequisites=["pattern_selection"]
+                prerequisites=["pattern_selection"],
             ),
             OnboardingStep(
                 step_id="first_test_run",
@@ -220,10 +227,10 @@ class EnhancedUXService:
                 description="Perform a supervised test run",
                 estimated_time_minutes=30,
                 required=True,
-                prerequisites=["boundary_mapping", "hardware_setup"]
-            )
+                prerequisites=["boundary_mapping", "hardware_setup"],
+            ),
         ]
-    
+
     def _load_default_dashboard_layouts(self):
         """Load default dashboard layouts"""
         default_layout = DashboardLayout(
@@ -235,45 +242,45 @@ class EnhancedUXService:
                     component_id="status_panel",
                     component_type="status",
                     position={"x": 0, "y": 0},
-                    size={"width": 6, "height": 4}
+                    size={"width": 6, "height": 4},
                 ),
                 UIComponent(
                     component_id="map_view",
                     component_type="map",
                     position={"x": 6, "y": 0},
-                    size={"width": 6, "height": 8}
+                    size={"width": 6, "height": 8},
                 ),
                 UIComponent(
                     component_id="battery_status",
                     component_type="battery",
                     position={"x": 0, "y": 4},
-                    size={"width": 3, "height": 2}
+                    size={"width": 3, "height": 2},
                 ),
                 UIComponent(
                     component_id="weather_widget",
                     component_type="weather",
                     position={"x": 3, "y": 4},
-                    size={"width": 3, "height": 2}
-                )
+                    size={"width": 3, "height": 2},
+                ),
             ],
             is_default=True,
             responsive_breakpoints={
                 "mobile": {"columns": 2, "max_width": 768},
                 "tablet": {"columns": 4, "max_width": 1024},
-                "desktop": {"columns": 12, "max_width": None}
+                "desktop": {"columns": 12, "max_width": None},
             },
             created_at=datetime.now(),
-            updated_at=datetime.now()
+            updated_at=datetime.now(),
         )
-        
+
         self.dashboard_layouts["default"] = default_layout
-    
+
     async def get_user_preferences(self, user_id: str) -> UserPreferences:
         """Get user preferences"""
         if user_id not in self.user_preferences:
             self.user_preferences[user_id] = UserPreferences()
         return self.user_preferences[user_id]
-    
+
     async def update_user_preferences(self, user_id: str, preferences: UserPreferences) -> bool:
         """Update user preferences"""
         try:
@@ -284,7 +291,7 @@ class EnhancedUXService:
         except Exception as e:
             logger.error(f"Failed to update user preferences: {e}")
             return False
-    
+
     async def get_onboarding_progress(self, user_id: str) -> OnboardingProgress:
         """Get user onboarding progress"""
         if user_id not in self.onboarding_progress:
@@ -292,112 +299,120 @@ class EnhancedUXService:
                 user_id=user_id,
                 started_at=datetime.now(),
                 last_updated=datetime.now(),
-                current_step="welcome"
+                current_step="welcome",
             )
             self.onboarding_progress[user_id] = progress
-        
+
         return self.onboarding_progress[user_id]
-    
-    async def update_onboarding_progress(self, user_id: str, step_id: str, completed: bool = True, skipped: bool = False) -> OnboardingProgress:
+
+    async def update_onboarding_progress(
+        self, user_id: str, step_id: str, completed: bool = True, skipped: bool = False
+    ) -> OnboardingProgress:
         """Update onboarding progress"""
         progress = await self.get_onboarding_progress(user_id)
-        
+
         if completed and step_id not in progress.completed_steps:
             progress.completed_steps.append(step_id)
         elif skipped and step_id not in progress.skipped_steps:
             progress.skipped_steps.append(step_id)
-        
+
         # Update completion percentage
         total_steps = len(self.default_onboarding_steps)
         completed_count = len(progress.completed_steps)
         progress.completion_percentage = (completed_count / total_steps) * 100
-        
+
         # Find next step
         next_step = self._find_next_onboarding_step(progress)
         if next_step:
             progress.current_step = next_step.step_id
             progress.estimated_time_remaining = sum(
-                step.estimated_time_minutes 
+                step.estimated_time_minutes
                 for step in self.default_onboarding_steps
                 if step.step_id not in progress.completed_steps + progress.skipped_steps
             )
-        
+
         progress.last_updated = datetime.now()
-        
+
         return progress
-    
+
     def _find_next_onboarding_step(self, progress: OnboardingProgress) -> Optional[OnboardingStep]:
         """Find the next available onboarding step"""
         for step in self.default_onboarding_steps:
             if step.step_id in progress.completed_steps or step.step_id in progress.skipped_steps:
                 continue
-            
+
             # Check prerequisites
             if all(prereq in progress.completed_steps for prereq in step.prerequisites):
                 return step
-        
+
         return None
-    
-    async def get_contextual_help(self, feature: str, user_level: str = "basic") -> List[HelpContent]:
+
+    async def get_contextual_help(
+        self, feature: str, user_level: str = "basic"
+    ) -> List[HelpContent]:
         """Get contextual help for a feature"""
         relevant_help = []
-        
+
         for help_item in self.help_content.values():
             if feature in help_item.related_features or feature in help_item.tags:
                 relevant_help.append(help_item)
                 help_item.view_count += 1
-        
+
         return relevant_help
-    
+
     async def search_help_content(self, query: str) -> List[HelpContent]:
         """Search help content"""
         results = []
         query_lower = query.lower()
-        
+
         for help_item in self.help_content.values():
-            if (query_lower in help_item.title.lower() or 
-                query_lower in help_item.content.lower() or
-                any(query_lower in tag.lower() for tag in help_item.tags)):
+            if (
+                query_lower in help_item.title.lower()
+                or query_lower in help_item.content.lower()
+                or any(query_lower in tag.lower() for tag in help_item.tags)
+            ):
                 results.append(help_item)
-        
+
         # Sort by relevance (view count for now)
         results.sort(key=lambda x: x.view_count, reverse=True)
-        
+
         return results
-    
+
     async def submit_feedback(self, user_id: str, feedback: UserFeedback) -> str:
         """Submit user feedback"""
         feedback_id = f"feedback_{len(self.feedback_submissions) + 1:06d}"
-        
+
         # Add metadata
         feedback_with_meta = {
             "id": feedback_id,
             "user_id": user_id,
             "submitted_at": datetime.now(),
             "status": "submitted",
-            **feedback.dict()
+            **feedback.dict(),
         }
-        
+
         self.feedback_submissions.append(feedback_with_meta)
-        
+
         # Log feedback
         logger.info(f"User feedback submitted: {feedback_id} - {feedback.title}")
-        
+
         return feedback_id
-    
-    async def get_dashboard_layout(self, user_id: str, layout_id: Optional[str] = None) -> DashboardLayout:
+
+    async def get_dashboard_layout(
+        self, user_id: str, layout_id: Optional[str] = None
+    ) -> DashboardLayout:
         """Get dashboard layout for user"""
         if layout_id and layout_id in self.dashboard_layouts:
             return self.dashboard_layouts[layout_id]
-        
+
         # Return user's custom layout or default
         user_prefs = await self.get_user_preferences(user_id)
         if "custom_layout" in user_prefs.dashboard_layout:
             # Build custom layout from preferences
             pass
-        
+
         return self.dashboard_layouts["default"]
-    
+
     async def _save_user_preferences(self, user_id: str, preferences: UserPreferences):
         """Save user preferences to persistent storage"""
         # Implementation would save to database or file
@@ -409,6 +424,7 @@ ux_service = EnhancedUXService()
 
 
 # API Endpoints
+
 
 @router.get("/preferences", response_model=APIResponse[UserPreferences])
 async def get_user_preferences(current_user: dict = Depends(get_current_user)):
@@ -423,8 +439,7 @@ async def get_user_preferences(current_user: dict = Depends(get_current_user)):
 
 @router.put("/preferences", response_model=APIResponse[bool])
 async def update_user_preferences(
-    preferences: UserPreferences,
-    current_user: dict = Depends(get_current_user)
+    preferences: UserPreferences, current_user: dict = Depends(get_current_user)
 ):
     """Update user preferences"""
     try:
@@ -447,13 +462,12 @@ async def get_onboarding_progress(current_user: dict = Depends(get_current_user)
 
 
 @router.post("/onboarding/step/{step_id}/complete", response_model=APIResponse[OnboardingProgress])
-async def complete_onboarding_step(
-    step_id: str,
-    current_user: dict = Depends(get_current_user)
-):
+async def complete_onboarding_step(step_id: str, current_user: dict = Depends(get_current_user)):
     """Mark onboarding step as complete"""
     try:
-        progress = await ux_service.update_onboarding_progress(current_user["id"], step_id, completed=True)
+        progress = await ux_service.update_onboarding_progress(
+            current_user["id"], step_id, completed=True
+        )
         return APIResponse(success=True, data=progress)
     except Exception as e:
         logger.error(f"Failed to complete onboarding step: {e}")
@@ -461,13 +475,12 @@ async def complete_onboarding_step(
 
 
 @router.post("/onboarding/step/{step_id}/skip", response_model=APIResponse[OnboardingProgress])
-async def skip_onboarding_step(
-    step_id: str,
-    current_user: dict = Depends(get_current_user)
-):
+async def skip_onboarding_step(step_id: str, current_user: dict = Depends(get_current_user)):
     """Skip onboarding step"""
     try:
-        progress = await ux_service.update_onboarding_progress(current_user["id"], step_id, completed=False, skipped=True)
+        progress = await ux_service.update_onboarding_progress(
+            current_user["id"], step_id, completed=False, skipped=True
+        )
         return APIResponse(success=True, data=progress)
     except Exception as e:
         logger.error(f"Failed to skip onboarding step: {e}")
@@ -476,9 +489,7 @@ async def skip_onboarding_step(
 
 @router.get("/help/contextual/{feature}", response_model=APIResponse[List[HelpContent]])
 async def get_contextual_help(
-    feature: str,
-    user_level: str = "basic",
-    current_user: dict = Depends(get_current_user)
+    feature: str, user_level: str = "basic", current_user: dict = Depends(get_current_user)
 ):
     """Get contextual help for a feature"""
     try:
@@ -490,10 +501,7 @@ async def get_contextual_help(
 
 
 @router.get("/help/search", response_model=APIResponse[List[HelpContent]])
-async def search_help_content(
-    q: str,
-    current_user: dict = Depends(get_current_user)
-):
+async def search_help_content(q: str, current_user: dict = Depends(get_current_user)):
     """Search help content"""
     try:
         results = await ux_service.search_help_content(q)
@@ -504,14 +512,13 @@ async def search_help_content(
 
 
 @router.post("/feedback", response_model=APIResponse[str])
-async def submit_feedback(
-    feedback: UserFeedback,
-    current_user: dict = Depends(get_current_user)
-):
+async def submit_feedback(feedback: UserFeedback, current_user: dict = Depends(get_current_user)):
     """Submit user feedback"""
     try:
         feedback_id = await ux_service.submit_feedback(current_user["id"], feedback)
-        return APIResponse(success=True, data=feedback_id, message="Feedback submitted successfully")
+        return APIResponse(
+            success=True, data=feedback_id, message="Feedback submitted successfully"
+        )
     except Exception as e:
         logger.error(f"Failed to submit feedback: {e}")
         raise HTTPException(status_code=500, detail="Failed to submit feedback")
@@ -519,8 +526,7 @@ async def submit_feedback(
 
 @router.get("/dashboard/layout", response_model=APIResponse[DashboardLayout])
 async def get_dashboard_layout(
-    layout_id: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
+    layout_id: Optional[str] = None, current_user: dict = Depends(get_current_user)
 ):
     """Get dashboard layout"""
     try:
@@ -535,12 +541,12 @@ async def get_dashboard_layout(
 async def websocket_ux_updates(websocket: WebSocket):
     """WebSocket for real-time UX updates"""
     await websocket.accept()
-    
+
     try:
         while True:
             # Send periodic updates
             await asyncio.sleep(5)
-            
+
             # Send UI performance metrics
             metrics = {
                 "type": "performance_metrics",
@@ -548,12 +554,12 @@ async def websocket_ux_updates(websocket: WebSocket):
                     "load_time": 250,  # ms
                     "render_time": 16,  # ms
                     "memory_usage": 45.2,  # MB
-                    "timestamp": datetime.now().isoformat()
-                }
+                    "timestamp": datetime.now().isoformat(),
+                },
             }
-            
+
             await websocket.send_json(metrics)
-            
+
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
@@ -566,28 +572,16 @@ async def get_mobile_optimizations(current_user: dict = Depends(get_current_user
     """Get mobile-specific optimizations"""
     try:
         optimizations = {
-            "touch_targets": {
-                "minimum_size": 44,  # pixels
-                "spacing": 8
-            },
-            "lazy_loading": {
-                "enabled": True,
-                "threshold": 50  # pixels from viewport
-            },
-            "data_compression": {
-                "enabled": True,
-                "level": "medium"
-            },
-            "offline_mode": {
-                "enabled": True,
-                "cache_duration": 3600  # seconds
-            },
+            "touch_targets": {"minimum_size": 44, "spacing": 8},  # pixels
+            "lazy_loading": {"enabled": True, "threshold": 50},  # pixels from viewport
+            "data_compression": {"enabled": True, "level": "medium"},
+            "offline_mode": {"enabled": True, "cache_duration": 3600},  # seconds
             "reduced_animations": {
                 "enabled": False,  # Based on user preference
-                "respect_system_setting": True
-            }
+                "respect_system_setting": True,
+            },
         }
-        
+
         return APIResponse(success=True, data=optimizations)
     except Exception as e:
         logger.error(f"Failed to get mobile optimizations: {e}")
@@ -606,9 +600,9 @@ async def get_accessibility_options(current_user: dict = Depends(get_current_use
             "voice_commands": False,
             "color_blind_friendly": True,
             "reduced_motion": False,
-            "focus_indicators": True
+            "focus_indicators": True,
         }
-        
+
         return APIResponse(success=True, data=options)
     except Exception as e:
         logger.error(f"Failed to get accessibility options: {e}")
@@ -617,17 +611,18 @@ async def get_accessibility_options(current_user: dict = Depends(get_current_use
 
 @router.post("/analytics/interaction", response_model=APIResponse[bool])
 async def track_user_interaction(
-    interaction_data: Dict[str, Any],
-    current_user: dict = Depends(get_current_user)
+    interaction_data: Dict[str, Any], current_user: dict = Depends(get_current_user)
 ):
     """Track user interaction for UX analytics"""
     try:
         # Log interaction for analytics
-        logger.info(f"User interaction: {interaction_data.get('action')} on {interaction_data.get('component')}")
-        
+        logger.info(
+            f"User interaction: {interaction_data.get('action')} on {interaction_data.get('component')}"
+        )
+
         # Store in analytics system
         # This would be implemented based on analytics requirements
-        
+
         return APIResponse(success=True, data=True)
     except Exception as e:
         logger.error(f"Failed to track interaction: {e}")
