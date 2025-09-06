@@ -3,9 +3,10 @@ Pydantic models for the web API.
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Union
-from pydantic import BaseModel, Field, ConfigDict, field_validator
 from enum import Enum
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import BaseModel, Field, field_validator
 
 
 # Enums
@@ -45,22 +46,22 @@ class Priority(str, Enum):
 # Base Models
 class BaseAPIModel(BaseModel):
     """Base model with common configuration"""
-    
+
     class Config:
         use_enum_values = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class TimestampedModel(BaseAPIModel):
     """Base model with timestamp"""
+
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
 # System Models
 class SystemStatus(BaseAPIModel):
     """Overall system status"""
+
     state: SystemState
     uptime: float
     version: str
@@ -72,6 +73,7 @@ class SystemStatus(BaseAPIModel):
 
 class ServiceHealth(BaseAPIModel):
     """Individual service health status"""
+
     name: str
     status: str
     last_heartbeat: datetime
@@ -83,6 +85,7 @@ class ServiceHealth(BaseAPIModel):
 # Sensor Models
 class SensorReading(TimestampedModel):
     """Sensor data reading"""
+
     sensor_id: str
     sensor_type: SensorType
     value: Union[float, int, Dict[str, Any]]
@@ -93,6 +96,7 @@ class SensorReading(TimestampedModel):
 
 class SensorStatus(BaseAPIModel):
     """Sensor status information"""
+
     sensor_id: str
     sensor_type: SensorType
     online: bool
@@ -104,6 +108,7 @@ class SensorStatus(BaseAPIModel):
 # Navigation Models
 class Position(BaseAPIModel):
     """Geographic position"""
+
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     altitude: Optional[float] = None
@@ -112,6 +117,7 @@ class Position(BaseAPIModel):
 
 class NavigationStatus(TimestampedModel):
     """Current navigation status"""
+
     position: Position
     heading: float = Field(ge=0, lt=360)
     speed: float = Field(ge=0)
@@ -122,28 +128,31 @@ class NavigationStatus(TimestampedModel):
 
 class NavigationCommand(BaseAPIModel):
     """Navigation command request"""
+
     action: str = Field(pattern="^(start|stop|pause|resume|return_home)$")
 
 
 # Pattern Models
 class MowingSchedule(BaseAPIModel):
     """Mowing schedule configuration"""
+
     enabled: bool = True
     days_of_week: List[int] = Field(min_items=1, max_items=7)
     start_time: str = Field(pattern="^([01]?[0-9]|2[0-3]):[0-5][0-9]$")
     duration_minutes: int = Field(gt=0, le=480)
     pattern: MowingPattern
-    
-    @field_validator('days_of_week')
+
+    @field_validator("days_of_week")
     @classmethod
     def validate_days(cls, v):
         if not all(0 <= day <= 6 for day in v):
-            raise ValueError('Days must be 0-6 (Monday=0)')
+            raise ValueError("Days must be 0-6 (Monday=0)")
         return sorted(list(set(v)))
 
 
 class PatternConfig(BaseAPIModel):
     """Mowing pattern configuration"""
+
     pattern: MowingPattern
     parameters: Dict[str, Any] = Field(default_factory=dict)
     coverage_overlap: float = Field(ge=0, le=0.5, default=0.1)
@@ -153,6 +162,7 @@ class PatternConfig(BaseAPIModel):
 # Configuration Models
 class SystemConfig(BaseAPIModel):
     """System configuration"""
+
     units: str = Field(pattern="^(metric|imperial)$", default="metric")
     temperature_unit: str = Field(pattern="^(celsius|fahrenheit)$", default="celsius")
     safety_timeout: int = Field(gt=0, le=300, default=100)
@@ -162,6 +172,7 @@ class SystemConfig(BaseAPIModel):
 
 class SafetyConfig(BaseAPIModel):
     """Safety system configuration"""
+
     obstacle_detection_sensitivity: float = Field(ge=0.1, le=1.0, default=0.8)
     tilt_threshold_degrees: float = Field(gt=0, le=45, default=15)
     person_detection_distance: float = Field(gt=0, le=10, default=3.0)
@@ -172,33 +183,36 @@ class SafetyConfig(BaseAPIModel):
 # Map Models
 class Boundary(BaseAPIModel):
     """Yard boundary definition"""
+
     points: List[Position] = Field(min_items=3)
     name: str = "main_boundary"
-    
-    @field_validator('points')
+
+    @field_validator("points")
     @classmethod
     def validate_boundary(cls, v):
         if len(v) < 3:
-            raise ValueError('Boundary must have at least 3 points')
+            raise ValueError("Boundary must have at least 3 points")
         return v
 
 
 class NoGoZone(BaseAPIModel):
     """No-go zone definition"""
+
     points: List[Position] = Field(min_items=3)
     name: str
     priority: Priority = Priority.HIGH
-    
-    @field_validator('points')
+
+    @field_validator("points")
     @classmethod
     def validate_zone(cls, v):
         if len(v) < 3:
-            raise ValueError('No-go zone must have at least 3 points')
+            raise ValueError("No-go zone must have at least 3 points")
         return v
 
 
 class HomeLocationType(str, Enum):
     """Predefined home location types"""
+
     CHARGING_STATION = "charging_station"
     STORAGE_LOCATION = "storage_location"
     MAINTENANCE_AREA = "maintenance_area"
@@ -207,6 +221,7 @@ class HomeLocationType(str, Enum):
 
 class HomeLocation(BaseAPIModel):
     """Home location definition with type and coordinates"""
+
     id: str
     name: str
     type: HomeLocationType
@@ -216,17 +231,18 @@ class HomeLocation(BaseAPIModel):
     description: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
-    @field_validator('custom_type')
+
+    @field_validator("custom_type")
     @classmethod
     def validate_custom_type(cls, v, info):
-        if info.data.get('type') == HomeLocationType.CUSTOM and not v:
-            raise ValueError('custom_type is required when type is CUSTOM')
+        if info.data.get("type") == HomeLocationType.CUSTOM and not v:
+            raise ValueError("custom_type is required when type is CUSTOM")
         return v
 
 
 class MapData(BaseAPIModel):
     """Complete map data"""
+
     boundaries: List[Boundary] = Field(default_factory=list)
     no_go_zones: List[NoGoZone] = Field(default_factory=list)
     home_position: Optional[Position] = None  # Deprecated, use home_locations
@@ -238,6 +254,7 @@ class MapData(BaseAPIModel):
 # Weather Models
 class WeatherCondition(TimestampedModel):
     """Current weather conditions"""
+
     temperature: float
     humidity: float
     precipitation: float = 0.0
@@ -250,6 +267,7 @@ class WeatherCondition(TimestampedModel):
 
 class WeatherForecast(BaseAPIModel):
     """Weather forecast data"""
+
     date: datetime
     temperature_high: float
     temperature_low: float
@@ -262,6 +280,7 @@ class WeatherForecast(BaseAPIModel):
 # Power Models
 class BatteryStatus(TimestampedModel):
     """Battery status information"""
+
     voltage: float = Field(gt=0)
     current: float
     power: float
@@ -274,6 +293,7 @@ class BatteryStatus(TimestampedModel):
 
 class SolarStatus(TimestampedModel):
     """Solar charging status"""
+
     voltage: float = Field(ge=0)
     current: float = Field(ge=0)
     power: float = Field(ge=0)
@@ -283,6 +303,7 @@ class SolarStatus(TimestampedModel):
 
 class PowerStatus(BaseAPIModel):
     """Complete power system status"""
+
     battery: BatteryStatus
     solar: Optional[SolarStatus] = None
     charging_mode: str = "auto"
@@ -292,6 +313,7 @@ class PowerStatus(BaseAPIModel):
 # WebSocket Models
 class WebSocketMessage(BaseAPIModel):
     """WebSocket message format"""
+
     type: str
     topic: Optional[str] = None
     data: Dict[str, Any]
@@ -300,6 +322,7 @@ class WebSocketMessage(BaseAPIModel):
 
 class WebSocketCommand(BaseAPIModel):
     """WebSocket command message"""
+
     command: str
     parameters: Dict[str, Any] = Field(default_factory=dict)
     request_id: Optional[str] = None
@@ -308,6 +331,7 @@ class WebSocketCommand(BaseAPIModel):
 # Response Models
 class SuccessResponse(BaseAPIModel):
     """Standard success response"""
+
     success: bool = True
     message: str = "Operation completed successfully"
     data: Optional[Dict[str, Any]] = None
@@ -315,6 +339,7 @@ class SuccessResponse(BaseAPIModel):
 
 class ErrorResponse(BaseAPIModel):
     """Standard error response"""
+
     success: bool = False
     error: str
     details: Optional[Dict[str, Any]] = None
@@ -324,9 +349,10 @@ class ErrorResponse(BaseAPIModel):
 # Pagination Models
 class PaginationParams(BaseAPIModel):
     """Pagination parameters"""
+
     page: int = Field(ge=1, default=1)
     size: int = Field(ge=1, le=100, default=20)
-    
+
     @property
     def offset(self) -> int:
         return (self.page - 1) * self.size
@@ -334,23 +360,25 @@ class PaginationParams(BaseAPIModel):
 
 class PaginatedResponse(BaseAPIModel):
     """Paginated response wrapper"""
+
     items: List[Any]
     total: int
     page: int
     size: int
     pages: int
-    
-    @field_validator('pages', mode='before')
+
+    @field_validator("pages", mode="before")
     @classmethod
     def calculate_pages(cls, v, info):
-        total = info.data.get('total', 0)
-        size = info.data.get('size', 20)
+        total = info.data.get("total", 0)
+        size = info.data.get("size", 20)
         return max(1, (total + size - 1) // size) if total > 0 else 1
 
 
 # Progress Tracking Models
 class PathPoint(TimestampedModel):
     """Point in mowing path history"""
+
     position: Position
     activity: str = Field(default="idle")  # idle, moving, mowing, turning, avoiding
     heading: float = Field(ge=0, lt=360, default=0)
@@ -360,6 +388,7 @@ class PathPoint(TimestampedModel):
 
 class MowingSession(BaseAPIModel):
     """Mowing session data"""
+
     session_id: str
     start_time: datetime
     end_time: Optional[datetime] = None
@@ -379,6 +408,7 @@ class MowingSession(BaseAPIModel):
 
 class ProgressUpdate(TimestampedModel):
     """Real-time progress update"""
+
     session_id: str
     position: Position
     coverage_percentage: float = Field(ge=0, le=100)
@@ -390,6 +420,7 @@ class ProgressUpdate(TimestampedModel):
 
 class CoverageArea(BaseAPIModel):
     """Coverage area polygon"""
+
     coordinates: List[Position]
     area: float = Field(ge=0)
     timestamp: datetime = Field(default_factory=datetime.now)
@@ -397,6 +428,7 @@ class CoverageArea(BaseAPIModel):
 
 class PathHistory(BaseAPIModel):
     """Complete path history for a session"""
+
     session_id: str
     points: List[PathPoint]
     total_distance: float = Field(ge=0, default=0)

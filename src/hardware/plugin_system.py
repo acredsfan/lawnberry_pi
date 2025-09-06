@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional
 
 from .data_structures import DeviceHealth, SensorReading
 from .exceptions import DeviceNotFoundError, HardwareError
@@ -229,8 +229,11 @@ class ToFSensorPlugin(HardwarePlugin):
 
             try:
                 # Import ToF manager
+                from .board_utils import (
+                    default_tof_right_interrupt_pin,
+                    maybe_override_tof_right_interrupt,
+                )
                 from .tof_manager import ToFSensorConfig, ToFSensorManager
-                from .board_utils import maybe_override_tof_right_interrupt, default_tof_right_interrupt_pin
 
                 # Get configuration parameters
                 sensor_name = self.config.name
@@ -273,7 +276,9 @@ class ToFSensorPlugin(HardwarePlugin):
                     self.__class__._shared_tof_manager = existing_mgr
                 else:
                     # Fall back to any previously created class-level manager
-                    if hasattr(self.__class__, "_shared_tof_manager") and isinstance(self.__class__._shared_tof_manager, ToFSensorManager):
+                    if hasattr(self.__class__, "_shared_tof_manager") and isinstance(
+                        self.__class__._shared_tof_manager, ToFSensorManager
+                    ):
                         tof_manager = self.__class__._shared_tof_manager
                     else:
                         # As a last resort, create a new manager; pass shared GPIO manager to avoid duplicate claims
@@ -308,14 +313,19 @@ class ToFSensorPlugin(HardwarePlugin):
 
     def _get_all_tof_configs(self) -> List:
         """Get all ToF sensor configurations from the system"""
-        from .tof_manager import ToFSensorConfig
         from .board_utils import default_tof_right_interrupt_pin
+        from .tof_manager import ToFSensorConfig
 
         # Default configuration based on hardware setup
         # This should ideally come from the hardware interface configuration
         return [
             ToFSensorConfig(name="tof_left", shutdown_pin=22, interrupt_pin=6, target_address=0x29),
-            ToFSensorConfig(name="tof_right", shutdown_pin=23, interrupt_pin=default_tof_right_interrupt_pin(), target_address=0x30),
+            ToFSensorConfig(
+                name="tof_right",
+                shutdown_pin=23,
+                interrupt_pin=default_tof_right_interrupt_pin(),
+                target_address=0x30,
+            ),
         ]
 
     async def read_data(self) -> Optional[SensorReading]:
@@ -383,8 +393,10 @@ class PowerMonitorPlugin(HardwarePlugin):
                 i2c_manager = self.managers["i2c"]
                 configured_addr = self.config.parameters.get("i2c_address")
                 autodetect = bool(self.config.parameters.get("auto_detect_address", True))
-                address = int(configured_addr, 0) if isinstance(configured_addr, str) else (
-                    int(configured_addr) if configured_addr is not None else 0x40
+                address = (
+                    int(configured_addr, 0)
+                    if isinstance(configured_addr, str)
+                    else (int(configured_addr) if configured_addr is not None else 0x40)
                 )
 
                 # Try auto-detection among common INA3221 addresses 0x40-0x43 by reading config register
@@ -408,7 +420,9 @@ class PowerMonitorPlugin(HardwarePlugin):
                 self.logger.info(f"Power monitor: initialized with I2C address 0x{address:02x}")
 
                 # Configure INA3221: reset and set average/convert times, enable channels (conservative defaults)
-                config_value = 0x7127  # Averaging 64, VBUS/VSH CT 1.1ms, mode: shunt and bus, continuous
+                config_value = (
+                    0x7127  # Averaging 64, VBUS/VSH CT 1.1ms, mode: shunt and bus, continuous
+                )
                 await i2c_manager.write_register(
                     address, 0x00, [config_value >> 8 & 0xFF, config_value & 0xFF]
                 )
@@ -431,7 +445,9 @@ class PowerMonitorPlugin(HardwarePlugin):
 
         try:
             i2c_manager = self.managers["i2c"]
-            address = getattr(self, "_address", int(self.config.parameters.get("i2c_address", 0x40)))
+            address = getattr(
+                self, "_address", int(self.config.parameters.get("i2c_address", 0x40))
+            )
             channel = int(self.config.parameters.get("channel", 1))
 
             # Read bus and shunt registers for specified channel
@@ -507,16 +523,21 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
                 try:
                     import board  # type: ignore
                     from adafruit_bme280 import basic as adafruit_bme280  # type: ignore
+
                     use_adafruit = True
                 except Exception as e:  # pragma: no cover - missing Blinka
-                    self.logger.warning(f"BME280 Adafruit driver unavailable, fallback to smbus2 path: {e}")
+                    self.logger.warning(
+                        f"BME280 Adafruit driver unavailable, fallback to smbus2 path: {e}"
+                    )
                     use_adafruit = False
 
                 # Determine I2C address: respect configured address, or auto-detect 0x76/0x77 by chip ID
                 configured_addr = self.config.parameters.get("i2c_address")
                 autodetect = bool(self.config.parameters.get("auto_detect_address", True))
-                address = int(configured_addr, 0) if isinstance(configured_addr, str) else (
-                    int(configured_addr) if configured_addr is not None else 0x76
+                address = (
+                    int(configured_addr, 0)
+                    if isinstance(configured_addr, str)
+                    else (int(configured_addr) if configured_addr is not None else 0x76)
                 )
 
                 detected_addr = None
@@ -542,6 +563,7 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
                 if use_adafruit:
                     try:
                         import busio  # type: ignore
+
                         i2c = busio.I2C(board.SCL, board.SDA)
                         sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=self._address)
                         # Optional oversampling/tuning from config
@@ -576,7 +598,9 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
                 except Exception:
                     eff_addr = address
                 self.logger.info(f"Environmental sensor (BME280) initialized at 0x{eff_addr:02x}")
-                self.logger.debug(f"Environmental sensor driver={self._driver[0]} address=0x{eff_addr:02x}")
+                self.logger.debug(
+                    f"Environmental sensor driver={self._driver[0]} address=0x{eff_addr:02x}"
+                )
                 return True
             except Exception as e:
                 await self.health.record_failure()
@@ -589,6 +613,7 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
                 return None
         try:
             from .data_structures import EnvironmentalReading
+
             if self._driver and self._driver[0] == "adafruit":
                 sensor = self._driver[1]
                 temperature = float(sensor.temperature)
@@ -640,7 +665,9 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
 
                 # Temperature compensation (per datasheet)
                 var1 = (adc_T / 16384.0 - dig_T1 / 1024.0) * dig_T2
-                var2 = ((adc_T / 131072.0 - dig_T1 / 8192.0) * (adc_T / 131072.0 - dig_T1 / 8192.0)) * dig_T3
+                var2 = (
+                    (adc_T / 131072.0 - dig_T1 / 8192.0) * (adc_T / 131072.0 - dig_T1 / 8192.0)
+                ) * dig_T3
                 t_fine = var1 + var2
                 temperature = t_fine / 5120.0
                 # Pressure compensation
@@ -662,7 +689,9 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
                 # Humidity compensation (per datasheet)
                 var_h = t_fine - 76800.0
                 var_h = (adc_H - (dig_H4 * 64.0 + (dig_H5 / 16384.0) * var_h)) * (
-                    dig_H2 / 65536.0 * (1.0 + (dig_H6 / 67108864.0) * var_h * (1.0 + (dig_H3 / 67108864.0) * var_h))
+                    dig_H2
+                    / 65536.0
+                    * (1.0 + (dig_H6 / 67108864.0) * var_h * (1.0 + (dig_H3 / 67108864.0) * var_h))
                 )
                 var_h = var_h * (1.0 - dig_H1 * var_h / 524288.0)
                 humidity = max(0.0, min(100.0, var_h))
@@ -883,7 +912,7 @@ class RoboHATPlugin(HardwarePlugin):
                 port = None
                 baud = None
                 try:
-                    if serial_manager and hasattr(serial_manager, 'devices'):
+                    if serial_manager and hasattr(serial_manager, "devices"):
                         port = serial_manager.devices.get("robohat", {}).get("port")
                         baud = serial_manager.devices.get("robohat", {}).get("baud")
                 except Exception:
@@ -935,7 +964,9 @@ class GPSPlugin(HardwarePlugin):
 
                 async def try_init(port: str, baud: int) -> bool:
                     try:
-                        await serial_manager.initialize_device("gps", port=port, baud=baud, timeout=self._timeout)
+                        await serial_manager.initialize_device(
+                            "gps", port=port, baud=baud, timeout=self._timeout
+                        )
                         # quick sanity read - look for any NMEA sentence
                         for _ in range(5):
                             line = await serial_manager.read_line("gps", timeout=0.6)
@@ -972,7 +1003,11 @@ class GPSPlugin(HardwarePlugin):
 
                 # Prefer ACM1 for GPS first; include others. Allow ACM0 as well if not assigned
                 preferred = [
-                    "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyAMA0", "/dev/ttyAMA4"
+                    "/dev/ttyACM1",
+                    "/dev/ttyUSB0",
+                    "/dev/ttyUSB1",
+                    "/dev/ttyAMA0",
+                    "/dev/ttyAMA4",
                 ]
                 for p in preferred:
                     if p in candidates_ports:
@@ -1006,7 +1041,9 @@ class GPSPlugin(HardwarePlugin):
                         candidates_bauds.append(bi)
                 # Debug: log candidate lists
                 try:
-                    self.logger.debug(f"GPS autodetect candidates: ports={candidates_ports}, bauds={candidates_bauds}")
+                    self.logger.debug(
+                        f"GPS autodetect candidates: ports={candidates_ports}, bauds={candidates_bauds}"
+                    )
                 except Exception:
                     pass
 
@@ -1044,11 +1081,15 @@ class GPSPlugin(HardwarePlugin):
                                 for b in candidates_bauds:
                                     if await try_init(p, b):
                                         try:
-                                            await serial_manager.initialize_device("gps", port=p, baud=b, timeout=self._timeout)
+                                            await serial_manager.initialize_device(
+                                                "gps", port=p, baud=b, timeout=self._timeout
+                                            )
                                             self._port, self._baud = (p, b)
                                             self._initialized = True
                                             await self.health.record_success()
-                                            self.logger.info(f"GPS plugin background-initialized on {p} @ {b}")
+                                            self.logger.info(
+                                                f"GPS plugin background-initialized on {p} @ {b}"
+                                            )
                                             return
                                         except Exception:
                                             continue
@@ -1103,7 +1144,14 @@ class GPSPlugin(HardwarePlugin):
                     satellites = int(data[7] or 0)
                     hdop = float(data[8] or 0.0)
                     altitude = float(data[9] or 0.0)
-                    fix_map = {"0": "none", "1": "gps", "2": "dgps", "4": "rtk", "5": "rtk", "9": "rtk"}
+                    fix_map = {
+                        "0": "none",
+                        "1": "gps",
+                        "2": "dgps",
+                        "4": "rtk",
+                        "5": "rtk",
+                        "9": "rtk",
+                    }
                     fix_type = fix_map.get(quality, "none")
             elif "$GPRMC" in line or "$GNRMC" in line:
                 data = line.split(",")
@@ -1132,7 +1180,13 @@ class GPSPlugin(HardwarePlugin):
                 except Exception:
                     pass
                 return None
-            elif "$GPGSV" in line or "$GLGSV" in line or "$GAGSV" in line or "$BDGSV" in line or "$GNGSV" in line:
+            elif (
+                "$GPGSV" in line
+                or "$GLGSV" in line
+                or "$GAGSV" in line
+                or "$BDGSV" in line
+                or "$GNGSV" in line
+            ):
                 # Satellites in view; we can approximate satellites used after a few frames
                 try:
                     data = line.split(",")
@@ -1238,20 +1292,25 @@ class IMUPlugin(HardwarePlugin):
                 self._use_bno08x = False
                 self._bno = None
                 try:
-                    from adafruit_bno08x.uart import BNO08X_UART  # type: ignore
-                    from adafruit_bno08x import (
-                        BNO_REPORT_ROTATION_VECTOR,
+                    from adafruit_bno08x import (  # type: ignore
                         BNO_REPORT_ACCELEROMETER,
                         BNO_REPORT_GYROSCOPE,
-                    )  # type: ignore
+                        BNO_REPORT_ROTATION_VECTOR,
+                    )
+                    from adafruit_bno08x.uart import BNO08X_UART  # type: ignore
+
                     self._adafruit_available = True
                 except Exception as e:
                     self._adafruit_available = False
-                    self.logger.debug(f"BNO08x driver not available, will use text parser fallback: {e}")
+                    self.logger.debug(
+                        f"BNO08x driver not available, will use text parser fallback: {e}"
+                    )
 
                 async def try_init(port: str, baud: int) -> bool:
                     try:
-                        await serial_manager.initialize_device("imu", port=port, baud=baud, timeout=self._timeout)
+                        await serial_manager.initialize_device(
+                            "imu", port=port, baud=baud, timeout=self._timeout
+                        )
                         # Preferred: BNO08x UART initialization path
                         if self._adafruit_available and baud >= 921600:
                             try:
@@ -1294,7 +1353,9 @@ class IMUPlugin(HardwarePlugin):
                                     return True
                             except Exception as e:
                                 # If BNO path fails, fall through to text parser
-                                self.logger.debug(f"BNO08x init failed on {port}@{baud}: {e}; trying text parser")
+                                self.logger.debug(
+                                    f"BNO08x init failed on {port}@{baud}: {e}; trying text parser"
+                                )
 
                         # Fallback: quick sanity read requiring parseable text content
                         for _ in range(6):
@@ -1309,7 +1370,9 @@ class IMUPlugin(HardwarePlugin):
                         return False
 
                 # Include UART1 (ttyAMA1) for Raspberry Pi 5 on GPIO12/13, while retaining Pi 4/CM defaults
-                candidates_ports = list(dict.fromkeys([cfg_port, "/dev/ttyAMA1", "/dev/ttyAMA4", "/dev/ttyAMA0"]))
+                candidates_ports = list(
+                    dict.fromkeys([cfg_port, "/dev/ttyAMA1", "/dev/ttyAMA4", "/dev/ttyAMA0"])
+                )
                 candidates_ports = [p for p in candidates_ports if p]
                 # Try configured baud first, then common rates
                 candidates_bauds = []
@@ -1328,11 +1391,15 @@ class IMUPlugin(HardwarePlugin):
 
                 if not selected:
                     # Initialize anyway to allow later re-detect
-                    await serial_manager.initialize_device("imu", port=cfg_port or "/dev/ttyAMA4", baud=cfg_baud, timeout=self._timeout)
+                    await serial_manager.initialize_device(
+                        "imu", port=cfg_port or "/dev/ttyAMA4", baud=cfg_baud, timeout=self._timeout
+                    )
                     self._last_failures = 0
                     self._initialized = True
                     await self.health.record_failure()
-                    self.logger.warning("IMU auto-detect failed; initialized with configured defaults")
+                    self.logger.warning(
+                        "IMU auto-detect failed; initialized with configured defaults"
+                    )
                     return True
 
                 self._port, self._baud = selected
@@ -1342,7 +1409,9 @@ class IMUPlugin(HardwarePlugin):
                 if getattr(self, "_use_bno08x", False):
                     self.logger.info(f"IMU (BNO08x) initialized on {self._port} @ {self._baud}")
                 else:
-                    self.logger.info(f"IMU (text-parser) initialized on {self._port} @ {self._baud}")
+                    self.logger.info(
+                        f"IMU (text-parser) initialized on {self._port} @ {self._baud}"
+                    )
                 return True
             except Exception as e:
                 await self.health.record_failure()
@@ -1382,11 +1451,12 @@ class IMUPlugin(HardwarePlugin):
                         if self._last_failures % 80 == 0:
                             # Attempt internal re-init by toggling features
                             try:
-                                from adafruit_bno08x import (
-                                    BNO_REPORT_ROTATION_VECTOR,
+                                from adafruit_bno08x import (  # type: ignore
                                     BNO_REPORT_ACCELEROMETER,
                                     BNO_REPORT_GYROSCOPE,
-                                )  # type: ignore
+                                    BNO_REPORT_ROTATION_VECTOR,
+                                )
+
                                 try:
                                     bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
                                 except Exception:
@@ -1424,6 +1494,7 @@ class IMUPlugin(HardwarePlugin):
                             pass
 
                     from .data_structures import IMUReading
+
                     quality = 0.9 if quat else (0.7 if acc or gyro else 0.3)
                     reading = IMUReading(
                         timestamp=datetime.now(),
@@ -1470,6 +1541,7 @@ class IMUPlugin(HardwarePlugin):
                 return None
             roll, pitch, yaw, ax, ay, az, gx, gy, gz, quality = parsed
             from .data_structures import IMUReading
+
             reading = IMUReading(
                 timestamp=datetime.now(),
                 sensor_id=self.config.name,
@@ -1494,7 +1566,9 @@ class IMUPlugin(HardwarePlugin):
             return None
 
     @staticmethod
-    def _parse_imu_line(line: str) -> Optional[tuple[float, float, float, float, float, float, float, float, float, float]]:
+    def _parse_imu_line(
+        line: str,
+    ) -> Optional[tuple[float, float, float, float, float, float, float, float, float, float]]:
         """Extract IMU values from a serial line.
 
         Returns (roll, pitch, yaw, ax, ay, az, gx, gy, gz, quality) or None if unparseable.
@@ -1502,6 +1576,7 @@ class IMUPlugin(HardwarePlugin):
         """
         try:
             import re
+
             floats = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", line)
             vals: List[float] = [float(x) for x in floats]
         except Exception:
@@ -1545,7 +1620,18 @@ class IMUPlugin(HardwarePlugin):
 
         # Clamp
         quality = max(0.0, min(1.0, base_q))
-        return (float(roll), float(pitch), float(yaw), float(ax), float(ay), float(az), float(gx), float(gy), float(gz), float(quality))
+        return (
+            float(roll),
+            float(pitch),
+            float(yaw),
+            float(ax),
+            float(ay),
+            float(az),
+            float(gx),
+            float(gy),
+            float(gz),
+            float(quality),
+        )
 
 
 class PluginManager:
@@ -1602,17 +1688,23 @@ class PluginManager:
                     if module is None:
                         # Try relative to this package as a last resort
                         try:
-                            module = importlib.import_module(f".plugins.{plugin_type}", package=__package__)
+                            module = importlib.import_module(
+                                f".plugins.{plugin_type}", package=__package__
+                            )
                         except Exception as e:
                             import_error = e
                             module = None
 
                     if module is None:
-                        raise ImportError(f"Unable to import custom plugin module for type '{plugin_type}': {import_error}")
+                        raise ImportError(
+                            f"Unable to import custom plugin module for type '{plugin_type}': {import_error}"
+                        )
 
                     class_name = f"{plugin_type.title()}Plugin"
                     if not hasattr(module, class_name):
-                        raise AttributeError(f"Custom plugin module '{module.__name__}' missing class '{class_name}'")
+                        raise AttributeError(
+                            f"Custom plugin module '{module.__name__}' missing class '{class_name}'"
+                        )
                     plugin_class = getattr(module, class_name)
 
                 # Verify required managers are available
@@ -1628,7 +1720,9 @@ class PluginManager:
                     self.logger.info(f"Plugin '{plugin_name}' loaded successfully")
                     return True
                 else:
-                    self.logger.error(f"Failed to initialize plugin '{plugin_name}' (initialize returned False)")
+                    self.logger.error(
+                        f"Failed to initialize plugin '{plugin_name}' (initialize returned False)"
+                    )
                     return False
 
             except Exception as e:
