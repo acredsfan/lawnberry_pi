@@ -4,7 +4,6 @@ import asyncio
 import logging
 import random
 import subprocess
-import shlex
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -21,6 +20,7 @@ except Exception:
 # Picamera2 (preferred on Raspberry Pi OS Bookworm)
 try:
     from picamera2 import Picamera2
+
     _PICAMERA2_AVAILABLE = True
 except Exception:
     Picamera2 = None  # type: ignore
@@ -31,9 +31,10 @@ try:
 except Exception:
     np = None
 
+from .board_utils import default_tof_right_interrupt_pin
+
 # Raspberry Pi 4B/5 compatibility is provided via gpio_wrapper
 from .gpio_wrapper import GPIO
-from .board_utils import default_tof_right_interrupt_pin
 
 try:  # Hardware I2C library may be unavailable during development
     import smbus2
@@ -43,19 +44,12 @@ except ImportError:  # pragma: no cover - development fallback
 from .data_structures import (
     CameraFrame,
     DeviceHealth,
-    GPIOReading,
     I2CDeviceReading,
     RoboHATStatus,
     SensorReading,
     SerialDeviceReading,
 )
-from .exceptions import (
-    CommunicationError,
-    DeviceBusyError,
-    DeviceNotFoundError,
-    DeviceTimeoutError,
-    HardwareError,
-)
+from .exceptions import CommunicationError, DeviceNotFoundError, HardwareError
 
 
 class RetryPolicy:
@@ -136,7 +130,7 @@ class I2CManager:
         """Clean up I2C resources and release bus handles"""
         async with self._lock:
             try:
-                if self._bus and hasattr(self._bus, 'close'):
+                if self._bus and hasattr(self._bus, "close"):
                     try:
                         self._bus.close()
                     except Exception as e:
@@ -267,7 +261,8 @@ class SerialManager:
         # Warn if another configured device points to the same port (potential conflict)
         try:
             same_port = [
-                name for name, cfg in self.devices.items()
+                name
+                for name, cfg in self.devices.items()
                 if name != device_name and cfg and cfg.get("port") == config.get("port")
             ]
             if same_port:
@@ -370,7 +365,7 @@ class SerialManager:
                     line = raw.decode(errors="ignore").strip()
                 except Exception:
                     # Fallback if decode fails for any reason
-                    line = ''.join((chr(b) for b in raw if 32 <= b <= 126)).strip()
+                    line = "".join((chr(b) for b in raw if 32 <= b <= 126)).strip()
 
                 # Strip common ANSI/terminal escape sequences that sometimes prefix serial output
                 # Remove OSC/CSI sequences e.g. '\x1b]0;...\x1b\\' or '\x1b[...m'
@@ -461,9 +456,15 @@ class GPIOManager:
                         pud = {"up": GPIO.PUD_UP, "down": GPIO.PUD_DOWN, "none": GPIO.PUD_OFF}
 
                         # If gpio_wrapper exposes claimant info, log it for diagnostics
-                        claimant = getattr(GPIO, 'get_claimant', lambda p: None)(pin) if hasattr(GPIO, 'get_claimant') else None
+                        claimant = (
+                            getattr(GPIO, "get_claimant", lambda p: None)(pin)
+                            if hasattr(GPIO, "get_claimant")
+                            else None
+                        )
                         if claimant:
-                            self.logger.debug(f"GPIOManager.setup_pin: pin {pin} currently claimed by {claimant} before setup")
+                            self.logger.debug(
+                                f"GPIOManager.setup_pin: pin {pin} currently claimed by {claimant} before setup"
+                            )
 
                         GPIO.setup(pin, gpio_dir, pull_up_down=pud[pull_up_down], initial=initial)
 
@@ -510,9 +511,15 @@ class GPIOManager:
             for attempt in range(policy.max_retries + 1):
                 try:
                     if GPIO:
-                        claimant = getattr(GPIO, 'get_claimant', lambda p: None)(pin) if hasattr(GPIO, 'get_claimant') else None
+                        claimant = (
+                            getattr(GPIO, "get_claimant", lambda p: None)(pin)
+                            if hasattr(GPIO, "get_claimant")
+                            else None
+                        )
                         if claimant:
-                            self.logger.debug(f"GPIOManager.write_pin: writing to pin {pin} claimed by {claimant}")
+                            self.logger.debug(
+                                f"GPIOManager.write_pin: writing to pin {pin} claimed by {claimant}"
+                            )
                         GPIO.output(pin, value)
 
                     self.logger.debug(f"GPIO pin {pin} set to {value}")
@@ -544,7 +551,9 @@ class GPIOManager:
         """Return a short string of gpioinfo consumer for a specific BCM line, if available."""
         try:
             # Call gpioinfo and search for the given line number
-            proc = subprocess.run(["/usr/bin/gpioinfo"], capture_output=True, text=True, timeout=1.5)
+            proc = subprocess.run(
+                ["/usr/bin/gpioinfo"], capture_output=True, text=True, timeout=1.5
+            )
             if proc.returncode != 0:
                 return None
             lines = proc.stdout.splitlines()
@@ -567,6 +576,7 @@ class GPIOManager:
                         try:
                             # The consumer appears after the quoted name; find tokens in quotes
                             import re
+
                             m = re.findall(r'"([^"]*)"', line)
                             if len(m) >= 2:
                                 consumer = m[1]
@@ -601,15 +611,15 @@ class GPIOManager:
                 if GPIO:
                     try:
                         # Prefer per-pin cleanup to avoid closing global handles in use elsewhere
-                        if hasattr(GPIO, 'cleanup_pins'):
+                        if hasattr(GPIO, "cleanup_pins"):
                             GPIO.cleanup_pins(list(self._pins.keys()))  # type: ignore
-                        elif hasattr(GPIO, 'free_pin'):
+                        elif hasattr(GPIO, "free_pin"):
                             for p in list(self._pins.keys()):
                                 try:
                                     GPIO.free_pin(p)  # type: ignore
                                 except Exception as e:
                                     self.logger.debug(f"GPIO free_pin error for {p}: {e}")
-                        elif hasattr(GPIO, 'cleanup'):
+                        elif hasattr(GPIO, "cleanup"):
                             GPIO.cleanup()
                     except Exception as e:
                         self.logger.debug(f"GPIO cleanup error: {e}")
@@ -643,7 +653,9 @@ class CameraManager:
             try:
                 # Use V4L2 backend for compatibility with Raspberry Pi rpicam stack
                 if cv2 is None:
-                    self.logger.warning("OpenCV (cv2) not available; attempting Picamera2 backend if present")
+                    self.logger.warning(
+                        "OpenCV (cv2) not available; attempting Picamera2 backend if present"
+                    )
                     if _PICAMERA2_AVAILABLE:
                         await self._initialize_picamera2(width, height, fps)
                         return
@@ -715,7 +727,9 @@ class CameraManager:
                         except Exception as e2:
                             self.logger.warning(f"Picamera2 fallback failed: {e2}")
 
-                self.logger.info(f"Camera initialized: {width}x{height}@{fps}fps (device {self.device_path})")
+                self.logger.info(
+                    f"Camera initialized: {width}x{height}@{fps}fps (device {self.device_path})"
+                )
 
             except Exception as e:
                 raise HardwareError(f"Failed to initialize camera: {e}")
@@ -730,7 +744,7 @@ class CameraManager:
             try:
                 config = self._picam2.create_video_configuration(
                     main={"size": (int(width), int(height)), "format": "RGB888"},
-                    controls={"FrameRate": int(fps)}
+                    controls={"FrameRate": int(fps)},
                 )
             except Exception:
                 # Fallback to a safe default
@@ -814,8 +828,10 @@ class CameraManager:
                         # Minimal fallback encoding (rare, since cv2 usually present); skip if unavailable
                         buffer = None
                         try:
-                            import PIL.Image as Image
                             import io
+
+                            import PIL.Image as Image
+
                             img = Image.fromarray(frame)
                             bio = io.BytesIO()
                             img.save(bio, format="JPEG", quality=85)
@@ -823,7 +839,7 @@ class CameraManager:
                         except Exception as e:
                             self.logger.error(f"JPEG encode failed: {e}")
                             buffer = b""
-                    frame_data = buffer.tobytes() if hasattr(buffer, 'tobytes') else (buffer or b"")
+                    frame_data = buffer.tobytes() if hasattr(buffer, "tobytes") else (buffer or b"")
 
                     # Create frame object
                     camera_frame = CameraFrame(
@@ -858,7 +874,9 @@ class CameraManager:
                                     self._picam2.stop()
                                     self._picam2.configure(cfg)
                                     self._picam2.start()
-                                    self.logger.warning("Picamera2 produced no frames; adjusted resolution to 640x480")
+                                    self.logger.warning(
+                                        "Picamera2 produced no frames; adjusted resolution to 640x480"
+                                    )
                                 except Exception as e:
                                     self.logger.debug(f"Picamera2 reconfig failed: {e}")
                         else:

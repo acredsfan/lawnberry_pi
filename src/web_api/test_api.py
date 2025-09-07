@@ -4,23 +4,20 @@ Simple tests to validate the web API backend functionality.
 """
 
 import asyncio
+from unittest.mock import AsyncMock
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, MagicMock
 
-from .main import create_app
-from .config import Settings
-from .mqtt_bridge import MQTTBridge
 from .auth import AuthManager, set_auth_manager
+from .config import Settings
+from .main import create_app
+from .mqtt_bridge import MQTTBridge
 
 
 # Mock settings for testing
 def get_test_settings():
-    return Settings(
-        debug=True,
-        auth=Settings().auth,
-        mqtt=Settings().mqtt
-    )
+    return Settings(debug=True, auth=Settings().auth, mqtt=Settings().mqtt)
 
 
 @pytest.fixture
@@ -30,7 +27,7 @@ def mock_mqtt_bridge():
     bridge.is_connected.return_value = True
     bridge.get_cached_data.return_value = {
         "timestamp": "2024-01-01T00:00:00",
-        "value": {"test": "data"}
+        "value": {"test": "data"},
     }
     bridge.publish_message.return_value = True
     return bridge
@@ -48,12 +45,12 @@ def mock_auth_manager():
 def client(mock_mqtt_bridge, mock_auth_manager):
     """Test client with mocked dependencies"""
     app = create_app()
-    
+
     # Override dependencies
     app.state.mqtt_bridge = mock_mqtt_bridge
     app.state.auth_manager = mock_auth_manager
     set_auth_manager(mock_auth_manager)
-    
+
     return TestClient(app)
 
 
@@ -94,7 +91,7 @@ def test_system_emergency_stop(client, mock_mqtt_bridge):
     data = response.json()
     assert data["success"] is True
     assert "Emergency stop triggered" in data["message"]
-    
+
     # Verify MQTT message was sent
     mock_mqtt_bridge.publish_message.assert_called_once()
 
@@ -125,9 +122,9 @@ def test_power_status(client, mock_mqtt_bridge):
         "current": -5.2,
         "power": -65.52,
         "state_of_charge": 0.85,
-        "timestamp": "2024-01-01T00:00:00"
+        "timestamp": "2024-01-01T00:00:00",
     }
-    
+
     response = client.get("/api/v1/power/status")
     assert response.status_code == 200
     data = response.json()
@@ -143,9 +140,9 @@ def test_weather_current(client, mock_mqtt_bridge):
         "humidity": 65.0,
         "precipitation": 0.0,
         "conditions": "clear",
-        "timestamp": "2024-01-01T00:00:00"
+        "timestamp": "2024-01-01T00:00:00",
     }
-    
+
     response = client.get("/api/v1/weather/current")
     assert response.status_code == 200
     data = response.json()
@@ -198,7 +195,7 @@ def test_error_handling(client, mock_mqtt_bridge):
     """Test error handling"""
     # Simulate MQTT bridge not connected
     mock_mqtt_bridge.is_connected.return_value = False
-    
+
     response = client.get("/api/v1/sensors/gps")
     assert response.status_code == 503  # Service unavailable
     data = response.json()
@@ -209,7 +206,7 @@ def test_error_handling(client, mock_mqtt_bridge):
 if __name__ == "__main__":
     # Run basic tests
     print("Running basic API tests...")
-    
+
     # Test client creation
     try:
         app = create_app()
@@ -217,32 +214,32 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"✗ FastAPI app creation failed: {e}")
         exit(1)
-    
+
     # Test with mock client
     try:
         mock_bridge = AsyncMock(spec=MQTTBridge)
         mock_bridge.is_connected.return_value = True
         mock_auth = AsyncMock(spec=AuthManager)
         mock_auth.config.enabled = False
-        
+
         app.state.mqtt_bridge = mock_bridge
         app.state.auth_manager = mock_auth
         set_auth_manager(mock_auth)
-        
+
         client = TestClient(app)
-        
+
         # Test health check
         response = client.get("/health")
         assert response.status_code == 200
         print("✓ Health check endpoint working")
-        
+
         # Test API status
         response = client.get("/api/v1/status")
         assert response.status_code == 200
         print("✓ API status endpoint working")
-        
+
         print("✓ All basic tests passed!")
-        
+
     except Exception as e:
         print(f"✗ Basic tests failed: {e}")
         exit(1)
