@@ -35,7 +35,7 @@ on:
 env:
   PYTHON_VERSION: '3.9'
   REGISTRY_URL: 'packages.lawnberry.com'
-  
+
 jobs:
   # Build and package
   build:
@@ -45,25 +45,25 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       package_path: ${{ steps.build.outputs.package_path }}
       checksum: ${{ steps.build.outputs.checksum }}
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0  # Full history for version calculation
-    
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         cache: 'pip'
-    
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install build wheel cryptography
-    
+
     - name: Calculate version
       id: version
       run: |
@@ -74,7 +74,7 @@ jobs:
         fi
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "VERSION=$VERSION" >> $GITHUB_ENV
-    
+
     - name: Run tests
       if: ${{ !inputs.skip_tests }}
       run: |
@@ -84,7 +84,7 @@ jobs:
           --cov-report=xml:coverage.xml \
           --junit-xml=test-results.xml \
           -v
-    
+
     - name: Upload test results
       if: ${{ !inputs.skip_tests }}
       uses: actions/upload-artifact@v4
@@ -93,13 +93,13 @@ jobs:
         path: |
           test-results.xml
           coverage.xml
-    
+
     - name: Build package
       id: build
       run: |
         # Create build configuration
         BUILD_TYPE="${{ inputs.build_type || 'release' }}"
-        
+
         cat > build_config.json << EOF
         {
           "version": "$VERSION",
@@ -112,7 +112,7 @@ jobs:
           "validate_config": true
         }
         EOF
-        
+
         # Create build script
         cat > build_package.py << 'EOF'
         import asyncio
@@ -121,58 +121,58 @@ jobs:
         from pathlib import Path
         from dataclasses import dataclass
         from enum import Enum
-        
+
         # Import build system (simplified for CI)
         import hashlib
         import tarfile
         import tempfile
         import shutil
         from datetime import datetime
-        
+
         async def build_package():
             with open('build_config.json', 'r') as f:
                 config = json.load(f)
-            
+
             version = config['version']
             build_type = config['build_type']
-            
+
             # Create build workspace
             build_dir = Path(f"/tmp/lawnberry_build_{version}")
             build_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Copy source files
             source_files = [
                 'src/',
-                'config/', 
+                'config/',
                 'requirements.txt',
                 'README.md'
             ]
-            
+
             for item in source_files:
                 source_path = Path(item)
                 target_path = build_dir / item
-                
+
                 if source_path.exists():
                     if source_path.is_dir():
                         shutil.copytree(source_path, target_path)
                     else:
                         target_path.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(source_path, target_path)
-            
+
             # Create package
             package_name = f"lawnberry_{version}_{build_type}.tar.gz"
             package_path = Path(package_name)
-            
+
             with tarfile.open(package_path, "w:gz") as tar:
                 tar.add(build_dir, arcname=".", recursive=True)
-            
+
             # Calculate checksum
             sha256_hash = hashlib.sha256()
             with open(package_path, 'rb') as f:
                 for chunk in iter(lambda: f.read(4096), b""):
                     sha256_hash.update(chunk)
             checksum = sha256_hash.hexdigest()
-            
+
             # Output results
             import os
             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
@@ -181,24 +181,24 @@ jobs:
             print(f"Package: {package_path}")
             print(f"Size: {package_path.stat().st_size}")
             print(f"Checksum: {checksum}")
-            
+
             # Cleanup
             shutil.rmtree(build_dir, ignore_errors=True)
-        
+
         if __name__ == "__main__":
             asyncio.run(build_package())
         EOF
-        
+
         # Run build
         python build_package.py
-    
+
     - name: Upload package
       uses: actions/upload-artifact@v4
       with:
         name: deployment-package
         path: lawnberry_*.tar.gz
         retention-days: 90
-    
+
     - name: Create release info
       run: |
         cat > release_info.json << EOF
@@ -211,41 +211,41 @@ jobs:
           "checksum": "${{ steps.build.outputs.checksum }}"
         }
         EOF
-    
+
     - name: Upload release info
       uses: actions/upload-artifact@v4
       with:
         name: release-info
         path: release_info.json
-  
+
   # Security scan
   security_scan:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: build
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: ${{ env.PYTHON_VERSION }}
-    
+
     - name: Install security tools
       run: |
         pip install bandit safety
-    
+
     - name: Run Bandit security scan
       run: |
         bandit -r src/ -f json -o bandit-report.json || true
         bandit -r src/ -f txt
-    
+
     - name: Run Safety dependency scan
       run: |
         safety check --json --output safety-report.json || true
-    
+
     - name: Upload security reports
       uses: actions/upload-artifact@v4
       with:
@@ -253,7 +253,7 @@ jobs:
         path: |
           bandit-report.json
           safety-report.json
-  
+
   # Deploy to staging
   # Deploy to staging
   deploy_staging:
@@ -262,7 +262,7 @@ jobs:
     needs: [build, security_scan]
     if: github.ref == 'refs/heads/main' || inputs.deploy_target == 'staging'
     # environment removed to avoid validation errors (configure repository Environments separately if needed)
-    
+
     steps:
     - name: Download package
       uses: actions/download-artifact@v4
@@ -274,23 +274,23 @@ jobs:
       with:
         name: release-info
         path: .
-    
+
     - name: Deploy to staging
       run: |
         echo "Deploying to staging environment..."
-        
+
         # Read release info
         VERSION=$(jq -r '.version' release_info.json)
         CHECKSUM=$(jq -r '.checksum' release_info.json)
         PACKAGE=$(ls lawnberry_*.tar.gz || true)
-        
+
         echo "Version: $VERSION"
         echo "Package: $PACKAGE"
         echo "Checksum: $CHECKSUM"
-        
+
         # Simulate deployment
         echo "Package deployed to staging successfully"
-        
+
         # Create deployment record
         cat > deployment_record.json << EOF
         {
@@ -303,7 +303,7 @@ jobs:
           "commit": "${{ github.sha }}"
         }
         EOF
-    
+
     - name: Upload deployment record
       uses: actions/upload-artifact@v4
       with:
@@ -315,40 +315,41 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build, security_scan, deploy_staging]
     # environment removed to avoid validation errors (configure repository Environments separately if needed)
-    environment: production
 
+    steps:
     - name: Download package
       uses: actions/download-artifact@v4
       with:
         name: deployment-package
         path: .
-    
+
     - name: Download release info
       uses: actions/download-artifact@v4
       with:
         name: release-info
         path: .
+
     - name: Deploy to production
       run: |
         echo "Deploying to production environment..."
-        
+
         # Read release info
         VERSION=$(jq -r '.version' release_info.json)
         CHECKSUM=$(jq -r '.checksum' release_info.json)
         PACKAGE=$(ls lawnberry_*.tar.gz || true)
-        
+
         echo "Version: $VERSION"
         echo "Package: $PACKAGE"
         echo "Checksum: $CHECKSUM"
-        
+
         # In real deployment, this would:
         # 1. Upload package to update server
         # 2. Trigger A/B deployment
         # 3. Monitor deployment progress
         # 4. Rollback on failure
-        
+
         echo "Package deployed to production successfully"
-        
+
         # Create deployment record
         cat > deployment_record.json << EOF
         {
@@ -361,7 +362,7 @@ jobs:
           "commit": "${{ github.sha }}"
         }
         EOF
-    
+
     - name: Create GitHub release
       uses: actions/create-release@v1
       env:
@@ -371,66 +372,63 @@ jobs:
         release_name: Release ${{ needs.build.outputs.version }}
         body: |
           Automated release for version ${{ needs.build.outputs.version }}
-          
+
           Package Information:
           - Version: ${{ needs.build.outputs.version }}
           - Checksum: ${{ needs.build.outputs.checksum }}
-          
+
           Deployment:
           - Staging: ✅ Deployed
           - Production: ✅ Deployed
         draft: false
         prerelease: false
+
     - name: Upload production deployment record
       uses: actions/upload-artifact@v4
       with:
         name: production-deployment
         path: deployment_record.json
-        path: deployment_record.json
-  
+
   # Fleet deployment (for fleet-wide updates)
   deploy_fleet:
     name: Deploy to Fleet
     runs-on: ubuntu-latest
     needs: [build, security_scan, deploy_production]
     if: inputs.deploy_target == 'fleet' && startsWith(github.ref, 'refs/tags/')
-    environment: fleet
-    
-    steps:
     # environment removed to avoid validation errors (configure repository Environments separately if needed)
-      uses: actions/download-artifact@v3
+
+    steps:
+    - name: Download package
+      uses: actions/download-artifact@v4
       with:
         name: deployment-package
-    
+
     - name: Download release info
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: release-info
-    
+
     - name: Deploy to fleet
       run: |
         echo "Initiating fleet deployment..."
-    - name: Deploy to fleet
-      run: |
-        echo "Initiating fleet deployment..."
-        
+
         # Read release info
         VERSION=$(jq -r '.version' release_info.json)
         CHECKSUM=$(jq -r '.checksum' release_info.json)
         PACKAGE=$(ls lawnberry_*.tar.gz || true)
-        
+
         echo "Version: $VERSION"
         echo "Package: $PACKAGE"
         echo "Checksum: $CHECKSUM"
-        
+
         # In real deployment, this would:
         # 1. Upload package to fleet management server
         # 2. Create fleet deployment with wave-based rollout
         # 3. Monitor deployment across all devices
         # 4. Handle failures and rollbacks
-        
+
         echo "Fleet deployment initiated successfully"
-        
+
         # Create fleet deployment record
         cat > fleet_deployment_record.json << EOF
         {
@@ -445,16 +443,19 @@ jobs:
           "deployment_strategy": "wave_based"
         }
         EOF
+
     - name: Upload fleet deployment record
       uses: actions/upload-artifact@v4
       with:
         name: fleet-deployment
         path: fleet_deployment_record.json
+
+  notify_deployment:
     name: Notify Deployment
     runs-on: ubuntu-latest
     needs: [deploy_staging, deploy_production, deploy_fleet]
     if: always()
-    
+
     steps:
     - name: Notify deployment status
       run: |
@@ -462,7 +463,7 @@ jobs:
         echo "Staging: ${{ needs.deploy_staging.result }}"
         echo "Production: ${{ needs.deploy_production.result }}"
         echo "Fleet: ${{ needs.deploy_fleet.result }}"
-        
+
         # In real implementation, this would send notifications via:
         # - Email
         # - Slack/Discord
