@@ -4,6 +4,7 @@ Coordinates microservices communication and lifecycle management
 """
 
 import asyncio
+import inspect
 import logging
 import time
 from typing import Dict, Any, List, Optional, Set, Callable
@@ -11,7 +12,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 from datetime import datetime, timedelta
 
-from .client import MQTTClient
+from . import client as mqtt_client_module
 from .message_protocols import (
     MessageProtocol, StatusMessage, EventMessage, AlertMessage,
     MessageType, Priority
@@ -62,13 +63,14 @@ class ServiceManager:
     """Manages microservices coordination and communication"""
     
     def __init__(self, service_id: str, service_type: str, 
-                 mqtt_config: Dict[str, Any] = None):
+                 mqtt_config: Optional[Dict[str, Any]] = None):
         self.service_id = service_id
         self.service_type = service_type
         self.logger = logging.getLogger(f"{__name__}.{service_id}")
         
-        # MQTT client
-        self.mqtt_client = MQTTClient(service_id, mqtt_config)
+        # MQTT client (instantiate via module reference so tests can patch
+        # 'src.communication.client.MQTTClient' and affect this usage)
+        self.mqtt_client = mqtt_client_module.MQTTClient(service_id, mqtt_config or {})
         
         # Service registry
         self.services: Dict[str, ServiceInfo] = {}
@@ -105,36 +107,45 @@ class ServiceManager:
             'last_error': None
         }
         
-        self._setup_mqtt_handlers()
+    # Defer MQTT handler setup until initialize() when an event loop is guaranteed
     
-    def _setup_mqtt_handlers(self):
-        """Setup MQTT message handlers"""
+    async def _call_maybe_async(self, func: Callable, *args, **kwargs):
+        """Call a function that may return an awaitable, and await it if needed."""
+        try:
+            result = func(*args, **kwargs)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as e:
+            self.logger.warning(f"Handler setup call failed: {e}")
+
+    async def _setup_mqtt_handlers(self):
+        """Setup MQTT message and command handlers; supports async-capable mocks in tests."""
         # Service discovery
-        self.mqtt_client.add_message_handler(
+        await self._call_maybe_async(
+            self.mqtt_client.add_message_handler,
             topic_manager.get_full_topic("system/services/+/status"),
-            self._handle_service_status
+            self._handle_service_status,
         )
-        
         # System events
-        self.mqtt_client.add_message_handler(
+        await self._call_maybe_async(
+            self.mqtt_client.add_message_handler,
             topic_manager.get_full_topic("system/events/+"),
-            self._handle_system_event
+            self._handle_system_event,
         )
-        
         # Health checks
-        self.mqtt_client.add_message_handler(
+        await self._call_maybe_async(
+            self.mqtt_client.add_message_handler,
             topic_manager.get_full_topic("system/health_check"),
-            self._handle_health_check
+            self._handle_health_check,
         )
-        
         # Service commands
-        self.mqtt_client.add_command_handler("ping", self._handle_ping_command)
-        self.mqtt_client.add_command_handler("status", self._handle_status_command)
-        self.mqtt_client.add_command_handler("shutdown", self._handle_shutdown_command)
+        await self._call_maybe_async(self.mqtt_client.add_command_handler, "ping", self._handle_ping_command)
+        await self._call_maybe_async(self.mqtt_client.add_command_handler, "status", self._handle_status_command)
+        await self._call_maybe_async(self.mqtt_client.add_command_handler, "shutdown", self._handle_shutdown_command)
     
-    async def initialize(self, dependencies: List[str] = None, 
-                        endpoints: Dict[str, str] = None,
-                        metadata: Dict[str, Any] = None) -> bool:
+    async def initialize(self, dependencies: Optional[List[str]] = None, 
+                        endpoints: Optional[Dict[str, str]] = None,
+                        metadata: Optional[Dict[str, Any]] = None) -> bool:
         """Initialize service manager"""
         try:
             self.logger.info(f"Initializing service manager for {self.service_id}")
@@ -148,6 +159,8 @@ class ServiceManager:
             if not await self.mqtt_client.initialize():
                 self.logger.error("Failed to initialize MQTT client")
                 return False
+            # Now that the client is initialized and we have a loop, set up handlers
+            await self._setup_mqtt_handlers()
             
             # Subscribe to relevant topics
             topics = topic_manager.get_topics_for_service(self.service_type)
@@ -218,6 +231,7 @@ class ServiceManager:
     async def _wait_for_dependencies(self, timeout: float = 60) -> bool:
         """Wait for service dependencies to be available"""
         start_time = time.time()
+        missing_deps: List[str] = []
         
         while time.time() - start_time < timeout:
             missing_deps = []
@@ -232,7 +246,7 @@ class ServiceManager:
             
             self.logger.debug(f"Waiting for dependencies: {missing_deps}")
             await asyncio.sleep(5)
-        
+
         self.logger.error(f"Timeout waiting for dependencies: {missing_deps}")
         return False
     
@@ -468,12 +482,12 @@ class ServiceManager:
         )
     
     async def send_command(self, target: str, command: str, 
-                          parameters: Dict[str, Any] = None, 
+                          parameters: Optional[Dict[str, Any]] = None, 
                           timeout: float = 30) -> Any:
         """Send command to another service"""
-        return await self.mqtt_client.send_command(target, command, parameters, timeout)
+        return await self.mqtt_client.send_command(target, command, parameters or {}, timeout)
     
-    def discover_services(self, service_type: str = None) -> List[ServiceInfo]:
+    def discover_services(self, service_type: Optional[str] = None) -> List[ServiceInfo]:
         """Discover available services"""
         services = []
         for service in self.services.values():

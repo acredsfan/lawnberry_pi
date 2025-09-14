@@ -515,7 +515,7 @@ class AdvancedTPUIntegrationTester:
                 logger.info("✅ Dashboard initialized successfully")
                 
                 # Test dashboard data retrieval
-                dashboard_data = self.dashboard.get_dashboard_data()
+                dashboard_data = await self.dashboard.get_dashboard_data()
                 
                 # Validate dashboard data structure
                 required_sections = ['status', 'current_performance', 'historical_data']

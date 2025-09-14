@@ -27,3 +27,22 @@ This file lists all files modified in this commit and a brief description of the
 - `src/web_api/routers/websocket.py`: removed unused auth/model imports.
 - `src/web_api/services/google_maps_service.py`: renamed unused context manager parameters.
 - `src/web_api/test_api.py`: removed unused `MagicMock` import.
+
+## 2025-09-14
+
+- `src/hardware/sensor_service.py`: Publish compatibility alias `power/battery` in addition to canonical `sensors/power/data` to ensure UI and API receive power data.
+- `src/web_api/main.py`: `/api/v1/status` now prefers `sensors/power/data` with fallback to `power/battery` when composing power info.
+- `src/web_api/routers/power.py`: Battery endpoint reads from `sensors/power/data` with legacy fallback to `power/battery`.
+- `web-ui/src/services/sensorDataService.ts`: Subscribe to `sensors/power/data` instead of legacy `power/battery` for real-time power data in UI.
+- `src/vision/tpu_dashboard.py`: Made `get_dashboard_data` async to fix a SyntaxError (await used inside a non-async function) and align with callers.
+- `scripts/test_advanced_tpu_integration.py`: Await `dashboard.get_dashboard_data()` accordingly.
+
+Notes:
+- This alignment establishes `sensors/power/data` as the canonical topic while retaining `power/battery` for backwards compatibility.
+- Perform a fast deploy and restart services to see live power data in the UI.
+
+## 2025-09-14 (comm system follow-up)
+
+- `src/communication/service_manager.py`:
+	- Instantiate MQTT client via module reference (`src.communication.client.MQTTClient`) to align with test patch target and improve DI/testability.
+	- Defer MQTT handler setup from `__init__` to `initialize()` and make handler registration await-safe to avoid coroutine-not-awaited warnings with async mocks.

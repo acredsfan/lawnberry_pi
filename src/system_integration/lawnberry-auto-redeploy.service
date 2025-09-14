@@ -1,0 +1,45 @@
+[Unit]
+Description=LawnBerryPi Auto Rebuild & Deploy Watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/lawnberry
+Environment=PYTHONPATH=/opt/lawnberry
+Environment=FAST_DEPLOY_SERVICE_TIMEOUT=10
+Environment=FAST_DEPLOY_MAX_SECONDS=70
+ExecStart=/bin/bash -lc '/bin/bash /opt/lawnberry/scripts/auto_rebuild_deploy.sh'
+Restart=always
+RestartSec=5
+TimeoutStartSec=20
+TimeoutStopSec=20
+NoNewPrivileges=false
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_SETUID CAP_SETGID
+AmbientCapabilities=CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_SETUID CAP_SETGID
+ProtectKernelTunables=true
+ProtectControlGroups=true
+LockPersonality=true
+MemoryMax=300M
+ReadWritePaths=/opt/lawnberry /etc/systemd/system /var/log/lawnberry
+
+# Additional Bookworm Security Features
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

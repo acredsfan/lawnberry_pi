@@ -176,7 +176,7 @@ class SensorDataService {
     webSocketService.on('sensors/imu/data', imuHandler);
     webSocketService.on('sensors/tof/data', tofHandler);
     webSocketService.on('sensors/environmental/data', environmentalHandler);
-    webSocketService.on('power/battery', powerHandler);
+  webSocketService.on('sensors/power/data', powerHandler);
     
     // Store unsubscribe functions
     this.unsubscribeFunctions = [
@@ -184,7 +184,7 @@ class SensorDataService {
       () => webSocketService.off('sensors/imu/data', imuHandler),
       () => webSocketService.off('sensors/tof/data', tofHandler),
       () => webSocketService.off('sensors/environmental/data', environmentalHandler),
-      () => webSocketService.off('power/battery', powerHandler)
+  () => webSocketService.off('sensors/power/data', powerHandler)
     ];
   }
   
@@ -209,7 +209,7 @@ class SensorDataService {
       'sensors/imu/data', 
       'sensors/tof/data',
       'sensors/environmental/data',
-      'power/battery'
+      'sensors/power/data'
     ]);
     
     console.log('Sensor data service started with WebSocket subscriptions');
@@ -223,7 +223,7 @@ class SensorDataService {
       'sensors/imu/data',
       'sensors/tof/data', 
       'sensors/environmental/data',
-      'power/battery'
+      'sensors/power/data'
     ]);
     
     // Clear all unsubscribe functions

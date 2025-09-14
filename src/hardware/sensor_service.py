@@ -725,6 +725,8 @@ class SensorService:
                 "sensors/tof/data": sensor_data["tof"],
                 "sensors/environmental/data": sensor_data["environmental"],
                 "sensors/power/data": sensor_data["power"],
+                # Compatibility alias for legacy consumers
+                "power/battery": sensor_data["power"],
             }
 
             # Publish to each topic

@@ -10,7 +10,8 @@ import hashlib
 import secrets
 from fastapi import HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import jwt
+from jose import jwt
+from jose.exceptions import JWTError, ExpiredSignatureError
 from passlib.context import CryptContext
 
 
@@ -104,7 +105,7 @@ class AuthManager:
                 algorithms=[self.config.jwt_algorithm]
             )
             
-            username: str = payload.get("sub")
+            username = payload.get("sub")
             if username is None:
                 return None
             
@@ -120,10 +121,10 @@ class AuthManager:
                 'iat': payload.get('iat')
             }
             
-        except jwt.ExpiredSignatureError:
+        except ExpiredSignatureError:
             self.logger.warning("Token expired")
             return None
-        except jwt.JWTError as e:
+        except JWTError as e:
             self.logger.warning(f"Token validation error: {e}")
             return None
     

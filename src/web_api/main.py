@@ -308,7 +308,12 @@ def create_app() -> FastAPI:
             imu_data = mqtt_bridge.get_cached_data("sensors/imu/data") or {}
             tof_data = mqtt_bridge.get_cached_data("sensors/tof/data") or {}
             env_data = mqtt_bridge.get_cached_data("sensors/environmental/data") or {}
-            power_data = mqtt_bridge.get_cached_data("power/battery") or {}
+            # Prefer canonical sensors/power/data; fall back to legacy power/battery if present
+            power_data = (
+                mqtt_bridge.get_cached_data("sensors/power/data")
+                or mqtt_bridge.get_cached_data("power/battery")
+                or {}
+            )
             health_data = mqtt_bridge.get_cached_data("system/health") or {}
             
             # ToF fallback logic: if aggregated topic missing or zero, try per-ToF topics

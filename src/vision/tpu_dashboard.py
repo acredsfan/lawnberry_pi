@@ -462,7 +462,7 @@ class TPUPerformanceDashboard:
         except Exception as e:
             self.logger.error(f"Error checking TPU alerts: {e}")
     
-    def get_dashboard_data(self) -> Dict[str, Any]:
+    async def get_dashboard_data(self) -> Dict[str, Any]:
         """Get comprehensive dashboard data"""
         try:
             # Current status

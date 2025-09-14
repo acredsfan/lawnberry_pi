@@ -420,6 +420,17 @@ Safeguards:
 - Mock gating via `VITE_USE_MOCKS` prevents mixing synthetic & live packets.
 - Navigation position & coverage updates come through lightweight incremental `updateStatus` actions to reduce render cost on Pi.
 
+## 🔄 Auto Rebuild & Deploy
+
+- Background watcher automatically rebuilds and redeploys only the pieces that changed, then syncs to `/opt/lawnberry`.
+- Details: see `docs/auto-redeploy.md`.
+- Manage the watcher service:
+
+```bash
+sudo systemctl status lawnberry-auto-redeploy
+sudo systemctl restart lawnberry-auto-redeploy
+```
+
 ## Contributing
 
 1. Fork the repository

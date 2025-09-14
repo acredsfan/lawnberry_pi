@@ -12,6 +12,7 @@ WEB_UI_DIR="$PROJECT_ROOT/web-ui"
 DIST_DIR="$WEB_UI_DIR/dist"
 INDEX_FILE="$DIST_DIR/index.html"
 STAMP_FILE="$DIST_DIR/.build_timestamp"
+PKG_HASH_FILE="$DIST_DIR/.pkg_hash"
 LOG_PREFIX="[auto-rebuild-ui]"
 
 MAX_BUILD_SECONDS=${MAX_BUILD_SECONDS:-600}
@@ -70,16 +71,27 @@ if [[ "$NEED_BUILD" = false ]]; then
   exit 0
 fi
 
-# Ensure dependencies present (install only if node_modules absent)
+# Decide if we must (re)install dependencies
+NEED_NPM_INSTALL=0
+CURRENT_PKG_HASH=$( (cd "$WEB_UI_DIR" && sha256sum package.json 2>/dev/null; sha256sum package-lock.json 2>/dev/null; sha256sum pnpm-lock.yaml 2>/dev/null; sha256sum yarn.lock 2>/dev/null) | sha256sum 2>/dev/null | cut -d' ' -f1 || echo "0")
+PREV_PKG_HASH=$(cat "$PKG_HASH_FILE" 2>/dev/null || echo "")
 if [[ ! -d "$WEB_UI_DIR/node_modules" ]]; then
-  log "node_modules missing – installing dependencies"
-  ( cd "$WEB_UI_DIR" && timeout ${MAX_BUILD_SECONDS}s npm install --no-audit --no-fund ) || {
-    err "npm install failed or timed out"; exit 1; }
+  NEED_NPM_INSTALL=1
+elif [[ -n "$CURRENT_PKG_HASH" && "$CURRENT_PKG_HASH" != "$PREV_PKG_HASH" ]]; then
+  log "package files changed – reinstalling dependencies"
+  NEED_NPM_INSTALL=1
+fi
+if [[ $NEED_NPM_INSTALL -eq 1 ]]; then
+  ( cd "$WEB_UI_DIR" && timeout ${MAX_BUILD_SECONDS}s npm install --no-audit --no-fund ) || { err "npm install failed or timed out"; exit 1; }
 fi
 
 log "Running production build (timeout: ${MAX_BUILD_SECONDS}s)"
 if ( cd "$WEB_UI_DIR" && timeout ${MAX_BUILD_SECONDS}s npm run build --silent ); then
   date +%s > "$STAMP_FILE" || true
+  # Record package hash for next time
+  if [[ -n "$CURRENT_PKG_HASH" ]]; then
+    echo "$CURRENT_PKG_HASH" > "$PKG_HASH_FILE" || true
+  fi
   log "Build complete"
 else
   err "Build failed or timed out"

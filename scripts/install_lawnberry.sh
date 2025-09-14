@@ -563,6 +563,7 @@ install_dependencies() {
         "rpicam-apps"
         "libcamera-dev"
         "python3-libcamera"
+        "inotify-tools"
     )
 
     # Hardware-specific packages
@@ -1368,14 +1369,22 @@ create_directories() {
     sudo mkdir -p "$DATA_DIR/database"
     sudo mkdir -p "$BACKUP_DIR"
 
-    # Copy project files to installation directory
-    log_info "Copying project files to $INSTALL_DIR..."
-    sudo cp -r "$PROJECT_ROOT"/* "$INSTALL_DIR/" || log_warning "Could not copy all project files"
+    # Copy project files to installation directory (exclude local venvs, node_modules, caches)
+    log_info "Copying project files to $INSTALL_DIR (rsync with excludes) ..."
+    sudo rsync -a --delete \
+        --exclude 'venv/' \
+        --exclude 'venv_coral_pyenv/' \
+        --exclude 'venv_test_mqtt/' \
+        --exclude '.git/' \
+        --exclude '.vscode/' \
+        --exclude 'node_modules/' \
+        --exclude 'web-ui/node_modules/' \
+        --exclude '*.log' \
+        "$PROJECT_ROOT"/ "$INSTALL_DIR"/ || log_warning "rsync copy reported issues"
 
     # Ensure a virtual environment exists in canonical install dir (Option A runtime)
     if [[ ! -d "$INSTALL_DIR/venv" ]]; then
         log_info "Creating virtual environment in $INSTALL_DIR/venv (canonical runtime)"
-        # Use root-owned creation then adjust ownership
         sudo python3 -m venv --system-site-packages "$INSTALL_DIR/venv" || log_warning "Failed to create venv in $INSTALL_DIR"
         sudo chown -R "$USER:$GROUP" "$INSTALL_DIR/venv" || sudo chown -R "$USER:$USER" "$INSTALL_DIR/venv"
     else
@@ -1516,7 +1525,7 @@ deploy_update() {
         case "$f" in
             lawnberry_install.log|*.pyc) continue;;
             *)
-                sudo rsync -a --owner --group --chown=lawnberry:lawnberry "$PROJECT_ROOT/$f" "$INSTALL_DIR/$f" 2>/dev/null || true
+                sudo rsync -a --owner --group --chown=pi:pi "$PROJECT_ROOT/$f" "$INSTALL_DIR/$f" 2>/dev/null || true
             ;;
         esac
     done
@@ -1560,7 +1569,7 @@ deploy_update() {
                 if [[ "$DIST_SYNC_SKIPPED" != 1 ]]; then
                     if [[ "$DIST_MODE" == "full" ]]; then
                         log_info "Syncing web UI dist (full mode, timeout 35s)"
-                        if ! timeout 35s sudo rsync -a --delete --owner --group --chown=lawnberry:lawnberry "$PROJECT_ROOT/web-ui/dist/" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null; then
+                        if ! timeout 35s sudo rsync -a --delete --owner --group --chown=pi:pi "$PROJECT_ROOT/web-ui/dist/" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null; then
                             log_warning "Full dist sync timed out - falling back to minimal subset"
                             DIST_MODE="minimal"
                         else
@@ -1674,26 +1683,57 @@ ensure_runtime_python_env() {
         }
     fi
 
+    # Compute combined hash of requirement files to detect changes
+    local req_hash_file="$INSTALL_DIR/.requirements_hash"
+    local current_hash=""
+    current_hash=$( ( \
+        test -f "$INSTALL_DIR/requirements.txt" && sha256sum "$INSTALL_DIR/requirements.txt" || true; \
+        test -f "$INSTALL_DIR/requirements-optional.txt" && sha256sum "$INSTALL_DIR/requirements-optional.txt" || true; \
+        test -f "$INSTALL_DIR/requirements-coral.txt" && sha256sum "$INSTALL_DIR/requirements-coral.txt" || true \
+      ) | sha256sum | cut -d' ' -f1 )
+    local previous_hash=""
+    previous_hash=$(cat "$req_hash_file" 2>/dev/null || echo "")
+
     # Quick import probe for a representative module
-    if ! "$INSTALL_DIR/venv/bin/python" -c "import fastapi" 2>/dev/null; then
-        log_info "Installing Python dependencies into runtime venv"
+    # Detect contaminated pip shebang pointing to wrong interpreter (e.g., source venv)
+    if [[ -f "$INSTALL_DIR/venv/bin/pip" ]]; then
+        pip_shebang=$(head -n1 "$INSTALL_DIR/venv/bin/pip" 2>/dev/null || echo "")
+        # Expect the shebang to reference the runtime venv under $INSTALL_DIR
+        if ! echo "$pip_shebang" | grep -q "$INSTALL_DIR/venv/bin/python"; then
+            log_warning "Runtime venv pip shebang mismatch — recreating runtime venv"
+            rm -rf "$INSTALL_DIR/venv"
+            python3 -m venv --system-site-packages "$INSTALL_DIR/venv" || { log_error "Failed to recreate runtime venv"; return; }
+        fi
+    fi
+
+    if ! "$INSTALL_DIR/venv/bin/python" -c "import fastapi, dotenv" 2>/dev/null || [[ -n "$current_hash" && "$current_hash" != "$previous_hash" ]]; then
+        if [[ -n "$previous_hash" && "$current_hash" != "$previous_hash" ]]; then
+            log_info "Detected requirements change (hash mismatch) — reinstalling dependencies"
+        else
+            log_info "Installing Python dependencies into runtime venv"
+        fi
         "$INSTALL_DIR/venv/bin/python" -m pip install --upgrade pip setuptools wheel >/dev/null 2>&1 || true
         if [[ -f "$INSTALL_DIR/requirements.txt" ]]; then
-            "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" || log_warning "Base requirements install encountered issues"
+            "$INSTALL_DIR/venv/bin/python" -m pip install -r "$INSTALL_DIR/requirements.txt" || log_warning "Base requirements install encountered issues"
         fi
         if [[ -f "$INSTALL_DIR/requirements-optional.txt" ]]; then
-            "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements-optional.txt" || log_warning "Optional requirements install issues"
+            "$INSTALL_DIR/venv/bin/python" -m pip install -r "$INSTALL_DIR/requirements-optional.txt" || log_warning "Optional requirements install issues"
         fi
         if [[ -f "$INSTALL_DIR/requirements-coral.txt" ]]; then
-            "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements-coral.txt" || log_debug "Coral requirements skipped or failed"
+            "$INSTALL_DIR/venv/bin/python" -m pip install -r "$INSTALL_DIR/requirements-coral.txt" || log_debug "Coral requirements skipped or failed"
+        fi
+        # Persist new hash
+        if [[ -n "$current_hash" ]]; then
+            echo "$current_hash" > "$req_hash_file" 2>/dev/null || true
+            chown pi:pi "$req_hash_file" 2>/dev/null || true
         fi
     else
-        log_debug "Runtime venv already has core dependencies"
+        log_debug "Runtime venv dependencies up-to-date (hash match)"
     fi
 
     # Final verification of critical modules (non-fatal if missing hardware libs)
     "$INSTALL_DIR/venv/bin/python" - <<'EOF'
-critical = ["fastapi", "pydantic", "asyncio"]
+critical = ["fastapi", "pydantic", "dotenv"]
 missing = []
 for m in critical:
     try:
@@ -1745,6 +1785,7 @@ install_services() {
     # Service files to install
     services=(
         "src/system_integration/lawnberry-system.service"
+        "src/system_integration/lawnberry-auto-redeploy.service"
         "src/communication/lawnberry-communication.service"
         "src/data_management/lawnberry-data.service"
         "src/hardware/lawnberry-hardware.service"
@@ -1921,6 +1962,7 @@ HARDEN
     # Enable core services (check if they need enabling)
     core_services=(
         "lawnberry-system"
+        "lawnberry-auto-redeploy"
         "lawnberry-communication"
         "lawnberry-data"
         "lawnberry-hardware"

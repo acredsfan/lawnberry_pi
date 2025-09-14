@@ -450,3 +450,29 @@ class TopicManager:
 
 # Singleton instance
 topic_manager = TopicManager()
+
+# Module-level convenience functions for legacy imports/tests that treat this module
+# as a function namespace (e.g., tests importing `src.communication.topic_manager`):
+def match_topic_pattern(topic: str, pattern: str) -> bool:
+    """Module-level wrapper: check if topic matches pattern (MQTT wildcards)."""
+    return topic_manager.match_topic_pattern(topic, pattern)
+
+def find_topic_definition(topic: str) -> Optional[TopicDefinition]:
+    """Module-level wrapper: find topic definition for a given topic."""
+    return topic_manager.find_topic_definition(topic)
+
+def get_recommended_qos(topic: str) -> int:
+    """Module-level wrapper: recommended QoS for topic."""
+    return topic_manager.get_recommended_qos(topic)
+
+def should_retain(topic: str) -> bool:
+    """Module-level wrapper: whether topic should be retained."""
+    return topic_manager.should_retain(topic)
+
+def get_rate_limit(topic: str) -> Optional[int]:
+    """Module-level wrapper: rate limit for topic if any."""
+    return topic_manager.get_rate_limit(topic)
+
+def get_topic_hierarchy() -> Dict[str, Any]:
+    """Module-level wrapper: produce topic hierarchy structure."""
+    return topic_manager.get_topic_hierarchy()

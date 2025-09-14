@@ -26,7 +26,8 @@ async def get_power_status(
         raise ServiceUnavailableError("mqtt_bridge", "MQTT bridge not available")
     
     # Get battery data
-    battery_data = mqtt_bridge.get_cached_data("power/battery")
+    # Use canonical sensors/power/data with fallback to legacy topics
+    battery_data = mqtt_bridge.get_cached_data("sensors/power/data") or mqtt_bridge.get_cached_data("power/battery")
     solar_data = mqtt_bridge.get_cached_data("power/solar")
     
     if not battery_data:

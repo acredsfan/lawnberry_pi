@@ -15,7 +15,8 @@ paho-mqtt>=2.1.0,<3.0.0
 
 # Computer Vision System Dependencies - Bookworm optimized
 opencv-python>=4.12.0.88,<5.0.0
-numpy>=2.3.2,<3.0.0
+# numpy constraint aligned with opencv-python 4.12 aarch64 wheels (requires <2.3.0)
+numpy>=2.0.0,<2.3.0
 # TensorFlow Lite runtime is only available on ARM64 Linux
 tflite-runtime>=2.14.0,<3.0.0; sys_platform == "linux" and platform_machine == "aarch64"
 pillow>=11.3.0,<12.0.0
