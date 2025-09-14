@@ -129,6 +129,8 @@ class WebSocketService {
       'sensors/+/data',
       'navigation/position',
       'navigation/status',
+      // Subscribe to canonical power topic and keep legacy alias for compatibility
+      'sensors/power/data',
       'power/battery',
       'weather/current',
   'safety/status',

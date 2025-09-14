@@ -46,3 +46,19 @@ Notes:
 - `src/communication/service_manager.py`:
 	- Instantiate MQTT client via module reference (`src.communication.client.MQTTClient`) to align with test patch target and improve DI/testability.
 	- Defer MQTT handler setup from `__init__` to `initialize()` and make handler registration await-safe to avoid coroutine-not-awaited warnings with async mocks.
+
+## 2025-09-14 (data pipeline + ToF)
+
+- `src/web_api/mqtt_bridge.py`: Subscribe/cache per-ToF topics by adding `'sensors/tof/+'` to `_topic_mappings`, enabling API fallback that reads `sensors/tof/left` and `sensors/tof/right`.
+- `docs/data-pipeline.md`: New documentation describing the end-to-end data flow (Hardware → MQTT → API/MQTTBridge → WebSocket → UI) for GPS, IMU, ToF, Environmental, Power, RC, and Camera stream.
+
+## 2025-09-14 (auto-redeploy activation)
+
+- `src/system_integration/lawnberry-auto-redeploy.service`: Run as user `pi`, watch `/home/pi/lawnberry`, adjust `WorkingDirectory` and `ExecStart`, and set `ProtectHome=read-only` so inotify can watch the workspace while keeping hardened settings.
+- `scripts/auto_rebuild_deploy.sh`: Support `WATCH_ROOT` override via `PROJECT_ROOT=${WATCH_ROOT:-...}` so the watcher can monitor the source workspace while deploying to `/opt/lawnberry`.
+- `docs/auto-redeploy.md`: Clarified service user, watch root behavior, and added troubleshooting steps.
+
+## 2025-09-14 (auto-redeploy logging)
+
+- `scripts/auto_rebuild_deploy.sh`: Added structured log markers at detection, initiation, and completion with explicit SUCCESS/FAILURE lines for UI builds/deploys, code fast deploys, service reinstalls, and requirements updates. Actions now return status; the runner logs `ACTION COMPLETE -> SUCCESS|FAILURE` per category.
+- `docs/auto-redeploy.md`: Documented new log markers to aid operations.

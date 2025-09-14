@@ -45,6 +45,8 @@ class MQTTBridge:
             'sensors/heartbeat': 'sensor_status',
             'system/services/+/status': 'service_status',
             'sensors/+/data': 'sensor_data',
+            # Per-ToF topics (left/right) used by API fallback logic
+            'sensors/tof/+': 'sensor_data',
             'sensors/+/status': 'sensor_status',
             'navigation/position': 'navigation_position',
             'navigation/status': 'navigation_status',

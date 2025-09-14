@@ -14,7 +14,8 @@
 
 set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Allow overriding the root to watch via WATCH_ROOT; default to script location
+PROJECT_ROOT="${WATCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 INSTALL_DIR="/opt/lawnberry"
 LOG_DIR="/var/log/lawnberry"
 LOG_FILE="$LOG_DIR/auto_redeploy.log"
@@ -44,46 +45,77 @@ cd "$PROJECT_ROOT"
 
 # Helper wrappers with timeouts and safe defaults
 do_ui_build_and_sync() {
-  say "UI: starting conditional build"
+  say "UI: DETECTED change -> INIT build & minimal dist deploy"
   # Rebuild dist only if changed; script already enforces timeouts
   if ! timeout 620s bash "$PROJECT_ROOT/scripts/auto_rebuild_web_ui.sh" >>"$LOG_FILE" 2>&1; then
-    warn "UI: auto rebuild failed or timed out; skipping dist sync this round"
+    err "UI: BUILD FAILED (auto_rebuild_web_ui.sh)"
     return 1
   fi
 
   # Fast deploy only the dist (minimal by default)
-  say "UI: syncing dist to $INSTALL_DIR (minimal)"
-  FAST_DEPLOY_DIST_MODE=minimal FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
-    timeout 120s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1 || warn "UI: deploy update encountered issues"
+  say "UI: DEPLOY START (dist minimal) -> $INSTALL_DIR"
+  if FAST_DEPLOY_DIST_MODE=minimal FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
+    timeout 120s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1; then
+    say "UI: DEPLOY SUCCESS (dist minimal)"
+    return 0
+  else
+    err "UI: DEPLOY FAILED (dist minimal)"
+    return 1
+  fi
 }
 
 do_ui_full_dist_sync() {
-  say "UI: package/lock changed – full dist sync"
+  say "UI: DETECTED pkg/lock change -> INIT build & FULL dist deploy"
   if ! timeout 620s bash "$PROJECT_ROOT/scripts/auto_rebuild_web_ui.sh" >>"$LOG_FILE" 2>&1; then
-    warn "UI: auto rebuild failed or timed out; skipping full dist sync"
+    err "UI: BUILD FAILED (full dist)"
     return 1
   fi
-  FAST_DEPLOY_DIST_MODE=full FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
-    timeout 160s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1 || warn "UI: full dist deploy had issues"
+  say "UI: DEPLOY START (dist full) -> $INSTALL_DIR"
+  if FAST_DEPLOY_DIST_MODE=full FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
+    timeout 160s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1; then
+    say "UI: DEPLOY SUCCESS (dist full)"
+    return 0
+  else
+    err "UI: DEPLOY FAILED (dist full)"
+    return 1
+  fi
 }
 
 do_fast_deploy_code() {
-  say "Code/config changed – running fast deploy"
-  FAST_DEPLOY_DIST_MODE=skip FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
-    timeout 160s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1 || warn "Deploy update encountered issues"
+  say "CODE: DETECTED src/config change -> INIT fast deploy"
+  if FAST_DEPLOY_DIST_MODE=skip FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
+    timeout 160s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1; then
+    say "CODE: DEPLOY SUCCESS"
+    return 0
+  else
+    err "CODE: DEPLOY FAILED"
+    return 1
+  fi
 }
 
 do_services_replace() {
-  say "Service unit changed – reinstalling and replacing"
+  say "SERVICE: DETECTED *.service change -> INIT reinstall & replace"
   # Force overwrite/replace semantics via --services-only (script handles stop/replace/start + daemon-reload)
-  timeout 120s bash "$PROJECT_ROOT/scripts/install_lawnberry.sh" --services-only >>"$LOG_FILE" 2>&1 || err "Service reinstall failed"
+  if timeout 120s bash "$PROJECT_ROOT/scripts/install_lawnberry.sh" --services-only >>"$LOG_FILE" 2>&1; then
+    say "SERVICE: REINSTALL SUCCESS"
+    return 0
+  else
+    err "SERVICE: REINSTALL FAILED"
+    return 1
+  fi
 }
 
 do_requirements_update() {
-  say "Requirements changed – ensuring runtime venv dependencies at $INSTALL_DIR"
+  say "REQS: DETECTED requirements/pyproject change -> INIT venv update deploy"
   # Fast path: copy new requirement files to /opt and let deploy script ensure venv deps
-  FAST_DEPLOY_DIST_MODE=skip FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
-    timeout 200s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1 || warn "Deploy update (requirements) had issues"
+  if FAST_DEPLOY_DIST_MODE=skip FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
+    timeout 200s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1; then
+    say "REQS: DEPLOY SUCCESS (venv deps ensured)"
+    return 0
+  else
+    err "REQS: DEPLOY FAILED (venv deps)"
+    return 1
+  fi
 }
 
 # Prepare watch set
@@ -128,19 +160,23 @@ classify_and_mark() {
   # Normalize path
   case "$f" in
     *"/web-ui/package.json"|*"/web-ui/package-lock.json"|*"/web-ui/pnpm-lock.yaml"|*"/web-ui/yarn.lock")
+      say "DETECT: UI pkg/lock changed -> $f"
       pending_ui_full=true
       ;;
     *"/web-ui/src/"*|*"/web-ui/public/"*|*"/web-ui/vite.config."*)
+      say "DETECT: UI source/assets changed -> $f"
       pending_ui=true
       ;;
     *".service")
-      # Any service unit in repo
+      say "DETECT: service unit changed -> $f"
       pending_services=true
       ;;
     *"requirements.txt"|*"requirements-optional.txt"|*"requirements-coral.txt"|*"pyproject.toml")
+      say "DETECT: requirements/pyproject changed -> $f"
       pending_requirements=true
       ;;
     *"/src/"*|*"/config/"*)
+      say "DETECT: code/config changed -> $f"
       pending_deploy=true
       ;;
     *)
@@ -152,18 +188,38 @@ classify_and_mark() {
 run_pending_actions() {
   # Priority order: services replace (units), requirements, UI full, UI minimal, code deploy
   if [[ "$pending_services" == true ]]; then
-    do_services_replace || true
+    if do_services_replace; then
+      say "SERVICE: ACTION COMPLETE -> SUCCESS"
+    else
+      err "SERVICE: ACTION COMPLETE -> FAILURE"
+    fi
   fi
   if [[ "$pending_requirements" == true ]]; then
-    do_requirements_update || true
+    if do_requirements_update; then
+      say "REQS: ACTION COMPLETE -> SUCCESS"
+    else
+      err "REQS: ACTION COMPLETE -> FAILURE"
+    fi
   fi
   if [[ "$pending_ui_full" == true ]]; then
-    do_ui_full_dist_sync || true
+    if do_ui_full_dist_sync; then
+      say "UI: ACTION COMPLETE (full) -> SUCCESS"
+    else
+      err "UI: ACTION COMPLETE (full) -> FAILURE"
+    fi
   elif [[ "$pending_ui" == true ]]; then
-    do_ui_build_and_sync || true
+    if do_ui_build_and_sync; then
+      say "UI: ACTION COMPLETE (minimal) -> SUCCESS"
+    else
+      err "UI: ACTION COMPLETE (minimal) -> FAILURE"
+    fi
   fi
   if [[ "$pending_deploy" == true ]]; then
-    do_fast_deploy_code || true
+    if do_fast_deploy_code; then
+      say "CODE: ACTION COMPLETE -> SUCCESS"
+    else
+      err "CODE: ACTION COMPLETE -> FAILURE"
+    fi
   fi
   # reset flags
   pending_ui=false

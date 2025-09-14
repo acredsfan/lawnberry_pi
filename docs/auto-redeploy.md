@@ -17,7 +17,8 @@ What it does
 
 How it runs
 - Watcher script: `scripts/auto_rebuild_deploy.sh` (inotify-based, debounced)
-- System service: `lawnberry-auto-redeploy.service` runs the watcher at boot from `/opt/lawnberry`.
+- System service: `lawnberry-auto-redeploy.service` runs the watcher at boot as user `pi` and watches the editable workspace at `/home/pi/lawnberry`.
+- The watcher deploys changes to the canonical runtime at `/opt/lawnberry` using the repo scripts.
 - Timeouts are enforced throughout to prevent hangs; long commands are bounded.
 
 Enable or disable
@@ -37,6 +38,7 @@ Environment knobs
 - `FAST_DEPLOY_MAX_SECONDS`: cap per-deploy duration (default 70).
 - `FAST_DEPLOY_SERVICE_TIMEOUT`: per-service restart timeout (default 10).
 - `SKIP_AUTO_REBUILD=1`: causes web UI auto rebuild script to skip builds.
+- `WATCH_ROOT`: override the root directory the watcher monitors. Default is the repo root when running manually; the systemd unit sets this effectively by running in `/home/pi/lawnberry`.
 
 Manual one-off run
 ```bash
@@ -44,7 +46,35 @@ Manual one-off run
 bash scripts/auto_rebuild_deploy.sh
 ```
 
+Troubleshooting
+- Service not activating on file changes:
+  - Ensure it runs as user `pi` and watches `/home/pi/lawnberry` (unit file updated accordingly).
+  - Check logs: `sudo journalctl -u lawnberry-auto-redeploy -n 200 --no-pager`
+  - Verify inotify-tools: `which inotifywait || sudo apt-get install -y inotify-tools`
+  - Confirm the watch set includes your paths (script logs “Starting watcher …”).
+  - Verify deploy scripts exist: `scripts/lawnberry-deploy.sh`, `scripts/auto_rebuild_web_ui.sh`.
+
 Security and platform notes
 - Runs as user `pi` with hardened systemd settings.
 - Uses inotify; installer ensures `inotify-tools` is present.
 - All builds and syncs adhere to Raspberry Pi OS Bookworm constraints.
+
+Log markers (what to look for in `journalctl`)
+- Detection lines (trigger):
+  - `DETECT: UI source/assets changed -> <path>`
+  - `DETECT: UI pkg/lock changed -> <path>`
+  - `DETECT: code/config changed -> <path>`
+  - `DETECT: service unit changed -> <path>`
+  - `DETECT: requirements/pyproject changed -> <path>`
+- Action initiation lines:
+  - `UI: DETECTED change -> INIT build & minimal dist deploy`
+  - `UI: DETECTED pkg/lock change -> INIT build & FULL dist deploy`
+  - `CODE: DETECTED src/config change -> INIT fast deploy`
+  - `SERVICE: DETECTED *.service change -> INIT reinstall & replace`
+  - `REQS: DETECTED requirements/pyproject change -> INIT venv update deploy`
+- Completion lines (success/failure):
+  - `UI: DEPLOY SUCCESS (dist minimal|dist full)` or `UI: DEPLOY FAILED (...)`
+  - `CODE: DEPLOY SUCCESS` or `CODE: DEPLOY FAILED`
+  - `SERVICE: REINSTALL SUCCESS` or `SERVICE: REINSTALL FAILED`
+  - `REQS: DEPLOY SUCCESS (venv deps ensured)` or `REQS: DEPLOY FAILED (venv deps)`
+  - Summary markers: `ACTION COMPLETE -> SUCCESS|FAILURE` per category
