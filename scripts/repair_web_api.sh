@@ -52,6 +52,19 @@ if ! "$RUN_ROOT/venv/bin/python" -c "import fastapi" >/dev/null 2>&1; then
   timeout_cmd 300s "$RUN_ROOT/venv/bin/pip" install -r "$RUN_ROOT/requirements.txt" || warn "requirements install had issues"
 fi
 
+# Ensure Paho MQTT is available in the runtime venv (systemd does not see user-site packages)
+if ! "$RUN_ROOT/venv/bin/python" - <<'PY' >/dev/null 2>&1; then
+import sys
+import importlib
+sys.exit(0 if importlib.util.find_spec('paho.mqtt') else 1)
+PY
+then
+  log "Installing paho-mqtt into runtime venv"
+  timeout_cmd 90s "$RUN_ROOT/venv/bin/python" -m pip install 'paho-mqtt>=2.1.0,<3.0.0' || warn "paho-mqtt install encountered issues"
+else
+  log "paho-mqtt already present in runtime venv"
+fi
+
 log "Ensuring log/data directories"
 sudo mkdir -p /var/log/lawnberry /var/lib/lawnberry
 sudo chown -R pi:pi /var/log/lawnberry /var/lib/lawnberry || true
@@ -98,6 +111,20 @@ if timeout_cmd 8s curl -fsS http://127.0.0.1:8000/ui/ | head -n 5; then
   log "UI endpoint responded"
 else
   warn "UI probe failed (check dist and logs above)"
+fi
+
+log "Probing /api/v1/meta for MQTT status"
+if timeout_cmd 8s curl -fsS http://127.0.0.1:8000/api/v1/meta | grep -q '"mqtt_connected": true'; then
+  log "API reports mqtt_connected=true"
+else
+  warn "API meta does not show mqtt_connected=true (bridge may still be connecting)"
+fi
+
+log "Probing WebSocket connections stats"
+if timeout_cmd 8s curl -fsS http://127.0.0.1:8000/ws/connections >/dev/null; then
+  timeout_cmd 8s curl -fsS http://127.0.0.1:8000/ws/connections | sed -n '1,3p' || true
+else
+  warn "WebSocket connections endpoint probe failed"
 fi
 
 log "Checking listeners on :8000"

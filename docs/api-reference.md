@@ -4,7 +4,7 @@
 **Base URL:** `http://localhost:8000/api/v1`  
 **Authentication:** Token-based with role-based access control  
 **Last Updated:** December 2024  
-**WebSocket:** `ws://localhost:8001/ws` for real-time updates
+**WebSocket:** `ws://localhost:8000/ws/realtime` for real-time updates
 
 ## Overview
 
@@ -318,7 +318,7 @@ Notes:
 ## WebSocket API
 
 ### Real-Time Data Streaming
-**Connection:** `ws://localhost:8000/api/v1/websocket`
+**Connection:** `ws://localhost:8000/ws/realtime`
 
 The WebSocket connection provides real-time updates for:
 - Robot position and status

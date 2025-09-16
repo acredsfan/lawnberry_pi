@@ -9,6 +9,9 @@ import logging
 import math
 import threading
 import time
+import importlib
+import sys
+import traceback
 from collections import defaultdict, deque
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
@@ -18,16 +21,17 @@ from typing import Any, Callable, Dict, List, Optional, Set
 class DateTimeEncoder(json.JSONEncoder):
     """Custom JSON encoder that handles datetime objects"""
 
-    def default(self, obj):
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        return super().default(obj)
+    def default(self, o):  # match JSONEncoder signature (o)
+        if isinstance(o, datetime):
+            return o.isoformat()
+        return super().default(o)
 
 
-try:
-    import paho.mqtt.client as mqtt
-except ImportError:
-    mqtt = None
+# Defer paho-mqtt import to runtime to avoid environment/path order races under systemd
+try:  # best-effort eager import (fast path)
+    import paho.mqtt.client as mqtt  # type: ignore
+except Exception:  # pragma: no cover - fall back to runtime import with diagnostics
+    mqtt = None  # Will attempt import inside initialize()
 
 from .message_protocols import MessageProtocol, MessageType, MessageValidator, Priority
 
@@ -35,7 +39,7 @@ from .message_protocols import MessageProtocol, MessageType, MessageValidator, P
 class MQTTClient:
     """Advanced MQTT client with reliability features"""
 
-    def __init__(self, client_id: str, config: Dict[str, Any] = None):
+    def __init__(self, client_id: str, config: Optional[Dict[str, Any]] = None):
         self.client_id = client_id
         self.logger = logging.getLogger(f"{__name__}.{client_id}")
         # Deep-merge provided config with defaults so missing keys (e.g. queue_size) don't raise KeyError
@@ -44,10 +48,11 @@ class MQTTClient:
         else:
             self.config = self._default_config()
 
-        # MQTT client
-        self.client: Optional[mqtt.Client] = None
+        # MQTT client (avoid referencing mqtt.Client in annotations before module is imported)
+        self.client: Optional[Any] = None
         self._connected = False
         self._connection_lock = asyncio.Lock()
+        self._mqtt_err_success: int = 0
 
         # Message handling
         self._message_handlers: Dict[str, List[Callable]] = defaultdict(list)
@@ -115,9 +120,26 @@ class MQTTClient:
 
     async def initialize(self) -> bool:
         """Initialize MQTT client"""
+        # Ensure paho-mqtt is importable at runtime
+        global mqtt
         if mqtt is None:
-            self.logger.error("paho-mqtt not installed")
-            return False
+            try:
+                self.logger.warning(
+                    "paho-mqtt not imported at module load; attempting runtime import"
+                )
+                mqtt = importlib.import_module("paho.mqtt.client")  # type: ignore
+                self.logger.info(
+                    "paho-mqtt import successful at runtime: version=%s",
+                    getattr(mqtt, "__version__", "unknown"),
+                )
+            except Exception as e:
+                # Provide rich diagnostics to troubleshoot environment issues
+                self.logger.error(
+                    "paho-mqtt import failed: %s (executable=%s)", e, sys.executable
+                )
+                self.logger.debug("sys.path=%r", sys.path)
+                self.logger.exception("paho-mqtt import traceback:")
+                return False
 
         try:
             self.logger.info(f"Initializing MQTT client: {self.client_id}")
@@ -127,27 +149,46 @@ class MQTTClient:
             except RuntimeError:
                 self._loop = None
 
-            # Create client (paho-mqtt v2.x) with v1-style callbacks
+            # Create client (paho-mqtt v1/v2) with v1-style callbacks when supported
             # Use keyword args to avoid positional misbinding across versions
-            self.client = mqtt.Client(
-                client_id=self.client_id,
-                clean_session=self.config["clean_session"],
-                callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
-            )
-            self.client.on_connect = self._on_connect
-            self.client.on_disconnect = self._on_disconnect
-            self.client.on_message = self._on_message
-            self.client.on_publish = self._on_publish
+            client_kwargs: Dict[str, Any] = {
+                "client_id": self.client_id,
+                "clean_session": self.config["clean_session"],
+            }
+            try:
+                cbv_enum = getattr(mqtt, "CallbackAPIVersion", None)
+                # Try both common enum names
+                cbv_v1 = None
+                if cbv_enum is not None:
+                    cbv_v1 = getattr(cbv_enum, "VERSION1", None) or getattr(cbv_enum, "v1", None)
+                if cbv_v1 is not None:
+                    client_kwargs["callback_api_version"] = cbv_v1
+            except Exception:
+                # Older paho versions: no callback_api_version supported
+                pass
+
+            self.client = mqtt.Client(**client_kwargs)
+            # cache success code constant for comparisons, fallback to 0
+            try:
+                self._mqtt_err_success = int(getattr(mqtt, "MQTT_ERR_SUCCESS", 0))
+            except Exception:
+                self._mqtt_err_success = 0
+            client = self.client
+            assert client is not None
+            client.on_connect = self._on_connect
+            client.on_disconnect = self._on_disconnect
+            client.on_message = self._on_message
+            client.on_publish = self._on_publish
 
             # Configure authentication
             if self.config["auth"]["enabled"]:
-                self.client.username_pw_set(
+                client.username_pw_set(
                     self.config["auth"]["username"], self.config["auth"]["password"]
                 )
 
             # Configure TLS
             if self.config["tls"]["enabled"]:
-                self.client.tls_set(
+                client.tls_set(
                     ca_certs=self.config["tls"]["ca_certs"],
                     certfile=self.config["tls"]["certfile"],
                     keyfile=self.config["tls"]["keyfile"],
@@ -176,8 +217,9 @@ class MQTTClient:
     async def disconnect(self):
         """Public method to disconnect from MQTT broker"""
         if self.client and self._connected:
-            self.client.loop_stop()
-            self.client.disconnect()
+            client = self.client
+            client.loop_stop()
+            client.disconnect()
             self._connected = False
             self.logger.info("MQTT client disconnected")
 
@@ -201,8 +243,9 @@ class MQTTClient:
 
         # Disconnect client
         if self.client and self._connected:
-            self.client.loop_stop()
-            self.client.disconnect()
+            client = self.client
+            client.loop_stop()
+            client.disconnect()
 
         self.logger.info("MQTT client shut down")
 
@@ -218,12 +261,15 @@ class MQTTClient:
                 )
 
                 # Connect
-                self.client.connect(
+                client = self.client
+                if client is None:
+                    raise RuntimeError("MQTT client not initialized")
+                client.connect(
                     self.config["broker_host"], self.config["broker_port"], self.config["keepalive"]
                 )
 
                 # Start network loop
-                self.client.loop_start()
+                client.loop_start()
 
                 # Wait for connection
                 for _ in range(100):  # 10 second timeout
@@ -398,7 +444,7 @@ class MQTTClient:
 
                     response = ResponseMessage.create(
                         sender=self.client_id,
-                        correlation_id=message.metadata.correlation_id,
+                        correlation_id=message.metadata.correlation_id or "",
                         success=True,
                         result=result,
                     )
@@ -412,7 +458,7 @@ class MQTTClient:
 
                     response = ResponseMessage.create(
                         sender=self.client_id,
-                        correlation_id=message.metadata.correlation_id,
+                        correlation_id=message.metadata.correlation_id or "",
                         success=False,
                         error=str(e),
                     )
@@ -462,9 +508,12 @@ class MQTTClient:
         while self._message_queue and processed < 10:  # Process max 10 per cycle
             try:
                 topic, message, qos = self._message_queue.popleft()
-                result = self.client.publish(topic, message, qos=qos)
+                client = self.client
+                if client is None:
+                    raise RuntimeError("MQTT client not initialized")
+                result = client.publish(topic, message, qos=qos)
 
-                if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                if int(getattr(result, "rc", -1)) == self._mqtt_err_success:
                     self._message_stats["sent"] += 1
                 else:
                     # Re-queue on failure
@@ -539,7 +588,7 @@ class MQTTClient:
             else:
                 # Convert dataclass instances
                 if is_dataclass(message):
-                    message = asdict(message)
+                    message = asdict(message)  # type: ignore[arg-type]
                 # Objects with to_dict support
                 elif hasattr(message, "to_dict") and callable(getattr(message, "to_dict")):
                     try:
@@ -575,8 +624,11 @@ class MQTTClient:
 
             # Publish or queue
             if self._connected:
-                result = self.client.publish(topic, payload, qos=qos, retain=retain)
-                if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                client = self.client
+                if client is None:
+                    raise RuntimeError("MQTT client not initialized")
+                result = client.publish(topic, payload, qos=qos, retain=retain)
+                if int(getattr(result, "rc", -1)) == self._mqtt_err_success:
                     self._message_stats["sent"] += 1
                     self.logger.debug(f"Published to {topic}: {len(payload)} bytes")
                     return True
@@ -604,8 +656,11 @@ class MQTTClient:
             return False
 
         try:
-            result, mid = self.client.subscribe(topic, qos)
-            if result == mqtt.MQTT_ERR_SUCCESS:
+            client = self.client
+            if client is None:
+                raise RuntimeError("MQTT client not initialized")
+            result, mid = client.subscribe(topic, qos)
+            if int(result) == self._mqtt_err_success:
                 self.logger.info(f"Subscribed to {topic} (qos={qos})")
                 return True
             else:
@@ -626,17 +681,19 @@ class MQTTClient:
         self.logger.debug(f"Added command handler for {command}")
 
     async def send_command(
-        self, target: str, command: str, parameters: Dict[str, Any] = None, timeout: float = 30
+        self, target: str, command: str, parameters: Optional[Dict[str, Any]] = None, timeout: float = 30
     ) -> Any:
         """Send command and wait for response"""
         from .message_protocols import CommandMessage
 
-        cmd_msg = CommandMessage.create(self.client_id, target, command, parameters)
+        payload_params: Dict[str, Any] = parameters or {}
+        cmd_msg = CommandMessage.create(self.client_id, target, command, payload_params)
         correlation_id = cmd_msg.metadata.correlation_id
 
         # Create response future
         future = asyncio.Future()
-        self._pending_responses[correlation_id] = future
+        if correlation_id:
+            self._pending_responses[correlation_id] = future
 
         try:
             # Publish command
@@ -644,14 +701,16 @@ class MQTTClient:
             await self.publish(cmd_topic, cmd_msg)
 
             # Wait for response
-            result = await asyncio.wait_for(future, timeout=timeout)
+            result = await asyncio.wait_for(future, timeout=timeout) if correlation_id else None
             return result
 
         except asyncio.TimeoutError:
-            self._pending_responses.pop(correlation_id, None)
+            if correlation_id and correlation_id in self._pending_responses:
+                self._pending_responses.pop(correlation_id)
             raise
         except Exception as e:
-            self._pending_responses.pop(correlation_id, None)
+            if correlation_id and correlation_id in self._pending_responses:
+                self._pending_responses.pop(correlation_id)
             raise
 
     def get_stats(self) -> Dict[str, Any]:

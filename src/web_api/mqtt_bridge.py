@@ -22,7 +22,7 @@ from .models import WebSocketMessage
 class MQTTBridge:
     """Bridge between MQTT system and web API"""
     
-    def __init__(self, mqtt_config: Dict[str, Any]):
+    def __init__(self, mqtt_config: Any):
         self.logger = logging.getLogger(__name__)
         self.config = mqtt_config
         self.mqtt_client: Optional[MQTTClient] = None

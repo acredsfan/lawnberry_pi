@@ -73,7 +73,10 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Redis initialization failed: {e}. Caching will be disabled.")
         app.state.redis_client = None
     
-    # Initialize MQTT bridge with a short connection timeout to avoid blocking startup
+    # Initialize MQTT bridge with a realistic connection timeout.
+    # If connection takes longer than the bound (e.g., broker slow to accept), continue startup
+    # and let the connection complete in the background. This prevents mqtt_connected=false due to
+    # premature 2s timeout while still avoiding indefinite startup blocking.
     mqtt_bridge = MQTTBridge(settings.mqtt)
     async def _safe_startup(coro, name: str, timeout: float):
         try:
@@ -84,39 +87,63 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Error during {name} startup: {e}")
 
-    await _safe_startup(mqtt_bridge.connect(), "MQTT bridge", 2.0)
+    # Expose bridge immediately so /api/v1/meta can reflect live state as soon as it flips
     app.state.mqtt_bridge = mqtt_bridge
+
+    # Try to connect with a sensible bound (mqtt client initialize may take up to ~10s)
+    connect_task = asyncio.create_task(mqtt_bridge.connect())
+    try:
+        connected = await asyncio.wait_for(connect_task, timeout=12.0)
+        logger.info(f"MQTT bridge connected: {connected}")
+    except asyncio.TimeoutError:
+        logger.warning(
+            "MQTT bridge connect taking >12s; continuing startup and completing in background"
+        )
+        def _log_connect_result(t: asyncio.Task):
+            try:
+                ok = t.result()
+                if ok:
+                    logger.info("MQTT bridge connected (post-startup)")
+                else:
+                    logger.warning("MQTT bridge connect failed after startup")
+            except Exception as e:
+                logger.warning(f"MQTT bridge connect error after startup: {e}")
+        connect_task.add_done_callback(_log_connect_result)
 
     # Integrate MQTT bridge with WebSocket manager for real-time data
     from .routers.websocket import setup_websocket_mqtt_integration
     setup_websocket_mqtt_integration(mqtt_bridge)
 
     # Initialize shared hardware interface for camera access in API process
+    # This can cause delays on systems without hardware; default is to SKIP unless explicitly enabled.
     try:
         import os
-        # When API owns the camera, instruct hardware service not to, by setting env in its unit
-        # Use absolute import to avoid relative import errors when running under uvicorn/module
-        from src.hardware.hardware_interface import create_hardware_interface  # type: ignore
-        cfg_path = os.path.join(os.environ.get('PYTHONPATH', '/opt/lawnberry').split(os.pathsep)[0], 'config', 'hardware.yaml')
-        hw = create_hardware_interface(cfg_path, shared=True)
-        # Initialize minimally and start camera capture for streaming; bounded time
-        try:
-            await asyncio.wait_for(hw.initialize(), timeout=8.0)
-        except Exception:
-            pass
-        app.state.system_manager = type('SysMgr', (), {
-            'hardware_interface': hw,
-            'camera_manager': getattr(hw, 'camera_manager', None)
-        })()
-        # Ensure camera capture running
-        cam = getattr(hw, 'camera_manager', None)
-        if cam:
+        if os.getenv("LAWNBERY_API_INIT_HW", "0") == "1":
+            # When API owns the camera, instruct hardware service not to, by setting env in its unit
+            # Use absolute import to avoid relative import errors when running under uvicorn/module
+            from src.hardware.hardware_interface import create_hardware_interface  # type: ignore
+            cfg_path = os.path.join(os.environ.get('PYTHONPATH', '/opt/lawnberry').split(os.pathsep)[0], 'config', 'hardware.yaml')
+            hw = create_hardware_interface(cfg_path, shared=True)
+            # Initialize minimally and start camera capture for streaming; bounded time
             try:
-                await asyncio.wait_for(cam.start_capture(), timeout=2.0)
+                await asyncio.wait_for(hw.initialize(), timeout=8.0)
             except Exception:
                 pass
+            app.state.system_manager = type('SysMgr', (), {
+                'hardware_interface': hw,
+                'camera_manager': getattr(hw, 'camera_manager', None)
+            })()
+            # Ensure camera capture running
+            cam = getattr(hw, 'camera_manager', None)
+            if cam:
+                try:
+                    await asyncio.wait_for(cam.start_capture(), timeout=2.0)
+                except Exception:
+                    pass
+        else:
+            logger.info("Skipping API hardware/camera initialization (LAWNBERY_API_INIT_HW!=1)")
     except Exception as e:
-        logger.warning(f"API hardware/camera init skipped: {e}")
+        logger.warning(f"API hardware/camera init skipped due to error: {e}")
     
     # Initialize auth manager and register globally for dependency helpers
     auth_manager = AuthManager(settings.auth)
@@ -183,9 +210,9 @@ def create_app() -> FastAPI:
     
     # Add exception handlers
     # Correct exception handler mapping and comprehensive handlers for validation and general errors
-    app.add_exception_handler(APIException, api_exception_handler)
-    app.add_exception_handler(HTTPException, http_exception_handler)
-    app.add_exception_handler(Exception, general_exception_handler)
+    app.add_exception_handler(APIException, api_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(Exception, general_exception_handler)  # type: ignore[arg-type]
     from fastapi.exceptions import RequestValidationError  # local import to avoid unused at top
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     
@@ -499,6 +526,8 @@ def create_app() -> FastAPI:
                 def _safe_asset_path(rel: str) -> Path:
                     # Prevent path traversal
                     rel = rel.lstrip("/")
+                    if chosen_path is None:
+                        raise HTTPException(status_code=404, detail="UI not mounted")
                     candidate = (chosen_path / rel).resolve()
                     if not str(candidate).startswith(str(chosen_path.resolve())):
                         raise HTTPException(status_code=403, detail="Forbidden")
@@ -545,7 +574,8 @@ def create_app() -> FastAPI:
         async def ui_version():  # type: ignore
             ts = 0
             try:
-                ts = int(chosen_path.stat().st_mtime)
+                if chosen_path is not None:
+                    ts = int(chosen_path.stat().st_mtime)
             except Exception:
                 pass
             return {"mounted_path": str(chosen_path), "mtime": ts}
@@ -575,8 +605,8 @@ def create_app() -> FastAPI:
         # the StaticFiles subclass in cases where Starlette routing returns a 404
         # before our overridden get_response fallback is applied (observed with
         # deep links like /ui/maps returning JSON 404).
-        index_path = chosen_path / "index.html"
-        if index_path.exists():
+        index_path = (chosen_path / "index.html") if chosen_path is not None else None
+        if index_path is not None and index_path.exists():
             @app.get("/ui/{full_path:path}", include_in_schema=False)
             async def ui_spa_catch_all(full_path: str):  # type: ignore
                 if any(full_path.endswith(ext) for ext in (".js", ".css", ".map", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webmanifest")):
