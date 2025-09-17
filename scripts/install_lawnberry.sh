@@ -218,11 +218,41 @@ NC='\033[0m' # No Color
 LOG_FILE="$SCRIPT_DIR/lawnberry_install.log"
 DEBUG_MODE=false
 
-# Delete existing log file if it exists to start fresh
-if [[ -f "$LOG_FILE" ]]; then
-    rm -f "$LOG_FILE"
-    echo "Deleted existing installation log file"
-fi
+# Resilient log initialization (do not fail under hardened systemd sandbox)
+# We prefer writing inside the repo for interactive/manual runs, but the
+# lawnberry-auto-redeploy service may apply ProtectSystem / ReadOnlyPaths which
+# makes $SCRIPT_DIR read-only. A failing 'rm' previously aborted fast deploy
+# (set -e), causing repeated CODE: DEPLOY FAILED events. We now degrade gracefully.
+init_log() {
+    local primary_log="$LOG_FILE"
+    local alt_dir="/var/log/lawnberry"
+    local fallback_log="/tmp/lawnberry_install.log"
+
+    # Attempt to delete/rotate existing log (non-fatal)
+    if [[ -f "$primary_log" ]]; then
+        if rm -f "$primary_log" 2>/dev/null; then
+            echo "Deleted existing installation log file"
+        else
+            echo "Warning: cannot remove $primary_log (read-only or permission denied)" >&2
+        fi
+    fi
+
+    # Verify we can write to primary location; otherwise fallback
+    if ! touch "$primary_log" 2>/dev/null; then
+        # Try /var/log/lawnberry (create if needed)
+        sudo mkdir -p "$alt_dir" 2>/dev/null || true
+        if touch "$alt_dir/lawnberry_install.log" 2>/dev/null; then
+            LOG_FILE="$alt_dir/lawnberry_install.log"
+            echo "Logging redirected to $LOG_FILE"
+        else
+            LOG_FILE="$fallback_log"
+            touch "$LOG_FILE" 2>/dev/null || true
+            echo "Logging redirected to fallback $LOG_FILE" >&2
+        fi
+    fi
+}
+
+init_log
 
 # Functions
 log_info() {

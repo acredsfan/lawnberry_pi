@@ -438,60 +438,196 @@ class PowerMonitorPlugin(HardwarePlugin):
                 return False
 
     async def read_data(self) -> Optional[SensorReading]:
-        """Read power data from INA3221"""
+        """Read power data from INA3221.
+
+        Enhancements:
+        - Supports multi-channel sampling (channels 1..3) in a single cycle.
+        - Configurable channel mappings for battery / solar / load:
+            parameters:
+              channel_mappings:
+                battery: 1
+                solar: 2
+                load: 3
+              shunts:
+                1: 0.01   # per-channel shunt resistance (Ohms)
+                2: 0.01
+                3: 0.01
+              invert_battery_current: false
+              soc_ema_alpha: 0.2
+        - Computes LiFePO4 SoC via voltage interpolation (when |current| below light-load threshold or charging state false).
+        - Publishes unified value dict including:
+            battery_voltage, battery_current, battery_power, battery_soc (0-1), battery_level (%),
+            solar_voltage, solar_current, solar_power, charging (bool), raw_channels{}.
+        Backward compatibility: if no channel_mappings provided, falls back to single-channel legacy behavior.
+        """
         if not self._initialized:
             if not await self.initialize():
                 return None
 
         try:
             i2c_manager = self.managers["i2c"]
-            address = getattr(
-                self, "_address", int(self.config.parameters.get("i2c_address", 0x40))
-            )
-            channel = int(self.config.parameters.get("channel", 1))
+            address = getattr(self, "_address", int(self.config.parameters.get("i2c_address", 0x40)))
+            params = self.config.parameters or {}
+            mappings: Dict[str, int] = params.get("channel_mappings", {}) or {}
+            shunts: Dict[str, float] = params.get("shunts", {}) or {}
+            invert_batt = bool(params.get("invert_battery_current", False))
+            ema_alpha = float(params.get("soc_ema_alpha", 0.2))
+            ema_alpha = min(1.0, max(0.01, ema_alpha))
 
-            # Read bus and shunt registers for specified channel
-            bus_reg = 0x02 + (channel - 1) * 2
-            shunt_reg = 0x01 + (channel - 1) * 2
+            async def _read_one(ch: int) -> Dict[str, float]:
+                bus_reg = 0x02 + (ch - 1) * 2
+                shunt_reg = 0x01 + (ch - 1) * 2
+                bus_raw = await i2c_manager.read_register(address, bus_reg, 2)
+                shunt_raw = await i2c_manager.read_register(address, shunt_reg, 2)
+                bus_val = (bus_raw[0] << 8) | bus_raw[1]
+                shunt_val = (shunt_raw[0] << 8) | shunt_raw[1]
+                bus_val >>= 3  # 13-bit value, LSB=8mV
+                voltage = bus_val * 0.008
+                if shunt_val & 0x8000:
+                    shunt_val -= 0x10000
+                shunt_v = shunt_val * 0.00004  # 40uV LSB
+                shunt_res = float(shunts.get(str(ch), shunts.get(ch, params.get("shunt_resistance", 0.1))))  # type: ignore[arg-type]
+                try:
+                    shunt_res = float(shunt_res)
+                    if shunt_res <= 0:
+                        shunt_res = 0.1
+                except Exception:
+                    shunt_res = 0.1
+                current = shunt_v / shunt_res if shunt_res else 0.0
+                return {"voltage": voltage, "current": current, "power": voltage * current}
 
-            bus_raw = await i2c_manager.read_register(address, bus_reg, 2)
-            shunt_raw = await i2c_manager.read_register(address, shunt_reg, 2)
+            # Determine which channels to sample
+            if mappings:
+                unique_channels = sorted({int(ch) for ch in mappings.values() if int(ch) in (1, 2, 3)})
+            else:
+                unique_channels = [int(params.get("channel", 1))]
 
-            # Combine bytes
-            bus_val = (bus_raw[0] << 8) | bus_raw[1]
-            shunt_val = (shunt_raw[0] << 8) | shunt_raw[1]
+            channel_results: Dict[int, Dict[str, float]] = {}
+            for ch in unique_channels:
+                try:
+                    channel_results[ch] = await _read_one(ch)
+                except Exception as ce:
+                    self.logger.warning(f"INA3221 channel {ch} read failed: {ce}")
+                    channel_results[ch] = {"voltage": 0.0, "current": 0.0, "power": 0.0}
 
-            # Per datasheet: bus voltage is a 13-bit value (bits 15..3), LSB=8mV
-            bus_val >>= 3
-            voltage = bus_val * 0.008  # V
+            # Map roles
+            def _get_role(role: str) -> Dict[str, float]:
+                ch = int(mappings.get(role, -1)) if mappings else -1
+                return channel_results.get(ch, {}) if ch in channel_results else {}
 
-            # Shunt voltage is signed 16-bit, LSB = 40uV
-            if shunt_val & 0x8000:
-                shunt_val = shunt_val - 0x10000
-            shunt_v = shunt_val * 0.00004  # V
+            if mappings:
+                batt = _get_role("battery")
+                solar = _get_role("solar")
+                load = _get_role("load")
+            else:
+                # Legacy single-channel behavior -> treat as battery
+                ch = unique_channels[0]
+                batt = channel_results.get(ch, {})
+                solar = {}
+                load = {}
 
-            shunt_ohms = float(self.config.parameters.get("shunt_resistance", 0.1))
-            current = shunt_v / shunt_ohms  # A
-            power = voltage * current  # W
+            battery_voltage = float(batt.get("voltage", 0.0))
+            battery_current = float(batt.get("current", 0.0)) * (-1.0 if invert_batt else 1.0)
+            solar_voltage = float(solar.get("voltage", 0.0))
+            solar_current = float(solar.get("current", 0.0))
+
+            # Detect charging: solar voltage significantly above battery and current positive (charging orientation assumption)
+            charging = (solar_voltage - battery_voltage) > 0.5 and battery_current > 0.0
+
+            # Compute LiFePO4 SoC via voltage mapping (open-circuit approximation)
+            def _interp_soc(v: float) -> float:
+                # Table (voltage -> SoC) approximate resting; includes slight tail above 14.4 for saturation
+                table = [
+                    (12.40, 0.00),
+                    (12.60, 0.05),
+                    (12.70, 0.10),
+                    (12.80, 0.20),
+                    (12.85, 0.30),
+                    (12.90, 0.40),
+                    (12.95, 0.50),
+                    (13.00, 0.60),
+                    (13.10, 0.70),
+                    (13.20, 0.80),
+                    (13.30, 0.90),
+                    (13.40, 0.95),
+                    (13.60, 0.98),
+                    (14.40, 1.00),
+                    (14.60, 1.00),
+                ]
+                if v <= table[0][0]:
+                    return 0.0
+                if v >= table[-1][0]:
+                    return 1.0
+                for (v0, s0), (v1, s1) in zip(table, table[1:]):
+                    if v0 <= v <= v1:
+                        # Linear interpolation
+                        if v1 == v0:
+                            return s1
+                        return s0 + (s1 - s0) * (v - v0) / (v1 - v0)
+                return 0.0
+
+            # Only trust voltage-based SoC under light load / near equilibrium (|I| < threshold) or while not charging.
+            light_load_threshold = float(params.get("light_load_current_threshold", 0.4))
+            if abs(battery_current) < light_load_threshold or not charging:
+                raw_soc = _interp_soc(battery_voltage)
+            else:
+                # Under heavy load, keep previous if available to avoid sudden drops
+                raw_soc = getattr(self, "_last_soc", _interp_soc(battery_voltage))
+
+            # Exponential smoothing
+            prev_ema = getattr(self, "_soc_ema", None)
+            if prev_ema is None:
+                soc_ema = raw_soc
+            else:
+                soc_ema = prev_ema + ema_alpha * (raw_soc - prev_ema)
+            self._soc_ema = soc_ema
+            self._last_soc = raw_soc
+
+            battery_soc = max(0.0, min(1.0, soc_ema))
+            battery_level_pct = round(battery_soc * 100.0, 2)
+
+            # Derived powers
+            battery_power = battery_voltage * battery_current
+            solar_power = solar_voltage * solar_current
+
+            # Raw channel diagnostics (voltage/current/power) keyed by channel index
+            raw_channels = {str(ch): channel_results[ch] for ch in channel_results}
+
+            value_dict = {
+                # Legacy fields
+                "voltage": battery_voltage,
+                "current": battery_current,
+                "power": battery_power,
+                # Canonical battery metrics
+                "battery_voltage": battery_voltage,
+                "battery_current": battery_current,
+                "battery_power": battery_power,
+                "battery_soc": battery_soc,
+                "battery_level": battery_level_pct,
+                # Solar (if mapped)
+                "solar_voltage": solar_voltage,
+                "solar_current": solar_current,
+                "solar_power": solar_power,
+                # Load (optional)
+                "load_voltage": load.get("voltage", 0.0) if mappings else 0.0,
+                "load_current": load.get("current", 0.0) if mappings else 0.0,
+                # State flags
+                "charging": charging,
+                # Diagnostics
+                "raw_channels": raw_channels,
+                "channel_mappings": mappings,
+            }
 
             from .data_structures import PowerReading
-
             reading = PowerReading(
                 timestamp=datetime.now(),
                 sensor_id=self.config.name,
-                value={
-                    "voltage": voltage,
-                    "current": current,
-                    "power": power,
-                    # Provide commonly expected aliases used by UI/service
-                    "battery_voltage": voltage,
-                    "battery_current": current,
-                },
+                value=value_dict,
                 unit="mixed",
                 i2c_address=address,
-                voltage=voltage,
-                current=current,
-                power=power,
+                voltage=battery_voltage,
+                current=battery_current,
+                power=battery_power,
             )
 
             await self.health.record_success()

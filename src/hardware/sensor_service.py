@@ -574,11 +574,17 @@ class SensorService:
                     # Accept multiple key aliases from plugins/drivers
                     bat_v = reading.value.get("battery_voltage", reading.value.get("voltage", 0.0))
                     bat_c = reading.value.get("battery_current", reading.value.get("current", 0.0))
+                    # Prefer plugin-computed SoC/level if present
+                    soc = reading.value.get("battery_soc", None)
+                    level = reading.value.get("battery_level", None)
+                    if soc is not None and level is None:
+                        level = round(float(soc) * 100.0, 2)
                     formatted["power"].update(
                         {
                             "battery_voltage": bat_v,
                             "battery_current": bat_c,
-                            "battery_level": reading.value.get("battery_level", 0.0),
+                            "battery_level": level if level is not None else reading.value.get("battery_level", 0.0),
+                            "battery_soc": soc if soc is not None else reading.value.get("battery_soc", None),
                             "solar_voltage": reading.value.get("solar_voltage", 0.0),
                             "solar_current": reading.value.get("solar_current", 0.0),
                             "charging": reading.value.get("charging", bat_c > 0.0),

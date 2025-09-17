@@ -16,6 +16,13 @@ set -euo pipefail
 
 # Allow overriding the root to watch via WATCH_ROOT; default to script location
 PROJECT_ROOT="${WATCH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# If we're running under systemd with WATCH_ROOT pointing at the source tree (read-only via ProtectHome),
+# use the canonical runtime /opt/lawnberry for executing deploy scripts to avoid write attempts in /home.
+EXEC_ROOT="/opt/lawnberry"
+if [[ ! -d "$EXEC_ROOT/scripts" ]]; then
+  # Fallback to PROJECT_ROOT if runtime missing (developer session)
+  EXEC_ROOT="$PROJECT_ROOT"
+fi
 INSTALL_DIR="/opt/lawnberry"
 LOG_DIR="/var/log/lawnberry"
 LOG_FILE="$LOG_DIR/auto_redeploy.log"
@@ -24,9 +31,11 @@ LOG_FILE="$LOG_DIR/auto_redeploy.log"
 mkdir -p "$LOG_DIR"
 touch "$LOG_FILE" 2>/dev/null || true
 
-say()  { echo "[auto-redeploy] $*" | tee -a "$LOG_FILE"; }
-warn() { echo "[auto-redeploy] WARN: $*" | tee -a "$LOG_FILE" >&2; }
-err()  { echo "[auto-redeploy] ERROR: $*" | tee -a "$LOG_FILE" >&2; }
+# Timestamped logging helpers (ISO8601 with seconds)
+_ts() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
+say()  { echo "[$(_ts)] [auto-redeploy] $*" | tee -a "$LOG_FILE"; }
+warn() { echo "[$(_ts)] [auto-redeploy] WARN: $*" | tee -a "$LOG_FILE" >&2; }
+err()  { echo "[$(_ts)] [auto-redeploy] ERROR: $*" | tee -a "$LOG_FILE" >&2; }
 
 # Verify inotifywait availability early
 if ! command -v inotifywait >/dev/null 2>&1; then
@@ -55,7 +64,7 @@ do_ui_build_and_sync() {
   # Fast deploy only the dist (minimal by default)
   say "UI: DEPLOY START (dist minimal) -> $INSTALL_DIR"
   if FAST_DEPLOY_DIST_MODE=minimal FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
-    timeout 120s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1; then
+    timeout 120s bash "$EXEC_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1; then
     say "UI: DEPLOY SUCCESS (dist minimal)"
     return 0
   else
@@ -72,7 +81,7 @@ do_ui_full_dist_sync() {
   fi
   say "UI: DEPLOY START (dist full) -> $INSTALL_DIR"
   if FAST_DEPLOY_DIST_MODE=full FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
-    timeout 160s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1; then
+    timeout 160s bash "$EXEC_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1; then
     say "UI: DEPLOY SUCCESS (dist full)"
     return 0
   else
@@ -83,12 +92,28 @@ do_ui_full_dist_sync() {
 
 do_fast_deploy_code() {
   say "CODE: DETECTED src/config change -> INIT fast deploy"
-  if FAST_DEPLOY_DIST_MODE=skip FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
-    timeout 160s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1; then
+  local cmd=(timeout 160s bash "$EXEC_ROOT/scripts/lawnberry-deploy.sh")
+  # Prevent a non-critical rm failure inside install script (read-only log dir) from aborting entire deploy
+  set +e
+  FAST_DEPLOY_DIST_MODE=skip FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS "${cmd[@]}" >>"$LOG_FILE" 2>&1
+  local ec=$?
+  set -e
+  if [[ $ec -eq 0 ]]; then
     say "CODE: DEPLOY SUCCESS"
     return 0
   else
-    err "CODE: DEPLOY FAILED"
+    err "CODE: DEPLOY FAILED (exit=$ec)"
+    # On first failure of a cycle, surface tail of install log if available
+    if [[ -f "$PROJECT_ROOT/scripts/lawnberry_install.log" ]]; then
+      err "Last 15 lines of install log (source tree):"
+      tail -n 15 "$PROJECT_ROOT/scripts/lawnberry_install.log" 2>/dev/null | sed 's/^/[auto-redeploy] LOG: /' | tee -a "$LOG_FILE" >&2 || true
+    fi
+    if [[ -f "/opt/lawnberry/scripts/lawnberry_install.log" ]]; then
+      err "Last 15 lines of runtime install log (/opt):"
+      tail -n 15 /opt/lawnberry/scripts/lawnberry_install.log 2>/dev/null | sed 's/^/[auto-redeploy] RUNTIME: /' | tee -a "$LOG_FILE" >&2 || true
+    fi
+    # Emit environment diagnostics (non-fatal)
+    say "Diag: FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS DIST_MODE=${FAST_DEPLOY_DIST_MODE:-skip} HASH=${FAST_DEPLOY_HASH:-1}"
     return 1
   fi
 }
@@ -96,7 +121,7 @@ do_fast_deploy_code() {
 do_services_replace() {
   say "SERVICE: DETECTED *.service change -> INIT reinstall & replace"
   # Force overwrite/replace semantics via --services-only (script handles stop/replace/start + daemon-reload)
-  if timeout 120s bash "$PROJECT_ROOT/scripts/install_lawnberry.sh" --services-only >>"$LOG_FILE" 2>&1; then
+  if timeout 120s bash "$EXEC_ROOT/scripts/install_lawnberry.sh" --services-only >>"$LOG_FILE" 2>&1; then
     say "SERVICE: REINSTALL SUCCESS"
     return 0
   else
@@ -109,7 +134,7 @@ do_requirements_update() {
   say "REQS: DETECTED requirements/pyproject change -> INIT venv update deploy"
   # Fast path: copy new requirement files to /opt and let deploy script ensure venv deps
   if FAST_DEPLOY_DIST_MODE=skip FAST_DEPLOY_MAX_SECONDS=$FAST_DEPLOY_MAX_SECONDS \
-    timeout 200s bash "$PROJECT_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1; then
+    timeout 200s bash "$EXEC_ROOT/scripts/lawnberry-deploy.sh" >>"$LOG_FILE" 2>&1; then
     say "REQS: DEPLOY SUCCESS (venv deps ensured)"
     return 0
   else
@@ -146,6 +171,22 @@ if [[ ${#PATHS_TO_WATCH[@]} -eq 0 ]]; then
 fi
 
 say "Starting watcher using inotifywait (debounce=${DEBOUNCE_SECONDS}s)"
+say "Heartbeat interval: ${HEARTBEAT_INTERVAL:-300}s"
+
+# Heartbeat: emit a liveness log line periodically so operators know watcher hasn't stalled
+HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-300}
+(
+  while true; do
+    sleep "$HEARTBEAT_INTERVAL" || exit 0
+    # Only emit heartbeat if log file still writable (avoid noise if rotated read-only)
+    if [[ -w "$LOG_FILE" ]]; then
+      say "HEARTBEAT: watcher alive (pid=$$)"
+    else
+      echo "[$(_ts)] [auto-redeploy] WARN: HEARTBEAT skipped (log not writable)" >&2 || true
+    fi
+  done
+) &
+heartbeat_pid=$!
 
 # State to coalesce events
 last_event_ts=0
@@ -231,7 +272,7 @@ run_pending_actions() {
 
 # Trap SIGTERM for clean shutdown under systemd
 shutdown=false
-trap 'shutdown=true; say "Shutting down watcher"; exit 0' SIGINT SIGTERM
+trap 'shutdown=true; say "Shutting down watcher"; kill "$heartbeat_pid" 2>/dev/null || true; exit 0' SIGINT SIGTERM
 
 # Run initial quick sync if /opt exists but out of date may be desired (optional)
 if [[ -d "$INSTALL_DIR" ]]; then
