@@ -650,6 +650,7 @@ class CameraManager:
         self._first_frame_logged = False
         self._backend: str = "opencv"  # or "picamera2"
         self._picam2 = None
+        self._picam_format = "RGB888"
         # Frame caching (for cross-process consumers like Web API)
         self._cache_enabled = os.getenv("LAWNBERY_CAMERA_CACHE_ENABLED", "1").lower() not in {
             "0",
@@ -772,16 +773,21 @@ class CameraManager:
             # Video configuration: choose format with good OpenCV compatibility
             try:
                 config = self._picam2.create_video_configuration(
-                    main={"size": (int(width), int(height)), "format": "RGB888"},
+                    main={"size": (int(width), int(height)), "format": "BGR888"},
                     controls={"FrameRate": int(fps)},
                 )
             except Exception:
                 # Fallback to a safe default
                 config = self._picam2.create_video_configuration(
-                    main={"size": (640, 480), "format": "RGB888"}
+                    main={"size": (640, 480), "format": "BGR888"}
                 )
             self._picam2.configure(config)
             self._backend = "picamera2"
+            # Remember actual format so we know whether a conversion is needed later
+            try:
+                self._picam_format = config["main"]["format"]
+            except Exception:
+                self._picam_format = "BGR888"
             self.logger.info(f"Picamera2 backend initialized: {width}x{height}@{fps}fps")
         except Exception as e:
             raise HardwareError(f"Failed to initialize Picamera2: {e}")
@@ -847,7 +853,7 @@ class CameraManager:
                     # Convert to bytes
                     if cv2 is not None:
                         # Ensure correct color order for JPEG when using Picamera2 (RGB -> BGR)
-                        if self._backend == "picamera2":
+                        if self._backend == "picamera2" and self._picam_format.upper() == "RGB888":
                             try:
                                 frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                             except Exception:
@@ -899,10 +905,14 @@ class CameraManager:
                                 try:
                                     # Reconfigure down to 640x480
                                     cfg = self._picam2.create_video_configuration(
-                                        main={"size": (640, 480), "format": "RGB888"}
+                                        main={"size": (640, 480), "format": "BGR888"}
                                     )
                                     self._picam2.stop()
                                     self._picam2.configure(cfg)
+                                    try:
+                                        self._picam_format = cfg["main"]["format"]
+                                    except Exception:
+                                        self._picam_format = "BGR888"
                                     self._picam2.start()
                                     self.logger.warning(
                                         "Picamera2 produced no frames; adjusted resolution to 640x480"

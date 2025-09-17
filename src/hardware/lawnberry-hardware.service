@@ -16,6 +16,8 @@ Environment=GPIOZERO_PIN_FACTORY=lgpio
 Environment=LAWNBERY_TOF_NO_GPIO=always
 Environment=LAWNBERY_TOF_AUTO_ASSIGN_ON_MISSING=1
 Environment=LAWNBERY_TOF_AUTO_ASSIGN_TIMEOUT_S=60
+# Enable camera capture so the hardware service can publish cached frames for the web API
+Environment=LAWNBERY_ENABLE_CAMERA_CACHE=1
 # Use the sensor service entrypoint which is the long-running hardware publisher
 ExecStart=/opt/lawnberry/venv/bin/python -m src.hardware.sensor_service
 Restart=on-failure
@@ -50,4 +52,3 @@ MemoryMax=512M
 
 [Install]
 WantedBy=multi-user.target
-

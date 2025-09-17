@@ -174,6 +174,9 @@ Note: The API allows up to ~12 seconds for the MQTT bridge to connect during sta
   - `LAWNBERY_CAMERA_META_PATH` — override metadata path (defaults to `<cache>.json`)
   - `LAWNBERY_CAMERA_CACHE_INTERVAL` — minimum seconds between cache updates (default `0.5`)
   - `LAWNBERY_CAMERA_CACHE_ENABLED` — set to `0` to disable caching entirely
+  - `LAWNBERY_ENABLE_CAMERA_CACHE=1` (service environment) ensures the hardware service owns
+    the camera and produces cached frames. Set `LAWNBERY_DISABLE_CAMERA=1` if the vision
+    service should take exclusive control instead.
 
 ## Fast Triage Flow
 1. Is `/opt` up to date? `bash scripts/lawnberry-deploy.sh` (should report SUCCESS)

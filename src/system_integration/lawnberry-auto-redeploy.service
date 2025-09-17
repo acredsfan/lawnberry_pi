@@ -40,7 +40,8 @@ ProtectKernelModules=true
 ProtectProc=invisible
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=true
-RestrictSUIDSGID=true
+# Allow sudo to elevate for service restarts; RestrictSUIDSGID would force no_new_privs and break sudo
+RestrictSUIDSGID=false
 SystemCallArchitectures=native
 UMask=0027
 

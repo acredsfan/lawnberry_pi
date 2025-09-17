@@ -113,7 +113,18 @@ class SensorService:
             # WorkingDirectory pitfalls under systemd. Prefer PYTHONPATH hint (set to /opt/lawnberry).
             import os
 
-            os.environ.setdefault("LAWNBERY_DISABLE_CAMERA", "1")
+            # Allow system integrators to opt in to camera capture for the hardware service.
+            # By default we remain conservative and disable the camera to avoid conflicts with
+            # the dedicated vision stack. If LAWNBERY_DISABLE_CAMERA is pre-set (e.g. via
+            # systemd Environment or shell), we respect that value. A convenience override
+            # LAWNBERY_ENABLE_CAMERA_CACHE=1 flips the default to enable the camera so the API
+            # can serve cached frames without a separate vision service.
+            if "LAWNBERY_DISABLE_CAMERA" not in os.environ:
+                camera_disabled_default = "1"
+                if os.getenv("LAWNBERY_ENABLE_CAMERA_CACHE", "0").lower() in {"1", "true", "yes"}:
+                    camera_disabled_default = "0"
+                os.environ["LAWNBERY_DISABLE_CAMERA"] = camera_disabled_default
+
             if os.environ.get("LAWNBERY_DISABLE_CAMERA") == "1":
                 self.logger.info("Camera disabled for sensor service to avoid device contention")
             repo_root = os.environ.get("PYTHONPATH", "/opt/lawnberry").split(os.pathsep)[0]
