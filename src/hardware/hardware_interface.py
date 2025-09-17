@@ -75,7 +75,10 @@ class HardwareInterface:
             pass
 
         # Managers that depend on config but are not bus-mapped
-        self.camera_manager = CameraManager(self.config.camera.device_path)
+        self.camera_manager = CameraManager(
+            self.config.camera.device_path,
+            buffer_size=getattr(self.config.camera, "buffer_size", 5),
+        )
         self.gpio_manager = GPIOManager()
         self.tof_manager = ToFSensorManager(gpio_manager=self.gpio_manager)
         self.display_manager = OLEDDisplayManager()
@@ -368,7 +371,10 @@ class HardwareInterface:
 
     async def get_camera_frame(self):
         """Get latest camera frame"""
-        return await self.camera_manager.get_latest_frame()
+        frame = await self.camera_manager.get_latest_frame()
+        if frame is not None:
+            return frame
+        return await self.camera_manager.get_cached_frame()
     
     async def control_gpio_pin(self, pin_name: str, value: int):
         """Control GPIO pin by name"""

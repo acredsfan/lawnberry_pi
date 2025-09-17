@@ -1,11 +1,15 @@
 """Hardware managers for different interface types"""
 
 import asyncio
+import json
 import logging
+import os
 import random
 import subprocess
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 try:
@@ -631,21 +635,46 @@ class GPIOManager:
 
 
 class CameraManager:
-    """Manager for camera access with frame buffering"""
+    """Manager for camera access with frame buffering and optional caching"""
 
-    def __init__(self, device_path: str = "/dev/video0"):
+    def __init__(self, device_path: str = "/dev/video0", buffer_size: int = 5):
         self.logger = logging.getLogger(__name__)
         self.device_path = device_path
         self._camera = None
         self._lock = asyncio.Lock()
         self._frame_buffer: List[CameraFrame] = []
-        self._buffer_size = 5
+        self._buffer_size = max(1, int(buffer_size))
         self._frame_id = 0
         self._capturing = False
         self._capture_task = None
         self._first_frame_logged = False
         self._backend: str = "opencv"  # or "picamera2"
         self._picam2 = None
+        # Frame caching (for cross-process consumers like Web API)
+        self._cache_enabled = os.getenv("LAWNBERY_CAMERA_CACHE_ENABLED", "1").lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+        cache_path_str = os.getenv(
+            "LAWNBERY_CAMERA_CACHE_PATH", "/var/lib/lawnberry/camera/latest.jpg"
+        )
+        try:
+            self._frame_cache_path = Path(cache_path_str)
+        except Exception:
+            self._frame_cache_path = Path("/var/lib/lawnberry/camera/latest.jpg")
+        meta_override = os.getenv("LAWNBERY_CAMERA_META_PATH")
+        if meta_override:
+            self._frame_cache_meta_path = Path(meta_override)
+        else:
+            self._frame_cache_meta_path = self._frame_cache_path.with_suffix(".json")
+        self._cache_interval = max(
+            0.1,
+            float(os.getenv("LAWNBERY_CAMERA_CACHE_INTERVAL", "0.5")),
+        )
+        self._last_cache_write = 0.0
+        self._last_cached_frame_id = -1
+        self._cache_update_task: Optional[asyncio.Task] = None
 
     async def initialize(self, width: int = 1920, height: int = 1080, fps: int = 30):
         """Initialize camera"""
@@ -858,6 +887,7 @@ class CameraManager:
                             self._frame_buffer.pop(0)
 
                     self._frame_id += 1
+                    await self._maybe_update_cache(camera_frame)
 
                 else:
                     no_frame_count += 1
@@ -907,6 +937,61 @@ class CameraManager:
         async with self._lock:
             return self._frame_buffer[-1] if self._frame_buffer else None
 
+    async def get_cached_frame(self) -> Optional[CameraFrame]:
+        """Load the latest cached frame from disk for cross-process access."""
+        if not self._cache_enabled:
+            return None
+
+        try:
+            frame_bytes = await asyncio.to_thread(self._frame_cache_path.read_bytes)
+        except FileNotFoundError:
+            return None
+        except Exception as exc:
+            self.logger.debug(f"Failed to read cached camera frame: {exc}")
+            return None
+
+        metadata: Dict[str, Any] = {}
+        try:
+            meta_text = await asyncio.to_thread(
+                self._frame_cache_meta_path.read_text, encoding="utf-8"
+            )
+            metadata = json.loads(meta_text)
+        except FileNotFoundError:
+            metadata = {}
+        except Exception as exc:
+            self.logger.debug(f"Failed to read cached camera metadata: {exc}")
+            metadata = {}
+
+        timestamp_str = metadata.get("timestamp")
+        try:
+            timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now()
+        except Exception:
+            timestamp = datetime.now()
+
+        try:
+            frame_id = int(metadata.get("frame_id", -1))
+        except Exception:
+            frame_id = -1
+        try:
+            width = int(metadata.get("width", 0))
+            height = int(metadata.get("height", 0))
+        except Exception:
+            width, height = 0, 0
+        frame_format = metadata.get("format", "jpeg")
+
+        cache_meta = dict(metadata)
+        cache_meta["source"] = "cache"
+
+        return CameraFrame(
+            timestamp=timestamp,
+            frame_id=frame_id,
+            width=width,
+            height=height,
+            format=frame_format,
+            data=frame_bytes,
+            metadata=cache_meta,
+        )
+
     async def get_frame_buffer(self) -> List[CameraFrame]:
         """Get all buffered frames"""
         async with self._lock:
@@ -947,6 +1032,59 @@ class CameraManager:
                 self._backend = "opencv"
 
         self.logger.info("Camera manager cleaned up")
+
+    async def _maybe_update_cache(self, frame: CameraFrame) -> None:
+        """Persist the latest frame for external consumers at a throttled rate."""
+        if not self._cache_enabled:
+            return
+
+        if frame.frame_id == self._last_cached_frame_id:
+            return
+
+        now = time.monotonic()
+        if (now - self._last_cache_write) < self._cache_interval:
+            return
+
+        if self._cache_update_task and not self._cache_update_task.done():
+            # A write is already in flight; skip to avoid queue buildup.
+            return
+
+        self._last_cache_write = now
+        self._last_cached_frame_id = frame.frame_id
+        self._cache_update_task = asyncio.create_task(self._write_cache_async(frame))
+
+    async def _write_cache_async(self, frame: CameraFrame) -> None:
+        """Persist frame bytes and metadata using a background thread."""
+        frame_bytes = bytes(frame.data)
+        metadata = {
+            "frame_id": frame.frame_id,
+            "timestamp": frame.timestamp.isoformat(),
+            "width": frame.width,
+            "height": frame.height,
+            "format": frame.format,
+            "device_path": self.device_path,
+            "backend": self._backend,
+        }
+
+        def _write_files() -> None:
+            try:
+                self._frame_cache_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp_frame = self._frame_cache_path.parent / (self._frame_cache_path.name + ".tmp")
+                with tmp_frame.open("wb") as fh:
+                    fh.write(frame_bytes)
+                os.replace(tmp_frame, self._frame_cache_path)
+
+                tmp_meta = (
+                    self._frame_cache_meta_path.parent
+                    / (self._frame_cache_meta_path.name + ".tmp")
+                )
+                with tmp_meta.open("w", encoding="utf-8") as fh:
+                    json.dump(metadata, fh, separators=(",", ":"))
+                os.replace(tmp_meta, self._frame_cache_meta_path)
+            except Exception as exc:  # pragma: no cover - best-effort cache
+                self.logger.debug(f"Camera cache write failed: {exc}")
+
+        await asyncio.to_thread(_write_files)
 
 
 class MockSMBus:

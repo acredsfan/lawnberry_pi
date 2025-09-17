@@ -165,6 +165,15 @@ Note: The API allows up to ~12 seconds for the MQTT bridge to connect during sta
 
 ## 5) Camera Stream (FYI)
 - API endpoints provide the camera stream; not part of MQTT, but included in UI.
+- Frames are captured by the hardware/vision stack and persisted to a shared cache at
+  `/var/lib/lawnberry/camera/latest.jpg` (metadata in the adjacent `.json`). The Web API
+  reads this cache when it is not the process owning the camera, preventing conflicts with
+  the vision stack.
+- Tuning:
+  - `LAWNBERY_CAMERA_CACHE_PATH` — override cache location (e.g., move to tmpfs)
+  - `LAWNBERY_CAMERA_META_PATH` — override metadata path (defaults to `<cache>.json`)
+  - `LAWNBERY_CAMERA_CACHE_INTERVAL` — minimum seconds between cache updates (default `0.5`)
+  - `LAWNBERY_CAMERA_CACHE_ENABLED` — set to `0` to disable caching entirely
 
 ## Fast Triage Flow
 1. Is `/opt` up to date? `bash scripts/lawnberry-deploy.sh` (should report SUCCESS)
