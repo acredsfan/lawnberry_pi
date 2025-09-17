@@ -88,8 +88,8 @@ sudo systemctl disable lawnberry-vision.service lawnberry-sensor-fusion.service 
 ```
 
 ## Open Tasks (Tracking)
-- [ ] Implement INA3221 channel mapping & SoC calculation (Phase A)
-- [ ] Add environment loader verification for map provider & weather service
+- [x] Implement INA3221 channel mapping & SoC calculation (Phase A)
+- [x] Add environment loader verification for map provider (multi-var runtime resolution) & weather service
 - [ ] Decide orchestration ownership (system_integration vs individual units)
 - [ ] Provide sensor fusion dry-run mode flag
 - [ ] Add dynamic FPS adaptation for vision service (future)
@@ -104,6 +104,51 @@ timeout 8s mosquitto_sub -t 'lawnberry/weather/current' -C 1 -W 6 -v
 timeout 8s mosquitto_sub -t 'lawnberry/sensors/localization' -C 1 -W 6 -v
 # Vision detections
 timeout 12s mosquitto_sub -t 'lawnberry/vision/detections' -C 1 -W 10 -v
+
+# Runtime Google Maps key resolution
+timeout 5s curl -fsS :8000/api/v1/public/config | jq '.google_maps'
+```
+
+## Activation Command Snippets (Safe Sequence)
+
+```bash
+# 1. Power management (after verifying new INA3221 fields appear)
+sudo systemctl enable --now lawnberry-power.service
+
+# 2. Weather (ensure OPENWEATHER_API_KEY present)
+grep -q OPENWEATHER_API_KEY /opt/lawnberry/.env && sudo systemctl enable --now lawnberry-weather.service
+
+# 3. Sensor fusion (dry-run / observe mode if supported by config flag)
+sudo systemctl enable --now lawnberry-sensor-fusion.service
+
+# 4. Vision (start without TPU first)
+sudo systemctl enable --now lawnberry-vision.service
+```
+
+## Auto-Redeploy Heartbeat Troubleshooting
+
+If deployments appear stalled:
+
+```bash
+sudo journalctl -u lawnberry-auto-redeploy -n 200 --no-pager | grep HEARTBEAT | tail
+```
+
+Expected every ~300s (unless `HEARTBEAT_INTERVAL` overridden). If missing:
+1. Check service status: `systemctl --user status lawnberry-auto-redeploy || sudo systemctl status lawnberry-auto-redeploy`
+2. Restart: `sudo systemctl restart lawnberry-auto-redeploy`
+3. Confirm first lines show: `Starting watcher using inotifywait` and path classifications.
+
+## Map Provider Runtime Key Notes
+
+Public config endpoint (`/api/v1/public/config`) now resolves Google Maps API key from the first non-empty of:
+`GOOGLE_MAPS_API_KEY`, `REACT_APP_GOOGLE_MAPS_API_KEY`, `VITE_GOOGLE_MAPS_API_KEY`, `VITE_REACT_APP_GOOGLE_MAPS_API_KEY`, `MAPS_API_KEY`.
+
+Add one to `/opt/lawnberry/.env` and restart `lawnberry-api`:
+
+```bash
+echo 'GOOGLE_MAPS_API_KEY=YOUR_KEY_HERE' | sudo tee -a /opt/lawnberry/.env
+sudo systemctl restart lawnberry-api
+timeout 5s curl -fsS :8000/api/v1/public/config | jq '.google_maps.available'
 ```
 
 ---

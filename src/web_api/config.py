@@ -4,7 +4,7 @@ Settings and configuration for the web API backend using Pydantic.
 """
 
 from functools import lru_cache
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
 import os
@@ -26,23 +26,23 @@ except Exception:
 
 class MQTTSettings(BaseSettings):
     """MQTT connection settings"""
-    broker_host: str = Field(default="localhost", env="MQTT_BROKER_HOST")
-    broker_port: int = Field(default=1883, env="MQTT_BROKER_PORT")
-    client_id: str = Field(default="web_api_backend", env="MQTT_CLIENT_ID")
-    keepalive: int = Field(default=60, env="MQTT_KEEPALIVE")
-    reconnect_delay: int = Field(default=5, env="MQTT_RECONNECT_DELAY")
-    max_reconnect_delay: int = Field(default=300, env="MQTT_MAX_RECONNECT_DELAY")
-    message_timeout: int = Field(default=30, env="MQTT_MESSAGE_TIMEOUT")
-    
+    broker_host: str = Field(default="localhost", validation_alias="MQTT_BROKER_HOST")
+    broker_port: int = Field(default=1883, validation_alias="MQTT_BROKER_PORT")
+    client_id: str = Field(default="web_api_backend", validation_alias="MQTT_CLIENT_ID")
+    keepalive: int = Field(default=60, validation_alias="MQTT_KEEPALIVE")
+    reconnect_delay: int = Field(default=5, validation_alias="MQTT_RECONNECT_DELAY")
+    max_reconnect_delay: int = Field(default=300, validation_alias="MQTT_MAX_RECONNECT_DELAY")
+    message_timeout: int = Field(default=30, validation_alias="MQTT_MESSAGE_TIMEOUT")
+
     # Authentication
-    username: Optional[str] = Field(default=None, env="MQTT_USERNAME")
-    password: Optional[str] = Field(default=None, env="MQTT_PASSWORD")
-    
+    username: Optional[str] = Field(default=None, validation_alias="MQTT_USERNAME")
+    password: Optional[str] = Field(default=None, validation_alias="MQTT_PASSWORD")
+
     # TLS
-    use_tls: bool = Field(default=False, env="MQTT_USE_TLS")
-    ca_certs: Optional[str] = Field(default=None, env="MQTT_CA_CERTS")
-    cert_file: Optional[str] = Field(default=None, env="MQTT_CERT_FILE")
-    key_file: Optional[str] = Field(default=None, env="MQTT_KEY_FILE")
+    use_tls: bool = Field(default=False, validation_alias="MQTT_USE_TLS")
+    ca_certs: Optional[str] = Field(default=None, validation_alias="MQTT_CA_CERTS")
+    cert_file: Optional[str] = Field(default=None, validation_alias="MQTT_CERT_FILE")
+    key_file: Optional[str] = Field(default=None, validation_alias="MQTT_KEY_FILE")
     
     class Config:
         env_prefix = "MQTT_"
@@ -92,19 +92,19 @@ class AuthSettings(BaseSettings):
 
 class RedisSettings(BaseSettings):
     """Redis cache settings"""
-    host: str = Field(default="localhost", env="REDIS_HOST")
-    port: int = Field(default=6379, env="REDIS_PORT")
-    db: int = Field(default=0, env="REDIS_DB")
-    password: Optional[str] = Field(default=None, env="REDIS_PASSWORD")
-    
+    host: str = Field(default="localhost", validation_alias="REDIS_HOST")
+    port: int = Field(default=6379, validation_alias="REDIS_PORT")
+    db: int = Field(default=0, validation_alias="REDIS_DB")
+    password: Optional[str] = Field(default=None, validation_alias="REDIS_PASSWORD")
+
     # Connection pool settings
-    max_connections: int = Field(default=20, env="REDIS_MAX_CONNECTIONS")
-    retry_on_timeout: bool = Field(default=True, env="REDIS_RETRY_ON_TIMEOUT")
-    
+    max_connections: int = Field(default=20, validation_alias="REDIS_MAX_CONNECTIONS")
+    retry_on_timeout: bool = Field(default=True, validation_alias="REDIS_RETRY_ON_TIMEOUT")
+
     # Cache TTL settings (seconds)
-    default_ttl: int = Field(default=300, env="REDIS_DEFAULT_TTL")
-    sensor_data_ttl: int = Field(default=60, env="REDIS_SENSOR_DATA_TTL")
-    config_ttl: int = Field(default=3600, env="REDIS_CONFIG_TTL")
+    default_ttl: int = Field(default=300, validation_alias="REDIS_DEFAULT_TTL")
+    sensor_data_ttl: int = Field(default=60, validation_alias="REDIS_SENSOR_DATA_TTL")
+    config_ttl: int = Field(default=3600, validation_alias="REDIS_CONFIG_TTL")
     
     class Config:
         env_prefix = "REDIS_"
@@ -112,30 +112,30 @@ class RedisSettings(BaseSettings):
 
 class DatabaseSettings(BaseSettings):
     """Database settings"""
-    url: str = Field(default="sqlite:///lawnberry.db", env="DATABASE_URL")
-    echo: bool = Field(default=False, env="DATABASE_ECHO")
-    pool_size: int = Field(default=5, env="DATABASE_POOL_SIZE")
-    max_overflow: int = Field(default=10, env="DATABASE_MAX_OVERFLOW")
+    url: str = Field(default="sqlite:///lawnberry.db", validation_alias="DATABASE_URL")
+    echo: bool = Field(default=False, validation_alias="DATABASE_ECHO")
+    pool_size: int = Field(default=5, validation_alias="DATABASE_POOL_SIZE")
+    max_overflow: int = Field(default=10, validation_alias="DATABASE_MAX_OVERFLOW")
     
     class Config:
         env_prefix = "DATABASE_"
 
 class GoogleMapsSettings(BaseSettings):
     """Google Maps API settings"""
-    api_key: Optional[str] = Field(default=None, env="REACT_APP_GOOGLE_MAPS_API_KEY")
-    usage_level: str = Field(default="medium", env="REACT_APP_GOOGLE_MAPS_USAGE_LEVEL")
-    cost_alert_threshold: float = Field(default=50.0, env="GOOGLE_MAPS_COST_ALERT_THRESHOLD")
-    
+    api_key: Optional[str] = Field(default=None, validation_alias="REACT_APP_GOOGLE_MAPS_API_KEY")
+    usage_level: str = Field(default="medium", validation_alias="REACT_APP_GOOGLE_MAPS_USAGE_LEVEL")
+    cost_alert_threshold: float = Field(default=50.0, validation_alias="GOOGLE_MAPS_COST_ALERT_THRESHOLD")
+
     # Cache settings
-    geocoding_cache_ttl: int = Field(default=604800, env="GOOGLE_MAPS_GEOCODING_CACHE_TTL")  # 7 days
-    reverse_geocoding_cache_ttl: int = Field(default=86400, env="GOOGLE_MAPS_REVERSE_CACHE_TTL")  # 1 day
-    places_cache_ttl: int = Field(default=21600, env="GOOGLE_MAPS_PLACES_CACHE_TTL")  # 6 hours
-    tiles_cache_ttl: int = Field(default=2592000, env="GOOGLE_MAPS_TILES_CACHE_TTL")  # 30 days
-    
+    geocoding_cache_ttl: int = Field(default=604800, validation_alias="GOOGLE_MAPS_GEOCODING_CACHE_TTL")  # 7 days
+    reverse_geocoding_cache_ttl: int = Field(default=86400, validation_alias="GOOGLE_MAPS_REVERSE_CACHE_TTL")  # 1 day
+    places_cache_ttl: int = Field(default=21600, validation_alias="GOOGLE_MAPS_PLACES_CACHE_TTL")  # 6 hours
+    tiles_cache_ttl: int = Field(default=2592000, validation_alias="GOOGLE_MAPS_TILES_CACHE_TTL")  # 30 days
+
     def is_available(self) -> bool:
         """Check if Google Maps API is properly configured"""
         return bool(self.api_key and self.api_key != "your_google_maps_api_key_here")
-    
+
     class Config:
         env_prefix = "GOOGLE_MAPS_"
 
@@ -144,14 +144,14 @@ class GoogleMapsSettings(BaseSettings):
 
 class RateLimitSettings(BaseSettings):
     """Rate limiting settings"""
-    enabled: bool = Field(default=True, env="RATE_LIMIT_ENABLED")
-    default_requests_per_minute: int = Field(default=100, env="RATE_LIMIT_DEFAULT_RPM")
-    burst_multiplier: float = Field(default=1.5, env="RATE_LIMIT_BURST_MULTIPLIER")
-    
+    enabled: bool = Field(default=True, validation_alias="RATE_LIMIT_ENABLED")
+    default_requests_per_minute: int = Field(default=100, validation_alias="RATE_LIMIT_DEFAULT_RPM")
+    burst_multiplier: float = Field(default=1.5, validation_alias="RATE_LIMIT_BURST_MULTIPLIER")
+
     # Per-endpoint limits
-    sensor_data_rpm: int = Field(default=200, env="RATE_LIMIT_SENSOR_DATA_RPM")
-    navigation_rpm: int = Field(default=60, env="RATE_LIMIT_NAVIGATION_RPM")
-    configuration_rpm: int = Field(default=30, env="RATE_LIMIT_CONFIG_RPM")
+    sensor_data_rpm: int = Field(default=200, validation_alias="RATE_LIMIT_SENSOR_DATA_RPM")
+    navigation_rpm: int = Field(default=60, validation_alias="RATE_LIMIT_NAVIGATION_RPM")
+    configuration_rpm: int = Field(default=30, validation_alias="RATE_LIMIT_CONFIG_RPM")
     
     class Config:
         env_prefix = "RATE_LIMIT_"
@@ -160,27 +160,27 @@ class RateLimitSettings(BaseSettings):
 class Settings(BaseSettings):
     """Main application settings"""
     # Application settings
-    app_name: str = Field(default="Lawnberry Web API", env="APP_NAME")
-    debug: bool = Field(default=False, env="DEBUG")
-    host: str = Field(default="0.0.0.0", env="HOST")
-    port: int = Field(default=8000, env="PORT")
-    log_level: str = Field(default="INFO", env="LOG_LEVEL")
-    
+    app_name: str = Field(default="Lawnberry Web API", validation_alias="APP_NAME")
+    debug: bool = Field(default=False, validation_alias="DEBUG")
+    host: str = Field(default="0.0.0.0", validation_alias="HOST")
+    port: int = Field(default=8000, validation_alias="PORT")
+    log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+
     # CORS settings
-    cors_origins: List[str] = Field(default=["*"], env="CORS_ORIGINS")
-    
+    cors_origins: List[str] = Field(default_factory=lambda: ["*"], validation_alias="CORS_ORIGINS")
+
     # API settings
-    api_prefix: str = Field(default="/api/v1", env="API_PREFIX")
-    docs_url: Optional[str] = Field(default="/docs", env="DOCS_URL")
-    redoc_url: Optional[str] = Field(default="/redoc", env="REDOC_URL")
-    
+    api_prefix: str = Field(default="/api/v1", validation_alias="API_PREFIX")
+    docs_url: Optional[str] = Field(default="/docs", validation_alias="DOCS_URL")
+    redoc_url: Optional[str] = Field(default="/redoc", validation_alias="REDOC_URL")
+
     # Performance settings
-    max_request_size: int = Field(default=16 * 1024 * 1024, env="MAX_REQUEST_SIZE")  # 16MB
-    request_timeout: int = Field(default=30, env="REQUEST_TIMEOUT")
-    
+    max_request_size: int = Field(default=16 * 1024 * 1024, validation_alias="MAX_REQUEST_SIZE")  # 16MB
+    request_timeout: int = Field(default=30, validation_alias="REQUEST_TIMEOUT")
+
     # WebSocket settings
-    websocket_heartbeat_interval: int = Field(default=30, env="WS_HEARTBEAT_INTERVAL")
-    websocket_max_connections: int = Field(default=100, env="WS_MAX_CONNECTIONS")
+    websocket_heartbeat_interval: int = Field(default=30, validation_alias="WS_HEARTBEAT_INTERVAL")
+    websocket_max_connections: int = Field(default=100, validation_alias="WS_MAX_CONNECTIONS")
     
     # Component settings
     mqtt: MQTTSettings = Field(default_factory=MQTTSettings)

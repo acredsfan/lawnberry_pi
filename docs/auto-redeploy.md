@@ -78,3 +78,17 @@ Log markers (what to look for in `journalctl`)
   - `SERVICE: REINSTALL SUCCESS` or `SERVICE: REINSTALL FAILED`
   - `REQS: DEPLOY SUCCESS (venv deps ensured)` or `REQS: DEPLOY FAILED (venv deps)`
   - Summary markers: `ACTION COMPLETE -> SUCCESS|FAILURE` per category
+
+Heartbeat lines:
+  - Every `HEARTBEAT_INTERVAL` seconds (default 300) the watcher emits:
+    - `[2025-09-17T12:34:56Z] [auto-redeploy] HEARTBEAT: watcher alive (pid=XXXX)`
+  - Absence of heartbeat for > 2 × interval suggests the watcher is stalled or service stopped.
+
+Adjust heartbeat interval (e.g. 180s):
+```bash
+sudo systemctl edit lawnberry-auto-redeploy
+# Add under [Service]:
+# Environment="HEARTBEAT_INTERVAL=180"
+sudo systemctl daemon-reload
+sudo systemctl restart lawnberry-auto-redeploy
+```

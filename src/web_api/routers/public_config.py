@@ -23,11 +23,23 @@ async def get_public_config():
     settings = get_settings()
     gmaps = settings.google_maps
     # Resolve API key with robust fallbacks: BaseSettings first, then environment variables.
-    api_key = (
-        (gmaps.api_key or "").strip()
-        or os.getenv("REACT_APP_GOOGLE_MAPS_API_KEY", "").strip()
-        or os.getenv("VITE_REACT_APP_GOOGLE_MAPS_API_KEY", "").strip()
-    )
+    # Accepted environment variable fallbacks (order matters). This allows operators to
+    # drop a key into /opt/lawnberry/.env using common names without rebuilding UI:
+    # GOOGLE_MAPS_API_KEY, REACT_APP_GOOGLE_MAPS_API_KEY, VITE_GOOGLE_MAPS_API_KEY,
+    # VITE_REACT_APP_GOOGLE_MAPS_API_KEY, MAPS_API_KEY (generic fallback).
+    candidates = [
+        (gmaps.api_key or "").strip(),
+        os.getenv("GOOGLE_MAPS_API_KEY", "").strip(),
+        os.getenv("REACT_APP_GOOGLE_MAPS_API_KEY", "").strip(),
+        os.getenv("VITE_GOOGLE_MAPS_API_KEY", "").strip(),
+        os.getenv("VITE_REACT_APP_GOOGLE_MAPS_API_KEY", "").strip(),
+        os.getenv("MAPS_API_KEY", "").strip(),
+    ]
+    api_key = ""
+    for k in candidates:
+        if k and k != "your_google_maps_api_key_here":
+            api_key = k
+            break
     # Note: Google Maps JS API requires key in browser. This is considered public.
     return {
         "google_maps": {

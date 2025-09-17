@@ -17,12 +17,24 @@ This document sketches the complete data path from hardware initialization and s
 - Env: `sensors/env/data` (BME280)
 - GPS: `sensors/gps/data`
 
-Payload shape (typical):
+Payload shape (typical – updated power metrics):
 ```json
 {
   "timestamp": 1757881000.123,
   "sensor_id": "ina3221",
-  "value": { "voltage": 12.4, "current": 0.8, "temp": 36.1 },
+  "value": {
+    "battery_voltage": 13.1,
+    "battery_current": -0.4,
+    "solar_voltage": 17.8,
+    "solar_current": 0.6,
+    "battery_soc": 0.73,
+    "battery_level": 73,
+    "raw_channels": {
+      "ch1": {"voltage": 13.1, "current": -0.4},
+      "ch2": {"voltage": 17.8, "current": 0.6},
+      "ch3": {"voltage": 0.02, "current": 0.0}
+    }
+  },
   "unit": null,
   "quality": 0.98,
   "metadata": { "bus": 1 }
@@ -84,6 +96,17 @@ timeout 5s curl -fsS http://127.0.0.1:8000/ | head -n 20 # UI index served
 
 - Power tile empty but others OK:
   - UI expects `sensors/power/data`; verify legacy alias exists but canonical is preferred.
+  - Ensure INA3221 plugin publishing mapped fields (`battery_voltage`, etc.). Check raw diagnostics via MQTT payload `raw_channels`.
+
+- Google Maps not activating / UI stuck on OpenStreetMap:
+  - Runtime public config endpoint: `curl -fsS :8000/api/v1/public/config | jq '.google_maps'`
+  - Verify API key resolved (non-empty `api_key`). Add any one of these to `/opt/lawnberry/.env` then restart API:
+    - `GOOGLE_MAPS_API_KEY`
+    - `REACT_APP_GOOGLE_MAPS_API_KEY`
+    - `VITE_GOOGLE_MAPS_API_KEY`
+    - `VITE_REACT_APP_GOOGLE_MAPS_API_KEY`
+    - `MAPS_API_KEY`
+  - No UI rebuild required; key is delivered at runtime through `/api/v1/public/config`.
 
 ## Operational Notes
 
@@ -170,6 +193,15 @@ sudo systemctl restart lawnberry-api
 timeout 6s curl -fsS http://127.0.0.1:8000/api/v1/meta | jq '.mqtt_connected'
 ```
 
+## Auto-Redeploy Watcher Observability
+
+The auto-redeploy watcher now writes ISO8601 timestamped lines and emits a heartbeat every 5 minutes (configurable via `HEARTBEAT_INTERVAL`). Look for lines like:
+```
+[2025-09-17T12:34:56Z] [auto-redeploy] HEARTBEAT: watcher alive (pid=1234)
+```
+Absence of a heartbeat for >2× interval implies the watcher stalled or the service stopped.
+
 ## Notes
 - Canonical topics with legacy fallbacks preserved during migration. UI subscribes to canonical `sensors/power/data`.
 - All steps enforce timeouts and run under Raspberry Pi OS Bookworm constraints.
+- Power metrics upgrade introduces backward-compatible additional fields; legacy consumers reading only `voltage`/`current` should update to new field names.
