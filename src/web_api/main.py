@@ -272,8 +272,14 @@ def create_app() -> FastAPI:
                 "level": max(20, 100 - (now % 7200) / 72),  # 2-hour discharge cycle
                 "voltage": random.uniform(23.8, 25.2),
                 "current": random.uniform(1.2, 2.5),
+                "power": random.uniform(30, 60),
                 "charging": random.choice([True, False]),
                 "timeRemaining": random.randint(60, 240)
+            },
+            "solar": {
+                "voltage": random.uniform(18.0, 22.0),
+                "current": random.uniform(0.5, 1.5),
+                "power": random.uniform(10, 25)
             },
             "sensors": {
                 "imu": {
@@ -304,9 +310,12 @@ def create_app() -> FastAPI:
                     "pressure": random.uniform(1000, 1020)
                 },
                 "power": {
-                    "voltage": random.uniform(23.8, 25.2),
-                    "current": random.uniform(1.2, 2.5),
-                    "power": random.uniform(30, 60)
+                    "battery_voltage": random.uniform(23.8, 25.2),
+                    "battery_current": random.uniform(1.2, 2.5),
+                    "battery_power": random.uniform(30, 60),
+                    "solar_voltage": random.uniform(18.0, 22.0),
+                    "solar_current": random.uniform(0.5, 1.5),
+                    "solar_power": random.uniform(10, 25)
                 }
             },
             "coverage": {
@@ -396,8 +405,17 @@ def create_app() -> FastAPI:
                     "level": power_data.get("battery_level", 0.0),
                     "voltage": power_data.get("battery_voltage", 0.0),
                     "current": power_data.get("battery_current", 0.0),
+                    "power": power_data.get(
+                        "battery_power",
+                        power_data.get("battery_voltage", 0.0) * power_data.get("battery_current", 0.0),
+                    ),
                     "charging": power_data.get("charging", False),
                     "timeRemaining": max(0, int(power_data.get("battery_level", 0) * 2))  # Rough estimate
+                },
+                "solar": {
+                    "voltage": power_data.get("solar_voltage", 0.0),
+                    "current": power_data.get("solar_current", 0.0),
+                    "power": power_data.get("solar_power", 0.0)
                 },
                 "sensors": {
                     "imu": {
@@ -416,9 +434,15 @@ def create_app() -> FastAPI:
                         "pressure": env_data.get("pressure", 0.0)
                     },
                     "power": {
-                        "voltage": power_data.get("battery_voltage", 0.0),
-                        "current": power_data.get("battery_current", 0.0),
-                        "power": power_data.get("battery_voltage", 0.0) * power_data.get("battery_current", 0.0)
+                        "battery_voltage": power_data.get("battery_voltage", 0.0),
+                        "battery_current": power_data.get("battery_current", 0.0),
+                        "battery_power": power_data.get(
+                            "battery_power",
+                            power_data.get("battery_voltage", 0.0) * power_data.get("battery_current", 0.0),
+                        ),
+                        "solar_voltage": power_data.get("solar_voltage", 0.0),
+                        "solar_current": power_data.get("solar_current", 0.0),
+                        "solar_power": power_data.get("solar_power", 0.0)
                     }
                 },
                 "coverage": {

@@ -241,16 +241,25 @@ const Dashboard: React.FC = () => {
               <Typography variant="h5" gutterBottom className="neon-text" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>
                 LIVE CAMERA FEED
               </Typography>
-              <Box className="camera-feed" sx={{ height: 380, backgroundColor: '#000', position: 'relative' }}>
+              <Box className="camera-feed" sx={{
+                height: 380,
+                backgroundColor: '#000',
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
                 {videoStream ? (
                   <>
                     <img 
                       src={videoStream}
                       alt="Live camera feed"
                       style={{ 
-                        width: '100%', 
-                        height: '100%', 
-                        objectFit: 'cover'
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                        maxWidth: '100%',
+                        maxHeight: '100%'
                       }}
                       onError={() => {
                         setCameraErrorCount(c => c + 1)
@@ -354,6 +363,14 @@ const Dashboard: React.FC = () => {
                 </Grid>
                 <Grid item xs={12}>
                   <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase' }}>
+                    Power Output
+                  </Typography>
+                  <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                    {typeof status?.battery?.power === 'number' ? status.battery.power.toFixed(2) : '0.00'} W
+                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase' }}>
                     Charging Status
                   </Typography>
                   <Box display="flex" alignItems="center" gap={1}>
@@ -376,6 +393,39 @@ const Dashboard: React.FC = () => {
                   </Grid>
                 )}
               </Grid>
+
+              {/* Solar panel telemetry */}
+              <Box mt={4}>
+                <Typography variant="subtitle1" className="neon-text" sx={{ textTransform: 'uppercase', letterSpacing: '0.1em', mb: 2 }}>
+                  Solar Input
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={4}>
+                    <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase' }}>
+                      Voltage
+                    </Typography>
+                    <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                      {typeof status?.solar?.voltage === 'number' ? status.solar.voltage.toFixed(2) : '0.00'} V
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase' }}>
+                      Current
+                    </Typography>
+                    <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                      {typeof status?.solar?.current === 'number' ? status.solar.current.toFixed(2) : '0.00'} A
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <Typography variant="caption" className="neon-text-secondary" sx={{ textTransform: 'uppercase' }}>
+                      Power
+                    </Typography>
+                    <Typography variant="h6" className="neon-text" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                      {typeof status?.solar?.power === 'number' ? status.solar.power.toFixed(2) : '0.00'} W
+                    </Typography>
+                  </Grid>
+                </Grid>
+              </Box>
             </CardContent>
           </Card>
         </Grid>

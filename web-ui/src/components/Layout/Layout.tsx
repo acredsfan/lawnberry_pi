@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { Box, AppBar, Toolbar, Typography, IconButton, Drawer, List, ListItem, ListItemIcon, ListItemText, Badge, useTheme, useMediaQuery } from '@mui/material'
 import { Menu as MenuIcon, Dashboard as DashboardIcon, Navigation as NavigationIcon, Map as MapIcon, Settings as SettingsIcon, PhotoCamera as TrainingIcon, Notifications as NotificationsIcon, Warning as EmergencyIcon, RadioButtonChecked as RCIcon, Description as DocumentationIcon } from '@mui/icons-material'
 import { useSelector, useDispatch } from 'react-redux'
@@ -32,6 +32,12 @@ const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
 
   // Determine if we should use full-page mode (desktop only)
   const useFullPage = fullPageMode && isDesktop
+
+  useEffect(() => {
+    if (useFullPage) {
+      dispatch(setSidebarOpen(false))
+    }
+  }, [useFullPage, dispatch])
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: DashboardIcon, path: '/dashboard' },
@@ -109,8 +115,8 @@ const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
       <AppBar
         position="fixed"
         sx={{
-          width: { md: `calc(100% - ${sidebarOpen ? drawerWidth : 0}px)` },
-          ml: { md: sidebarOpen ? `${drawerWidth}px` : 0 },
+          width: useFullPage ? '100%' : { md: `calc(100% - ${sidebarOpen ? drawerWidth : 0}px)` },
+          ml: useFullPage ? 0 : { md: sidebarOpen ? `${drawerWidth}px` : 0 },
           zIndex: theme.zIndex.drawer + 1,
         }}
       >
@@ -149,14 +155,14 @@ const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
 
       <Box
         component="nav"
-        sx={{ width: { md: sidebarOpen ? drawerWidth : 0 }, flexShrink: { md: 0 } }}
+        sx={{ width: { md: useFullPage ? 0 : sidebarOpen ? drawerWidth : 0 }, flexShrink: { md: 0 } }}
       >
         <Drawer
-          variant={isMobile ? 'temporary' : 'persistent'}
+          variant={isMobile || useFullPage ? 'temporary' : 'persistent'}
           open={sidebarOpen}
           onClose={handleDrawerToggle}
           ModalProps={{
-            keepMounted: true, // Better mobile performance
+            keepMounted: true,
           }}
           sx={{
             '& .MuiDrawer-paper': {
@@ -174,7 +180,7 @@ const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
         component="main"
         sx={{
           flexGrow: 1,
-          width: { md: `calc(100% - ${sidebarOpen ? drawerWidth : 0}px)` },
+          width: useFullPage ? '100%' : { md: `calc(100% - ${sidebarOpen ? drawerWidth : 0}px)` },
           height: '100vh',
           overflow: 'hidden',
           display: 'flex',

@@ -17,8 +17,14 @@ export interface MowerStatus {
     level: number
     voltage: number
     current: number
+    power?: number
     charging: boolean
     timeRemaining?: number
+  }
+  solar?: {
+    voltage: number
+    current: number
+    power: number
   }
   sensors: {
     imu: {
@@ -37,9 +43,12 @@ export interface MowerStatus {
       pressure: number
     }
     power: {
-      voltage: number
-      current: number
-      power: number
+      battery_voltage: number
+      battery_current: number
+      battery_power: number
+      solar_voltage: number
+      solar_current: number
+      solar_power: number
     }
   }
   coverage: {

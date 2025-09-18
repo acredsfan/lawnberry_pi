@@ -257,9 +257,10 @@ const MapContainer: React.FC<MapContainerProps> = ({
       style={style} 
       sx={{ 
         position: 'relative',
-        height: '100%',
         width: '100%',
-        '& > div:last-child': {
+        height: { xs: 480, md: 600 },
+        minHeight: 400,
+        '& > div:last-of-type': {
           height: '100%',
           width: '100%'
         }
@@ -293,7 +294,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
           exclusive
           onChange={handleProviderSwitch}
           size="small"
-          sx={{ bgcolor: 'white', boxShadow: 1 }}
+          sx={{ bgcolor: 'rgba(255,255,255,0.9)', boxShadow: 1 }}
         >
           <ToggleButton value="google">Google</ToggleButton>
           <ToggleButton value="openstreetmap">OSM</ToggleButton>

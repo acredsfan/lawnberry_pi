@@ -67,6 +67,7 @@ const App: React.FC = () => {
     severity: 'info'
   })
   const [dataStale, setDataStale] = useState(false)
+  const [hasReceivedData, setHasReceivedData] = useState(false)
   const lastDataRef = useRef<number>(Date.now())
 
   usePerformanceMonitor()
@@ -171,6 +172,8 @@ const App: React.FC = () => {
         
         if (useMocks) {
           dispatch(setStatus(mockMowerStatus))
+          lastDataRef.current = Date.now()
+          setHasReceivedData(true)
           dispatch(setWeatherData(mockWeatherData))
           console.log('✅ Mock data initialized (VITE_USE_MOCKS=true)')
         } else {
@@ -178,6 +181,8 @@ const App: React.FC = () => {
           try {
             const liveStatus = await dataService.fetchMowerStatus()
             dispatch(setStatus(liveStatus))
+            lastDataRef.current = Date.now()
+            setHasReceivedData(true)
             console.log('✅ Hydrated UI with initial live status')
           } catch (e) {
             console.warn('Initial live status fetch failed; UI will update via WS when available', e)
@@ -305,12 +310,18 @@ const App: React.FC = () => {
                   heading: sensorData.imu.orientation.yaw || baseStatus.position.heading,
                   accuracy: sensorData.gps.accuracy || baseStatus.position.accuracy
                 },
-                battery: {
-                  level: sensorData.power.battery_level || baseStatus.battery.level,
-                  voltage: sensorData.power.battery_voltage || baseStatus.battery.voltage,
-                  current: sensorData.power.battery_current || baseStatus.battery.current,
+               battery: {
+                 level: sensorData.power.battery_level || baseStatus.battery.level,
+                 voltage: sensorData.power.battery_voltage || baseStatus.battery.voltage,
+                 current: sensorData.power.battery_current || baseStatus.battery.current,
+                  power: sensorData.power.battery_power || baseStatus.battery.power || (baseStatus.battery.voltage * baseStatus.battery.current),
                   charging: sensorData.power.charging || baseStatus.battery.charging,
                   timeRemaining: Math.floor((sensorData.power.battery_level || baseStatus.battery.level) * 2)
+                },
+                solar: {
+                  voltage: sensorData.power.solar_voltage || baseStatus.solar?.voltage || 0,
+                  current: sensorData.power.solar_current || baseStatus.solar?.current || 0,
+                  power: sensorData.power.solar_power || baseStatus.solar?.power || ((baseStatus.solar?.voltage || 0) * (baseStatus.solar?.current || 0))
                 },
                 sensors: {
                   imu: {
@@ -333,9 +344,12 @@ const App: React.FC = () => {
                     pressure: sensorData.environmental.pressure || baseStatus.sensors.environmental.pressure
                   },
                   power: {
-                    voltage: sensorData.power.battery_voltage || baseStatus.sensors.power.voltage,
-                    current: sensorData.power.battery_current || baseStatus.sensors.power.current,
-                    power: (sensorData.power.battery_voltage || baseStatus.sensors.power.voltage) * (sensorData.power.battery_current || baseStatus.sensors.power.current)
+                    battery_voltage: sensorData.power.battery_voltage || baseStatus.sensors.power.battery_voltage,
+                    battery_current: sensorData.power.battery_current || baseStatus.sensors.power.battery_current,
+                    battery_power: sensorData.power.battery_power || baseStatus.sensors.power.battery_power,
+                    solar_voltage: sensorData.power.solar_voltage || baseStatus.sensors.power.solar_voltage,
+                    solar_current: sensorData.power.solar_current || baseStatus.sensors.power.solar_current,
+                    solar_power: sensorData.power.solar_power || baseStatus.sensors.power.solar_power
                   }
                 },
                 coverage: baseStatus.coverage,
@@ -344,7 +358,9 @@ const App: React.FC = () => {
                 connected: true
               }
               dispatch(setStatus(updatedStatus))
-              lastDataRef.current = Date.now()
+              const now = Date.now()
+              lastDataRef.current = now
+              setHasReceivedData(true)
             })
             // Keep reference to unsubscribe if needed later
             ;(window as any).__sensorDataUnsub = unsubscribeSensorData
@@ -396,13 +412,18 @@ const App: React.FC = () => {
 
   // Data freshness watchdog
   useEffect(() => {
+    if (!hasReceivedData) {
+      setDataStale(false)
+      return
+    }
+
     const interval = setInterval(() => {
       const last = mowerStatus?.lastUpdate || lastDataRef.current
       const stale = Date.now() - last > 15000 // 15s threshold
       if (stale !== dataStale) setDataStale(stale)
     }, 5000)
     return () => clearInterval(interval)
-  }, [mowerStatus, dataStale])
+  }, [mowerStatus, dataStale, hasReceivedData])
 
   const handleRetryData = () => {
     setDataStale(false)

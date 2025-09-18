@@ -64,7 +64,14 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
   const [customControls, setCustomControls] = useState<{
     drawingToolbar?: HTMLElement;
     offlineIndicator?: HTMLElement;
+    followBtn?: HTMLButtonElement;
   }>({});
+  const [autoFollow, setAutoFollow] = useState(true);
+  const autoFollowRef = useRef(true);
+  const programmaticZoomRef = useRef(false);
+  const programmaticCenterRef = useRef(false);
+  const lastAppliedZoomRef = useRef<number | null>(null);
+  const lastAppliedCenterRef = useRef<{ lat: number; lng: number } | null>(null);
 
   const createCustomMapStyles = useCallback((): google.maps.MapTypeStyle[] => {
     // LawnBerryPi branded map styles
@@ -92,17 +99,15 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
     ];
   }, []);
 
-  const getMapOptions = useCallback((): google.maps.MapOptions => {
+  const baseMapOptions = React.useMemo((): google.maps.MapOptions => {
     const usageSettings = mapService.getUsageLevelSettings(usageLevel);
-    
-    return {
-      center,
-      zoom,
+
+    const options: google.maps.MapOptions = {
       styles: createCustomMapStyles(),
       mapTypeControl: true,
       mapTypeControlOptions: {
         style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
-        position: google.maps.ControlPosition.TOP_CENTER,
+        position: google.maps.ControlPosition.TOP_RIGHT,
         mapTypeIds: [
           google.maps.MapTypeId.ROADMAP,
           google.maps.MapTypeId.SATELLITE,
@@ -112,7 +117,7 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
       },
       zoomControl: true,
       zoomControlOptions: {
-        position: google.maps.ControlPosition.RIGHT_CENTER
+        position: google.maps.ControlPosition.RIGHT_BOTTOM
       },
       streetViewControl: false,
       fullscreenControl: true,
@@ -120,12 +125,26 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
         position: google.maps.ControlPosition.RIGHT_TOP
       },
       gestureHandling: 'cooperative',
-      // Performance optimizations based on usage level
       clickableIcons: usageSettings.enableAllFeatures,
       disableDefaultUI: !usageSettings.enableAllFeatures,
       backgroundColor: 'transparent'
     };
-  }, [center, zoom, usageLevel, createCustomMapStyles]);
+
+    if (!usageSettings.enableAllFeatures) {
+      options.zoomControl = true;
+      options.mapTypeControl = true;
+      options.fullscreenControl = true;
+      options.disableDefaultUI = false;
+    }
+
+    return options;
+  }, [usageLevel, createCustomMapStyles]);
+
+  const getInitialMapOptions = useCallback((): google.maps.MapOptions => ({
+    ...baseMapOptions,
+    center,
+    zoom
+  }), [baseMapOptions, center, zoom]);
 
 const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
     if (!window.google?.maps?.drawing) {
@@ -267,6 +286,24 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
     drawingToolbar.appendChild(homeBtn);
     drawingToolbar.appendChild(clearBtn);
 
+    const followBtn = createToolButton(autoFollowRef.current ? 'Following' : 'Follow Robot', () => {
+      autoFollowRef.current = true;
+      setAutoFollow(true);
+      if (mapInstanceRef.current) {
+        const target = robotPosition || center;
+        programmaticCenterRef.current = true;
+        mapInstanceRef.current.panTo(target);
+        lastAppliedCenterRef.current = { lat: target.lat, lng: target.lng };
+        if (typeof zoom === 'number') {
+          programmaticZoomRef.current = true;
+          mapInstanceRef.current.setZoom(zoom);
+          lastAppliedZoomRef.current = zoom;
+        }
+      }
+    }, autoFollowRef.current);
+
+    drawingToolbar.appendChild(followBtn);
+
     map.controls[google.maps.ControlPosition.TOP_CENTER].push(drawingToolbar);
 
     // Create offline indicator
@@ -285,8 +322,17 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
     
     map.controls[google.maps.ControlPosition.TOP_RIGHT].push(offlineIndicator);
 
-    setCustomControls({ drawingToolbar, offlineIndicator });
-  }, [isOffline]);
+    setCustomControls({ drawingToolbar, offlineIndicator, followBtn });
+  }, [isOffline, center, zoom, clearAllOverlays, robotPosition]);
+
+  useEffect(() => {
+    autoFollowRef.current = autoFollow;
+    if (customControls.followBtn) {
+      customControls.followBtn.textContent = autoFollow ? 'Following' : 'Follow Robot';
+      customControls.followBtn.style.background = autoFollow ? '#4caf50' : 'white';
+      customControls.followBtn.style.color = autoFollow ? 'white' : '#4caf50';
+    }
+  }, [autoFollow, customControls.followBtn]);
 
   const clearAllOverlays = useCallback(() => {
     // Clear boundary polygons
@@ -327,13 +373,23 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       }
     });
 
-    // Handle zoom and center changes
-    map.addListener('zoom_changed', () => {
-      console.log('Zoom changed:', map.getZoom());
+    map.addListener('dragstart', () => {
+      autoFollowRef.current = false;
+      setAutoFollow(false);
     });
 
-    map.addListener('center_changed', () => {
-      console.log('Center changed:', map.getCenter()?.toJSON());
+    map.addListener('zoom_changed', () => {
+      if (programmaticZoomRef.current) {
+        programmaticZoomRef.current = false;
+        return;
+      }
+      autoFollowRef.current = false;
+      setAutoFollow(false);
+    });
+
+    map.addListener('idle', () => {
+      programmaticCenterRef.current = false;
+      programmaticZoomRef.current = false;
     });
   }, [onHomeLocationSet]);
 
@@ -417,35 +473,38 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
   }, [homeLocation]);
 
   const updateRobotPosition = useCallback(() => {
-    if (!mapInstanceRef.current) return;
+    if (!mapInstanceRef.current || !robotPosition) return;
 
-    // Clear existing robot marker
-    if (robotMarkerRef.current) {
-      robotMarkerRef.current.setMap(null);
-      robotMarkerRef.current = null;
-    }
+    const icon: google.maps.Symbol = {
+      path: 'M12 2C8.13 2 5 5.13 5 9c0 3.87 6.01 11 6.01 11s6.99-7.13 6.99-11c0-3.87-3.13-7-6-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z',
+      fillColor: geofenceViolation ? '#FF1744' : '#FF1493',
+      fillOpacity: 0.95,
+      strokeColor: geofenceInNoGo ? '#FFEA00' : '#00FFD1',
+      strokeWeight: 1.6,
+      rotation: robotPosition.heading || 0,
+      scale: 1.35,
+      anchor: new google.maps.Point(12, 22)
+    };
 
-    // Add new robot marker
-  if (robotPosition) {
-      const marker = new google.maps.Marker({
+    if (!robotMarkerRef.current) {
+      robotMarkerRef.current = new google.maps.Marker({
         position: robotPosition,
         map: mapInstanceRef.current,
-        title: 'LawnBerry Robot',
-        icon: {
-          path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-          scale: 8,
-          fillColor: '#ff9800',
-          fillOpacity: 1,
-          strokeColor: 'white',
-          strokeWeight: 2,
-      rotation: robotPosition.heading || 0
-        },
+        title: 'LawnBerryPi',
+        icon,
         zIndex: 1000
       });
-
-      robotMarkerRef.current = marker;
+    } else {
+      robotMarkerRef.current.setPosition(robotPosition);
+      robotMarkerRef.current.setIcon(icon);
     }
-  }, [robotPosition]);
+
+    if (autoFollowRef.current) {
+      programmaticCenterRef.current = true;
+      mapInstanceRef.current.panTo(robotPosition);
+      lastAppliedCenterRef.current = { lat: robotPosition.lat, lng: robotPosition.lng };
+    }
+  }, [robotPosition, geofenceViolation, geofenceInNoGo]);
 
   const updateMowingProgress = useCallback(() => {
     if (!mapInstanceRef.current || !showMowingProgress) return;
@@ -499,8 +558,8 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
         throw new Error('Google Maps API not loaded');
       }
 
-      const mapOptions = getMapOptions();
-  const map = new google.maps.Map(mapRef.current, mapOptions);
+      const mapOptions = getInitialMapOptions();
+      const map = new google.maps.Map(mapRef.current, mapOptions);
       
       mapInstanceRef.current = map;
       
@@ -549,7 +608,7 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       );
       onError(mapError);
     }
-  }, [getMapOptions, isOffline, onError]);
+  }, [getInitialMapOptions, isOffline, onError, initializeDrawingManager, initializeCustomControls, setupMapEventListeners]);
 
   // Initialize map on mount
   useEffect(() => {
@@ -558,19 +617,36 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
 
   // Update map center and zoom when props change
   useEffect(() => {
-    if (mapInstanceRef.current && isInitialized) {
-      mapInstanceRef.current.setCenter(center);
-      mapInstanceRef.current.setZoom(zoom);
+    if (!mapInstanceRef.current || !isInitialized || !autoFollowRef.current) return;
+
+    const desiredCenter = { lat: center.lat, lng: center.lng };
+    const needsCenter =
+      !lastAppliedCenterRef.current ||
+      Math.abs(lastAppliedCenterRef.current.lat - desiredCenter.lat) > 1e-6 ||
+      Math.abs(lastAppliedCenterRef.current.lng - desiredCenter.lng) > 1e-6;
+
+    if (needsCenter) {
+      programmaticCenterRef.current = true;
+      mapInstanceRef.current.panTo(desiredCenter);
+      lastAppliedCenterRef.current = desiredCenter;
     }
-  }, [center, zoom, isInitialized]);
+
+    if (typeof zoom === 'number') {
+      const currentZoom = mapInstanceRef.current.getZoom();
+      if (currentZoom !== zoom) {
+        programmaticZoomRef.current = true;
+        mapInstanceRef.current.setZoom(zoom);
+        lastAppliedZoomRef.current = zoom;
+      }
+    }
+  }, [center.lat, center.lng, zoom, isInitialized]);
 
   // Update map options when usage level changes
   useEffect(() => {
     if (mapInstanceRef.current && isInitialized) {
-      const newOptions = getMapOptions();
-      mapInstanceRef.current.setOptions(newOptions);
+      mapInstanceRef.current.setOptions(baseMapOptions);
     }
-  }, [usageLevel, getMapOptions, isInitialized]);
+  }, [baseMapOptions, isInitialized]);
 
   // Handle quota exceeded errors
   useEffect(() => {
@@ -628,6 +704,22 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       customControls.offlineIndicator.style.display = isOffline ? 'block' : 'none';
     }
   }, [isOffline, customControls.offlineIndicator]);
+
+  useEffect(() => {
+    if (!mapRef.current || !window.ResizeObserver) return;
+
+    const observer = new ResizeObserver(() => {
+      if (!mapInstanceRef.current) return;
+      google.maps.event.trigger(mapInstanceRef.current, 'resize');
+      if (autoFollowRef.current && lastAppliedCenterRef.current) {
+        programmaticCenterRef.current = true;
+        mapInstanceRef.current.panTo(lastAppliedCenterRef.current);
+      }
+    });
+
+    observer.observe(mapRef.current);
+    return () => observer.disconnect();
+  }, [isInitialized]);
 
   useEffect(() => {
     if (drawingManagerRef.current && isDrawingMode) {

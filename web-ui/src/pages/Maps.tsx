@@ -46,6 +46,7 @@ import {
   selectUserPreferences,
   setUsageLevel,
   setPreferredProvider,
+  setCurrentProvider,
   setAutoFallback,
   initializeMapFromEnvironment,
   setError,
@@ -210,11 +211,17 @@ const Maps: React.FC = () => {
           const gmaps = data?.google_maps || {};
           if (gmaps.api_key) {
             dispatch(setError(null));
-            dispatch(updateConfig({ usageLevel: gmaps.usage_level || 'medium' } as any));
+            dispatch(updateConfig({
+              usageLevel: gmaps.usage_level || 'medium',
+              apiKey: gmaps.api_key,
+              provider: 'google'
+            } as any));
             dispatch(setPreferredProvider('google'));
+            dispatch(setCurrentProvider('google'));
             console.log('✅ Runtime Google Maps key found - selecting Google');
           } else {
             dispatch(setPreferredProvider('openstreetmap'));
+            dispatch(setCurrentProvider('openstreetmap'));
             console.log('ℹ️ No runtime Google Maps key - using OpenStreetMap');
           }
         } else {
@@ -333,7 +340,14 @@ const Maps: React.FC = () => {
   }, [robotPosition, validBoundaries, activeNoGoZones, pointInPolygon]);
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box
+      sx={{
+        width: '100%',
+        maxWidth: '100%',
+        px: useFullWidth ? { xs: 0, md: 0 } : { xs: 1.5, md: 3 },
+        py: useFullWidth ? { xs: 1.5, md: 2 } : 3
+      }}
+    >
       <Typography variant="h4" component="h1" gutterBottom>
         LawnBerry Maps
         {geofenceStatus.violation && (
@@ -370,7 +384,7 @@ const Maps: React.FC = () => {
         </Alert>
       )}
 
-      <Paper>
+      <Paper sx={{ width: '100%' }}>
         <Tabs
           value={activeTab}
           onChange={(e, newValue) => setActiveTab(newValue)}
@@ -423,17 +437,18 @@ const Maps: React.FC = () => {
           />
         </Tabs>
 
-        <Box sx={{ p: useFullWidth ? 0 : 3 }}>
+        <Box sx={{ p: useFullWidth ? { xs: 1, md: 0 } : 3 }}>
           {activeTab === 0 && (
             <>
             {/* Overview tab: full-width map with statistics stacked below */}
-            <Grid container spacing={useFullWidth ? 0 : 3} direction="column">
+            <Grid container spacing={useFullWidth ? 1 : 3} direction="column">
               {/* Map row: always full width */}
               <Grid item xs={12}>
-                <Paper sx={{ 
-                  height: useFullWidth ? 'calc(100vh - 120px)' : isDesktop ? '75vh' : '60vh', 
-                  minHeight: '500px',
-                  overflow: 'hidden', 
+                <Paper sx={{
+                  width: '100%',
+                  height: useFullWidth ? 'calc(100vh - 140px)' : isDesktop ? '75vh' : '60vh',
+                  minHeight: 500,
+                  overflow: 'hidden',
                   position: 'relative',
                   borderRadius: useFullWidth ? 0 : 1
                 }}>
@@ -697,7 +712,7 @@ const Maps: React.FC = () => {
             <Grid container spacing={3} direction="column">
               {/* Map row */}
               <Grid item xs={12}>
-                <Paper sx={{ height: 600, overflow: 'hidden' }}>
+                <Paper sx={{ height: 600, overflow: 'hidden', width: '100%' }}>
                   <MapContainer
                     center={robotPosition || mapConfig.defaultCenter}
                     zoom={mapConfig.defaultZoom}
@@ -749,7 +764,7 @@ const Maps: React.FC = () => {
             <Grid container spacing={3} direction="column">
               {/* Map row */}
               <Grid item xs={12}>
-                <Paper sx={{ height: 600, overflow: 'hidden' }}>
+                <Paper sx={{ height: 600, overflow: 'hidden', width: '100%' }}>
                   <MapContainer
                     center={robotPosition || mapConfig.defaultCenter}
                     zoom={mapConfig.defaultZoom}
@@ -803,7 +818,7 @@ const Maps: React.FC = () => {
             <Grid container spacing={3} direction="column">
               {/* Map row */}
               <Grid item xs={12}>
-                <Paper sx={{ height: 600, overflow: 'hidden' }}>
+                <Paper sx={{ height: 600, overflow: 'hidden', width: '100%' }}>
                   <MapContainer
                     center={robotPosition || mapConfig.defaultCenter}
                     zoom={mapConfig.defaultZoom}

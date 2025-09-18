@@ -163,8 +163,14 @@ class SensorDataService {
         battery_voltage: data.battery_voltage || 0,
         battery_current: data.battery_current || 0,
         battery_level: data.battery_level || 0,
+        battery_power: typeof data.battery_power === 'number'
+          ? data.battery_power
+          : (data.battery_voltage || 0) * (data.battery_current || 0),
         solar_voltage: data.solar_voltage || 0,
         solar_current: data.solar_current || 0,
+        solar_power: typeof data.solar_power === 'number'
+          ? data.solar_power
+          : (data.solar_voltage || 0) * (data.solar_current || 0),
         charging: data.charging || false,
         timestamp: data.timestamp || new Date().toISOString()
       };

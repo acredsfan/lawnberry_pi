@@ -5,7 +5,7 @@ Settings and configuration for the web API backend using Pydantic.
 
 from functools import lru_cache
 from typing import List, Optional
-from pydantic import Field
+from pydantic import Field, AliasChoices
 from pydantic_settings import BaseSettings
 import os
 import logging
@@ -122,7 +122,10 @@ class DatabaseSettings(BaseSettings):
 
 class GoogleMapsSettings(BaseSettings):
     """Google Maps API settings"""
-    api_key: Optional[str] = Field(default=None, validation_alias="REACT_APP_GOOGLE_MAPS_API_KEY")
+    api_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_MAPS_API_KEY", "REACT_APP_GOOGLE_MAPS_API_KEY"),
+    )
     usage_level: str = Field(default="medium", validation_alias="REACT_APP_GOOGLE_MAPS_USAGE_LEVEL")
     cost_alert_threshold: float = Field(default=50.0, validation_alias="GOOGLE_MAPS_COST_ALERT_THRESHOLD")
 
