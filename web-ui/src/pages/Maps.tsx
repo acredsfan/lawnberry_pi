@@ -165,13 +165,25 @@ const Maps: React.FC = () => {
     }
   }, [isDesktop, useFullWidth]);
 
-  const containerStyles = useMemo(() => ({
-    width: '100%',
-    maxWidth: useFullWidth ? '100%' : '1200px',
-    margin: '0 auto',
-    px: useFullWidth ? { xs: 0, md: 0 } : { xs: 1.5, md: 3 },
-    py: useFullWidth ? { xs: 1.5, md: 2 } : 3
-  }), [useFullWidth]);
+  const containerStyles = useMemo(() => {
+    if (useFullWidth) {
+      return {
+        width: '100vw',
+        marginLeft: 'calc(50% - 50vw)',
+        marginRight: 'calc(50% - 50vw)',
+        px: { xs: 0, md: 0 },
+        py: { xs: 1.5, md: 2 }
+      } as const;
+    }
+
+    return {
+      width: '100%',
+      maxWidth: '1200px',
+      margin: '0 auto',
+      px: { xs: 1.5, md: 3 },
+      py: 3
+    } as const;
+  }, [useFullWidth]);
 
   const robotPosition = status?.position ? {
     lat: status.position.lat,
