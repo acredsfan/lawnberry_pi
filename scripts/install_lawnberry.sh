@@ -1590,7 +1590,7 @@ deploy_update() {
                     while IFS= read -r f; do
                         rel=${f#"$PROJECT_ROOT/web-ui/dist/"}
                         [[ -f "$INSTALL_DIR/web-ui/dist/$rel" ]] || { new_assets=true; break; }
-                    done < <(find "$PROJECT_ROOT/web-ui/dist" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[^/]+\.[a-f0-9]{8,}\.[a-z0-9]{2,4}$' 2>/dev/null)
+                    done < <(find "$PROJECT_ROOT/web-ui/dist" -type f -regextype posix-extended -regex '.*/[^/]+\.[a-f0-9]{8,}\.[a-z0-9]{2,4}$' 2>/dev/null)
                     if [[ $new_assets == false ]]; then
                         log_info "Web UI dist unchanged (minimal mode) - skipping dist sync"
                         DIST_SYNC_SKIPPED=1
@@ -1612,13 +1612,9 @@ deploy_update() {
                         for coref in index.html manifest*.json favicon.* robots.txt asset-manifest.json registerSW.js sw.js service-worker.js; do
                             sudo cp "$PROJECT_ROOT/web-ui/dist/$coref" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null || true
                         done
-                        # Sync new hashed assets only (do not delete old to avoid 404 during rolling reload)
-                        while IFS= read -r asset; do
-                            rel=${asset#"$PROJECT_ROOT/web-ui/dist/"}
-                            if [[ ! -f "$INSTALL_DIR/web-ui/dist/$rel" ]]; then
-                                sudo cp "$asset" "$INSTALL_DIR/web-ui/dist/" 2>/dev/null || true
-                            fi
-                        done < <(find "$PROJECT_ROOT/web-ui/dist" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[^/]+\.[a-f0-9]{8,}\.[a-z0-9]{2,4}$' 2>/dev/null)
+                        # Sync hashed/static assets while preserving directory structure.
+                        sudo mkdir -p "$INSTALL_DIR/web-ui/dist/assets"
+                        sudo rsync -a "$PROJECT_ROOT/web-ui/dist/assets/" "$INSTALL_DIR/web-ui/dist/assets/" 2>/dev/null || true
                         DIST_SYNC_DONE=1
                     fi
                     # Verification message

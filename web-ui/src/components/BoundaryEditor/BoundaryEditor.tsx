@@ -27,7 +27,6 @@ import {
   Cancel as CancelIcon,
   Warning as WarningIcon
 } from '@mui/icons-material';
-import { Loader } from '@googlemaps/js-api-loader';
 // Geometry operations
 import { union, polygon as turfPolygon, Feature, Polygon, booleanIntersects } from '@turf/turf';
 
@@ -58,7 +57,6 @@ const BoundaryEditor: React.FC<BoundaryEditorProps> = ({
   onBoundariesChange,
   robotPosition
 }) => {
-  const [drawingManager, setDrawingManager] = useState<google.maps.drawing.DrawingManager | null>(null);
   const [activePolygons, setActivePolygons] = useState<google.maps.Polygon[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [editingBoundary, setEditingBoundary] = useState<string | null>(null);
@@ -66,71 +64,45 @@ const BoundaryEditor: React.FC<BoundaryEditorProps> = ({
   const [pendingPolygon, setPendingPolygon] = useState<google.maps.Polygon | null>(null);
   const [boundaryName, setBoundaryName] = useState('');
   const [alert, setAlert] = useState<{ message: string; severity: 'error' | 'warning' | 'success' } | null>(null);
+  const drawingListenersRef = useRef<google.maps.MapsEventListener[]>([]);
+  const drawingSessionRef = useRef<{ polygon: google.maps.Polygon | null; points: BoundaryPoint[] }>({
+    polygon: null,
+    points: []
+  });
+  const drawingMapOptionsRef = useRef<{ disableDoubleClickZoom: boolean | null } | null>(null);
 
-  // Initialize drawing manager
+  // Custom polygon completion handler (replaces deprecated drawing library)
+  const handlePolygonCompletion = useCallback((polygon: google.maps.Polygon, points: BoundaryPoint[]) => {
+    const validation = validatePolygon(points);
+
+    if (!validation.isValid) {
+      setAlert({ message: validation.error!, severity: 'error' });
+      polygon.setMap(null);
+      return;
+    }
+
+    const mergedPolygons = mergeOverlappingPolygons([...boundaries, {
+      id: `boundary-${Date.now()}`,
+      name: `Boundary ${boundaries.length + 1}`,
+      points,
+      isValid: true,
+      vertices: points.length
+    }]);
+
+    if (mergedPolygons.length < boundaries.length + 1) {
+      setAlert({ message: 'Overlapping boundaries automatically merged', severity: 'success' });
+    }
+
+    setPendingPolygon(polygon);
+    setBoundaryName(`Boundary ${boundaries.length + 1}`);
+    setShowNameDialog(true);
+  }, [boundaries]);
+
   useEffect(() => {
-    if (!map || !window.google) return;
-
-    const manager = new google.maps.drawing.DrawingManager({
-      drawingMode: null,
-      drawingControl: false,
-      polygonOptions: {
-        fillColor: '#4CAF50',
-        fillOpacity: 0.2,
-        strokeColor: '#4CAF50',
-        strokeWeight: 2,
-        editable: true,
-        draggable: false
-      }
-    });
-
-    manager.setMap(map);
-    setDrawingManager(manager);
-
-    // Handle polygon completion
-    const handlePolygonComplete = (polygon: google.maps.Polygon) => {
-      const path = polygon.getPath();
-      const points = path.getArray().map(latLng => ({
-        lat: latLng.lat(),
-        lng: latLng.lng()
-      }));
-
-      // Validate polygon
-      const validation = validatePolygon(points);
-      
-      if (!validation.isValid) {
-        setAlert({ message: validation.error!, severity: 'error' });
-        polygon.setMap(null);
-        return;
-      }
-
-      // Auto-merge overlapping polygons
-      const mergedPolygons = mergeOverlappingPolygons([...boundaries, {
-        id: `boundary-${Date.now()}`,
-        name: `Boundary ${boundaries.length + 1}`,
-        points,
-        isValid: true,
-        vertices: points.length
-      }]);
-
-      if (mergedPolygons.length < boundaries.length + 1) {
-        setAlert({ message: 'Overlapping boundaries automatically merged', severity: 'success' });
-      }
-
-      setPendingPolygon(polygon);
-      setBoundaryName(`Boundary ${boundaries.length + 1}`);
-      setShowNameDialog(true);
-    };
-
-    manager.addListener('polygoncomplete', handlePolygonComplete);
-
     return () => {
-      if (manager) {
-        google.maps.event.clearInstanceListeners(manager);
-        manager.setMap(null);
-      }
+      stopDrawing();
     };
-  }, [map, boundaries]);
+  }, [stopDrawing]);
 
   // Render existing boundaries on map
   useEffect(() => {
@@ -334,19 +306,90 @@ const BoundaryEditor: React.FC<BoundaryEditorProps> = ({
     }
   };
 
-  const startDrawing = () => {
-    if (drawingManager) {
-      drawingManager.setDrawingMode(google.maps.drawing.OverlayType.POLYGON);
-      setIsDrawing(true);
-    }
-  };
+  const stopDrawing = useCallback((preservePolygon: boolean = false) => {
+    drawingListenersRef.current.forEach(listener => listener.remove());
+    drawingListenersRef.current = [];
 
-  const stopDrawing = () => {
-    if (drawingManager) {
-      drawingManager.setDrawingMode(null);
-      setIsDrawing(false);
+    if (!preservePolygon && drawingSessionRef.current.polygon) {
+      drawingSessionRef.current.polygon.setMap(null);
     }
-  };
+
+    drawingSessionRef.current = {
+      polygon: preservePolygon ? drawingSessionRef.current.polygon : null,
+      points: []
+    };
+
+    if (map) {
+      map.setOptions({
+        disableDoubleClickZoom: drawingMapOptionsRef.current?.disableDoubleClickZoom ?? false,
+        draggableCursor: undefined
+      });
+    }
+    drawingMapOptionsRef.current = null;
+
+    setIsDrawing(false);
+  }, [map]);
+
+  const startDrawing = useCallback(() => {
+    if (!map) return;
+
+    stopDrawing();
+
+    const polygon = new google.maps.Polygon({
+      map,
+      paths: [],
+      fillColor: '#4CAF50',
+      fillOpacity: 0.2,
+      strokeColor: '#4CAF50',
+      strokeWeight: 2,
+      editable: false,
+      draggable: false
+    });
+
+    drawingSessionRef.current = { polygon, points: [] };
+    setIsDrawing(true);
+
+    drawingMapOptionsRef.current = {
+      disableDoubleClickZoom: map.get('disableDoubleClickZoom') as boolean | null
+    };
+    map.setOptions({ disableDoubleClickZoom: true, draggableCursor: 'crosshair' });
+
+    const clickListener = map.addListener('click', (event: google.maps.MapMouseEvent) => {
+      const latLng = event.latLng;
+      if (!latLng || !drawingSessionRef.current.polygon) return;
+      drawingSessionRef.current.points = [...drawingSessionRef.current.points, { lat: latLng.lat(), lng: latLng.lng() }];
+      drawingSessionRef.current.polygon.setPaths([drawingSessionRef.current.points]);
+    });
+
+    const dblClickListener = map.addListener('dblclick', (event: google.maps.MapMouseEvent) => {
+      const domEvt = event.domEvent as MouseEvent | undefined;
+      domEvt?.preventDefault?.();
+
+      const session = drawingSessionRef.current;
+      if (!session.polygon || session.points.length < 3) {
+        return;
+      }
+
+      stopDrawing(true);
+      handlePolygonCompletion(session.polygon, [...session.points]);
+      drawingSessionRef.current = { polygon: null, points: [] };
+    });
+
+    const rightClickListener = map.addListener('rightclick', (event: google.maps.MapMouseEvent) => {
+      const domEvt = event.domEvent as MouseEvent | undefined;
+      domEvt?.preventDefault?.();
+
+      const session = drawingSessionRef.current;
+      if (!session.polygon || session.points.length === 0) {
+        return;
+      }
+
+      session.points = session.points.slice(0, -1);
+      session.polygon.setPaths([session.points]);
+    });
+
+    drawingListenersRef.current = [clickListener, dblClickListener, rightClickListener];
+  }, [map, stopDrawing, handlePolygonCompletion]);
 
   const handleSaveBoundary = () => {
     if (pendingPolygon && boundaryName.trim()) {
@@ -434,7 +477,7 @@ const BoundaryEditor: React.FC<BoundaryEditorProps> = ({
               <Button
                 variant="outlined"
                 startIcon={<CancelIcon />}
-                onClick={stopDrawing}
+                onClick={() => stopDrawing()}
               >
                 Cancel
               </Button>

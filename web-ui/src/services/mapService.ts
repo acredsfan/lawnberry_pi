@@ -13,6 +13,9 @@ export class MapService {
     const envApiKey = (import.meta as any).env?.REACT_APP_GOOGLE_MAPS_API_KEY ||
                       (import.meta as any).env?.VITE_REACT_APP_GOOGLE_MAPS_API_KEY ||
                       undefined;
+    const envMapId = (import.meta as any).env?.REACT_APP_GOOGLE_MAPS_MAP_ID ||
+                     (import.meta as any).env?.VITE_REACT_APP_GOOGLE_MAPS_MAP_ID ||
+                     undefined;
 
     this.config = {
       provider: 'google',
@@ -21,7 +24,8 @@ export class MapService {
       defaultCenter: { lat: 40.7128, lng: -74.0060 },
       defaultZoom: 15,
       enableCaching: true,
-      offlineMode: false
+      offlineMode: false,
+      mapId: envMapId
     };
   }
 
@@ -39,6 +43,9 @@ export class MapService {
       }
       if (gmaps.usage_level) {
         this.config.usageLevel = gmaps.usage_level;
+      }
+      if (gmaps.map_id) {
+        this.config.mapId = gmaps.map_id;
       }
       this._publicConfigLoaded = true;
       console.log('🌐 Loaded runtime public config for maps:', { hasKey: !!this.config.apiKey, usage: this.config.usageLevel });
@@ -92,7 +99,7 @@ export class MapService {
       this.googleMapsLoader = new Loader({
         apiKey: this.config.apiKey,
         version: 'weekly',
-        libraries: ['places', 'drawing', 'geometry'],
+        libraries: ['places', 'geometry'],
         language: 'en',
         region: 'US'
       });

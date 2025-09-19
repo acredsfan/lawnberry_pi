@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { Grid, Card, CardContent, Typography, Box, LinearProgress, Chip, IconButton, Alert } from '@mui/material'
 import { Battery90 as BatteryIcon, Thermostat as TempIcon, Speed as SpeedIcon, LocationOn as LocationIcon, Refresh as RefreshIcon } from '@mui/icons-material'
 import { useSelector, useDispatch } from 'react-redux'
@@ -30,6 +30,14 @@ const Dashboard: React.FC = () => {
   const [videoStream, setVideoStream] = useState<string | null>(null)
   const [cameraErrorCount, setCameraErrorCount] = useState(0)
   const [lastDataUpdate, setLastDataUpdate] = useState<Date | null>(null)
+  const refreshTimerRef = useRef<ReturnType<typeof window.setInterval> | null>(null)
+
+  const getStreamUrl = useCallback(() => {
+    const baseUrl = import.meta.env.DEV
+      ? 'http://localhost:8000/api/v1/camera/stream'
+      : '/api/v1/camera/stream'
+    return `${baseUrl}?t=${Date.now()}`
+  }, [])
 
   // Hydrate dashboard with backend status on mount
   useEffect(() => {
@@ -57,20 +65,33 @@ const Dashboard: React.FC = () => {
 
   // Initialize camera stream once
   useEffect(() => {
-    // Camera stream with cache-busting and auto-retry
-    let retryTimer: ReturnType<typeof setTimeout> | null = null
-    const getStreamUrl = () => {
-      const baseUrl = import.meta.env.DEV
-        ? 'http://localhost:8000/api/v1/camera/stream'
-        : `/api/v1/camera/stream`
-      // Add cache-busting param
-      return `${baseUrl}?t=${Date.now()}`
+    if (!isConnected || connectionStatus === 'disconnected') {
+      setVideoStream(null)
+      if (refreshTimerRef.current) {
+        window.clearInterval(refreshTimerRef.current)
+        refreshTimerRef.current = null
+      }
+      return
     }
-    setVideoStream(getStreamUrl())
+
+    const refreshStream = () => {
+      setVideoStream(getStreamUrl())
+    }
+
+    refreshStream()
+
+    if (refreshTimerRef.current) {
+      window.clearInterval(refreshTimerRef.current)
+    }
+    refreshTimerRef.current = window.setInterval(refreshStream, 15000)
+
     return () => {
-      if (retryTimer) clearTimeout(retryTimer)
+      if (refreshTimerRef.current) {
+        window.clearInterval(refreshTimerRef.current)
+        refreshTimerRef.current = null
+      }
     }
-  }, [cameraErrorCount])
+  }, [cameraErrorCount, isConnected, connectionStatus, getStreamUrl])
 
   const getBatteryColor = (level?: number) => {
     if (typeof level !== 'number') return 'default'
@@ -252,6 +273,7 @@ const Dashboard: React.FC = () => {
                 {videoStream ? (
                   <>
                     <img 
+                      key={videoStream ?? 'camera-feed'}
                       src={videoStream}
                       alt="Live camera feed"
                       style={{ 

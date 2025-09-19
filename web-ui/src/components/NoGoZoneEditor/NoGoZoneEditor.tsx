@@ -30,7 +30,6 @@ import {
   Warning as WarningIcon,
   Block as BlockIcon
 } from '@mui/icons-material';
-import { Loader } from '@googlemaps/js-api-loader';
 import { NoGoZone, NoGoZonePoint, noGoZoneService } from '../../services/noGoZoneService';
 
 interface BoundaryPoint {
@@ -53,7 +52,6 @@ const NoGoZoneEditor: React.FC<NoGoZoneEditorProps> = ({
   yardBoundaries,
   robotPosition
 }) => {
-  const [drawingManager, setDrawingManager] = useState<google.maps.drawing.DrawingManager | null>(null);
   const [activePolygons, setActivePolygons] = useState<google.maps.Polygon[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [editingZone, setEditingZone] = useState<string | null>(null);
@@ -62,71 +60,18 @@ const NoGoZoneEditor: React.FC<NoGoZoneEditorProps> = ({
   const [zoneName, setZoneName] = useState('');
   const [alert, setAlert] = useState<{ message: string; severity: 'error' | 'warning' | 'success' } | null>(null);
   const [clippedPoints, setClippedPoints] = useState<NoGoZonePoint[]>([]);
+  const drawingListenersRef = useRef<google.maps.MapsEventListener[]>([]);
+  const drawingSessionRef = useRef<{ polygon: google.maps.Polygon | null; points: BoundaryPoint[] }>({
+    polygon: null,
+    points: []
+  });
+  const drawingMapOptionsRef = useRef<{ disableDoubleClickZoom: boolean | null } | null>(null);
 
-  // Initialize drawing manager
   useEffect(() => {
-    if (!map || !window.google) return;
-
-    const manager = new google.maps.drawing.DrawingManager({
-      drawingMode: null,
-      drawingControl: false,
-      polygonOptions: {
-        fillColor: '#f44336',
-        fillOpacity: 0.3,
-        strokeColor: '#d32f2f',
-        strokeWeight: 2,
-        editable: true,
-        draggable: false
-      }
-    });
-
-    manager.setMap(map);
-    setDrawingManager(manager);
-
-    // Handle polygon completion
-    const handlePolygonComplete = async (polygon: google.maps.Polygon) => {
-      const path = polygon.getPath();
-      const points = path.getArray().map(latLng => ({
-        lat: latLng.lat(),
-        lng: latLng.lng()
-      }));
-
-      // Validate and clip to yard boundaries
-      const validation = validateNoGoZone(points);
-      
-      if (!validation.isValid) {
-        setAlert({ message: validation.error!, severity: 'error' });
-        polygon.setMap(null);
-        return;
-      }
-
-      // Clip to yard boundaries
-      const clipped = await noGoZoneService.clipToYardBoundaries(points, yardBoundaries);
-      
-      if (clipped.length !== points.length) {
-        setAlert({ 
-          message: `Zone was automatically clipped to yard boundaries. ${points.length - clipped.length} points removed.`, 
-          severity: 'warning' 
-        });
-        
-        // Update polygon with clipped points
-        const clippedPath = clipped.map(p => new google.maps.LatLng(p.lat, p.lng));
-        polygon.setPath(clippedPath);
-        setClippedPoints(clipped);
-      }
-
-      setPendingPolygon(polygon);
-      setShowNameDialog(true);
-      setIsDrawing(false);
-      manager.setDrawingMode(null);
-    };
-
-    manager.addListener('polygoncomplete', handlePolygonComplete);
-
     return () => {
-      manager.setMap(null);
+      stopDrawing();
     };
-  }, [map, yardBoundaries]);
+  }, [stopDrawing]);
 
   // Render existing no-go zones
   useEffect(() => {
@@ -206,19 +151,131 @@ const NoGoZoneEditor: React.FC<NoGoZoneEditorProps> = ({
     return inside;
   };
 
-  const handleStartDrawing = () => {
-    if (!drawingManager) return;
-    
-    setIsDrawing(true);
-    drawingManager.setDrawingMode(google.maps.drawing.OverlayType.POLYGON);
-  };
+  const handlePolygonCompletion = useCallback(async (polygon: google.maps.Polygon, points: BoundaryPoint[]) => {
+    const validation = validateNoGoZone(points);
 
-  const handleCancelDrawing = () => {
-    if (!drawingManager) return;
-    
+    if (!validation.isValid) {
+      setAlert({ message: validation.error!, severity: 'error' });
+      polygon.setMap(null);
+      return;
+    }
+
+    try {
+      const clipped = await noGoZoneService.clipToYardBoundaries(points, yardBoundaries);
+      if (clipped.length !== points.length) {
+        setAlert({
+          message: `Zone was automatically clipped to yard boundaries. ${points.length - clipped.length} points removed.`,
+          severity: 'warning'
+        });
+        polygon.setPaths([clipped.map(p => ({ lat: p.lat, lng: p.lng }))]);
+        setClippedPoints(clipped);
+      } else {
+        setClippedPoints([]);
+      }
+
+      setPendingPolygon(polygon);
+      setZoneName(prev => prev || `No-Go Zone ${noGoZones.length + 1}`);
+      setShowNameDialog(true);
+      setIsDrawing(false);
+    } catch (error) {
+      setAlert({
+        message: error instanceof Error ? error.message : 'Failed to clip zone to boundaries',
+        severity: 'error'
+      });
+      polygon.setMap(null);
+    }
+  }, [noGoZones.length, yardBoundaries, validateNoGoZone]);
+
+  const stopDrawing = useCallback((preservePolygon: boolean = false) => {
+    drawingListenersRef.current.forEach(listener => listener.remove());
+    drawingListenersRef.current = [];
+
+    if (!preservePolygon && drawingSessionRef.current.polygon) {
+      drawingSessionRef.current.polygon.setMap(null);
+    }
+
+    drawingSessionRef.current = {
+      polygon: preservePolygon ? drawingSessionRef.current.polygon : null,
+      points: []
+    };
+
+    if (map) {
+      map.setOptions({
+        disableDoubleClickZoom: drawingMapOptionsRef.current?.disableDoubleClickZoom ?? false,
+        draggableCursor: undefined
+      });
+    }
+    drawingMapOptionsRef.current = null;
+
     setIsDrawing(false);
-    drawingManager.setDrawingMode(null);
-  };
+  }, [map]);
+
+  const handleStartDrawing = useCallback(() => {
+    if (!map) return;
+
+    stopDrawing();
+    setClippedPoints([]);
+
+    const polygon = new google.maps.Polygon({
+      map,
+      paths: [],
+      fillColor: '#f44336',
+      fillOpacity: 0.3,
+      strokeColor: '#d32f2f',
+      strokeWeight: 2,
+      editable: false,
+      draggable: false
+    });
+
+    drawingSessionRef.current = { polygon, points: [] };
+    setIsDrawing(true);
+
+    drawingMapOptionsRef.current = {
+      disableDoubleClickZoom: map.get('disableDoubleClickZoom') as boolean | null
+    };
+    map.setOptions({ disableDoubleClickZoom: true, draggableCursor: 'crosshair' });
+
+    const clickListener = map.addListener('click', (event: google.maps.MapMouseEvent) => {
+      const latLng = event.latLng;
+      if (!latLng || !drawingSessionRef.current.polygon) return;
+      drawingSessionRef.current.points = [...drawingSessionRef.current.points, { lat: latLng.lat(), lng: latLng.lng() }];
+      drawingSessionRef.current.polygon.setPaths([drawingSessionRef.current.points]);
+    });
+
+    const dblClickListener = map.addListener('dblclick', async (event: google.maps.MapMouseEvent) => {
+      const domEvt = event.domEvent as MouseEvent | undefined;
+      domEvt?.preventDefault?.();
+
+      const session = drawingSessionRef.current;
+      if (!session.polygon || session.points.length < 3) {
+        return;
+      }
+
+      stopDrawing(true);
+      await handlePolygonCompletion(session.polygon, [...session.points]);
+      drawingSessionRef.current = { polygon: null, points: [] };
+    });
+
+    const rightClickListener = map.addListener('rightclick', (event: google.maps.MapMouseEvent) => {
+      const domEvt = event.domEvent as MouseEvent | undefined;
+      domEvt?.preventDefault?.();
+
+      const session = drawingSessionRef.current;
+      if (!session.polygon || session.points.length === 0) {
+        return;
+      }
+
+      session.points = session.points.slice(0, -1);
+      session.polygon.setPaths([session.points]);
+    });
+
+    drawingListenersRef.current = [clickListener, dblClickListener, rightClickListener];
+  }, [map, stopDrawing, handlePolygonCompletion]);
+
+  const handleCancelDrawing = useCallback(() => {
+    stopDrawing();
+    setClippedPoints([]);
+  }, [stopDrawing]);
 
   const handleSaveZone = async () => {
     if (!pendingPolygon || !zoneName.trim()) return;
@@ -258,6 +315,7 @@ const NoGoZoneEditor: React.FC<NoGoZoneEditorProps> = ({
     setPendingPolygon(null);
     setZoneName('');
     setClippedPoints([]);
+    stopDrawing();
   };
 
   const handleEditZone = (zoneId: string) => {
@@ -427,7 +485,7 @@ const NoGoZoneEditor: React.FC<NoGoZoneEditorProps> = ({
 
           {isDrawing && (
             <Alert severity="info" sx={{ mb: 2 }}>
-              Click on the map to start drawing a no-go zone. Click the first point again to complete the zone.
+              Click on the map to add vertices. Double-click to finish the zone, right-click to undo the last point.
             </Alert>
           )}
 

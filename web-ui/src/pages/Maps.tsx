@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import L from 'leaflet';
 import { useDispatch, useSelector } from 'react-redux';
 import { 
@@ -158,6 +158,20 @@ const Maps: React.FC = () => {
 
   // Determine if we should use full-width layout (desktop full-page mode); allow user toggle
   const [useFullWidth, setUseFullWidth] = useState(isDesktop);
+
+  useEffect(() => {
+    if (!isDesktop && useFullWidth) {
+      setUseFullWidth(false);
+    }
+  }, [isDesktop, useFullWidth]);
+
+  const containerStyles = useMemo(() => ({
+    width: '100%',
+    maxWidth: useFullWidth ? '100%' : '1200px',
+    margin: '0 auto',
+    px: useFullWidth ? { xs: 0, md: 0 } : { xs: 1.5, md: 3 },
+    py: useFullWidth ? { xs: 1.5, md: 2 } : 3
+  }), [useFullWidth]);
 
   const robotPosition = status?.position ? {
     lat: status.position.lat,
@@ -340,14 +354,7 @@ const Maps: React.FC = () => {
   }, [robotPosition, validBoundaries, activeNoGoZones, pointInPolygon]);
 
   return (
-    <Box
-      sx={{
-        width: '100%',
-        maxWidth: '100%',
-        px: useFullWidth ? { xs: 0, md: 0 } : { xs: 1.5, md: 3 },
-        py: useFullWidth ? { xs: 1.5, md: 2 } : 3
-      }}
-    >
+    <Box sx={containerStyles}>
       <Typography variant="h4" component="h1" gutterBottom>
         LawnBerry Maps
         {geofenceStatus.violation && (

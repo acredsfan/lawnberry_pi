@@ -256,6 +256,7 @@ export interface MapConfig {
   provider: MapProvider
   usageLevel: MapUsageLevel
   apiKey?: string
+  mapId?: string
   defaultCenter: { lat: number; lng: number }
   defaultZoom: number
   enableCaching: boolean

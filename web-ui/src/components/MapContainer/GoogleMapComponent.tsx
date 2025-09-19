@@ -53,19 +53,42 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
 }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
-  const drawingManagerRef = useRef<google.maps.drawing.DrawingManager | null>(null);
   const boundaryPolygonsRef = useRef<google.maps.Polygon[]>([]);
   const noGoZonePolygonsRef = useRef<google.maps.Polygon[]>([]);
-  const homeMarkerRef = useRef<google.maps.Marker | null>(null);
-  const robotMarkerRef = useRef<google.maps.Marker | null>(null);
+  const homeMarkerRef = useRef<google.maps.marker.AdvancedMarkerElement | null>(null);
+  const legacyHomeMarkerRef = useRef<google.maps.Marker | null>(null);
+  const robotMarkerRef = useRef<{
+    marker: google.maps.marker.AdvancedMarkerElement;
+    element: HTMLElement;
+    arrow: HTMLElement;
+  } | null>(null);
+  const legacyRobotMarkerRef = useRef<google.maps.Marker | null>(null);
   const mowingPathRef = useRef<google.maps.Polyline | null>(null);
   const coveredAreasRef = useRef<google.maps.Polygon[]>([]);
+  const markerLibraryRef = useRef<google.maps.MarkerLibrary | null>(null);
+  const drawingSessionRef = useRef<{
+    type: 'boundary' | 'no-go' | null;
+    polygon: google.maps.Polygon | null;
+    path: Array<{ lat: number; lng: number }>;
+  }>({ type: null, polygon: null, path: [] });
+  const homePlacementRef = useRef(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [customControls, setCustomControls] = useState<{
     drawingToolbar?: HTMLElement;
     offlineIndicator?: HTMLElement;
     followBtn?: HTMLButtonElement;
+    boundaryBtn?: HTMLButtonElement;
+    noGoBtn?: HTMLButtonElement;
+    homeBtn?: HTMLButtonElement;
+    completeBtn?: HTMLButtonElement;
+    cancelBtn?: HTMLButtonElement;
   }>({});
+  const controlsRef = useRef(customControls);
+  const [drawingState, setDrawingState] = useState<{ active: boolean; type: 'boundary' | 'no-go' | null }>({
+    active: false,
+    type: null
+  });
+  const [isSettingHome, setIsSettingHome] = useState(false);
   const [autoFollow, setAutoFollow] = useState(true);
   const autoFollowRef = useRef(true);
   const programmaticZoomRef = useRef(false);
@@ -146,86 +169,167 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
     zoom
   }), [baseMapOptions, center, zoom]);
 
-const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
-    if (!window.google?.maps?.drawing) {
-      console.warn('Google Maps Drawing library not loaded');
-      return;
+  const refreshControlStates = useCallback(() => {
+    const controls = controlsRef.current;
+    const session = drawingSessionRef.current;
+    if (controls?.completeBtn) {
+      controls.completeBtn.disabled = !(session.type && session.path.length >= 3);
+    }
+    if (controls?.cancelBtn) {
+      controls.cancelBtn.disabled = !session.type;
+    }
+  }, []);
+
+  useEffect(() => {
+    controlsRef.current = customControls;
+    refreshControlStates();
+  }, [customControls, refreshControlStates]);
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    const applyActiveStyles = (btn: HTMLButtonElement | undefined, active: boolean, activeColor: string) => {
+      if (!btn) return;
+      btn.style.background = active ? activeColor : 'white';
+      btn.style.color = active ? 'white' : activeColor;
+    };
+
+    applyActiveStyles(controls?.boundaryBtn, drawingState.active && drawingState.type === 'boundary', '#4caf50');
+    applyActiveStyles(controls?.noGoBtn, drawingState.active && drawingState.type === 'no-go', '#f44336');
+    applyActiveStyles(controls?.homeBtn, isSettingHome, '#2196f3');
+  }, [drawingState, isSettingHome]);
+
+  const resetDrawingSession = useCallback((removeOverlay: boolean = true) => {
+    const session = drawingSessionRef.current;
+    if (removeOverlay && session.polygon) {
+      session.polygon.setMap(null);
+    }
+    drawingSessionRef.current = { type: null, polygon: null, path: [] };
+    setDrawingState({ active: false, type: null });
+    setIsSettingHome(false);
+    homePlacementRef.current = false;
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.setOptions({ draggableCursor: undefined });
+    }
+    refreshControlStates();
+  }, [refreshControlStates]);
+
+  const beginDrawing = useCallback((type: 'boundary' | 'no-go') => {
+    if (!mapInstanceRef.current) return;
+
+    resetDrawingSession();
+    homePlacementRef.current = false;
+    setIsSettingHome(false);
+    const map = mapInstanceRef.current;
+    const color = type === 'no-go' ? '#f44336' : '#4caf50';
+
+    const polygon = new google.maps.Polygon({
+      map,
+      paths: [],
+      strokeColor: color,
+      strokeOpacity: type === 'no-go' ? 0.9 : 0.8,
+      strokeWeight: 2,
+      fillColor: color,
+      fillOpacity: type === 'no-go' ? 0.3 : 0.15,
+      editable: false,
+      draggable: false
+    });
+
+    drawingSessionRef.current = { type, polygon, path: [] };
+    setDrawingState({ active: true, type });
+    map.setOptions({ draggableCursor: 'crosshair' });
+    refreshControlStates();
+  }, [resetDrawingSession, refreshControlStates]);
+
+  const appendDrawingPoint = useCallback((point: { lat: number; lng: number }) => {
+    const session = drawingSessionRef.current;
+    if (!session.type || !session.polygon) return;
+
+    session.path = [...session.path, point];
+    session.polygon.setPaths([session.path]);
+    refreshControlStates();
+  }, [refreshControlStates]);
+
+  const removeLastDrawingPoint = useCallback(() => {
+    const session = drawingSessionRef.current;
+    if (!session.type || !session.polygon || session.path.length === 0) return;
+
+    session.path = session.path.slice(0, -1);
+    session.polygon.setPaths([session.path]);
+    refreshControlStates();
+  }, [refreshControlStates]);
+
+  const completeDrawing = useCallback(() => {
+    const session = drawingSessionRef.current;
+    if (!session.type || session.path.length < 3) return;
+
+    const coordinates = [...session.path];
+    if (session.type === 'boundary' && onBoundaryComplete) {
+      onBoundaryComplete(coordinates);
+    } else if (session.type === 'no-go' && onNoGoZoneComplete) {
+      onNoGoZoneComplete(coordinates);
     }
 
-    const drawingManager = new google.maps.drawing.DrawingManager({
-      drawingMode: null,
-      drawingControl: false, // We'll use custom controls
-      polygonOptions: {
-        fillColor: '#4caf50',
-        fillOpacity: 0.3,
-        strokeColor: '#4caf50',
-        strokeWeight: 2,
-        clickable: true,
-        editable: true,
-        draggable: false
-      },
-      circleOptions: {
-        fillColor: '#f44336',
-        fillOpacity: 0.3,
-        strokeColor: '#f44336',
-        strokeWeight: 2,
-        clickable: true,
-        editable: true,
-        draggable: false
-      }
-    });
+    resetDrawingSession();
+  }, [onBoundaryComplete, onNoGoZoneComplete, resetDrawingSession]);
 
-    drawingManager.setMap(map);
-    drawingManagerRef.current = drawingManager;
+  const cancelDrawing = useCallback(() => {
+    resetDrawingSession();
+  }, [resetDrawingSession]);
 
-    // Handle completed shapes
-    drawingManager.addListener('polygoncomplete', (polygon: google.maps.Polygon) => {
-      const path = polygon.getPath();
-      const coordinates = path.getArray().map(latLng => ({
-        lat: latLng.lat(),
-        lng: latLng.lng()
-      }));
-
-      if (drawingType === 'boundary' && onBoundaryComplete) {
-        onBoundaryComplete(coordinates);
-      } else if (drawingType === 'no-go' && onNoGoZoneComplete) {
-        onNoGoZoneComplete(coordinates);
-      }
-
-      // Reset drawing mode after completion
-      drawingManager.setDrawingMode(null);
-    });
-
-    drawingManager.addListener('circlecomplete', (circle: google.maps.Circle) => {
-      const center = circle.getCenter();
-      const radius = circle.getRadius();
-      
-      // Convert circle to polygon for consistency
-      const coordinates = generateCirclePolygon(center!, radius);
-      
-      if (drawingType === 'no-go' && onNoGoZoneComplete) {
-        onNoGoZoneComplete(coordinates);
-      }
-
-      // Remove the circle and reset drawing mode
-      circle.setMap(null);
-      drawingManager.setDrawingMode(null);
-    });
-  }, [drawingType, onBoundaryComplete, onNoGoZoneComplete]);
-
-  const generateCirclePolygon = (center: google.maps.LatLng, radius: number): Array<{ lat: number; lng: number }> => {
-    const points: Array<{ lat: number; lng: number }> = [];
-    const numPoints = 32;
-    
-    for (let i = 0; i < numPoints; i++) {
-      const angle = (i * 360 / numPoints) * Math.PI / 180;
-      const lat = center.lat() + (radius / 111000) * Math.cos(angle);
-      const lng = center.lng() + (radius / (111000 * Math.cos(center.lat() * Math.PI / 180))) * Math.sin(angle);
-      points.push({ lat, lng });
+  const ensureMarkerLibrary = useCallback(async () => {
+    const config = mapService.getConfig();
+    if (!config.mapId) {
+      markerLibraryRef.current = null;
+      return null;
     }
-    
-    return points;
-  };
+
+    if (!markerLibraryRef.current) {
+      markerLibraryRef.current = await google.maps.importLibrary('marker') as google.maps.MarkerLibrary;
+    }
+    return markerLibraryRef.current;
+  }, []);
+
+  const clearAllOverlays = useCallback(() => {
+    // Clear boundary polygons
+    boundaryPolygonsRef.current.forEach(polygon => polygon.setMap(null));
+    boundaryPolygonsRef.current = [];
+
+    // Clear no-go zone polygons
+    noGoZonePolygonsRef.current.forEach(polygon => polygon.setMap(null));
+    noGoZonePolygonsRef.current = [];
+
+    // Clear home markers
+    if (homeMarkerRef.current) {
+      homeMarkerRef.current.map = null;
+      homeMarkerRef.current = null;
+    }
+    if (legacyHomeMarkerRef.current) {
+      legacyHomeMarkerRef.current.setMap(null);
+      legacyHomeMarkerRef.current = null;
+    }
+
+    // Clear mowing path
+    if (mowingPathRef.current) {
+      mowingPathRef.current.setMap(null);
+      mowingPathRef.current = null;
+    }
+
+    // Clear covered areas
+    coveredAreasRef.current.forEach(polygon => polygon.setMap(null));
+    coveredAreasRef.current = [];
+
+    if (robotMarkerRef.current) {
+      robotMarkerRef.current.marker.map = null;
+      robotMarkerRef.current = null;
+    }
+    if (legacyRobotMarkerRef.current) {
+      legacyRobotMarkerRef.current.setMap(null);
+      legacyRobotMarkerRef.current = null;
+    }
+
+    resetDrawingSession();
+    homePlacementRef.current = false;
+  }, [resetDrawingSession]);
 
   const initializeCustomControls = useCallback((map: google.maps.Map) => {
     // Create drawing toolbar
@@ -261,19 +365,17 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
     };
 
     const boundaryBtn = createToolButton('Draw Boundary', () => {
-      if (drawingManagerRef.current) {
-        drawingManagerRef.current.setDrawingMode(google.maps.drawing.OverlayType.POLYGON);
-      }
+      beginDrawing('boundary');
     });
 
     const noGoBtn = createToolButton('Draw No-Go Zone', () => {
-      if (drawingManagerRef.current) {
-        drawingManagerRef.current.setDrawingMode(google.maps.drawing.OverlayType.CIRCLE);
-      }
+      beginDrawing('no-go');
     });
 
     const homeBtn = createToolButton('Set Home', () => {
-      // Enable click mode for home location
+      resetDrawingSession();
+      homePlacementRef.current = true;
+      setIsSettingHome(true);
       map.setOptions({ draggableCursor: 'crosshair' });
     });
 
@@ -281,10 +383,22 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       clearAllOverlays();
     });
 
+    const completeBtn = createToolButton('Finish Shape', () => {
+      completeDrawing();
+    });
+    completeBtn.disabled = true;
+
+    const cancelBtn = createToolButton('Cancel', () => {
+      cancelDrawing();
+    });
+    cancelBtn.disabled = true;
+
     drawingToolbar.appendChild(boundaryBtn);
     drawingToolbar.appendChild(noGoBtn);
     drawingToolbar.appendChild(homeBtn);
     drawingToolbar.appendChild(clearBtn);
+    drawingToolbar.appendChild(completeBtn);
+    drawingToolbar.appendChild(cancelBtn);
 
     const followBtn = createToolButton(autoFollowRef.current ? 'Following' : 'Follow Robot', () => {
       autoFollowRef.current = true;
@@ -322,8 +436,8 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
     
     map.controls[google.maps.ControlPosition.TOP_RIGHT].push(offlineIndicator);
 
-    setCustomControls({ drawingToolbar, offlineIndicator, followBtn });
-  }, [isOffline, center, zoom, clearAllOverlays, robotPosition]);
+    setCustomControls({ drawingToolbar, offlineIndicator, followBtn, boundaryBtn, noGoBtn, homeBtn, completeBtn, cancelBtn });
+  }, [isOffline, center, zoom, clearAllOverlays, robotPosition, beginDrawing, resetDrawingSession, completeDrawing, cancelDrawing]);
 
   useEffect(() => {
     autoFollowRef.current = autoFollow;
@@ -334,42 +448,47 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
     }
   }, [autoFollow, customControls.followBtn]);
 
-  const clearAllOverlays = useCallback(() => {
-    // Clear boundary polygons
-    boundaryPolygonsRef.current.forEach(polygon => polygon.setMap(null));
-    boundaryPolygonsRef.current = [];
-
-    // Clear no-go zone polygons
-    noGoZonePolygonsRef.current.forEach(polygon => polygon.setMap(null));
-    noGoZonePolygonsRef.current = [];
-
-    // Clear home marker
-    if (homeMarkerRef.current) {
-      homeMarkerRef.current.setMap(null);
-      homeMarkerRef.current = null;
-    }
-
-    // Clear mowing path
-    if (mowingPathRef.current) {
-      mowingPathRef.current.setMap(null);
-      mowingPathRef.current = null;
-    }
-
-    // Clear covered areas
-    coveredAreasRef.current.forEach(polygon => polygon.setMap(null));
-    coveredAreasRef.current = [];
-  }, []);
-
   const setupMapEventListeners = useCallback((map: google.maps.Map) => {
-    // Handle click for home location setting
     map.addListener('click', (event: google.maps.MapMouseEvent) => {
-      if (map.get('draggableCursor') === 'crosshair' && onHomeLocationSet) {
+      const latLng = event.latLng;
+      if (!latLng) {
+        return;
+      }
+
+      if (drawingSessionRef.current.type) {
+        appendDrawingPoint({ lat: latLng.lat(), lng: latLng.lng() });
+        const domEvt = event.domEvent as MouseEvent | undefined;
+        domEvt?.preventDefault?.();
+        return;
+      }
+
+      if (homePlacementRef.current && onHomeLocationSet) {
         const coordinates = {
-          lat: event.latLng!.lat(),
-          lng: event.latLng!.lng()
+          lat: latLng.lat(),
+          lng: latLng.lng()
         };
         onHomeLocationSet(coordinates);
+        homePlacementRef.current = false;
+        setIsSettingHome(false);
         map.setOptions({ draggableCursor: undefined });
+        const domEvt = event.domEvent as MouseEvent | undefined;
+        domEvt?.preventDefault?.();
+      }
+    });
+
+    map.addListener('dblclick', (event: google.maps.MapMouseEvent) => {
+      if (drawingSessionRef.current.type) {
+        const domEvt = event.domEvent as MouseEvent | undefined;
+        domEvt?.preventDefault?.();
+        completeDrawing();
+      }
+    });
+
+    map.addListener('rightclick', (event: google.maps.MapMouseEvent) => {
+      if (drawingSessionRef.current.type) {
+        const domEvt = event.domEvent as MouseEvent | undefined;
+        domEvt?.preventDefault?.();
+        removeLastDrawingPoint();
       }
     });
 
@@ -391,7 +510,7 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       programmaticCenterRef.current = false;
       programmaticZoomRef.current = false;
     });
-  }, [onHomeLocationSet]);
+  }, [appendDrawingPoint, onHomeLocationSet, completeDrawing, removeLastDrawingPoint]);
 
   const updateBoundaries = useCallback(() => {
     if (!mapInstanceRef.current) return;
@@ -446,57 +565,130 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
   const updateHomeLocation = useCallback(() => {
     if (!mapInstanceRef.current) return;
 
-    // Clear existing home marker
+    // Clear existing home markers
     if (homeMarkerRef.current) {
-      homeMarkerRef.current.setMap(null);
+      homeMarkerRef.current.map = null;
       homeMarkerRef.current = null;
+    }
+    if (legacyHomeMarkerRef.current) {
+      legacyHomeMarkerRef.current.setMap(null);
+      legacyHomeMarkerRef.current = null;
     }
 
     // Add new home marker
     if (homeLocation) {
-      const marker = new google.maps.Marker({
-        position: homeLocation,
-        map: mapInstanceRef.current,
-        title: 'Home Base',
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 10,
-          fillColor: '#2196f3',
-          fillOpacity: 1,
-          strokeColor: 'white',
-          strokeWeight: 2
-        }
-      });
+      const markerLib = markerLibraryRef.current;
+      if (markerLib) {
+        const pin = new markerLib.PinElement({
+          background: '#2196f3',
+          borderColor: '#ffffff',
+          glyphColor: '#ffffff'
+        });
 
-      homeMarkerRef.current = marker;
+        const marker = new markerLib.AdvancedMarkerElement({
+          map: mapInstanceRef.current!,
+          position: homeLocation,
+          title: 'Home Base',
+          content: pin.element
+        });
+
+        homeMarkerRef.current = marker;
+      } else {
+        legacyHomeMarkerRef.current = new google.maps.Marker({
+          position: homeLocation,
+          map: mapInstanceRef.current!,
+          title: 'Home Base',
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 10,
+            fillColor: '#2196f3',
+            fillOpacity: 1,
+            strokeColor: 'white',
+            strokeWeight: 2
+          }
+        });
+      }
     }
   }, [homeLocation]);
 
   const updateRobotPosition = useCallback(() => {
     if (!mapInstanceRef.current || !robotPosition) return;
 
-    const icon: google.maps.Symbol = {
-      path: 'M12 2C8.13 2 5 5.13 5 9c0 3.87 6.01 11 6.01 11s6.99-7.13 6.99-11c0-3.87-3.13-7-6-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z',
-      fillColor: geofenceViolation ? '#FF1744' : '#FF1493',
-      fillOpacity: 0.95,
-      strokeColor: geofenceInNoGo ? '#FFEA00' : '#00FFD1',
-      strokeWeight: 1.6,
-      rotation: robotPosition.heading || 0,
-      scale: 1.35,
-      anchor: new google.maps.Point(12, 22)
-    };
+    const heading = robotPosition.heading ?? 0;
+    const borderColor = geofenceInNoGo ? '#FFEA00' : '#00FFD1';
+    const fillColor = geofenceViolation ? '#FF1744' : '#FF1493';
+    const markerLib = markerLibraryRef.current;
 
-    if (!robotMarkerRef.current) {
-      robotMarkerRef.current = new google.maps.Marker({
-        position: robotPosition,
-        map: mapInstanceRef.current,
-        title: 'LawnBerryPi',
-        icon,
-        zIndex: 1000
-      });
+    if (markerLib) {
+      if (!robotMarkerRef.current) {
+        const wrapper = document.createElement('div');
+        wrapper.style.width = '28px';
+        wrapper.style.height = '28px';
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.justifyContent = 'center';
+        wrapper.style.transform = `rotate(${heading}deg)`;
+        wrapper.style.transition = 'transform 0.2s ease-out';
+        wrapper.style.filter = `drop-shadow(0 0 6px ${borderColor})`;
+
+        const arrow = document.createElement('div');
+        arrow.style.width = '0';
+        arrow.style.height = '0';
+        arrow.style.borderLeft = '8px solid transparent';
+        arrow.style.borderRight = '8px solid transparent';
+        arrow.style.borderBottom = `18px solid ${fillColor}`;
+        arrow.style.filter = `drop-shadow(0 0 6px ${borderColor})`;
+
+        wrapper.appendChild(arrow);
+
+        if (legacyRobotMarkerRef.current) {
+          legacyRobotMarkerRef.current.setMap(null);
+          legacyRobotMarkerRef.current = null;
+        }
+
+        const marker = new markerLib.AdvancedMarkerElement({
+          map: mapInstanceRef.current,
+          position: robotPosition,
+          content: wrapper,
+          zIndex: 1000
+        });
+
+        robotMarkerRef.current = { marker, element: wrapper, arrow };
+      } else {
+        robotMarkerRef.current.marker.position = robotPosition;
+        robotMarkerRef.current.element.style.transform = `rotate(${heading}deg)`;
+        robotMarkerRef.current.element.style.filter = `drop-shadow(0 0 6px ${borderColor})`;
+        robotMarkerRef.current.arrow.style.borderBottom = `18px solid ${fillColor}`;
+        robotMarkerRef.current.arrow.style.filter = `drop-shadow(0 0 6px ${borderColor})`;
+      }
     } else {
-      robotMarkerRef.current.setPosition(robotPosition);
-      robotMarkerRef.current.setIcon(icon);
+      if (robotMarkerRef.current) {
+        robotMarkerRef.current.marker.map = null;
+        robotMarkerRef.current = null;
+      }
+
+      const symbol: google.maps.Symbol = {
+        path: 'M12 2C8.13 2 5 5.13 5 9c0 3.87 6.01 11 6.01 11s6.99-7.13 6.99-11c0-3.87-3.13-7-6-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z',
+        fillColor,
+        fillOpacity: 0.95,
+        strokeColor: borderColor,
+        strokeWeight: 1.6,
+        rotation: heading,
+        scale: 1.35,
+        anchor: new google.maps.Point(12, 22)
+      };
+
+      if (!legacyRobotMarkerRef.current) {
+        legacyRobotMarkerRef.current = new google.maps.Marker({
+          position: robotPosition,
+          map: mapInstanceRef.current,
+          title: 'LawnBerryPi',
+          icon: symbol
+        });
+      } else {
+        legacyRobotMarkerRef.current.setPosition(robotPosition);
+        legacyRobotMarkerRef.current.setIcon(symbol);
+      }
     }
 
     if (autoFollowRef.current) {
@@ -559,13 +751,17 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       }
 
       const mapOptions = getInitialMapOptions();
+      const config = mapService.getConfig();
+      if (config.mapId) {
+        (mapOptions as google.maps.MapOptions & { mapId?: string }).mapId = config.mapId;
+      }
+
       const map = new google.maps.Map(mapRef.current, mapOptions);
-      
+
       mapInstanceRef.current = map;
-      
-      // Initialize drawing manager
-      await initializeDrawingManager(map);
-      
+
+      await ensureMarkerLibrary();
+
       // Initialize custom controls
       initializeCustomControls(map);
       
@@ -608,7 +804,7 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
       );
       onError(mapError);
     }
-  }, [getInitialMapOptions, isOffline, onError, initializeDrawingManager, initializeCustomControls, setupMapEventListeners]);
+  }, [getInitialMapOptions, isOffline, onError, ensureMarkerLibrary, initializeCustomControls, setupMapEventListeners]);
 
   // Initialize map on mount
   useEffect(() => {
@@ -722,18 +918,33 @@ const initializeDrawingManager = useCallback(async (map: google.maps.Map) => {
   }, [isInitialized]);
 
   useEffect(() => {
-    if (drawingManagerRef.current && isDrawingMode) {
-      const mode = drawingType === 'boundary' 
-        ? google.maps.drawing.OverlayType.POLYGON 
-        : drawingType === 'no-go'
-        ? google.maps.drawing.OverlayType.CIRCLE
-        : null;
-      
-      drawingManagerRef.current.setDrawingMode(mode);
-    } else if (drawingManagerRef.current) {
-      drawingManagerRef.current.setDrawingMode(null);
+    if (!mapInstanceRef.current) return;
+
+    if (!isDrawingMode) {
+      if (drawingState.active) {
+        cancelDrawing();
+      } else {
+        resetDrawingSession();
+      }
+      homePlacementRef.current = false;
+      setIsSettingHome(false);
+      mapInstanceRef.current.setOptions({ draggableCursor: undefined });
+      return;
     }
-  }, [isDrawingMode, drawingType]);
+
+    if (drawingType === 'home') {
+      cancelDrawing();
+      homePlacementRef.current = true;
+      setIsSettingHome(true);
+      mapInstanceRef.current.setOptions({ draggableCursor: 'crosshair' });
+      return;
+    }
+
+    const desiredType: 'boundary' | 'no-go' = drawingType === 'no-go' ? 'no-go' : 'boundary';
+    if (!drawingState.active || drawingState.type !== desiredType) {
+      beginDrawing(desiredType);
+    }
+  }, [isDrawingMode, drawingType, drawingState.active, drawingState.type, beginDrawing, cancelDrawing, resetDrawingSession]);
 
   return (
     <div
