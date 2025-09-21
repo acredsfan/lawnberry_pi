@@ -29,6 +29,9 @@ export interface MapContainerProps {
   onBoundaryComplete?: (coordinates: Array<{ lat: number; lng: number }>) => void;
   onNoGoZoneComplete?: (coordinates: Array<{ lat: number; lng: number }>) => void;
   onHomeLocationSet?: (coordinate: { lat: number; lng: number }) => void;
+  onClearAll?: () => void;
+  onBoundaryUpdate?: (id: string, coordinates: Array<{ lat: number; lng: number }>) => void;
+  onNoGoZoneUpdate?: (id: string, coordinates: Array<{ lat: number; lng: number }>) => void;
   weather?: {
     temperature: number;
     humidity: number;
@@ -60,6 +63,9 @@ const MapContainer: React.FC<MapContainerProps> = ({
   onBoundaryComplete,
   onNoGoZoneComplete,
   onHomeLocationSet,
+  onClearAll,
+  onBoundaryUpdate,
+  onNoGoZoneUpdate,
   weather,
   style,
   className,
@@ -240,16 +246,43 @@ const MapContainer: React.FC<MapContainerProps> = ({
     onError: handleError,
     robotPosition,
     robotPath,
-  boundaries: boundaries,
-  noGoZones: noGoZones,
-  homeLocation: homeLocation || undefined,
-  isDrawingMode: enableDrawing && !!drawingMode,
-  drawingType: (drawingMode === 'home' ? 'home' : drawingMode === 'no-go' ? 'no-go' : 'boundary') as any,
-  onBoundaryComplete,
-  onNoGoZoneComplete,
-  onHomeLocationSet,
+    boundaries,
+    noGoZones,
+    homeLocation: homeLocation || undefined,
+    isDrawingMode: enableDrawing && !!drawingMode,
+    drawingType: (drawingMode === 'home' ? 'home' : drawingMode === 'no-go' ? 'no-go' : 'boundary') as any,
+    onBoundaryComplete,
+    onNoGoZoneComplete,
+    onHomeLocationSet,
+    onClearAll,
+    onBoundaryUpdate,
+    onNoGoZoneUpdate,
     style: { width: '100%', height: '100%' }
   };
+
+  const defaultHeight = { xs: 480, md: 600 } as const;
+  const resolvedHeight = style?.height ?? defaultHeight;
+  const resolvedWidth = style?.width ?? '100%';
+
+  const renderMap = () => (
+    <Box sx={{ flexGrow: 1, height: '100%', width: '100%' }}>
+      {mapState.currentProvider === 'google' ? (
+        <GoogleMapComponent
+          {...mapProps}
+          geofenceViolation={geofenceViolation}
+          geofenceInNoGo={geofenceInNoGo}
+          onClearAll={onClearAll}
+          onMapReady={(m: any) => onMapReady?.(m, 'google')}
+        >
+          {children}
+        </GoogleMapComponent>
+      ) : (
+        <LeafletMapComponent {...mapProps} onMapReady={(m: any) => onMapReady?.(m, 'openstreetmap')}>
+          {children}
+        </LeafletMapComponent>
+      )}
+    </Box>
+  );
 
   return (
     <Box 
@@ -257,13 +290,11 @@ const MapContainer: React.FC<MapContainerProps> = ({
       style={style} 
       sx={{ 
         position: 'relative',
-        width: '100%',
-        height: { xs: 480, md: 600 },
-        minHeight: 400,
-        '& > div:last-of-type': {
-          height: '100%',
-          width: '100%'
-        }
+        width: resolvedWidth,
+        height: resolvedHeight,
+        minHeight: style?.height ? undefined : 400,
+        display: 'flex',
+        flexDirection: 'column'
       }}
     >
       {weather && (
@@ -301,15 +332,7 @@ const MapContainer: React.FC<MapContainerProps> = ({
         </ToggleButtonGroup>
       </Box>
 
-      {mapState.currentProvider === 'google' ? (
-        <GoogleMapComponent {...mapProps} geofenceViolation={geofenceViolation} geofenceInNoGo={geofenceInNoGo} onMapReady={(m: any) => onMapReady?.(m, 'google')}>
-          {children}
-        </GoogleMapComponent>
-      ) : (
-        <LeafletMapComponent {...mapProps} onMapReady={(m: any) => onMapReady?.(m, 'openstreetmap')}>
-          {children}
-        </LeafletMapComponent>
-      )}
+      {renderMap()}
     </Box>
   );
 };

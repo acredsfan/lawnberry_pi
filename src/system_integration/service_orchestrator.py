@@ -210,16 +210,18 @@ class ServiceOrchestrator:
         try:
             logger.info(f"Starting service: {service_name}")
             status.state = ServiceState.STARTING
-            
+
+            # If the service is already active, mark as running and skip restart
+            if await self._is_service_active(config.service_file):
+                status.state = ServiceState.RUNNING
+                status.start_time = time.time()
+                status.error_message = None
+                status.pid = await self._get_service_pid(config.service_file)
+                logger.info(f"Service {service_name} already active (PID: {status.pid})")
+                return
+
             # Use systemctl to start the service
-            systemctl_cmd = ['systemctl']
-            try:
-                import os
-                if os.geteuid() != 0:
-                    # Running unprivileged (as user 'pi' under hardened service), use --user scope
-                    systemctl_cmd.append('--user')
-            except Exception:
-                pass
+            systemctl_cmd = self._build_systemctl_command()
             result = await asyncio.create_subprocess_exec(
                 *systemctl_cmd, 'start', config.service_file,
                 stdout=asyncio.subprocess.PIPE,
@@ -281,13 +283,7 @@ class ServiceOrchestrator:
             status.state = ServiceState.STOPPING
             
             # Use systemctl to stop the service
-            systemctl_cmd = ['systemctl']
-            try:
-                import os
-                if os.geteuid() != 0:
-                    systemctl_cmd.append('--user')
-            except Exception:
-                pass
+            systemctl_cmd = self._build_systemctl_command()
             result = await asyncio.create_subprocess_exec(
                 *systemctl_cmd, 'stop', config.service_file,
                 stdout=asyncio.subprocess.PIPE,
@@ -395,13 +391,7 @@ class ServiceOrchestrator:
             config = self.services[service_name]
             
             # Force stop using systemctl
-            systemctl_cmd = ['systemctl']
-            try:
-                import os
-                if os.geteuid() != 0:
-                    systemctl_cmd.append('--user')
-            except Exception:
-                pass
+            systemctl_cmd = self._build_systemctl_command()
             result = await asyncio.create_subprocess_exec(
                 *systemctl_cmd, 'kill', '--signal=SIGKILL', config.service_file,
                 stdout=asyncio.subprocess.PIPE,
@@ -419,13 +409,7 @@ class ServiceOrchestrator:
     async def _get_service_pid(self, service_file: str) -> Optional[int]:
         """Get the PID of a systemd service"""
         try:
-            systemctl_cmd = ['systemctl']
-            try:
-                import os
-                if os.geteuid() != 0:
-                    systemctl_cmd.append('--user')
-            except Exception:
-                pass
+            systemctl_cmd = self._build_systemctl_command()
             result = await asyncio.create_subprocess_exec(
                 *systemctl_cmd, 'show', '--property=MainPID', service_file,
                 stdout=asyncio.subprocess.PIPE,
@@ -457,3 +441,23 @@ class ServiceOrchestrator:
         """Check if a service is running"""
         status = self.service_status.get(service_name)
         return status is not None and status.state == ServiceState.RUNNING
+
+    def _build_systemctl_command(self) -> List[str]:
+        """Build systemctl command with appropriate privileges"""
+        return ['systemctl', '--no-ask-password']
+
+    async def _is_service_active(self, service_file: str) -> bool:
+        """Check if a systemd service is already active"""
+        try:
+            systemctl_cmd = self._build_systemctl_command()
+            result = await asyncio.create_subprocess_exec(
+                *systemctl_cmd, 'is-active', service_file,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await result.communicate()
+            if result.returncode == 0 and stdout.decode().strip() == 'active':
+                return True
+        except Exception:
+            pass
+        return False

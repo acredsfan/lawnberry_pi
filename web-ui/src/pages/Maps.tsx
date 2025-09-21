@@ -15,11 +15,7 @@ import {
   Tabs,
   Tab,
   Grid,
-  Card,
-  CardContent,
   Chip,
-  Tooltip,
-  Fab,
   useTheme,
   useMediaQuery
 } from '@mui/material';
@@ -29,9 +25,7 @@ import {
   Block as BlockIcon,
   Home as HomeIcon,
   Timeline as TimelineIcon,
-  Help as HelpIcon,
-  Fullscreen as FullscreenIcon,
-  FullscreenExit as FullscreenExitIcon
+  Help as HelpIcon
 } from '@mui/icons-material';
 import { MapContainer } from '../components/MapContainer';
 import { BoundaryEditor, LeafletBoundaryEditor } from '../components/BoundaryEditor';
@@ -39,7 +33,6 @@ import { NoGoZoneEditor, LeafletNoGoZoneEditor } from '../components/NoGoZoneEdi
 import { HomeLocationManager } from '../components/HomeLocationManager';
 import LeafletHomeLocationManager from '../components/HomeLocationManager/LeafletHomeLocationManager';
 import { PatternVisualizer } from '../components/PatternVisualizer';
-import { ProgressTracker } from '../components/ProgressTracker';
 import { 
   selectMapState, 
   selectMapConfig, 
@@ -156,34 +149,29 @@ const Maps: React.FC = () => {
     setHomeLocations(prev => [...prev, newHome]);
   }, [homeLocations]);
 
-  // Determine if we should use full-width layout (desktop full-page mode); allow user toggle
-  const [useFullWidth, setUseFullWidth] = useState(isDesktop);
+  const containerStyles = useMemo(() => ({
+    width: '100vw',
+    maxWidth: '100vw',
+    marginLeft: 'calc(50% - 50vw)',
+    marginRight: 'calc(50% - 50vw)',
+    px: { xs: 0, md: 0 },
+    py: { xs: 1.5, md: 2 },
+    boxSizing: 'border-box'
+  }), []);
 
-  useEffect(() => {
-    if (!isDesktop && useFullWidth) {
-      setUseFullWidth(false);
-    }
-  }, [isDesktop, useFullWidth]);
+  const mapHeight = isDesktop ? 'calc(100vh - 140px)' : 'calc(100vh - 110px)';
 
-  const containerStyles = useMemo(() => {
-    if (useFullWidth) {
-      return {
-        width: '100vw',
-        marginLeft: 'calc(50% - 50vw)',
-        marginRight: 'calc(50% - 50vw)',
-        px: { xs: 0, md: 0 },
-        py: { xs: 1.5, md: 2 }
-      } as const;
-    }
-
-    return {
-      width: '100%',
-      maxWidth: '1200px',
-      margin: '0 auto',
-      px: { xs: 1.5, md: 3 },
-      py: 3
-    } as const;
-  }, [useFullWidth]);
+  const overviewMapStyles = useMemo(() => ({
+    position: 'relative' as const,
+    width: '100vw',
+    maxWidth: '100vw',
+    marginLeft: 'calc(50% - 50vw)',
+    marginRight: 'calc(50% - 50vw)',
+    height: mapHeight,
+    minHeight: isDesktop ? 600 : '70vh',
+    overflow: 'hidden',
+    borderRadius: 0
+  }), [isDesktop, mapHeight]);
 
   const robotPosition = status?.position ? {
     lat: status.position.lat,
@@ -330,11 +318,8 @@ const Maps: React.FC = () => {
   };
 
   const validBoundaries = boundaries.filter(b => b.isValid);
-  const invalidBoundaries = boundaries.filter(b => !b.isValid);
   const defaultHomeLocation = homeLocations.find(l => l.is_default);
-  const totalArea = boundaries.reduce((sum, b) => sum + (b.area || 0), 0);
   const activeNoGoZones = noGoZones.filter(z => z.isEnabled && z.isValid);
-  const totalNoGoArea = noGoZones.reduce((sum, z) => sum + (z.area || 0), 0);
 
   // Point in polygon (ray casting) helper
   const pointInPolygon = useCallback((point: { lat: number; lng: number }, polygon: Array<{ lat: number; lng: number }>) => {
@@ -456,275 +441,112 @@ const Maps: React.FC = () => {
           />
         </Tabs>
 
-        <Box sx={{ p: useFullWidth ? { xs: 1, md: 0 } : 3 }}>
-          {activeTab === 0 && (
-            <>
-            {/* Overview tab: full-width map with statistics stacked below */}
-            <Grid container spacing={useFullWidth ? 1 : 3} direction="column">
-              {/* Map row: always full width */}
-              <Grid item xs={12}>
-                <Paper sx={{
-                  width: '100%',
-                  height: useFullWidth ? 'calc(100vh - 140px)' : isDesktop ? '75vh' : '60vh',
-                  minHeight: 500,
-                  overflow: 'hidden',
-                  position: 'relative',
-                  borderRadius: useFullWidth ? 0 : 1
-                }}>
-                  <MapContainer
-                    center={robotPosition || mapConfig.defaultCenter}
-                    zoom={mapConfig.defaultZoom}
-                    usageLevel={mapConfig.usageLevel}
-                    preferredProvider={userPreferences.preferredProvider}
-                    robotPosition={robotPosition}
-                    boundaries={showLayers.boundaries ? validBoundaries.map(b => ({ id: b.id, name: b.name, coordinates: b.points, type: 'boundary' as const })) : []}
-                    noGoZones={showLayers.noGo ? activeNoGoZones.map(z => ({ id: z.id, name: z.name, coordinates: z.points, type: 'no-go' as const })) : []}
-                    homeLocation={showLayers.home && defaultHomeLocation ? { lat: defaultHomeLocation.position.latitude, lng: defaultHomeLocation.position.longitude } : null}
-                    enableDrawing={drawingEnabled}
-                    drawingMode={drawingMode}
-                    onBoundaryComplete={handleBoundaryComplete}
-                    onNoGoZoneComplete={handleNoGoComplete}
-                    onHomeLocationSet={handleHomeSet}
-                    onProviderChange={(provider) => {
-                      console.log('Provider changed to:', provider);
-                    }}
-                    onError={(error) => {
-                      console.error('Map error:', error);
-                    }}
-                    onMapReady={handleMapReady}
-                    geofenceViolation={geofenceStatus.violation}
-                    geofenceInNoGo={geofenceStatus.inNoGo}
-                    style={{ height: '100%' }}
-                  >
-                    {/* Overlays injected via MapContainer props */}
-                    {drawingEnabled && (
-                      <Box sx={{ position: 'absolute', top: 12, left: 12, zIndex: 1200, display: 'flex', gap: 1 }}>
-                        <Chip
-                          label="Boundary"
-                          color={drawingMode === 'boundary' ? 'success' : 'default'}
-                          onClick={() => setDrawingMode('boundary')}
-                          variant={drawingMode === 'boundary' ? 'filled' : 'outlined'}
-                          size="small"
-                        />
-                        <Chip
-                          label="No-Go"
-                          color={drawingMode === 'no-go' ? 'error' : 'default'}
-                          onClick={() => setDrawingMode('no-go')}
-                          variant={drawingMode === 'no-go' ? 'filled' : 'outlined'}
-                          size="small"
-                        />
-                        <Chip
-                          label="Home"
-                          color={drawingMode === 'home' ? 'info' : 'default'}
-                          onClick={() => setDrawingMode('home')}
-                          variant={drawingMode === 'home' ? 'filled' : 'outlined'}
-                          size="small"
-                        />
-                        <Chip
-                          label="Finish"
-                          color="primary"
-                          onClick={() => { setDrawingEnabled(false); setDrawingMode(null); }}
-                          variant="outlined"
-                          size="small"
-                        />
-                      </Box>
-                    )}
-                  </MapContainer>
-                  
-                  {/* Layer toggle controls */}
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      // Position toggles in bottom‑right so they don’t overlap map controls
-                      bottom: 16,
-                      right: 16,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 1,
-                      backgroundColor: 'background.paper',
-                      p: 1,
-                      borderRadius: 1,
-                      boxShadow: 2,
-                      zIndex: 1000
-                    }}
-                  >
-                    <FormControlLabel
-                      control={<Switch size="small" checked={showLayers.boundaries} onChange={e => setShowLayers(s => ({ ...s, boundaries: e.target.checked }))} />}
-                      label="Boundaries"
-                      sx={{ m: 0, fontSize: '0.875rem' }}
+        {activeTab === 0 && (
+          <Box sx={overviewMapStyles}>
+            <Box sx={{ position: 'absolute', inset: 0 }}>
+              <MapContainer
+                center={robotPosition || mapConfig.defaultCenter}
+                zoom={mapConfig.defaultZoom}
+                usageLevel={mapConfig.usageLevel}
+                preferredProvider={userPreferences.preferredProvider}
+                robotPosition={robotPosition}
+                boundaries={showLayers.boundaries ? validBoundaries.map(b => ({ id: b.id, name: b.name, coordinates: b.points, type: 'boundary' as const })) : []}
+                noGoZones={showLayers.noGo ? activeNoGoZones.map(z => ({ id: z.id, name: z.name, coordinates: z.points, type: 'no-go' as const })) : []}
+                homeLocation={showLayers.home && defaultHomeLocation ? { lat: defaultHomeLocation.position.latitude, lng: defaultHomeLocation.position.longitude } : null}
+                enableDrawing={drawingEnabled}
+                drawingMode={drawingMode}
+                onBoundaryComplete={handleBoundaryComplete}
+                onNoGoZoneComplete={handleNoGoComplete}
+                onHomeLocationSet={handleHomeSet}
+                onProviderChange={(provider) => {
+                  console.log('Provider changed to:', provider);
+                }}
+                onError={(error) => {
+                  console.error('Map error:', error);
+                }}
+                onMapReady={handleMapReady}
+                geofenceViolation={geofenceStatus.violation}
+                geofenceInNoGo={geofenceStatus.inNoGo}
+                style={{ height: '100%', width: '100%' }}
+              >
+                {drawingEnabled && (
+                  <Box sx={{ position: 'absolute', top: 12, left: 12, zIndex: 1200, display: 'flex', gap: 1 }}>
+                    <Chip
+                      label="Boundary"
+                      color={drawingMode === 'boundary' ? 'success' : 'default'}
+                      onClick={() => setDrawingMode('boundary')}
+                      variant={drawingMode === 'boundary' ? 'filled' : 'outlined'}
+                      size="small"
                     />
-                    <FormControlLabel
-                      control={<Switch size="small" checked={showLayers.noGo} onChange={e => setShowLayers(s => ({ ...s, noGo: e.target.checked }))} />}
-                      label="No-Go Zones"
-                      sx={{ m: 0, fontSize: '0.875rem' }}
+                    <Chip
+                      label="No-Go"
+                      color={drawingMode === 'no-go' ? 'error' : 'default'}
+                      onClick={() => setDrawingMode('no-go')}
+                      variant={drawingMode === 'no-go' ? 'filled' : 'outlined'}
+                      size="small"
                     />
-                    <FormControlLabel
-                      control={<Switch size="small" checked={showLayers.home} onChange={e => setShowLayers(s => ({ ...s, home: e.target.checked }))} />}
-                      label="Home Locations"
-                      sx={{ m: 0, fontSize: '0.875rem' }}
+                    <Chip
+                      label="Home"
+                      color={drawingMode === 'home' ? 'info' : 'default'}
+                      onClick={() => setDrawingMode('home')}
+                      variant={drawingMode === 'home' ? 'filled' : 'outlined'}
+                      size="small"
                     />
-                    <FormControlLabel
-                      control={<Switch size="small" checked={showLayers.path} onChange={e => setShowLayers(s => ({ ...s, path: e.target.checked }))} />}
-                      label="Robot Path"
-                      sx={{ m: 0, fontSize: '0.875rem' }}
-                    />
-                    <FormControlLabel
-                      control={<Switch size="small" checked={drawingEnabled} onChange={e => { setDrawingEnabled(e.target.checked); if (!e.target.checked) setDrawingMode(null); }} />}
-                      label="Draw"
-                      sx={{ m: 0, fontSize: '0.875rem' }}
+                    <Chip
+                      label="Finish"
+                      color="primary"
+                      onClick={() => { setDrawingEnabled(false); setDrawingMode(null); }}
+                      variant="outlined"
+                      size="small"
                     />
                   </Box>
-                </Paper>
-              </Grid>
+                )}
+              </MapContainer>
+            </Box>
 
-              {/* Statistics row: render below the map */}
-              <Grid item xs={12}>
-                <Grid container spacing={2}>
-                    {/* Robot Status Card */}
-                    <Grid item xs={12}>
-                    <Card>
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Box
-                            sx={{
-                              width: 12,
-                              height: 12,
-                              borderRadius: '50%',
-                              backgroundColor: status?.connected ? 'success.main' : 'error.main'
-                            }}
-                          />
-                          Robot Status
-                          {geofenceStatus.violation && (
-                            <Chip
-                              label={geofenceStatus.inNoGo ? 'No-Go Violation' : 'Boundary Violation'}
-                              color="error"
-                              size="small"
-                              sx={{ ml: 1 }}
-                            />
-                          )}
-                        </Typography>
-                        {geofenceStatus.violation && (
-                          <Alert severity="error" sx={{ mb: 2 }}>
-                            {geofenceStatus.inNoGo ? 'Robot has entered a restricted no-go zone.' : 'Robot is outside all defined yard boundaries.'}
-                          </Alert>
-                        )}
-                        
-                        <Box sx={{ mb: 2 }}>
-                          <Typography variant="body2" color="text.secondary">
-                            Current State
-                          </Typography>
-                          <Chip
-                            label={status?.state || 'Unknown'}
-                            color={status?.state === 'mowing' ? 'success' : status?.state === 'charging' ? 'info' : 'default'}
-                            size="small"
-                          />
-                        </Box>
-
-                        {robotPosition && (
-                          <Box sx={{ mb: 2 }}>
-                            <Typography variant="body2" color="text.secondary">
-                              Current Position
-                            </Typography>
-                            <Typography variant="body2">
-                              {robotPosition.lat.toFixed(6)}, {robotPosition.lng.toFixed(6)}
-                            </Typography>
-                          </Box>
-                        )}
-
-                        {typeof status?.battery?.level === 'number' && (
-                          <Box sx={{ mb: 2 }}>
-                            <Typography variant="body2" color="text.secondary">
-                              Battery Level
-                            </Typography>
-                            <Typography variant="h4" sx={{ color: status?.battery?.level < 20 ? 'error.main' : 'inherit' }}>
-                              {status?.battery?.level.toFixed(1)}%
-                            </Typography>
-                          </Box>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </Grid>
-
-                  {/* Map Statistics Card */}
-                  <Grid item xs={12}>
-                    <Card>
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom>
-                          Map Statistics
-                        </Typography>
-                        
-                        <Box sx={{ mb: 2 }}>
-                          <Typography variant="body2" color="text.secondary">
-                            Total Area
-                          </Typography>
-                          <Typography variant="h4">
-                            {formatUnits.area(totalArea)}
-                          </Typography>
-                        </Box>
-
-                        <Box sx={{ mb: 2 }}>
-                          <Typography variant="body2" color="text.secondary">
-                            Boundaries
-                          </Typography>
-                          <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                            <Chip
-                              label={`${validBoundaries.length} Valid`}
-                              color="success"
-                              size="small"
-                            />
-                            {invalidBoundaries.length > 0 && (
-                              <Chip
-                                label={`${invalidBoundaries.length} Invalid`}
-                                color="error"
-                                size="small"
-                              />
-                            )}
-                          </Box>
-                        </Box>
-
-                        <Box sx={{ mb: 2 }}>
-                          <Typography variant="body2" color="text.secondary">
-                            No-Go Zones
-                          </Typography>
-                          <Typography variant="body1">
-                            {activeNoGoZones.length} active ({formatUnits.area(totalNoGoArea)})
-                          </Typography>
-                        </Box>
-
-                        <Box sx={{ mb: 2 }}>
-                          <Typography variant="body2" color="text.secondary">
-                            Home Locations
-                          </Typography>
-                          <Typography variant="body1">
-                            {homeLocations.length} configured
-                          </Typography>
-                        </Box>
-
-                        <Typography variant="body2" color="text.secondary">
-                          Map Provider: <strong>{mapState.currentProvider}</strong>
-                          {mapConfig.apiKey && <> (API Key: Configured)</>}
-                          {mapState.isOffline && <> - OFFLINE MODE</>}
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-
-                  {/* Progress Tracking Card - only show when mowing */}
-                  {status?.state === 'mowing' && (
-                    <Grid item xs={12}>
-                      <ProgressTracker
-                        mapProvider={userPreferences.preferredProvider}
-                        map={mapRef.current}
-                        robotPosition={robotPosition}
-                      />
-                    </Grid>
-                  )}
-                </Grid>
-              </Grid>
-            </Grid>
-            </>
-          )}
-
+            <Box
+              sx={{
+                position: 'absolute',
+                bottom: 16,
+                right: 16,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 1,
+                backgroundColor: 'background.paper',
+                p: 1,
+                borderRadius: 1,
+                boxShadow: 2,
+                zIndex: 1000
+              }}
+            >
+              <FormControlLabel
+                control={<Switch size="small" checked={showLayers.boundaries} onChange={e => setShowLayers(s => ({ ...s, boundaries: e.target.checked }))} />}
+                label="Boundaries"
+                sx={{ m: 0, fontSize: '0.875rem' }}
+              />
+              <FormControlLabel
+                control={<Switch size="small" checked={showLayers.noGo} onChange={e => setShowLayers(s => ({ ...s, noGo: e.target.checked }))} />}
+                label="No-Go Zones"
+                sx={{ m: 0, fontSize: '0.875rem' }}
+              />
+              <FormControlLabel
+                control={<Switch size="small" checked={showLayers.home} onChange={e => setShowLayers(s => ({ ...s, home: e.target.checked }))} />}
+                label="Home Locations"
+                sx={{ m: 0, fontSize: '0.875rem' }}
+              />
+              <FormControlLabel
+                control={<Switch size="small" checked={showLayers.path} onChange={e => setShowLayers(s => ({ ...s, path: e.target.checked }))} />}
+                label="Robot Path"
+                sx={{ m: 0, fontSize: '0.875rem' }}
+              />
+              <FormControlLabel
+                control={<Switch size="small" checked={drawingEnabled} onChange={e => { setDrawingEnabled(e.target.checked); if (!e.target.checked) setDrawingMode(null); }} />}
+                label="Draw"
+                sx={{ m: 0, fontSize: '0.875rem' }}
+              />
+            </Box>
+          </Box>
+        )}
           {activeTab === 1 && (
             <>
             {/* Boundaries tab: stack the map on top and the editor below */}
@@ -928,23 +750,8 @@ const Maps: React.FC = () => {
             </Grid>
             </>
           )}
-        </Box>
       </Paper>
 
-      {/* Fullscreen Toggle FAB */}
-      <Fab
-        color="primary"
-        aria-label="toggle fullscreen"
-        onClick={() => setUseFullWidth(!useFullWidth)}
-        sx={{
-          position: 'fixed',
-          bottom: 16,
-          right: 16,
-          zIndex: 1000
-        }}
-      >
-        {useFullWidth ? <FullscreenExitIcon /> : <FullscreenIcon />}
-      </Fab>
     </Box>
   );
 };

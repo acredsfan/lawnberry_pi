@@ -92,7 +92,9 @@ class SystemStateMachine:
         ],
         SystemState.EMERGENCY_STOP: [
             SystemState.STOPPED,
-            SystemState.MAINTENANCE
+            SystemState.MAINTENANCE,
+            SystemState.STARTING,
+            SystemState.INITIALIZING
         ]
     }
     

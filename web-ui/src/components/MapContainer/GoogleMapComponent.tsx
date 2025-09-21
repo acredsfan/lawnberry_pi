@@ -14,8 +14,6 @@ interface GoogleMapComponentProps {
   noGoZones?: YardBoundary[];
   homeLocation?: { lat: number; lng: number };
   robotPosition?: { lat: number; lng: number; heading?: number };
-  isDrawingMode?: boolean;
-  drawingType?: 'boundary' | 'no-go' | 'home';
   onBoundaryComplete?: (coordinates: Array<{ lat: number; lng: number }>) => void;
   onNoGoZoneComplete?: (coordinates: Array<{ lat: number; lng: number }>) => void;
   onHomeLocationSet?: (coordinates: { lat: number; lng: number }) => void;
@@ -25,7 +23,12 @@ interface GoogleMapComponentProps {
   onMapReady?: (map: google.maps.Map) => void;
   geofenceViolation?: boolean;
   geofenceInNoGo?: boolean;
+  onClearAll?: () => void;
+  onBoundaryUpdate?: (id: string, coordinates: Array<{ lat: number; lng: number }>) => void;
+  onNoGoZoneUpdate?: (id: string, coordinates: Array<{ lat: number; lng: number }>) => void;
 }
+
+const ROBOT_ICON_URL = new URL('../../assets/LawnBerryPi_icon2.png', import.meta.url).href;
 
 const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
   center,
@@ -39,8 +42,6 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
   noGoZones = [],
   homeLocation,
   robotPosition,
-  isDrawingMode = false,
-  drawingType = 'boundary',
   onBoundaryComplete,
   onNoGoZoneComplete,
   onHomeLocationSet,
@@ -50,6 +51,9 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
   , onMapReady
   , geofenceViolation
   , geofenceInNoGo
+  , onClearAll
+  , onBoundaryUpdate
+  , onNoGoZoneUpdate
 }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<google.maps.Map | null>(null);
@@ -89,8 +93,8 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
     type: null
   });
   const [isSettingHome, setIsSettingHome] = useState(false);
-  const [autoFollow, setAutoFollow] = useState(true);
-  const autoFollowRef = useRef(true);
+  const [autoFollow, setAutoFollow] = useState(false);
+  const autoFollowRef = useRef(false);
   const programmaticZoomRef = useRef(false);
   const programmaticCenterRef = useRef(false);
   const lastAppliedZoomRef = useRef<number | null>(null);
@@ -381,6 +385,7 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
 
     const clearBtn = createToolButton('Clear All', () => {
       clearAllOverlays();
+      onClearAll?.();
     });
 
     const completeBtn = createToolButton('Finish Shape', () => {
@@ -520,22 +525,39 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
     boundaryPolygonsRef.current = [];
 
     // Add new boundary polygons
-  boundaries.forEach(boundary => {
+    boundaries.forEach(boundary => {
+      const coords = (boundary as any).coordinates?.map((coord: any) => ({ lat: coord.lat, lng: coord.lng }))
+        || (boundary as any).points?.map((p: any) => ({ lat: p.lat, lng: p.lng }))
+        || [];
+
       const polygon = new google.maps.Polygon({
-    paths: (boundary as any).coordinates?.map((coord: any) => ({ lat: coord.lat, lng: coord.lng })) || (boundary as any).points?.map((p: any) => ({ lat: p.lat, lng: p.lng })),
-  strokeColor: geofenceViolation ? '#f44336' : '#4caf50',
-  strokeOpacity: geofenceViolation ? 1.0 : 0.8,
-  strokeWeight: geofenceViolation ? 3 : 2,
-  fillColor: geofenceViolation ? '#f44336' : '#4caf50',
-  fillOpacity: geofenceViolation ? 0.15 : 0.1,
+        paths: coords,
+        strokeColor: geofenceViolation ? '#f44336' : '#4caf50',
+        strokeOpacity: geofenceViolation ? 1.0 : 0.8,
+        strokeWeight: geofenceViolation ? 3 : 2,
+        fillColor: geofenceViolation ? '#f44336' : '#4caf50',
+        fillOpacity: geofenceViolation ? 0.15 : 0.1,
         editable: true,
         draggable: false
       });
 
       polygon.setMap(mapInstanceRef.current);
+
+      const boundaryId = (boundary as any).id;
+      if (boundaryId && onBoundaryUpdate) {
+        const path = polygon.getPath();
+        const notifyChange = () => {
+          const updated = path.getArray().map(latLng => ({ lat: latLng.lat(), lng: latLng.lng() }));
+          onBoundaryUpdate(boundaryId, updated);
+        };
+        path.addListener('set_at', notifyChange);
+        path.addListener('insert_at', notifyChange);
+        path.addListener('remove_at', notifyChange);
+      }
+
       boundaryPolygonsRef.current.push(polygon);
     });
-  }, [boundaries, geofenceViolation]);
+  }, [boundaries, geofenceViolation, onBoundaryUpdate]);
 
   const updateNoGoZones = useCallback(() => {
     if (!mapInstanceRef.current) return;
@@ -545,22 +567,39 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
     noGoZonePolygonsRef.current = [];
 
     // Add new no-go zone polygons
-  noGoZones.forEach(zone => {
+    noGoZones.forEach(zone => {
+      const coords = (zone as any).coordinates?.map((coord: any) => ({ lat: coord.lat, lng: coord.lng }))
+        || (zone as any).points?.map((p: any) => ({ lat: p.lat, lng: p.lng }))
+        || [];
+
       const polygon = new google.maps.Polygon({
-    paths: (zone as any).coordinates?.map((coord: any) => ({ lat: coord.lat, lng: coord.lng })) || (zone as any).points?.map((p: any) => ({ lat: p.lat, lng: p.lng })),
-  strokeColor: geofenceInNoGo ? '#ff1744' : '#f44336',
-  strokeOpacity: geofenceInNoGo ? 1.0 : 0.9,
-  strokeWeight: geofenceInNoGo ? 3 : 2,
-  fillColor: geofenceInNoGo ? '#ff1744' : '#f44336',
-  fillOpacity: geofenceInNoGo ? 0.4 : 0.3,
+        paths: coords,
+        strokeColor: geofenceInNoGo ? '#ff1744' : '#f44336',
+        strokeOpacity: geofenceInNoGo ? 1.0 : 0.9,
+        strokeWeight: geofenceInNoGo ? 3 : 2,
+        fillColor: geofenceInNoGo ? '#ff1744' : '#f44336',
+        fillOpacity: geofenceInNoGo ? 0.4 : 0.3,
         editable: true,
         draggable: false
       });
 
       polygon.setMap(mapInstanceRef.current);
+
+      const zoneId = (zone as any).id;
+      if (zoneId && onNoGoZoneUpdate) {
+        const path = polygon.getPath();
+        const notifyChange = () => {
+          const updated = path.getArray().map(latLng => ({ lat: latLng.lat(), lng: latLng.lng() }));
+          onNoGoZoneUpdate(zoneId, updated);
+        };
+        path.addListener('set_at', notifyChange);
+        path.addListener('insert_at', notifyChange);
+        path.addListener('remove_at', notifyChange);
+      }
+
       noGoZonePolygonsRef.current.push(polygon);
     });
-  }, [noGoZones, geofenceInNoGo]);
+  }, [noGoZones, geofenceInNoGo, onNoGoZoneUpdate]);
 
   const updateHomeLocation = useCallback(() => {
     if (!mapInstanceRef.current) return;
@@ -579,17 +618,28 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
     if (homeLocation) {
       const markerLib = markerLibraryRef.current;
       if (markerLib) {
-        const pin = new markerLib.PinElement({
-          background: '#2196f3',
-          borderColor: '#ffffff',
-          glyphColor: '#ffffff'
-        });
+        const wrapper = document.createElement('div');
+        wrapper.style.width = '36px';
+        wrapper.style.height = '36px';
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.justifyContent = 'center';
+
+        const img = document.createElement('img');
+        img.src = ROBOT_ICON_URL;
+        img.alt = 'Home Base';
+        img.style.width = '32px';
+        img.style.height = '32px';
+        img.style.objectFit = 'contain';
+        img.style.filter = 'drop-shadow(0 0 6px rgba(33, 150, 243, 0.6))';
+
+        wrapper.appendChild(img);
 
         const marker = new markerLib.AdvancedMarkerElement({
           map: mapInstanceRef.current!,
           position: homeLocation,
           title: 'Home Base',
-          content: pin.element
+          content: wrapper
         });
 
         homeMarkerRef.current = marker;
@@ -599,12 +649,9 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
           map: mapInstanceRef.current!,
           title: 'Home Base',
           icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 10,
-            fillColor: '#2196f3',
-            fillOpacity: 1,
-            strokeColor: 'white',
-            strokeWeight: 2
+            url: ROBOT_ICON_URL,
+            scaledSize: new google.maps.Size(36, 36),
+            anchor: new google.maps.Point(18, 18)
           }
         });
       }
@@ -615,31 +662,28 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
     if (!mapInstanceRef.current || !robotPosition) return;
 
     const heading = robotPosition.heading ?? 0;
-    const borderColor = geofenceInNoGo ? '#FFEA00' : '#00FFD1';
-    const fillColor = geofenceViolation ? '#FF1744' : '#FF1493';
     const markerLib = markerLibraryRef.current;
 
     if (markerLib) {
       if (!robotMarkerRef.current) {
         const wrapper = document.createElement('div');
-        wrapper.style.width = '28px';
-        wrapper.style.height = '28px';
+        wrapper.style.width = '40px';
+        wrapper.style.height = '40px';
         wrapper.style.display = 'flex';
         wrapper.style.alignItems = 'center';
         wrapper.style.justifyContent = 'center';
         wrapper.style.transform = `rotate(${heading}deg)`;
         wrapper.style.transition = 'transform 0.2s ease-out';
-        wrapper.style.filter = `drop-shadow(0 0 6px ${borderColor})`;
+        wrapper.style.filter = 'drop-shadow(0 0 6px rgba(0, 255, 209, 0.6))';
 
-        const arrow = document.createElement('div');
-        arrow.style.width = '0';
-        arrow.style.height = '0';
-        arrow.style.borderLeft = '8px solid transparent';
-        arrow.style.borderRight = '8px solid transparent';
-        arrow.style.borderBottom = `18px solid ${fillColor}`;
-        arrow.style.filter = `drop-shadow(0 0 6px ${borderColor})`;
+        const img = document.createElement('img');
+        img.src = ROBOT_ICON_URL;
+        img.alt = 'LawnBerryPi';
+        img.style.width = '36px';
+        img.style.height = '36px';
+        img.style.objectFit = 'contain';
 
-        wrapper.appendChild(arrow);
+        wrapper.appendChild(img);
 
         if (legacyRobotMarkerRef.current) {
           legacyRobotMarkerRef.current.setMap(null);
@@ -653,13 +697,10 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
           zIndex: 1000
         });
 
-        robotMarkerRef.current = { marker, element: wrapper, arrow };
+        robotMarkerRef.current = { marker, element: wrapper, arrow: img };
       } else {
         robotMarkerRef.current.marker.position = robotPosition;
         robotMarkerRef.current.element.style.transform = `rotate(${heading}deg)`;
-        robotMarkerRef.current.element.style.filter = `drop-shadow(0 0 6px ${borderColor})`;
-        robotMarkerRef.current.arrow.style.borderBottom = `18px solid ${fillColor}`;
-        robotMarkerRef.current.arrow.style.filter = `drop-shadow(0 0 6px ${borderColor})`;
       }
     } else {
       if (robotMarkerRef.current) {
@@ -667,15 +708,10 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
         robotMarkerRef.current = null;
       }
 
-      const symbol: google.maps.Symbol = {
-        path: 'M12 2C8.13 2 5 5.13 5 9c0 3.87 6.01 11 6.01 11s6.99-7.13 6.99-11c0-3.87-3.13-7-6-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z',
-        fillColor,
-        fillOpacity: 0.95,
-        strokeColor: borderColor,
-        strokeWeight: 1.6,
-        rotation: heading,
-        scale: 1.35,
-        anchor: new google.maps.Point(12, 22)
+      const icon: google.maps.Icon = {
+        url: ROBOT_ICON_URL,
+        scaledSize: new google.maps.Size(40, 40),
+        anchor: new google.maps.Point(20, 20)
       };
 
       if (!legacyRobotMarkerRef.current) {
@@ -683,11 +719,11 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
           position: robotPosition,
           map: mapInstanceRef.current,
           title: 'LawnBerryPi',
-          icon: symbol
+          icon
         });
       } else {
         legacyRobotMarkerRef.current.setPosition(robotPosition);
-        legacyRobotMarkerRef.current.setIcon(symbol);
+        legacyRobotMarkerRef.current.setIcon(icon);
       }
     }
 
@@ -916,35 +952,6 @@ const GoogleMapComponent: React.FC<GoogleMapComponentProps> = ({
     observer.observe(mapRef.current);
     return () => observer.disconnect();
   }, [isInitialized]);
-
-  useEffect(() => {
-    if (!mapInstanceRef.current) return;
-
-    if (!isDrawingMode) {
-      if (drawingState.active) {
-        cancelDrawing();
-      } else {
-        resetDrawingSession();
-      }
-      homePlacementRef.current = false;
-      setIsSettingHome(false);
-      mapInstanceRef.current.setOptions({ draggableCursor: undefined });
-      return;
-    }
-
-    if (drawingType === 'home') {
-      cancelDrawing();
-      homePlacementRef.current = true;
-      setIsSettingHome(true);
-      mapInstanceRef.current.setOptions({ draggableCursor: 'crosshair' });
-      return;
-    }
-
-    const desiredType: 'boundary' | 'no-go' = drawingType === 'no-go' ? 'no-go' : 'boundary';
-    if (!drawingState.active || drawingState.type !== desiredType) {
-      beginDrawing(desiredType);
-    }
-  }, [isDrawingMode, drawingType, drawingState.active, drawingState.type, beginDrawing, cancelDrawing, resetDrawingSession]);
 
   return (
     <div

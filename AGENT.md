@@ -1,441 +1,239 @@
-# LawnBerryPi Development Guide
+# LawnBerryPi Developer Onboarding Guide
 
-**Description** An Expert Software and Robotics Engineer exceling in writing code and debugging hardware issues.
+This document is the single place a new engineer should read before touching the code. It explains the project goals, architecture, local setup, and the day-to-day commands you will use while developing LawnBerryPi.
 
-Act as my expert assistant with access to all your reasoning and knowledge. Always provide:
-1. ﻿﻿﻿A clear, direct resolution to my request.
-2. ﻿﻿﻿A step-by-step explanation of how you got there.
-3. ﻿﻿﻿Alternative perspectives or solutions I might not have thought of then choose the best option to implement.
-4. ﻿﻿﻿A practical summary or action plan you can apply immediately.
-5. Clean, maintainable, modular, and safe code that fits into the context of the entire codebase.
-6. A clean workspace ensuring any temporary or unnecessary files and code are cleaned up after you are finished with them or before wrapping up your task.
-7. Fixes and code that take the entire system into account so fixing one part does not break another.
+---
 
-**Never give vague answers.** If the question is broad, break it into parts. If I ask for help, act like a professional in that domain (teacher, coach, engineer, doctor, etc.). Push your reasoning to 100% of your capacity.
+## 1. What You Are Building
 
-**ALWAYS follow .github/copilot-instructions.md** to ensure project standards are maintained.
+LawnBerryPi is an autonomous lawn mower platform that runs on Raspberry Pi hardware. The system has two major halves:
 
-**ALWAYS USE THE MOST UP-TO-DATE INFORMATION** from the codebase, documentation, and any other relevant sources to ensure accuracy and relevance in your responses.
+1. **Python backend** (in `src/`): manages hardware, navigation, safety, power, scheduling, and exposes a FastAPI web API plus WebSocket streams.
+2. **React web UI** (in `web-ui/`): a Material-UI based dashboard and control surface that talks to the backend over REST + WebSockets.
 
-**ALWAYS ensure packages and dependencies are up to date** to maintain security, performance, and compatibility within the project, if needing to use older versions for compatibility, make sure to use the newest version to meet requirements and document why.
+It targets **Raspberry Pi OS Bookworm (64-bit)**, Python 3.11, and Node.js 18+. Most modules are designed to run headlessly on the Pi, but you can also develop from a workstation and connect to the Pi for hardware-in-the-loop testing.
 
-**ALWAYS use the tools available to you** to ensure extended context memory, maintained and updated task lists/todos, and efficient code navigation.
+---
 
-**ALWAYS update docs** to ensure the end user knows how to use this project and its features as well as keeping old/no longer relevant information up to date.
+## 2. Repository Layout (read this once)
 
-**You are the expert** so make decisions on changes, additions, subtractions, and design based on your expertise, the user is just here to provide input and context to the overall goals, but has little to no coding and robotics experience.
+```
+├── src/                      # Python backend
+│   ├── hardware/             # Plugin system for sensors/actuators
+│   ├── navigation/           # Path planning & map logic
+│   ├── power_management/     # Battery + charging
+│   ├── safety/               # Emergency stop, tilt, obstacle protection
+│   ├── web_api/              # FastAPI + WebSocket entrypoints
+│   └── ...                   # Other domain modules (vision, weather, etc.)
+│
+├── config/                   # YAML configuration (hardware, system params)
+├── scripts/                  # Install, update, and maintenance utilities
+├── tests/                    # Pytest suite with unit/integration markers
+│
+├── web-ui/                   # React/Vite frontend (TypeScript)
+│   ├── src/components/       # Reusable UI/Map widgets
+│   ├── src/pages/            # Dashboard, Maps, Settings, etc.
+│   └── src/store/            # Redux Toolkit slices
+│
+├── docs/                     # User + developer documentation
+└── README.md                 # High-level product overview
+```
 
-## Build/Test/Lint Commands
+---
+
+## 3. Prerequisites & Toolchain
+
+### Hardware
+- Raspberry Pi 4 or 5 (Bookworm 64-bit) with RoboHAT RP2040, RTK GPS, sensors, motors
+- Optional: development PC running Linux/macOS/WSL for editing and UI work
+
+### Software
+- **Python 3.11** (managed via `pyenv` or system Python on Pi)
+- **Node.js 18+** (for the web UI)
+- **Poetry** *or* pip/venv (project currently uses `pip` with requirements files)
+- Redis + SQLite are used by the backend; installer scripts provision them automatically on the Pi
+
+### External keys
+- Google Maps API key for the web UI (`REACT_APP_GOOGLE_MAPS_API_KEY`)
+- OpenWeather API key (configured via backend environment variables)
+
+---
+
+## 4. First-Time Setup (Backend)
+
+You can let the automation handle everything on a Pi, or bootstrap manually on your workstation.
+
+### Option A – Pi installer (recommended for hardware work)
+```bash
+git clone https://github.com/acredsfan/lawnberry_pi.git lawnberry
+cd lawnberry
+bash scripts/install_lawnberry.sh
+```
+The installer detects hardware, installs Python dependencies, creates services, and runs smoke tests. Run `python3 scripts/first_run_wizard.py` afterwards for guided configuration.
+
+### Option B – Manual dev environment
+```bash
+# from repo root
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements-dev.txt
+```
+Set environment variables (examples in `scripts/setup_environment.py`). Key variables:
+- `LAWNERRY_ENV` (`development|production`)
+- `OPENWEATHER_API_KEY`
+- `MQTT_BROKER_URL` (if applicable)
+
+Configuration lives in `config/`. Copy and customize YAML files as needed.
+
+### Running the backend locally
+```bash
+# Activate virtualenv first
+uvicorn src.web_api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+WebSocket server is part of FastAPI; default WS endpoint is `ws://<host>:8000/api/ws`.
+
+---
+
+## 5. Web UI Setup
 
 ```bash
-# Run all tests with coverage
-python -m pytest tests/ --cov=src --cov-report=html -v
+cd web-ui
+npm install
+cp .env.example .env  # create and edit values
+# Ensure .env includes:
+# REACT_APP_GOOGLE_MAPS_API_KEY=...
+# VITE_API_URL=http://localhost:8000
+# VITE_WS_URL=ws://localhost:8000/api/ws
+npm run dev            # starts Vite on http://localhost:3000
+```
+For production:
+```bash
+npm run build
+npm run preview        # locally serve the optimized bundle
+```
+When deploying on the Pi, serve the `web-ui/dist/` folder via nginx or the existing systemd service (`web-ui/index.html` entry point).
 
-# Run specific test file or method
+---
+
+## 6. Everyday Commands (Backend)
+
+Testing and quality gates:
+```bash
+python -m pytest tests/ --cov=src --cov-report=html -v
+python -m pytest -m "unit" tests/
 python -m pytest tests/test_hardware_interface.py::TestI2CManager -v
 
-# Run tests by category (markers)
-python -m pytest -m "unit" tests/
-python -m pytest -m "integration" tests/
-python -m pytest -m "hardware" tests/
-
-# Linting and formatting
 black --line-length=100 src/ tests/
 isort --profile=black --line-length=100 src/ tests/
 flake8 --max-line-length=100 src/ tests/
 mypy src/ --ignore-missing-imports
 bandit -r src/ --severity-level medium
-
-# Pre-commit hooks (all checks)
 pre-commit run --all-files
-
-# Security and code quality
+```
+Security & hygiene:
+```bash
 safety check --json
 vulture --min-confidence=80 src/
 ```
+For Redis-backed queues or MQTT integrations, use the simulators in `tests/fixtures/` or run `docker-compose` (see `docs/development/docker.md` if present).
 
-## Architecture Overview
+---
 
-- **Hardware Layer**: `src/hardware/` - Plugin-based system with I2C, Serial, GPIO, Camera managers
-- **Navigation**: `src/navigation/` - GPS RTK positioning, boundary detection, path planning
-- **Safety Systems**: `src/safety/` - Emergency stops, tilt detection, obstacle avoidance  
-- **Vision/AI**: `src/vision/` - Computer vision, TensorFlow Lite object detection
-- **Power Management**: `src/power_management/` - Battery monitoring, charging control
-- **Web API**: `src/web_api/` - FastAPI backend with WebSocket real-time communication
-- **Weather Integration**: `src/weather/` - OpenWeather API for scheduling
-- **Configuration**: `config/` directory with YAML files for hardware and system settings
+## 7. Key Services & How They Talk
 
-## Code Style Guidelines
+- **HardwareInterface (`src/system_integration/service_orchestrator.py`)**: orchestrates hardware plugins async.
+- **State Machine (`src/system_integration/state_machine.py`)**: central mower workflow (idle → mowing → docked).
+- **Navigation → Maps**: Map/GPS data exposed through the `/maps` API; frontend fetches boundaries, positions, and renders via Leaflet/Google Maps components.
+- **WebSockets**: Single multiplexed stream delivering mower status, sensor packets, navigation updates, notifications. Check `src/web_api/websocket` for event types.
+- **Configuration**: YAML + environment. Use `ConfigManager` utilities in `src/configuration/` to load/validate.
 
-- **Formatting**: Black with 100 character line length
-- **Imports**: isort with black profile, grouped by stdlib/3rd-party/local
-- **Type Hints**: Use where helpful, mypy configured with relaxed settings for hardware libraries
-- **Docstrings**: Google-style docstrings for public APIs
-- **Error Handling**: Custom exceptions in `hardware/exceptions.py`, proper async error propagation
-- **Async/Await**: Heavy use of asyncio throughout, especially for hardware interfaces
-- **Testing**: Pytest with fixtures, mocking for hardware, separate unit/integration/hardware markers
-- **Security**: Bandit security scanning, no hardcoded secrets, proper API key handling
+Understanding these modules first will save you hours.
 
-# Copilot Instructions
-# LawnBerryPi Copilot Instructions
+---
 
-## Platform Requirements
+## 8. Adding or Updating Hardware Plugins
 
-**Target Platform**: Raspberry Pi OS Lite (aarch64) Bookworm - ALL code must be compatible with this environment.
+1. Implement a subclass of `HardwarePlugin` (see `src/hardware/plugin_system.py`).
+2. Declare required managers (`required_managers` property) and provide `initialize`, `shutdown`, and `read_data`/`control` methods.
+3. Register the plugin in `config/hardware.yaml` under the `plugins` list.
+4. Write unit tests with mocks in `tests/hardware/` and, if necessary, integration tests behind the `hardware` pytest marker.
+5. Update documentation in `docs/hardware-overview.md`.
 
-**Critical Agent Guidelines**:
-- **NEVER run commands without timeouts** - Agents cannot use Ctrl+C to exit hanging processes
-- **Always use `timeout` command**: `timeout 30s python script.py` or implement internal timeouts
-- **Cancel stuck terminals proactively** - If any command appears interactive or hangs (e.g., terminal shows a trailing `>` prompt or no output), use the terminal cancel command to send an interrupt and recover the session. Prefer canceling over leaving a stuck terminal.
-- **Cancel hung terminals explicitly** - If a command still hangs despite timeouts or opens an interactive prompt, send a cancel signal using `#terminal-tools_cancelCommand` for the named terminal to emulate Ctrl+C and recover cleanly.
-- **Clean workspace obsessively** - Delete ALL temporary test files, debug scripts, and verification files
-- **Never commit sensitive data** - Check for API keys, passwords, or personal information before any commits
-- **NEVER use workarounds or shortcuts** - Always make sure fixes are complete and ensure intended design/functionality.
-- **Always keep user and developer documentation up-to-date** - Update README, API docs, and inline comments with every change.
-- **Double and Triple check all changes** - Review code thoroughly before committing.
-- **Ensure all changes made are also integrated into the installation script** - Update installation scripts and deployment configurations accordingly.
-- **Use docs/SENSOR-LIBRARY-EXAMPLE-LINKS.md to understand the sensor library structure** - Follow the example links to ensure proper integration of new and existing sensors.
-- **Use the `#server-memory` toolset for persistent context management** - Always read the current graph first, prune aggressively, and never store sensitive data.
-- **Use the '#sequential-thinking' toolset for managing state across multiple steps** - This helps in maintaining context and ensuring coherent interactions.
+---
 
-## Agent venv enforcement (MANDATORY)
+## 9. Frontend Notes
 
-Agents and automation MUST verify and use the repository virtual environments before running any Python commands or tooling. This prevents ABI mismatches and missing native drivers on Raspberry Pi (Bookworm) and ensures consistent, repeatable runs.
+- Global state uses Redux Toolkit; slices are in `web-ui/src/store/slices/`.
+- Map-related logic lives in `web-ui/src/pages/Maps.tsx` plus components in `src/components/MapContainer/`.
+- When adjusting layouts, update `index.css` for global themes and `Layout/` for navigation changes.
+- Run `npm run lint` and `npm run test` (if configured) before commits.
+- The build pipeline produces chunked assets; ensure any new dependencies are Pi-friendly.
 
-Required checks and behaviour for agents:
-- Always read `/home/pi/lawnberry/.github/copilot-instructions.md` and the `VirtualEnvs` server-memory entity before running Python commands to determine which venv to use.
-- Verify the chosen venv exists before running commands. Example checks:
-    - `test -f venv/bin/activate || echo "venv missing"`
-    - `test -x venv/bin/python || echo "venv python missing or not executable"`
-- Run commands inside the venv using one of these patterns (prefer these over system `python3`):
-    - Non-interactive: `venv/bin/python -m module_or_script` (preferred)
-    - Interactive / long debugging: `source venv/bin/activate && python -m module_or_script`
-- For Coral/TPU tasks that require Python 3.9 runtimes use `venv_coral_pyenv/bin/python` (do NOT mix runtimes in a single process).
-- If a venv check fails, do NOT proceed with system `python3` unless the user explicitly approves a fallback. Log the venv failure and recommended remediation.
-- Always combine venv execution with project timeout and isolation rules (e.g., `timeout 60s venv/bin/python -m ...` or `systemd-run --user --scope --property=TimeoutStopSec=30s venv/bin/python -m ...`).
+---
 
-Example quick verification snippet agents should run before Python work:
+## 10. Deployment & Services
+
+Systemd services (created by the installer) typically include:
+- `lawnberry-backend.service` – starts the FastAPI app with Uvicorn
+- `lawnberry-ui.service` or nginx site – serves the built web UI
+- `lawnberry-worker.service` – optional background jobs (sensor polling, navigation loops)
+
+Check `scripts/` for service definitions and use `sudo systemctl status lawnberry-backend` while debugging on the Pi.
+
+For OTA-style updates:
 ```bash
-# prefer non-interactive execution
-test -f venv/bin/activate || (echo "ERROR: venv missing"; exit 2)
-venv/bin/python -V || (echo "ERROR: venv python not runnable"; exit 2)
-venv/bin/python -c "import pkgutil; print('FOUND' if pkgutil.find_loader('adafruit_vl53l0x') else 'MISSING')"
+bash scripts/update_lawnberry.sh        # preserves config, pulls latest
 ```
-
-These rules are mandatory for agent runs and automated scripts. If the venv layout differs on a target device, prefer `venv` for main services and `venv_coral_pyenv` for Coral workloads; document any deviations in the `VirtualEnvs` server-memory entity.
-
-### server-memory Usage (Persistent Context Management)
-### Terminal management (canceling stuck commands)
-
-Agents can cancel a long-running or stuck terminal session without manual Ctrl+C by invoking the provided cancel capability. Use it whenever a command appears to block, become interactive (e.g., stray Python REPL prompts), or exceed expected timeouts.
-
-- Cancel the currently active command in a named terminal: use `terminal-tools_cancelCommand`.
-- Pattern of use in sessions: attempt with `timeout`, and if the command still becomes interactive, immediately cancel the terminal command and rerun with corrected flags or shorter timeouts.
-
-**Always** Use the `#server-memory` toolset to maintain persistent context across sessions. This allows agents to store and retrieve observations, entities, and relationships without losing critical information.
-
-Core rules:
-1. Always read current graph first: `mcp_server-memory_read_graph`.
-2. Add concise observations grouped by stable entity names (e.g., `WebUI`, `HardwareInterface`, `DeploymentPipeline`).
-3. Prune aggressively—delete outdated observations or entire entities when superseded.
-4. Never store secrets, credentials, tokens, personal data, or transient debug output.
-5. Before large architectural or refactor steps, re-sync by reading the graph again.
-
-Quick reference:
-- Read graph: `mcp_server-memory_read_graph`
-- Create entities: `mcp_server-memory_create_entities`
-- Add observations: `mcp_server-memory_add_observations`
-- Relate entities: `mcp_server-memory_create_relations`
-- Delete observations: `mcp_server-memory_delete_observations`
-- Delete entities: `mcp_server-memory_delete_entities`
-
-If memory pollution suspected (irrelevant or cross-project data), clear affected entities immediately to prevent decision drift.
-
-## Architecture Overview
-
-LawnBerryPi is a plugin-based autonomous lawn mower system with layered architecture:
-
-- **Hardware Layer** (`src/hardware/`): Plugin-based abstraction with I2C, Serial, GPIO, Camera managers coordinated by `HardwareInterface`
-- **Core Services** (`src/`): Independent modules for navigation, safety, vision, power management, weather integration
-- **Web API** (`src/web_api/`): FastAPI backend with WebSocket real-time communication and MQTT bridge
-- **Configuration** (`config/`): YAML-driven hardware and system configuration with validation
-
-## Critical Patterns
-
-### Hardware Plugin System
-All hardware components use the plugin architecture in `src/hardware/plugin_system.py`:
-
-```python
-class CustomSensorPlugin(HardwarePlugin):
-    @property
-    def plugin_type(self) -> str:
-        return "i2c_sensor"  # or "serial_device", "gpio_device"
-    
-    @property 
-    def required_managers(self) -> List[str]:
-        return ["i2c", "gpio"]  # Dependencies on hardware managers
-    
-    async def read_data(self) -> SensorReading:
-        # Must return standardized SensorReading from data_structures.py
-```
-
-Register plugins in `config/hardware.yaml` under `plugins` section with `name`, `enabled`, and `parameters`.
-
-### Data Structure Standards
-All sensor data uses `SensorReading` from `src/hardware/data_structures.py`:
-- `timestamp`, `sensor_id`, `value`, `unit`, `quality` (0.0-1.0), `metadata`
-- Specialized subclasses: `I2CDeviceReading`, `SerialDeviceReading`, `GPIOReading`
-
-### Async Hardware Interface
-Main coordination through `HardwareInterface` class:
-- **Initialize**: `await hw.initialize()` - Sets up all managers and plugins
-- **Read Data**: `await hw.get_all_sensor_data()` - Returns Dict[str, SensorReading]  
-- **Device Control**: `await hw.send_robohat_command('pwm', 1500, 1600)` - Motor control
-- **Health Monitoring**: `await hw.get_system_health()` - System-wide status
-
-### Configuration Management
-YAML configuration in `config/` directory:
-- `hardware.yaml`: I2C addresses, GPIO pins, plugin definitions
-- Hardware configuration loaded via `ConfigManager` with validation
-- Plugin parameters passed through config to enable/disable features
-
-## Development Workflows
-
-### Testing Strategy - ALWAYS USE TIMEOUTS
-Use pytest markers for test categorization with mandatory timeouts:
+To completely remove:
 ```bash
-# Hardware-in-the-loop tests with timeout protection
-timeout 60s python -m pytest -m "hardware" tests/
-
-# Integration tests with mocked hardware - max 30s
-timeout 30s python -m pytest -m "integration" tests/
-
-# Safety-critical tests (100% coverage required) - max 45s
-timeout 45s python -m pytest -m "safety" tests/
-
-# Performance tests - ALWAYS timeout these as they can hang
-timeout 120s python -m pytest -m "performance" tests/performance/
+bash scripts/uninstall_lawnberry.sh
 ```
 
-### Raspberry Pi OS Bookworm Compatibility
-**CRITICAL**: All code must work on Pi OS Lite (aarch64) Bookworm:
-```bash
-# Use systemd-run for process isolation with timeouts
-systemd-run --user --scope --property=TimeoutStopSec=30s python script.py
+---
 
-# For hardware initialization that might hang
-timeout 60s python scripts/setup_dual_tof.py || echo "Hardware setup timed out"
+## 11. Debugging Tips
 
-# Always check Python version compatibility (3.11+)
-python3 --version  # Must be 3.11+ for Bookworm
-```
+- Use `scripts/hardware_detection.py` to verify sensors before running the full stack.
+- Web UI stuck? Clear `web-ui/dist` and rebuild, then hard refresh (Ctrl+Shift+R).
+- If the backend appears unresponsive, tail logs: `journalctl -u lawnberry-backend -f` or run the app in foreground.
+- Enable mock mode (frontend) by setting `VITE_USE_MOCKS=true`; backend has mock data helpers in `src/mock_data/`.
+- Watch for websocket disconnects; the frontend reconnection logic logs to the browser console.
 
-### Terminal Management and Cancellation
+---
 
-- Prefer named terminals for grouped operations (e.g., `test`, `build`, `scripts`). This keeps context and makes it easy to cancel.
-- If a long-running command becomes unresponsive or enters an interpreter (prompt shows `>`), send a cancel to that terminal:
-    - Use `#terminal-tools_cancelCommand` with `terminalName: "test"` (or whichever name you used)
-- Always combine this with timeouts to prevent hangs in the first place. Cancellation is a fallback for unexpected interactive modes.
+## 12. Documentation You Should Know Exists
 
-### ARM64/Raspberry Pi Compatibility Assessment (Summer 2025)
-**BEFORE implementing any solution, consider ARM64 compatibility**:
-- **Package Versions**: Use newest compatible versions, not oldest stable - balance security with compatibility
-- **Binary Dependencies**: Many Node.js packages now have ARM64 binaries, but verify compatibility
-- **Native Modules**: C++ extensions may need ARM64-specific builds or compilation flags
-- **Version Selection Strategy**: Start with latest LTS/stable, step down incrementally if issues arise
-- **Raspberry Pi 4/5 Support**: Modern ARM64 Cortex-A72/A76 supports most current software
-- **Test Early**: Verify ARM64 compatibility immediately after package installation
+- `docs/installation-guide.md` – full Pi provisioning walkthrough
+- `docs/first-time-setup.md` – calibrating boundaries, safety checks
+- `docs/user-manual.md` – handy for understanding user-visible features
+- `docs/troubleshooting-guide.md` – common runtime issues
+- `scripts/README.md` – details of automation scripts
 
-### Installation and Setup
-Primary installation via `scripts/install_lawnberry.sh`:
-- **Hardware Detection**: Automatically scans I2C bus and detects connected devices
-- **Configuration Generation**: Updates `config/hardware.yaml` based on detected hardware
-- **Service Setup**: Creates systemd services with proper permissions
-- **ToF Sensor Initialization**: Special handling for VL53L0X dual sensor setup with address conflicts
+Whenever you add features, update the relevant doc so field operators are never surprised.
 
-### Canonical Runtime vs Source Tree
-The editable source repository (typically `/home/pi/lawnberry`) is synced to the immutable runtime directory `/opt/lawnberry` used by all systemd services. Services MUST NOT run directly from the source tree for security and consistency.
+---
 
-Fast deploy/update workflow:
-```bash
-# Minimal code + config sync (subset hashing enabled by default)
-./scripts/install_lawnberry.sh --deploy-update
+## 13. Working Agreements & Style
 
-# With environment overrides:
-FAST_DEPLOY_HASH=0 FAST_DEPLOY_DIST_MODE=minimal ./scripts/lawnberry-deploy.sh
-```
+- Python formatting: **Black** with 100 char lines, imports with **isort** (black profile).
+- Type hints: encouraged; keep mypy happy.
+- Tests: include unit coverage for new logic and integration tests if hardware interaction is touched.
+- Frontend: adhere to existing Material-UI patterns; keep components composable.
+- No secrets in the repo. Use `.env`, `config/secrets.yaml`, or environment variables.
+- Clean up temporary files and feature flags before opening PRs.
 
-Environment / mode flags (export before running deploy if needed):
-- `FAST_DEPLOY_HASH=0` disables subset drift hashing (speeds large syncs)
-- `FAST_DEPLOY_DIST_MODE=skip|minimal|full` controls web-ui dist syncing (default: minimal)
-    - `skip`: do not sync any dist assets
-    - `minimal`: sync only changed top-level files (index.html, manifest, sw.js, registerSW.js, workbox*, small static assets) and new hashed asset files
-    - `full`: rsync entire `web-ui/dist/` with timeout protection
-- `RSYNC_TIMEOUT_PER=<seconds>` adjust per-directory rsync timeout (default 40)
+---
 
-Guidelines:
-- Always edit code in source tree, then fast deploy.
-- Never hand-edit `/opt/lawnberry` (changes will be overwritten on next deploy).
-- If drift detected, investigate uncommitted source modifications before forcing deploy.
+## 14. Quick Checklist For Your First PR
 
-Backup before major changes:
-```bash
-sudo tar -czf lawnberry-prechange-$(date +%Y%m%d).tar.gz /opt/lawnberry/config /var/lib/lawnberry
-```
+1. Backend virtualenv active, dependencies installed (`pip install -r requirements-dev.txt`).
+2. Frontend dependencies installed (`npm install`).
+3. Run backend unit tests + linters.
+4. Run `npm run build` to ensure UI compiles.
+5. Update documentation or changelog if behavior changed.
+6. Smoke test combined stack locally or on the Pi (start backend, run `npm run dev`, verify key flows).
 
-### Mandatory Workspace Cleanup Protocol
-**BEFORE ANY COMMIT OR COMPLETION**:
-```bash
-# Delete ALL temporary test files
-rm -f test_*.py setup_*.py verify_*.py debug_*.py
-rm -f *.log *.tmp output_*.txt results_*.json
+If you get stuck, search the repo, skim `docs/`, or ask the team—this guide should help orient you quickly.
 
-# Remove any files with sensitive data
-grep -r "api_key\|password\|secret\|token" . --exclude-dir=.git --exclude="*.md" && echo "SENSITIVE DATA FOUND - CLEAN BEFORE COMMIT"
-
-# Clean Python cache and temp files
-find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-find . -name "*.pyc" -delete 2>/dev/null || true
-find . -name ".pytest_cache" -type d -exec rm -rf {} + 2>/dev/null || true
-
-# Verify workspace is clean
-git status --porcelain | grep -E "^\?\?" && echo "UNTRACKED FILES - REVIEW BEFORE COMMIT"
-```
-
-### Code Quality Standards
-- **Formatting**: Black with 100-character line length
-- **Type Hints**: Required for public APIs, relaxed for hardware libraries
-- **Error Handling**: Custom exceptions in `hardware/exceptions.py` with proper async propagation
-- **Logging**: Structured logging with per-component loggers
-- **Timeout Enforcement**: All blocking operations MUST have timeouts
-- **Version Selection**: Use newest compatible versions for security, test ARM64 compatibility immediately
-
-### Hardware Testing with Timeout Protection
-Key test files with timeout requirements:
-- `tests/test_hardware_interface.py` - Main hardware interface tests (max 60s)
-- `tests/performance/` - Performance benchmarks with asyncio (max 120s)
-- `tests/automation/` - Comprehensive test automation suite (max 300s)
-
-**Hardware Script Pattern** - Always implement internal timeouts:
-```python
-import asyncio
-from asyncio import timeout
-
-async def safe_hardware_operation():
-    try:
-        async with timeout(30.0):  # 30 second timeout
-            result = await hardware_operation()
-            return result
-    except asyncio.TimeoutError:
-        logger.error("Hardware operation timed out")
-        return None
-```
-
-## Integration Points
-
-### RoboHAT Communication
-Motor control via serial protocol to RoboHAT controller:
-```python
-await hw.send_robohat_command('rc_disable')  # Take control
-await hw.send_robohat_command('pwm', steer_us, throttle_us)  # 1000-2000μs
-await hw.send_robohat_command('rc_enable')   # Return control
-```
-
-### Web API Integration
-FastAPI backend with WebSocket real-time updates:
-- **Routers**: Organized by domain (`sensors`, `navigation`, `power`, etc.)
-- **MQTT Bridge**: Real-time pub/sub for sensor data and commands
-- **Authentication**: JWT-based with role-based access control
-
-### External Dependencies
-- **Hardware Libraries**: Adafruit CircuitPython for I2C sensors, RPi.GPIO for pin control
-- **Vision**: TensorFlow Lite with Coral TPU acceleration, OpenCV for image processing  
-- **Navigation**: GPS RTK with custom boundary detection algorithms
-- **Weather**: OpenWeather API integration for intelligent scheduling
-
-## Common Tasks
-
-### Adding New Sensor
-1. Create plugin class extending `HardwarePlugin` in `src/hardware/plugins/`
-2. Add configuration entry to `config/hardware.yaml`
-3. Update `HardwareInterface` to load new plugin type
-4. Add tests in `tests/test_hardware_interface.py`
-
-### Debug Hardware Issues
-1. Check I2C bus: `timeout 30s python -c "import asyncio; from src.hardware import HardwareInterface; asyncio.run(HardwareInterface().i2c_manager.scan_bus())"`
-2. Review device health: `timeout 45s python -c "from src.hardware import create_hardware_interface; hw = create_hardware_interface(); asyncio.run(hw.get_system_health())"`
-3. Enable debug logging: Set `logging_level: DEBUG` in config
-4. Use hardware-specific test scripts with timeouts: `timeout 60s python test_dual_tof.py`
-
-### Performance Optimization
-- Monitor sensor read latency with `timeout 120s python -m pytest tests/performance/test_performance_benchmarks.py`
-- Use concurrent sensor reads: `asyncio.gather(*[plugin.read_data() for plugin in plugins])`
-- Cache sensor data with `_sensor_data_cache` and `_cache_lock` in HardwareInterface
-- Profile with `--durations=10` pytest flag to identify slow tests
-
-### Bookworm-Specific Hardware Commands
-```bash
-# I2C detection with timeout (agents cannot interrupt)
-timeout 15s i2cdetect -y 1 || echo "I2C scan timed out"
-
-# GPIO testing with systemd isolation
-systemd-run --user --scope --property=TimeoutStopSec=30s python test_gpio.py
-
-# Service status checking (non-hanging)
-systemctl --user is-active lawnberry-api || echo "Service not running"
-```
-
-## Project-Specific Conventions
-
-- **File Organization**: Each major component (hardware, navigation, safety) has dedicated subdirectory
-- **Configuration**: Hardware-specific settings in YAML, not hardcoded in Python
-- **Error Recovery**: Exponential backoff with jitter for communication retries
-- **Resource Management**: Exclusive device access prevents I2C/serial bus conflicts
-- **Health Monitoring**: Continuous background health checks with automatic recovery
-
-## Virtual environments in this repository
-
-The repository contains multiple Python virtual environments used for different runtime roles; document them here so agents and operators know which to use:
-
-- `venv` (Python 3.11) — Primary runtime venv used for most services in `/opt/lawnberry` and for local development. This venv normally contains general-purpose packages (MQTT client, FastAPI, hardware drivers for I2C/GPIO where available) and is the default for running `src` services such as the sensor service unless another venv is explicitly required.
-
-- `venv_coral_pyenv` (Python 3.9) — Coral / TPU venv. This venv contains `pycoral`, `tflite_runtime` (or an equivalent Coral runtime) and other Coral-specific packages; use this environment when running Coral-accelerated vision models (object detection inference). It is NOT the default for general services because it targets Python 3.9 and contains binary wheels compiled for TPU/Coral usage.
-
-- `venv_coral` (possible alias) — If present, treat similarly to `venv_coral_pyenv` (Python 3.9). Confirm which coral venv is present on the device before running Coral-specific tasks.
-
-- `venv_test_mqtt` (Python 3.11) — Lightweight test venv used in CI/quick-tests for MQTT tooling, local smoke tests, and developer experiments. Contains tools like `mosquitto` clients or test helpers but may not have full hardware drivers.
-
-Guidelines for venv usage:
-
-- For hardware sensor services (ToF, GPS, IMU, power monitor), prefer the `venv` Python 3.11 environment unless the code requires a Coral-specific runtime. The repo's service entrypoints assume Python 3.11 compatibility unless a Coral model is used.
-- For Coral/TPU model execution (vision `src/vision` tasks, TFLite+Coral accelerators), activate `venv_coral_pyenv` or run via `venv_coral_pyenv/bin/python` so the correct binary runtime is available.
-- Always check for the presence of required drivers (for example `adafruit_vl53l0x`) in the chosen venv before running hardware-mode services. You can quickly inspect with:
-
-```bash
-# from repo root
-venv/bin/python -c "import pkgutil; print('FOUND' if pkgutil.find_loader('adafruit_vl53l0x') else 'MISSING')"
-venv_coral_pyenv/bin/python -c "import pkgutil; print('FOUND' if pkgutil.find_loader('pycoral') else 'MISSING')"
-```
-
-- If a service is to be run by systemd in production, ensure the systemd service uses the same venv that was used during local validation to avoid ABI mismatches.
-
-Keep the venv list up to date when adding or removing environments; add notes here explaining when and why to use each.
-
-Agent runtime enforcement (appendix):
-
-- Before any automated or manual Python execution, agents MUST run a venv verification and then execute via the venv binary. Example (non-interactive):
-
-```bash
-# verify and run a sensor service safely
-test -f venv/bin/activate || { echo "venv missing - aborting"; exit 2; }
-timeout 90s venv/bin/python -m src.hardware.sensor_service
-```
-
-- For interactive debug sessions, prefer activating the venv first:
-
-```bash
-source venv/bin/activate
-python -m src.web_api.main
-```
-
-Record any intentional deviations from these rules in server-memory under `VirtualEnvs` with the reason and approval.
+Happy mowing! 🌱
