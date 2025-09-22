@@ -115,9 +115,13 @@ const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
       <AppBar
         position="fixed"
         sx={{
-          width: useFullPage ? '100%' : { md: `calc(100% - ${sidebarOpen ? drawerWidth : 0}px)` },
-          ml: useFullPage ? 0 : { md: sidebarOpen ? `${drawerWidth}px` : 0 },
+          width: { md: `calc(100% - ${useFullPage ? 0 : (sidebarOpen ? drawerWidth : 0)}px)` },
+          ml: { md: useFullPage ? 0 : (sidebarOpen ? `${drawerWidth}px` : 0) },
           zIndex: theme.zIndex.drawer + 1,
+          transition: theme.transitions.create(['width', 'margin'], {
+            easing: theme.transitions.easing.sharp,
+            duration: theme.transitions.duration.enteringScreen,
+          }),
         }}
       >
         <Toolbar>
@@ -180,25 +184,24 @@ const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
         component="main"
         sx={{
           flexGrow: 1,
-          width: useFullPage ? '100%' : { md: `calc(100% - ${sidebarOpen ? drawerWidth : 0}px)` },
-          height: '100vh',
-          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
+          width: '100%',
         }}
       >
         <Toolbar /> {/* Spacer for fixed AppBar */}
-        <Box sx={{ 
-          flexGrow: 1, 
-          overflow: 'auto', 
+        <Box sx={{
+          flexGrow: 1,
           p: useFullPage ? 0 : { xs: 1, sm: 2, md: 3 },
-          height: useFullPage ? '100%' : 'auto'
+          overflow: useFullPage ? 'hidden' : 'auto',
+          display: 'flex',
+          flexDirection: 'column',
         }}>
           {children}
         </Box>
       </Box>
     </Box>
-  )
+  );
 }
 
-export default Layout
+export default Layout;

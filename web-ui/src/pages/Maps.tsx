@@ -150,28 +150,16 @@ const Maps: React.FC = () => {
   }, [homeLocations]);
 
   const containerStyles = useMemo(() => ({
-    width: '100vw',
-    maxWidth: '100vw',
-    marginLeft: 'calc(50% - 50vw)',
-    marginRight: 'calc(50% - 50vw)',
-    px: { xs: 0, md: 0 },
-    py: { xs: 1.5, md: 2 },
-    boxSizing: 'border-box'
+    flexGrow: 1,
+    display: 'flex',
+    flexDirection: 'column',
   }), []);
-
-  const mapHeight = isDesktop ? 'calc(100vh - 140px)' : 'calc(100vh - 110px)';
 
   const overviewMapStyles = useMemo(() => ({
     position: 'relative' as const,
-    width: '100vw',
-    maxWidth: '100vw',
-    marginLeft: 'calc(50% - 50vw)',
-    marginRight: 'calc(50% - 50vw)',
-    height: mapHeight,
-    minHeight: isDesktop ? 600 : '70vh',
+    flexGrow: 1,
     overflow: 'hidden',
-    borderRadius: 0
-  }), [isDesktop, mapHeight]);
+  }), []);
 
   const robotPosition = status?.position ? {
     lat: status.position.lat,
@@ -388,7 +376,7 @@ const Maps: React.FC = () => {
         </Alert>
       )}
 
-      <Paper sx={{ width: '100%' }}>
+                              <Paper sx={{ width: '100%', flexGrow: 1, display: 'flex', flexDirection: 'column', p: 0, m: 0 }}>
         <Tabs
           value={activeTab}
           onChange={(e, newValue) => setActiveTab(newValue)}
