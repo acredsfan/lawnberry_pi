@@ -150,15 +150,18 @@ const Maps: React.FC = () => {
   }, [homeLocations]);
 
   const containerStyles = useMemo(() => ({
-    flexGrow: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     display: 'flex',
     flexDirection: 'column',
   }), []);
 
   const overviewMapStyles = useMemo(() => ({
-    position: 'relative' as const,
     flexGrow: 1,
-    overflow: 'hidden',
+    position: 'relative',
   }), []);
 
   const robotPosition = status?.position ? {

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import time
 
 from .data_structures import DeviceHealth, SensorReading
 from .exceptions import DeviceNotFoundError, HardwareError
@@ -20,7 +21,7 @@ class PluginConfig:
 
     name: str
     enabled: bool = True
-    parameters: Dict[str, Any] = None
+    parameters: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if self.parameters is None:
@@ -237,6 +238,8 @@ class ToFSensorPlugin(HardwarePlugin):
 
                 # Get configuration parameters
                 sensor_name = self.config.name
+                if self.config.parameters is None:
+                    raise HardwareError(f"ToF sensor {sensor_name} missing parameters configuration")
                 shutdown_pin = self.config.parameters.get("shutdown_pin")
                 interrupt_pin = self.config.parameters.get("interrupt_pin")
                 target_address = self.config.parameters.get("i2c_address", 0x29)
@@ -391,6 +394,8 @@ class PowerMonitorPlugin(HardwarePlugin):
 
             try:
                 i2c_manager = self.managers["i2c"]
+                if self.config.parameters is None:
+                    raise HardwareError("Power monitor missing parameters configuration")
                 configured_addr = self.config.parameters.get("i2c_address")
                 autodetect = bool(self.config.parameters.get("auto_detect_address", True))
                 address = (
@@ -466,6 +471,8 @@ class PowerMonitorPlugin(HardwarePlugin):
 
         try:
             i2c_manager = self.managers["i2c"]
+            if self.config.parameters is None:
+                raise HardwareError("Power monitor missing parameters configuration")
             address = getattr(self, "_address", int(self.config.parameters.get("i2c_address", 0x40)))
             params = self.config.parameters or {}
             mappings: Dict[str, int] = params.get("channel_mappings", {}) or {}
@@ -668,6 +675,8 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
                     use_adafruit = False
 
                 # Determine I2C address: respect configured address, or auto-detect 0x76/0x77 by chip ID
+                if self.config.parameters is None:
+                    raise HardwareError("Environmental sensor missing parameters configuration")
                 configured_addr = self.config.parameters.get("i2c_address")
                 autodetect = bool(self.config.parameters.get("auto_detect_address", True))
                 address = (
@@ -703,15 +712,16 @@ class EnvironmentalSensorPlugin(HardwarePlugin):
                         i2c = busio.I2C(board.SCL, board.SDA)
                         sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=self._address)
                         # Optional oversampling/tuning from config
-                        osrs_t = self.config.parameters.get("temperature_oversample")
-                        if osrs_t is not None:
-                            sensor.temperature_oversample = int(osrs_t)
-                        osrs_h = self.config.parameters.get("humidity_oversample")
-                        if osrs_h is not None:
-                            sensor.humidity_oversample = int(osrs_h)
-                        osrs_p = self.config.parameters.get("pressure_oversample")
-                        if osrs_p is not None:
-                            sensor.pressure_oversample = int(osrs_p)
+                        if self.config.parameters:
+                            osrs_t = self.config.parameters.get("temperature_oversample")
+                            if osrs_t is not None:
+                                sensor.temperature_oversample = int(osrs_t)
+                            osrs_h = self.config.parameters.get("humidity_oversample")
+                            if osrs_h is not None:
+                                sensor.humidity_oversample = int(osrs_h)
+                            osrs_p = self.config.parameters.get("pressure_oversample")
+                            if osrs_p is not None:
+                                sensor.pressure_oversample = int(osrs_p)
                         self._driver = ("adafruit", sensor)
                         self.logger.info("Environmental sensor: using Adafruit driver path")
                     except Exception as e:
@@ -1092,6 +1102,8 @@ class GPSPlugin(HardwarePlugin):
             try:
                 serial_manager = self.managers["serial"]
                 self.device_name = "gps"
+                if self.config.parameters is None:
+                    raise HardwareError("GPS plugin missing parameters configuration")
                 self._timeout = float(self.config.parameters.get("timeout", 1.0))
                 # Start with configured values
                 cfg_port = self.config.parameters.get("port")
@@ -1403,6 +1415,46 @@ class IMUPlugin(HardwarePlugin):
     library is not available or initialization fails, fall back to parsing
     comma-separated text lines for basic IMU telemetry (legacy/dev boards).
     """
+    _adafruit_available = False
+    _BNO_REPORT_ACCELEROMETER = None
+    _BNO_REPORT_GYROSCOPE = None
+    _BNO_REPORT_ROTATION_VECTOR = None
+    _BNO08X_UART = None
+
+    try:
+        from adafruit_bno08x import (  # type: ignore
+            BNO_REPORT_ACCELEROMETER,
+            BNO_REPORT_GYROSCOPE,
+            BNO_REPORT_ROTATION_VECTOR,
+        )
+        from adafruit_bno08x.uart import BNO08X_UART  # type: ignore
+        _adafruit_available = True
+        _BNO_REPORT_ACCELEROMETER = BNO_REPORT_ACCELEROMETER
+        _BNO_REPORT_GYROSCOPE = BNO_REPORT_GYROSCOPE
+        _BNO_REPORT_ROTATION_VECTOR = BNO_REPORT_ROTATION_VECTOR
+        _BNO08X_UART = BNO08X_UART
+    except ImportError:
+        pass
+    _adafruit_available = False
+    _BNO_REPORT_ACCELEROMETER = None
+    _BNO_REPORT_GYROSCOPE = None
+    _BNO_REPORT_ROTATION_VECTOR = None
+    _BNO08X_UART = None
+
+    try:
+        from adafruit_bno08x import (  # type: ignore
+            BNO_REPORT_ACCELEROMETER,
+            BNO_REPORT_GYROSCOPE,
+            BNO_REPORT_ROTATION_VECTOR,
+        )
+        from adafruit_bno08x.uart import BNO08X_UART  # type: ignore
+        _adafruit_available = True
+        _BNO_REPORT_ACCELEROMETER = BNO_REPORT_ACCELEROMETER
+        _BNO_REPORT_GYROSCOPE = BNO_REPORT_GYROSCOPE
+        _BNO_REPORT_ROTATION_VECTOR = BNO_REPORT_ROTATION_VECTOR
+        _BNO08X_UART = BNO08X_UART
+    except ImportError:
+        pass
 
     @property
     def plugin_type(self) -> str:
@@ -1419,6 +1471,8 @@ class IMUPlugin(HardwarePlugin):
             try:
                 serial_manager = self.managers["serial"]
                 self.device_name = "imu"
+                if self.config.parameters is None:
+                    raise HardwareError("IMU plugin missing parameters configuration")
                 # Use a slightly more generous default timeout for initial detection
                 self._timeout = float(self.config.parameters.get("timeout", 0.2))
                 cfg_port = self.config.parameters.get("port")
@@ -1427,20 +1481,6 @@ class IMUPlugin(HardwarePlugin):
                 # Attempt to set up BNO08x UART driver if available
                 self._use_bno08x = False
                 self._bno = None
-                try:
-                    from adafruit_bno08x import (  # type: ignore
-                        BNO_REPORT_ACCELEROMETER,
-                        BNO_REPORT_GYROSCOPE,
-                        BNO_REPORT_ROTATION_VECTOR,
-                    )
-                    from adafruit_bno08x.uart import BNO08X_UART  # type: ignore
-
-                    self._adafruit_available = True
-                except Exception as e:
-                    self._adafruit_available = False
-                    self.logger.debug(
-                        f"BNO08x driver not available, will use text parser fallback: {e}"
-                    )
 
                 async def try_init(port: str, baud: int) -> bool:
                     try:
@@ -1448,45 +1488,51 @@ class IMUPlugin(HardwarePlugin):
                             "imu", port=port, baud=baud, timeout=self._timeout
                         )
                         # Preferred: BNO08x UART initialization path
-                        if self._adafruit_available and baud >= 921600:
+                        if self._adafruit_available and baud >= 921600 and self._BNO08X_UART is not None:
                             try:
                                 # Access underlying pyserial object
                                 ser = serial_manager._connections.get("imu")
                                 if ser is None:
                                     return False
-                                # Initialize Adafruit BNO08x UART driver
-                                bno = BNO08X_UART(ser)
-                                # Enable core features
-                                try:
-                                    bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
-                                except Exception:
-                                    pass
-                                try:
-                                    bno.enable_feature(BNO_REPORT_ACCELEROMETER)
-                                except Exception:
-                                    pass
-                                try:
-                                    bno.enable_feature(BNO_REPORT_GYROSCOPE)
-                                except Exception:
-                                    pass
-                                # Try a couple reads to verify
-                                ok_reads = 0
-                                for _ in range(6):
-                                    try:
-                                        q = bno.quaternion  # type: ignore[attr-defined]
-                                        if q and any(abs(float(x)) > 1e-6 for x in q):
-                                            ok_reads += 1
-                                            if ok_reads >= 1:
-                                                self._bno = bno
-                                                self._use_bno08x = True
-                                                return True
-                                    except Exception:
-                                        await asyncio.sleep(0.05)
-                                # If quaternion not ready yet, still accept BNO path but mark initialized
-                                if bno is not None:
+
+                                # Initialize Adafruit BNO08x UART driver in a separate thread to avoid blocking
+                                def _init_bno_sync():
+                                    if self._BNO08X_UART is None:
+                                        return None
+                                    bno = self._BNO08X_UART(ser, debug=False)
+                                    # Enable core features
+                                    if self._BNO_REPORT_ROTATION_VECTOR:
+                                        try:
+                                            bno.enable_feature(self._BNO_REPORT_ROTATION_VECTOR)
+                                        except Exception:
+                                            pass
+                                    if self._BNO_REPORT_ACCELEROMETER:
+                                        try:
+                                            bno.enable_feature(self._BNO_REPORT_ACCELEROMETER)
+                                        except Exception:
+                                            pass
+                                    if self._BNO_REPORT_GYROSCOPE:
+                                        try:
+                                            bno.enable_feature(self._BNO_REPORT_GYROSCOPE)
+                                        except Exception:
+                                            pass
+                                    # Try a quick read to verify
+                                    for _ in range(3):
+                                        try:
+                                            q = bno.quaternion
+                                            if q and any(abs(float(x)) > 1e-6 for x in q):
+                                                return bno
+                                        except Exception:
+                                            time.sleep(0.02)
+                                    return bno
+
+                                bno = await asyncio.to_thread(_init_bno_sync)
+
+                                if bno:
                                     self._bno = bno
                                     self._use_bno08x = True
                                     return True
+
                             except Exception as e:
                                 # If BNO path fails, fall through to text parser
                                 self.logger.debug(
@@ -1586,27 +1632,16 @@ class IMUPlugin(HardwarePlugin):
                         self._last_failures = getattr(self, "_last_failures", 0) + 1
                         if self._last_failures % 80 == 0:
                             # Attempt internal re-init by toggling features
-                            try:
-                                from adafruit_bno08x import (  # type: ignore
-                                    BNO_REPORT_ACCELEROMETER,
-                                    BNO_REPORT_GYROSCOPE,
-                                    BNO_REPORT_ROTATION_VECTOR,
-                                )
-
+                            if self._adafruit_available and bno:
                                 try:
-                                    bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
+                                    if self._BNO_REPORT_ROTATION_VECTOR:
+                                        bno.enable_feature(self._BNO_REPORT_ROTATION_VECTOR)
+                                    if self._BNO_REPORT_ACCELEROMETER:
+                                        bno.enable_feature(self._BNO_REPORT_ACCELEROMETER)
+                                    if self._BNO_REPORT_GYROSCOPE:
+                                        bno.enable_feature(self._BNO_REPORT_GYROSCOPE)
                                 except Exception:
                                     pass
-                                try:
-                                    bno.enable_feature(BNO_REPORT_ACCELEROMETER)
-                                except Exception:
-                                    pass
-                                try:
-                                    bno.enable_feature(BNO_REPORT_GYROSCOPE)
-                                except Exception:
-                                    pass
-                            except Exception:
-                                pass
                         return None
 
                     # Prepare output values

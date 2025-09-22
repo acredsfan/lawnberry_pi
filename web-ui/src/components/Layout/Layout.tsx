@@ -12,7 +12,7 @@ import Logo from '../Logo'
 
 interface LayoutProps {
   children: React.ReactNode
-  fullPageMode?: boolean // New prop for full-page desktop layout
+  fullPageMode?: boolean
 }
 
 const drawerWidth = 240
@@ -25,19 +25,17 @@ const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
   const navigate = useNavigate()
   const location = useLocation()
   
-  const { sidebarOpen, notifications, connectionStatus } = useSelector((state: RootState) => state.ui)
+  const { sidebarOpen, notifications } = useSelector((state: RootState) => state.ui)
   const { emergencyStop } = useSelector((state: RootState) => state.mower)
 
   const unreadCount = notifications.filter(n => !n.read).length
-
-  // Determine if we should use full-page mode (desktop only)
   const useFullPage = fullPageMode && isDesktop
 
   useEffect(() => {
-    if (useFullPage) {
+    if (useFullPage && sidebarOpen) {
       dispatch(setSidebarOpen(false))
     }
-  }, [useFullPage, dispatch])
+  }, [useFullPage, sidebarOpen, dispatch])
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: DashboardIcon, path: '/dashboard' },
@@ -115,8 +113,8 @@ const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
       <AppBar
         position="fixed"
         sx={{
-          width: { md: `calc(100% - ${useFullPage ? 0 : (sidebarOpen ? drawerWidth : 0)}px)` },
-          ml: { md: useFullPage ? 0 : (sidebarOpen ? `${drawerWidth}px` : 0) },
+          width: { md: `calc(100% - ${(sidebarOpen ? drawerWidth : 0)}px)` },
+          ml: { md: `${(sidebarOpen ? drawerWidth : 0)}px` },
           zIndex: theme.zIndex.drawer + 1,
           transition: theme.transitions.create(['width', 'margin'], {
             easing: theme.transitions.easing.sharp,
@@ -130,7 +128,7 @@ const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
             aria-label="open drawer"
             edge="start"
             onClick={handleDrawerToggle}
-            sx={{ mr: 2, display: { md: sidebarOpen ? 'none' : 'block' } }}
+            sx={{ mr: 2, display: { md: 'block' } }}
           >
             <MenuIcon />
           </IconButton>
@@ -159,10 +157,10 @@ const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
 
       <Box
         component="nav"
-        sx={{ width: { md: useFullPage ? 0 : sidebarOpen ? drawerWidth : 0 }, flexShrink: { md: 0 } }}
+        sx={{ width: { md: sidebarOpen ? drawerWidth : 0 }, flexShrink: { md: 0 } }}
       >
         <Drawer
-          variant={isMobile || useFullPage ? 'temporary' : 'persistent'}
+          variant={isMobile ? 'temporary' : 'persistent'}
           open={sidebarOpen}
           onClose={handleDrawerToggle}
           ModalProps={{
@@ -186,16 +184,17 @@ const Layout: React.FC<LayoutProps> = ({ children, fullPageMode = false }) => {
           flexGrow: 1,
           display: 'flex',
           flexDirection: 'column',
-          width: '100%',
+          height: '100vh',
+          overflow: 'hidden',
         }}
       >
-        <Toolbar /> {/* Spacer for fixed AppBar */}
+        <Toolbar />
         <Box sx={{
           flexGrow: 1,
           p: useFullPage ? 0 : { xs: 1, sm: 2, md: 3 },
-          overflow: useFullPage ? 'hidden' : 'auto',
           display: 'flex',
           flexDirection: 'column',
+          position: 'relative',
         }}>
           {children}
         </Box>
