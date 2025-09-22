@@ -1482,70 +1482,61 @@ class IMUPlugin(HardwarePlugin):
                 self._use_bno08x = False
                 self._bno = None
 
+                async def _init_bno_background():
+                    """Deferred, non-blocking BNO08x initialization."""
+                    try:
+                        ser = serial_manager._connections.get("imu")
+                        if ser is None or not self._adafruit_available or self._BNO08X_UART is None:
+                            return
+
+                        def _init_bno_sync():
+                            if self._BNO08X_UART is None: return None
+                            bno = self._BNO08X_UART(ser, debug=False)
+                            if self._BNO_REPORT_ROTATION_VECTOR:
+                                try: bno.enable_feature(self._BNO_REPORT_ROTATION_VECTOR)
+                                except Exception: pass
+                            if self._BNO_REPORT_ACCELEROMETER:
+                                try: bno.enable_feature(self._BNO_REPORT_ACCELEROMETER)
+                                except Exception: pass
+                            if self._BNO_REPORT_GYROSCOPE:
+                                try: bno.enable_feature(self._BNO_REPORT_GYROSCOPE)
+                                except Exception: pass
+                            # Verification read
+                            for _ in range(5):
+                                try:
+                                    q = bno.quaternion
+                                    if q and any(abs(float(x)) > 1e-6 for x in q):
+                                        return bno
+                                except Exception:
+                                    time.sleep(0.05)
+                            return bno
+
+                        bno = await asyncio.to_thread(_init_bno_sync)
+                        if bno:
+                            self._bno = bno
+                            self._use_bno08x = True
+                            await self.health.record_success()
+                            self.logger.info(f"IMU (BNO08x) background initialization complete.")
+                        else:
+                            self.logger.warning("BNO08x background initialization failed.")
+
+                    except Exception as e:
+                        self.logger.error(f"Error in BNO08x background init: {e}")
+
                 async def try_init(port: str, baud: int) -> bool:
                     try:
                         await serial_manager.initialize_device(
                             "imu", port=port, baud=baud, timeout=self._timeout
                         )
-                        # Preferred: BNO08x UART initialization path
-                        if self._adafruit_available and baud >= 921600 and self._BNO08X_UART is not None:
-                            try:
-                                # Access underlying pyserial object
-                                ser = serial_manager._connections.get("imu")
-                                if ser is None:
-                                    return False
+                        # If BNO08x is the target, defer full init and return success immediately
+                        if self._adafruit_available and baud >= 921600:
+                            asyncio.create_task(_init_bno_background())
+                            return True
 
-                                # Initialize Adafruit BNO08x UART driver in a separate thread to avoid blocking
-                                def _init_bno_sync():
-                                    if self._BNO08X_UART is None:
-                                        return None
-                                    bno = self._BNO08X_UART(ser, debug=False)
-                                    # Enable core features
-                                    if self._BNO_REPORT_ROTATION_VECTOR:
-                                        try:
-                                            bno.enable_feature(self._BNO_REPORT_ROTATION_VECTOR)
-                                        except Exception:
-                                            pass
-                                    if self._BNO_REPORT_ACCELEROMETER:
-                                        try:
-                                            bno.enable_feature(self._BNO_REPORT_ACCELEROMETER)
-                                        except Exception:
-                                            pass
-                                    if self._BNO_REPORT_GYROSCOPE:
-                                        try:
-                                            bno.enable_feature(self._BNO_REPORT_GYROSCOPE)
-                                        except Exception:
-                                            pass
-                                    # Try a quick read to verify
-                                    for _ in range(3):
-                                        try:
-                                            q = bno.quaternion
-                                            if q and any(abs(float(x)) > 1e-6 for x in q):
-                                                return bno
-                                        except Exception:
-                                            time.sleep(0.02)
-                                    return bno
-
-                                bno = await asyncio.to_thread(_init_bno_sync)
-
-                                if bno:
-                                    self._bno = bno
-                                    self._use_bno08x = True
-                                    return True
-
-                            except Exception as e:
-                                # If BNO path fails, fall through to text parser
-                                self.logger.debug(
-                                    f"BNO08x init failed on {port}@{baud}: {e}; trying text parser"
-                                )
-
-                        # Fallback: quick sanity read requiring parseable text content
+                        # Fallback: quick sanity read for text parser
                         for _ in range(6):
                             line = await serial_manager.read_line("imu", timeout=self._timeout)
-                            if not line:
-                                continue
-                            parsed = self._parse_imu_line(line)
-                            if parsed is not None:
+                            if line and self._parse_imu_line(line) is not None:
                                 return True
                         return False
                     except Exception:
@@ -1577,10 +1568,10 @@ class IMUPlugin(HardwarePlugin):
                         "imu", port=cfg_port or "/dev/ttyAMA4", baud=cfg_baud, timeout=self._timeout
                     )
                     self._last_failures = 0
-                    self._initialized = True
-                    await self.health.record_failure()
+                    self._initialized = True # Mark as initialized to allow read_data attempts
+                    await self.health.record_failure() # But start as unhealthy
                     self.logger.warning(
-                        "IMU auto-detect failed; initialized with configured defaults"
+                        "IMU auto-detect failed; initialized with configured defaults. Will retry."
                     )
                     return True
 
@@ -1588,8 +1579,9 @@ class IMUPlugin(HardwarePlugin):
                 self._last_failures = 0
                 self._initialized = True
                 await self.health.record_success()
-                if getattr(self, "_use_bno08x", False):
-                    self.logger.info(f"IMU (BNO08x) initialized on {self._port} @ {self._baud}")
+                # Log based on which path will be taken, even if BNO is in background
+                if self._adafruit_available and self._baud >= 921600:
+                    self.logger.info(f"IMU (BNO08x) initializing in background on {self._port} @ {self._baud}")
                 else:
                     self.logger.info(
                         f"IMU (text-parser) initialized on {self._port} @ {self._baud}"
@@ -1829,6 +1821,14 @@ class PluginManager:
         try:
             from ..weather.weather_plugin import WeatherPlugin
 
+            self._builtin_plugins["weather_service"] = WeatherPlugin
+        except ImportError:
+            self.logger.warning("Weather service plugin not available")
+
+    async def load_plugin(self, plugin_name: str, plugin_type: str, config: PluginConfig) -> bool:
+        """Load and initialize a hardware plugin"""
+        async with self._lock:
+            try:
             self._builtin_plugins["weather_service"] = WeatherPlugin
         except ImportError:
             self.logger.warning("Weather service plugin not available")
