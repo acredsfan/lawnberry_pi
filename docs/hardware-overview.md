@@ -19,7 +19,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
     ┌─────────────────────────────────────────────┼──────────────┐
     │                 MAIN COMPUTE                │              │
     │  ┌─────────────────────────────────────┐    │              │
-    │  │        Raspberry Pi 5 (16GB)         │    │ 12V Bus      │
+    │  │        Raspberry Pi 5 (16GB)        │    │ 12V Bus      │
     │  │  ┌─────────────────────────────┐    │    │              │
     │  │  │      RoboHAT (RP2040)       │    │    │              │
     │  │  │                             │    │    │              │
@@ -27,7 +27,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
     │  └─────────────────────────────────────┘    │              │
     │                    │                        │              │
     │              5V DC-DC Converter ←───────────┘              │
-    └────────────────────┼─────────────────────────────────────┘
+    └────────────────────┼───────────────────────────────────────┘
                         │
     ┌───────────────────┼─────────────────────────────────────┐
     │              SENSOR SYSTEMS                 │           │
