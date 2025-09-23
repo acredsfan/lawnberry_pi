@@ -9,17 +9,17 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
                            
     ┌─────────────────────────────────────────────────────────────┐
     │                     POWER SYSTEM                            │
-    │  ┌─────────────┐  ┌──────────────┐  ┌─────────────────┐    │
-    │  │ Solar Panel │──│ Charge       │──│ 30Ah LiFePO4   │    │
-    │  │ 30W         │  │ Controller   │  │ Battery         │    │
-    │  └─────────────┘  │ 20A          │  └─────────────────┘    │
-    │                   └──────────────┘           │              │
-    └─────────────────────────────────────────────┼──────────────┘
+    │  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐    │
+    │  │ Solar Panel │──│ Charge       │──│ 30Ah LiFePO4     │    │
+    │  │ 30W         │  │ Controller   │  │ Battery          │    │
+    │  └─────────────┘  │ 15A          │  └──────────────────┘    │
+    │                   └──────────────┘          │               │
+    └─────────────────────────────────────────────┼───────────────┘
                                                   │
     ┌─────────────────────────────────────────────┼──────────────┐
     │                 MAIN COMPUTE                │              │
     │  ┌─────────────────────────────────────┐    │              │
-    │  │        Raspberry Pi 4 (8GB)        │    │ 12V Bus      │
+    │  │        Raspberry Pi 5 (16GB)         │    │ 12V Bus      │
     │  │  ┌─────────────────────────────┐    │    │              │
     │  │  │      RoboHAT (RP2040)       │    │    │              │
     │  │  │                             │    │    │              │
@@ -31,51 +31,51 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
                         │
     ┌───────────────────┼─────────────────────────────────────┐
     │              SENSOR SYSTEMS                 │           │
-    │                                            │           │
-    │  I2C Bus (3.3V):                          │           │
-    │  ├─ VL53L0X ToF (Left)  - 0x29            │           │
-    │  ├─ VL53L0X ToF (Right) - 0x30            │           │
-    │  ├─ BME280 Environment  - 0x76            │           │
-    │  ├─ INA3221 Power Mon   - 0x40            │           │
-    │  └─ SSD1306 Display     - 0x3C            │           │
-    │                                            │           │
-    │  Serial/UART:                              │           │
-    │  ├─ GPS RTK Module   - /dev/ttyACM1       │           │
-    │  ├─ BNO085 IMU       - /dev/ttyAMA4 (Pi 5 UART4, GPIO12/13) │           │
-    │  └─ RoboHAT Comms    - /dev/serial0       │           │
-    │                                            │           │
-    │  Camera:                                   │           │
-    │  └─ Pi Camera        - /dev/video0        │           │
-    └────────────────────────────────────────────┼───────────┘
-                                                │
-    ┌───────────────────────────────────────────┼───────────┐
-    │                MOTOR SYSTEMS               │           │
-    │                                           │           │
-    │  Drive Motors (12V):                      │           │
-    │  ├─ Left Drive Motor  ←─ Cytron MDDRC10 ←─┤           │
-    │  └─ Right Drive Motor ←─ Motor Driver   ←─┤           │
-    │                                           │           │
-    │  Blade Motor (12V):                       │           │
-    │  └─ 997 DC Motor ←─ IBT-4 Driver ←────────┤           │
-    │                                           │           │
-    │  Control Signals:                         │           │
-    │  ├─ GPIO 24 (Blade IN1)                  │           │
-    │  ├─ GPIO 25 (Blade IN2)                  │           │
-    │  ├─ PWM/DIR to Motor Driver               │           │
-    │  └─ Hall Effect Feedback                  │           │
-    └───────────────────────────────────────────────────────┘
+    │                                             │           │
+    │  I2C Bus (3.3V):                            │           │
+    │  ├─ VL53L0X ToF (Left)  - 0x29              │           │
+    │  ├─ VL53L0X ToF (Right) - 0x30              │           │
+    │  ├─ BME280 Environment  - 0x76              │           │
+    │  ├─ INA3221 Power Mon   - 0x40              │           │
+    │  └─ SSD1306 Display     - 0x3C              │           │
+    │                                             │           │
+    │  Serial/UART:                               │           │
+    │  ├─ GPS RTK Module   - /dev/ttyACM1         │           │
+    │  ├─ BNO085 IMU       - /dev/ttyAMA4         │           │ <----(Pi 5 UART4, GPIO12/13)
+    │  └─ RoboHAT Comms    - /dev/serial0         │           │
+    │                                             │           │
+    │  Camera:                                    │           │
+    │  └─ Pi Camera        - /dev/video0          │           │
+    └─────────────────────────────────────────────┼───────────┘
+                                                  │
+    ┌─────────────────────────────────────────────┼───────────┐
+    │                MOTOR SYSTEMS                │           │
+    │                                             │           │
+    │  Drive Motors (12V):                        │           │
+    │  ├─ Left Drive Motor  ←─ Cytron MDDRC10 ←───┤           │
+    │  └─ Right Drive Motor ←─ Motor Driver   ←───┤           │
+    │                                             │           │
+    │  Blade Motor (12V):                         │           │
+    │  └─ 997 DC Motor ←─ IBT-4 Driver ←──────────┤           │
+    │                                             │           │
+    │  Control Signals:                           │           │
+    │  ├─ GPIO 24 (Blade IN1)                     │           │
+    │  ├─ GPIO 25 (Blade IN2)                     │           │
+    │  ├─ PWM/DIR to Motor Driver                 │           │
+    │  └─ Hall Effect Feedback                    │           │
+    └─────────────────────────────────────────────────────────┘
 ```
 
 ## Core Components
 
-### Raspberry Pi 4 (8GB RAM)
+### Raspberry Pi 5 (16GB RAM)
 **Function**: Main computing platform running all software systems
 **Specifications**:
-- ARM Cortex-A72 quad-core processor (1.5GHz)
-- 8GB LPDDR4 RAM for advanced processing
+- Broadcom BCM2712 quad-core Arm Cortex A76 processor @ 2.4GHz
+- 16GB LPDDR4X-4267 RAM for advanced processing
 - WiFi 802.11ac and Gigabit Ethernet
 - Multiple I2C, SPI, UART, and GPIO interfaces
-- Camera Serial Interface (CSI) for Pi Camera
+- 2 × 4-lane MIPI camera/display transceivers
 
 **Key Responsibilities**:
 - Web interface hosting and API services
@@ -183,19 +183,19 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 
 **Performance Characteristics**:
 - **Runtime**: 4-8 hours depending on terrain and conditions
-- **Charging time**: 6-8 hours from 20% to 100%
+- **Solar-Only Charging time**: 3-4 days from 20% to 100% depending on conditions
 - **Operating temperature**: -20°C to 60°C
 - **Safety features**: Over/under voltage, current, and temperature protection
 
 ### Solar Charging System
 **Components**:
 - **30W Solar Panel**: Monocrystalline silicon with aluminum frame
-- **20A MPPT Charge Controller**: Maximum Power Point Tracking for efficiency
+- **15A Victron SmartSolar MPPT Charge Controller**: Maximum Power Point Tracking for efficiency
 - **Charge regulation**: Automatic multi-stage charging profile
 
 **Charging Performance**:
 - **Peak charging**: 1.5A in full sunlight (30W panel)
-- **Daily energy**: 120-180Wh in typical conditions
+- **Daily energy**: 80-120Wh in typical conditions
 - **Seasonal variation**: 60% capacity in winter, 140% in summer
 - **Maintenance charging**: Keeps battery topped off during storage
 
@@ -209,8 +209,8 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 
 **Monitoring Channels**:
 - **Channel 1**: Main battery voltage and total current
-- **Channel 2**: Drive motor power consumption
-- **Channel 3**: Blade motor and accessories power
+- **Channel 2**: Not Used
+- **Channel 3**: Solar panel voltage and current
 
 ## Motor and Drive Systems
 
@@ -219,11 +219,11 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 - **2x 12V Worm Gear DC Motors**: High torque, low speed for traction
 - **Cytron MDDRC10 Motor Driver**: Dual-channel motor control
 - **Hall Effect Sensors**: Wheel rotation feedback
-- **Magnetic Encoders**: Precise distance and speed measurement
+- **4x magnets per wheel**: to be read by Hall Sensors
 
 **Specifications**:
-- **Motor power**: 50W per motor (100W total drive power)
-- **Gear ratio**: 30:1 for high torque
+- **Motor power**: 35W per motor (70W total drive power)
+- **Gear ratio**: 218:1 for high torque
 - **Maximum speed**: 2.5 m/s (5.6 mph)
 - **Typical operating speed**: 1.0-1.5 m/s
 - **Differential steering**: Independent left/right wheel control
@@ -235,7 +235,7 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 - **GPIO Control**: Direction and enable signals from Raspberry Pi
 
 **Specifications**:
-- **Motor power**: 100W maximum
+- **Motor power**: 50W maximum
 - **Blade speed**: 3000-4000 RPM typical
 - **Control method**: PWM speed control
 - **Safety features**: Emergency stop and blade brake
@@ -255,9 +255,11 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 - Live monitoring via web interface
 - Image collection for AI training
 - Progress documentation and time-lapse creation
+- RTK GPS for real-time location monitoring and geofencing
 
 **Computer Vision Capabilities**:
-- OpenCV integration for image processing
+- TFlite or OpenCV integration for image processing
+- Optional Google Coral or Hailo for offloading vision
 - Object detection using trained models
 - Edge detection for boundary recognition
 - Motion detection for security monitoring
@@ -281,13 +283,6 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 
 ## Physical Design and Enclosures
 
-### Weatherproof Enclosures
-**Main Electronics Enclosure**:
-- IP65 rated protection against dust and water
-- Ventilation for heat dissipation
-- Clear access panels for maintenance
-- Cable glands for all external connections
-
 **Sensor Protection**:
 - Individual weatherproof housings for exposed sensors
 - UV-resistant materials for long-term outdoor exposure
@@ -296,16 +291,10 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 
 ### Mechanical Platform
 **Chassis Design**:
-- Aluminum frame construction for durability
+- 3D printed body
 - Low center of gravity for stability on slopes
 - Modular design for easy component access
 - Integrated cable management and routing
-
-**Cutting Deck**:
-- Steel construction with protective guards
-- Adjustable cutting height mechanism
-- Grass discharge management
-- Safety switches and emergency stops
 
 ## Connectivity and Communication
 
@@ -316,39 +305,23 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 - Automatic reconnection and fallback
 - Range: 100+ meters from access point
 
-**Optional Cellular**:
-- 4G LTE module for remote areas
-- GPS tracking and remote monitoring
-- Emergency communication capability
-- Data usage optimization for cost control
-
 ### Wired Interfaces
 **Available Ports**:
-- Ethernet for reliable network connection
-- USB ports for expansion and diagnostics
+- USB ports for the External Wifi Antenna, RTK GPS, Google Coral TPU Accelerator, and secondary connection to RoboHAT RP2040
 - HDMI for direct display connection
 - MicroSD card for system storage and logging
 
 ## Expansion and Customization
 
-### Available GPIO Pins
-**Unused GPIO for expansion**:
-- GPIO 19, 20, 21: Available for additional sensors
-- GPIO 5, 6, 13, 16, 26: General purpose I/O
-- Additional I2C addresses available on bus
-
 ### Expansion Possibilities
 **Sensor Additions**:
 - Additional ToF sensors for full perimeter coverage
 - Ultrasonic sensors for different detection characteristics
-- Light sensors for automatic lighting control
-- Rain sensors for immediate weather response
+- LIDAR module
 
 **Actuator Additions**:
-- LED lighting systems for night operation
 - Horn or alarm for safety alerts
 - Additional motors for specialized attachments
-- Servo motors for adjustable components
 
 ## Maintenance Access Points
 
@@ -360,8 +333,6 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 - Display and control interface
 
 **Monthly/Seasonal Access**:
-- Motor inspection and lubrication points
-- Drive belt and gear inspection
 - Electrical connection inspection
 - Software and firmware update access
 
