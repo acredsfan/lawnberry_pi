@@ -1,0 +1,12 @@
+name: webui-build
+on: [pull_request]
+jobs:
+  build-ui:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: web-ui } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 'lts/*', cache: 'npm', cache-dependency-path: 'web-ui/package-lock.json' }
+      - run: npm ci
+      - run: npm run build

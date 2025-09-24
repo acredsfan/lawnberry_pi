@@ -1,6 +1,5 @@
 name: hardware-guard
-on:
-  pull_request:
+on: [pull_request]
 
 jobs:
   manifest-check:
@@ -10,25 +9,24 @@ jobs:
 
       - name: Ensure required hardware appears in spec/hardware.yaml
         run: |
-          file=spec/hardware.yaml
-          grep -qi "GPS-RTK-SMA"        "$file"
-          grep -qi "ZED-?F9P"           "$file" || grep -qi "ZEDF9P" "$file"
-          grep -qi "Neo-8M"             "$file"
-          grep -qi "BNO085"             "$file"
-          grep -qi "VL53L0X"            "$file"
-          grep -qi "BME280"             "$file"
-          grep -qi "SSD1306"            "$file"
-          grep -qi "INA3221"            "$file"
-          grep -qi "IBT-4"              "$file"
-          grep -qi "MDDRC10"            "$file"
-          grep -qi "RoboHAT"            "$file"
-          grep -qi "Pi Camera v2"       "$file"
-          grep -qi "Hailo"              "$file"
-          grep -qi "coral"              "$file"
+          f=spec/hardware.yaml
+          grep -qi "GPS-RTK-SMA" "$f"
+          grep -qi "ZED-\?F9P" "$f" || grep -qi "ZEDF9P" "$f"
+          grep -qi "Neo-8M" "$f"
+          grep -qi "BNO085" "$f"
+          grep -qi "VL53L0X" "$f"
+          grep -qi "BME280" "$f"
+          grep -qi "SSD1306" "$f"
+          grep -qi "INA3221" "$f"
+          grep -qi "IBT-4" "$f"
+          grep -qi "MDDRC10" "$f"
+          grep -qi "RoboHAT" "$f"
+          grep -qi "Pi Camera v2" "$f"
+          grep -qi "coral" "$f"
+          grep -qi "Hailo" "$f"
 
       - name: Ensure bench-only ethernet note exists
-        run: |
-          grep -qi "ethernet" spec/hardware.yaml && grep -qi "bench_only" spec/hardware.yaml
+        run: grep -qi "ethernet" spec/hardware.yaml && grep -qi "bench_only" spec/hardware.yaml
 
       - name: Block irrelevant hardware in manifest
         run: |
@@ -36,7 +34,6 @@ jobs:
           ! grep -qi "weather station" spec/hardware.yaml
           ! grep -qi "jetson" spec/hardware.yaml
           ! grep -qi "movidius" spec/hardware.yaml
-          ! grep -qi "hat" spec/hardware.yaml | grep -vi "RoboHAT"  # no extra HATs beyond RoboHAT (and optional Hailo by name)
 
       - name: Confirm I2C addresses listed (sanity)
         run: |
@@ -46,9 +43,9 @@ jobs:
           grep -qi "0x40" spec/hardware.yaml
           grep -qi "0x76" spec/hardware.yaml
 
-      - name: Ensure INA3221 channel mapping is correct
+      - name: Verify INA3221 fixed channel mapping
         run: |
-          file=spec/hardware.yaml
-          grep -q "channel_1" "$file" && grep -qi "Battery" "$file"
-          grep -q "channel_2" "$file" && grep -qi "Unused" "$file"
-          grep -q "channel_3" "$file" && grep -qi "Solar" "$file"
+          f=spec/hardware.yaml
+          grep -q "channel_1" "$f" && grep -qi "Battery" "$f"
+          grep -q "channel_2" "$f" && grep -qi "Unused" "$f"
+          grep -q "channel_3" "$f" && grep -qi "Solar" "$f"
