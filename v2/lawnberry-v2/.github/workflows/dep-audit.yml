@@ -1,0 +1,22 @@
+name: dep-audit
+on: [pull_request]
+jobs:
+  python-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --all-extras --dev
+      - run: python -m pip install --upgrade pip setuptools wheel
+      - run: python -m pip install pip-audit
+      - run: python -m pip_audit || true
+
+  node-audit:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: web-ui } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 'lts/*' }
+      - run: npm ci
+      - run: npm audit --audit-level=high || true
