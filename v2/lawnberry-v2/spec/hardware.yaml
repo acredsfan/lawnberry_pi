@@ -1,5 +1,5 @@
 rpi:
-  supported_models: ["Raspberry Pi 5 (8GB)", "Raspberry Pi 4B (2–8GB)"]
+  supported_models: ["Raspberry Pi 5 (8-16GB)", "Raspberry Pi 4B (2–8GB)"]
   os: "Raspberry Pi OS Bookworm (64-bit)"
   python: "3.11.x"
 sensors:
