@@ -19,7 +19,8 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 1. [x] Scaffold v2 layout, pyproject, CI  
    ↳ Complete 8-module structure, constitutional compliance, CI pipeline, architecture docs
-2. [ ] CPU TFLite runner  
+2. [x] CPU TFLite runner  
+   ↳ Implemented CPU fallback with synthetic test harness and docs page
 3. [ ] Hailo runner  
 4. [ ] Coral integration  
 5. [ ] Camera pipeline  
@@ -37,10 +38,10 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 ## Current Task (in progress)
 
-- **Task #:** T001 COMPLETED  
-- **Goal:** Foundation scaffolding with constitutional compliance
-- **Sub-steps:** pyproject.toml, src structure, tests, CI, pre-commit, docs - ALL COMPLETE
-- **Status:** ✅ DONE - Ready for T002-T004 parallel execution
+- **Task #:** Preparing for T003/T004  
+- **Goal:** Begin accelerator hierarchy completion after CPU fallback  
+- **Sub-steps:** Plan Hailo runner scaffolding, outline Coral isolation strategy
+- **Status:** ✅ T002 delivered - ready to branch into remaining AI runner tasks
 
 ---
 
@@ -65,13 +66,11 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 For the next session / agent:
 
-- Current task: T001 COMPLETED successfully
-- Tests passing: ✅ YES (10/11 passed, 1 skipped on non-ARM64)
-- Docs updated: ✅ YES (architecture.md created)  
-- Pending merges/commits: Ready to commit T001 changes
+- Current task: T002 COMPLETED successfully
+- Tests passing: ✅ YES (15 passed total)
+- Docs updated: ✅ YES (`docs/ai-acceleration/cpu-tflite.md` added)  
+- Pending merges/commits: Ready to commit AI runner baseline
 - What to do next: 
-  - Commit T001 changes and open PR
-  - Execute T002-T004 in parallel (AI runners)
-  - T002: CPU TFLite runner + synthetic tests
-  - T003: Hailo runner with graceful fallback  
-  - T004: Coral TPU isolated environment  
+   - Execute T003 (Hailo runner) and T004 (Coral isolation) in parallel
+   - Extend test harnesses for hardware-detection fallbacks
+   - Coordinate docs updates for remaining acceleration tiers  

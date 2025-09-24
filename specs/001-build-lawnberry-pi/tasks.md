@@ -19,7 +19,7 @@ Create complete project structure with constitutional compliance:
 - Update `/docs/architecture.md` with v2 structure overview
 - Tests: `tests/test_project_structure.py` validates directory layout and pyproject.toml constraints
 
-### T002 [P] CPU TFLite runner + unit tests with synthetic frames; docs page
+### T002 [X] CPU TFLite runner + unit tests with synthetic frames; docs page
 Implement fallback AI acceleration tier:
 - `src/lawnberry/runners/cpu_tflite_runner.py` with TensorFlow Lite inference
 - `tests/unit/test_cpu_tflite_runner.py` with synthetic frame generation and mock models
