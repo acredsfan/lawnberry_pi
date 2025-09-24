@@ -8,7 +8,7 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 ## Project Status
 
-- **Branch:** 001-build-lawnberry-pi  
+- **Branch:** 002-update-spec-to  
 - **Environment:** Raspberry Pi OS Bookworm (64-bit, ARM64)
 - **Current focus:** Foundation scaffolding complete, ready for AI runners
 - **Last validated on hardware:** 2025-09-24 (CI passing)
@@ -19,7 +19,8 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 1. [x] Scaffold v2 layout, pyproject, CI  
    ↳ Complete 8-module structure, constitutional compliance, CI pipeline, architecture docs
-2. [ ] CPU TFLite runner  
+2. [x] CPU TFLite runner  
+   ↳ Implemented CPU fallback with synthetic test harness and docs page
 3. [ ] Hailo runner  
 4. [ ] Coral integration  
 5. [ ] Camera pipeline  
@@ -35,12 +36,21 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 ---
 
+## Session Log (2025-09-24 – Spec Update)
+
+- Created feature branch `002-update-spec-to` through `/specify` automation.
+- Authored spec draft enumerating all seven WebUI pages, their goals, and associated REST/WebSocket obligations.
+- Synchronized hardware requirements with `spec/hardware.yaml`, covering preferred vs. alternative components and conflict notes.
+- Outcome: Spec is ready for planning artifacts to incorporate new page inventory and contract expectations.
+
+---
+
 ## Current Task (in progress)
 
-- **Task #:** T001 COMPLETED  
-- **Goal:** Foundation scaffolding with constitutional compliance
-- **Sub-steps:** pyproject.toml, src structure, tests, CI, pre-commit, docs - ALL COMPLETE
-- **Status:** ✅ DONE - Ready for T002-T004 parallel execution
+- **Task #:** SPEC-002  
+- **Goal:** Deliver updated specification capturing WebUI scope + hardware alignment  
+- **Sub-steps:** Finalize seven-page inventory, document contract obligations, mirror hardware manifest
+- **Status:** ✅ Draft completed and awaiting review sign-off
 
 ---
 
@@ -65,13 +75,11 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 For the next session / agent:
 
-- Current task: T001 COMPLETED successfully
-- Tests passing: ✅ YES (10/11 passed, 1 skipped on non-ARM64)
-- Docs updated: ✅ YES (architecture.md created)  
-- Pending merges/commits: Ready to commit T001 changes
+- Current task: SPEC-002 spec draft ready for stakeholder review
+- Tests passing: ✅ Not applicable (documentation-only update)
+- Docs updated: ✅ YES (spec, hardware alignment captured)  
+- Pending merges/commits: Prepare planning assets to consume updated spec
 - What to do next: 
-  - Commit T001 changes and open PR
-  - Execute T002-T004 in parallel (AI runners)
-  - T002: CPU TFLite runner + synthetic tests
-  - T003: Hailo runner with graceful fallback  
-  - T004: Coral TPU isolated environment  
+   - Run `/plan` against updated spec to refresh planning artifacts
+   - Cascade REST/WS contract definitions into contracts directory
+   - Ensure hardware manifest remains the single source during planning  
