@@ -8,7 +8,7 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 ## Project Status
 
-- **Branch:** 001-build-lawnberry-pi  
+- **Branch:** 002-update-spec-to  
 - **Environment:** Raspberry Pi OS Bookworm (64-bit, ARM64)
 - **Current focus:** Foundation scaffolding complete, ready for AI runners
 - **Last validated on hardware:** 2025-09-24 (CI passing)
@@ -36,12 +36,21 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 ---
 
+## Session Log (2025-09-24 – Spec Update)
+
+- Created feature branch `002-update-spec-to` through `/specify` automation.
+- Authored spec draft enumerating all seven WebUI pages, their goals, and associated REST/WebSocket obligations.
+- Synchronized hardware requirements with `spec/hardware.yaml`, covering preferred vs. alternative components and conflict notes.
+- Outcome: Spec is ready for planning artifacts to incorporate new page inventory and contract expectations.
+
+---
+
 ## Current Task (in progress)
 
-- **Task #:** Preparing for T003/T004  
-- **Goal:** Begin accelerator hierarchy completion after CPU fallback  
-- **Sub-steps:** Plan Hailo runner scaffolding, outline Coral isolation strategy
-- **Status:** ✅ T002 delivered - ready to branch into remaining AI runner tasks
+- **Task #:** T003/T004 prep  
+- **Goal:** Finalize accelerator hierarchy plan following CPU fallback and SPEC-002 updates  
+- **Sub-steps:** Plan Hailo runner scaffolding, outline Coral isolation strategy, cascade spec-driven REST/WS contracts  
+- **Status:** ✅ CPU fallback landed; SPEC-002 doc refresh awaiting stakeholder sign-off
 
 ---
 
@@ -66,11 +75,11 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 For the next session / agent:
 
-- Current task: T002 COMPLETED successfully
-- Tests passing: ✅ YES (15 passed total)
-- Docs updated: ✅ YES (`docs/ai-acceleration/cpu-tflite.md` added)  
-- Pending merges/commits: Ready to commit AI runner baseline
+- Current focus: T002 complete; SPEC-002 spec refresh drafted and published
+- Tests passing: ✅ YES (15 passed total from CPU fallback suite)
+- Docs updated: ✅ YES (`docs/ai-acceleration/cpu-tflite.md`, spec, hardware manifest)  
+- Pending merges/commits: Integrate accelerator planning commits post-review
 - What to do next: 
-   - Execute T003 (Hailo runner) and T004 (Coral isolation) in parallel
-   - Extend test harnesses for hardware-detection fallbacks
-   - Coordinate docs updates for remaining acceleration tiers  
+   - Execute T003 (Hailo runner) and T004 (Coral isolation) initiatives
+   - Run `/plan` against updated spec to refresh planning artifacts
+   - Extend test harnesses and document coordination for shared hardware access
