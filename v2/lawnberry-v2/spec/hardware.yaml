@@ -5,7 +5,7 @@ rpi:
 sensors:
   imu: "BNO085 on UART4 (/dev/ttyAMA4)"
   power: "INA3221 I2C"
-  tof: ["VL53L0X xN I2C"]
+  tof: ["VL53L0X x2 I2C"]
   wheel_encoders: "Hall effect x2 (GPIO)"
 motor_ctrl:
   driver: "Cytron MDDRC10 via RoboHAT RP2040 (CircuitPython bridge)"
