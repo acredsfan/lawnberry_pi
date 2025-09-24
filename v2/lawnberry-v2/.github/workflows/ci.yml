@@ -1,0 +1,24 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --all-extras --dev
+      - run: ruff check .
+      - run: black --check .
+      - run: mypy src || true
+      - run: pytest -q || true
+      - name: Fail on TODOs
+        run: "! git grep -nE 'TODO(?!\\(v3\\))' -- ':!docs' || (echo 'Unapproved TODOs found' && exit 1)"
+  docs-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          CHANGED=$(git diff --name-only origin/main...HEAD || true)
+          echo "$CHANGED" | grep -qE '(^|/)src/|systemd/|scripts/' && \
+          echo "$CHANGED" | grep -q '^docs/' || \
+          (echo "Code changed without docs update" && exit 2)

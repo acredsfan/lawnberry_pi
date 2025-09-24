@@ -1,0 +1,52 @@
+[project]
+name = "lawnberry"
+version = "0.1.0"
+description = "Autonomous mower controller for Raspberry Pi (Pi5 primary, Pi4 compatible)"
+requires-python = ">=3.11"
+readme = "README.md"
+authors = [{ name = "Aaron Link" }]
+
+dependencies = [
+  "fastapi>=0.115,<0.116",
+  "uvicorn[standard]>=0.30,<0.31",
+  "websockets>=12,<13",
+  "structlog>=24,<25",
+  "python-dotenv>=1.0,<2.0",
+  "pydantic>=2.8,<3",
+  "pyserial>=3.5,<4",
+  "python-periphery>=2.4,<3",
+  "lgpio>=0.2.2.0",
+  "sqlite-utils>=3.37,<4",
+  # CPU fallback (installable on Pi; on Windows this marker prevents install)
+  "tflite-runtime; platform_system=='Linux' and platform_machine=='aarch64'",
+  "opencv-python-headless>=4.10,<5; platform_system=='Linux' and platform_machine=='aarch64'",
+]
+
+[project.optional-dependencies]
+# Hailo is optional. Only install on Pi when you intend to use it.
+# hailo = ["hailo-sdk-client; platform_system=='Linux' and platform_machine=='aarch64'"]
+dev   = [
+  "pytest>=8,<9",
+  "pytest-asyncio>=0.23,<0.24",
+  "coverage>=7,<8",
+  "mypy>=1.11,<2",
+  "ruff>=0.6,<0.7",
+  "black>=24,<25",
+  "mdformat>=0.7,<0.8"
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.black]
+line-length = 100
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]

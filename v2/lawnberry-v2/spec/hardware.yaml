@@ -1,0 +1,17 @@
+rpi:
+  supported_models: ["Raspberry Pi 5 (8GB)", "Raspberry Pi 4B (2–8GB)"]
+  os: "Raspberry Pi OS Bookworm (64-bit)"
+  python: "3.11.x"
+sensors:
+  imu: "BNO085 on UART4 (/dev/ttyAMA4)"
+  power: "INA3221 I2C"
+  tof: ["VL53L0X xN I2C"]
+  wheel_encoders: "Hall effect x2 (GPIO)"
+motor_ctrl:
+  driver: "Cytron MDDRC10 via RoboHAT RP2040 (CircuitPython bridge)"
+camera:
+  module: "Pi Camera via Picamera2"
+accel:
+  coral: "USB Coral TPU (optional, isolated venv)"
+  hailo: "Hailo AI Hat (optional)"
+  cpu: "TFLite/OpenCV fallback"
