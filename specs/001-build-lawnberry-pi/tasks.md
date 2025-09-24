@@ -10,7 +10,7 @@
 
 ## Phase 3.1: Foundation & AI Runners
 
-### T001 Scaffold v2 layout, pyproject (ARM64 guards), pre-commit, CI
+### T001 [X] Scaffold v2 layout, pyproject (ARM64 guards), pre-commit, CI
 Create complete project structure with constitutional compliance:
 - `pyproject.toml` with ARM64 platform guards and forbidden packages
 - `src/lawnberry/` package layout with 8 modules

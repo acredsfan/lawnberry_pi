@@ -1,9 +1,11 @@
 from __future__ import annotations
+
 import asyncio
 import os
 import signal
 import sys
 from typing import NoReturn
+
 
 def log(msg: str) -> None:
     print(f"[lawnberry] {msg}", flush=True)

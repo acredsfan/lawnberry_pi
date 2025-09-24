@@ -8,16 +8,17 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 ## Project Status
 
-- **Branch:** v2-spec-rebuild
+- **Branch:** 001-build-lawnberry-pi  
 - **Environment:** Raspberry Pi OS Bookworm (64-bit, ARM64)
-- **Current focus:** [Fill in latest task]
-- **Last validated on hardware:** [date]
+- **Current focus:** Foundation scaffolding complete, ready for AI runners
+- **Last validated on hardware:** 2025-09-24 (CI passing)
 
 ---
 
 ## Completed Tasks
 
-1. [ ] Scaffold v2 layout, pyproject, CI  
+1. [x] Scaffold v2 layout, pyproject, CI  
+   ↳ Complete 8-module structure, constitutional compliance, CI pipeline, architecture docs
 2. [ ] CPU TFLite runner  
 3. [ ] Hailo runner  
 4. [ ] Coral integration  
@@ -36,10 +37,10 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 ## Current Task (in progress)
 
-- **Task #:**  
-- **Goal:**  
-- **Sub-steps:**  
-- **Status:**  
+- **Task #:** T001 COMPLETED  
+- **Goal:** Foundation scaffolding with constitutional compliance
+- **Sub-steps:** pyproject.toml, src structure, tests, CI, pre-commit, docs - ALL COMPLETE
+- **Status:** ✅ DONE - Ready for T002-T004 parallel execution
 
 ---
 
@@ -64,8 +65,13 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 For the next session / agent:
 
-- Current task: [fill in]  
-- Tests passing: [yes/no]  
-- Docs updated: [yes/no]  
-- Pending merges/commits: [list]  
-- What to do next: [bullet list]  
+- Current task: T001 COMPLETED successfully
+- Tests passing: ✅ YES (10/11 passed, 1 skipped on non-ARM64)
+- Docs updated: ✅ YES (architecture.md created)  
+- Pending merges/commits: Ready to commit T001 changes
+- What to do next: 
+  - Commit T001 changes and open PR
+  - Execute T002-T004 in parallel (AI runners)
+  - T002: CPU TFLite runner + synthetic tests
+  - T003: Hailo runner with graceful fallback  
+  - T004: Coral TPU isolated environment  
