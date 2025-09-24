@@ -52,15 +52,24 @@ Operations staff managing the LawnBerry mower need a single specification that d
 - **FR-005**: Specification MUST describe the `AI Training` page goal as reviewing captured imagery, labeling data, and exporting datasets, along with the contracts supporting uploads and approvals.
 - **FR-006**: Specification MUST describe the `Settings` page goal as configuring mower preferences, hardware selections, networking, and simulation toggles while calling out required persistence contracts.
 - **FR-007**: Specification MUST describe the `Docs Hub` page goal as bundling on-device documentation, troubleshooting, and compliance references consistent with branding requirements.
-- **FR-008**: Specification MUST require that each WebUI page references the REST endpoints and WebSocket topics that supply its data, including snapshot frequency or broadcast expectations for telemetry-oriented pages.
+- **FR-008**: Specification MUST require that each WebUI page references the REST endpoints and WebSocket topics that supply its data, including telemetry broadcasting at a 1 Hz default interval with user-adjustable cadence.
 - **FR-009**: Specification MUST align hardware details (platform, sensors, controllers, power monitoring, acceleration hierarchy) with the authoritative hardware manifest, including preferred vs. alternative components and any operational constraints or conflicts.
 - **FR-010**: Specification MUST restate that simulated operation covers sensors, navigation, power, and AI pipelines so that every listed page and contract can be validated without physical hardware.
 - **FR-011**: Specification MUST highlight monitoring expectations for safety-critical data (e.g., INA3221 channel map, emergency stop signals) to ensure UI pages and contracts expose alerts when thresholds are exceeded.
+- **FR-012**: Specification MUST require a single shared operator credential protecting all WebUI pages, with authentication gating manual control actions.
+- **FR-013**: Specification MUST ensure the AI Training page exports datasets in both COCO JSON and YOLO TXT formats for downstream pipelines.
 
 ### Key Entities *(include if feature involves data)*
 - **WebUI Page Contract**: Describes each of the seven mandated pages, the primary objective of the view, and the data/command flows it depends on via REST or WebSocket channels.
 - **Hardware Baseline**: Captures required vs. optional hardware components (Raspberry Pi models, GPS modules, sensors, power monitoring, drive systems, AI accelerators) and their constraints so the specification remains synchronized with the hardware manifest.
 - **Telemetry Exchange**: Summarizes the snapshot data, event notifications, and job updates that the system must publish to satisfy the dashboard, planning, and safety monitoring experiences.
+
+## Clarifications
+
+### Session 2025-09-24
+- Q: What update frequency should the telemetry WebSocket deliver to the Dashboard? → A: 1 Hz adjustable
+- Q: Which authentication model should the WebUI use for access control? → A: Option A (single shared operator credential)
+- Q: Which dataset export formats must the AI Training page support? → A: Option C (COCO and YOLO)
 
 ---
 

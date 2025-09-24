@@ -1,5 +1,5 @@
 rpi:
-  supported_models: ["Raspberry Pi 5 (8GB)", "Raspberry Pi 4B (2–8GB)"]
+  supported_models: ["Raspberry Pi 5 (4-16GB)", "Raspberry Pi 4B (4–8GB)"]
   os: "Raspberry Pi OS Bookworm (64-bit)"
   python: "3.11.x"
 
@@ -25,6 +25,8 @@ sensors:
     bme280: { model: "BME280", bus: "I2C", address: 0x76 }
   display:
     oled: { model: "SSD1306 128x64", bus: "I2C", address: 0x3C }
+  orientation:
+    bno085: { model: "BNO085", uart: "UART4", optional: false, preferred_baud: 3000000 }
 
 ai_acceleration:
   priority: ["coral", "hailo", "cpu"]
@@ -44,18 +46,20 @@ vision:
 power:
   battery:
     chemistry: "LiFePO4"
-    voltage: 12
+    voltage: 12.8
+    max_voltage: 14.6
+    min_voltage: 10.0
     capacity_ah: 30
   solar:
     panel_watts: 30
-    controller: "20A MPPT"
+    controller: "15A MPPT"
   monitoring:
     ina3221:
       bus: "I2C"
       address: 0x40
       channels:
         channel_1:
-          name: "Battery Bank"
+          name: "Battery"
           attached_to: "Battery"
         channel_2:
           name: "Unused"
@@ -94,9 +98,22 @@ pins:
     - { pin: 22, gpio: 25, role: "Blade IN2" }
     - { pin: 31, gpio: 6,  role: "ToF Left Interrupt" }
     - { pin: 32, gpio: 12, role: "ToF Right Interrupt" }
+    - { pin: 33, rxd: 4,  role: "BNO085 RX", rpi4_alt_pin: 21 }
+    - { pin: 32, txd: 4,  role: "BNO085 TX", rpi4_alt_pin: 24 }
+
   i2c_addresses:
     "0x29": "VL53L0X Left"
     "0x30": "VL53L0X Right"
     "0x3C": "SSD1306 OLED"
     "0x40": "INA3221"
     "0x76": "BME280"
+
+  serial_uart_used:
+    - { uart: "UART0", role: "GPS", preferred_baud: 115200 }
+    - { uart: "UART1", role: "RoboHAT", preferred_baud: 38400 }
+    - { uart: "UART4", role: "BNO085", preferred_baud: 3000000 }
+
+  usb_used:
+    - { role: "GPS", notes: "u-blox ZED-F9P via SparkFun GPS-RTK-SMA" }
+    - { role: "Coral TPU", notes: "Google Coral USB Accelerator" }
+    - { role: "High Gain WiFi Adapter", notes: "preferred" }
