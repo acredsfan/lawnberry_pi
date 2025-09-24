@@ -8,4 +8,9 @@ This module implements the constitutional AI acceleration hierarchy:
 Each runner provides the same interface with graceful degradation.
 """
 
-__all__ = []
+from .cpu_tflite_runner import CpuTFLiteDetector, CpuTFLiteError
+
+__all__ = [
+    "CpuTFLiteDetector",
+    "CpuTFLiteError",
+]
