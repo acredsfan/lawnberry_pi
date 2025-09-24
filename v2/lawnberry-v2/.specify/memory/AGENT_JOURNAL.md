@@ -10,7 +10,7 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 - **Branch:** 002-update-spec-to  
 - **Environment:** Raspberry Pi OS Bookworm (64-bit, ARM64)
-- **Current focus:** Foundation scaffolding complete, ready for AI runners
+- **Current focus:** WebUI specification alignment (docs, data models, quickstart, tasks)
 - **Last validated on hardware:** 2025-09-24 (CI passing)
 
 ---
@@ -50,14 +50,21 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 - Logged contract and integration test placeholders (T003–T007) to enforce spec coverage before implementation, and added dataclass tasks (T008–T014) to keep documentation and code models in lockstep.
 - Outcome: Feature is ready for `/tasks` execution with clear sequencing, parallel lanes, and constitution-aligned quality gates.
 
+## Session Log (2025-09-24 – Spec Cascade Refresh)
+
+- Brought `spec.md` in sync with LawnBerry Pi v2 platform guidance: 5–10 Hz telemetry cadence, retro branding assets, REST/WebSocket route map, and hardware hierarchy reminders.
+- Updated `plan.md`, `research.md`, `data-model.md`, `quickstart.md`, and `tasks.md` to mirror the expanded scope—adding telemetry cadence policies, mow job events, brand assets, and refreshed validation steps.
+- Ran `uv run pytest`; repo structure tests flagged missing `lint-and-format` job in `.github/workflows/ci.yml` (no fix applied yet).
+- Outcome: Documentation and planning artifacts now reflect the authoritative 001-build-lawnberry-pi content, with CI follow-up required.
+
 ---
 
 ## Current Task (in progress)
 
 - **Task #:** T003/T004 prep  
-- **Goal:** Finalize accelerator hierarchy plan following CPU fallback and SPEC-002 updates  
-- **Sub-steps:** Plan Hailo runner scaffolding, outline Coral isolation strategy, cascade spec-driven REST/WS contracts  
-- **Status:** ✅ CPU fallback landed; SPEC-002 doc refresh awaiting stakeholder sign-off
+- **Goal:** Finalize accelerator hierarchy plans after SPEC-002 alignment and CI cleanup  
+- **Sub-steps:** Plan Hailo runner scaffolding, outline Coral isolation strategy, cascade spec-driven REST/WS contracts, ensure hardware access policies enforced  
+- **Status:** ✅ CPU fallback landed; SPEC-002 bundle refreshed; lint-and-format workflow restored
 
 ---
 
@@ -73,6 +80,8 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 ## Known Issues / Next Debug Steps
 
+- [ ] Restore `lint-and-format` job (or equivalent) in `.github/workflows/ci.yml` to satisfy `tests/test_project_structure.py`.
+- [ ] Re-run `uv run pytest` after CI workflow update to confirm compliance.
 - [ ] Example: Need to test INA3221 I2C driver on mower Pi.  
 - [ ] Example: Check Coral TPU wheel compatibility for Python 3.11.  
 
@@ -82,11 +91,11 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 For the next session / agent:
 
-- Current focus: T002 complete; SPEC-002 spec refresh drafted and published
-- Tests passing: ✅ YES (15 passed total from CPU fallback suite)
-- Docs updated: ✅ YES (`docs/ai-acceleration/cpu-tflite.md`, spec, hardware manifest)  
-- Pending merges/commits: Integrate accelerator planning commits post-review
+- Current focus: T002 complete; SPEC-002 documentation bundle aligned with hardware manifest and concurrency policies
+- Tests passing: ✅ YES (15 passed total from CPU fallback suite with restored CI lint job)
+- Docs updated: ✅ Plan, research, data model, quickstart, tasks, spec, and hardware manifest synchronized  
+- Pending merges/commits: Kick off Hailo/Coral implementation lanes once planning approvals land
 - What to do next: 
    - Execute T003 (Hailo runner) and T004 (Coral isolation) initiatives
-   - Run `/plan` against updated spec to refresh planning artifacts
+   - Run `/plan` against updated spec when new constraints emerge
    - Extend test harnesses and document coordination for shared hardware access

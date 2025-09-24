@@ -4,21 +4,25 @@
 **Input**: Feature specification from `/home/pi/lawnberry_pi/specs/002-update-spec-to/spec.md`
 
 ## Summary
-- Extracted all clarifications and baseline requirements from the updated spec so the seven WebUI pages (`Dashboard`, `Map Setup`, `Manual Control`, `Mow Planning`, `AI Training`, `Settings`, `Docs Hub`) each call out their REST and WebSocket dependencies.
-- Documented how telemetry streams provide a 1 Hz default cadence with operator tuning, how the single shared operator credential gates sensitive controls, and how COCO + YOLO dataset exports are produced.
-- Mapped hardware expectations directly to `spec/hardware.yaml`, keeping preferred/alternative components, bus assignments, and acceleration hierarchy aligned with the constitution.
+- Extracted all clarifications and baseline requirements from the updated spec so the seven WebUI pages (`Dashboard`, `Map Setup`, `Manual Control`, `Mow Planning`, `AI Training`, `Settings`, `Docs Hub`) each call out their route mapping plus REST and WebSocket dependencies.
+- Documented how telemetry streams provide a 5 Hz default cadence (expandable to 10 Hz under normal operations and degradable to 1 Hz for diagnostics), how the single shared operator credential gates sensitive controls, and how COCO + YOLO dataset exports are produced.
+- Mapped hardware expectations directly to `spec/hardware.yaml`, keeping preferred/alternative components, INA3221 channel assignments, motor controller hierarchy, GPS selection rules, and acceleration hierarchy aligned with the constitution.
+- Captured retro LawnBerry Pi branding requirements (logo, icon set, robot pin marker) that must flow through Dashboard, Manual Control, and Docs Hub surfaces.
 - Produced research, data modeling, contract, and quickstart artifacts that downstream commands and implementers will follow when refreshing the specification and validating service coverage.
 
 ## Technical Context
+**Performance Goals**: Dashboard telemetry broadcast at 5 Hz default (expandable to 10 Hz) with operator overrides; export jobs must finish ≤5 minutes for 5k-image batches
+**Scale/Scope**: Seven WebUI surfaces, six core REST endpoints, five WebSocket topics, two dataset export formats, single shared credential path, three branded asset touchpoints
+| Telemetry cadence expectations | Verified 5 Hz default with operator-adjustable range (10 Hz headroom, 1 Hz diagnostic mode); documented impacts on bandwidth, buffering, and downshift triggers. |
 **Language/Version**: Markdown documentation + YAML references (Raspberry Pi OS Bookworm, Python 3.11 ecosystem)
+| REST/WebSocket coverage | Catalogued existing service surfaces, noted deltas (Map Setup diff endpoints, Manual Control command channel acknowledgement), and linked each page to concrete REST routes and WebSocket topics. |
+| Branding assets | Confirmed requirement to surface `LawnBerryPi_logo.png`, `LawnBerryPi_icon2.png`, and LawnBerry Pi robot pin markers across Dashboard, Manual Control, and Docs Hub per platform story. |
 **Primary Dependencies**: `spec/hardware.yaml`, existing LawnBerry REST/WebSocket surfaces, dataset export tooling (COCO JSON, YOLO TXT)
 **Storage**: Git-tracked Markdown/YAML artifacts within `/home/pi/lawnberry_pi/specs/002-update-spec-to`
 **Testing**: Documentation diff reviews, contract schema validation via OpenAPI/AsyncAPI linting, constitution cross-checks
 **Target Platform**: LawnBerry Pi v2 mower fleet (Raspberry Pi OS Bookworm 64-bit on Pi 5 / Pi 4B)
 **Project Type**: single (documentation + contract alignment)
-**Performance Goals**: Dashboard telemetry broadcast at 1 Hz default, adjustable per operator; export jobs must finish ≤5 minutes for 5k-image batches
 **Constraints**: Must respect AI acceleration hierarchy (Coral → Hailo → CPU), uphold INA3221 channel assignments, forbid pycoral in main env, keep simulation parity for every page/contract
-**Scale/Scope**: Seven WebUI surfaces, six core REST endpoints, five WebSocket topics, two dataset export formats, single shared credential path
 
 ## Constitution Check
 - **Platform Exclusivity**: Documentation keeps focus on Raspberry Pi OS Bookworm with Python 3.11 runtimes; no cross-platform deviation introduced. ✅
@@ -61,10 +65,11 @@ tests/
 ## Phase 0: Outline & Research
 | Item | Outcome |
 | --- | --- |
-| Telemetry cadence expectations | Verified 1 Hz default with operator-adjustable cadence; documented impacts on bandwidth and buffering. |
+| Telemetry cadence expectations | Verified 5 Hz default with operator-adjustable range (10 Hz headroom, 1 Hz diagnostic mode); documented impacts on bandwidth, buffering, and downshift triggers. |
 | Authentication scheme | Locked to single shared operator credential with manual control hard gate; contrasted against per-user RBAC and rejected due to added complexity. |
 | Dataset export formats | Confirmed COCO JSON + YOLO TXT must be generated in one export job; evaluated Pascal VOC as an alternative and discarded. |
-| REST/WebSocket coverage | Catalogued existing service surfaces, noted deltas (Map Setup diff endpoints, Manual Control command channel acknowledgement). |
+| REST/WebSocket coverage | Catalogued existing service surfaces, noted deltas (Map Setup diff endpoints, Manual Control command channel acknowledgement), and linked each page to concrete REST routes and WebSocket topics. |
+| Branding assets | Confirmed requirement to surface `LawnBerryPi_logo.png`, `LawnBerryPi_icon2.png`, and LawnBerry Pi robot pin markers across Dashboard, Manual Control, and Docs Hub per platform story. |
 | Hardware manifest alignment | Diffed `spec/hardware.yaml` elements to ensure spec callouts cover preferred/alternate hardware, conflicts, and INA3221 assignments. |
 
 See `research.md` for detailed rationale and alternatives.
