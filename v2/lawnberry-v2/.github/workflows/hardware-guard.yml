@@ -1,0 +1,54 @@
+name: hardware-guard
+on:
+  pull_request:
+
+jobs:
+  manifest-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure required hardware appears in spec/hardware.yaml
+        run: |
+          file=spec/hardware.yaml
+          grep -qi "GPS-RTK-SMA"        "$file"
+          grep -qi "ZED-?F9P"           "$file" || grep -qi "ZEDF9P" "$file"
+          grep -qi "Neo-8M"             "$file"
+          grep -qi "BNO085"             "$file"
+          grep -qi "VL53L0X"            "$file"
+          grep -qi "BME280"             "$file"
+          grep -qi "SSD1306"            "$file"
+          grep -qi "INA3221"            "$file"
+          grep -qi "IBT-4"              "$file"
+          grep -qi "MDDRC10"            "$file"
+          grep -qi "RoboHAT"            "$file"
+          grep -qi "Pi Camera v2"       "$file"
+          grep -qi "Hailo"              "$file"
+          grep -qi "coral"              "$file"
+
+      - name: Ensure bench-only ethernet note exists
+        run: |
+          grep -qi "ethernet" spec/hardware.yaml && grep -qi "bench_only" spec/hardware.yaml
+
+      - name: Block irrelevant hardware in manifest
+        run: |
+          ! grep -qi "soil" spec/hardware.yaml
+          ! grep -qi "weather station" spec/hardware.yaml
+          ! grep -qi "jetson" spec/hardware.yaml
+          ! grep -qi "movidius" spec/hardware.yaml
+          ! grep -qi "hat" spec/hardware.yaml | grep -vi "RoboHAT"  # no extra HATs beyond RoboHAT (and optional Hailo by name)
+
+      - name: Confirm I2C addresses listed (sanity)
+        run: |
+          grep -qi "0x29" spec/hardware.yaml
+          grep -qi "0x30" spec/hardware.yaml
+          grep -qi "0x3c" spec/hardware.yaml
+          grep -qi "0x40" spec/hardware.yaml
+          grep -qi "0x76" spec/hardware.yaml
+
+      - name: Ensure INA3221 channel mapping is correct
+        run: |
+          file=spec/hardware.yaml
+          grep -q "channel_1" "$file" && grep -qi "Battery" "$file"
+          grep -q "channel_2" "$file" && grep -qi "Unused" "$file"
+          grep -q "channel_3" "$file" && grep -qi "Solar" "$file"

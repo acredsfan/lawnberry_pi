@@ -1,0 +1,92 @@
+[project]
+name = "lawnberry"
+version = "2.0.0"
+description = "Autonomous mower controller for Raspberry Pi (Pi5 primary, Pi4 compatible)"
+requires-python = ">=3.11"
+readme = "README.md"
+authors = [{ name = "Aaron Link" }]
+
+dependencies = [
+  "fastapi>=0.115,<0.116",
+  "uvicorn[standard]>=0.30,<0.31",
+  "websockets>=12,<13",
+  "structlog>=24,<25",
+  "python-dotenv>=1.0,<2.0",
+  "pydantic>=2.8,<3",
+  "pyserial>=3.5,<4",
+  "python-periphery>=2.4,<3",
+  "lgpio>=0.2.2.0",
+  "sqlite-utils>=3.37,<4",
+  # ARM64 platform requirement - constitutional compliance
+  "tflite-runtime; platform_system=='Linux' and platform_machine=='aarch64'",
+  "opencv-python-headless>=4.10,<5; platform_system=='Linux' and platform_machine=='aarch64'",
+  # Note: Picamera2 installed via system packages on Raspberry Pi OS
+]
+
+[project.optional-dependencies]
+# Hailo AI Hat support (optional mid-tier acceleration)
+# Note: Hailo SDK not available in public PyPI, installed via setup script
+hailo = []
+# Development dependencies
+dev = [
+  "pytest>=8,<9",
+  "pytest-asyncio>=0.23,<0.24",
+  "pytest-cov>=4,<5",
+  "coverage>=7,<8",
+  "mypy>=1.11,<2",
+  "ruff>=0.6,<0.7",
+  "black>=24,<25",
+  "mdformat>=0.7,<0.8",
+  "pre-commit>=3.0,<4.0",
+]
+
+# UV package manager configuration - constitutional compliance
+[tool.uv]
+# Note: UV package forbidding will be implemented when available
+# For now, rely on pre-commit hooks and CI to enforce package restrictions
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "black>=24.10.0",
+    "mypy>=1.18.2",
+    "ruff>=0.6.9",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
