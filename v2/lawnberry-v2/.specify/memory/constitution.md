@@ -69,7 +69,7 @@ Contract and unit tests MUST accompany every measurable behavior. Skipped tests 
 ## Platform Constraints
 
 **Hardware Requirements:**
-- Raspberry Pi 5 (8GB) primary, Raspberry Pi 4B (2–8GB) compatible
+- Raspberry Pi 5 (8 OR 16GB) primary, Raspberry Pi 4B (4–8GB) compatible
 - RoboHAT RP2040 motor controller on GPIO
 - Optional acceleration: Coral USB device OR single Hailo HAT (not both simultaneously)
 - Sensors and actuators enumerated in `/spec/hardware.yaml`
