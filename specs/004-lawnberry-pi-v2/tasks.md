@@ -135,11 +135,11 @@
       File: /home/pi/lawnberry/backend/src/api/rest.py
  - [x] T047 Implement PUT /map/locations
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T048 Implement POST /control/drive
+ - [x] T048 Implement POST /control/drive
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T049 Implement POST /control/blade
+ - [x] T049 Implement POST /control/blade
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T050 Implement POST /control/emergency-stop
+ - [x] T050 Implement POST /control/emergency-stop
       File: /home/pi/lawnberry/backend/src/api/rest.py
 - [ ] T051 Implement GET /planning/jobs
       File: /home/pi/lawnberry/backend/src/api/rest.py
