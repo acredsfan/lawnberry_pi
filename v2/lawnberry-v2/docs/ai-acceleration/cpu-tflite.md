@@ -6,6 +6,7 @@ Hat) is present. The implementation is optimised for Raspberry Pi OS Bookworm (A
 relies on the `tflite-runtime` wheel distributed for aarch64.
 
 ## When to Use
+
 - Coral TPU is absent or reserved for other workloads
 - Hailo AI Hat is not installed or unavailable
 - Development and CI environments without hardware acceleration
@@ -14,6 +15,7 @@ The runtime automatically selects the best accelerator available. Setting
 `LBY_ACCEL=cpu` forces the CPU fallback.
 
 ## Features
+
 - Lazy interpreter loading with automatic warmup
 - Synthetic warmup pass to stabilise execution time before first real frame
 - Resolution-aware preprocessing with OpenCV (falls back to nearest-neighbour when OpenCV
@@ -22,6 +24,7 @@ The runtime automatically selects the best accelerator available. Setting
 - Graceful error messages when `tflite-runtime` or the model file is missing
 
 ## Configuration
+
 | Variable | Default | Description |
 | --- | --- | --- |
 | `LBY_TFLITE_MODEL` | `/opt/lawnberry/models/mower_detect.tflite` | Absolute path to the TFLite model |
@@ -30,6 +33,7 @@ The runtime automatically selects the best accelerator available. Setting
 | `LBY_TFLITE_SCORE_THRESHOLD` | `0.5` | Optional override for detection threshold |
 
 ## Quick Start
+
 ```bash
 # Ensure the model exists
 ls /opt/lawnberry/models/mower_detect.tflite
@@ -43,6 +47,7 @@ uv run python -c "from lawnberry.ai.detect import get_detector; get_detector()"
 ```
 
 ## Performance Benchmarks
+
 Measurements taken on Raspberry Pi 5 (8GB) with 720p frames:
 
 | Metric | Value |
@@ -53,9 +58,10 @@ Measurements taken on Raspberry Pi 5 (8GB) with 720p frames:
 | Memory footprint | ~120 MB including model |
 
 > _Note_: Adjust `LBY_TFLITE_THREADS` to balance throughput and thermal budget. Two threads
-keep the Pi within safe temperature limits without throttling.
+> keep the Pi within safe temperature limits without throttling.
 
 ## Testing Strategy
+
 - Synthetic frame generator validates preprocessing for 720p input
 - Stub interpreter verifies tensor allocation, invocation, and result parsing
 - Error-path coverage ensures missing dependencies surface actionable messages
@@ -67,6 +73,7 @@ uv run pytest tests/unit/test_cpu_tflite_runner.py -q
 ```
 
 ## Troubleshooting
+
 | Symptom | Resolution |
 | --- | --- |
 | `ImportError: tflite-runtime` | Install the official aarch64 wheel or run `scripts/setup_env_cpu.sh` |
@@ -75,6 +82,7 @@ uv run pytest tests/unit/test_cpu_tflite_runner.py -q
 | Empty detections | Verify model labels, adjust score threshold, or inspect input exposure |
 
 ## Related Documentation
+
 - [AI Acceleration Overview](../architecture.md#ai-acceleration)
 - [Coral TPU Isolation](./coral-tpu.md) _(pending)_
 - [Hailo Runner](./hailo.md) _(pending)_

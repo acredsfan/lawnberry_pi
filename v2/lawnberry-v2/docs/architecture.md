@@ -28,8 +28,8 @@ LawnBerry Pi v2 is an autonomous robotic lawn mower system designed exclusively 
 LawnBerry Pi v2 consists of three main systemd services:
 
 1. **mower-core.service** - Core mowing logic, navigation, and safety systems
-2. **camera-stream.service** - Camera processing and AI inference
-3. **webui.service** - Web interface and API endpoints
+1. **camera-stream.service** - Camera processing and AI inference
+1. **webui.service** - Web interface and API endpoints
 
 ## Directory Structure
 
@@ -97,12 +97,14 @@ tests/
 ## Constitutional Compliance
 
 ### Platform Exclusivity
+
 - **Target**: Raspberry Pi OS Bookworm (ARM64) only
 - **Hardware**: Pi 5 primary, Pi 4B compatible
 - **Python**: 3.11+ required
 - **Validation**: Runtime checks in `__init__.py` prevent execution on other platforms
 
 ### AI Acceleration Hierarchy
+
 ```
 Coral TPU (isolated venv) → Hailo AI Hat (optional) → CPU TFLite (fallback)
 ```
@@ -112,6 +114,7 @@ Coral TPU (isolated venv) → Hailo AI Hat (optional) → CPU TFLite (fallback)
 - **CPU Runner**: Universal fallback using TensorFlow Lite
 
 ### Code Quality Gates
+
 - **Package Manager**: UV with lockfile discipline
 - **Linting**: Ruff for code analysis and import sorting
 - **Formatting**: Black for consistent code style
@@ -119,6 +122,7 @@ Coral TPU (isolated venv) → Hailo AI Hat (optional) → CPU TFLite (fallback)
 - **Testing**: Pytest with async support and coverage reporting
 
 ### Documentation-as-Contract
+
 - All code changes must update corresponding documentation
 - CI fails if source changes don't include documentation updates
 - Specifications in `/spec/` drive development decisions
@@ -127,6 +131,7 @@ Coral TPU (isolated venv) → Hailo AI Hat (optional) → CPU TFLite (fallback)
 ## Data Flow
 
 ### Telemetry Pipeline
+
 ```
 Hardware Sensors → Sensor Service → WebSocket Hub → Frontend Display
                 ↓
@@ -134,6 +139,7 @@ Hardware Sensors → Sensor Service → WebSocket Hub → Frontend Display
 ```
 
 ### Control Pipeline
+
 ```
 Frontend Commands → WebSocket Hub → Service Router → Hardware Controllers
                                  ↓
@@ -141,6 +147,7 @@ Frontend Commands → WebSocket Hub → Service Router → Hardware Controllers
 ```
 
 ### AI Pipeline
+
 ```
 Camera Stream → AI Runner Selection → Object Detection → Navigation Input
      ↓               ↓                      ↓                ↓
@@ -150,17 +157,20 @@ Camera Stream → AI Runner Selection → Object Detection → Navigation Input
 ## Hardware Interface
 
 ### Sensor Configuration
+
 - **IMU**: BNO085 on UART4 (/dev/ttyAMA4)
 - **Power**: INA3221 I2C power monitoring
 - **ToF**: VL53L0X sensors on I2C bus
 - **Encoders**: Hall effect sensors on GPIO pins
 
 ### Motor Control
+
 - **Driver**: Cytron MDDRC10 via RoboHAT RP2040 bridge
 - **Communication**: Serial protocol over USB
 - **Safety**: Hardware emergency stop integration
 
 ### Camera System
+
 - **Module**: Pi Camera v2/v3 via Picamera2
 - **Pipeline**: Picamera2 → GStreamer → H.264/MJPEG
 - **AI Integration**: Frame extraction for inference pipeline
@@ -168,26 +178,30 @@ Camera Stream → AI Runner Selection → Object Detection → Navigation Input
 ## Performance Characteristics
 
 ### Real-time Requirements
-- **Telemetry Latency**: <100ms from sensor to UI
-- **Emergency Stop**: <10ms from trigger to motor shutdown
-- **AI Inference**: <200ms for obstacle detection
+
+- **Telemetry Latency**: \<100ms from sensor to UI
+- **Emergency Stop**: \<10ms from trigger to motor shutdown
+- **AI Inference**: \<200ms for obstacle detection
 - **Video Streaming**: 720p@15fps with AI overlay
 
 ### Resource Usage
-- **Memory**: <512MB baseline, <1GB with AI acceleration
-- **CPU**: <50% average load on Pi 5, <70% on Pi 4B
-- **Storage**: <2GB for application, log rotation configured
+
+- **Memory**: \<512MB baseline, \<1GB with AI acceleration
+- **CPU**: \<50% average load on Pi 5, \<70% on Pi 4B
+- **Storage**: \<2GB for application, log rotation configured
 - **Network**: Local WiFi only, no external dependencies
 
 ## Security Model
 
 ### Network Security
+
 - **Scope**: Local network operation only
 - **Authentication**: Basic session-based auth for web interface
 - **Communication**: WebSocket with origin validation
 - **API**: Rate limiting on REST endpoints
 
 ### System Security
+
 - **Process Isolation**: Systemd user services with restricted permissions
 - **File System**: Minimal read/write permissions, no sudo required
 - **Coral Isolation**: Separate Python environment prevents package conflicts
@@ -196,13 +210,15 @@ Camera Stream → AI Runner Selection → Object Detection → Navigation Input
 ## Deployment Model
 
 ### Installation Process
+
 1. **Bootstrap Script**: `scripts/pi_bootstrap.sh` handles full setup
-2. **Environment**: UV creates locked virtual environment
-3. **Services**: Systemd unit files installed and enabled
-4. **Configuration**: `.env` file generated with hardware detection
-5. **Validation**: Hardware compatibility check and calibration
+1. **Environment**: UV creates locked virtual environment
+1. **Services**: Systemd unit files installed and enabled
+1. **Configuration**: `.env` file generated with hardware detection
+1. **Validation**: Hardware compatibility check and calibration
 
 ### Service Management
+
 ```bash
 # Service control
 sudo systemctl start mower-core camera-stream webui
@@ -216,6 +232,7 @@ journalctl -u webui -f
 ```
 
 ### Configuration Management
+
 - **Environment**: `.env` files loaded via python-dotenv
 - **Database**: SQLite with automatic migration support
 - **Hardware**: YAML configuration in `/spec/hardware.yaml`
@@ -224,12 +241,14 @@ journalctl -u webui -f
 ## Development Workflow
 
 ### Testing Strategy
+
 1. **Unit Tests**: Individual component testing with mocks
-2. **Integration Tests**: Service interaction testing with simulation
-3. **Contract Tests**: API specification validation
-4. **Hardware Tests**: Real hardware validation (manual)
+1. **Integration Tests**: Service interaction testing with simulation
+1. **Contract Tests**: API specification validation
+1. **Hardware Tests**: Real hardware validation (manual)
 
 ### Continuous Integration
+
 - **Linting**: Ruff and Black formatting checks
 - **Type Checking**: MyPy static analysis
 - **Testing**: Full test suite with coverage reporting
@@ -237,8 +256,9 @@ journalctl -u webui -f
 - **Documentation Drift**: Ensures docs stay synchronized with code
 
 ### Release Process
+
 1. **Feature Development**: Branch-based development with PR reviews
-2. **Constitutional Validation**: All changes must pass compliance checks
-3. **Testing**: Full test suite must pass including hardware simulation
-4. **Documentation**: All changes must include documentation updates
-5. **Deployment**: Automated installation via bootstrap script
+1. **Constitutional Validation**: All changes must pass compliance checks
+1. **Testing**: Full test suite must pass including hardware simulation
+1. **Documentation**: All changes must include documentation updates
+1. **Deployment**: Automated installation via bootstrap script

@@ -10,6 +10,7 @@ from typing import NoReturn
 def log(msg: str) -> None:
     print(f"[lawnberry] {msg}", flush=True)
 
+
 async def main() -> None:
     sim = os.getenv("SIM_MODE", "0") == "1"
     accel = os.getenv("LBY_ACCEL", "cpu")
@@ -23,9 +24,11 @@ async def main() -> None:
     except asyncio.CancelledError:
         log("shutdown requested")
 
+
 def _handle_sigterm(loop: asyncio.AbstractEventLoop) -> None:
     for task in asyncio.all_tasks(loop):
         task.cancel()
+
 
 def run() -> NoReturn:
     loop = asyncio.new_event_loop()
@@ -38,6 +41,7 @@ def run() -> NoReturn:
         loop.run_until_complete(asyncio.sleep(0))
         loop.close()
         sys.exit(0)
+
 
 if __name__ == "__main__":
     run()
