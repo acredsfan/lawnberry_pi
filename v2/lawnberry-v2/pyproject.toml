@@ -40,6 +40,9 @@ dev = [
   "pre-commit>=3.0,<4.0",
 ]
 
+[project.scripts]
+lawnberry-core = "lawnberry.core:main"
+
 # UV package manager configuration - constitutional compliance
 [tool.uv]
 # Note: UV package forbidding will be implemented when available
