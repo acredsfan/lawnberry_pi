@@ -39,6 +39,7 @@ class TestProjectStructure:
             # Should import successfully
             try:
                 import lawnberry
+
                 assert lawnberry.__version__ == "2.0.0"
             except ImportError:
                 pytest.skip("LawnBerry package not installed in development mode")
@@ -46,6 +47,7 @@ class TestProjectStructure:
             # Should raise RuntimeError on other platforms
             try:
                 import lawnberry
+
                 pytest.fail("Expected RuntimeError on non-ARM64 platform")
             except (RuntimeError, ImportError):
                 # Either RuntimeError (correct behavior) or ImportError (not installed) is acceptable
@@ -61,14 +63,14 @@ class TestProjectStructure:
         assert src_dir.exists(), "src/lawnberry package directory must exist"
 
         required_modules = [
-            "models",      # Pydantic data models
-            "services",    # Business logic services
-            "api",         # FastAPI endpoints
-            "core",        # WebSocket hub, config
-            "runners",     # AI acceleration runners
-            "adapters",    # Hardware abstractions
-            "cli",         # Command-line interface
-            "utils",       # Utility functions
+            "models",  # Pydantic data models
+            "services",  # Business logic services
+            "api",  # FastAPI endpoints
+            "core",  # WebSocket hub, config
+            "runners",  # AI acceleration runners
+            "adapters",  # Hardware abstractions
+            "cli",  # Command-line interface
+            "utils",  # Utility functions
         ]
 
         for module in required_modules:
@@ -88,9 +90,9 @@ class TestProjectStructure:
         assert tests_dir.exists(), "tests directory must exist"
 
         required_test_dirs = [
-            "contract",     # API contract tests
+            "contract",  # API contract tests
             "integration",  # Service integration tests
-            "unit",         # Unit tests
+            "unit",  # Unit tests
         ]
 
         for test_dir in required_test_dirs:
@@ -122,8 +124,9 @@ class TestProjectStructure:
         # Check TensorFlow Lite with ARM64 marker
         tflite_deps = [dep for dep in dependencies if "tflite-runtime" in dep]
         assert len(tflite_deps) > 0, "Must include tflite-runtime dependency"
-        assert any("platform_machine=='aarch64'" in dep for dep in tflite_deps), \
-            "TensorFlow Lite must have ARM64 platform marker"
+        assert any(
+            "platform_machine=='aarch64'" in dep for dep in tflite_deps
+        ), "TensorFlow Lite must have ARM64 platform marker"
 
     def test_uv_configuration(self, pyproject_config: dict) -> None:
         """Test UV package manager configuration."""
@@ -178,10 +181,10 @@ class TestProjectStructure:
     def test_configuration_files_exist(self, project_root: Path) -> None:
         """Test that required configuration files exist."""
         required_files = [
-            ".pre-commit-config.yaml",   # Pre-commit hooks
+            ".pre-commit-config.yaml",  # Pre-commit hooks
             ".github/workflows/ci.yml",  # CI workflow
-            "docs/architecture.md",      # Architecture documentation
-            "pyproject.toml",            # Project configuration
+            "docs/architecture.md",  # Architecture documentation
+            "pyproject.toml",  # Project configuration
         ]
 
         for file_path in required_files:

@@ -24,7 +24,9 @@ class CpuTFLiteError(RuntimeError):
 
 
 InterpreterFactory = Callable[[str], Any]
-DEFAULT_MODEL_PATH = Path(os.getenv("LBY_TFLITE_MODEL", "/opt/lawnberry/models/mower_detect.tflite"))
+DEFAULT_MODEL_PATH = Path(
+    os.getenv("LBY_TFLITE_MODEL", "/opt/lawnberry/models/mower_detect.tflite")
+)
 
 
 class CpuTFLiteDetector:
@@ -68,9 +70,7 @@ class CpuTFLiteDetector:
                     "LBY_TFLITE_SCORE_THRESHOLD must be a float between 0.0 and 1.0"
                 ) from exc
             if parsed < 0 or parsed > 1:
-                raise CpuTFLiteError(
-                    "LBY_TFLITE_SCORE_THRESHOLD must be between 0.0 and 1.0"
-                )
+                raise CpuTFLiteError("LBY_TFLITE_SCORE_THRESHOLD must be between 0.0 and 1.0")
             return parsed
 
         return 0.5
