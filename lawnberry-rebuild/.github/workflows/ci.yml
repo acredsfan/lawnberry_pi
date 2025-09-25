@@ -1,0 +1,54 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  lint-and-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Ruff lint
+        run: ruff check .
+      - name: Ruff format check
+        run: ruff format --check .
+      - name: Black format check
+        run: black --check .
+      - name: Mypy strict type check (non-blocking until type debt resolved)
+        run: mypy --strict src || true
+      - name: Fail on unapproved TODOs
+        run: "! git grep -nE 'TODO(?!\\(v3\\))' -- ':!docs' || (echo 'Unapproved TODOs found' && exit 1)"
+
+  constitutional-compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce forbidden packages (pycoral/edgetpu)
+        run: "! grep -Ei '\\b(pycoral|edgetpu)\\b' pyproject.toml || (echo 'pycoral/edgetpu found in pyproject'; exit 1)"
+      - name: Scan source imports for pycoral/edgetpu
+        run: "! grep -R --include='*.py' -Ei 'import (pycoral|edgetpu)|from (pycoral|edgetpu)' src || (echo 'pycoral/edgetpu import found'; exit 1)"
+      - name: ARM64 constitutional reminder
+        run: echo "ARM64 compliance checks documented"
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Run pytest (SIM_MODE)
+        run: SIM_MODE=1 LBY_ACCEL=cpu uv run pytest -q
+
+  docs-drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Verify markdown formatting
+        run: uv run mdformat --check docs spec
+      - name: Ensure no docs drift
+        run: git diff --exit-code

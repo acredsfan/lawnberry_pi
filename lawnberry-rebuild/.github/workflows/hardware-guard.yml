@@ -1,0 +1,51 @@
+name: hardware-guard
+on: [pull_request]
+
+jobs:
+  manifest-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure required hardware appears in spec/hardware.yaml
+        run: |
+          f=spec/hardware.yaml
+          grep -qi "GPS-RTK-SMA" "$f"
+          grep -qi "ZED-\?F9P" "$f" || grep -qi "ZEDF9P" "$f"
+          grep -qi "Neo-8M" "$f"
+          grep -qi "BNO085" "$f"
+          grep -qi "VL53L0X" "$f"
+          grep -qi "BME280" "$f"
+          grep -qi "SSD1306" "$f"
+          grep -qi "INA3221" "$f"
+          grep -qi "IBT-4" "$f"
+          grep -qi "MDDRC10" "$f"
+          grep -qi "RoboHAT" "$f"
+          grep -qi "Pi Camera v2" "$f"
+          grep -qi "coral" "$f"
+          grep -qi "Hailo" "$f"
+
+      - name: Ensure bench-only ethernet note exists
+        run: grep -qi "ethernet" spec/hardware.yaml && grep -qi "bench_only" spec/hardware.yaml
+
+      - name: Block irrelevant hardware in manifest
+        run: |
+          ! grep -qi "soil" spec/hardware.yaml
+          ! grep -qi "weather station" spec/hardware.yaml
+          ! grep -qi "jetson" spec/hardware.yaml
+          ! grep -qi "movidius" spec/hardware.yaml
+
+      - name: Confirm I2C addresses listed (sanity)
+        run: |
+          grep -qi "0x29" spec/hardware.yaml
+          grep -qi "0x30" spec/hardware.yaml
+          grep -qi "0x3c" spec/hardware.yaml
+          grep -qi "0x40" spec/hardware.yaml
+          grep -qi "0x76" spec/hardware.yaml
+
+      - name: Verify INA3221 fixed channel mapping
+        run: |
+          f=spec/hardware.yaml
+          grep -q "channel_1" "$f" && grep -qi "Battery" "$f"
+          grep -q "channel_2" "$f" && grep -qi "Unused" "$f"
+          grep -q "channel_3" "$f" && grep -qi "Solar" "$f"
