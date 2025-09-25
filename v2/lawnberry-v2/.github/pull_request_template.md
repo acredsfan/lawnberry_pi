@@ -23,6 +23,10 @@
   - [ ] Integration tests (sim mode or hardware-in-the-loop where applicable)
   - [ ] All tests passing locally (`uv run pytest`)
 
+- [ ] **Hardware Resource Coordination**
+  - Camera, sensors, and actuators are accessed through their designated owner service/daemon (no duplicate device handles)
+  - Concurrency strategy documented when introducing new shared hardware interactions
+
 - [ ] **CI**
   - [ ] Lint checks pass (`ruff`, `black`, `mypy`)
   - [ ] No unapproved TODOs (`TODO(v3)` only with issue link)
