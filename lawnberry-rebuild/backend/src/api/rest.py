@@ -141,3 +141,44 @@ def dashboard_telemetry():
             "yaw": None,
         },
     }
+
+
+# ------------------------ Control ------------------------
+
+
+class DriveCommand(BaseModel):
+    mode: str  # e.g., "arcade", "tank"
+    throttle: float | None = None
+    turn: float | None = None
+
+
+_blade_state = {"active": False}
+_safety_state = {"emergency_stop_active": False}
+
+
+@router.post("/control/drive")
+def control_drive(cmd: DriveCommand):
+    # Placeholder: accept the command if within basic numeric bounds
+    if cmd.throttle is not None and not (-1.0 <= cmd.throttle <= 1.0):
+        raise HTTPException(status_code=422, detail="throttle out of range")
+    if cmd.turn is not None and not (-1.0 <= cmd.turn <= 1.0):
+        raise HTTPException(status_code=422, detail="turn out of range")
+    return {"accepted": True}
+
+
+class BladeCommand(BaseModel):
+    active: bool
+
+
+@router.post("/control/blade")
+def control_blade(cmd: BladeCommand):
+    _blade_state["active"] = bool(cmd.active)
+    return {"blade_active": _blade_state["active"]}
+
+
+@router.post("/control/emergency-stop")
+def control_emergency_stop():
+    _safety_state["emergency_stop_active"] = True
+    # Also force blade off for safety
+    _blade_state["active"] = False
+    return {"emergency_stop_active": True}
