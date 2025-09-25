@@ -1,0 +1,535 @@
+openapi: 3.0.3
+info:
+  title: LawnBerry Pi v2 REST API
+  description: Autonomous robotic lawn mower REST API supporting WebUI functionality
+  version: 2.0.0
+  contact:
+    name: LawnBerry Pi Project
+servers:
+  - url: http://localhost:8000/api/v2
+    description: Local development server
+  - url: http://{pi_hostname}:8000/api/v2
+    description: Production Pi deployment
+    variables:
+      pi_hostname:
+        default: lawnberrypi
+        description: Raspberry Pi hostname
+
+paths:
+  # Authentication
+  /auth/login:
+    post:
+      summary: Authenticate with shared operator credential
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                credential:
+                  type: string
+                  description: Single shared operator credential
+              required:
+                - credential
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: JWT session token
+                  expires_at:
+                    type: string
+                    format: date-time
+        '401':
+          description: Authentication failed
+
+  # Dashboard Data
+  /dashboard/status:
+    get:
+      summary: Get current mower status and telemetry
+      tags:
+        - Dashboard
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current mower status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MowerStatus'
+
+  /dashboard/telemetry:
+    get:
+      summary: Get recent telemetry history
+      tags:
+        - Dashboard
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: duration
+          in: query
+          schema:
+            type: string
+            enum: ['1h', '6h', '24h']
+            default: '1h'
+      responses:
+        '200':
+          description: Telemetry history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TelemetryData'
+
+  # Map Setup
+  /map/zones:
+    get:
+      summary: Get mowing zone definitions
+      tags:
+        - Map Setup
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Zone definitions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MowingZone'
+    post:
+      summary: Create or update mowing zones
+      tags:
+        - Map Setup
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/MowingZone'
+      responses:
+        '200':
+          description: Zones updated successfully
+        '400':
+          description: Invalid zone configuration
+
+  /map/locations:
+    get:
+      summary: Get predefined locations (HOME, AM_SUN, PM_SUN)
+      tags:
+        - Map Setup
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Location definitions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationPreferences'
+    put:
+      summary: Update location preferences
+      tags:
+        - Map Setup
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationPreferences'
+      responses:
+        '200':
+          description: Locations updated successfully
+
+  # Manual Control
+  /control/drive:
+    post:
+      summary: Issue direct drive commands
+      tags:
+        - Manual Control
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DriveCommand'
+      responses:
+        '200':
+          description: Command executed
+        '403':
+          description: Safety interlock engaged
+
+  /control/blade:
+    post:
+      summary: Control cutting blade
+      tags:
+        - Manual Control
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BladeCommand'
+      responses:
+        '200':
+          description: Blade command executed
+        '403':
+          description: Safety interlock engaged
+
+  /control/emergency-stop:
+    post:
+      summary: Emergency stop all motors
+      tags:
+        - Manual Control
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Emergency stop activated
+
+  # Mow Planning
+  /planning/jobs:
+    get:
+      summary: Get scheduled mowing jobs
+      tags:
+        - Mow Planning
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Scheduled jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MowingJob'
+    post:
+      summary: Schedule new mowing job
+      tags:
+        - Mow Planning
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MowingJob'
+      responses:
+        '201':
+          description: Job scheduled successfully
+
+  /planning/jobs/{jobId}:
+    delete:
+      summary: Cancel scheduled job
+      tags:
+        - Mow Planning
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job cancelled
+
+  # AI Training
+  /ai/datasets:
+    get:
+      summary: List available training datasets
+      tags:
+        - AI Training
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Dataset list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TrainingDataset'
+
+  /ai/datasets/{datasetId}/export:
+    post:
+      summary: Export dataset in specified format
+      tags:
+        - AI Training
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: datasetId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: ['COCO_JSON', 'YOLO_TXT']
+      responses:
+        '200':
+          description: Export initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export_id:
+                    type: string
+                  download_url:
+                    type: string
+
+  # Settings
+  /settings/system:
+    get:
+      summary: Get system configuration
+      tags:
+        - Settings
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: System configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemSettings'
+    put:
+      summary: Update system configuration
+      tags:
+        - Settings
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemSettings'
+      responses:
+        '200':
+          description: Configuration updated
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    MowerStatus:
+      type: object
+      properties:
+        position:
+          $ref: '#/components/schemas/Position'
+        battery_percentage:
+          type: number
+          minimum: 0
+          maximum: 100
+        power_mode:
+          type: string
+          enum: ['NORMAL', 'POWER_SAVE', 'LOW_BATTERY', 'SOLAR_CHARGING']
+        navigation_state:
+          type: string
+          enum: ['IDLE', 'MOWING', 'RETURNING', 'CHARGING', 'MANUAL']
+        safety_status:
+          $ref: '#/components/schemas/SafetyStatus'
+        blade_active:
+          type: boolean
+        last_updated:
+          type: string
+          format: date-time
+
+    Position:
+      type: object
+      properties:
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        altitude:
+          type: number
+          format: double
+        accuracy:
+          type: number
+          description: GPS accuracy in meters
+        gps_mode:
+          type: string
+          enum: ['ZED-F9P-USB-NTRIP', 'Neo-8M-UART', 'DEAD_RECKONING']
+
+    SafetyStatus:
+      type: object
+      properties:
+        emergency_stop_active:
+          type: boolean
+        tilt_detected:
+          type: boolean
+        obstacle_detected:
+          type: boolean
+        blade_safety_ok:
+          type: boolean
+        safety_interlocks:
+          type: array
+          items:
+            type: string
+
+    TelemetryData:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        sensor_data:
+          type: object
+          properties:
+            imu:
+              type: object
+            power:
+              type: object
+            distance_sensors:
+              type: object
+            environmental:
+              type: object
+
+    MowingZone:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        polygon:
+          type: array
+          items:
+            $ref: '#/components/schemas/Position'
+        priority:
+          type: integer
+          minimum: 1
+        exclusion_zone:
+          type: boolean
+          default: false
+
+    LocationPreferences:
+      type: object
+      properties:
+        home:
+          $ref: '#/components/schemas/Position'
+        am_sun:
+          $ref: '#/components/schemas/Position'
+        pm_sun:
+          $ref: '#/components/schemas/Position'
+
+    DriveCommand:
+      type: object
+      properties:
+        left_speed:
+          type: integer
+          minimum: -100
+          maximum: 100
+        right_speed:
+          type: integer
+          minimum: -100
+          maximum: 100
+        duration_ms:
+          type: integer
+          minimum: 0
+          maximum: 5000
+
+    BladeCommand:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ['START', 'STOP']
+        speed:
+          type: integer
+          minimum: 0
+          maximum: 100
+
+    MowingJob:
+      type: object
+      properties:
+        id:
+          type: string
+        zone_ids:
+          type: array
+          items:
+            type: string
+        scheduled_start:
+          type: string
+          format: date-time
+        estimated_duration_minutes:
+          type: integer
+        status:
+          type: string
+          enum: ['SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'FAILED']
+
+    TrainingDataset:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        image_count:
+          type: integer
+        annotation_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        export_formats:
+          type: array
+          items:
+            type: string
+            enum: ['COCO_JSON', 'YOLO_TXT']
+
+    SystemSettings:
+      type: object
+      properties:
+        telemetry_cadence:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 5
+        map_provider:
+          type: string
+          enum: ['GOOGLE_MAPS', 'OPENSTREETMAP']
+          default: 'GOOGLE_MAPS'
+        simulation_mode:
+          type: boolean
+          default: false
+        constitutional_compliance_version:
+          type: string

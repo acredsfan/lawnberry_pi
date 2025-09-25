@@ -1,0 +1,329 @@
+# WebSocket API Contract: LawnBerry Pi v2 Telemetry Hub
+# Real-time bidirectional communication for telemetry and control
+
+## Connection
+- **URL**: `ws://localhost:8000/ws/telemetry` (development)
+- **URL**: `ws://{pi_hostname}:8000/ws/telemetry` (production)
+- **Authentication**: JWT token in query parameter `?token={jwt_token}`
+- **Protocol**: WebSocket with JSON message format
+
+## Message Format
+All messages follow this structure:
+```json
+{
+  "type": "MESSAGE_TYPE",
+  "topic": "topic/name", 
+  "timestamp": "2025-09-25T15:30:00.123456Z",
+  "data": { ... }
+}
+```
+
+## Client → Server Messages
+
+### SUBSCRIBE
+Subscribe to telemetry topics
+```json
+{
+  "type": "SUBSCRIBE",
+  "topics": [
+    "sensor/imu",
+    "sensor/power", 
+    "sensor/distance",
+    "navigation/position",
+    "navigation/status",
+    "safety/alerts",
+    "system/status"
+  ]
+}
+```
+
+### UNSUBSCRIBE  
+Unsubscribe from topics
+```json
+{
+  "type": "UNSUBSCRIBE",
+  "topics": ["sensor/distance"]
+}
+```
+
+### SET_CADENCE
+Configure telemetry update frequency (1-10Hz)
+```json
+{
+  "type": "SET_CADENCE", 
+  "cadence_hz": 5
+}
+```
+
+### MANUAL_COMMAND
+Direct control commands (requires authentication)
+```json
+{
+  "type": "MANUAL_COMMAND",
+  "command": "DRIVE",
+  "data": {
+    "left_speed": 50,
+    "right_speed": 50,
+    "duration_ms": 1000
+  }
+}
+```
+
+```json
+{
+  "type": "MANUAL_COMMAND",
+  "command": "EMERGENCY_STOP",
+  "data": {}
+}
+```
+
+## Server → Client Messages  
+
+### TELEMETRY_DATA
+Real-time sensor and system data
+
+#### IMU Data
+```json
+{
+  "type": "TELEMETRY_DATA",
+  "topic": "sensor/imu",
+  "timestamp": "2025-09-25T15:30:00.123456Z",
+  "data": {
+    "orientation": {
+      "roll": 0.1,
+      "pitch": -0.05, 
+      "yaw": 45.2
+    },
+    "acceleration": {
+      "x": 0.02,
+      "y": -0.01,
+      "z": 9.81
+    },
+    "gyroscope": {
+      "x": 0.001,
+      "y": 0.002,
+      "z": -0.001  
+    },
+    "bus_status": "OK"
+  }
+}
+```
+
+#### Power Data  
+```json
+{
+  "type": "TELEMETRY_DATA",
+  "topic": "sensor/power", 
+  "timestamp": "2025-09-25T15:30:00.123456Z",
+  "data": {
+    "battery": {
+      "voltage": 12.6,
+      "current": -2.5,
+      "power": -31.5,
+      "percentage": 78
+    },
+    "solar": {
+      "voltage": 14.2,
+      "current": 1.8,
+      "power": 25.6
+    },
+    "power_mode": "SOLAR_CHARGING",
+    "constitutional_channels": {
+      "channel_1": "Battery",
+      "channel_2": "Unused", 
+      "channel_3": "Solar"
+    }
+  }
+}
+```
+
+#### Distance Sensors
+```json
+{
+  "type": "TELEMETRY_DATA",
+  "topic": "sensor/distance",
+  "timestamp": "2025-09-25T15:30:00.123456Z", 
+  "data": {
+    "left_mm": 450,
+    "right_mm": 520,
+    "left_status": "OK",
+    "right_status": "OK"
+  }
+}
+```
+
+#### GPS Position
+```json
+{
+  "type": "TELEMETRY_DATA",
+  "topic": "navigation/position",
+  "timestamp": "2025-09-25T15:30:00.123456Z",
+  "data": {
+    "latitude": 40.7128, 
+    "longitude": -74.0060,
+    "altitude": 10.5,
+    "accuracy_meters": 0.3,
+    "gps_mode": "ZED-F9P-USB-NTRIP",
+    "satellites": 12
+  }
+}
+```
+
+#### Navigation Status
+```json
+{
+  "type": "TELEMETRY_DATA", 
+  "topic": "navigation/status",
+  "timestamp": "2025-09-25T15:30:00.123456Z",
+  "data": {
+    "state": "MOWING",
+    "current_zone": "front_yard_001",
+    "progress_percentage": 45,
+    "estimated_remaining_minutes": 23,
+    "blade_active": true,
+    "movement": {
+      "left_speed": 60,
+      "right_speed": 58,
+      "actual_left_rpm": 145,
+      "actual_right_rpm": 142
+    }
+  }
+}
+```
+
+#### Safety Alerts
+```json
+{
+  "type": "TELEMETRY_DATA",
+  "topic": "safety/alerts", 
+  "timestamp": "2025-09-25T15:30:00.123456Z",
+  "data": {
+    "emergency_stop": false,
+    "tilt_detected": false,
+    "obstacle_detected": true,
+    "blade_safety": true,
+    "active_interlocks": ["obstacle_avoidance"],
+    "alert_level": "WARNING"
+  }
+}
+```
+
+#### System Status
+```json
+{
+  "type": "TELEMETRY_DATA",
+  "topic": "system/status",
+  "timestamp": "2025-09-25T15:30:00.123456Z", 
+  "data": {
+    "ai_acceleration": "CORAL_USB_VENV",
+    "camera_stream_active": true,
+    "service_health": {
+      "camera-stream": "OK",
+      "sensor-manager": "OK", 
+      "navigation": "OK",
+      "webui-backend": "OK"
+    },
+    "simulation_mode": false,
+    "constitutional_compliance": "v1.3.0"
+  }
+}
+```
+
+### CONNECTION_ACK
+Acknowledge successful connection and authentication
+```json
+{
+  "type": "CONNECTION_ACK",
+  "timestamp": "2025-09-25T15:30:00.123456Z",
+  "data": {
+    "session_id": "sess_abc123",
+    "available_topics": [
+      "sensor/imu",
+      "sensor/power", 
+      "sensor/distance",
+      "navigation/position",
+      "navigation/status", 
+      "safety/alerts",
+      "system/status"
+    ],
+    "default_cadence_hz": 5,
+    "max_cadence_hz": 10
+  }
+}
+```
+
+### SUBSCRIPTION_ACK
+Acknowledge topic subscription changes
+```json
+{
+  "type": "SUBSCRIPTION_ACK",
+  "timestamp": "2025-09-25T15:30:00.123456Z",
+  "data": {
+    "subscribed_topics": ["sensor/power", "navigation/position"],
+    "cadence_hz": 5
+  }
+}
+```
+
+### COMMAND_ACK
+Acknowledge manual command execution
+```json
+{
+  "type": "COMMAND_ACK", 
+  "timestamp": "2025-09-25T15:30:00.123456Z",
+  "data": {
+    "command": "DRIVE",
+    "status": "EXECUTED",
+    "message": "Drive command executed successfully" 
+  }
+}
+```
+
+### ERROR
+Error responses for invalid requests or system issues
+```json
+{
+  "type": "ERROR",
+  "timestamp": "2025-09-25T15:30:00.123456Z",
+  "data": {
+    "error_code": "AUTHENTICATION_REQUIRED",
+    "message": "Valid JWT token required for manual commands",
+    "retry_allowed": false
+  }
+}
+```
+
+```json
+{
+  "type": "ERROR", 
+  "timestamp": "2025-09-25T15:30:00.123456Z",
+  "data": {
+    "error_code": "SAFETY_INTERLOCK",
+    "message": "Manual control blocked by active safety interlock: tilt_detected",
+    "retry_allowed": true
+  }
+}
+```
+
+## Topic Hierarchy
+
+- **sensor/*** - Real-time sensor data (IMU, power, distance, environmental)
+- **navigation/*** - Position, status, and movement data  
+- **safety/*** - Safety alerts and interlock status
+- **system/*** - Service health, AI status, constitutional compliance
+- **control/*** - Manual control confirmations and status
+
+## Quality of Service
+
+- **Update Frequency**: Configurable 1-10Hz (default 5Hz)
+- **Latency Target**: <100ms from sensor reading to WebSocket delivery
+- **Reliability**: At-most-once delivery, clients handle reconnection
+- **Graceful Degradation**: Automatic cadence reduction under load
+
+## Constitutional Compliance
+
+- **Authentication**: JWT token required for all connections
+- **Manual Control**: Additional authentication gate for drive/blade commands  
+- **Resource Coordination**: WebSocket hub coordinates with camera-stream.service
+- **Package Isolation**: AI acceleration status reflects constitutional hierarchy
+- **Platform Exclusivity**: ARM64-optimized message serialization
