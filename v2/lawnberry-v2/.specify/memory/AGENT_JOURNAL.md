@@ -8,9 +8,9 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 ## Project Status
 
-- **Branch:** 001-build-lawnberry-pi  
+- **Branch:** 002-update-spec-to  
 - **Environment:** Raspberry Pi OS Bookworm (64-bit, ARM64)
-- **Current focus:** Foundation scaffolding complete, ready for AI runners
+- **Current focus:** WebUI specification alignment (docs, data models, quickstart, tasks)
 - **Last validated on hardware:** 2025-09-24 (CI passing)
 
 ---
@@ -36,12 +36,35 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 ---
 
+## Session Log (2025-09-24 – Spec Update)
+
+- Created feature branch `002-update-spec-to` through `/specify` automation.
+- Authored spec draft enumerating all seven WebUI pages, their goals, and associated REST/WebSocket obligations.
+- Synchronized hardware requirements with `spec/hardware.yaml`, covering preferred vs. alternative components and conflict notes.
+- Outcome: Spec is ready for planning artifacts to incorporate new page inventory and contract expectations.
+
+## Session Log (2025-09-24 – Planning & Tasks)
+
+- Consumed `plan.md`, `research.md`, `data-model.md`, `quickstart.md`, and new contract specs to scope implementation work.
+- Generated `/specs/002-update-spec-to/tasks.md` with 29 dependency-ordered tasks covering setup, TDD contract checks, datamodel scaffolding, documentation updates, integration alignment, and polish gates.
+- Logged contract and integration test placeholders (T003–T007) to enforce spec coverage before implementation, and added dataclass tasks (T008–T014) to keep documentation and code models in lockstep.
+- Outcome: Feature is ready for `/tasks` execution with clear sequencing, parallel lanes, and constitution-aligned quality gates.
+
+## Session Log (2025-09-24 – Spec Cascade Refresh)
+
+- Brought `spec.md` in sync with LawnBerry Pi v2 platform guidance: 5–10 Hz telemetry cadence, retro branding assets, REST/WebSocket route map, and hardware hierarchy reminders.
+- Updated `plan.md`, `research.md`, `data-model.md`, `quickstart.md`, and `tasks.md` to mirror the expanded scope—adding telemetry cadence policies, mow job events, brand assets, and refreshed validation steps.
+- Ran `uv run pytest`; repo structure tests flagged missing `lint-and-format` job in `.github/workflows/ci.yml` (no fix applied yet).
+- Outcome: Documentation and planning artifacts now reflect the authoritative 001-build-lawnberry-pi content, with CI follow-up required.
+
+---
+
 ## Current Task (in progress)
 
-- **Task #:** Preparing for T003/T004  
-- **Goal:** Begin accelerator hierarchy completion after CPU fallback  
-- **Sub-steps:** Plan Hailo runner scaffolding, outline Coral isolation strategy
-- **Status:** ✅ T002 delivered - ready to branch into remaining AI runner tasks
+- **Task #:** T003/T004 prep  
+- **Goal:** Finalize accelerator hierarchy plans after SPEC-002 alignment and CI cleanup  
+- **Sub-steps:** Plan Hailo runner scaffolding, outline Coral isolation strategy, cascade spec-driven REST/WS contracts, ensure hardware access policies enforced  
+- **Status:** ✅ CPU fallback landed; SPEC-002 bundle refreshed; lint-and-format workflow restored
 
 ---
 
@@ -57,6 +80,8 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 ## Known Issues / Next Debug Steps
 
+- [ ] Restore `lint-and-format` job (or equivalent) in `.github/workflows/ci.yml` to satisfy `tests/test_project_structure.py`.
+- [ ] Re-run `uv run pytest` after CI workflow update to confirm compliance.
 - [ ] Example: Need to test INA3221 I2C driver on mower Pi.  
 - [ ] Example: Check Coral TPU wheel compatibility for Python 3.11.  
 
@@ -66,11 +91,11 @@ Think of it as a pilot’s logbook: short, precise, handoff-friendly.
 
 For the next session / agent:
 
-- Current task: T002 COMPLETED successfully
-- Tests passing: ✅ YES (15 passed total)
-- Docs updated: ✅ YES (`docs/ai-acceleration/cpu-tflite.md` added)  
-- Pending merges/commits: Ready to commit AI runner baseline
+- Current focus: T002 complete; SPEC-002 documentation bundle aligned with hardware manifest and concurrency policies
+- Tests passing: ✅ YES (15 passed total from CPU fallback suite with restored CI lint job)
+- Docs updated: ✅ Plan, research, data model, quickstart, tasks, spec, and hardware manifest synchronized  
+- Pending merges/commits: Kick off Hailo/Coral implementation lanes once planning approvals land
 - What to do next: 
-   - Execute T003 (Hailo runner) and T004 (Coral isolation) in parallel
-   - Extend test harnesses for hardware-detection fallbacks
-   - Coordinate docs updates for remaining acceleration tiers  
+   - Execute T003 (Hailo runner) and T004 (Coral isolation) initiatives
+   - Run `/plan` against updated spec when new constraints emerge
+   - Extend test harnesses and document coordination for shared hardware access

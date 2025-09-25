@@ -1,0 +1,225 @@
+asyncapi: 2.6.0
+info:
+  title: LawnBerry WebUI WebSocket Topics
+  version: 0.1.0
+  description: Real-time channels supporting the LawnBerry dashboard, planning, and training experiences.
+servers:
+  production:
+    url: wss://mower.local/ws
+    protocol: wss
+    description: On-device WebSocket gateway
+channels:
+  telemetry/updates:
+    description: 1 Hz default stream of mower state metrics consumed by the Dashboard page.
+    subscribe:
+      message:
+        $ref: '#/components/messages/TelemetryUpdate'
+  map/updates:
+    description: Broadcasts map edits and version tokens for Map Setup collaborators.
+    subscribe:
+      message:
+        $ref: '#/components/messages/MapUpdate'
+  manual/feedback:
+    description: Command acknowledgement and safety state snapshots for Manual Control interactions.
+    subscribe:
+      message:
+        $ref: '#/components/messages/ManualFeedback'
+  mow/jobs/{jobId}/events:
+    parameters:
+      jobId:
+        description: UUID of the mow job
+        schema:
+          type: string
+    subscribe:
+      message:
+        $ref: '#/components/messages/MowJobEvent'
+  ai/training/progress:
+    description: Dataset export and labeling progress notifications for the AI Training page.
+    subscribe:
+      message:
+        $ref: '#/components/messages/TrainingProgress'
+  settings/cadence:
+    description: Operator-triggered cadence adjustments and simulator overrides.
+    publish:
+      message:
+        $ref: '#/components/messages/CadenceUpdateRequest'
+    subscribe:
+      message:
+        $ref: '#/components/messages/CadenceUpdateAck'
+components:
+  messages:
+    TelemetryUpdate:
+      name: TelemetryUpdate
+      payload:
+        $ref: '#/components/schemas/TelemetryPayload'
+    MapUpdate:
+      name: MapUpdate
+      payload:
+        $ref: '#/components/schemas/MapUpdatePayload'
+    ManualFeedback:
+      name: ManualFeedback
+      payload:
+        $ref: '#/components/schemas/ManualFeedbackPayload'
+    MowJobEvent:
+      name: MowJobEvent
+      payload:
+        $ref: '#/components/schemas/MowJobEventPayload'
+    TrainingProgress:
+      name: TrainingProgress
+      payload:
+        $ref: '#/components/schemas/TrainingProgressPayload'
+    CadenceUpdateRequest:
+      name: CadenceUpdateRequest
+      payload:
+        $ref: '#/components/schemas/CadenceUpdateRequestPayload'
+    CadenceUpdateAck:
+      name: CadenceUpdateAck
+      payload:
+        $ref: '#/components/schemas/CadenceUpdateAckPayload'
+  schemas:
+    TelemetryPayload:
+      type: object
+      required: [mowerState, safety, metrics, lastUpdate, cadenceHz]
+      properties:
+        mowerState:
+          type: string
+          enum: [idle, mowing, docking, charging, error]
+        safety:
+          type: object
+          required: [emergencyStop, tilt, bladeActive]
+          properties:
+            emergencyStop:
+              type: boolean
+            tilt:
+              type: boolean
+            bladeActive:
+              type: boolean
+        metrics:
+          type: object
+          required: [batteryVoltage, batteryPercent, solarInputWatts]
+          properties:
+            batteryVoltage:
+              type: number
+            batteryPercent:
+              type: number
+            solarInputWatts:
+              type: number
+            gpsFixQuality:
+              type: string
+              enum: [none, float, fixed]
+        lastUpdate:
+          type: string
+          format: date-time
+        cadenceHz:
+          type: number
+          default: 1
+    MapUpdatePayload:
+      type: object
+      required: [version, updatedBy, zones]
+      properties:
+        version:
+          type: string
+        updatedBy:
+          type: string
+        zones:
+          type: array
+          items:
+            type: object
+            required: [id, polygon]
+            properties:
+              id:
+                type: string
+              polygon:
+                type: array
+                minItems: 3
+                items:
+                  type: array
+                  minItems: 2
+                  maxItems: 2
+                  items:
+                    type: number
+    ManualFeedbackPayload:
+      type: object
+      required: [commandId, status, appliedAt, safety]
+      properties:
+        commandId:
+          type: string
+        status:
+          type: string
+          enum: [accepted, rejected, completed]
+        appliedAt:
+          type: string
+          format: date-time
+        safety:
+          type: object
+          properties:
+            emergencyStop:
+              type: boolean
+            tilt:
+              type: boolean
+            bladeActive:
+              type: boolean
+        note:
+          type: string
+    MowJobEventPayload:
+      type: object
+      required: [jobId, eventType, timestamp]
+      properties:
+        jobId:
+          type: string
+        eventType:
+          type: string
+          enum: [queued, started, paused, resumed, progress, completed, failed]
+        timestamp:
+          type: string
+          format: date-time
+        progressPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        reason:
+          type: string
+    TrainingProgressPayload:
+      type: object
+      required: [jobId, status, timestamp]
+      properties:
+        jobId:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, exporting-coco, exporting-yolo, complete, failed]
+        timestamp:
+          type: string
+          format: date-time
+        detail:
+          type: string
+        artifactUrls:
+          type: object
+          additionalProperties:
+            type: string
+            format: uri
+    CadenceUpdateRequestPayload:
+      type: object
+      required: [requestedHz, requestedBy]
+      properties:
+        requestedHz:
+          type: number
+          minimum: 0.2
+          maximum: 5
+        requestedBy:
+          type: string
+        reason:
+          type: string
+    CadenceUpdateAckPayload:
+      type: object
+      required: [accepted, appliedHz, appliedAt]
+      properties:
+        accepted:
+          type: boolean
+        appliedHz:
+          type: number
+        appliedAt:
+          type: string
+          format: date-time
+        simulatorOverride:
+          type: boolean
