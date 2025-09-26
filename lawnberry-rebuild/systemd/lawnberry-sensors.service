@@ -1,0 +1,45 @@
+[Unit]
+Description=LawnBerry Pi v2 Sensor Manager Service
+Documentation=https://github.com/acredsfan/lawnberry_pi
+After=network.target lawnberry-database.service
+Requires=lawnberry-database.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/lawnberry/lawnberry-rebuild
+Environment=PYTHONPATH=/home/pi/lawnberry/lawnberry-rebuild
+Environment=LAWNBERRY_ENV=production
+Environment=LAWNBERRY_CONFIG_DIR=/home/pi/lawnberry/config
+
+# Sensor manager service (placeholder - will be implemented in integration phase)
+ExecStart=/bin/bash -c 'echo "Sensor manager service placeholder - starting..." && sleep infinity'
+
+# Health and process management
+Restart=always
+RestartSec=5
+RestartPreventExitStatus=2
+
+# Security with hardware access
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=false
+ProtectSystem=strict
+ReadWritePaths=/home/pi/lawnberry/logs /home/pi/lawnberry/data /home/pi/lawnberry/config
+
+# Hardware access for sensors
+SupplementaryGroups=gpio i2c spi dialout
+
+# Resource limits
+LimitNOFILE=1024
+MemoryMax=256M
+CPUQuota=50%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawnberry-sensors
+
+[Install]
+WantedBy=multi-user.target

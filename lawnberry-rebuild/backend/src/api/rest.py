@@ -510,7 +510,6 @@ def put_settings_system(settings_update: dict):
         return _system_settings.model_dump()
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Invalid settings: {str(e)}")
-
 # ----------------------- WebSocket -----------------------
 
 

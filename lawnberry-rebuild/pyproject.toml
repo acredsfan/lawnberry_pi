@@ -1,14 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "lawnberry-pi"
 version = "0.1.0"
 description = "LawnBerry Pi v2 Unified System"
 requires-python = ">=3.11"
 
-[project.dependencies]
-fastapi = ">=0.115.0"
-uvicorn = {version=">=0.30.0", extras=["standard"]}
-httpx = ">=0.27.0"
-pydantic = ">=2.8.0"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0", 
+    "httpx>=0.27.0",
+    "pydantic>=2.8.0",
+    "websockets>=12.0",
+    "python-multipart>=0.0.6",
+    "PyJWT>=2.8.0",
+    "passlib[bcrypt]>=1.7.4",
+    "structlog>=23.1.0",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

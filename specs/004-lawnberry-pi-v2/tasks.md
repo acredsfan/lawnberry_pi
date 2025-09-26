@@ -141,36 +141,36 @@
       File: /home/pi/lawnberry/backend/src/api/rest.py
  - [x] T050 Implement POST /control/emergency-stop
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T051 Implement GET /planning/jobs
+- [x] T051 Implement GET /planning/jobs
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T052 Implement POST /planning/jobs
+- [x] T052 Implement POST /planning/jobs
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T053 Implement DELETE /planning/jobs/{jobId}
+- [x] T053 Implement DELETE /planning/jobs/{jobId}
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T054 Implement GET /ai/datasets
+- [x] T054 Implement GET /ai/datasets
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T055 Implement POST /ai/datasets/{datasetId}/export
+- [x] T055 Implement POST /ai/datasets/{datasetId}/export
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T056 Implement GET /settings/system
+- [x] T056 Implement GET /settings/system
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T057 Implement PUT /settings/system
+- [x] T057 Implement PUT /settings/system
       File: /home/pi/lawnberry/backend/src/api/rest.py
 
-- [ ] T058 WebSocket endpoint for telemetry hub
-      File: /home/pi/lawnberry/backend/src/api/websocket.py
-- [ ] T059 Backend app entrypoint
+- [x] T058 WebSocket endpoint for telemetry hub
+      File: /home/pi/lawnberry/backend/src/api/rest.py
+- [x] T059 Backend app entrypoint
       File: /home/pi/lawnberry/backend/src/main.py
 
 ## Phase 3.4: Backend Integration & Infra
-- [ ] T060 SQLite persistence layer and migrations
+- [x] T060 SQLite persistence layer and migrations
       File: /home/pi/lawnberry/backend/src/core/persistence.py
-- [ ] T061 Configuration management (JSON files, atomic writes)
+- [x] T061 Configuration management (JSON files, atomic writes)
       File: /home/pi/lawnberry/backend/src/core/config.py
-- [ ] T062 Logging & observability (structured logs, metrics)
+- [x] T062 Logging & observability (structured logs, metrics)
       File: /home/pi/lawnberry/backend/src/core/observability.py
-- [ ] T063 Systemd service files for backend services
+- [x] T063 Systemd service files for backend services
       Path: /home/pi/lawnberry/systemd/
-- [ ] T064 IPC sockets and coordination contracts
+- [x] T064 IPC sockets and coordination contracts
       File: /home/pi/lawnberry/backend/src/core/ipc.py
 
 ## Phase 3.5: Frontend Tests (TDD) — MUST FAIL BEFORE IMPLEMENTATION
