@@ -174,13 +174,13 @@
       File: /home/pi/lawnberry/backend/src/core/ipc.py
 
 ## Phase 3.5: Frontend Tests (TDD) — MUST FAIL BEFORE IMPLEMENTATION
-- [ ] T065 [P] E2E test: Dashboard live telemetry @ 5Hz
+- [x] T065 [P] E2E test: Dashboard live telemetry @ 5Hz
       File: /home/pi/lawnberry/frontend/tests/e2e/test_dashboard.spec.ts
-- [ ] T066 [P] E2E test: Map setup polygon + validation
+- [x] T066 [P] E2E test: Map setup polygon + validation
       File: /home/pi/lawnberry/frontend/tests/e2e/test_map_setup.spec.ts
-- [ ] T067 [P] E2E test: Manual control gated by auth
+- [x] T067 [P] E2E test: Manual control gated by auth
       File: /home/pi/lawnberry/frontend/tests/e2e/test_manual_control.spec.ts
-- [ ] T068 [P] E2E test: AI training export (COCO/YOLO)
+- [x] T068 [P] E2E test: AI training export (COCO/YOLO)
       File: /home/pi/lawnberry/frontend/tests/e2e/test_ai_training.spec.ts
 - [x] T069 [P] Integration tests: WebSocket client cadence control
       File: /home/pi/lawnberry/frontend/tests/integration/test_ws_client.ts
