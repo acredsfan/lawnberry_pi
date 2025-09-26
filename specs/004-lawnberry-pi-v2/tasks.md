@@ -200,13 +200,13 @@
       Path: /home/pi/lawnberry/frontend/src/assets/
 
 ## Phase 3.7: Compliance, Docs, and CI
-- [ ] T076 Documentation updates (API refs, operational procedures)
+- [x] T076 Documentation updates (API refs, operational procedures)
       Paths: /home/pi/lawnberry/docs/
-- [ ] T077 Constitutional compliance script (platform, isolation, resource ownership)
+- [x] T077 Constitutional compliance script (platform, isolation, resource ownership)
       File: /home/pi/lawnberry/scripts/check_constitution.sh
-- [ ] T078 Update / quickstart verification scripts
+- [x] T078 Update / quickstart verification scripts
       Files: /home/pi/lawnberry/scripts/test_latency.py, /home/pi/lawnberry/scripts/test_websocket_load.py
-- [ ] T079 Performance tests (<100ms latency target)
+- [x] T079 Performance tests (<100ms latency target)
       Files: /home/pi/lawnberry/scripts/test_performance_degradation.py
 - [ ] T080 Workflows run & journal update (post-merge/PR validation)
       Action: Run `.github/workflows` then update `/home/pi/lawnberry/lawnberry-rebuild/.specify/memory/AGENT_JOURNAL.md`
