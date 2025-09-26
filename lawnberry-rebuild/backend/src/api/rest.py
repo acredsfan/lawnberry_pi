@@ -1,9 +1,124 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict, Set
+import json
+import asyncio
+import time
 
 router = APIRouter()
+
+# WebSocket Hub for real-time communication
+class WebSocketHub:
+    def __init__(self):
+        self.clients: Dict[str, WebSocket] = {}
+        self.subscriptions: Dict[str, Set[str]] = {}  # topic -> client_ids
+        self.telemetry_cadence_hz = 5.0
+        self._telemetry_task: Optional[asyncio.Task] = None
+        
+    async def connect(self, websocket: WebSocket, client_id: str):
+        await websocket.accept()
+        self.clients[client_id] = websocket
+        await websocket.send_text(json.dumps({
+            "event": "connection.established",
+            "client_id": client_id,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }))
+        
+    def disconnect(self, client_id: str):
+        if client_id in self.clients:
+            del self.clients[client_id]
+        # Remove from all subscriptions
+        for topic, subscribers in self.subscriptions.items():
+            subscribers.discard(client_id)
+            
+    async def subscribe(self, client_id: str, topic: str):
+        if topic not in self.subscriptions:
+            self.subscriptions[topic] = set()
+        self.subscriptions[topic].add(client_id)
+        
+        # Send confirmation
+        if client_id in self.clients:
+            await self.clients[client_id].send_text(json.dumps({
+                "event": "subscription.confirmed",
+                "topic": topic,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }))
+            
+    async def set_cadence(self, client_id: str, cadence_hz: float):
+        # Clamp cadence between 1-10 Hz
+        cadence_hz = max(1.0, min(10.0, cadence_hz))
+        self.telemetry_cadence_hz = cadence_hz
+        
+        # Send confirmation
+        if client_id in self.clients:
+            await self.clients[client_id].send_text(json.dumps({
+                "event": "cadence.updated",
+                "cadence_hz": cadence_hz,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }))
+            
+    async def broadcast_to_topic(self, topic: str, data: dict):
+        if topic not in self.subscriptions:
+            return
+            
+        message = json.dumps({
+            "event": "telemetry.data",
+            "topic": topic,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "data": data
+        })
+        
+        disconnected_clients = []
+        for client_id in self.subscriptions[topic]:
+            if client_id in self.clients:
+                try:
+                    await self.clients[client_id].send_text(message)
+                except:
+                    disconnected_clients.append(client_id)
+                    
+        # Clean up disconnected clients
+        for client_id in disconnected_clients:
+            self.disconnect(client_id)
+            
+    async def start_telemetry_loop(self):
+        if self._telemetry_task is not None:
+            return
+        self._telemetry_task = asyncio.create_task(self._telemetry_loop())
+        
+    async def stop_telemetry_loop(self):
+        if self._telemetry_task:
+            self._telemetry_task.cancel()
+            try:
+                await self._telemetry_task
+            except asyncio.CancelledError:
+                pass
+            self._telemetry_task = None
+            
+    async def _telemetry_loop(self):
+        while True:
+            try:
+                # Generate telemetry data
+                telemetry_data = {
+                    "battery": {"percentage": 85.2, "voltage": 12.6},
+                    "position": {"latitude": 40.7128, "longitude": -74.0060},
+                    "motor_status": "idle",
+                    "safety_state": "safe",
+                    "uptime_seconds": time.time()
+                }
+                
+                await self.broadcast_to_topic("telemetry/updates", telemetry_data)
+                
+                # Wait based on cadence
+                await asyncio.sleep(1.0 / self.telemetry_cadence_hz)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(1.0)
+
+# Global WebSocket hub instance
+websocket_hub = WebSocketHub()
 
 
 class AuthRequest(BaseModel):
@@ -320,3 +435,43 @@ def put_system_config(config: SystemConfig):
     global _config_store
     _config_store = config
     return _config_store
+
+
+# ----------------------- WebSocket -----------------------
+
+
+@router.websocket("/ws/telemetry")
+async def websocket_telemetry_endpoint(websocket: WebSocket):
+    client_id = f"client_{int(time.time())}"
+    
+    try:
+        await websocket_hub.connect(websocket, client_id)
+        
+        # Start telemetry broadcasting
+        await websocket_hub.start_telemetry_loop()
+        
+        while True:
+            try:
+                # Receive client messages
+                data = await websocket.receive_text()
+                message = json.loads(data)
+                
+                message_type = message.get("type")
+                
+                if message_type == "subscribe":
+                    topic = message.get("topic")
+                    if topic:
+                        await websocket_hub.subscribe(client_id, topic)
+                        
+                elif message_type == "set_cadence":
+                    cadence_hz = message.get("cadence_hz", 5.0)
+                    await websocket_hub.set_cadence(client_id, cadence_hz)
+                    
+            except WebSocketDisconnect:
+                break
+            except json.JSONDecodeError:
+                # Invalid JSON, ignore
+                continue
+                
+    finally:
+        websocket_hub.disconnect(client_id)
