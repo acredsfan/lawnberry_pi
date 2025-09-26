@@ -182,9 +182,9 @@
       File: /home/pi/lawnberry/frontend/tests/e2e/test_manual_control.spec.ts
 - [ ] T068 [P] E2E test: AI training export (COCO/YOLO)
       File: /home/pi/lawnberry/frontend/tests/e2e/test_ai_training.spec.ts
-- [ ] T069 [P] Integration tests: WebSocket client cadence control
+- [x] T069 [P] Integration tests: WebSocket client cadence control
       File: /home/pi/lawnberry/frontend/tests/integration/test_ws_client.ts
-- [ ] T070 [P] Unit tests: Components scaffolds
+- [x] T070 [P] Unit tests: Components scaffolds
       Path: /home/pi/lawnberry/frontend/tests/unit/
 
 ## Phase 3.6: Frontend Implementation

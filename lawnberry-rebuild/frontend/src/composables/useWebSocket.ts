@@ -82,6 +82,16 @@ export function useWebSocket(url = '/ws') {
     }
   }
 
+  // Helper to request server to change telemetry cadence
+  const setCadence = (hz: number) => {
+    emit('set_cadence', { cadence_hz: hz })
+  }
+
+  // Helper to subscribe to a topic on the server (for WS bridge patterns)
+  const subscribeTopic = (topic: string) => {
+    emit('subscribe', { topic })
+  }
+
   const subscribe = (event: string, handler: (data: any) => void) => {
     if (socket.value) {
       socket.value.on(event, handler)
@@ -110,6 +120,8 @@ export function useWebSocket(url = '/ws') {
     connect,
     disconnect,
     emit,
+    setCadence,
+    subscribeTopic,
     subscribe,
     unsubscribe
   }
