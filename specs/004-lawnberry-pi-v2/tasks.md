@@ -208,7 +208,7 @@
       Files: /home/pi/lawnberry/scripts/test_latency.py, /home/pi/lawnberry/scripts/test_websocket_load.py
 - [x] T079 Performance tests (<100ms latency target)
       Files: /home/pi/lawnberry/scripts/test_performance_degradation.py
-- [ ] T080 Workflows run & journal update (post-merge/PR validation)
+- [x] T080 Workflows run & journal update (post-merge/PR validation)
       Action: Run `.github/workflows` then update `/home/pi/lawnberry/lawnberry-rebuild/.specify/memory/AGENT_JOURNAL.md`
 
 ## Phase 3.8: Coverage Additions from Analysis
