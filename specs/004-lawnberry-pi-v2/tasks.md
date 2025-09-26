@@ -41,8 +41,8 @@
       Paths: /home/pi/lawnberry/backend/, /home/pi/lawnberry/frontend/
 - [x] T002 Initialize backend Python project (uv + pyproject) at /home/pi/lawnberry/backend/
 - [x] T003 [P] Configure backend lint/format (ruff/black) at /home/pi/lawnberry/backend/
-- [ ] T004 Initialize frontend (Vue 3 + Vite) at /home/pi/lawnberry/frontend/
-- [ ] T005 [P] Configure frontend lint/format (eslint/prettier) at /home/pi/lawnberry/frontend/
+- [x] T004 Initialize frontend (Vue 3 + Vite) at /home/pi/lawnberry/frontend/
+- [x] T005 [P] Configure frontend lint/format (eslint/prettier) at /home/pi/lawnberry/frontend/
 - [x] T006 Setup tests folders
       Paths: /home/pi/lawnberry/tests/{contract,integration,unit}/
 - [x] T007 Constitutional bootstrap (ARM64 checks, isolation policy docs)
@@ -67,55 +67,55 @@
       Path: /home/pi/lawnberry/tests/unit/
 
 ## Phase 3.3: Backend Core (Models, Services, API) — Implement after tests are failing
-- [ ] T016 [P] Create models package
+- [x] T016 [P] Create models package
       Path: /home/pi/lawnberry/backend/src/models/__init__.py
-- [ ] T017 [P] SensorData model from data-model.md
+- [x] T017 [P] SensorData model from data-model.md
       File: /home/pi/lawnberry/backend/src/models/sensor_data.py
-- [ ] T018 [P] NavigationState model
+- [x] T018 [P] NavigationState model
       File: /home/pi/lawnberry/backend/src/models/navigation_state.py
-- [ ] T019 [P] MotorControl model
+- [x] T019 [P] MotorControl model
       File: /home/pi/lawnberry/backend/src/models/motor_control.py
-- [ ] T020 [P] PowerManagement model
+- [x] T020 [P] PowerManagement model
       File: /home/pi/lawnberry/backend/src/models/power_management.py
-- [ ] T021 [P] CameraStream model
+- [x] T021 [P] CameraStream model
       File: /home/pi/lawnberry/backend/src/models/camera_stream.py
-- [ ] T022 [P] AIProcessing model
+- [x] T022 [P] AIProcessing model
       File: /home/pi/lawnberry/backend/src/models/ai_processing.py
-- [ ] T023 [P] TrainingData model
+- [x] T023 [P] TrainingData model
       File: /home/pi/lawnberry/backend/src/models/training_data.py
-- [ ] T024 [P] WebUIPageContracts model
+- [x] T024 [P] WebUIPageContracts model
       File: /home/pi/lawnberry/backend/src/models/webui_contracts.py
-- [ ] T025 [P] TelemetryExchange model
+- [x] T025 [P] TelemetryExchange model
       File: /home/pi/lawnberry/backend/src/models/telemetry_exchange.py
-- [ ] T026 [P] UserSession model
+- [x] T026 [P] UserSession model
       File: /home/pi/lawnberry/backend/src/models/user_session.py
-- [ ] T027 [P] HardwareBaseline model
+- [x] T027 [P] HardwareBaseline model
       File: /home/pi/lawnberry/backend/src/models/hardware_baseline.py
-- [ ] T028 [P] SystemConfiguration model
+- [x] T028 [P] SystemConfiguration model
       File: /home/pi/lawnberry/backend/src/models/system_configuration.py
-- [ ] T029 [P] OperationalData model
+- [x] T029 [P] OperationalData model
       File: /home/pi/lawnberry/backend/src/models/operational_data.py
 
-- [ ] T030 Create services package
+- [x] T030 Create services package
       Path: /home/pi/lawnberry/backend/src/services/__init__.py
-- [ ] T031 Sensor manager service (I2C/UART coordination, validation flags)
+- [x] T031 Sensor manager service (I2C/UART coordination, validation flags)
       File: /home/pi/lawnberry/backend/src/services/sensor_manager.py
-- [ ] T032 Navigation service (sensor fusion, dead reckoning, safety)
+- [x] T032 Navigation service (sensor fusion, dead reckoning, safety)
       File: /home/pi/lawnberry/backend/src/services/navigation_service.py
-- [ ] T033 Motor control service (RoboHAT/Cytron, L298N fallback)
+- [x] T033 Motor control service (RoboHAT/Cytron, L298N fallback)
       File: /home/pi/lawnberry/backend/src/services/motor_service.py
-- [ ] T034 Power management service (INA3221 channels, sun-seeking)
+- [x] T034 Power management service (INA3221 channels, sun-seeking)
       File: /home/pi/lawnberry/backend/src/services/power_service.py
-- [ ] T035 Camera stream service client (IPC to camera-stream.service)
+- [x] T035 Camera stream service client (IPC to camera-stream.service)
       File: /home/pi/lawnberry/backend/src/services/camera_client.py
-- [ ] T036 AI processing service (TFLite/OpenCV, Coral venv, Hailo)
+- [x] T036 AI processing service (TFLite/OpenCV, Coral venv, Hailo)
       File: /home/pi/lawnberry/backend/src/services/ai_service.py
-- [ ] T037 Telemetry hub (WebSocket publisher)
+- [x] T037 Telemetry hub (WebSocket publisher)
       File: /home/pi/lawnberry/backend/src/services/telemetry_hub.py
-- [ ] T038 Auth service (shared operator credential, JWT)
+- [x] T038 Auth service (shared operator credential, JWT)
       File: /home/pi/lawnberry/backend/src/services/auth_service.py
 
-- [ ] T039 Create API package
+- [x] T039 Create API package
       Path: /home/pi/lawnberry/backend/src/api/__init__.py
 - [x] T040 REST API scaffolding (FastAPI router, base wiring)
       File: /home/pi/lawnberry/backend/src/api/rest.py
@@ -188,15 +188,15 @@
       Path: /home/pi/lawnberry/frontend/tests/unit/
 
 ## Phase 3.6: Frontend Implementation
-- [ ] T071 Create Vue app skeleton
+- [x] T071 Create Vue app skeleton
       Path: /home/pi/lawnberry/frontend/src/
-- [ ] T072 Pages x7 (Dashboard, Map Setup, Manual Control, Mow Planning, AI Training, Settings, Docs Hub)
+- [x] T072 Pages x7 (Dashboard, Map Setup, Manual Control, Mow Planning, AI Training, Settings, Docs Hub)
       Path: /home/pi/lawnberry/frontend/src/pages/
-- [ ] T073 Components (widgets for telemetry, maps, controls)
+- [x] T073 Components (widgets for telemetry, maps, controls)
       Path: /home/pi/lawnberry/frontend/src/components/
-- [ ] T074 Services (REST client, WS client, auth)
+- [x] T074 Services (REST client, WS client, auth)
       Path: /home/pi/lawnberry/frontend/src/services/
-- [ ] T075 Retro 1980s theme assets
+- [x] T075 Retro 1980s theme assets
       Path: /home/pi/lawnberry/frontend/src/assets/
 
 ## Phase 3.7: Compliance, Docs, and CI
