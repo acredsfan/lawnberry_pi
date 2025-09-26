@@ -65,3 +65,21 @@ def test_websocket_cadence_control():
         data = websocket.receive_json()
         assert data["event"] == "cadence.updated"
         assert data["cadence_hz"] == 1.0
+
+
+def test_websocket_ping_pong():
+    """Test that the server responds to ping with a pong (heartbeat)."""
+    client = TestClient(app)
+
+    with client.websocket_connect("/api/v2/ws/telemetry") as websocket:
+        # Consume connection established message
+        websocket.receive_json()
+
+        # Send ping
+        websocket.send_json({
+            "type": "ping"
+        })
+
+        # Expect pong
+        data = websocket.receive_json()
+        assert data["event"] == "pong"

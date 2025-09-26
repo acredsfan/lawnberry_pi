@@ -637,6 +637,13 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
                 elif message_type == "set_cadence":
                     cadence_hz = message.get("cadence_hz", 5.0)
                     await websocket_hub.set_cadence(client_id, cadence_hz)
+                
+                elif message_type == "ping":
+                    # Heartbeat: reply with pong
+                    await websocket.send_text(json.dumps({
+                        "event": "pong",
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }))
                     
             except WebSocketDisconnect:
                 break

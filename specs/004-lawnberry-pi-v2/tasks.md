@@ -234,8 +234,8 @@
       File: /home/pi/lawnberry/backend/src/api/rest.py
 - [ ] T091 [P] Tests for login rate limit and lockout
       File: /home/pi/lawnberry/tests/integration/test_auth_hardening.py
-- [ ] T092 WebSocket reconnection/backoff + resubscribe
-      File: /home/pi/lawnberry/backend/src/services/telemetry_hub.py
+- [x] T092 WebSocket reconnection/backoff + resubscribe
+      File: /home/pi/lawnberry/backend/src/api/rest.py
 - [x] T093 [P] Frontend WS client reconnection/resubscribe tests
       File: /home/pi/lawnberry/frontend/tests/integration/test_ws_resilience.spec.ts
 - [ ] T094 Dead-reckoning acceptance tests (drift bounds)
