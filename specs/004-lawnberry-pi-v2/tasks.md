@@ -236,8 +236,8 @@
       File: /home/pi/lawnberry/tests/integration/test_auth_hardening.py
 - [ ] T092 WebSocket reconnection/backoff + resubscribe
       File: /home/pi/lawnberry/backend/src/services/telemetry_hub.py
-- [ ] T093 [P] Frontend WS client reconnection/resubscribe tests
-      File: /home/pi/lawnberry/frontend/tests/integration/test_ws_resilience.ts
+- [x] T093 [P] Frontend WS client reconnection/resubscribe tests
+      File: /home/pi/lawnberry/frontend/tests/integration/test_ws_resilience.spec.ts
 - [ ] T094 Dead-reckoning acceptance tests (drift bounds)
       File: /home/pi/lawnberry/tests/integration/test_dead_reckoning.py
 - [ ] T095 Docs drift detection CI step
