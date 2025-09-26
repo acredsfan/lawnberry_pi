@@ -4,50 +4,77 @@ from backend.src.main import app
 
 
 @pytest.mark.asyncio
-async def test_get_system_config_returns_config():
+async def test_get_settings_system_returns_config():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/v2/settings/config")
+        resp = await client.get("/api/v2/settings/system")
         assert resp.status_code == 200
         body = resp.json()
         assert isinstance(body, dict)
-        # Check for key configuration fields
-        expected_fields = [
-            "mowing_height_mm",
-            "cutting_speed", 
-            "weather_pause_enabled",
-            "charging_return_threshold",
-            "safety_tilt_threshold_degrees",
-            "obstacle_detection_sensitivity"
-        ]
-        for field in expected_fields:
-            assert field in body
+        # Check for expected top-level keys
+        expected_keys = ["hardware", "operation", "telemetry", "ai", "ui"]
+        for key in expected_keys:
+            assert key in body
 
 
 @pytest.mark.asyncio
-async def test_put_system_config_updates_config():
+async def test_put_settings_system_updates_config():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        # Get current config
-        get_resp = await client.get("/api/v2/settings/config")
-        current_config = get_resp.json()
+        # First get current settings
+        get_resp = await client.get("/api/v2/settings/system")
+        current_settings = get_resp.json()
         
-        # Modify one field
-        updated_config = current_config.copy()
-        updated_config["mowing_height_mm"] = 25
-        updated_config["cutting_speed"] = 0.6
+        # Modify some settings
+        updated_settings = current_settings.copy()
+        updated_settings["telemetry"]["cadence_hz"] = 8
+        updated_settings["operation"]["simulation_mode"] = True
         
         # Update via PUT
-        put_resp = await client.put("/api/v2/settings/config", json=updated_config)
+        put_resp = await client.put("/api/v2/settings/system", json=updated_settings)
         assert put_resp.status_code == 200
         
-        # Verify the changes took effect
-        returned_config = put_resp.json()
-        assert returned_config["mowing_height_mm"] == 25
-        assert returned_config["cutting_speed"] == 0.6
+        # Verify changes were applied
+        verify_resp = await client.get("/api/v2/settings/system")
+        verify_body = verify_resp.json()
+        assert verify_body["telemetry"]["cadence_hz"] == 8
+        assert verify_body["operation"]["simulation_mode"] is True
+
+
+@pytest.mark.asyncio
+async def test_put_settings_system_validates_cadence():
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        # Get current settings
+        get_resp = await client.get("/api/v2/settings/system")
+        settings = get_resp.json()
         
-        # Verify via GET as well
-        verify_resp = await client.get("/api/v2/settings/config")
-        verify_config = verify_resp.json()
-        assert verify_config["mowing_height_mm"] == 25
-        assert verify_config["cutting_speed"] == 0.6
+        # Try invalid cadence (out of range)
+        settings["telemetry"]["cadence_hz"] = 15  # Should be 1-10
+        
+        put_resp = await client.put("/api/v2/settings/system", json=settings)
+        assert put_resp.status_code == 422  # Validation error
+
+
+@pytest.mark.asyncio
+async def test_put_settings_partial_update():
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        # Try partial update (just UI settings)
+        partial_settings = {
+            "ui": {
+                "theme": "retro-green",
+                "auto_refresh": False
+            }
+        }
+        
+        put_resp = await client.put("/api/v2/settings/system", json=partial_settings)
+        assert put_resp.status_code == 200
+        
+        # Verify only UI was updated, other sections preserved
+        verify_resp = await client.get("/api/v2/settings/system")
+        body = verify_resp.json()
+        assert body["ui"]["theme"] == "retro-green"
+        assert body["ui"]["auto_refresh"] is False
+        # Hardware section should still exist
+        assert "hardware" in body

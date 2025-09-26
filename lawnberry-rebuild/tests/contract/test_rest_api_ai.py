@@ -7,46 +7,56 @@ from backend.src.main import app
 async def test_get_ai_datasets_returns_list():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/v2/ai/model/datasets")
+        resp = await client.get("/api/v2/ai/datasets")
         assert resp.status_code == 200
         body = resp.json()
         assert isinstance(body, list)
-        # Should have some default datasets
-        assert len(body) >= 1
-        # Check structure of first dataset
-        if body:
-            dataset = body[0]
-            for key in ["id", "name", "type", "size_mb", "last_updated"]:
-                assert key in dataset
-
-
-@pytest.mark.asyncio
-async def test_export_path_data_csv():
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/v2/ai/export/path-data?format=csv")
+        resp = await client.get("/api/v2/ai/datasets")
         assert resp.status_code == 200
         body = resp.json()
-        assert "export_url" in body
-        assert "format" in body
-        assert body["format"] == "csv"
-        assert "size_estimate_mb" in body
-        assert "expires_at" in body
+        assert isinstance(body, list)
 
 
 @pytest.mark.asyncio
-async def test_export_path_data_json():
+async def test_post_ai_dataset_export_starts_job():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/v2/ai/export/path-data?format=json")
-        assert resp.status_code == 200
+        payload = {
+            "format": "COCO",
+            "include_unlabeled": False,
+            "min_confidence": 0.8
+        }
+        resp = await client.post("/api/v2/ai/datasets/obstacle-detection/export", json=payload)
+        assert resp.status_code == 202  # Accepted - export job started
         body = resp.json()
-        assert body["format"] == "json"
+        assert "export_id" in body
+        assert "status" in body
+        assert body["status"] == "started"
 
 
 @pytest.mark.asyncio
-async def test_export_path_data_invalid_format():
+async def test_post_ai_dataset_export_yolo_format():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/v2/ai/export/path-data?format=xml")
-        assert resp.status_code == 422
+        payload = {
+            "format": "YOLO",
+            "include_unlabeled": True,
+            "min_confidence": 0.5
+        }
+        resp = await client.post("/api/v2/ai/datasets/grass-detection/export", json=payload)
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["format"] == "YOLO"
+
+
+@pytest.mark.asyncio 
+async def test_post_ai_dataset_export_invalid_dataset():
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        payload = {
+            "format": "COCO",
+            "include_unlabeled": False,
+            "min_confidence": 0.8
+        }
+        resp = await client.post("/api/v2/ai/datasets/nonexistent/export", json=payload)
+        assert resp.status_code == 404

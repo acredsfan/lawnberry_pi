@@ -299,7 +299,7 @@ def control_emergency_stop():
     return {"emergency_stop_active": True}
 
 
-# ----------------------- Planning ------------------------
+# ----------------------- Planning Jobs -----------------------
 
 
 class PlanningJob(BaseModel):
@@ -355,87 +355,161 @@ def delete_planning_job(jobId: str):
     raise HTTPException(status_code=404, detail="Job not found")
 
 
-# ------------------------ AI/ML ---------------------------
+# -------------------------- AI Datasets --------------------------
 
 
 class Dataset(BaseModel):
     id: str
     name: str
-    type: str  # "object_detection", "path_learning", "grass_classification"
-    size_mb: float
+    description: str
+    image_count: int
+    labeled_count: int
+    categories: List[str]
+    created_at: datetime
     last_updated: datetime
-    status: str = "ready"  # ready, training, error
 
 
-_datasets_store = [
+class ExportRequest(BaseModel):
+    format: str  # "COCO" or "YOLO"
+    include_unlabeled: bool = False
+    min_confidence: float = 0.0
+
+
+class ExportResponse(BaseModel):
+    export_id: str
+    status: str
+    format: str
+    created_at: datetime
+
+
+# Mock datasets for now
+_datasets = [
     Dataset(
-        id="grass-v1",
-        name="Grass Classification v1",
-        type="grass_classification",
-        size_mb=45.2,
-        last_updated=datetime.now(timezone.utc)
+        id="obstacle-detection",
+        name="Obstacle Detection",
+        description="Images for training obstacle detection models",
+        image_count=150,
+        labeled_count=120,
+        categories=["tree", "rock", "fence", "person", "animal"],
+        created_at=datetime.now(timezone.utc) - timedelta(days=7),
+        last_updated=datetime.now(timezone.utc) - timedelta(hours=2)
     ),
     Dataset(
-        id="obstacles-v2",
-        name="Obstacle Detection v2",
-        type="object_detection", 
-        size_mb=128.7,
-        last_updated=datetime.now(timezone.utc)
+        id="grass-detection", 
+        name="Grass Quality Detection",
+        description="Images for grass health and cutting quality analysis",
+        image_count=200,
+        labeled_count=180,
+        categories=["healthy_grass", "weeds", "bare_soil", "cut_grass"],
+        created_at=datetime.now(timezone.utc) - timedelta(days=14),
+        last_updated=datetime.now(timezone.utc) - timedelta(hours=6)
     )
 ]
 
+_export_counter = 0
 
-@router.get("/ai/model/datasets", response_model=List[Dataset])
+
+@router.get("/ai/datasets", response_model=List[Dataset])
 def get_ai_datasets():
-    return _datasets_store
+    return _datasets
 
 
-@router.get("/ai/export/path-data")
-def export_path_data(format: str = "csv"):
-    # Placeholder export functionality
-    if format not in ["csv", "json"]:
-        raise HTTPException(status_code=422, detail="Unsupported format")
+@router.post("/ai/datasets/{datasetId}/export", response_model=ExportResponse, status_code=202)
+def post_ai_dataset_export(datasetId: str, export_req: ExportRequest):
+    global _export_counter
     
-    return {
-        "export_url": f"/data/exports/paths-{datetime.now().strftime('%Y%m%d')}.{format}",
-        "format": format,
-        "size_estimate_mb": 12.3,
-        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    # Validate dataset exists
+    dataset_exists = any(ds.id == datasetId for ds in _datasets)
+    if not dataset_exists:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    # Validate format
+    if export_req.format not in ["COCO", "YOLO"]:
+        raise HTTPException(status_code=422, detail="Format must be COCO or YOLO")
+    
+    _export_counter += 1
+    export_id = f"export-{_export_counter:04d}"
+    
+    return ExportResponse(
+        export_id=export_id,
+        status="started",
+        format=export_req.format,
+        created_at=datetime.now(timezone.utc)
+    )
+
+
+# ------------------------ System Settings ------------------------
+
+
+class SystemSettings(BaseModel):
+    hardware: dict = {
+        "gps_module": "ZED-F9P",  # or "Neo-8M"
+        "drive_controller": "RoboHAT-Cytron",  # or "L298N"
+        "ai_acceleration": "Coral-USB",  # or "Hailo-HAT" or "CPU"
+        "simulation_mode": False
+    }
+    operation: dict = {
+        "max_speed": 0.8,
+        "cutting_height": 3.0,  # cm
+        "safety_timeout": 30,  # seconds
+        "simulation_mode": False
+    }
+    telemetry: dict = {
+        "cadence_hz": 5,  # 1-10 Hz
+        "logging_level": "INFO",
+        "retain_days": 30
+    }
+    ai: dict = {
+        "confidence_threshold": 0.7,
+        "inference_mode": "obstacle_detection",
+        "training_enabled": True
+    }
+    ui: dict = {
+        "theme": "retro-amber",
+        "auto_refresh": True,
+        "map_provider": "google"  # or "osm"
     }
 
 
-# ----------------------- Settings ------------------------
+_system_settings = SystemSettings()
 
 
-class SystemConfig(BaseModel):
-    mowing_height_mm: int = 30
-    cutting_speed: float = 0.8  # m/s
-    edge_cutting_enabled: bool = True
-    weather_pause_enabled: bool = True
-    rain_threshold_mm: float = 2.0
-    wind_threshold_kmh: float = 25.0
-    charging_return_threshold: float = 20.0  # battery percentage
-    safety_tilt_threshold_degrees: float = 30.0
-    gps_required_accuracy_m: float = 2.0
-    obstacle_detection_sensitivity: str = "medium"  # low, medium, high
-    blade_engagement_delay_ms: int = 500
-    emergency_stop_timeout_s: int = 30
+@router.get("/settings/system")
+def get_settings_system():
+    return _system_settings.model_dump()
 
 
-_config_store = SystemConfig()
-
-
-@router.get("/settings/config", response_model=SystemConfig)
-def get_system_config():
-    return _config_store
-
-
-@router.put("/settings/config", response_model=SystemConfig)
-def put_system_config(config: SystemConfig):
-    global _config_store
-    _config_store = config
-    return _config_store
-
+@router.put("/settings/system")
+def put_settings_system(settings_update: dict):
+    global _system_settings
+    
+    # Get current settings as dict
+    current = _system_settings.model_dump()
+    
+    # Apply partial or full updates
+    for section_key, section_value in settings_update.items():
+        if section_key in current:
+            if isinstance(section_value, dict):
+                # Update nested dict values
+                current[section_key].update(section_value)
+            else:
+                current[section_key] = section_value
+        else:
+            # New section
+            current[section_key] = section_value
+    
+    # Validate specific constraints
+    if "telemetry" in current and "cadence_hz" in current["telemetry"]:
+        cadence = current["telemetry"]["cadence_hz"]
+        if not isinstance(cadence, int) or cadence < 1 or cadence > 10:
+            raise HTTPException(status_code=422, detail="cadence_hz must be between 1 and 10")
+    
+    # Update the settings object
+    try:
+        _system_settings = SystemSettings(**current)
+        return _system_settings.model_dump()
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid settings: {str(e)}")
 
 # ----------------------- WebSocket -----------------------
 
