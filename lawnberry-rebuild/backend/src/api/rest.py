@@ -8,6 +8,7 @@ import asyncio
 import time
 import hashlib
 from email.utils import format_datetime, parsedate_to_datetime
+from ..core.persistence import persistence
 
 router = APIRouter()
 
@@ -375,6 +376,8 @@ def control_drive(cmd: DriveCommand):
         raise HTTPException(status_code=422, detail="throttle out of range")
     if cmd.turn is not None and not (-1.0 <= cmd.turn <= 1.0):
         raise HTTPException(status_code=422, detail="turn out of range")
+    # Audit
+    persistence.add_audit_log("control.drive", details=cmd.model_dump())
     return {"accepted": True}
 
 
@@ -385,6 +388,7 @@ class BladeCommand(BaseModel):
 @router.post("/control/blade")
 def control_blade(cmd: BladeCommand):
     _blade_state["active"] = bool(cmd.active)
+    persistence.add_audit_log("control.blade", details=cmd.model_dump())
     return {"blade_active": _blade_state["active"]}
 
 
@@ -393,6 +397,7 @@ def control_emergency_stop():
     _safety_state["emergency_stop_active"] = True
     # Also force blade off for safety
     _blade_state["active"] = False
+    persistence.add_audit_log("control.emergency_stop")
     return {"emergency_stop_active": True}
 
 
@@ -550,12 +555,14 @@ def post_ai_dataset_export(datasetId: str, export_req: ExportRequest):
     _export_counter += 1
     export_id = f"export-{_export_counter:04d}"
     
-    return ExportResponse(
+    resp = ExportResponse(
         export_id=export_id,
         status="started",
         format=export_req.format,
         created_at=datetime.now(timezone.utc)
     )
+    persistence.add_audit_log("ai.export", resource=datasetId, details={"format": export_req.format})
+    return resp
 
 
 # ------------------------ System Settings ------------------------
@@ -651,7 +658,9 @@ def put_settings_system(settings_update: dict):
         _system_settings = SystemSettings(**current)
         global _settings_last_modified
         _settings_last_modified = datetime.now(timezone.utc)
-        return _system_settings.model_dump()
+        result = _system_settings.model_dump()
+        persistence.add_audit_log("settings.update", details=settings_update)
+        return result
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Invalid settings: {str(e)}")
 # ----------------------- WebSocket -----------------------

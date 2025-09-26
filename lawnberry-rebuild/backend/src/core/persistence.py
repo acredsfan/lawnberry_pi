@@ -27,7 +27,7 @@ class Migration:
 class PersistenceLayer:
     """SQLite-based persistence layer for LawnBerry Pi v2."""
     
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
     
     MIGRATIONS = [
         Migration(
@@ -74,6 +74,23 @@ class PersistenceLayer:
             
             -- Insert initial schema version
             INSERT OR REPLACE INTO schema_version (version) VALUES (1);
+            """
+        )
+        ,
+        Migration(
+            version=2,
+            description="Add audit_logs table",
+            sql="""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                client_id TEXT,
+                action TEXT NOT NULL,
+                resource TEXT,
+                details_json TEXT
+            );
+
+            INSERT OR REPLACE INTO schema_version (version) VALUES (2);
             """
         )
     ]
@@ -248,6 +265,33 @@ class PersistenceLayer:
             )
             conn.commit()
             return cursor.rowcount
+
+    # Audit Logs
+    def add_audit_log(self, action: str, client_id: Optional[str] = None, resource: Optional[str] = None, details: Optional[Dict[str, Any]] = None) -> None:
+        with self.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO audit_logs (client_id, action, resource, details_json) VALUES (?, ?, ?, ?)",
+                (client_id, action, resource, json.dumps(details or {}))
+            )
+            conn.commit()
+
+    def load_audit_logs(self, limit: int = 100) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT id, timestamp, client_id, action, resource, details_json FROM audit_logs ORDER BY id DESC LIMIT ?",
+                (limit,)
+            )
+            rows = []
+            for r in cursor.fetchall():
+                rows.append({
+                    "id": r["id"],
+                    "timestamp": r["timestamp"],
+                    "client_id": r["client_id"],
+                    "action": r["action"],
+                    "resource": r["resource"],
+                    "details": json.loads(r["details_json"]) if r["details_json"] else {}
+                })
+            return rows
 
 
 # Global persistence instance

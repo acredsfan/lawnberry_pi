@@ -224,9 +224,9 @@
       Files: /home/pi/lawnberry/backend/src/api/rest.py
 - [x] T086 [P] Contract tests for caching semantics (ETag/If-None-Match)
       File: /home/pi/lawnberry/tests/contract/test_caching.py
-- [ ] T087 Audit logging middleware and persistence
-      Files: /home/pi/lawnberry/backend/src/core/audit.py, /home/pi/lawnberry/backend/src/services/auth_service.py
-- [ ] T088 [P] Tests for audit logs (manual control, config changes, exports)
+- [x] T087 Audit logging middleware and persistence
+      Files: /home/pi/lawnberry/backend/src/core/persistence.py, /home/pi/lawnberry/backend/src/api/rest.py
+- [x] T088 [P] Tests for audit logs (manual control, config changes, exports)
       File: /home/pi/lawnberry/tests/integration/test_audit_logging.py
 - [ ] T089 Backups and migration scripts (+ tests)
       Files: /home/pi/lawnberry/scripts/backup.sh, /home/pi/lawnberry/scripts/restore.sh, /home/pi/lawnberry/tests/integration/test_backup_migration.py
