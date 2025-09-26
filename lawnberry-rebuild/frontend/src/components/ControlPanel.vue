@@ -8,11 +8,11 @@
     </div>
     
     <div class="panel-body">
-      <slot></slot>
+      <slot />
     </div>
     
     <div v-if="$slots.actions" class="panel-actions">
-      <slot name="actions"></slot>
+      <slot name="actions" />
     </div>
   </div>
 </template>

@@ -32,16 +32,16 @@
       <div class="col-4">
         <ControlPanel title="Quick Controls" :status="currentMode === 'Idle' ? 'inactive' : 'active'">
           <div class="control-buttons">
-            <button class="btn btn-success" @click="startSystem" :disabled="isLoading">
+            <button class="btn btn-success" :disabled="isLoading" @click="startSystem">
               Start System
             </button>
-            <button class="btn btn-warning" @click="pauseSystem" :disabled="isLoading">
+            <button class="btn btn-warning" :disabled="isLoading" @click="pauseSystem">
               Pause
             </button>
-            <button class="btn btn-secondary" @click="stopSystem" :disabled="isLoading">
+            <button class="btn btn-secondary" :disabled="isLoading" @click="stopSystem">
               Stop
             </button>
-            <button class="btn btn-danger" @click="emergencyStop" :disabled="isLoading">
+            <button class="btn btn-danger" :disabled="isLoading" @click="emergencyStop">
               Emergency Stop
             </button>
           </div>
@@ -117,7 +117,12 @@
           </div>
           <div class="card-body">
             <div class="events-list">
-              <div v-for="event in recentEvents" :key="event.id" class="event-item" :class="event.level">
+              <div
+                v-for="event in recentEvents"
+                :key="event.id"
+                class="event-item"
+                :class="event.level"
+              >
                 <div class="event-time">{{ formatTime(event.timestamp) }}</div>
                 <div class="event-message">{{ event.message }}</div>
               </div>
@@ -142,7 +147,6 @@ const systemStore = useSystemStore()
 const isLoading = ref(false)
 const currentMode = ref('Idle')
 const progress = ref(0)
-const eta = ref('--:--')
 const uptime = ref('0h 0m')
 const gpsPosition = ref('N/A')
 const batteryLevel = ref(100)

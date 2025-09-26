@@ -1,7 +1,7 @@
 <template>
   <div class="metric-widget" :class="`metric-${variant}`">
     <div class="metric-header">
-      <div class="metric-icon" v-if="icon">
+      <div v-if="icon" class="metric-icon">
         <slot name="icon">{{ icon }}</slot>
       </div>
       <div class="metric-info">
@@ -18,7 +18,7 @@
         <div 
           class="progress-fill" 
           :style="`width: ${progressPercentage}%`"
-        ></div>
+        />
       </div>
       <div class="progress-text">
         {{ progressPercentage }}% {{ progressLabel }}

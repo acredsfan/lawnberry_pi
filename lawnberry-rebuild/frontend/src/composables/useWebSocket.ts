@@ -1,10 +1,11 @@
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { io, Socket } from 'socket.io-client'
 
 export function useWebSocket(url = '/ws') {
   const socket = ref<Socket | null>(null)
   const isConnected = ref(false)
-  const lastMessage = ref<any>(null)
+  type WSMessage = { type: string; [key: string]: unknown }
+  const lastMessage = ref<WSMessage | null>(null)
   const error = ref<string | null>(null)
 
   const connect = async () => {

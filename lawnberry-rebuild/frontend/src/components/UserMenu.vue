@@ -1,10 +1,10 @@
 <template>
   <div class="user-menu" :class="{ 'menu-open': showMenu }">
     <button 
-      @click="toggleMenu" 
-      class="user-button"
+      class="user-button" 
       :aria-expanded="showMenu"
       aria-haspopup="true"
+      @click="toggleMenu"
     >
       <span class="user-avatar">
         {{ user?.username?.charAt(0).toUpperCase() || 'U' }}
@@ -32,15 +32,15 @@
         </div>
       </div>
       
-      <div class="dropdown-divider"></div>
+      <div class="dropdown-divider" />
       
       <div class="dropdown-actions">
-        <button @click="handleRefreshToken" class="dropdown-item" :disabled="isLoading">
+        <button class="dropdown-item" :disabled="isLoading" @click="handleRefreshToken">
           <span class="item-icon">🔄</span>
           {{ isLoading ? 'Refreshing...' : 'Refresh Session' }}
         </button>
         
-        <button @click="handleLogout" class="dropdown-item logout-item">
+        <button class="dropdown-item logout-item" @click="handleLogout">
           <span class="item-icon">🚪</span>
           Sign Out
         </button>
@@ -48,7 +48,7 @@
     </div>
     
     <!-- Overlay to close menu -->
-    <div v-if="showMenu" class="menu-overlay" @click="closeMenu"></div>
+    <div v-if="showMenu" class="menu-overlay" @click="closeMenu" />
   </div>
 </template>
 

@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { AxiosInstance, AxiosRequestConfig } from 'axios'
+import type { AxiosInstance } from 'axios'
 import type { AuthResponse, RefreshResponse, LoginCredentials, User } from '@/types/auth'
 
 // Create axios instance with base configuration

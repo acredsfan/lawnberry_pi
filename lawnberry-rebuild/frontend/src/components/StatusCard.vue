@@ -3,7 +3,7 @@
     <div class="status-header">
       <div class="status-icon">
         <slot name="icon">
-          <div class="status-dot"></div>
+          <div class="status-dot" />
         </slot>
       </div>
       <div class="status-content">
@@ -13,11 +13,11 @@
     </div>
     
     <div v-if="$slots.details" class="status-details">
-      <slot name="details"></slot>
+      <slot name="details" />
     </div>
     
     <div v-if="$slots.actions" class="status-actions">
-      <slot name="actions"></slot>
+      <slot name="actions" />
     </div>
   </div>
 </template>

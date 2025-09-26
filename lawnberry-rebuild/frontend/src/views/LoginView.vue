@@ -2,12 +2,12 @@
   <div class="login-container">
     <div class="login-card">
       <div class="login-header">
-        <img src="/lawnberry-icon.svg" alt="LawnBerry Pi" class="login-logo" />
+        <img src="/lawnberry-icon.svg" alt="LawnBerry Pi" class="login-logo">
         <h1>LawnBerry Pi v2</h1>
         <p>Autonomous Lawn Care System</p>
       </div>
       
-      <form @submit.prevent="handleLogin" class="login-form">
+      <form class="login-form" @submit.prevent="handleLogin">
         <div class="form-group">
           <label class="form-label" for="username">Username</label>
           <input
@@ -18,7 +18,7 @@
             :class="{ error: errors.username }"
             required
             :disabled="isLoading"
-          />
+          >
           <div v-if="errors.username" class="form-error">{{ errors.username }}</div>
         </div>
         
@@ -32,7 +32,7 @@
             :class="{ error: errors.password }"
             required
             :disabled="isLoading"
-          />
+          >
           <div v-if="errors.password" class="form-error">{{ errors.password }}</div>
         </div>
         
@@ -46,7 +46,7 @@
           :disabled="isLoading"
           :aria-label="isLoading ? 'Signing in, please wait' : 'Sign in to your account'"
         >
-          <span v-if="isLoading" class="spinner" aria-hidden="true"></span>
+          <span v-if="isLoading" class="spinner" aria-hidden="true" />
           {{ isLoading ? 'Signing In...' : 'Sign In' }}
         </button>
       </form>

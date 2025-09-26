@@ -3,7 +3,7 @@
     <header class="app-header">
       <nav class="navbar">
         <div class="nav-brand">
-          <img src="/lawnberry-icon.svg" alt="LawnBerry Pi" class="logo" />
+          <img src="/lawnberry-icon.svg" alt="LawnBerry Pi" class="logo">
           <h1>LawnBerry Pi v2</h1>
         </div>
         <div class="nav-links">
@@ -29,11 +29,11 @@
     <footer class="app-footer">
       <div class="status-bar">
         <div class="system-status" :class="systemStatus">
-          <span class="status-indicator"></span>
+          <span class="status-indicator" />
           System: {{ systemStatus }}
         </div>
         <div class="connection-status" :class="connectionStatus">
-          <span class="status-indicator"></span>
+          <span class="status-indicator" />
           Connection: {{ connectionStatus }}
         </div>
       </div>
