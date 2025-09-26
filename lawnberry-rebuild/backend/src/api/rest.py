@@ -133,11 +133,57 @@ class AuthResponse(BaseModel):
     expires_at: datetime
 
 
+# ------------------------ Auth Hardening ------------------------
+
+# Rate limiting and lockout (simple in-memory, per client)
+AUTH_WINDOW_SECONDS = 60
+AUTH_MAX_ATTEMPTS_PER_WINDOW = 3
+AUTH_LOCKOUT_FAILED_ATTEMPTS = 3
+AUTH_LOCKOUT_SECONDS = 60
+
+_auth_attempts: Dict[str, list[float]] = {}
+_auth_failed_counts: Dict[str, int] = {}
+_auth_lockout_until: Dict[str, float] = {}
+
+
 @router.post("/auth/login", response_model=AuthResponse)
-def auth_login(payload: AuthRequest):
-    # Placeholder auth: accept any non-empty credential, else 401
+def auth_login(payload: AuthRequest, request: Request):
+    now = time.time()
+    client_id = request.headers.get("X-Client-Id") or "global"
+
+    # Lockout check
+    lock_until = _auth_lockout_until.get(client_id)
+    if lock_until and now < lock_until:
+        retry_after = int(max(1, lock_until - now))
+        raise HTTPException(status_code=429, detail="Too Many Requests", headers={"Retry-After": str(retry_after)})
+
+    # Rate limit: prune old attempts, then check
+    attempts = _auth_attempts.get(client_id, [])
+    cutoff = now - AUTH_WINDOW_SECONDS
+    attempts = [t for t in attempts if t >= cutoff]
+    if len(attempts) >= AUTH_MAX_ATTEMPTS_PER_WINDOW:
+        # Compute retry-after based on oldest attempt in window
+        oldest = min(attempts)
+        retry_after = int(max(1, AUTH_WINDOW_SECONDS - (now - oldest)))
+        _auth_attempts[client_id] = attempts  # persist pruned list
+        raise HTTPException(status_code=429, detail="Too Many Requests", headers={"Retry-After": str(retry_after)})
+
+    # Record this attempt before validating (rate limit applies to all attempts)
+    attempts.append(now)
+    _auth_attempts[client_id] = attempts
+
+    # Validate credential
     if not payload.credential:
+        # Increment failed count
+        failed = _auth_failed_counts.get(client_id, 0) + 1
+        _auth_failed_counts[client_id] = failed
+        # Activate lockout after threshold, but this attempt still returns 401
+        if failed >= AUTH_LOCKOUT_FAILED_ATTEMPTS:
+            _auth_lockout_until[client_id] = now + AUTH_LOCKOUT_SECONDS
         raise HTTPException(status_code=401, detail="Authentication failed")
+
+    # Successful login resets failed count
+    _auth_failed_counts[client_id] = 0
     exp = datetime.now(timezone.utc) + timedelta(hours=1)
     return AuthResponse(token="dummy-token", expires_at=exp)
 

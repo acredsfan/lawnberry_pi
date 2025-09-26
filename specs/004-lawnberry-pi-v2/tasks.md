@@ -230,9 +230,9 @@
       File: /home/pi/lawnberry/tests/integration/test_audit_logging.py
 - [ ] T089 Backups and migration scripts (+ tests)
       Files: /home/pi/lawnberry/scripts/backup.sh, /home/pi/lawnberry/scripts/restore.sh, /home/pi/lawnberry/tests/integration/test_backup_migration.py
-- [ ] T090 Auth hardening: rate limiting and lockout on /auth/login
+- [x] T090 Auth hardening: rate limiting and lockout on /auth/login
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T091 [P] Tests for login rate limit and lockout
+- [x] T091 [P] Tests for login rate limit and lockout
       File: /home/pi/lawnberry/tests/integration/test_auth_hardening.py
 - [x] T092 WebSocket reconnection/backoff + resubscribe
       File: /home/pi/lawnberry/backend/src/api/rest.py
