@@ -228,7 +228,7 @@
       Files: /home/pi/lawnberry/backend/src/core/persistence.py, /home/pi/lawnberry/backend/src/api/rest.py
 - [x] T088 [P] Tests for audit logs (manual control, config changes, exports)
       File: /home/pi/lawnberry/tests/integration/test_audit_logging.py
-- [ ] T089 Backups and migration scripts (+ tests)
+- [x] T089 Backups and migration scripts (+ tests)
       Files: /home/pi/lawnberry/scripts/backup.sh, /home/pi/lawnberry/scripts/restore.sh, /home/pi/lawnberry/tests/integration/test_backup_migration.py
 - [x] T090 Auth hardening: rate limiting and lockout on /auth/login
       File: /home/pi/lawnberry/backend/src/api/rest.py
