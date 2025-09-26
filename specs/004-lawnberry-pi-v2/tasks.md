@@ -220,9 +220,9 @@
       File: /home/pi/lawnberry/backend/src/api/rest.py
 - [ ] T084 [P] Frontend weather UI elements on Mow Planning
       Path: /home/pi/lawnberry/frontend/src/pages/
-- [ ] T085 Caching: Implement ETag/Last-Modified + Cache-Control on cacheable GETs
+- [x] T085 Caching: Implement ETag/Last-Modified + Cache-Control on cacheable GETs
       Files: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T086 [P] Contract tests for caching semantics (ETag/If-None-Match)
+- [x] T086 [P] Contract tests for caching semantics (ETag/If-None-Match)
       File: /home/pi/lawnberry/tests/contract/test_caching.py
 - [ ] T087 Audit logging middleware and persistence
       Files: /home/pi/lawnberry/backend/src/core/audit.py, /home/pi/lawnberry/backend/src/services/auth_service.py

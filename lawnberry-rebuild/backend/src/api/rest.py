@@ -1,10 +1,13 @@
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Set
 import json
 import asyncio
 import time
+import hashlib
+from email.utils import format_datetime, parsedate_to_datetime
 
 router = APIRouter()
 
@@ -188,17 +191,41 @@ class Zone(BaseModel):
 
 
 _zones_store: List[Zone] = []
+_zones_last_modified: datetime = datetime.now(timezone.utc)
 
 
 @router.get("/map/zones", response_model=List[Zone])
-def get_map_zones():
-    return _zones_store
+def get_map_zones(request: Request):
+    data = [z.model_dump(mode="json") for z in _zones_store]
+    body = json.dumps(data, sort_keys=True).encode()
+    etag = hashlib.sha256(body).hexdigest()
+    inm = request.headers.get("if-none-match")
+    ims = request.headers.get("if-modified-since")
+    if inm == etag:
+        return JSONResponse(status_code=304, content=None)
+    if ims:
+        try:
+            ims_dt = parsedate_to_datetime(ims)
+            if ims_dt.tzinfo is None:
+                ims_dt = ims_dt.replace(tzinfo=timezone.utc)
+            if ims_dt >= _zones_last_modified.replace(microsecond=0):
+                return JSONResponse(status_code=304, content=None)
+        except Exception:
+            pass
+    headers = {
+        "ETag": etag,
+        "Last-Modified": format_datetime(_zones_last_modified),
+        "Cache-Control": "public, max-age=30",
+    }
+    return JSONResponse(content=data, headers=headers)
 
 
 @router.post("/map/zones", response_model=List[Zone])
 def post_map_zones(zones: List[Zone]):
     global _zones_store
     _zones_store = zones
+    global _zones_last_modified
+    _zones_last_modified = datetime.now(timezone.utc)
     return _zones_store
 
 
@@ -212,17 +239,41 @@ class MapLocations(BaseModel):
 
 
 _locations_store = MapLocations()
+_locations_last_modified: datetime = datetime.now(timezone.utc)
 
 
 @router.get("/map/locations", response_model=MapLocations)
-def get_map_locations():
-    return _locations_store
+def get_map_locations(request: Request):
+    data = _locations_store.model_dump(mode="json")
+    body = json.dumps(data, sort_keys=True).encode()
+    etag = hashlib.sha256(body).hexdigest()
+    inm = request.headers.get("if-none-match")
+    ims = request.headers.get("if-modified-since")
+    if inm == etag:
+        return JSONResponse(status_code=304, content=None)
+    if ims:
+        try:
+            ims_dt = parsedate_to_datetime(ims)
+            if ims_dt.tzinfo is None:
+                ims_dt = ims_dt.replace(tzinfo=timezone.utc)
+            if ims_dt >= _locations_last_modified.replace(microsecond=0):
+                return JSONResponse(status_code=304, content=None)
+        except Exception:
+            pass
+    headers = {
+        "ETag": etag,
+        "Last-Modified": format_datetime(_locations_last_modified),
+        "Cache-Control": "public, max-age=30",
+    }
+    return JSONResponse(content=data, headers=headers)
 
 
 @router.put("/map/locations", response_model=MapLocations)
 def put_map_locations(locations: MapLocations):
     global _locations_store
     _locations_store = locations
+    global _locations_last_modified
+    _locations_last_modified = datetime.now(timezone.utc)
     return _locations_store
 
 
@@ -410,8 +461,31 @@ _export_counter = 0
 
 
 @router.get("/ai/datasets", response_model=List[Dataset])
-def get_ai_datasets():
-    return _datasets
+def get_ai_datasets(request: Request):
+    data = [ds.model_dump(mode="json") for ds in _datasets]
+    # Last modified is the latest dataset update
+    last_mod = max((ds.last_updated for ds in _datasets), default=datetime.now(timezone.utc))
+    body = json.dumps(data, sort_keys=True).encode()
+    etag = hashlib.sha256(body).hexdigest()
+    inm = request.headers.get("if-none-match")
+    ims = request.headers.get("if-modified-since")
+    if inm == etag:
+        return JSONResponse(status_code=304, content=None)
+    if ims:
+        try:
+            ims_dt = parsedate_to_datetime(ims)
+            if ims_dt.tzinfo is None:
+                ims_dt = ims_dt.replace(tzinfo=timezone.utc)
+            if ims_dt >= last_mod.replace(microsecond=0):
+                return JSONResponse(status_code=304, content=None)
+        except Exception:
+            pass
+    headers = {
+        "ETag": etag,
+        "Last-Modified": format_datetime(last_mod),
+        "Cache-Control": "public, max-age=60",
+    }
+    return JSONResponse(content=data, headers=headers)
 
 
 @router.post("/ai/datasets/{datasetId}/export", response_model=ExportResponse, status_code=202)
@@ -472,11 +546,33 @@ class SystemSettings(BaseModel):
 
 
 _system_settings = SystemSettings()
+_settings_last_modified: datetime = datetime.now(timezone.utc)
 
 
 @router.get("/settings/system")
-def get_settings_system():
-    return _system_settings.model_dump()
+def get_settings_system(request: Request):
+    data = _system_settings.model_dump(mode="json")
+    body = json.dumps(data, sort_keys=True).encode()
+    etag = hashlib.sha256(body).hexdigest()
+    inm = request.headers.get("if-none-match")
+    ims = request.headers.get("if-modified-since")
+    if inm == etag:
+        return JSONResponse(status_code=304, content=None)
+    if ims:
+        try:
+            ims_dt = parsedate_to_datetime(ims)
+            if ims_dt.tzinfo is None:
+                ims_dt = ims_dt.replace(tzinfo=timezone.utc)
+            if ims_dt >= _settings_last_modified.replace(microsecond=0):
+                return JSONResponse(status_code=304, content=None)
+        except Exception:
+            pass
+    headers = {
+        "ETag": etag,
+        "Last-Modified": format_datetime(_settings_last_modified),
+        "Cache-Control": "public, max-age=30",
+    }
+    return JSONResponse(content=data, headers=headers)
 
 
 @router.put("/settings/system")
@@ -507,6 +603,8 @@ def put_settings_system(settings_update: dict):
     # Update the settings object
     try:
         _system_settings = SystemSettings(**current)
+        global _settings_last_modified
+        _settings_last_modified = datetime.now(timezone.utc)
         return _system_settings.model_dump()
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Invalid settings: {str(e)}")
