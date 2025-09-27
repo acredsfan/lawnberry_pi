@@ -161,7 +161,11 @@ class DeadReckoningSystem:
     def estimate_position(self, heading: float, distance_traveled: float) -> Optional[Position]:
         """Estimate current position using dead reckoning"""
         if not self.last_gps_position:
-            return None
+            # Initialize a local frame at origin if no GPS reference exists yet.
+            # This enables dead-reckoning operation even before first GPS fix.
+            self.last_gps_position = Position(latitude=0.0, longitude=0.0, accuracy=10.0)
+            self.last_gps_time = datetime.now(timezone.utc)
+            self.estimated_position = self.last_gps_position
         
         self.active = True
         

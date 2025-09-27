@@ -238,7 +238,7 @@
       File: /home/pi/lawnberry/backend/src/api/rest.py
 - [x] T093 [P] Frontend WS client reconnection/resubscribe tests
       File: /home/pi/lawnberry/frontend/tests/integration/test_ws_resilience.spec.ts
-- [ ] T094 Dead-reckoning acceptance tests (drift bounds)
+- [x] T094 Dead-reckoning acceptance tests (drift bounds)
       File: /home/pi/lawnberry/tests/integration/test_dead_reckoning.py
 - [x] T095 Docs drift detection CI step
       File: /home/pi/lawnberry/.github/workflows/docs-drift.yml
