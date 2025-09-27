@@ -244,7 +244,7 @@
       File: /home/pi/lawnberry/.github/workflows/docs-drift.yml
 - [x] T096 Systemd health probes and boot order validation tests
       Files: /home/pi/lawnberry/tests/integration/test_systemd_health.py
-- [ ] T097 Frontend auth handling (JWT storage, expiry), gated routes tests
+- [x] T097 Frontend auth handling (JWT storage, expiry), gated routes tests
       Files: /home/pi/lawnberry/frontend/src/services/auth.ts, /home/pi/lawnberry/frontend/tests/integration/test_auth_routes.ts
 - [ ] T098 Offline maps mode (OSM fallback without key) + tests
       Files: /home/pi/lawnberry/frontend/src/pages/map_setup.ts, /home/pi/lawnberry/frontend/tests/integration/test_offline_maps.ts
