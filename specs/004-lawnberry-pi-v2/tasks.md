@@ -218,7 +218,7 @@
       File: /home/pi/lawnberry/backend/src/services/navigation_service.py
 - [x] T083 [P] REST endpoints for weather data and planning advice
       File: /home/pi/lawnberry/backend/src/api/rest.py
-- [ ] T084 [P] Frontend weather UI elements on Mow Planning
+- [x] T084 [P] Frontend weather UI elements on Mow Planning
       Path: /home/pi/lawnberry/frontend/src/pages/
 - [x] T085 Caching: Implement ETag/Last-Modified + Cache-Control on cacheable GETs
       Files: /home/pi/lawnberry/backend/src/api/rest.py

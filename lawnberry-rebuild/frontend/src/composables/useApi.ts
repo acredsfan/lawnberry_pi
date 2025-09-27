@@ -266,4 +266,32 @@ export const aiApi = {
   },
 }
 
+// Weather API endpoints
+export const weatherApi = {
+  getCurrent: async (params?: { lat?: number; lon?: number }) => {
+    const query = new URLSearchParams()
+    if (params?.lat !== undefined) query.append('lat', String(params.lat))
+    if (params?.lon !== undefined) query.append('lon', String(params.lon))
+    const path = query.toString() ? `/weather/current?${query}` : '/weather/current'
+    const response = await apiClient.get(path)
+    return response.data as {
+      temperature_c: number
+      humidity_percent: number
+      wind_speed_mps: number
+      condition: string
+      source: string
+      ts: string
+    }
+  },
+
+  getPlanningAdvice: async () => {
+    const response = await apiClient.get('/weather/planning-advice')
+    return response.data as {
+      advice: 'proceed' | 'avoid' | 'caution'
+      reason: string
+      next_review_at: string
+    }
+  },
+}
+
 export default apiClient
