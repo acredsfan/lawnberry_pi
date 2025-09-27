@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Set
+from pathlib import Path
 import json
 import asyncio
 import time
@@ -735,6 +736,48 @@ def weather_current(latitude: float | None = None, longitude: float | None = Non
 def weather_planning_advice(latitude: float | None = None, longitude: float | None = None):
     current = weather_service.get_current(latitude=latitude, longitude=longitude)
     return weather_service.get_planning_advice(current)
+
+
+# ------------------------ Docs Hub ------------------------
+
+
+def _docs_root() -> Path:
+    # backend/src/api/rest.py -> .../lawnberry-rebuild
+    return Path(__file__).resolve().parents[3] / "docs"
+
+
+@router.get("/docs/list")
+def docs_list():
+    root = _docs_root()
+    if not root.exists():
+        return []
+    items = []
+    for p in sorted(root.rglob("*.md")):
+        rel = p.relative_to(root).as_posix()
+        items.append({
+            "name": p.stem.replace('_', ' ').title(),
+            "path": rel,
+            "size": p.stat().st_size,
+        })
+    return items
+
+
+@router.get("/docs/{doc_path:path}")
+def docs_get(doc_path: str):
+    root = _docs_root()
+    target = (root / doc_path).resolve()
+    # Prevent path traversal
+    try:
+        target.relative_to(root)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="Document not found")
+    if target.suffix.lower() not in {".md", ".txt"}:
+        raise HTTPException(status_code=415, detail="Unsupported document type")
+    content = target.read_text(encoding="utf-8", errors="replace")
+    # Return as plain text; front-end will render markdown if desired
+    return PlainTextResponse(content)
 # ----------------------- WebSocket -----------------------
 
 
