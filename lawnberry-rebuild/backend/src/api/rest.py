@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Set
 from pathlib import Path
+import os
 import json
 import asyncio
 import time
@@ -22,6 +23,8 @@ class WebSocketHub:
         self.subscriptions: Dict[str, Set[str]] = {}  # topic -> client_ids
         self.telemetry_cadence_hz = 5.0
         self._telemetry_task: Optional[asyncio.Task] = None
+        # Hardware integration
+        self._sensor_manager = None  # lazy init to avoid hardware deps on CI
         
     async def connect(self, websocket: WebSocket, client_id: str):
         await websocket.accept()
@@ -105,14 +108,7 @@ class WebSocketHub:
     async def _telemetry_loop(self):
         while True:
             try:
-                # Generate telemetry data
-                telemetry_data = {
-                    "battery": {"percentage": 85.2, "voltage": 12.6},
-                    "position": {"latitude": 40.7128, "longitude": -74.0060},
-                    "motor_status": "idle",
-                    "safety_state": "safe",
-                    "uptime_seconds": time.time()
-                }
+                telemetry_data = await self._generate_telemetry()
                 
                 await self.broadcast_to_topic("telemetry/updates", telemetry_data)
                 
@@ -123,6 +119,71 @@ class WebSocketHub:
                 break
             except Exception:
                 await asyncio.sleep(1.0)
+
+    async def _generate_telemetry(self) -> dict:
+        """Generate telemetry from hardware when SIM_MODE=0, otherwise simulated.
+
+        Safe on CI: imports and hardware init are lazy and wrapped in try/except.
+        """
+        # SIM_MODE: default to simulation unless explicitly set to '0'
+        sim_mode = os.getenv("SIM_MODE", "1") != "0"
+
+        if not sim_mode:
+            # Try to read from SensorManager
+            try:
+                if self._sensor_manager is None:
+                    # Lazy import to avoid unnecessary deps in CI
+                    from ..services.sensor_manager import SensorManager  # type: ignore
+                    self._sensor_manager = SensorManager()
+                    # Initialize once (async)
+                    await self._sensor_manager.initialize()
+
+                if getattr(self._sensor_manager, "initialized", False):
+                    data = await self._sensor_manager.read_all_sensors()
+                    # Map to telemetry payload expected by clients
+                    battery_pct = None
+                    batt_v = None
+                    if data.power and data.power.battery_voltage is not None:
+                        batt_v = data.power.battery_voltage
+                        # Rough estimate of percentage from voltage for 12V lead-acid/LiFePO4 profiles
+                        # This is placeholder logic; real calibration to be added later
+                        battery_pct = max(0.0, min(100.0, (batt_v - 11.0) / (13.0 - 11.0) * 100.0))
+
+                    pos = data.gps
+                    imu = data.imu
+                    telemetry = {
+                        "source": "hardware",
+                        "battery": {"percentage": battery_pct, "voltage": batt_v},
+                        "position": {
+                            "latitude": getattr(pos, "latitude", None),
+                            "longitude": getattr(pos, "longitude", None),
+                            "altitude": getattr(pos, "altitude", None),
+                            "accuracy": getattr(pos, "accuracy", None),
+                            "gps_mode": getattr(pos, "mode", None),
+                        },
+                        "imu": {
+                            "roll": getattr(imu, "roll", None),
+                            "pitch": getattr(imu, "pitch", None),
+                            "yaw": getattr(imu, "yaw", None),
+                        },
+                        "motor_status": "idle",
+                        "safety_state": "safe",
+                        "uptime_seconds": time.time(),
+                    }
+                    return telemetry
+            except Exception:
+                # Fall back to simulation if hardware path fails
+                pass
+
+        # Simulated data
+        return {
+            "source": "simulated",
+            "battery": {"percentage": 85.2, "voltage": 12.6},
+            "position": {"latitude": 40.7128, "longitude": -74.0060},
+            "motor_status": "idle",
+            "safety_state": "safe",
+            "uptime_seconds": time.time(),
+        }
 
 # Global WebSocket hub instance
 websocket_hub = WebSocketHub()
@@ -776,8 +837,17 @@ def docs_get(doc_path: str):
     if target.suffix.lower() not in {".md", ".txt"}:
         raise HTTPException(status_code=415, detail="Unsupported document type")
     content = target.read_text(encoding="utf-8", errors="replace")
-    # Return as plain text; front-end will render markdown if desired
-    return PlainTextResponse(content)
+    # Add simple caching headers and appropriate content type
+    body = content.encode("utf-8", errors="replace")
+    etag = hashlib.sha256(body).hexdigest()
+    last_mod = datetime.fromtimestamp(target.stat().st_mtime, tz=timezone.utc)
+    headers = {
+        "ETag": etag,
+        "Last-Modified": format_datetime(last_mod),
+        "Cache-Control": "public, max-age=60",
+    }
+    media_type = "text/markdown; charset=utf-8" if target.suffix.lower() == ".md" else "text/plain; charset=utf-8"
+    return PlainTextResponse(content, headers=headers, media_type=media_type)
 # ----------------------- WebSocket -----------------------
 
 

@@ -25,7 +25,7 @@
         <div class="card-body">
           <div v-if="loadingDoc" class="text-muted">Loading…</div>
           <div v-else-if="docError" class="text-danger">{{ docError }}</div>
-          <pre v-else class="content">{{ content }}</pre>
+          <div v-else class="content" v-html="contentHtml"></div>
         </div>
       </div>
     </div>
@@ -33,8 +33,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import api from '@/composables/useApi'
+import { renderMarkdownSafe } from '@/utils/markdown'
 
 type DocItem = { name: string; path: string; size: number }
 
@@ -73,6 +74,8 @@ async function selectDoc(path: string) {
 }
 
 onMounted(loadList)
+
+const contentHtml = computed(() => renderMarkdownSafe(content.value))
 </script>
 
 <style scoped>
@@ -85,5 +88,10 @@ onMounted(loadList)
 .list li { margin-bottom: 0.25rem; }
 .link { background: none; border: none; color: #58a6ff; cursor: pointer; padding: 0; }
 .muted { color: #9aa4b2; font-size: 0.85rem; }
-.content { white-space: pre-wrap; line-height: 1.25; }
+.content { line-height: 1.4; }
+.content h1, .content h2, .content h3 { margin: 0.6rem 0 0.4rem; }
+.content p { margin: 0.4rem 0; }
+.content code, .content pre { background: #0f1722; border: 1px solid #1e293b; border-radius: 4px; padding: 0.2rem 0.35rem; }
+.content pre { padding: 0.6rem; overflow: auto; }
+.content a { color: #58a6ff; }
 </style>

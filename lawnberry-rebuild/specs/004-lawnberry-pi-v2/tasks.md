@@ -16,7 +16,7 @@ Note: This is a repo-local mirror to track on-device tasks while the upstream fe
       - /home/pi/lawnberry/lawnberry-rebuild/tests/integration/test_hardware_selftest.py
       - /home/pi/lawnberry/lawnberry-rebuild/docs/TESTING.md (on-device section)
 
-- [ ] T102 Wire SensorManager to real hardware behind SIM_MODE (0=hardware, 1=simulation)
+- [x] T102 Wire SensorManager to real hardware behind SIM_MODE (0=hardware, 1=simulation)
       Files:
       - /home/pi/lawnberry/lawnberry-rebuild/backend/src/services/sensor_manager.py
       Notes:
@@ -74,7 +74,11 @@ Note: This is a repo-local mirror to track on-device tasks while the upstream fe
       Notes:
       - When enabled, logs actual ranges and flags out-of-bounds readings
 
-- [ ] T110 WebSocket telemetry uses SensorManager when SIM_MODE=0
+- [x] T110 WebSocket telemetry uses SensorManager when SIM_MODE=0
+
+Notes:
+- SIM_MODE is read from environment; default is simulation (safe for CI). When SIM_MODE=0, the backend lazily initializes SensorManager and publishes hardware-backed telemetry on the WebSocket. Failures automatically fall back to simulated payloads.
+- Docs Hub now serves markdown with ETag/Last-Modified, and the frontend renders content with safe markdown (markdown-it + DOMPurify).
       Files:
       - /home/pi/lawnberry/lawnberry-rebuild/backend/src/services/telemetry_hub.py
       - /home/pi/lawnberry/lawnberry-rebuild/backend/src/api/rest.py (settings toggle)
