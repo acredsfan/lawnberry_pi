@@ -10,6 +10,7 @@ import hashlib
 from email.utils import format_datetime, parsedate_to_datetime
 from ..core.persistence import persistence
 from ..services.hw_selftest import run_selftest
+from ..services.weather_service import weather_service
 
 router = APIRouter()
 
@@ -716,6 +717,24 @@ def health_readiness():
         },
         "ready": ready,
     }
+
+
+# ------------------------ Weather ------------------------
+
+
+@router.get("/weather/current")
+def weather_current(latitude: float | None = None, longitude: float | None = None):
+    """Return minimal current weather snapshot.
+
+    latitude/longitude are optional; when missing, service returns simulated values.
+    """
+    return weather_service.get_current(latitude=latitude, longitude=longitude)
+
+
+@router.get("/weather/planning-advice")
+def weather_planning_advice(latitude: float | None = None, longitude: float | None = None):
+    current = weather_service.get_current(latitude=latitude, longitude=longitude)
+    return weather_service.get_planning_advice(current)
 # ----------------------- WebSocket -----------------------
 
 

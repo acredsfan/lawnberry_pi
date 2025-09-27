@@ -212,11 +212,11 @@
       Action: Run `.github/workflows` then update `/home/pi/lawnberry/lawnberry-rebuild/.specify/memory/AGENT_JOURNAL.md`
 
 ## Phase 3.8: Coverage Additions from Analysis
-- [ ] T081 Weather integration service (BME280 + OpenWeatherMap client)
+- [x] T081 Weather integration service (BME280 + OpenWeatherMap client)
       Files: /home/pi/lawnberry/backend/src/services/weather_service.py, /home/pi/lawnberry/backend/src/core/weather_client.py
 - [ ] T082 [P] Weather rules in Mow Planning (gate scheduling, optimal windows)
       File: /home/pi/lawnberry/backend/src/services/navigation_service.py
-- [ ] T083 [P] REST endpoints for weather data and planning advice
+- [x] T083 [P] REST endpoints for weather data and planning advice
       File: /home/pi/lawnberry/backend/src/api/rest.py
 - [ ] T084 [P] Frontend weather UI elements on Mow Planning
       Path: /home/pi/lawnberry/frontend/src/pages/
