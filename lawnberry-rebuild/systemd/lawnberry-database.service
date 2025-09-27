@@ -1,0 +1,37 @@
+[Unit]
+Description=LawnBerry Pi v2 Database Service
+Documentation=https://github.com/acredsfan/lawnberry_pi
+After=local-fs.target
+Before=lawnberry-backend.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+User=pi
+Group=pi
+
+# Database initialization and migration
+ExecStart=/bin/bash -c 'mkdir -p /home/pi/lawnberry/data /home/pi/lawnberry/logs /home/pi/lawnberry/config && \
+    cd /home/pi/lawnberry/lawnberry-rebuild && \
+    /home/pi/lawnberry/lawnberry-rebuild/.venv/bin/python -c "from backend.src.core.persistence import persistence; print(\"Database initialized\")"'
+
+# Permissions and directory setup
+ExecStartPre=/bin/mkdir -p /home/pi/lawnberry/data
+ExecStartPre=/bin/mkdir -p /home/pi/lawnberry/logs  
+ExecStartPre=/bin/mkdir -p /home/pi/lawnberry/config
+ExecStartPre=/bin/chown -R pi:pi /home/pi/lawnberry
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=false
+ProtectSystem=strict
+ReadWritePaths=/home/pi/lawnberry
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawnberry-database
+
+[Install]
+WantedBy=multi-user.target

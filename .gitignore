@@ -144,3 +144,5 @@ UI_FIX.md
 Other_issues.md
 imu_test.py
 pylance_errors.md
+.github/prompts/
+.specify/

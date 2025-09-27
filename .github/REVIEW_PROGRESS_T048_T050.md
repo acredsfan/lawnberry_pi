@@ -1,0 +1,1 @@
+Progress update for PR #25: Implemented and tested control endpoints (T048–T050). Next tasks: planning/jobs endpoints (T051–T053).

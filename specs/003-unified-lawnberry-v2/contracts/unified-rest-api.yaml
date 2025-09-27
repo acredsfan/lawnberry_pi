@@ -1,0 +1,874 @@
+openapi: 3.1.0
+info:
+  title: LawnBerry Pi v2 Unified System API
+  version: 2.0.0
+  description: >-
+    Complete REST API for LawnBerry Pi v2 autonomous mower system.
+    Supports all seven WebUI pages with real-time sensor data, navigation control,
+    safety monitoring, power management, AI processing, and system configuration.
+    Constitutional compliance: ARM64/Bookworm exclusive, proper authentication.
+servers:
+  - url: https://mower.local
+    description: On-device API gateway
+security:
+  - basicOperatorAuth: []
+paths:
+  # Dashboard API - Live system status and KPIs
+  /api/v1/dashboard/state:
+    get:
+      summary: Retrieve live mower dashboard snapshot with autonomous system status
+      operationId: getDashboardState
+      responses:
+        '200':
+          description: Complete dashboard telemetry snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardState'
+      tags: [Dashboard]
+  
+  /api/v1/dashboard/alerts:
+    get:
+      summary: List active safety and system alerts
+      operationId: getDashboardAlerts
+      responses:
+        '200':
+          description: Active alerts ordered by severity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  safety_alerts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SafetyAlert'
+                  system_alerts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SystemAlert'
+                  last_updated:
+                    type: string
+                    format: date-time
+      tags: [Dashboard]
+
+  # Sensor Data API - Real-time sensor readings
+  /api/v1/sensors/readings:
+    get:
+      summary: Get current sensor readings from all configured sensors
+      operationId: getSensorReadings
+      responses:
+        '200':
+          description: Current sensor data with timestamps and quality indicators
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SensorReadings'
+      tags: [Sensors]
+
+  /api/v1/sensors/health:
+    get:
+      summary: Get sensor system health and diagnostics
+      operationId: getSensorHealth
+      responses:
+        '200':
+          description: Sensor health status and diagnostics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SensorHealth'
+      tags: [Sensors]
+
+  # Navigation API - Autonomous navigation and path planning
+  /api/v1/navigation/status:
+    get:
+      summary: Get current navigation status and position
+      operationId: getNavigationStatus
+      responses:
+        '200':
+          description: Current navigation state and position
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NavigationStatus'
+      tags: [Navigation]
+
+  /api/v1/navigation/path:
+    get:
+      summary: Get current planned path and waypoints
+      operationId: getCurrentPath
+      responses:
+        '200':
+          description: Current path plan and waypoints
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NavigationPath'
+      tags: [Navigation]
+
+  # Map Setup API - Zone and boundary management
+  /api/v1/map/provider:
+    get:
+      summary: Get current map provider preference
+      operationId: getMapProvider
+      responses:
+        '200':
+          description: Current map provider preference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapProviderPreference'
+      tags: [Map Setup]
+    put:
+      summary: Set map provider preference (Google preferred; OSM fallback)
+      operationId: setMapProvider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MapProviderPreference'
+      responses:
+        '200':
+          description: Map provider updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapProviderPreference'
+      tags: [Map Setup]
+
+  /api/v1/map/boundary:
+    get:
+      summary: Get current yard boundary and exclusions (polygon)
+      operationId: getMapBoundary
+      responses:
+        '200':
+          description: Boundary polygon
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapBoundary'
+      tags: [Map Setup]
+    put:
+      summary: Set yard boundary and exclusions (polygon)
+      operationId: setMapBoundary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MapBoundary'
+      responses:
+        '200':
+          description: Boundary updated with validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapBoundary'
+      tags: [Map Setup]
+
+  /api/v1/map/locations:
+    get:
+      summary: Get Home, AM Sun, and PM Sun locations
+      operationId: getMapLocations
+      responses:
+        '200':
+          description: Current configured locations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapLocations'
+      tags: [Map Setup]
+    put:
+      summary: Set Home, AM Sun, and PM Sun locations
+      operationId: setMapLocations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MapLocations'
+      responses:
+        '200':
+          description: Locations updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapLocations'
+      tags: [Map Setup]
+  /api/v1/map/zones:
+    get:
+      summary: Fetch current mowing zones and exclusion areas
+      operationId: getMapZones
+      responses:
+        '200':
+          description: Current map configuration with autonomous navigation data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapZoneCollection'
+      tags: [Map Setup]
+    put:
+      summary: Replace mowing zones and exclusion areas
+      operationId: updateMapZones
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MapZoneUpdateRequest'
+      responses:
+        '200':
+          description: Zones updated successfully with navigation validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapZoneCollection'
+      tags: [Map Setup]
+
+  # Manual Control API - Direct mower control with safety
+  /api/v1/manual/command:
+    post:
+      summary: Issue direct drive or blade command with safety validation
+      operationId: postManualCommand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManualCommandRequest'
+      responses:
+        '202':
+          description: Command accepted with safety validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManualCommandResponse'
+      tags: [Manual Control]
+
+  /api/v1/manual/status:
+    get:
+      summary: Get current manual control status and capabilities
+      operationId: getManualStatus
+      responses:
+        '200':
+          description: Manual control system status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManualControlStatus'
+      tags: [Manual Control]
+
+  /api/v1/manual/rc-status:
+    get:
+      summary: Get RoboHAT RC/USB status as reported by firmware
+      operationId: getRCStatus
+      responses:
+        '200':
+          description: Current RC status snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RCStatus'
+      tags: [Manual Control]
+
+  # Mow Planning API - Job scheduling and management
+  /api/v1/mow/jobs:
+    get:
+      summary: List scheduled and running autonomous mow jobs
+      operationId: listMowJobs
+      responses:
+        '200':
+          description: Current job queue with autonomous planning data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MowJob'
+      tags: [Mow Planning]
+    post:
+      summary: Schedule new autonomous mow job
+      operationId: createMowJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MowJobCreateRequest'
+      responses:
+        '201':
+          description: Job created with autonomous validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MowJob'
+      tags: [Mow Planning]
+
+  /api/v1/mow/jobs/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      summary: Retrieve detailed job status and progress
+      operationId: getMowJob
+      responses:
+        '200':
+          description: Detailed job information with navigation data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MowJob'
+      tags: [Mow Planning]
+    delete:
+      summary: Cancel pending or running job
+      operationId: deleteMowJob
+      responses:
+        '204':
+          description: Job cancelled with safe autonomous shutdown
+      tags: [Mow Planning]
+
+  # AI Training API - Dataset management and model training
+  /api/v1/ai/datasets:
+    get:
+      summary: List captured datasets for AI training
+      operationId: listDatasets
+      responses:
+        '200':
+          description: Available datasets with training metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  datasets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Dataset'
+      tags: [AI Training]
+
+  /api/v1/ai/datasets/export:
+    post:
+      summary: Export datasets in COCO JSON and/or YOLO TXT formats
+      operationId: requestDatasetExport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DatasetExportRequest'
+      responses:
+        '202':
+          description: Export job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatasetExportJob'
+      tags: [AI Training]
+
+  # Power Management API - Battery and solar monitoring
+  /api/v1/power/status:
+    get:
+      summary: Get current power system status with constitutional channel compliance
+      operationId: getPowerStatus
+      responses:
+        '200':
+          description: Power system status with INA3221 channel data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PowerStatus'
+      tags: [Power]
+
+  /api/v1/power/history:
+    get:
+      summary: Get power consumption and charging history
+      operationId: getPowerHistory
+      parameters:
+        - name: hours
+          in: query
+          schema:
+            type: integer
+            default: 24
+            minimum: 1
+            maximum: 168
+      responses:
+        '200':
+          description: Historical power data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PowerHistory'
+      tags: [Power]
+
+  # Safety API - Safety monitoring and emergency controls
+  /api/v1/safety/status:
+    get:
+      summary: Get current safety system status
+      operationId: getSafetyStatus
+      responses:
+        '200':
+          description: Comprehensive safety system status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SafetyStatus'
+      tags: [Safety]
+
+  /api/v1/safety/emergency-stop:
+    post:
+      summary: Trigger emergency stop for all systems
+      operationId: triggerEmergencyStop
+      responses:
+        '200':
+          description: Emergency stop activated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  emergency_stop_active:
+                    type: boolean
+                  stopped_at:
+                    type: string
+                    format: date-time
+      tags: [Safety]
+
+  # Settings API - System configuration and preferences
+  /api/v1/settings/profile:
+    get:
+      summary: Retrieve complete system configuration profile
+      operationId: getSettingsProfile
+      responses:
+        '200':
+          description: Current settings with hardware and autonomous config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsProfile'
+      tags: [Settings]
+    put:
+      summary: Update system configuration profile
+      operationId: updateSettingsProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsProfileUpdateRequest'
+      responses:
+        '200':
+          description: Settings updated with validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsProfile'
+      tags: [Settings]
+
+  # Docs Hub API - Documentation and asset access
+  /api/v1/docs/index:
+    get:
+      summary: Retrieve documentation manifest with branding assets
+      operationId: getDocsIndex
+      security: []
+      responses:
+        '200':
+          description: Documentation manifest with retro branding
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DocsEntry'
+                  branding_assets:
+                    type: array
+                    items:  
+                      $ref: '#/components/schemas/BrandAsset'
+      tags: [Docs Hub]
+
+components:
+  securitySchemes:
+    basicOperatorAuth:
+      type: http
+      scheme: basic
+      description: Shared operator credential (constitutional requirement)
+
+  parameters:
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9a-fA-F-]{36}$'
+
+  schemas:
+    DashboardState:
+      type: object
+      required: [mower_state, navigation, safety, power, sensors, ai_status, last_update]
+      properties:
+        mower_state:
+          type: string
+          enum: [idle, autonomous_mowing, manual_control, returning_to_base, charging, error, maintenance]
+        navigation:
+          $ref: '#/components/schemas/NavigationSummary'
+        safety:
+          $ref: '#/components/schemas/SafetySummary'
+        power:
+          $ref: '#/components/schemas/PowerSummary'
+        sensors:
+          $ref: '#/components/schemas/SensorSummary'
+        ai_status:
+          $ref: '#/components/schemas/AIStatusSummary'
+        last_update:
+          type: string
+          format: date-time
+        telemetry_cadence_hz:
+          type: number
+          minimum: 1.0
+          maximum: 10.0
+          default: 5.0
+
+    NavigationSummary:
+      type: object
+      properties:
+        current_position:
+          $ref: '#/components/schemas/GPSCoordinate'
+        heading:
+          type: number
+          minimum: 0
+          maximum: 359.9
+        gps_mode:
+          type: string
+          enum: [rtk_usb, uart_fallback]
+        navigation_quality:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+
+    SafetySummary:
+      type: object
+      properties:
+        emergency_stop:
+          type: boolean
+        tilt_detected:
+          type: boolean
+        obstacles_detected:
+          type: boolean
+        blade_safety_active:
+          type: boolean
+
+    PowerSummary:
+      type: object
+      properties:
+        battery_voltage:
+          type: number
+        battery_percentage:
+          type: number
+          minimum: 0
+          maximum: 100
+        charging_state:
+          type: string
+          enum: [charging, discharging, idle]
+        solar_active:
+          type: boolean
+
+    SensorSummary:
+      type: object
+      properties:
+        sensors_online:
+          type: integer
+        sensors_total:
+          type: integer
+        last_sensor_update:
+          type: string
+          format: date-time
+
+    AIStatusSummary:
+      type: object
+      properties:
+        active_accelerator:
+          type: string
+          enum: [coral_usb, hailo_hat, cpu_fallback]
+        processing_fps:
+          type: number
+        objects_detected:
+          type: integer
+
+    SensorReadings:
+      type: object
+      properties:
+        imu:
+          $ref: '#/components/schemas/IMUReading'
+        power_monitor:
+          $ref: '#/components/schemas/PowerMonitorReading'
+        tof_sensors:
+          type: object
+          properties:
+            left:
+              $ref: '#/components/schemas/ToFReading'
+            right:
+              $ref: '#/components/schemas/ToFReading'
+        environmental:
+          $ref: '#/components/schemas/EnvironmentalReading'
+        timestamp:
+          type: string
+          format: date-time
+
+    IMUReading:
+      type: object
+      properties:
+        heading:
+          type: number
+          minimum: 0
+          maximum: 359.9
+        roll:
+          type: number
+        pitch:
+          type: number
+        acceleration_x:
+          type: number
+        acceleration_y:
+          type: number
+        acceleration_z:
+          type: number
+        quality:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+
+    PowerMonitorReading:
+      type: object
+      properties:
+        channel_1_battery:
+          $ref: '#/components/schemas/INA3221Channel'
+        channel_2_unused:
+          $ref: '#/components/schemas/INA3221Channel'
+        channel_3_solar:
+          $ref: '#/components/schemas/INA3221Channel'
+        bus_voltage:
+          type: number
+
+    INA3221Channel:
+      type: object
+      properties:
+        voltage:
+          type: number
+        current:
+          type: number
+        power:
+          type: number
+
+    ToFReading:
+      type: object
+      properties:
+        distance_mm:
+          type: integer
+          minimum: 0
+          maximum: 2000
+        quality:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        sensor_status:
+          type: string
+          enum: [active, fault, offline]
+
+    EnvironmentalReading:
+    MapProviderPreference:
+      type: object
+      properties:
+        provider:
+          type: string
+          enum: [google_maps, openstreetmap]
+        cost_optimization_enabled:
+          type: boolean
+          default: true
+
+    MapBoundary:
+      type: object
+      properties:
+        name:
+          type: string
+        polygon:
+          type: array
+          items:
+            $ref: '#/components/schemas/GPSCoordinate'
+        exclusions:
+          type: array
+          items:
+            type: array
+            items:
+              $ref: '#/components/schemas/GPSCoordinate'
+        updated_at:
+          type: string
+          format: date-time
+
+    MapLocations:
+      type: object
+      properties:
+        home:
+          $ref: '#/components/schemas/GPSCoordinate'
+        am_sun:
+          $ref: '#/components/schemas/GPSCoordinate'
+        pm_sun:
+          $ref: '#/components/schemas/GPSCoordinate'
+        updated_at:
+          type: string
+          format: date-time
+
+    RCStatus:
+      type: object
+      properties:
+        rc_enabled:
+          type: boolean
+        rc_mode:
+          type: string
+          enum: [emergency, manual, assisted, training]
+        signal_lost:
+          type: boolean
+        blade_enabled:
+          type: boolean
+        channels:
+          type: object
+          additionalProperties:
+            type: integer
+            description: PWM microseconds (1000-2000)
+        encoder_ticks:
+          type: integer
+        hall_left:
+          type: integer
+          nullable: true
+        hall_right:
+          type: integer
+          nullable: true
+      type: object
+      properties:
+        temperature:
+          type: number
+        humidity:
+          type: number
+        pressure:
+          type: number
+
+    NavigationStatus:
+      type: object
+      properties:
+        current_position:
+          $ref: '#/components/schemas/GPSCoordinate'
+        target_position:
+          $ref: '#/components/schemas/GPSCoordinate'
+        heading:
+          type: number
+        velocity:
+          type: number
+        path_progress:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        obstacles_detected:
+          type: array
+          items:
+            $ref: '#/components/schemas/ObstacleDetection'
+
+    GPSCoordinate:
+      type: object
+      properties:
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+        altitude:
+          type: number
+        accuracy:
+          type: number
+
+    ObstacleDetection:
+      type: object
+      properties:
+        distance:
+          type: number
+        bearing:
+          type: number
+        size:
+          type: string
+          enum: [small, medium, large]
+        confidence:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+
+    # Additional schemas for remaining endpoints...
+    SafetyAlert:
+      type: object
+      properties:
+        id:
+          type: string
+        severity:
+          type: string
+          enum: [info, warning, critical, emergency]
+        message:
+          type: string
+        source:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    SystemAlert:
+      type: object
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+          enum: [hardware, software, network, performance]
+        message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ManualCommandRequest:
+      type: object
+      required: [command, issued_at]
+      properties:
+        command:
+          type: string
+          enum: [drive-forward, drive-reverse, turn-left, turn-right, blade-on, blade-off, emergency-stop, autonomous-start, autonomous-stop]
+        magnitude:
+          type: number
+          minimum: 0
+          maximum: 1
+        duration_ms:
+          type: integer
+        issued_at:
+          type: string
+          format: date-time
+
+    ManualCommandResponse:
+      type: object
+      properties:
+        command_id:
+          type: string
+        status:
+          type: string
+          enum: [accepted, rejected, executing, completed, failed]
+        message:
+          type: string
+        accepted_at:
+          type: string
+          format: date-time
+
+    # Core entities for remaining schemas would continue here...
+    # This represents the unified API supporting both autonomous operation
+    # and the seven WebUI pages with constitutional compliance

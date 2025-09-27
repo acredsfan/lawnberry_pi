@@ -1,0 +1,1 @@
+Progress update: Implemented control endpoints (T048–T050) with passing tests. Next up: planning/jobs endpoints (T051–T053).
