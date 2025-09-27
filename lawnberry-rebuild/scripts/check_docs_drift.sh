@@ -38,7 +38,8 @@ echo "$CHANGED_FILES" >&2
 
 # Define code vs docs patterns
 CODE_REGEX='^(backend/|frontend/src/|systemd/|scripts/|pyproject\.toml)'
-DOCS_REGEX='^(docs/|spec/|README\.md|\.specify/memory/AGENT_JOURNAL\.md)'
+# Accept both singular spec/ (repo-local) and plural specs/ (external or future mirror)
+DOCS_REGEX='^(docs/|spec/|specs/|README\.md|\.specify/memory/AGENT_JOURNAL\.md)'
 
 # Exclusions (do not count as code for drift): tests/, .github/
 EXCLUDE_CODE_REGEX='^(tests/|\.github/|scripts/check_docs_drift\.sh)'
