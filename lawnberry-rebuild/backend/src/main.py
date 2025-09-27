@@ -26,14 +26,3 @@ app.include_router(rest_router, prefix="/api/v2")
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "lawnberry-backend"}
-
-
-@app.get("/health/liveness")
-def liveness():
-    return {"status": "alive"}
-
-
-@app.get("/health/readiness")
-def readiness():
-    # Basic readiness: app created and WS hub loop can be started
-    return {"status": "ready"}
