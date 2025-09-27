@@ -9,6 +9,7 @@ import time
 import hashlib
 from email.utils import format_datetime, parsedate_to_datetime
 from ..core.persistence import persistence
+from ..services.hw_selftest import run_selftest
 
 router = APIRouter()
 
@@ -663,6 +664,19 @@ def put_settings_system(settings_update: dict):
         return result
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Invalid settings: {str(e)}")
+
+
+# ------------------------ Hardware Self-Test ------------------------
+
+
+@router.get("/system/selftest")
+def system_selftest():
+    """Run on-device hardware self-test.
+
+    Safe to run on systems without hardware; returns a structured report.
+    """
+    report = run_selftest()
+    return report
 # ----------------------- WebSocket -----------------------
 
 
