@@ -185,11 +185,13 @@ class DeadReckoningSystem:
 class NavigationService:
     """Main navigation service with sensor fusion and path planning"""
     
-    def __init__(self):
+    def __init__(self, weather=None):
         self.navigation_state = NavigationState()
         self.path_planner = PathPlanner()
         self.obstacle_detector = ObstacleDetector()
         self.dead_reckoning = DeadReckoningSystem()
+        # Optional weather service with get_current() and get_planning_advice()
+        self.weather = weather
         
         # Navigation parameters
         self.max_speed = 0.8  # m/s
@@ -363,6 +365,22 @@ class NavigationService:
         if not self.navigation_state.current_position:
             logger.error("Cannot start navigation: no current position")
             return False
+        
+        # Weather gating if service is available
+        try:
+            if self.weather is not None:
+                pos = self.navigation_state.current_position
+                current = self.weather.get_current(
+                    latitude=getattr(pos, 'latitude', None),
+                    longitude=getattr(pos, 'longitude', None),
+                )
+                advice = self.weather.get_planning_advice(current)
+                if advice and advice.get("advice") == "avoid":
+                    logger.warning("Navigation start blocked by weather: %s", advice)
+                    return False
+        except Exception as e:
+            # Fail-open to avoid hard-blocking in case of weather service errors
+            logger.warning("Weather check failed, proceeding: %s", e)
         
         self.navigation_state.navigation_mode = NavigationMode.AUTO
         self.navigation_state.path_status = PathStatus.EXECUTING
