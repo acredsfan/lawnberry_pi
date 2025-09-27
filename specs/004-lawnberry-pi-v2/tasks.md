@@ -246,7 +246,7 @@
       Files: /home/pi/lawnberry/tests/integration/test_systemd_health.py
 - [x] T097 Frontend auth handling (JWT storage, expiry), gated routes tests
       Files: /home/pi/lawnberry/frontend/src/services/auth.ts, /home/pi/lawnberry/frontend/tests/integration/test_auth_routes.ts
-- [ ] T098 Offline maps mode (OSM fallback without key) + tests
+- [x] T098 Offline maps mode (OSM fallback without key) + tests
       Files: /home/pi/lawnberry/frontend/src/pages/map_setup.ts, /home/pi/lawnberry/frontend/tests/integration/test_offline_maps.ts
 - [ ] T099 Docs Hub content build/serve and tests
       Files: /home/pi/lawnberry/frontend/src/pages/docs_hub.tsx, /home/pi/lawnberry/tests/integration/test_docs_hub.py
