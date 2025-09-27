@@ -17,6 +17,7 @@ from functools import wraps
 import traceback
 import sys
 import os
+from .logging import apply_privacy_filter
 
 # System metrics
 from collections import defaultdict, deque
@@ -240,6 +241,9 @@ class ObservabilityManager:
                     '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
                 ))
             root_logger.addHandler(file_handler)
+
+        # Apply privacy redaction filter
+        apply_privacy_filter(root_logger)
     
     def _start_metrics_collection(self):
         """Start background metrics collection."""
