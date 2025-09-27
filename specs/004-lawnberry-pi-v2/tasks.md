@@ -240,9 +240,9 @@
       File: /home/pi/lawnberry/frontend/tests/integration/test_ws_resilience.spec.ts
 - [ ] T094 Dead-reckoning acceptance tests (drift bounds)
       File: /home/pi/lawnberry/tests/integration/test_dead_reckoning.py
-- [ ] T095 Docs drift detection CI step
+- [x] T095 Docs drift detection CI step
       File: /home/pi/lawnberry/.github/workflows/docs-drift.yml
-- [ ] T096 Systemd health probes and boot order validation tests
+- [x] T096 Systemd health probes and boot order validation tests
       Files: /home/pi/lawnberry/tests/integration/test_systemd_health.py
 - [ ] T097 Frontend auth handling (JWT storage, expiry), gated routes tests
       Files: /home/pi/lawnberry/frontend/src/services/auth.ts, /home/pi/lawnberry/frontend/tests/integration/test_auth_routes.ts
