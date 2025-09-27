@@ -124,6 +124,7 @@ class WebSocketHub:
 
 # Global WebSocket hub instance
 websocket_hub = WebSocketHub()
+_app_start_time = time.time()
 
 
 class AuthRequest(BaseModel):
@@ -677,6 +678,44 @@ def system_selftest():
     """
     report = run_selftest()
     return report
+
+
+# ------------------------ Health Endpoints ------------------------
+
+
+@router.get("/health/liveness")
+def health_liveness():
+    """Basic liveness for systemd: process is up and serving requests."""
+    uptime = max(0.0, time.time() - _app_start_time)
+    return {
+        "status": "ok",
+        "service": "lawnberry-backend",
+        "uptime_seconds": uptime,
+    }
+
+
+@router.get("/health/readiness")
+def health_readiness():
+    """Readiness: verify core dependencies are reachable (DB, app state)."""
+    db_ok = False
+    try:
+        with persistence.get_connection() as conn:
+            conn.execute("SELECT 1")
+            db_ok = True
+    except Exception:
+        db_ok = False
+
+    telemetry_state = "running" if getattr(websocket_hub, "_telemetry_task", None) else "idle"
+
+    ready = db_ok  # minimal: DB reachable => ready
+    return {
+        "status": "ready" if ready else "not-ready",
+        "components": {
+            "database": {"ok": db_ok},
+            "telemetry": {"state": telemetry_state},
+        },
+        "ready": ready,
+    }
 # ----------------------- WebSocket -----------------------
 
 
