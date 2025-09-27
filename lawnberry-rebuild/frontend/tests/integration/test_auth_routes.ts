@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { createRouter, createWebHistory } from 'vue-router'
 import { setActivePinia, createPinia, defineStore } from 'pinia'
 
@@ -57,7 +57,9 @@ describe('auth route guards', () => {
     store.isAuthenticated = false
     const router = makeRouter(store)
 
-    try { await router.push('/') } catch {}
+    try { await router.push('/') } catch (e) {
+      // ignore navigation errors in test
+    }
     expect(router.currentRoute.value.fullPath).toBe('/login')
   })
 

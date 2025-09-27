@@ -10,7 +10,7 @@
       <div class="card-body">
         <div class="controls">
           <label>
-            <input type="checkbox" :checked="isOffline" @change="onToggleOffline" />
+            <input type="checkbox" :checked="isOffline" @change="onToggleOffline">
             Use offline mode (no API key)
           </label>
           <div class="provider">{{ providerName }}</div>
@@ -23,7 +23,7 @@
       <div class="card-header"><strong>Tile Preview</strong></div>
       <div class="card-body">
         <div class="tile-preview">
-          <img :src="previewUrl" alt="Tile preview" />
+          <img :src="previewUrl" alt="Tile preview">
           <div class="meta">z={{ zoom }}, lat={{ lat.toFixed(4) }}, lon={{ lon.toFixed(4) }}</div>
         </div>
       </div>

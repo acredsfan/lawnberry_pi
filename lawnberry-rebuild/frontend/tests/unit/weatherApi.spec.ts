@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { weatherApi } from '@/composables/useApi'
-import axios from 'axios'
 
 vi.mock('axios', () => {
   const get = vi.fn(async (url: string) => {

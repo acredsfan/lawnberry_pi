@@ -25,7 +25,7 @@
         <div class="card-body">
           <div v-if="loadingDoc" class="text-muted">Loading…</div>
           <div v-else-if="docError" class="text-danger">{{ docError }}</div>
-          <div v-else class="content" v-html="contentHtml"></div>
+          <div v-else class="content" v-html="contentHtml" />
         </div>
       </div>
     </div>
