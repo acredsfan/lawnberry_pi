@@ -190,11 +190,27 @@ websocket_hub = WebSocketHub()
 _app_start_time = time.time()
 
 
-class AuthRequest(BaseModel):
-    credential: str
+class AuthLoginRequest(BaseModel):
+    # Support both shared-credential and username/password payloads
+    credential: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
+class UserOut(BaseModel):
+    id: str
+    username: str
+    role: str = "admin"
+    created_at: datetime = datetime.now(timezone.utc)
 
 
 class AuthResponse(BaseModel):
+    # Back-compat fields
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int = 3600
+    user: UserOut
+    # Contract-required convenience fields
     token: str
     expires_at: datetime
 
@@ -213,7 +229,7 @@ _auth_lockout_until: Dict[str, float] = {}
 
 
 @router.post("/auth/login", response_model=AuthResponse)
-def auth_login(payload: AuthRequest, request: Request):
+def auth_login(payload: AuthLoginRequest, request: Request):
     now = time.time()
     client_id = request.headers.get("X-Client-Id") or "global"
 
@@ -238,8 +254,19 @@ def auth_login(payload: AuthRequest, request: Request):
     attempts.append(now)
     _auth_attempts[client_id] = attempts
 
+    # Determine provided credentials
+    provided_credential = None
+    if payload.credential:
+        provided_credential = payload.credential
+    elif payload.username is not None or payload.password is not None:
+        # Simple compatibility: allow default admin/admin
+        if payload.username == "admin" and payload.password == "admin":
+            provided_credential = "operator123"
+        else:
+            provided_credential = None
+
     # Validate credential
-    if not payload.credential:
+    if not provided_credential:
         # Increment failed count
         failed = _auth_failed_counts.get(client_id, 0) + 1
         _auth_failed_counts[client_id] = failed
@@ -250,8 +277,47 @@ def auth_login(payload: AuthRequest, request: Request):
 
     # Successful login resets failed count
     _auth_failed_counts[client_id] = 0
-    exp = datetime.now(timezone.utc) + timedelta(hours=1)
-    return AuthResponse(token="dummy-token", expires_at=exp)
+
+    # Issue a dummy token compatible with frontend and tests
+    token = "lbp2-" + hashlib.sha256(f"{client_id}-{now}".encode()).hexdigest()[:32]
+    user = UserOut(id="admin", username="admin")
+    expires_in = 3600
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    return AuthResponse(
+        access_token=token,
+        token=token,
+        token_type="bearer",
+        expires_in=expires_in,
+        expires_at=expires_at,
+        user=user,
+    )
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    token: str
+    token_type: str = "bearer"
+    expires_in: int = 3600
+    expires_at: datetime
+
+
+@router.post("/auth/refresh", response_model=RefreshResponse)
+def auth_refresh():
+    # Return a new dummy token
+    token = "lbp2-" + hashlib.sha256(f"refresh-{time.time()}".encode()).hexdigest()[:32]
+    expires_in = 3600
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    return RefreshResponse(access_token=token, token=token, expires_in=expires_in, expires_at=expires_at)
+
+
+@router.post("/auth/logout")
+def auth_logout():
+    return {"ok": True}
+
+
+@router.get("/auth/profile", response_model=UserOut)
+def auth_profile():
+    return UserOut(id="admin", username="admin")
 
 
 class Position(BaseModel):

@@ -47,6 +47,8 @@ This specification is derived from the user prompt and prior unified specificati
 - Q: What’s the intended network exposure for the WebUI, REST API, and WebSocket hub? → A: C — Remote access supported out of the box (built-in secure exposure), configurable.
 - Q: Authentication strength for the single shared operator credential? → A: D — Password + TOTP + backup codes.
 - Q: Map provider cost control strategy? → A: C — Adaptive usage (reduced tiles/frequency) before fallback to OSM.
+- Q: GPS signal loss safety policy? → A: C — Dead reckoning for ≤2 minutes at reduced speed with stricter safety thresholds; stop and alert if GPS not restored.
+- Q: TLS certificate provisioning for built‑in remote access? → A: B — Built-in ACME (Let’s Encrypt) HTTP‑01 with automatic renewal.
 
 ---
 
@@ -84,7 +86,7 @@ A homeowner operates an autonomous robotic lawn mower through a web interface th
 
 ### Functional Requirements
 - FR-001: System MUST collect and process sensor data for IMU positioning, power monitoring, distance sensing, environmental readings, display telemetry, and wheel encoder feedback with bus isolation and robust error handling.
-- FR-002: System MUST plan and execute autonomous paths using GPS + IMU fusion and obstacle avoidance with safety-first decisions.
+- FR-002: System MUST plan and execute autonomous paths using GPS + IMU fusion and obstacle avoidance with safety-first decisions, including GPS-loss handling: switch to dead reckoning for ≤2 minutes at reduced speed with stricter safety thresholds, then stop and alert if GPS is not restored.
 - FR-003: System MUST control propulsion and cutting mechanisms with precise speed/direction control and safety interlocks.
 - FR-004: System MUST implement comprehensive safety protocols including emergency stops, tilt detection, obstacle avoidance, and hazard response with immediate motor shutdown and user notification.
 - FR-005: System MUST monitor power via INA3221 with constitutional channel assignments (1: Battery, 2: Unused, 3: Solar) and support sun-seeking (AM/PM Sun), return-to-Home idling, and low-power modes.
@@ -110,6 +112,7 @@ A homeowner operates an autonomous robotic lawn mower through a web interface th
 - FR-025: System MUST include complete user documentation for installation, setup, operation, maintenance, and migration with drift checks.
 - FR-026: System MUST execute a final cutover to replace the original build with this complete rebuild in the repository, including mainline branch cutover, versioned release tags, documented migration steps, and a verified rollback path.
 - FR-027: System MUST support built-in secure remote access (configurable) for the WebUI, REST API, and WebSocket hub, aligning with the clarified network exposure.
+- FR-028: System MUST provision TLS certificates via built-in ACME (Let’s Encrypt) HTTP‑01 with automatic renewal for remote access; user supplies a domain and ensures HTTP‑01 reachability. On certificate failure, access MUST fail closed with clear remediation guidance.
 
 ### Key Entities
 - Sensor Data: Real-time measurements with timestamps, bus assignments, validation, and error conditions.

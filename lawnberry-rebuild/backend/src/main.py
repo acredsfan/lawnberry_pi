@@ -22,6 +22,30 @@ app = FastAPI(
 app.include_router(rest_router, prefix="/api/v2")
 
 
+# Root endpoint with API information
+@app.get("/")
+def root():
+    return {
+        "service": "LawnBerry Pi v2 Backend API",
+        "version": "2.0.0",
+        "status": "running",
+        "api_docs": "/docs",
+        "api_redoc": "/redoc",
+        "api_endpoints": {
+            "health": "/health",
+            "api_v2": "/api/v2",
+            "websocket_telemetry": "/api/v2/ws/telemetry"
+        },
+        "key_endpoints": [
+            "/api/v2/health/liveness",
+            "/api/v2/health/readiness",
+            "/api/v2/dashboard/status",
+            "/api/v2/dashboard/telemetry",
+            "/api/v2/docs/list"
+        ]
+    }
+
+
 # Health check endpoint
 @app.get("/health")
 def health_check():
