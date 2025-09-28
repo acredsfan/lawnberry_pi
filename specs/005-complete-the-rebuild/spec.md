@@ -41,6 +41,13 @@ This specification is derived from the user prompt and prior unified specificati
 
 ---
 
+## Clarifications
+
+### Session 2025-09-27
+- Q: What’s the intended network exposure for the WebUI, REST API, and WebSocket hub? → A: C — Remote access supported out of the box (built-in secure exposure), configurable.
+
+---
+
 ## User Scenarios & Testing (mandatory)
 
 ### Primary User Story
@@ -100,6 +107,7 @@ A homeowner operates an autonomous robotic lawn mower through a web interface th
 - FR-024: System MUST include a comprehensive test suite covering unit, integration, and simulation scenarios (SIM_MODE=1) plus real hardware readiness.
 - FR-025: System MUST include complete user documentation for installation, setup, operation, maintenance, and migration with drift checks.
 - FR-026: System MUST execute a final cutover to replace the original build with this complete rebuild in the repository, including mainline branch cutover, versioned release tags, documented migration steps, and a verified rollback path.
+- FR-027: System MUST support built-in secure remote access (configurable) for the WebUI, REST API, and WebSocket hub, aligning with the clarified network exposure.
 
 ### Key Entities
 - Sensor Data: Real-time measurements with timestamps, bus assignments, validation, and error conditions.
