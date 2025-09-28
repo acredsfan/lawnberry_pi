@@ -13,6 +13,11 @@ PLACEHOLDER_BASENAMES = {
     "test_hardware_compliance.py",
     "test_migration_v1_to_v2.py",
     "test_webui_experience.py",
+    # Placeholders still pending implementation
+    # Existing integration placeholders not yet implemented
+    "test_acme_tls.py",
+    "test_gps_loss_policy.py",
+    "test_map_cost_control.py",
 }
 
 

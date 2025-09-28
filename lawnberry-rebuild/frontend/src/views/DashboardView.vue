@@ -135,24 +135,37 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSystemStore } from '@/stores/system'
 import { controlApi } from '@/composables/useApi'
+import { useWebSocket } from '@/services/websocket'
 import StatusCard from '@/components/StatusCard.vue'
 import MetricWidget from '@/components/MetricWidget.vue'
 import ControlPanel from '@/components/ControlPanel.vue'
 
 const systemStore = useSystemStore()
+const { connected, connecting, connect, subscribe, unsubscribe } = useWebSocket()
 
 const isLoading = ref(false)
 const currentMode = ref('Idle')
 const progress = ref(0)
 const uptime = ref('0h 0m')
 const gpsPosition = ref('N/A')
-const batteryLevel = ref(100)
+const batteryLevel = ref(85.2)
 const speed = ref(0.0)
 const speedTrend = ref(5)
 const temperature = ref(25.0)
+
+// Live telemetry data
+const telemetryData = ref({
+  battery: { percentage: 85.2, voltage: 12.6 },
+  position: { latitude: null, longitude: null },
+  motor_status: 'idle',
+  safety_state: 'safe',
+  weather: { temperature_c: 25.0, humidity_percent: 60 },
+  system: { cpu_usage_percent: 30, memory_usage_percent: 45 },
+  lastUpdate: new Date()
+})
 
 const recentEvents = ref([
   { id: 1, timestamp: new Date(), message: 'System started successfully', level: 'info' },
@@ -215,9 +228,91 @@ const formatTime = (timestamp: Date) => {
   return timestamp.toLocaleTimeString()
 }
 
-onMounted(() => {
-  // Update telemetry data when new messages arrive
-  // This would be connected to the WebSocket in a real implementation
+onMounted(async () => {
+  // Connect to WebSocket for live telemetry
+  await connect()
+  
+  // Subscribe to telemetry topics
+  subscribe('telemetry.power', (data) => {
+    if (data.battery) {
+      telemetryData.value.battery = data.battery
+      batteryLevel.value = data.battery.percentage || 0
+    }
+    telemetryData.value.lastUpdate = new Date()
+  })
+  
+  subscribe('telemetry.navigation', (data) => {
+    if (data.position) {
+      telemetryData.value.position = data.position
+      if (data.position.latitude && data.position.longitude) {
+        gpsPosition.value = `${data.position.latitude.toFixed(6)}, ${data.position.longitude.toFixed(6)}`
+      }
+    }
+    telemetryData.value.lastUpdate = new Date()
+  })
+  
+  subscribe('telemetry.motors', (data) => {
+    if (data.motor_status) {
+      telemetryData.value.motor_status = data.motor_status
+      currentMode.value = data.motor_status === 'idle' ? 'Idle' : 'Running'
+    }
+    telemetryData.value.lastUpdate = new Date()
+  })
+  
+  subscribe('telemetry.system', (data) => {
+    if (data.safety_state) {
+      telemetryData.value.safety_state = data.safety_state
+    }
+    if (data.uptime_seconds) {
+      const uptimeSeconds = data.uptime_seconds
+      const hours = Math.floor(uptimeSeconds / 3600)
+      const minutes = Math.floor((uptimeSeconds % 3600) / 60)
+      uptime.value = `${hours}h ${minutes}m`
+    }
+    telemetryData.value.lastUpdate = new Date()
+  })
+  
+  subscribe('telemetry.weather', (data) => {
+    if (data.temperature_c) {
+      telemetryData.value.weather.temperature_c = data.temperature_c
+      temperature.value = data.temperature_c
+    }
+    if (data.humidity_percent) {
+      telemetryData.value.weather.humidity_percent = data.humidity_percent
+    }
+    telemetryData.value.lastUpdate = new Date()
+  })
+  
+  subscribe('system.performance', (data) => {
+    if (data.cpu_usage_percent) {
+      telemetryData.value.system.cpu_usage_percent = data.cpu_usage_percent
+    }
+    if (data.memory_usage_percent) {
+      telemetryData.value.system.memory_usage_percent = data.memory_usage_percent
+    }
+    telemetryData.value.lastUpdate = new Date()
+  })
+  
+  subscribe('jobs.progress', (data) => {
+    if (data.progress_percent !== undefined) {
+      progress.value = data.progress_percent
+    }
+    if (data.current_job) {
+      currentMode.value = data.status === 'running' ? `Running: ${data.current_job}` : 'Idle'
+    }
+    telemetryData.value.lastUpdate = new Date()
+  })
+})
+
+onUnmounted(() => {
+  // Cleanup subscriptions
+  unsubscribe('telemetry.power')
+  unsubscribe('telemetry.navigation')
+  unsubscribe('telemetry.motors')
+  unsubscribe('telemetry.system')
+  unsubscribe('telemetry.weather')
+  unsubscribe('system.performance')
+  unsubscribe('jobs.progress')
 })
 </script>
 

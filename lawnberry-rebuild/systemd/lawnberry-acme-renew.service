@@ -1,0 +1,50 @@
+[Unit]
+Description=LawnBerry Pi ACME Certificate Renewal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/home/pi/lawnberry/lawnberry-rebuild
+Environment=PYTHONPATH=/home/pi/lawnberry/lawnberry-rebuild/backend/src
+ExecStart=/home/pi/lawnberry/lawnberry-rebuild/backend/venv/bin/python -c "
+from services.acme_service import acme_service
+import asyncio
+
+async def renew_certificates():
+    print('Starting ACME certificate renewal check...')
+    domains = acme_service.get_certificates_needing_renewal()
+    
+    if not domains:
+        print('No certificates need renewal.')
+        return
+        
+    print(f'Found {len(domains)} certificates needing renewal: {domains}')
+    
+    for domain in domains:
+        try:
+            result = acme_service.renew_certificate(domain)
+            if 'error' in result:
+                print(f'Failed to renew {domain}: {result[\"error\"]}')
+            else:
+                print(f'Successfully renewed certificate for {domain}')
+                # Reload web server after successful renewal
+                acme_service.reload_web_server()
+        except Exception as e:
+            print(f'Error renewing {domain}: {e}')
+    
+    print('ACME certificate renewal check completed.')
+
+if __name__ == '__main__':
+    asyncio.run(renew_certificates())
+"
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawnberry-acme-renew
+
+[Install]
+WantedBy=multi-user.target

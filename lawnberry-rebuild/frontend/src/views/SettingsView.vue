@@ -5,16 +5,466 @@
       <p class="text-muted">System configuration and preferences</p>
     </div>
     
-    <div class="card">
-      <div class="card-body">
-        <p>Settings interface coming soon...</p>
+    <!-- Settings Tabs -->
+    <div class="settings-tabs">
+      <button 
+        v-for="tab in tabs" 
+        :key="tab.id"
+        :class="{ active: activeTab === tab.id }"
+        @click="activeTab = tab.id"
+        class="tab-button"
+      >
+        {{ tab.label }}
+      </button>
+    </div>
+    
+    <!-- System Settings -->
+    <div v-if="activeTab === 'system'" class="settings-section">
+      <div class="card">
+        <div class="card-header">
+          <h3>System Settings</h3>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Device Name</label>
+            <input 
+              v-model="systemSettings.device_name" 
+              type="text" 
+              class="form-control"
+              placeholder="LawnBerry Pi"
+            />
+          </div>
+          
+          <div class="form-group">
+            <label>Timezone</label>
+            <select v-model="systemSettings.timezone" class="form-control">
+              <option value="UTC">UTC</option>
+              <option value="US/Eastern">US/Eastern</option>
+              <option value="US/Central">US/Central</option>
+              <option value="US/Mountain">US/Mountain</option>
+              <option value="US/Pacific">US/Pacific</option>
+              <option value="Europe/London">Europe/London</option>
+              <option value="Europe/Paris">Europe/Paris</option>
+            </select>
+          </div>
+          
+          <div class="form-group">
+            <label>
+              <input 
+                v-model="systemSettings.debug_mode" 
+                type="checkbox"
+                class="form-check-input"
+              /> 
+              Enable Debug Mode
+            </label>
+          </div>
+          
+          <button @click="saveSystemSettings" class="btn btn-primary" :disabled="saving">
+            {{ saving ? 'Saving...' : 'Save System Settings' }}
+          </button>
+        </div>
       </div>
+    </div>
+    
+    <!-- Security Settings -->
+    <div v-if="activeTab === 'security'" class="settings-section">
+      <div class="card">
+        <div class="card-header">
+          <h3>Security Settings</h3>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Authentication Level</label>
+            <select v-model="securitySettings.auth_level" class="form-control">
+              <option value="password">Password Only</option>
+              <option value="totp">Password + TOTP</option>
+              <option value="google">Google Authentication</option>
+              <option value="cloudflare">Cloudflare Tunnel Auth</option>
+            </select>
+            <small class="form-text text-muted">
+              Higher levels provide better security for remote access
+            </small>
+          </div>
+          
+          <div class="form-group">
+            <label>Session Timeout (minutes)</label>
+            <input 
+              v-model.number="securitySettings.session_timeout_minutes" 
+              type="number" 
+              class="form-control"
+              min="5" 
+              max="1440"
+            />
+          </div>
+          
+          <div class="form-group">
+            <label>
+              <input 
+                v-model="securitySettings.require_https" 
+                type="checkbox"
+                class="form-check-input"
+              /> 
+              Require HTTPS
+            </label>
+          </div>
+          
+          <div class="form-group">
+            <label>
+              <input 
+                v-model="securitySettings.auto_lock_manual_control" 
+                type="checkbox"
+                class="form-check-input"
+              /> 
+              Auto-lock Manual Control
+            </label>
+          </div>
+          
+          <button @click="saveSecuritySettings" class="btn btn-primary" :disabled="saving">
+            {{ saving ? 'Saving...' : 'Save Security Settings' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Remote Access Settings -->
+    <div v-if="activeTab === 'remote'" class="settings-section">
+      <div class="card">
+        <div class="card-header">
+          <h3>Remote Access Settings</h3>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Remote Access Method</label>
+            <select v-model="remoteSettings.method" class="form-control">
+              <option value="none">Disabled</option>
+              <option value="cloudflare">Cloudflare Tunnel</option>
+              <option value="ngrok">Ngrok</option>
+              <option value="custom">Custom Domain</option>
+            </select>
+          </div>
+          
+          <div v-if="remoteSettings.method === 'cloudflare'" class="remote-config">
+            <div class="form-group">
+              <label>Cloudflare Tunnel Token</label>
+              <input 
+                v-model="remoteSettings.cloudflare_token" 
+                type="password" 
+                class="form-control"
+                placeholder="Enter tunnel token"
+              />
+            </div>
+          </div>
+          
+          <div v-if="remoteSettings.method === 'ngrok'" class="remote-config">
+            <div class="form-group">
+              <label>Ngrok Auth Token</label>
+              <input 
+                v-model="remoteSettings.ngrok_token" 
+                type="password" 
+                class="form-control"
+                placeholder="Enter ngrok token"
+              />
+            </div>
+          </div>
+          
+          <div v-if="remoteSettings.method === 'custom'" class="remote-config">
+            <div class="form-group">
+              <label>Custom Domain</label>
+              <input 
+                v-model="remoteSettings.custom_domain" 
+                type="text" 
+                class="form-control"
+                placeholder="example.com"
+              />
+            </div>
+            
+            <div class="form-group">
+              <label>
+                <input 
+                  v-model="remoteSettings.auto_tls" 
+                  type="checkbox"
+                  class="form-check-input"
+                /> 
+                Automatic TLS (Let's Encrypt)
+              </label>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label>
+              <input 
+                v-model="remoteSettings.enabled" 
+                type="checkbox"
+                class="form-check-input"
+              /> 
+              Enable Remote Access
+            </label>
+          </div>
+          
+          <button @click="saveRemoteSettings" class="btn btn-primary" :disabled="saving">
+            {{ saving ? 'Saving...' : 'Save Remote Access Settings' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Maps Settings -->
+    <div v-if="activeTab === 'maps'" class="settings-section">
+      <div class="card">
+        <div class="card-header">
+          <h3>Maps Settings</h3>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Maps Provider</label>
+            <select v-model="mapsSettings.provider" class="form-control">
+              <option value="osm">OpenStreetMap (Free)</option>
+              <option value="google">Google Maps</option>
+              <option value="none">Disabled</option>
+            </select>
+          </div>
+          
+          <div v-if="mapsSettings.provider === 'google'" class="maps-config">
+            <div class="form-group">
+              <label>Google Maps API Key</label>
+              <input 
+                v-model="mapsSettings.google_api_key" 
+                type="password" 
+                class="form-control"
+                placeholder="Enter your Google Maps API key"
+              />
+              <small class="form-text text-muted">
+                Required for Google Maps features. Get your key at 
+                <a href="https://developers.google.com/maps" target="_blank">Google Cloud Console</a>
+              </small>
+            </div>
+            
+            <div class="form-group">
+              <label>
+                <input 
+                  v-model="mapsSettings.google_billing_warnings" 
+                  type="checkbox"
+                  class="form-check-input"
+                /> 
+                Show billing warnings
+              </label>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label>Map Style</label>
+            <select v-model="mapsSettings.style" class="form-control">
+              <option value="standard">Standard</option>
+              <option value="satellite">Satellite</option>
+              <option value="hybrid">Hybrid</option>
+              <option value="terrain">Terrain</option>
+            </select>
+          </div>
+          
+          <button @click="saveMapsSettings" class="btn btn-primary" :disabled="saving">
+            {{ saving ? 'Saving...' : 'Save Maps Settings' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- GPS Policy Settings -->
+    <div v-if="activeTab === 'gps'" class="settings-section">
+      <div class="card">
+        <div class="card-header">
+          <h3>GPS Policy Settings</h3>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>GPS Loss Policy</label>
+            <select v-model="gpsSettings.gps_loss_policy" class="form-control">
+              <option value="stop">Stop Immediately</option>
+              <option value="return_home">Return to Base</option>
+              <option value="dead_reckoning">Continue with Dead Reckoning</option>
+            </select>
+          </div>
+          
+          <div v-if="gpsSettings.gps_loss_policy === 'dead_reckoning'" class="gps-config">
+            <div class="form-group">
+              <label>Dead Reckoning Duration (minutes)</label>
+              <input 
+                v-model.number="gpsSettings.dead_reckoning_duration_minutes" 
+                type="number" 
+                class="form-control"
+                min="1" 
+                max="10"
+              />
+              <small class="form-text text-muted">
+                Maximum time to continue without GPS (recommended: ≤2 minutes)
+              </small>
+            </div>
+            
+            <div class="form-group">
+              <label>Reduced Speed Factor</label>
+              <input 
+                v-model.number="gpsSettings.reduced_speed_factor" 
+                type="number" 
+                class="form-control"
+                min="0.1" 
+                max="1.0" 
+                step="0.1"
+              />
+              <small class="form-text text-muted">
+                Speed multiplier during dead reckoning (0.1 = 10% speed)
+              </small>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label>GPS Accuracy Threshold (meters)</label>
+            <input 
+              v-model.number="gpsSettings.accuracy_threshold_meters" 
+              type="number" 
+              class="form-control"
+              min="1" 
+              max="10"
+            />
+          </div>
+          
+          <button @click="saveGpsSettings" class="btn btn-primary" :disabled="saving">
+            {{ saving ? 'Saving...' : 'Save GPS Settings' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Status indicator -->
+    <div v-if="saveMessage" class="alert" :class="saveSuccess ? 'alert-success' : 'alert-danger'">
+      {{ saveMessage }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-// Settings view logic will be implemented later
+import { ref, onMounted } from 'vue'
+import { useApiService } from '@/services/api'
+
+const api = useApiService()
+
+// State
+const activeTab = ref('system')
+const saving = ref(false)
+const saveMessage = ref('')
+const saveSuccess = ref(false)
+
+// Tabs configuration
+const tabs = [
+  { id: 'system', label: 'System' },
+  { id: 'security', label: 'Security' },
+  { id: 'remote', label: 'Remote Access' },
+  { id: 'maps', label: 'Maps' },
+  { id: 'gps', label: 'GPS Policy' }
+]
+
+// Settings objects
+const systemSettings = ref({
+  device_name: 'LawnBerry Pi',
+  timezone: 'UTC',
+  debug_mode: false
+})
+
+const securitySettings = ref({
+  auth_level: 'password',
+  session_timeout_minutes: 60,
+  require_https: false,
+  auto_lock_manual_control: true
+})
+
+const remoteSettings = ref({
+  method: 'none',
+  enabled: false,
+  cloudflare_token: '',
+  ngrok_token: '',
+  custom_domain: '',
+  auto_tls: true
+})
+
+const mapsSettings = ref({
+  provider: 'osm',
+  google_api_key: '',
+  google_billing_warnings: true,
+  style: 'standard'
+})
+
+const gpsSettings = ref({
+  gps_loss_policy: 'dead_reckoning',
+  dead_reckoning_duration_minutes: 2,
+  reduced_speed_factor: 0.5,
+  accuracy_threshold_meters: 3
+})
+
+// Load settings
+async function loadAllSettings() {
+  try {
+    const [system, security, remote, maps, gps] = await Promise.all([
+      api.get('/api/v2/settings/system'),
+      api.get('/api/v2/settings/security'),
+      api.get('/api/v2/settings/remote-access'),
+      api.get('/api/v2/settings/maps'),
+      api.get('/api/v2/settings/gps-policy')
+    ])
+    
+    systemSettings.value = { ...systemSettings.value, ...system.data }
+    securitySettings.value = { ...securitySettings.value, ...security.data }
+    remoteSettings.value = { ...remoteSettings.value, ...remote.data }
+    mapsSettings.value = { ...mapsSettings.value, ...maps.data }
+    gpsSettings.value = { ...gpsSettings.value, ...gps.data }
+  } catch (error) {
+    console.error('Failed to load settings:', error)
+    showMessage('Failed to load settings', false)
+  }
+}
+
+// Save functions
+async function saveSystemSettings() {
+  await saveSettings('/api/v2/settings/system', systemSettings.value)
+}
+
+async function saveSecuritySettings() {
+  await saveSettings('/api/v2/settings/security', securitySettings.value)
+}
+
+async function saveRemoteSettings() {
+  await saveSettings('/api/v2/settings/remote-access', remoteSettings.value)
+}
+
+async function saveMapsSettings() {
+  await saveSettings('/api/v2/settings/maps', mapsSettings.value)
+}
+
+async function saveGpsSettings() {
+  await saveSettings('/api/v2/settings/gps-policy', gpsSettings.value)
+}
+
+async function saveSettings(endpoint: string, data: any) {
+  saving.value = true
+  try {
+    await api.put(endpoint, data)
+    showMessage('Settings saved successfully!', true)
+  } catch (error) {
+    console.error('Failed to save settings:', error)
+    showMessage('Failed to save settings', false)
+  } finally {
+    saving.value = false
+  }
+}
+
+function showMessage(message: string, success: boolean) {
+  saveMessage.value = message
+  saveSuccess.value = success
+  setTimeout(() => {
+    saveMessage.value = ''
+  }, 3000)
+}
+
+onMounted(() => {
+  loadAllSettings()
+})
 </script>
 
 <style scoped>
@@ -28,5 +478,188 @@
 
 .page-header h1 {
   margin-bottom: 0.5rem;
+}
+
+.settings-tabs {
+  display: flex;
+  border-bottom: 2px solid var(--primary-dark);
+  margin-bottom: 2rem;
+  overflow-x: auto;
+}
+
+.tab-button {
+  background: none;
+  border: none;
+  padding: 1rem 2rem;
+  color: var(--text-color);
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.tab-button:hover {
+  background-color: var(--primary-dark);
+  color: var(--primary-light);
+}
+
+.tab-button.active {
+  border-bottom-color: var(--accent-green);
+  color: var(--accent-green);
+  background-color: var(--primary-dark);
+}
+
+.settings-section {
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.card {
+  background: var(--secondary-dark);
+  border: 1px solid var(--primary-light);
+  border-radius: 8px;
+  margin-bottom: 2rem;
+}
+
+.card-header {
+  background: var(--primary-dark);
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--primary-light);
+  border-radius: 8px 8px 0 0;
+}
+
+.card-header h3 {
+  margin: 0;
+  color: var(--accent-green);
+  font-size: 1.25rem;
+}
+
+.card-body {
+  padding: 1.5rem;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--text-color);
+  font-weight: 500;
+}
+
+.form-control {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--primary-dark);
+  border: 1px solid var(--primary-light);
+  border-radius: 4px;
+  color: var(--text-color);
+  font-size: 1rem;
+}
+
+.form-control:focus {
+  outline: none;
+  border-color: var(--accent-green);
+  box-shadow: 0 0 0 2px rgba(0, 255, 146, 0.2);
+}
+
+.form-control::placeholder {
+  color: var(--text-muted);
+}
+
+.form-check-input {
+  margin-right: 0.5rem;
+  width: auto;
+}
+
+.form-text {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-primary {
+  background: var(--accent-green);
+  color: var(--primary-dark);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-green-hover);
+  transform: translateY(-2px);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.remote-config,
+.maps-config,
+.gps-config {
+  margin-left: 1rem;
+  padding-left: 1rem;
+  border-left: 3px solid var(--accent-green);
+}
+
+.alert {
+  padding: 1rem;
+  border-radius: 4px;
+  margin-top: 1rem;
+}
+
+.alert-success {
+  background: rgba(0, 255, 146, 0.1);
+  border: 1px solid var(--accent-green);
+  color: var(--accent-green);
+}
+
+.alert-danger {
+  background: rgba(255, 67, 67, 0.1);
+  border: 1px solid #ff4343;
+  color: #ff4343;
+}
+
+@media (max-width: 768px) {
+  .settings-tabs {
+    flex-direction: column;
+  }
+  
+  .tab-button {
+    padding: 0.75rem 1rem;
+    text-align: left;
+  }
+  
+  .remote-config,
+  .maps-config,
+  .gps-config {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: none;
+    border-top: 3px solid var(--accent-green);
+    padding-top: 1rem;
+    margin-top: 1rem;
+  }
 }
 </style>

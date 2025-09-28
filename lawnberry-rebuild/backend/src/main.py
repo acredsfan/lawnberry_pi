@@ -21,6 +21,10 @@ app = FastAPI(
 
 app.include_router(rest_router, prefix="/api/v2")
 
+# Add v1 API router for contract compliance
+from .api.rest_v1 import router as rest_v1_router
+app.include_router(rest_v1_router, prefix="/api/v1")
+
 
 # Root endpoint with API information
 @app.get("/")

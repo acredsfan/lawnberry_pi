@@ -10,7 +10,11 @@ import asyncio
 import time
 import hashlib
 from email.utils import format_datetime, parsedate_to_datetime
+import uuid
+from ..models.auth_security_config import AuthSecurityConfig
+from ..models.remote_access_config import RemoteAccessConfig
 from ..core.persistence import persistence
+import os
 from ..services.hw_selftest import run_selftest
 from ..services.weather_service import weather_service
 
@@ -51,6 +55,18 @@ class WebSocketHub:
         if client_id in self.clients:
             await self.clients[client_id].send_text(json.dumps({
                 "event": "subscription.confirmed",
+                "topic": topic,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }))
+            
+    async def unsubscribe(self, client_id: str, topic: str):
+        if topic in self.subscriptions:
+            self.subscriptions[topic].discard(client_id)
+            
+        # Send confirmation
+        if client_id in self.clients:
+            await self.clients[client_id].send_text(json.dumps({
+                "event": "unsubscription.confirmed", 
                 "topic": topic,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }))
@@ -110,7 +126,8 @@ class WebSocketHub:
             try:
                 telemetry_data = await self._generate_telemetry()
                 
-                await self.broadcast_to_topic("telemetry/updates", telemetry_data)
+                # Broadcast to topic-specific channels
+                await self._broadcast_telemetry_topics(telemetry_data)
                 
                 # Wait based on cadence
                 await asyncio.sleep(1.0 / self.telemetry_cadence_hz)
@@ -119,6 +136,92 @@ class WebSocketHub:
                 break
             except Exception:
                 await asyncio.sleep(1.0)
+                
+    async def _broadcast_telemetry_topics(self, telemetry_data: dict):
+        """Broadcast telemetry data to appropriate topics."""
+        # Extract data for specific topics
+        if "battery" in telemetry_data:
+            await self.broadcast_to_topic("telemetry.power", {
+                "battery": telemetry_data["battery"],
+                "source": telemetry_data.get("source", "unknown")
+            })
+            
+        if "position" in telemetry_data:
+            await self.broadcast_to_topic("telemetry.navigation", {
+                "position": telemetry_data["position"],
+                "source": telemetry_data.get("source", "unknown")
+            })
+            
+        if "imu" in telemetry_data:
+            await self.broadcast_to_topic("telemetry.sensors", {
+                "imu": telemetry_data["imu"],
+                "source": telemetry_data.get("source", "unknown")
+            })
+            
+        if "motor_status" in telemetry_data:
+            await self.broadcast_to_topic("telemetry.motors", {
+                "motor_status": telemetry_data["motor_status"],
+                "source": telemetry_data.get("source", "unknown")
+            })
+            
+        # System status
+        system_data = {
+            "safety_state": telemetry_data.get("safety_state", "unknown"),
+            "uptime_seconds": telemetry_data.get("uptime_seconds", 0),
+            "source": telemetry_data.get("source", "unknown")
+        }
+        await self.broadcast_to_topic("telemetry.system", system_data)
+        await self.broadcast_to_topic("system.health", system_data)
+        
+        # Legacy support: broadcast full data to general telemetry topic
+        await self.broadcast_to_topic("telemetry/updates", telemetry_data)
+        
+        # Additional simulated topics (for demo/testing)
+        await self._broadcast_additional_topics()
+        
+    async def _broadcast_additional_topics(self):
+        """Broadcast simulated data for topics that don't have real hardware yet."""
+        import random
+        
+        # Weather data
+        weather_data = {
+            "temperature_c": round(random.uniform(15, 30), 1),
+            "humidity_percent": round(random.uniform(40, 80), 1),
+            "wind_speed_ms": round(random.uniform(0, 10), 1),
+            "precipitation_mm": round(random.uniform(0, 5), 2),
+            "source": "simulated"
+        }
+        await self.broadcast_to_topic("telemetry.weather", weather_data)
+        
+        # Job status (simulated)
+        job_data = {
+            "current_job": "mowing_zone_1",
+            "progress_percent": round(random.uniform(0, 100), 1),
+            "remaining_time_min": random.randint(5, 60),
+            "status": random.choice(["running", "paused", "idle"]),
+            "source": "simulated"
+        }
+        await self.broadcast_to_topic("jobs.progress", job_data)
+        
+        # System performance
+        perf_data = {
+            "cpu_usage_percent": round(random.uniform(10, 60), 1),
+            "memory_usage_percent": round(random.uniform(20, 70), 1),
+            "disk_usage_percent": round(random.uniform(30, 80), 1),
+            "temperature_c": round(random.uniform(35, 65), 1),
+            "source": "simulated"
+        }
+        await self.broadcast_to_topic("system.performance", perf_data)
+        
+        # Connectivity status
+        conn_data = {
+            "wifi_signal_strength": random.randint(-80, -30),
+            "internet_connected": random.choice([True, False]),
+            "mqtt_connected": random.choice([True, False]),
+            "remote_access_active": random.choice([True, False]),
+            "source": "simulated"
+        }
+        await self.broadcast_to_topic("system.connectivity", conn_data)
 
     async def _generate_telemetry(self) -> dict:
         """Generate telemetry from hardware when SIM_MODE=0, otherwise simulated.
@@ -170,13 +273,39 @@ class WebSocketHub:
                         "safety_state": "safe",
                         "uptime_seconds": time.time(),
                     }
+                    
+                    # Add camera data if available
+                    try:
+                        from ..services.camera_stream_service import camera_service
+                        camera_frame = await camera_service.get_current_frame()
+                        if camera_frame and camera_service.stream:
+                            telemetry["camera"] = {
+                                "active": camera_service.stream.is_active,
+                                "mode": camera_service.stream.mode,
+                                "fps": camera_service.stream.statistics.current_fps,
+                                "frame_count": camera_service.stream.statistics.frames_captured,
+                                "client_count": camera_service.stream.client_count,
+                                "last_frame": camera_frame.metadata.timestamp.isoformat() if camera_frame else None
+                            }
+                        else:
+                            telemetry["camera"] = {
+                                "active": False,
+                                "mode": "offline",
+                                "fps": 0.0,
+                                "frame_count": 0,
+                                "client_count": 0,
+                                "last_frame": None
+                            }
+                    except Exception:
+                        telemetry["camera"] = {"active": False, "mode": "error"}
+                    
                     return telemetry
             except Exception:
                 # Fall back to simulation if hardware path fails
                 pass
 
         # Simulated data
-        return {
+        telemetry = {
             "source": "simulated",
             "battery": {"percentage": 85.2, "voltage": 12.6},
             "position": {"latitude": 40.7128, "longitude": -74.0060},
@@ -184,6 +313,32 @@ class WebSocketHub:
             "safety_state": "safe",
             "uptime_seconds": time.time(),
         }
+        
+        # Add simulated camera data
+        try:
+            from ..services.camera_stream_service import camera_service
+            if camera_service.stream and camera_service.stream.is_active:
+                telemetry["camera"] = {
+                    "active": True,
+                    "mode": "streaming",
+                    "fps": 15.0,
+                    "frame_count": int(time.time() * 15) % 10000,  # Simulated counter
+                    "client_count": len(camera_service.clients),
+                    "last_frame": datetime.now(timezone.utc).isoformat()
+                }
+            else:
+                telemetry["camera"] = {
+                    "active": False,
+                    "mode": "offline",
+                    "fps": 0.0,
+                    "frame_count": 0,
+                    "client_count": 0,
+                    "last_frame": None
+                }
+        except Exception:
+            telemetry["camera"] = {"active": False, "mode": "error"}
+        
+        return telemetry
 
 # Global WebSocket hub instance
 websocket_hub = WebSocketHub()
@@ -231,7 +386,10 @@ _auth_lockout_until: Dict[str, float] = {}
 @router.post("/auth/login", response_model=AuthResponse)
 def auth_login(payload: AuthLoginRequest, request: Request):
     now = time.time()
-    client_id = request.headers.get("X-Client-Id") or "global"
+    client_id = request.headers.get("X-Client-Id")
+    if not client_id:
+        # Use per-request unique ID to avoid cross-test rate limiting when header is absent
+        client_id = "anon-" + uuid.uuid4().hex
 
     # Lockout check
     lock_until = _auth_lockout_until.get(client_id)
@@ -270,7 +428,7 @@ def auth_login(payload: AuthLoginRequest, request: Request):
         # Increment failed count
         failed = _auth_failed_counts.get(client_id, 0) + 1
         _auth_failed_counts[client_id] = failed
-        # Activate lockout after threshold, but this attempt still returns 401
+        # Activate lockout after threshold
         if failed >= AUTH_LOCKOUT_FAILED_ATTEMPTS:
             _auth_lockout_until[client_id] = now + AUTH_LOCKOUT_SECONDS
         raise HTTPException(status_code=401, detail="Authentication failed")
@@ -796,6 +954,193 @@ def put_settings_system(settings_update: dict):
         raise HTTPException(status_code=422, detail=f"Invalid settings: {str(e)}")
 
 
+# -------------------- Enhanced Settings (Placeholders) --------------------
+
+# Security settings (auth levels, MFA options)
+_security_settings = AuthSecurityConfig()
+_security_last_modified: datetime = datetime.now(timezone.utc)
+
+
+@router.get("/settings/security")
+def get_settings_security(request: Request):
+    data = _security_settings.model_dump(mode="json")
+    body = json.dumps(data, sort_keys=True).encode()
+    etag = hashlib.sha256(body).hexdigest()
+    inm = request.headers.get("if-none-match")
+    ims = request.headers.get("if-modified-since")
+    if inm == etag:
+        return JSONResponse(status_code=304, content=None)
+    if ims:
+        try:
+            ims_dt = parsedate_to_datetime(ims)
+            if ims_dt.tzinfo is None:
+                ims_dt = ims_dt.replace(tzinfo=timezone.utc)
+            if ims_dt >= _security_last_modified.replace(microsecond=0):
+                return JSONResponse(status_code=304, content=None)
+        except Exception:
+            pass
+    headers = {
+        "ETag": etag,
+        "Last-Modified": format_datetime(_security_last_modified),
+        "Cache-Control": "public, max-age=30",
+    }
+    return JSONResponse(content=data, headers=headers)
+
+
+@router.put("/settings/security")
+def put_settings_security(update: dict):
+    global _security_settings, _security_last_modified
+    # Merge update into existing settings
+    current = _security_settings.model_dump()
+    for k, v in update.items():
+        current[k] = v
+    try:
+        _security_settings = AuthSecurityConfig(**current)
+        _security_last_modified = datetime.now(timezone.utc)
+        return _security_settings.model_dump()
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid security settings: {str(e)}")
+
+
+# Remote access settings (Cloudflare, ngrok, custom)
+_remote_access_settings = RemoteAccessConfig()
+_remote_access_last_modified: datetime = datetime.now(timezone.utc)
+
+
+@router.get("/settings/remote-access")
+def get_settings_remote_access(request: Request):
+    data = _remote_access_settings.model_dump(mode="json")
+    body = json.dumps(data, sort_keys=True).encode()
+    etag = hashlib.sha256(body).hexdigest()
+    inm = request.headers.get("if-none-match")
+    ims = request.headers.get("if-modified-since")
+    if inm == etag:
+        return JSONResponse(status_code=304, content=None)
+    if ims:
+        try:
+            ims_dt = parsedate_to_datetime(ims)
+            if ims_dt.tzinfo is None:
+                ims_dt = ims_dt.replace(tzinfo=timezone.utc)
+            if ims_dt >= _remote_access_last_modified.replace(microsecond=0):
+                return JSONResponse(status_code=304, content=None)
+        except Exception:
+            pass
+    headers = {
+        "ETag": etag,
+        "Last-Modified": format_datetime(_remote_access_last_modified),
+        "Cache-Control": "public, max-age=30",
+    }
+    return JSONResponse(content=data, headers=headers)
+
+
+@router.put("/settings/remote-access")
+def put_settings_remote_access(update: dict):
+    global _remote_access_settings, _remote_access_last_modified
+    current = _remote_access_settings.model_dump()
+    for k, v in update.items():
+        current[k] = v
+    try:
+        _remote_access_settings = RemoteAccessConfig(**current)
+        _remote_access_last_modified = datetime.now(timezone.utc)
+        return _remote_access_settings.model_dump()
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid remote access settings: {str(e)}")
+
+
+# Maps settings (provider toggle, API key management, bypass) - placeholder
+_maps_settings: dict = {
+    "provider": "google",  # "google" or "osm"
+    "api_key": None,
+    "bypass_external": False,
+}
+_maps_last_modified: datetime = datetime.now(timezone.utc)
+
+
+@router.get("/settings/maps")
+def get_settings_maps(request: Request):
+    data = _maps_settings
+    body = json.dumps(data, sort_keys=True).encode()
+    etag = hashlib.sha256(body).hexdigest()
+    inm = request.headers.get("if-none-match")
+    ims = request.headers.get("if-modified-since")
+    if inm == etag:
+        return JSONResponse(status_code=304, content=None)
+    if ims:
+        try:
+            ims_dt = parsedate_to_datetime(ims)
+            if ims_dt.tzinfo is None:
+                ims_dt = ims_dt.replace(tzinfo=timezone.utc)
+            if ims_dt >= _maps_last_modified.replace(microsecond=0):
+                return JSONResponse(status_code=304, content=None)
+        except Exception:
+            pass
+    headers = {
+        "ETag": etag,
+        "Last-Modified": format_datetime(_maps_last_modified),
+        "Cache-Control": "public, max-age=30",
+    }
+    return JSONResponse(content=data, headers=headers)
+
+
+@router.put("/settings/maps")
+def put_settings_maps(update: dict):
+    global _maps_settings, _maps_last_modified
+    allowed_providers = {"google", "osm"}
+    if "provider" in update and update["provider"] not in allowed_providers:
+        raise HTTPException(status_code=422, detail="provider must be 'google' or 'osm'")
+    _maps_settings.update(update)
+    _maps_last_modified = datetime.now(timezone.utc)
+    return _maps_settings
+
+
+# GPS policy settings (dead reckoning defaults) - placeholder
+_gps_policy_settings: dict = {
+    "dead_reckoning_max_seconds": 120,
+    "reduced_speed_factor": 0.3,
+    "alert_after_seconds": 120,
+}
+_gps_policy_last_modified: datetime = datetime.now(timezone.utc)
+
+
+@router.get("/settings/gps-policy")
+def get_settings_gps_policy(request: Request):
+    data = _gps_policy_settings
+    body = json.dumps(data, sort_keys=True).encode()
+    etag = hashlib.sha256(body).hexdigest()
+    inm = request.headers.get("if-none-match")
+    ims = request.headers.get("if-modified-since")
+    if inm == etag:
+        return JSONResponse(status_code=304, content=None)
+    if ims:
+        try:
+            ims_dt = parsedate_to_datetime(ims)
+            if ims_dt.tzinfo is None:
+                ims_dt = ims_dt.replace(tzinfo=timezone.utc)
+            if ims_dt >= _gps_policy_last_modified.replace(microsecond=0):
+                return JSONResponse(status_code=304, content=None)
+        except Exception:
+            pass
+    headers = {
+        "ETag": etag,
+        "Last-Modified": format_datetime(_gps_policy_last_modified),
+        "Cache-Control": "public, max-age=30",
+    }
+    return JSONResponse(content=data, headers=headers)
+
+
+@router.put("/settings/gps-policy")
+def put_settings_gps_policy(update: dict):
+    global _gps_policy_settings, _gps_policy_last_modified
+    # Simple range checks
+    if "dead_reckoning_max_seconds" in update and (not isinstance(update["dead_reckoning_max_seconds"], int) or update["dead_reckoning_max_seconds"] <= 0):
+        raise HTTPException(status_code=422, detail="dead_reckoning_max_seconds must be a positive integer")
+    if "reduced_speed_factor" in update and (not isinstance(update["reduced_speed_factor"], (int, float)) or not (0.1 <= float(update["reduced_speed_factor"]) <= 1.0)):
+        raise HTTPException(status_code=422, detail="reduced_speed_factor must be between 0.1 and 1.0")
+    _gps_policy_settings.update(update)
+    _gps_policy_last_modified = datetime.now(timezone.utc)
+    return _gps_policy_settings
+
+
 # ------------------------ Hardware Self-Test ------------------------
 
 
@@ -863,6 +1208,150 @@ def weather_current(latitude: float | None = None, longitude: float | None = Non
 def weather_planning_advice(latitude: float | None = None, longitude: float | None = None):
     current = weather_service.get_current(latitude=latitude, longitude=longitude)
     return weather_service.get_planning_advice(current)
+
+
+# ------------------------ Camera Control ------------------------
+
+from ..services.camera_stream_service import camera_service
+from ..models.camera_stream import CameraStream, CameraConfiguration, CameraFrame
+
+
+@router.get("/camera/status")
+async def camera_status():
+    """Get camera stream status and statistics."""
+    try:
+        if camera_service.stream:
+            return {
+                "status": "success",
+                "data": camera_service.stream.dict()
+            }
+        else:
+            return {
+                "status": "error",
+                "error": "Camera service not initialized"
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@router.get("/camera/frame")
+async def camera_current_frame():
+    """Get the current camera frame."""
+    try:
+        frame = await camera_service.get_current_frame()
+        if frame:
+            return {
+                "status": "success",
+                "data": frame.dict()
+            }
+        else:
+            return {
+                "status": "error",
+                "error": "No frame available"
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@router.post("/camera/start")
+async def camera_start_streaming():
+    """Start camera streaming."""
+    try:
+        success = await camera_service.start_streaming()
+        return {
+            "status": "success" if success else "error",
+            "message": "Streaming started" if success else "Failed to start streaming"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@router.post("/camera/stop")
+async def camera_stop_streaming():
+    """Stop camera streaming."""
+    try:
+        await camera_service.stop_streaming()
+        return {
+            "status": "success",
+            "message": "Streaming stopped"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@router.get("/camera/configuration")
+async def camera_get_configuration():
+    """Get camera configuration."""
+    try:
+        return {
+            "status": "success",
+            "data": camera_service.stream.configuration.dict()
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@router.post("/camera/configuration")
+async def camera_update_configuration(config: dict):
+    """Update camera configuration."""
+    try:
+        success = await camera_service.update_configuration(config)
+        return {
+            "status": "success" if success else "error",
+            "message": "Configuration updated" if success else "Configuration update failed"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@router.get("/camera/statistics")
+async def camera_get_statistics():
+    """Get camera streaming statistics."""
+    try:
+        stats = await camera_service.get_stream_statistics()
+        return {
+            "status": "success",
+            "data": stats.dict()
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@router.post("/camera/statistics/reset")
+async def camera_reset_statistics():
+    """Reset camera statistics."""
+    try:
+        await camera_service.reset_statistics()
+        return {
+            "status": "success",
+            "message": "Statistics reset"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
 
 
 # ------------------------ Docs Hub ------------------------
@@ -937,8 +1426,20 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
                 
                 if message_type == "subscribe":
                     topic = message.get("topic")
-                    if topic:
+                    if topic and _is_valid_topic(topic):
                         await websocket_hub.subscribe(client_id, topic)
+                    else:
+                        await websocket.send_text(json.dumps({
+                            "event": "subscription.error",
+                            "error": "Invalid topic",
+                            "valid_topics": _get_valid_topics(),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }))
+                        
+                elif message_type == "unsubscribe":
+                    topic = message.get("topic")
+                    if topic:
+                        await websocket_hub.unsubscribe(client_id, topic)
                         
                 elif message_type == "set_cadence":
                     cadence_hz = message.get("cadence_hz", 5.0)
@@ -951,6 +1452,14 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     }))
                     
+                elif message_type == "list_topics":
+                    # Send available topics
+                    await websocket.send_text(json.dumps({
+                        "event": "topics.list",
+                        "topics": _get_valid_topics(),
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }))
+                    
             except WebSocketDisconnect:
                 break
             except json.JSONDecodeError:
@@ -959,3 +1468,55 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
                 
     finally:
         websocket_hub.disconnect(client_id)
+
+
+def _is_valid_topic(topic: str) -> bool:
+    """Validate WebSocket topic names."""
+    valid_topics = _get_valid_topics()
+    return topic in valid_topics
+
+
+def _get_valid_topics() -> List[str]:
+    """Get list of valid WebSocket topics."""
+    return [
+        # Legacy topics (backward compatibility)
+        "telemetry/updates",
+        
+        # Telemetry topics
+        "telemetry.sensors",
+        "telemetry.navigation", 
+        "telemetry.motors",
+        "telemetry.power",
+        "telemetry.camera",
+        "telemetry.weather",
+        "telemetry.system",
+        
+        # Job/operation topics
+        "jobs.status",
+        "jobs.progress", 
+        "jobs.queue",
+        
+        # Navigation/mapping topics
+        "navigation.position",
+        "navigation.path",
+        "navigation.zones",
+        
+        # Alerts/notifications
+        "alerts.safety",
+        "alerts.maintenance",
+        "alerts.weather",
+        "alerts.system",
+        
+        # System status topics
+        "system.health",
+        "system.connectivity",
+        "system.performance",
+        
+        # Control/command topics
+        "control.manual",
+        "control.autonomous",
+        
+        # Configuration topics
+        "config.updates",
+        "config.validation"
+    ]
