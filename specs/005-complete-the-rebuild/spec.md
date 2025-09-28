@@ -46,6 +46,7 @@ This specification is derived from the user prompt and prior unified specificati
 ### Session 2025-09-27
 - Q: What’s the intended network exposure for the WebUI, REST API, and WebSocket hub? → A: C — Remote access supported out of the box (built-in secure exposure), configurable.
 - Q: Authentication strength for the single shared operator credential? → A: D — Password + TOTP + backup codes.
+- Q: Map provider cost control strategy? → A: C — Adaptive usage (reduced tiles/frequency) before fallback to OSM.
 
 ---
 
@@ -91,7 +92,7 @@ A homeowner operates an autonomous robotic lawn mower through a web interface th
 - FR-007: System MUST provide a web UI with LawnBerry branding and retro 1980s aesthetic, running fluidly on Pi 5 and gracefully on Pi 4B, covering seven mandated pages with responsive design.
 - FR-008: System MUST run AI object detection with acceleration hierarchy (Coral USB → Hailo HAT → CPU) and maintain package isolation and graceful degradation.
 - FR-009: System MUST provide a Dashboard with live state, safety status, KPIs, real-time telemetry streams (default 5 Hz, 1–10 Hz configurable), battery/power status, position tracking, and alert management.
-- FR-010: System MUST provide Map Setup enabling boundaries, zones, and exclusion regions with interactive editing, validation, zone priorities, and conflict detection. Google Maps is preferred with OSM fallback; live position uses the LawnBerry pin asset.
+- FR-010: System MUST provide Map Setup enabling boundaries, zones, and exclusion regions with interactive editing, validation, zone priorities, and conflict detection. Google Maps is preferred with OSM fallback; implement adaptive usage (reduced tiles/frequency) to control costs and automatically fallback to OSM upon threshold. Live position uses the LawnBerry pin asset. Google Maps usage requires a user-supplied API key.
 - FR-011: System MUST provide Manual Control with authentication, safety indicators, live feedback, emergency stop access, and audit logging.
 - FR-012: System MUST provide Mow Planning with schedules, job queues, live progress, completion estimates, and historical insights.
 - FR-013: System MUST provide AI Training workflows, annotation tools, quality checks, and exports in both COCO JSON and YOLO TXT formats.
