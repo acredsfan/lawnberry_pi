@@ -243,6 +243,7 @@ class WebSocketHub:
 
                 if getattr(self._sensor_manager, "initialized", False):
                     data = await self._sensor_manager.read_all_sensors()
+                    
                     # Map to telemetry payload expected by clients
                     battery_pct = None
                     batt_v = None
@@ -296,11 +297,11 @@ class WebSocketHub:
                                 "client_count": 0,
                                 "last_frame": None
                             }
-                    except Exception:
+                    except Exception as e:
                         telemetry["camera"] = {"active": False, "mode": "error"}
                     
                     return telemetry
-            except Exception:
+            except Exception as e:
                 # Fall back to simulation if hardware path fails
                 pass
 
@@ -617,32 +618,68 @@ def put_map_locations(locations: MapLocations):
 
 
 @router.get("/dashboard/telemetry")
-def dashboard_telemetry():
-    # Minimal shape to satisfy contract tests; values are placeholders
+async def dashboard_telemetry():
+    """Get real-time telemetry from hardware sensors"""
+    # Get hardware telemetry data from the WebSocket hub
+    telemetry_data = await websocket_hub._generate_telemetry()
+    
     now = datetime.now(timezone.utc).isoformat()
-    return {
-        "timestamp": now,
-        "battery": {
-            "percentage": 0.0,
-            "voltage": None,
-        },
-        "temperatures": {
-            "cpu": None,
-            "ambient": None,
-        },
-        "position": {
-            "latitude": None,
-            "longitude": None,
-            "altitude": None,
-            "accuracy": None,
-            "gps_mode": None,
-        },
-        "imu": {
-            "roll": None,
-            "pitch": None,
-            "yaw": None,
-        },
-    }
+    
+    # Extract and map hardware data to dashboard format
+    if "source" in telemetry_data and telemetry_data["source"] == "hardware":
+        # Use real hardware data
+        battery_data = telemetry_data.get("battery", {})
+        position_data = telemetry_data.get("position", {})
+        imu_data = telemetry_data.get("imu", {})
+        
+        return {
+            "timestamp": now,
+            "battery": {
+                "percentage": battery_data.get("percentage", 0.0),
+                "voltage": battery_data.get("voltage", None),
+            },
+            "temperatures": {
+                "cpu": None,  # Add CPU temperature monitoring if available
+                "ambient": None,  # Add from environmental sensor if available
+            },
+            "position": {
+                "latitude": position_data.get("latitude", None),
+                "longitude": position_data.get("longitude", None),
+                "altitude": position_data.get("altitude", None),
+                "accuracy": position_data.get("accuracy", None),
+                "gps_mode": position_data.get("gps_mode", None),
+            },
+            "imu": {
+                "roll": imu_data.get("roll", None),
+                "pitch": imu_data.get("pitch", None),
+                "yaw": imu_data.get("yaw", None),
+            },
+        }
+    else:
+        # Fallback to simulated/default values
+        return {
+            "timestamp": now,
+            "battery": {
+                "percentage": telemetry_data.get("battery", {}).get("percentage", 85.2),
+                "voltage": telemetry_data.get("battery", {}).get("voltage", 12.6),
+            },
+            "temperatures": {
+                "cpu": None,
+                "ambient": None,
+            },
+            "position": {
+                "latitude": telemetry_data.get("position", {}).get("latitude", None),
+                "longitude": telemetry_data.get("position", {}).get("longitude", None),
+                "altitude": None,
+                "accuracy": None,
+                "gps_mode": None,
+            },
+            "imu": {
+                "roll": None,
+                "pitch": None,
+                "yaw": None,
+            },
+        }
 
 
 # ------------------------ Control ------------------------
