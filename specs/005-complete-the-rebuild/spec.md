@@ -59,6 +59,7 @@ A homeowner operates an autonomous robotic lawn mower through a web interface th
 10. Given multiple clients are connected to the web interface, When telemetry is streamed, Then the system maintains bidirectional communication with topic subscriptions and configurable cadence without impacting control responsiveness.
 11. Given Wi‑Fi connectivity is interrupted, When the mower is operating, Then safety is preserved, control degrades gracefully, and the UI indicates connectivity loss and recovery.
 12. Given wet/unsafe conditions are detected, When mowing is active or scheduled, Then the mower delays or pauses operations and informs the user with clear recommendations.
+13. Given the rebuild has passed all tests and reviews, When the release is approved, Then the repository mainline is cut over to this complete rebuild, replacing the original build with documented migration and rollback provisions.
 
 ### Edge Cases
 - GPS signal loss during navigation (fall back to dead reckoning while maintaining safety)
@@ -98,6 +99,7 @@ A homeowner operates an autonomous robotic lawn mower through a web interface th
 - FR-023: System MUST run as managed services with automatic startup, monitoring, logging, and graceful shutdown; respect single-owner hardware coordination.
 - FR-024: System MUST include a comprehensive test suite covering unit, integration, and simulation scenarios (SIM_MODE=1) plus real hardware readiness.
 - FR-025: System MUST include complete user documentation for installation, setup, operation, maintenance, and migration with drift checks.
+- FR-026: System MUST execute a final cutover to replace the original build with this complete rebuild in the repository, including mainline branch cutover, versioned release tags, documented migration steps, and a verified rollback path.
 
 ### Key Entities
 - Sensor Data: Real-time measurements with timestamps, bus assignments, validation, and error conditions.
@@ -141,9 +143,4 @@ A homeowner operates an autonomous robotic lawn mower through a web interface th
 - [x] Review checklist passed
 
 ---
-# Feature Specification: LawnBerry Pi v2 — Complete Rebuild to Production Operation
-
 **Feature Branch**:   
-**Created**: 2025-09-27  
-**Status**: Draft  
-**Input**: User description: Complete
