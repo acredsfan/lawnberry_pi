@@ -538,19 +538,42 @@ onMounted(async () => {
 }
 
 .retro-title {
-  font-size: 2.5rem;
+  font-size: 3rem;
   font-weight: 900;
   text-align: center;
   text-transform: uppercase;
-  letter-spacing: 5px;
+  letter-spacing: 8px;
   margin: 0 0 0.5rem 0;
+  font-family: 'Orbitron', 'Courier New', monospace;
   background: linear-gradient(45deg, #00ffff, #ff00ff, #ffff00, #00ffff);
-  background-size: 300% 300%;
+  background-size: 400% 400%;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  animation: titleGlow 3s ease-in-out infinite;
-  text-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+  animation: titleGlow 4s ease-in-out infinite;
+  text-shadow: 0 0 30px rgba(0, 255, 255, 0.8), 0 0 60px rgba(255, 0, 255, 0.4);
+  position: relative;
+}
+
+.retro-title::before {
+  content: attr(data-text);
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  z-index: -1;
+  background: linear-gradient(45deg, #ff00ff, #00ffff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  opacity: 0.3;
+  animation: glitchShadow 5s ease-in-out infinite;
+}
+
+@keyframes glitchShadow {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-2px, 2px); }
+  40% { transform: translate(2px, -1px); }
+  60% { transform: translate(-1px, -2px); }
+  80% { transform: translate(1px, 1px); }
 }
 
 @keyframes titleGlow {
@@ -560,20 +583,80 @@ onMounted(async () => {
 
 .retro-subtitle {
   text-align: center;
-  font-size: 1rem;
-  letter-spacing: 2px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: 4px;
   color: #ffff00;
-  margin: 0 0 1rem 0;
-  text-shadow: 0 0 10px rgba(255, 255, 0, 0.7);
+  margin: 0 0 1.5rem 0;
+  font-family: 'Orbitron', 'Courier New', monospace;
+  text-shadow: 0 0 15px rgba(255, 255, 0, 0.8), 0 0 30px rgba(255, 255, 0, 0.4);
+  text-transform: uppercase;
+  position: relative;
+}
+
+.retro-subtitle::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #ffff00, transparent);
+  animation: subtitleLine 3s ease-in-out infinite;
+}
+
+@keyframes subtitleLine {
+  0%, 100% { opacity: 0.6; width: 200px; }
+  50% { opacity: 1; width: 300px; }
+}
+
+@keyframes metricUnderline {
+  0%, 100% { opacity: 0.4; transform: scaleX(0.8); }
+  50% { opacity: 0.8; transform: scaleX(1.2); }
 }
 
 .data-stream {
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   text-align: center;
   color: #00ff00;
+  font-family: 'Courier New', monospace;
   font-weight: 600;
-  letter-spacing: 1px;
-  animation: textPulse 2s ease-in-out infinite;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  animation: dataStream 3s ease-in-out infinite;
+  position: relative;
+  background: rgba(0, 255, 0, 0.05);
+  padding: 0.5rem 1rem;
+  border: 1px solid rgba(0, 255, 0, 0.3);
+  border-radius: 4px;
+  backdrop-filter: blur(5px);
+}
+
+.data-stream::before {
+  content: '▶ ';
+  animation: blink 1s linear infinite;
+}
+
+.data-stream::after {
+  content: ' ◀';
+  animation: blink 1s linear infinite reverse;
+}
+
+@keyframes dataStream {
+  0%, 100% { 
+    opacity: 0.8; 
+    text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+  }
+  50% { 
+    opacity: 1; 
+    text-shadow: 0 0 20px rgba(0, 255, 0, 0.8), 0 0 30px rgba(0, 255, 0, 0.4);
+  }
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.3; }
 }
 
 @keyframes textPulse {
@@ -598,14 +681,28 @@ onMounted(async () => {
 
 /* Retro Cards */
 .retro-card {
-  background: linear-gradient(135deg, #1a1a1a 0%, #2d1b69 50%, #1a1a1a 100%);
+  background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 30%, #16213e 70%, #0a0a0a 100%);
   border: 2px solid #00ffff;
-  border-radius: 0;
+  border-radius: 8px;
   position: relative;
   overflow: hidden;
+  backdrop-filter: blur(10px);
   box-shadow: 
-    0 0 20px rgba(0, 255, 255, 0.3),
-    inset 0 0 20px rgba(0, 255, 255, 0.1);
+    0 8px 32px rgba(0, 255, 255, 0.3),
+    0 0 20px rgba(0, 255, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 30px rgba(0, 255, 255, 0.05);
+  transition: all 0.3s ease;
+}
+
+.retro-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 
+    0 12px 40px rgba(0, 255, 255, 0.4),
+    0 0 30px rgba(0, 255, 255, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 0 40px rgba(0, 255, 255, 0.1);
+  border-color: #00ffff;
 }
 
 .retro-card::before {
@@ -741,18 +838,39 @@ onMounted(async () => {
 }
 
 .retro-btn {
-  background: linear-gradient(135deg, #2a2a2a, #0a0a0a);
+  background: linear-gradient(135deg, #1a1a2e, #16213e, #0f0f23);
   border: 2px solid #00ffff;
   color: #00ffff;
-  padding: 1rem;
-  font-family: inherit;
+  padding: 1.2rem 1.5rem;
+  font-family: 'Orbitron', 'Courier New', monospace;
   font-weight: 700;
+  font-size: 0.9rem;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 2px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
-  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  border-radius: 6px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  box-shadow: 
+    0 4px 15px rgba(0, 255, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.retro-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s ease;
+}
+
+.retro-btn:hover::before {
+  left: 100%;
 }
 
 .retro-btn:hover:not(:disabled) {
@@ -869,12 +987,30 @@ onMounted(async () => {
 }
 
 .metric-value {
-  font-size: 2.5rem;
+  font-size: 2.8rem;
   font-weight: 900;
   color: #00ffff;
-  text-shadow: 0 0 15px rgba(0, 255, 255, 0.7);
-  margin-bottom: 0.5rem;
-  letter-spacing: 2px;
+  font-family: 'Orbitron', 'Courier New', monospace;
+  text-shadow: 
+    0 0 20px rgba(0, 255, 255, 0.8),
+    0 0 40px rgba(0, 255, 255, 0.4),
+    0 2px 4px rgba(0, 0, 0, 0.8);
+  margin-bottom: 0.8rem;
+  letter-spacing: 3px;
+  position: relative;
+  text-transform: uppercase;
+}
+
+.metric-value::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #00ffff, transparent);
+  opacity: 0.6;
+  animation: metricUnderline 2s ease-in-out infinite;
 }
 
 .metric-value .unit {
