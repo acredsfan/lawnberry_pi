@@ -1,0 +1,39 @@
+[Unit]
+Description=LawnBerry Pi Camera Stream Service
+After=network-online.target
+Wants=network-online.target
+PartOf=lawnberry-backend.service
+
+[Service]
+Type=simple
+User=pi
+Group=video
+WorkingDirectory=/home/pi/lawnberry/lawnberry-rebuild/backend
+Environment=PYTHONPATH=/home/pi/lawnberry/lawnberry-rebuild/backend/src
+Environment=SIM_MODE=0
+ExecStart=/home/pi/lawnberry/lawnberry-rebuild/backend/venv/bin/python -m services.camera_stream_service
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Permissions for camera access
+SupplementaryGroups=video
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=false
+ProtectSystem=strict
+ReadWritePaths=/home/pi/lawnberry/lawnberry-rebuild /var/lib/lawnberry /tmp
+DeviceAllow=/dev/video0 rw
+DeviceAllow=/dev/video1 rw
+DevicePolicy=closed
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawnberry-camera
+
+[Install]
+WantedBy=multi-user.target

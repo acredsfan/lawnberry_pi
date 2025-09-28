@@ -1,0 +1,32 @@
+openapi: 3.0.3
+info:
+  title: LawnBerry Pi v2 API
+  version: 0.1.0
+servers:
+  - url: http://localhost
+paths:
+  /api/v1/status:
+    get:
+      summary: System status snapshot
+      responses:
+        '200':
+          description: OK
+  /api/v1/auth/login:
+    post:
+      summary: Start login flow (MFA)
+      responses:
+        '200': { description: OK }
+  /api/v1/maps/zones:
+    get:
+      summary: List zones
+      responses: { '200': { description: OK } }
+    post:
+      summary: Create/update zones
+      responses: { '200': { description: OK } }
+  /api/v1/mow/jobs:
+    get:
+      summary: List jobs
+      responses: { '200': { description: OK } }
+    post:
+      summary: Queue a job
+      responses: { '202': { description: Accepted } }

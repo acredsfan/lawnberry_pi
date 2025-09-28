@@ -1,0 +1,33 @@
+[Unit]
+Description=LawnBerry Pi v2 Frontend Web UI
+After=network-online.target lawnberry-backend.service
+Wants=network-online.target lawnberry-backend.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/lawnberry/lawnberry-rebuild/frontend
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=BACKEND_URL=http://127.0.0.1:8081
+ExecStart=/usr/bin/node /home/pi/lawnberry/lawnberry-rebuild/frontend/server.mjs
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=false
+ProtectSystem=strict
+ReadWritePaths=/home/pi/lawnberry/lawnberry-rebuild/frontend
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lawnberry-frontend
+
+[Install]
+WantedBy=multi-user.target
