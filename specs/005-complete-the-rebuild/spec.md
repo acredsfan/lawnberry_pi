@@ -45,6 +45,7 @@ This specification is derived from the user prompt and prior unified specificati
 
 ### Session 2025-09-27
 - Q: What’s the intended network exposure for the WebUI, REST API, and WebSocket hub? → A: C — Remote access supported out of the box (built-in secure exposure), configurable.
+- Q: Authentication strength for the single shared operator credential? → A: D — Password + TOTP + backup codes.
 
 ---
 
@@ -98,7 +99,7 @@ A homeowner operates an autonomous robotic lawn mower through a web interface th
 - FR-015: System MUST provide a Docs Hub bundling on-device documentation, troubleshooting, compliance references, branding assets, and offline access with search.
 - FR-016: System MUST maintain a centralized WebSocket hub for real-time bidirectional communication with topic-based subscriptions and client management.
 - FR-017: System MUST expose REST endpoints supporting all WebUI capabilities with authentication, validation, schemaed responses, caching, and robust error handling.
-- FR-018: System MUST implement a single shared operator credential to protect pages and gate manual control, dataset exports, and configuration changes, with audit trails.
+- FR-018: System MUST implement a single shared operator credential protected by MFA (password + TOTP + backup codes) to gate manual control, dataset exports, and configuration changes, with audit logging.
 - FR-019: System MUST persist operational data, settings, configuration changes, and historical performance with integrity, backup, and migration support.
 - FR-020: System MUST provide automated install/config scripts for deployment with hardware detection, dependencies, service configuration, and migration assistance.
 - FR-021: System MUST operate on supported Raspberry Pi OS and hardware with Python runtime versions aligned to constitution; no cross-platform dependencies.
