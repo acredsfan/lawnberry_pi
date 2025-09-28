@@ -67,10 +67,10 @@ export const authApi = {
   },
 }
 
-// System API endpoints
+// System API endpoints  
 export const systemApi = {
   getStatus: async () => {
-    const response = await apiClient.get('/system/status')
+    const response = await apiClient.get('/dashboard/status')
     return response.data
   },
 
@@ -205,7 +205,7 @@ export const settingsApi = {
 // Telemetry API endpoints
 export const telemetryApi = {
   getCurrent: async () => {
-    const response = await apiClient.get('/telemetry/current')
+    const response = await apiClient.get('/dashboard/telemetry')
     return response.data
   },
 
