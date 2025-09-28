@@ -1,1 +1,0 @@
-Progress update: Implemented T048–T050 (control endpoints) with passing tests. Updating tasks.md and AGENT_JOURNAL.md; ready for review in this PR.

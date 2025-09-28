@@ -1,6 +1,0 @@
-export { default as Code } from './Code'
-export { Card, CardContent, CardHeader, CardTitle } from './card'
-export { Badge } from './badge'
-export { Progress } from './progress'
-export { Button } from './button'
-export { Alert, AlertTitle } from './alert'

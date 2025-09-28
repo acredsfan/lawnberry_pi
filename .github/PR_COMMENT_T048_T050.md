@@ -1,3 +1,0 @@
-- Added control endpoints (T048–T050) with passing tests.
-- Updated tasks.md and AGENT_JOURNAL.md.
-- Next: planning/jobs endpoints (T051–T053).

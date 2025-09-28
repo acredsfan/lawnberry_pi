@@ -1,1 +1,0 @@
-# LawnBerry backend package

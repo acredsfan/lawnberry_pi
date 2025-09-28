@@ -1,17 +1,38 @@
-### Summary
-This PR implements and tests the following REST endpoints for LawnBerry Pi v2:
-- GET /dashboard/telemetry
-- GET/POST /map/zones
-- GET/PUT /map/locations
+# LawnBerry Pi v2 Pull Request
 
-All endpoints are contract-first and validated with passing tests. Tasks T043–T047 are marked complete in tasks.md. See AGENT_JOURNAL.md for details.
+## Description
+<!-- Describe the change in 1–3 sentences. Link to related task/issue if applicable. -->
 
-### Validation
-- All new REST contract tests pass
-- No ARM64-incompatible dependencies added
-- Implementation matches OpenAPI contract and spec
+---
 
-### Next Steps
-- Continue with remaining REST endpoints (T048–T057)
-- Proceed to WebSocket endpoint and backend integration per tasks
-- Update journal and tasks after each phase
+## Checklist
+
+- [ ] **Agent Journal Updated**
+  - Updated `memory/AGENT_JOURNAL.md` with:
+    - Current task status
+    - Decisions made
+    - Next debug steps
+    - Handoff notes
+
+- [ ] **Docs Updated**
+  - Updated `/docs` and `/spec` to reflect this change
+  - If no docs needed, explain why:
+
+- [ ] **Tests**
+  - [ ] Unit tests added/updated
+  - [ ] Integration tests (sim mode or hardware-in-the-loop where applicable)
+  - [ ] All tests passing locally (`uv run pytest`)
+
+- [ ] **Hardware Resource Coordination**
+  - Camera, sensors, and actuators are accessed through their designated owner service/daemon (no duplicate device handles)
+  - Concurrency strategy documented when introducing new shared hardware interactions
+
+- [ ] **CI**
+  - [ ] Lint checks pass (`ruff`, `black`, `mypy`)
+  - [ ] No unapproved TODOs (`TODO(v3)` only with issue link)
+  - [ ] No doc drift (CI docs job passes)
+
+---
+
+## Notes for Reviewers
+<!-- Any special notes, instructions, or caveats for reviewers. -->

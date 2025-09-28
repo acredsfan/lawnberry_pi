@@ -1,1 +1,0 @@
-Update for PR #25: Control endpoints implemented (T048–T050). All related contract tests pass. Proceeding with planning/jobs endpoints next.
