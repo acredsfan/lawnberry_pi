@@ -13,8 +13,10 @@ from uuid import uuid4
 
 from ..models import (
     TelemetryExchange, TelemetryHub, TelemetryMessage, StreamConfiguration,
-    ClientSubscription, StreamStatistics, TelemetryTopic, MessagePriority, StreamStatus
+    ClientSubscription, StreamStatistics, TelemetryTopic, MessagePriority, StreamStatus,
+    HardwareTelemetryStream, ComponentId, ComponentStatus
 )
+from ..core.persistence import persistence
 
 logger = logging.getLogger(__name__)
 

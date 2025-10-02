@@ -14,13 +14,13 @@
           placeholder="Search documentation..."
           class="search-input"
           @input="performSearch"
-        />
+        >
         <button class="search-button">🔍</button>
       </div>
       <div class="quick-actions">
-        <button @click="showQuickStart" class="btn btn-primary">⚡ Quick Start</button>
-        <button @click="showTroubleshooting" class="btn btn-secondary">🔧 Troubleshooting</button>
-        <button @click="showAPIRef" class="btn btn-info">📖 API Reference</button>
+        <button class="btn btn-primary" @click="showQuickStart">⚡ Quick Start</button>
+        <button class="btn btn-secondary" @click="showTroubleshooting">🔧 Troubleshooting</button>
+        <button class="btn btn-info" @click="showAPIRef">📖 API Reference</button>
       </div>
     </div>
 
@@ -36,9 +36,9 @@
               class="nav-category"
             >
               <button 
-                @click="toggleSection(section.id)"
                 class="category-toggle"
                 :class="{ expanded: expandedSections.includes(section.id) }"
+                @click="toggleSection(section.id)"
               >
                 {{ section.icon }} {{ section.title }}
               </button>
@@ -49,9 +49,9 @@
                 <button 
                   v-for="doc in section.docs" 
                   :key="doc.id"
-                  @click="selectDoc(doc)"
                   class="nav-item"
                   :class="{ active: selectedDoc?.id === doc.id }"
+                  @click="selectDoc(doc)"
                 >
                   {{ doc.title }}
                 </button>
@@ -67,8 +67,8 @@
             <button 
               v-for="result in searchResults" 
               :key="result.id"
-              @click="selectDoc(result)"
               class="search-result"
+              @click="selectDoc(result)"
             >
               <div class="result-title">{{ result.title }}</div>
               <div class="result-excerpt">{{ result.excerpt }}</div>
@@ -135,16 +135,16 @@
         <div v-else class="document-content">
           <div class="document-header">
             <div class="breadcrumb">
-              <button @click="selectedDoc = null" class="breadcrumb-item">
+              <button class="breadcrumb-item" @click="selectedDoc = null">
                 📚 Documentation
               </button>
               <span class="breadcrumb-separator">›</span>
               <span class="breadcrumb-current">{{ selectedDoc.title }}</span>
             </div>
             <div class="document-actions">
-              <button @click="printDoc" class="btn btn-sm btn-secondary">🖨️ Print</button>
-              <button @click="shareDoc" class="btn btn-sm btn-info">🔗 Share</button>
-              <button @click="downloadDoc" class="btn btn-sm btn-primary">📥 Download</button>
+              <button class="btn btn-sm btn-secondary" @click="printDoc">🖨️ Print</button>
+              <button class="btn btn-sm btn-info" @click="shareDoc">🔗 Share</button>
+              <button class="btn btn-sm btn-primary" @click="downloadDoc">📥 Download</button>
             </div>
           </div>
 
@@ -164,7 +164,7 @@
                     <div 
                       class="progress-fill" 
                       :style="{ width: `${(currentStep / selectedDoc.steps.length) * 100}%` }"
-                    ></div>
+                    />
                   </div>
                   <span class="progress-text">Step {{ currentStep }} of {{ selectedDoc.steps.length }}</span>
                 </div>
@@ -184,11 +184,11 @@
                       <h3>{{ step.title }}</h3>
                     </div>
                     <div v-if="index === currentStep - 1" class="step-body">
-                      <div class="step-description" v-html="renderMarkdown(step.description)"></div>
+                      <div class="step-description" v-html="renderMarkdown(step.description)" />
                       <div v-if="step.code" class="code-block">
                         <div class="code-header">
                           <span>{{ step.codeLanguage || 'bash' }}</span>
-                          <button @click="copyCode(step.code)" class="copy-btn">📋 Copy</button>
+                          <button class="copy-btn" @click="copyCode(step.code)">📋 Copy</button>
                         </div>
                         <pre><code>{{ step.code }}</code></pre>
                       </div>
@@ -198,22 +198,22 @@
                       <div class="step-actions">
                         <button 
                           v-if="index > 0"
-                          @click="currentStep = index"
                           class="btn btn-secondary"
+                          @click="currentStep = index"
                         >
                           ← Previous
                         </button>
                         <button 
                           v-if="index < selectedDoc.steps.length - 1"
-                          @click="currentStep = index + 2"
                           class="btn btn-primary"
+                          @click="currentStep = index + 2"
                         >
                           Next →
                         </button>
                         <button 
                           v-else
-                          @click="completeGuide"
                           class="btn btn-success"
+                          @click="completeGuide"
                         >
                           ✅ Complete Guide
                         </button>
@@ -224,7 +224,7 @@
               </div>
 
               <div v-else class="standard-content">
-                <div class="content" v-html="renderMarkdown(selectedDoc.content)"></div>
+                <div class="content" v-html="renderMarkdown(selectedDoc.content)" />
                 
                 <!-- Table of Contents for longer documents -->
                 <div v-if="selectedDoc.toc && selectedDoc.toc.length > 0" class="toc">
@@ -247,8 +247,8 @@
                 <button 
                   v-for="doc in relatedDocs" 
                   :key="doc.id"
-                  @click="selectDoc(doc)"
                   class="related-item"
+                  @click="selectDoc(doc)"
                 >
                   <span class="related-icon">{{ doc.icon }}</span>
                   <span class="related-title">{{ doc.title }}</span>
@@ -261,16 +261,16 @@
             <div class="feedback-section">
               <h4>💬 Was this helpful?</h4>
               <div class="feedback-buttons">
-                <button @click="submitFeedback('helpful')" class="btn btn-success">👍 Yes</button>
-                <button @click="submitFeedback('not-helpful')" class="btn btn-secondary">👎 No</button>
+                <button class="btn btn-success" @click="submitFeedback('helpful')">👍 Yes</button>
+                <button class="btn btn-secondary" @click="submitFeedback('not-helpful')">👎 No</button>
               </div>
               <div v-if="showFeedbackForm" class="feedback-form">
                 <textarea 
                   v-model="feedbackText"
                   placeholder="Tell us how we can improve this documentation..."
                   class="feedback-textarea"
-                ></textarea>
-                <button @click="submitDetailedFeedback" class="btn btn-primary">Send Feedback</button>
+                />
+                <button class="btn btn-primary" @click="submitDetailedFeedback">Send Feedback</button>
               </div>
             </div>
           </div>

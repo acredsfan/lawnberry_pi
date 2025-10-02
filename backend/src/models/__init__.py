@@ -33,11 +33,22 @@ from .training_data import (
 )
 from .webui_contracts import (
     WebUIPageContracts, WebUIPageContract, DataDependency, TelemetryRequirement,
-    WebUIPageSlug, AuthRequirement, DataDependencyType, PerformanceMetrics
+    WebUIPageSlug, AuthRequirement, DataDependencyType, PerformanceMetrics,
+    DocumentationBundle, DocumentationFile, DocumentationType
 )
 from .telemetry_exchange import (
     TelemetryExchange, TelemetryHub, TelemetryMessage, StreamConfiguration,
-    ClientSubscription, StreamStatistics, TelemetryTopic, MessagePriority, StreamStatus
+    ClientSubscription, StreamStatistics, TelemetryTopic, MessagePriority, StreamStatus,
+    HardwareTelemetryStream, ComponentId, ComponentStatus, RtkFixType,
+    GPSData, IMUData, MotorData, PowerData, ToFData
+)
+from .zone import (
+    Zone, ZoneType, Point, ZoneSettings, ZoneStatistics,
+    MapConfiguration, MapMarker, MarkerType, MapProvider
+)
+from .control_session import (
+    ControlSession, ControlCommand, ControlAuditEntry, EmergencyState,
+    ControlCommandType, ControlCommandResult, EmergencyStatus, SafetyInterlock
 )
 from .user_session import (
     UserSession, SessionActivity, UserPreferences, SecurityContext, WebSocketConnection,
@@ -51,11 +62,18 @@ from .hardware_baseline import (
 from .system_configuration import (
     SystemConfiguration, SensorCalibration, NavigationSettings, SafetyThresholds,
     UIPreferences, BrandingReference, NetworkConfiguration, OperationalMode,
-    GpsModeConfig, DriveControllerConfig, AIRunnerPreference, LogLevel
+    GpsModeConfig, DriveControllerConfig, AIRunnerPreference, LogLevel,
+    SettingsProfile, TelemetrySettings, ControlSettings, MapsSettings,
+    CameraSettings, AISettings, SystemSettings
 )
 from .operational_data import (
     OperationalData, OperationalEvent, PerformanceMetrics, MaintenanceRecord,
     JobExecution, SystemHealth, OperationStatus, EventType, Severity
+)
+from .verification_artifact import (
+    VerificationArtifact, VerificationArtifactCollection, ArtifactType,
+    PlatformInfo, PerformanceMetrics as VerificationPerformanceMetrics,
+    TelemetrySnapshot
 )
 
 __all__ = [
@@ -90,10 +108,21 @@ __all__ = [
     # WebUI Contracts
     "WebUIPageContracts", "WebUIPageContract", "DataDependency", "TelemetryRequirement",
     "WebUIPageSlug", "AuthRequirement", "DataDependencyType", "PerformanceMetrics",
+    "DocumentationBundle", "DocumentationFile", "DocumentationType",
     
     # Telemetry Exchange
     "TelemetryExchange", "TelemetryHub", "TelemetryMessage", "StreamConfiguration",
     "ClientSubscription", "StreamStatistics", "TelemetryTopic", "MessagePriority", "StreamStatus",
+    "HardwareTelemetryStream", "ComponentId", "ComponentStatus", "RtkFixType",
+    "GPSData", "IMUData", "MotorData", "PowerData", "ToFData",
+    
+    # Zones and Map Configuration
+    "Zone", "ZoneType", "Point", "ZoneSettings", "ZoneStatistics",
+    "MapConfiguration", "MapMarker", "MarkerType", "MapProvider",
+    
+    # Control Session
+    "ControlSession", "ControlCommand", "ControlAuditEntry", "EmergencyState",
+    "ControlCommandType", "ControlCommandResult", "EmergencyStatus", "SafetyInterlock",
     
     # User Session
     "UserSession", "SessionActivity", "UserPreferences", "SecurityContext", "WebSocketConnection",
@@ -108,8 +137,14 @@ __all__ = [
     "SystemConfiguration", "SensorCalibration", "NavigationSettings", "SafetyThresholds",
     "UIPreferences", "BrandingReference", "NetworkConfiguration", "OperationalMode",
     "GpsModeConfig", "DriveControllerConfig", "AIRunnerPreference", "LogLevel",
+    "SettingsProfile", "TelemetrySettings", "ControlSettings", "MapsSettings",
+    "CameraSettings", "AISettings", "SystemSettings",
     
     # Operational Data
     "OperationalData", "OperationalEvent", "PerformanceMetrics", "MaintenanceRecord",
-    "JobExecution", "SystemHealth", "OperationStatus", "EventType", "Severity"
+    "JobExecution", "SystemHealth", "OperationStatus", "EventType", "Severity",
+    
+    # Verification Artifacts
+    "VerificationArtifact", "VerificationArtifactCollection", "ArtifactType",
+    "PlatformInfo", "VerificationPerformanceMetrics", "TelemetrySnapshot"
 ]

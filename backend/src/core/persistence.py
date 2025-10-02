@@ -58,6 +58,21 @@ class PersistenceLayer:
                 data_json TEXT NOT NULL
             );
             
+            CREATE TABLE IF NOT EXISTS hardware_telemetry_streams (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TIMESTAMP NOT NULL,
+                component_id TEXT NOT NULL,
+                value TEXT NOT NULL,
+                status TEXT NOT NULL,
+                latency_ms REAL NOT NULL,
+                stream_json TEXT NOT NULL,
+                verification_artifact_id TEXT,
+                UNIQUE(timestamp, component_id)
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_telemetry_timestamp ON hardware_telemetry_streams(timestamp DESC);
+            CREATE INDEX IF NOT EXISTS idx_telemetry_component ON hardware_telemetry_streams(component_id);
+            
             CREATE TABLE IF NOT EXISTS map_zones (
                 id TEXT PRIMARY KEY,
                 name TEXT,
@@ -265,6 +280,30 @@ class PersistenceLayer:
             )
             conn.commit()
             return cursor.rowcount
+    
+    # Map Configuration
+    async def save_map_configuration(self, config_id: str, config_json: str) -> None:
+        """Save map configuration to database."""
+        with self.get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO system_config (id, config_json, updated_at)
+                VALUES (?, ?, ?)
+            """, (f"map_config_{config_id}", config_json, datetime.now(timezone.utc)))
+            conn.commit()
+            logger.info(f"Saved map configuration {config_id} to persistence")
+    
+    async def load_map_configuration(self, config_id: str) -> Optional[str]:
+        """Load map configuration from database."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT config_json FROM system_config WHERE id = ?",
+                (f"map_config_{config_id}",)
+            )
+            result = cursor.fetchone()
+            if result:
+                logger.info(f"Loaded map configuration {config_id} from persistence")
+                return result["config_json"]
+            return None
 
     # Audit Logs
     def add_audit_log(self, action: str, client_id: Optional[str] = None, resource: Optional[str] = None, details: Optional[Dict[str, Any]] = None) -> None:
@@ -292,6 +331,156 @@ class PersistenceLayer:
                     "details": json.loads(r["details_json"]) if r["details_json"] else {}
                 })
             return rows
+    
+    # Hardware Telemetry Streams
+    def save_telemetry_streams(self, streams: List[Dict[str, Any]]) -> None:
+        """Save hardware telemetry streams to database."""
+        with self.get_connection() as conn:
+            for stream in streams:
+                try:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO hardware_telemetry_streams
+                        (timestamp, component_id, value, status, latency_ms, stream_json, verification_artifact_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        stream.get("timestamp"),
+                        stream.get("component_id"),
+                        str(stream.get("value", "")),
+                        stream.get("status"),
+                        stream.get("latency_ms", 0.0),
+                        json.dumps(stream),
+                        stream.get("verification_artifact_id")
+                    ))
+                except Exception as e:
+                    logger.error(f"Failed to save telemetry stream: {e}")
+            conn.commit()
+    
+    def load_telemetry_streams(self, limit: int = 100, component_id: Optional[str] = None,
+                               start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Load hardware telemetry streams from database with optional filters."""
+        with self.get_connection() as conn:
+            query = "SELECT * FROM hardware_telemetry_streams WHERE 1=1"
+            params = []
+            
+            if component_id:
+                query += " AND component_id = ?"
+                params.append(component_id)
+            
+            if start_time:
+                query += " AND timestamp >= ?"
+                params.append(start_time)
+            
+            if end_time:
+                query += " AND timestamp <= ?"
+                params.append(end_time)
+            
+            query += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+            
+            cursor = conn.execute(query, params)
+            streams = []
+            for row in cursor.fetchall():
+                stream = json.loads(row["stream_json"])
+                stream["db_id"] = row["id"]
+                streams.append(stream)
+            return streams
+    
+    def compute_telemetry_latency_stats(self, component_id: Optional[str] = None,
+                                       start_time: Optional[str] = None,
+                                       end_time: Optional[str] = None) -> Dict[str, Any]:
+        """Compute latency statistics for telemetry streams."""
+        with self.get_connection() as conn:
+            query = """
+                SELECT 
+                    COUNT(*) as count,
+                    AVG(latency_ms) as avg_latency,
+                    MIN(latency_ms) as min_latency,
+                    MAX(latency_ms) as max_latency,
+                    component_id
+                FROM hardware_telemetry_streams
+                WHERE 1=1
+            """
+            params = []
+            
+            if component_id:
+                query += " AND component_id = ?"
+                params.append(component_id)
+            
+            if start_time:
+                query += " AND timestamp >= ?"
+                params.append(start_time)
+            
+            if end_time:
+                query += " AND timestamp <= ?"
+                params.append(end_time)
+            
+            if not component_id:
+                query += " GROUP BY component_id"
+            
+            cursor = conn.execute(query, params)
+            
+            if component_id:
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "component_id": component_id,
+                        "count": row["count"],
+                        "avg_latency_ms": row["avg_latency"],
+                        "min_latency_ms": row["min_latency"],
+                        "max_latency_ms": row["max_latency"]
+                    }
+                return {}
+            else:
+                results = []
+                for row in cursor.fetchall():
+                    results.append({
+                        "component_id": row["component_id"],
+                        "count": row["count"],
+                        "avg_latency_ms": row["avg_latency"],
+                        "min_latency_ms": row["min_latency"],
+                        "max_latency_ms": row["max_latency"]
+                    })
+                return {"by_component": results}
+    
+    def cleanup_old_telemetry_streams(self, days_to_keep: int = 7) -> int:
+        """Clean up old telemetry stream data to manage disk space."""
+        cutoff = datetime.now(timezone.utc).timestamp() - (days_to_keep * 24 * 3600)
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM hardware_telemetry_streams WHERE timestamp < datetime(?, 'unixepoch')",
+                (cutoff,)
+            )
+            conn.commit()
+            return cursor.rowcount
+    
+    def export_telemetry_diagnostic(self, component_id: Optional[str] = None,
+                                   start_time: Optional[str] = None,
+                                   end_time: Optional[str] = None) -> Dict[str, Any]:
+        """Export telemetry diagnostic data including power metrics and status."""
+        streams = self.load_telemetry_streams(
+            limit=1000,
+            component_id=component_id,
+            start_time=start_time,
+            end_time=end_time
+        )
+        
+        stats = self.compute_telemetry_latency_stats(
+            component_id=component_id,
+            start_time=start_time,
+            end_time=end_time
+        )
+        
+        return {
+            "export_timestamp": datetime.now(timezone.utc).isoformat(),
+            "filters": {
+                "component_id": component_id,
+                "start_time": start_time,
+                "end_time": end_time
+            },
+            "statistics": stats,
+            "stream_count": len(streams),
+            "streams": streams
+        }
 
 
 # Global persistence instance

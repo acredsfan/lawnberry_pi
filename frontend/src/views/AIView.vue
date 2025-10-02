@@ -46,8 +46,8 @@
         v-for="tab in tabs" 
         :key="tab.id"
         :class="{ active: activeTab === tab.id }"
-        @click="activeTab = tab.id"
         class="tab-button"
+        @click="activeTab = tab.id"
       >
         {{ tab.label }}
       </button>
@@ -59,10 +59,10 @@
         <div class="card-header">
           <h3>Dataset Overview</h3>
           <div class="header-actions">
-            <button @click="refreshDataset" class="btn btn-sm btn-secondary">
+            <button class="btn btn-sm btn-secondary" @click="refreshDataset">
               🔄 Refresh
             </button>
-            <button @click="showUploadModal = true" class="btn btn-sm btn-primary">
+            <button class="btn btn-sm btn-primary" @click="showUploadModal = true">
               📤 Upload Images
             </button>
           </div>
@@ -85,15 +85,15 @@
                   <div 
                     class="progress-fill" 
                     :style="{ width: `${(category.labeled / category.count) * 100}%` }"
-                  ></div>
+                  />
                 </div>
                 <span class="progress-text">{{ category.labeled }}/{{ category.count }} labeled</span>
               </div>
               <div class="category-actions">
-                <button @click.stop="labelCategory(category)" class="btn btn-xs btn-success">
+                <button class="btn btn-xs btn-success" @click.stop="labelCategory(category)">
                   🏷️ Label
                 </button>
-                <button @click.stop="exportCategory(category)" class="btn btn-xs btn-info">
+                <button class="btn btn-xs btn-info" @click.stop="exportCategory(category)">
                   📥 Export
                 </button>
               </div>
@@ -112,10 +112,10 @@
               <option value="labeled">Labeled Only</option>
               <option value="unlabeled">Unlabeled Only</option>
             </select>
-            <button @click="selectAllImages" class="btn btn-xs btn-secondary">
+            <button class="btn btn-xs btn-secondary" @click="selectAllImages">
               Select All
             </button>
-            <button @click="clearSelection" class="btn btn-xs btn-secondary">
+            <button class="btn btn-xs btn-secondary" @click="clearSelection">
               Clear Selection
             </button>
           </div>
@@ -133,7 +133,7 @@
               @click="toggleImageSelection(image.id)"
             >
               <div class="image-wrapper">
-                <img :src="image.thumbnail_url" :alt="image.filename" />
+                <img :src="image.thumbnail_url" :alt="image.filename">
                 <div class="image-overlay">
                   <div class="image-info">
                     <span class="filename">{{ image.filename }}</span>
@@ -159,13 +159,13 @@
               {{ selectedImages.length }} images selected
             </div>
             <div class="action-buttons">
-              <button @click="batchLabel" class="btn btn-success">
+              <button class="btn btn-success" @click="batchLabel">
                 🏷️ Batch Label
               </button>
-              <button @click="batchExport" class="btn btn-info">
+              <button class="btn btn-info" @click="batchExport">
                 📥 Export Selected
               </button>
-              <button @click="batchDelete" class="btn btn-danger">
+              <button class="btn btn-danger" @click="batchDelete">
                 🗑️ Delete Selected
               </button>
             </div>
@@ -179,7 +179,7 @@
       <div class="card">
         <div class="card-header">
           <h3>Dataset Export</h3>
-          <button @click="createNewExport" class="btn btn-sm btn-primary">
+          <button class="btn btn-sm btn-primary" @click="createNewExport">
             ➕ Create Export
           </button>
         </div>
@@ -214,10 +214,10 @@
                 <div class="category-checkboxes">
                   <label v-for="category in datasetCategories" :key="category.name" class="checkbox-label">
                     <input 
-                      type="checkbox" 
+                      v-model="exportConfig.categories" 
+                      type="checkbox"
                       :value="category.name"
-                      v-model="exportConfig.categories"
-                    />
+                    >
                     {{ category.name }} ({{ category.count }})
                   </label>
                 </div>
@@ -226,9 +226,9 @@
               <div class="option-group">
                 <label>
                   <input 
-                    type="checkbox" 
-                    v-model="exportConfig.includeUnlabeled"
-                  />
+                    v-model="exportConfig.includeUnlabeled" 
+                    type="checkbox"
+                  >
                   Include unlabeled images
                 </label>
               </div>
@@ -244,7 +244,7 @@
                     max="90" 
                     step="5"
                     @input="exportConfig.testSplit = 100 - exportConfig.trainSplit"
-                  />
+                  >
                   <label>Test: {{ exportConfig.testSplit }}%</label>
                 </div>
               </div>
@@ -286,12 +286,12 @@
                 <div class="export-actions">
                   <button 
                     v-if="exportJob.status === 'completed'"
-                    @click="downloadExport(exportJob)"
                     class="btn btn-xs btn-success"
+                    @click="downloadExport(exportJob)"
                   >
                     📥 Download
                   </button>
-                  <button @click="deleteExport(exportJob)" class="btn btn-xs btn-danger">
+                  <button class="btn btn-xs btn-danger" @click="deleteExport(exportJob)">
                     🗑️ Delete
                   </button>
                 </div>
@@ -315,9 +315,9 @@
         <div class="card-header">
           <h3>Model Training</h3>
           <button 
-            @click="startTraining" 
-            class="btn btn-sm btn-primary"
+            class="btn btn-sm btn-primary" 
             :disabled="isTraining"
+            @click="startTraining"
           >
             {{ isTraining ? '🔄 Training...' : '🚀 Start Training' }}
           </button>
@@ -336,7 +336,7 @@
                   <span>{{ currentTraining.progress }}% complete</span>
                 </div>
                 <div class="progress-bar">
-                  <div class="progress-fill" :style="{ width: `${currentTraining.progress}%` }"></div>
+                  <div class="progress-fill" :style="{ width: `${currentTraining.progress}%` }" />
                 </div>
                 <div class="training-metrics">
                   <div class="metric">
@@ -379,7 +379,7 @@
                   min="0.0001"
                   max="0.1"
                   class="form-control"
-                />
+                >
               </div>
               
               <div class="config-group">
@@ -399,7 +399,7 @@
                   min="1"
                   max="1000"
                   class="form-control"
-                />
+                >
               </div>
             </div>
           </div>
@@ -429,12 +429,12 @@
                 <div class="training-actions">
                   <button 
                     v-if="session.status === 'completed'"
-                    @click="deployModel(session)"
                     class="btn btn-xs btn-primary"
+                    @click="deployModel(session)"
                   >
                     🚀 Deploy
                   </button>
-                  <button @click="viewTrainingDetails(session)" class="btn btn-xs btn-info">
+                  <button class="btn btn-xs btn-info" @click="viewTrainingDetails(session)">
                     📊 Details
                   </button>
                 </div>
@@ -457,7 +457,7 @@
       <div class="modal-content" @click.stop>
         <div class="modal-header">
           <h3>Upload Training Images</h3>
-          <button @click="closeUploadModal" class="btn btn-sm btn-secondary">✖️</button>
+          <button class="btn btn-sm btn-secondary" @click="closeUploadModal">✖️</button>
         </div>
         <div class="modal-body">
           <div class="upload-area" @dragover.prevent @drop="handleDrop">
@@ -468,9 +468,9 @@
                 type="file" 
                 multiple 
                 accept="image/*"
-                @change="handleFileSelect"
                 class="file-input"
-              />
+                @change="handleFileSelect"
+              >
             </div>
           </div>
           
@@ -480,7 +480,7 @@
               <div v-for="(file, index) in uploadFiles" :key="index" class="file-item">
                 <span>{{ file.name }}</span>
                 <span>{{ (file.size / 1024).toFixed(1) }} KB</span>
-                <button @click="removeFile(index)" class="btn btn-xs btn-danger">✖️</button>
+                <button class="btn btn-xs btn-danger" @click="removeFile(index)">✖️</button>
               </div>
             </div>
           </div>
@@ -498,16 +498,16 @@
             
             <div v-if="uploadCategory === 'new'" class="form-group">
               <label>New Category Name</label>
-              <input v-model="newCategoryName" type="text" class="form-control" />
+              <input v-model="newCategoryName" type="text" class="form-control">
             </div>
           </div>
         </div>
         <div class="modal-footer">
-          <button @click="closeUploadModal" class="btn btn-secondary">Cancel</button>
+          <button class="btn btn-secondary" @click="closeUploadModal">Cancel</button>
           <button 
-            @click="uploadImages" 
-            class="btn btn-primary"
+            class="btn btn-primary" 
             :disabled="uploading || uploadFiles.length === 0"
+            @click="uploadImages"
           >
             {{ uploading ? 'Uploading...' : 'Upload Images' }}
           </button>

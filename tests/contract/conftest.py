@@ -5,9 +5,7 @@ import pytest
 # Skip placeholder WebSocket topic tests by default until implemented
 RUN_PLACEHOLDER = os.getenv("RUN_PLACEHOLDER_CONTRACT", "0") == "1"
 
-PLACEHOLDER_BASENAMES = {
-    "test_websocket_topics.py",
-}
+PLACEHOLDER_BASENAMES = set()
 
 
 def pytest_collection_modifyitems(config, items):

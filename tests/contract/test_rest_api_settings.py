@@ -1,80 +1,137 @@
+"""Contract tests for settings profile endpoints."""
+
 import pytest
 import httpx
+
 from backend.src.main import app
 
 
-@pytest.mark.asyncio
-async def test_get_settings_system_returns_config():
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/v2/settings/system")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert isinstance(body, dict)
-        # Check for expected top-level keys
-        expected_keys = ["hardware", "operation", "telemetry", "ai", "ui"]
-        for key in expected_keys:
-            assert key in body
+BASE_URL = "http://test"
+
+
+def _bump_patch(version: str) -> str:
+    major, minor, patch = version.split(".")
+    return f"{major}.{minor}.{int(patch) + 1}"
 
 
 @pytest.mark.asyncio
-async def test_put_settings_system_updates_config():
+async def test_get_settings_profile_returns_expected_sections():
+    """GET /api/v2/settings should expose profile metadata and latency targets."""
+
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        # First get current settings
-        get_resp = await client.get("/api/v2/settings/system")
-        current_settings = get_resp.json()
-        
-        # Modify some settings
-        updated_settings = current_settings.copy()
-        updated_settings["telemetry"]["cadence_hz"] = 8
-        updated_settings["operation"]["simulation_mode"] = True
-        
-        # Update via PUT
-        put_resp = await client.put("/api/v2/settings/system", json=updated_settings)
-        assert put_resp.status_code == 200
-        
-        # Verify changes were applied
-        verify_resp = await client.get("/api/v2/settings/system")
-        verify_body = verify_resp.json()
-        assert verify_body["telemetry"]["cadence_hz"] == 8
-        assert verify_body["operation"]["simulation_mode"] is True
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        response = await client.get("/api/v2/settings")
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+
+        for key in (
+            "profile_version",
+            "hardware",
+            "network",
+            "telemetry",
+            "simulation_mode",
+            "ai_acceleration",
+            "branding_checksum",
+        ):
+            assert key in payload, f"Missing {key}"
+
+        telemetry = payload["telemetry"]
+        assert telemetry.get("cadence_hz")
+        latency_targets = telemetry.get("latency_targets", {})
+        assert latency_targets.get("pi5_ms") <= 250
+        assert latency_targets.get("pi4b_ms") <= 350
+
+        checksum = payload.get("branding_checksum")
+        assert isinstance(checksum, str) and len(checksum) == 64
 
 
 @pytest.mark.asyncio
-async def test_put_settings_system_validates_cadence():
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        # Get current settings
-        get_resp = await client.get("/api/v2/settings/system")
-        settings = get_resp.json()
-        
-        # Try invalid cadence (out of range)
-        settings["telemetry"]["cadence_hz"] = 15  # Should be 1-10
-        
-        put_resp = await client.put("/api/v2/settings/system", json=settings)
-        assert put_resp.status_code == 422  # Validation error
+async def test_put_settings_profile_updates_version_and_persists_changes():
+    """PUT /api/v2/settings should bump profile version and persist telemetry cadence."""
 
-
-@pytest.mark.asyncio
-async def test_put_settings_partial_update():
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        # Try partial update (just UI settings)
-        partial_settings = {
-            "ui": {
-                "theme": "retro-green",
-                "auto_refresh": False
-            }
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        current = (await client.get("/api/v2/settings")).json()
+
+        new_version = _bump_patch(current["profile_version"])
+        update_payload = {
+            **current,
+            "profile_version": new_version,
         }
-        
-        put_resp = await client.put("/api/v2/settings/system", json=partial_settings)
-        assert put_resp.status_code == 200
-        
-        # Verify only UI was updated, other sections preserved
-        verify_resp = await client.get("/api/v2/settings/system")
-        body = verify_resp.json()
-        assert body["ui"]["theme"] == "retro-green"
-        assert body["ui"]["auto_refresh"] is False
-        # Hardware section should still exist
-        assert "hardware" in body
+        update_payload["telemetry"]["cadence_hz"] = 7
+        update_payload["simulation_mode"] = True
+
+        response = await client.put("/api/v2/settings", json=update_payload)
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body.get("profile_version") == new_version
+        assert body.get("updated_at"), "updated_at missing in response"
+
+        refreshed = (await client.get("/api/v2/settings")).json()
+        assert refreshed["telemetry"]["cadence_hz"] == 7
+        assert refreshed["simulation_mode"] is True
+
+
+@pytest.mark.asyncio
+async def test_put_settings_profile_detects_version_conflict():
+    """Submitting a stale profile_version should return HTTP 409 with conflict detail."""
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        current = (await client.get("/api/v2/settings")).json()
+        stale_payload = {
+            **current,
+            "profile_version": "0.0.1",  # guaranteed older than active semver
+        }
+
+        response = await client.put("/api/v2/settings", json=stale_payload)
+
+        assert response.status_code == 409, response.text
+        detail = response.json()
+        assert detail.get("error_code") == "PROFILE_VERSION_CONFLICT"
+        assert detail.get("current_version") == current["profile_version"]
+
+
+@pytest.mark.asyncio
+async def test_put_settings_profile_enforces_latency_targets():
+    """Latency guardrails >250/350 ms should be rejected with validation error."""
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        current = (await client.get("/api/v2/settings")).json()
+        new_version = _bump_patch(current["profile_version"])
+        invalid_payload = {
+            **current,
+            "profile_version": new_version,
+        }
+        invalid_payload["telemetry"]["latency_targets"] = {"pi5_ms": 400, "pi4b_ms": 500}
+
+        response = await client.put("/api/v2/settings", json=invalid_payload)
+
+        assert response.status_code == 422, response.text
+        detail = response.json()
+        assert detail.get("error_code") == "LATENCY_GUARDRAIL_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_put_settings_profile_validates_branding_checksum():
+    """Invalid branding checksum should surface remediation info."""
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        current = (await client.get("/api/v2/settings")).json()
+        new_version = _bump_patch(current["profile_version"])
+        invalid_payload = {
+            **current,
+            "profile_version": new_version,
+            "branding_checksum": "deadbeef",
+        }
+
+        response = await client.put("/api/v2/settings", json=invalid_payload)
+
+        assert response.status_code == 422, response.text
+        detail = response.json()
+        assert detail.get("error_code") == "BRANDING_ASSET_MISMATCH"
+        assert "remediation_url" in detail

@@ -2,7 +2,7 @@
   <div class="dashboard retro-dashboard">
     <!-- Retro Header -->
     <div class="retro-header">
-      <div class="header-glow"></div>
+      <div class="header-glow" />
       <h1 class="retro-title">SYSTEM DASHBOARD</h1>
       <p class="retro-subtitle">REAL-TIME MONITORING & CONTROL INTERFACE</p>
       <div class="data-stream">{{ dataStreamText }}</div>
@@ -13,7 +13,7 @@
       <div class="retro-card status-card">
         <div class="card-header">
           <h3>◢ SYSTEM STATUS ◣</h3>
-          <div class="status-indicator" :class="systemStatusClass"></div>
+          <div class="status-indicator" :class="systemStatusClass" />
         </div>
         <div class="card-content">
           <div class="status-row">
@@ -35,7 +35,7 @@
       <div class="retro-card control-card">
         <div class="card-header">
           <h3>◢ QUICK CONTROLS ◣</h3>
-          <div class="power-indicator" :class="{ active: currentMode !== 'IDLE' }"></div>
+          <div class="power-indicator" :class="{ active: currentMode !== 'IDLE' }" />
         </div>
         <div class="card-content">
           <div class="control-grid">
@@ -66,14 +66,14 @@
       <div class="retro-card activity-card">
         <div class="card-header">
           <h3>◢ CURRENT ACTIVITY ◣</h3>
-          <div class="activity-pulse"></div>
+          <div class="activity-pulse" />
         </div>
         <div class="card-content">
           <div class="progress-container">
             <div class="progress-label">{{ progress }}% COMPLETE</div>
             <div class="retro-progress">
-              <div class="progress-bar" :style="{ width: `${progress}%` }"></div>
-              <div class="progress-grid"></div>
+              <div class="progress-bar" :style="{ width: `${progress}%` }" />
+              <div class="progress-grid" />
             </div>
           </div>
         </div>
@@ -103,8 +103,8 @@
         <div class="card-content">
           <div class="metric-value">{{ batteryLevel.toFixed(1) }}%</div>
           <div class="battery-bar">
-            <div class="battery-fill" :style="{ width: `${batteryLevel}%` }" :class="batteryBarClass"></div>
-            <div class="battery-segments"></div>
+            <div class="battery-fill" :style="{ width: `${batteryLevel}%` }" :class="batteryBarClass" />
+            <div class="battery-segments" />
           </div>
           <div class="metric-status">{{ batteryVoltage }}V</div>
         </div>
@@ -141,7 +141,7 @@
     <div class="retro-card events-card">
       <div class="card-header">
         <h3>◢ SYSTEM LOG ◣</h3>
-        <div class="log-indicator"></div>
+        <div class="log-indicator" />
       </div>
       <div class="card-content">
         <div class="events-terminal">

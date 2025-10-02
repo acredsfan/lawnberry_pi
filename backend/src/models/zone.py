@@ -97,3 +97,164 @@ class Zone(BaseModel):
     class Config:
         use_enum_values = True
         json_encoders = {datetime: lambda v: v.isoformat()}
+
+
+class MarkerType(str, Enum):
+    """Special marker types for map configuration"""
+    HOME = "home"
+    AM_SUN = "am_sun"
+    PM_SUN = "pm_sun"
+    CUSTOM = "custom"
+
+
+class MapMarker(BaseModel):
+    """Special marker on the map"""
+    marker_id: str
+    marker_type: MarkerType
+    position: Point
+    label: Optional[str] = None
+    icon: Optional[str] = None  # Icon identifier for UI rendering
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MapProvider(str, Enum):
+    """Map provider options"""
+    GOOGLE_MAPS = "google_maps"
+    OSM = "osm"  # OpenStreetMap fallback
+
+
+class MapConfiguration(BaseModel):
+    """Persisted geospatial definition for mowing area"""
+    config_id: str
+    config_version: int = 1
+    
+    # Map provider
+    provider: MapProvider = MapProvider.GOOGLE_MAPS
+    provider_metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    # Zones and boundaries
+    boundary_zone: Optional[Zone] = None  # Primary yard boundary
+    exclusion_zones: List[Zone] = Field(default_factory=list)
+    mowing_zones: List[Zone] = Field(default_factory=list)
+    
+    # Special markers
+    markers: List[MapMarker] = Field(default_factory=list)
+    
+    # Map view settings
+    center_point: Optional[Point] = None
+    zoom_level: int = 18
+    map_rotation_deg: float = 0.0
+    
+    # Validation and metadata
+    validation_errors: List[str] = Field(default_factory=list)
+    last_modified: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    class Config:
+        use_enum_values = True
+        json_encoders = {datetime: lambda v: v.isoformat()}
+    
+    def add_marker(self, marker_type: MarkerType, position: Point, label: Optional[str] = None) -> MapMarker:
+        """Add a special marker to the map"""
+        import uuid
+        marker_id = str(uuid.uuid4())
+        marker = MapMarker(
+            marker_id=marker_id,
+            marker_type=marker_type,
+            position=position,
+            label=label or marker_type.value
+        )
+        self.markers.append(marker)
+        self.last_modified = datetime.now(timezone.utc)
+        return marker
+    
+    def get_marker(self, marker_type: MarkerType) -> Optional[MapMarker]:
+        """Get marker by type"""
+        return next(
+            (m for m in self.markers if m.marker_type == marker_type),
+            None
+        )
+    
+    def add_exclusion_zone(self, zone: Zone) -> bool:
+        """Add exclusion zone with overlap validation"""
+        # Check for overlaps with existing zones (basic validation)
+        if self.boundary_zone and not self._is_within_boundary(zone):
+            self.validation_errors.append(
+                f"Exclusion zone {zone.id} extends outside boundary"
+            )
+            return False
+        
+        # Check for overlaps with other exclusion zones
+        for existing_zone in self.exclusion_zones:
+            if self._zones_overlap(zone, existing_zone):
+                self.validation_errors.append(
+                    f"Exclusion zone {zone.id} overlaps with {existing_zone.id}"
+                )
+                return False
+        
+        self.exclusion_zones.append(zone)
+        self.last_modified = datetime.now(timezone.utc)
+        return True
+    
+    def _is_within_boundary(self, zone: Zone) -> bool:
+        """Check if zone is within boundary (simplified check)"""
+        if not self.boundary_zone:
+            return True
+        
+        # Simplified: check if all zone points are roughly within boundary
+        # Real implementation would use shapely or similar library
+        try:
+            from shapely.geometry import Polygon as ShapelyPolygon
+            from shapely.geometry import Point as ShapelyPoint
+            
+            boundary_coords = [(p.longitude, p.latitude) for p in self.boundary_zone.polygon]
+            boundary_poly = ShapelyPolygon(boundary_coords)
+            
+            zone_coords = [(p.longitude, p.latitude) for p in zone.polygon]
+            zone_poly = ShapelyPolygon(zone_coords)
+            
+            return boundary_poly.contains(zone_poly)
+        except ImportError:
+            # If shapely not available, skip validation
+            return True
+    
+    def _zones_overlap(self, zone1: Zone, zone2: Zone) -> bool:
+        """Check if two zones overlap (requires shapely for accurate check)"""
+        try:
+            from shapely.geometry import Polygon as ShapelyPolygon
+            
+            zone1_coords = [(p.longitude, p.latitude) for p in zone1.polygon]
+            zone2_coords = [(p.longitude, p.latitude) for p in zone2.polygon]
+            
+            poly1 = ShapelyPolygon(zone1_coords)
+            poly2 = ShapelyPolygon(zone2_coords)
+            
+            return poly1.intersects(poly2)
+        except ImportError:
+            # If shapely not available, assume no overlap (conservative)
+            return False
+    
+    def validate_configuration(self) -> bool:
+        """Validate complete map configuration"""
+        self.validation_errors = []
+        
+        # Require boundary zone
+        if not self.boundary_zone:
+            self.validation_errors.append("Boundary zone is required")
+            return False
+        
+        # Validate all exclusion zones
+        for zone in self.exclusion_zones:
+            if not self._is_within_boundary(zone):
+                self.validation_errors.append(
+                    f"Exclusion zone {zone.id} outside boundary"
+                )
+        
+        # Check for marker overlaps (basic validation)
+        marker_types = [m.marker_type for m in self.markers]
+        required_markers = [MarkerType.HOME]
+        for required in required_markers:
+            if required not in marker_types:
+                self.validation_errors.append(f"Missing required marker: {required.value}")
+        
+        return len(self.validation_errors) == 0

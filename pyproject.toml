@@ -22,7 +22,11 @@ dependencies = [
     "pytest-asyncio>=0.21.0",
     # ARM64-friendly hardware access libs (optional at runtime; imported lazily)
     "smbus2>=0.4.3",
-    "pyserial>=3.5"
+    "pyserial>=3.5",
+    # Geometry validation for map overlap checks (libgeos available via Pi OS repos)
+    "shapely>=2.0.4",
+    # Numerics for orientation math and latency aggregation without pulling accelerator deps
+    "numpy>=1.26.4"
 ]
 
 [tool.setuptools.packages.find]
