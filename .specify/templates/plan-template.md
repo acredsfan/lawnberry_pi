@@ -47,12 +47,7 @@
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- Platform exclusivity & degradation guardrail: Pi OS Lite Bookworm (64-bit) on Raspberry Pi 5 (16 GB) primary, graceful degradation for Raspberry Pi 4B (4–8 GB).
-- Package isolation hierarchy: Coral USB (isolated venv) → Hailo HAT (optional) → CPU fallback; forbidden accelerator packages stay out of the main environment.
-- Test-first development: TDD workflow with failing tests before implementation and SIM_MODE coverage for CI.
-- Hardware resource coordination: Single-owner services (camera-stream, sensor/motor daemons) explicitly defined with coordination mechanisms.
-- Constitutional hardware compliance: Implementation aligns with immutable `spec/hardware.yaml` manifest, including INA3221 mapping and controller selections.
-- LawnBerry identity & assets: WebUI/docs plan uses required branding files and retro 1980s aesthetic across deliverables.
+[Gates determined based on constitution file]
 
 ## Project Structure
 
@@ -214,4 +209,4 @@ ios/ or android/
 - [ ] Complexity deviations documented
 
 ---
-*Based on Constitution v1.5.0 - See `/.specify/memory/constitution.md`*
+*Based on Constitution v2.0.0 - See `/.specify/memory/constitution.md`*
