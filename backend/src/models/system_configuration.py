@@ -325,3 +325,205 @@ class SystemConfiguration(BaseModel):
         }
         
         return config
+
+
+class TelemetrySettings(BaseModel):
+    """Telemetry configuration settings"""
+    cadence_hz: float = Field(default=5.0, ge=1.0, le=10.0)  # 1-10 Hz range
+    latency_target_ms: float = 250.0  # Pi 5: ≤250ms, Pi 4B: ≤350ms
+    stream_enabled: bool = True
+    buffer_size: int = 100
+    compression_enabled: bool = False
+    
+    @validator('cadence_hz')
+    def validate_cadence(cls, v):
+        if not 1.0 <= v <= 10.0:
+            raise ValueError('Telemetry cadence must be between 1 and 10 Hz')
+        return v
+
+
+class ControlSettings(BaseModel):
+    """Control system settings"""
+    latency_budget_ms: float = 100.0  # Maximum control latency
+    watchdog_timeout_ms: int = 500
+    safety_interlocks_enabled: bool = True
+    manual_control_enabled: bool = True
+    audit_trail_enabled: bool = True
+
+
+class MapsSettings(BaseModel):
+    """Maps and navigation settings"""
+    provider: str = "google_maps"  # "google_maps" or "osm"
+    enable_osm_fallback: bool = True
+    satellite_view: bool = False
+    show_grid: bool = True
+    show_exclusion_zones: bool = True
+    marker_icons_enabled: bool = True
+
+
+class CameraSettings(BaseModel):
+    """Camera system settings"""
+    resolution_width: int = 1920
+    resolution_height: int = 1080
+    framerate: int = 30
+    format: str = "h264"
+    quality: int = 85  # 0-100
+    auto_exposure: bool = True
+    
+    @validator('resolution_width', 'resolution_height')
+    def validate_resolution(cls, v):
+        if v < 640 or v > 4096:
+            raise ValueError('Resolution must be between 640 and 4096')
+        return v
+    
+    @validator('framerate')
+    def validate_framerate(cls, v):
+        if v not in [15, 24, 30, 60]:
+            raise ValueError('Framerate must be one of: 15, 24, 30, 60')
+        return v
+
+
+class AISettings(BaseModel):
+    """AI/ML system settings"""
+    model_selection: str = "yolov8n"  # "yolov8n", "yolov8s", "efficientdet-lite0"
+    accelerator: str = "cpu_only"  # "coral_usb", "hailo_hat", "cpu_only"
+    confidence_threshold: float = 0.5
+    inference_enabled: bool = True
+    max_detections: int = 10
+
+
+class SystemSettings(BaseModel):
+    """System-level settings"""
+    sim_mode_enabled: bool = False
+    debug_mode: bool = False
+    log_level: str = "info"
+    auto_backup: bool = True
+    data_retention_days: int = 90
+
+
+class SettingsProfile(BaseModel):
+    """Aggregated configuration state for all settings categories"""
+    profile_id: str
+    profile_version: str = "1.0.0"  # Semantic versioning
+    profile_name: str = "Default Profile"
+    
+    # Settings categories
+    hardware: Dict[str, Any] = Field(default_factory=dict)  # Calibration values, channel mappings
+    network: NetworkConfiguration = Field(default_factory=NetworkConfiguration)
+    telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
+    control: ControlSettings = Field(default_factory=ControlSettings)
+    maps: MapsSettings = Field(default_factory=MapsSettings)
+    camera: CameraSettings = Field(default_factory=CameraSettings)
+    ai: AISettings = Field(default_factory=AISettings)
+    system: SystemSettings = Field(default_factory=SystemSettings)
+    
+    # Branding compliance
+    branding_checksum: Optional[str] = None  # SHA256 of required assets
+    branding_assets_present: bool = False
+    
+    # Persistence metadata
+    persisted_to_sqlite: bool = False
+    persisted_to_config_files: bool = False
+    sqlite_last_sync: Optional[datetime] = None
+    config_files_last_sync: Optional[datetime] = None
+    
+    # Timestamps
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
+    
+    def bump_version(self, bump_type: str = "patch"):
+        """Bump semantic version (major.minor.patch)"""
+        parts = self.profile_version.split('.')
+        major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+        
+        if bump_type == "major":
+            major += 1
+            minor = 0
+            patch = 0
+        elif bump_type == "minor":
+            minor += 1
+            patch = 0
+        else:  # patch
+            patch += 1
+        
+        self.profile_version = f"{major}.{minor}.{patch}"
+        self.updated_at = datetime.now(timezone.utc)
+    
+    def update_setting(self, category: str, key: str, value: Any) -> bool:
+        """Update a setting in a specific category"""
+        if not hasattr(self, category):
+            return False
+        
+        category_obj = getattr(self, category)
+        if isinstance(category_obj, dict):
+            category_obj[key] = value
+        elif hasattr(category_obj, key):
+            setattr(category_obj, key, value)
+        else:
+            return False
+        
+        self.updated_at = datetime.now(timezone.utc)
+        self.bump_version("patch")
+        return True
+    
+    def compute_branding_checksum(self, asset_paths: List[str]) -> str:
+        """Compute SHA256 checksum of branding assets"""
+        import hashlib
+        import os
+        
+        hasher = hashlib.sha256()
+        for path in sorted(asset_paths):
+            if os.path.exists(path):
+                with open(path, 'rb') as f:
+                    hasher.update(f.read())
+        
+        checksum = hasher.hexdigest()
+        self.branding_checksum = checksum
+        return checksum
+    
+    def validate_branding_assets(self, required_assets: List[str]) -> bool:
+        """Validate presence of required branding assets"""
+        import os
+        
+        all_present = all(os.path.exists(asset) for asset in required_assets)
+        self.branding_assets_present = all_present
+        return all_present
+    
+    def validate_settings(self) -> List[str]:
+        """Validate all settings and return issues"""
+        issues = []
+        
+        # Validate telemetry cadence
+        if not 1.0 <= self.telemetry.cadence_hz <= 10.0:
+            issues.append("Telemetry cadence must be between 1 and 10 Hz")
+        
+        # Validate control latency
+        if self.control.latency_budget_ms < 50 or self.control.latency_budget_ms > 1000:
+            issues.append("Control latency budget must be between 50 and 1000 ms")
+        
+        # Validate camera resolution
+        if self.camera.resolution_width * self.camera.resolution_height > 4096 * 3072:
+            issues.append("Camera resolution exceeds maximum supported")
+        
+        # Validate AI model selection
+        valid_models = ["yolov8n", "yolov8s", "efficientdet-lite0"]
+        if self.ai.model_selection not in valid_models:
+            issues.append(f"AI model must be one of: {', '.join(valid_models)}")
+        
+        return issues
+    
+    @classmethod
+    def create_default_profile(cls) -> 'SettingsProfile':
+        """Create default settings profile"""
+        import uuid
+        
+        profile = cls(
+            profile_id=str(uuid.uuid4()),
+            profile_name="Default Profile",
+            profile_version="1.0.0"
+        )
+        
+        return profile

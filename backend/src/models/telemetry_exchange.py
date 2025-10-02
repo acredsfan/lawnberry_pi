@@ -10,6 +10,165 @@ from pydantic import BaseModel, Field, validator
 import json
 
 
+class ComponentId(str, Enum):
+    """Hardware component identifiers"""
+    IMU = "imu"
+    GPS = "gps"
+    POWER = "power"
+    TOF_LEFT = "tof_left"
+    TOF_RIGHT = "tof_right"
+    BLADE_MOTOR = "blade_motor"
+    DRIVE_LEFT = "drive_left"
+    DRIVE_RIGHT = "drive_right"
+    CORAL = "coral"
+    HAILO = "hailo"
+    CPU = "cpu"
+    CAMERA = "camera"
+    ENVIRONMENTAL = "environmental"
+
+
+class ComponentStatus(str, Enum):
+    """Hardware component health status"""
+    HEALTHY = "healthy"
+    WARNING = "warning"
+    FAULT = "fault"
+
+
+class RtkFixType(str, Enum):
+    """RTK GPS fix quality"""
+    NO_FIX = "no_fix"
+    GPS_FIX = "gps_fix"
+    DGPS_FIX = "dgps_fix"
+    RTK_FLOAT = "rtk_float"
+    RTK_FIXED = "rtk_fixed"
+
+
+class GPSData(BaseModel):
+    """GPS sensor data"""
+    latitude: float
+    longitude: float
+    altitude_m: float = 0.0
+    speed_mps: float = 0.0
+    heading_deg: float = 0.0
+    hdop: float = 99.9  # Horizontal dilution of precision
+    satellites: int = 0
+    fix_type: RtkFixType = RtkFixType.NO_FIX
+    rtk_status_message: Optional[str] = None  # Human-readable RTK status
+    
+    @validator('latitude')
+    def validate_latitude(cls, v):
+        if not -90 <= v <= 90:
+            raise ValueError('Latitude must be between -90 and 90')
+        return v
+    
+    @validator('longitude')
+    def validate_longitude(cls, v):
+        if not -180 <= v <= 180:
+            raise ValueError('Longitude must be between -180 and 180')
+        return v
+
+
+class IMUData(BaseModel):
+    """IMU orientation and motion data"""
+    # Quaternion orientation (w, x, y, z)
+    quaternion_w: float = 1.0
+    quaternion_x: float = 0.0
+    quaternion_y: float = 0.0
+    quaternion_z: float = 0.0
+    
+    # Euler angles (degrees)
+    roll_deg: float = 0.0
+    pitch_deg: float = 0.0
+    yaw_deg: float = 0.0
+    
+    # Linear acceleration (m/s²)
+    accel_x: float = 0.0
+    accel_y: float = 0.0
+    accel_z: float = 0.0
+    
+    # Angular velocity (deg/s)
+    gyro_x: float = 0.0
+    gyro_y: float = 0.0
+    gyro_z: float = 0.0
+    
+    # Calibration status (0-3, 3 = fully calibrated)
+    calibration_sys: int = 0
+    calibration_gyro: int = 0
+    calibration_accel: int = 0
+    calibration_mag: int = 0
+
+
+class MotorData(BaseModel):
+    """Motor status data"""
+    pwm_target: int = 0  # -255 to 255
+    pwm_actual: int = 0
+    current_amps: float = 0.0
+    temperature_c: float = 0.0
+    encoder_position: Optional[int] = None
+    encoder_velocity: Optional[float] = None  # RPM
+
+
+class PowerData(BaseModel):
+    """Power system data from INA3221"""
+    # Battery (Channel 1)
+    battery_voltage: float = 0.0
+    battery_current: float = 0.0
+    battery_power: float = 0.0
+    
+    # Solar (Channel 3)
+    solar_voltage: float = 0.0
+    solar_current: float = 0.0
+    solar_power: float = 0.0
+    
+    # Derived metrics
+    battery_soc_percent: Optional[float] = None  # State of charge estimate
+    battery_health: ComponentStatus = ComponentStatus.HEALTHY
+
+
+class ToFData(BaseModel):
+    """Time-of-Flight sensor data"""
+    distance_mm: int = 0
+    range_status: str = "valid"  # valid, out_of_range, signal_fail
+    signal_rate: float = 0.0
+
+
+class HardwareTelemetryStream(BaseModel):
+    """Real-time snapshot of hardware sensor values and status"""
+    # Timestamp and identification
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    component_id: ComponentId
+    
+    # Component value (variant based on component_id)
+    value: Union[float, int, str, Dict[str, Any]] = Field(default=0.0)
+    
+    # Component health
+    status: ComponentStatus = ComponentStatus.HEALTHY
+    latency_ms: float = 0.0
+    
+    # Component-specific structured data
+    gps_data: Optional[GPSData] = None
+    imu_data: Optional[IMUData] = None
+    motor_data: Optional[MotorData] = None
+    power_data: Optional[PowerData] = None
+    tof_data: Optional[ToFData] = None
+    
+    # Generic metadata (JSON for flexibility)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    # Verification artifact reference
+    verification_artifact_id: Optional[str] = None
+    
+    class Config:
+        use_enum_values = True
+        json_encoders = {datetime: lambda v: v.isoformat()}
+    
+    @validator('latency_ms')
+    def validate_latency(cls, v):
+        if v < 0 or v > 10000:  # 10 second max
+            raise ValueError('Latency must be between 0 and 10000 ms')
+        return v
+
+
 class TelemetryTopic(str, Enum):
     """Available telemetry topics"""
     TELEMETRY_UPDATES = "telemetry/updates"

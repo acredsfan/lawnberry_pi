@@ -1,0 +1,113 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.virtualenv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+.tox/
+htmlcov/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/lawnberry.db
+data/lawnberry.db-journal
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+data/*.json
+data/*.csv
+data/exports/
+memory/*.json
+
+# Hardware integration (temporary/local testing)
+hw-integration/
+
+# Compiled RoboHAT code (built locally)
+robohat-rp2040-code/*.uf2
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Secrets and environment
+.env
+.env.local
+.env.*.local
+config/secrets.json
+config/*.key
+config/*.pem
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*~
+
+# Build artifacts
+*.tar.gz
+*.zip
+
+# Frontend specific (covered by frontend/.gitignore but listed for clarity)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Python package artifacts
+lawnberry_pi.egg-info/
+
+# Logo image (uncomment if proprietary)
+# LawnBerryPi_logo.png
