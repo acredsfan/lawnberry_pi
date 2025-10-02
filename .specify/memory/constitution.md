@@ -1,8 +1,11 @@
 <!--
 Sync Impact Report:
-Version: 1.3.0 → 1.4.0 (Expand agent execution rules: mandatory local workspace edits/search; allow GitHub CLI for git ops)
-Modified principles: None renamed
-Added sections: Clarified Agent Execution Rules (local edit/search, GH CLI option)
+Version: 1.4.0 → 1.5.0 (Add brand identity guardrail and clarify platform/hardware mandates)
+Modified principles:
+  - I. Platform Exclusivity → I. Platform Exclusivity & Degradation Guardrail
+  - V. Constitutional Hardware Compliance → V. Constitutional Hardware Compliance (clarified manifest immutability)
+Added sections:
+  - VI. LawnBerry Identity & Assets (NON-NEGOTIABLE)
 Removed sections: None
 Templates requiring updates:
   - .specify/templates/plan-template.md (version reference) ✅ updated
@@ -15,8 +18,8 @@ Follow-up TODOs: None
 
 ## Core Principles
 
-### I. Platform Exclusivity
-The LawnBerry Pi system MUST operate exclusively on Raspberry Pi OS Bookworm (64-bit) with Python 3.11.x runtime on Raspberry Pi 5 (primary) or Pi 4B (compatible). No cross-platform dependencies, alternate interpreters, or non-ARM64 Linux distributions are permitted. All development, testing, and deployment MUST assume this target platform exclusively.
+### I. Platform Exclusivity & Degradation Guardrail
+The LawnBerry Pi system MUST operate exclusively on Raspberry Pi OS Lite Bookworm (64-bit) with Python 3.11.x on Raspberry Pi 5 (16 GB) as the primary execution environment. All features MUST be validated on this hardware. Every capability MUST provide graceful degradation on Raspberry Pi 4B (4–8 GB) without removing constitutional functionality or violating safety gates. No cross-platform dependencies, alternate interpreters, or non-ARM64 Linux distributions are permitted. Simulation or desktop testing MAY supplement development, but final verification MUST occur on supported Raspberry Pi hardware.
 
 ### II. Package Isolation (NON-NEGOTIABLE)
 AI acceleration dependencies MUST maintain strict isolation: `pycoral`/`edgetpu` are BANNED from the main environment and MUST use dedicated venv-coral. Coral USB acceleration operates in complete isolation from the main system. Hardware acceleration follows constitutional hierarchy: Coral USB (isolated venv-coral) → Hailo HAT (optional) → CPU fallback (TFLite/OpenCV). Package management via uv with committed lock files ensures reproducible builds.
@@ -28,15 +31,18 @@ TDD methodology is mandatory: Tests written → User approved → Tests fail →
 Hardware interfaces are single-owner resources requiring explicit coordination. Camera access is brokered exclusively through `camera-stream.service`; other services MUST subscribe to feeds via IPC and NEVER open the device directly. Sensors, motor controllers, and communication buses require coordination mechanisms (locks, IPC queues, or dedicated daemons) to prevent concurrent access conflicts. Resource ownership must be clearly defined and enforced.
 
 ### V. Constitutional Hardware Compliance
-Hardware configuration MUST align with `spec/hardware.yaml` requirements. INA3221 power monitoring uses fixed channel assignments: Channel 1 (Battery), Channel 2 (Unused), Channel 3 (Solar Input). GPS supports either ZED-F9P USB with NTRIP corrections OR Neo-8M UART (mutually exclusive). Motor control via RoboHAT RP2040→Cytron MDDRC10 (preferred) or L298N fallback. HAT stacking conflicts (RoboHAT + Hailo HAT) are prohibited without constitutional amendment.
+Hardware configuration MUST align with the canonical manifest at `spec/hardware.yaml`. The manifest is immutable without constitutional amendment; automation MUST treat it as a read-only guardrail. INA3221 power monitoring uses fixed channel assignments: Channel 1 (Battery), Channel 2 (Unused), Channel 3 (Solar Input). GPS supports either ZED-F9P USB with NTRIP corrections OR Neo-8M UART (mutually exclusive). Motor control via RoboHAT RP2040→Cytron MDDRC10 (preferred) or L298N fallback. HAT stacking conflicts (RoboHAT + Hailo HAT) are prohibited without constitutional amendment.
+
+### VI. LawnBerry Identity & Assets (NON-NEGOTIABLE)
+All user-facing experiences MUST ship with official LawnBerry branding and imagery (e.g., `LawnBerryPi_logo.png`, `LawnBerryPi_icon2.png`, `LawnBerryPi_Pin.png`). The retro 1980s neon aesthetic, color palette, and typography derived from these assets are mandatory across the WebUI, documentation, marketing, and packaging. No generic or alternate branding is permitted. Asset updates require design approval and a constitutional amendment to remain consistent across the ecosystem.
 
 ## Technology Stack Requirements
 
-All system components must use approved technologies and interfaces: Picamera2 + GStreamer for camera handling, python-periphery + lgpio for GPIO control, pyserial for UART communication, and systemd for service management. WebUI must maintain retro 1980s aesthetic with constitutional branding assets. No frameworks or libraries outside the approved stack without constitutional amendment and compelling technical justification.
+All system components MUST use the approved stack: Picamera2 + GStreamer for camera handling, python-periphery + lgpio for GPIO control, pyserial for UART communication, and systemd for service management. Implementations MUST respect the acceleration hierarchy (Coral USB → Hailo HAT → CPU) and maintain environment isolation. The WebUI MUST maintain the retro 1980s LawnBerry aesthetic using constitutional assets while delivering fluent performance on Raspberry Pi 5 and graceful degradation on Raspberry Pi 4B. No frameworks or libraries outside the approved stack are permitted without constitutional amendment and compelling technical justification.
 
 ## Development Workflow
 
-Every code change MUST update `/docs` and `/spec` documentation with CI validation preventing drift. No TODOs are permitted unless formatted as `TODO(v3):` with linked GitHub issue for future version planning. All services operate as managed systemd units with automatic startup, monitoring, and graceful shutdown. Service coordination respects camera ownership and hardware resource management protocols.
+Every code change MUST update `/docs` and `/spec` documentation with CI validation preventing drift. No TODOs are permitted unless formatted as `TODO(v3):` with linked GitHub issue for future version planning. All services operate as managed systemd units with automatic startup, monitoring, and graceful shutdown. Service coordination respects camera ownership and hardware resource management protocols. UI and documentation changes MUST confirm constitutional branding compliance prior to review.
 
 AI agents MUST maintain an `AGENT_JOURNAL.md` file in the `.specify/memory/` folder, documenting progress, changes made, decisions taken, and any information necessary for seamless handoff to other agents or developers. The journal MUST include timestamps, rationale for major decisions, and current project state to ensure continuity across development sessions.
 
@@ -63,4 +69,4 @@ Git operations (OPTIONS):
 
 This constitution supersedes all other development practices and requirements. Constitutional amendments require formal documentation, approval process, and migration plan for affected systems. All pull requests and code reviews MUST verify constitutional compliance before approval. Complexity deviations require explicit justification with simpler alternatives documented. Development teams MUST use `spec/agent_rules.md` for runtime development guidance and implementation constraints.
 
-**Version**: 1.4.0 | **Ratified**: 2025-09-25 | **Last Amended**: 2025-09-26
+**Version**: 1.5.0 | **Ratified**: 2025-09-25 | **Last Amended**: 2025-09-28

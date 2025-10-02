@@ -92,6 +92,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 - PWM generation for motor control
 - Hall effect sensor monitoring
 - I2C communication with Raspberry Pi
+- Serial bridge to main compute via /dev/ttyACM0 or /dev/serial0
 
 **Key Responsibilities**:
 - Drive motor PWM control and direction
@@ -99,6 +100,16 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 - Emergency stop signal processing
 - Real-time safety monitoring
 - Status display on integrated OLED
+- Control command execution with lockout enforcement
+
+**Control Integration**:
+The RoboHAT provides a serial API for motor control commands. The backend services communicate via the `robohat_service.py` which translates high-level control commands (FORWARD, BACKWARD, ROTATE, STOP) into serial protocol messages. Status updates and command echoes are streamed back via WebSocket to the frontend control interface.
+
+**Safety Features**:
+- Hardware emergency stop circuit
+- Blade safety interlocks (tilt detection)
+- Lockout state management during faults
+- Command validation and rate limiting
 
 ## Navigation and Positioning
 
@@ -371,8 +382,64 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 - Fail-safe defaults for lost communication
 - Remote emergency stop capabilities
 
+## Telemetry and Monitoring
+
+### Real-Time Telemetry System
+The LawnBerryPi v2 system includes a comprehensive telemetry hub that aggregates data from all sensors and subsystems:
+
+**Telemetry Channels**:
+- **GPS/Position**: Latitude, longitude, altitude, accuracy, satellite count, RTK status
+- **IMU/Orientation**: Quaternion, linear acceleration, angular velocity, euler angles
+- **Environmental**: Temperature, humidity, barometric pressure, dew point
+- **Power**: Battery voltage, current draw, state of charge, solar input
+- **Obstacle Detection**: ToF sensor distances (left/right), confidence scores
+- **Motor Status**: Drive motor speeds, blade motor RPM, current consumption
+- **System Health**: CPU usage, memory usage, disk space, network connectivity
+
+**Data Access**:
+- REST API: GET /api/v2/telemetry/stream for JSON snapshots
+- WebSocket: Real-time streaming at configurable intervals (default 1Hz)
+- Export: Historical data export in JSON/CSV formats
+- Persistence: SQLite storage with configurable retention periods
+
+### Map Configuration System
+Operators can define working boundaries, exclusion zones, and point-of-interest markers through the map interface:
+
+**Map Providers**:
+- **Leaflet (Open Street Map)**: Primary offline-capable provider
+- **Google Maps**: Optional provider with API key
+- **Fallback Support**: Automatic provider switching on failures
+
+**Configuration Features**:
+- GeoJSON-based boundary definitions
+- Overlap detection for exclusion zones
+- Validation with Shapely geometry checks
+- Version-controlled configuration storage
+- Real-time boundary visualization
+
+### Settings Management
+The settings service provides profile-based configuration management:
+
+**Settings Categories**:
+- **Hardware**: SIM mode, RoboHAT serial port configuration
+- **Network**: WiFi credentials, access point settings
+- **Telemetry**: Streaming intervals, persistence options
+- **Control**: Lockout timeouts, blade safety settings
+- **Maps**: Provider selection, API keys, caching options
+- **Camera**: Resolution, framerate, quality settings
+- **AI**: Detection thresholds, learning modes
+- **System**: Log levels, update preferences, branding validation
+
+**Profile Management**:
+- Dual persistence (SQLite + JSON backup)
+- Version conflict detection
+- Constitutional branding checksum validation
+- Audit logging for all changes
+
 ---
 
 This hardware overview provides the foundation for understanding how your LawnBerryPi operates. For specific maintenance procedures, see the [Maintenance Guide](maintenance-guide.md). For troubleshooting hardware issues, consult the [Troubleshooting Guide](troubleshooting-guide.md).
 
-*Hardware Overview - Part of LawnBerryPi Documentation v1.0*
+For API documentation and operational procedures, see [OPERATIONS.md](OPERATIONS.md). For hardware capabilities and configuration options, see the [Hardware Feature Matrix](hardware-feature-matrix.md).
+
+*Hardware Overview - Part of LawnBerryPi Documentation v2.0*

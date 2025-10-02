@@ -109,5 +109,11 @@ frontend/.vite/
 # Python package artifacts
 lawnberry_pi.egg-info/
 
+# UV lock file (managed by uv, not committed)
+uv.lock
+
+# Chat modes (temporary agent context)
+.github/chatmodes/
+
 # Logo image (uncomment if proprietary)
 # LawnBerryPi_logo.png

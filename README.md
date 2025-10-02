@@ -2,7 +2,7 @@
 
 **Professional Autonomous Mowing System with 1980s Cyberpunk Interface**
 
-Target platform: Raspberry Pi OS Bookworm (64-bit), Python 3.11.x.
+Target platform: Raspberry Pi OS Lite Bookworm (64-bit) on Raspberry Pi 5 (16 GB) with Python 3.11.x, with graceful degradation validated on Raspberry Pi 4B (4–8 GB).
 
 ## 🚀 Quick Start
 

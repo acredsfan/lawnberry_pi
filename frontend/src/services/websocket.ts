@@ -201,19 +201,24 @@ export class WebSocketService {
 // Global WebSocket service instance
 let wsService: WebSocketService | null = null
 
-export function useWebSocket() {
-  if (!wsService) {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
-    const wsUrl = `${protocol}//${host}/api/v2/ws/telemetry`
-    wsService = new WebSocketService(wsUrl)
+
+// Factory for telemetry or control WebSocket
+export function useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handlers?: { onMessage?: (msg: any) => void }) {
+  let wsUrl: string
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.host
+  if (type === 'telemetry') {
+    wsUrl = `${protocol}//${host}/api/v2/ws/telemetry`
+  } else {
+    wsUrl = `${protocol}//${host}/api/v2/ws/control`
   }
+  const wsService = new WebSocketService(wsUrl)
 
   const connected = ref(false)
   const connecting = ref(false)
 
   const connect = async () => {
-    if (wsService && !wsService.isConnected && !connecting.value) {
+    if (!wsService.isConnected && !connecting.value) {
       connecting.value = true
       try {
         await wsService.connect()
@@ -228,27 +233,30 @@ export function useWebSocket() {
   }
 
   const disconnect = () => {
-    if (wsService) {
-      wsService.disconnect()
-      connected.value = false
-    }
+    wsService.disconnect()
+    connected.value = false
   }
 
   const subscribe = (topic: string, callback: (data: any) => void) => {
-    if (wsService) {
-      wsService.onTopic(topic, callback)
-    }
+    wsService.onTopic(topic, callback)
   }
 
   const unsubscribe = (topic: string, callback?: (data: any) => void) => {
-    if (wsService) {
-      wsService.offTopic(topic, callback)
+    wsService.offTopic(topic, callback)
+  }
+
+  // Listen for all messages if handler provided
+  if (handlers?.onMessage) {
+    // Patch handleMessage to call onMessage
+    const origHandleMessage = (wsService as any).handleMessage?.bind(wsService)
+    ;(wsService as any).handleMessage = function(message: any) {
+      handlers.onMessage!(message)
+      if (origHandleMessage) origHandleMessage(message)
     }
   }
 
   onUnmounted(() => {
-    // Note: We don't disconnect here as the service might be used by other components
-    // The service handles its own lifecycle
+    // No disconnect here; service may be shared
   })
 
   return {
@@ -258,8 +266,8 @@ export function useWebSocket() {
     disconnect,
     subscribe,
     unsubscribe,
-    setCadence: (hz: number) => wsService?.setCadence(hz),
-    ping: () => wsService?.ping(),
-    listTopics: () => wsService?.listTopics()
+    setCadence: (hz: number) => wsService.setCadence(hz),
+    ping: () => wsService.ping(),
+    listTopics: () => wsService.listTopics()
   }
 }

@@ -11,8 +11,8 @@
         v-for="tab in tabs" 
         :key="tab.id"
         :class="{ active: activeTab === tab.id }"
-        @click="activeTab = tab.id"
         class="tab-button"
+        @click="activeTab = tab.id"
       >
         {{ tab.label }}
       </button>
@@ -32,7 +32,7 @@
               type="text" 
               class="form-control"
               placeholder="LawnBerry Pi"
-            />
+            >
           </div>
           
           <div class="form-group">
@@ -54,12 +54,12 @@
                 v-model="systemSettings.debug_mode" 
                 type="checkbox"
                 class="form-check-input"
-              /> 
+              > 
               Enable Debug Mode
             </label>
           </div>
           
-          <button @click="saveSystemSettings" class="btn btn-primary" :disabled="saving">
+          <button class="btn btn-primary" :disabled="saving" @click="saveSystemSettings">
             {{ saving ? 'Saving...' : 'Save System Settings' }}
           </button>
         </div>
@@ -94,7 +94,7 @@
               class="form-control"
               min="5" 
               max="1440"
-            />
+            >
           </div>
           
           <div class="form-group">
@@ -103,7 +103,7 @@
                 v-model="securitySettings.require_https" 
                 type="checkbox"
                 class="form-check-input"
-              /> 
+              > 
               Require HTTPS
             </label>
           </div>
@@ -114,12 +114,12 @@
                 v-model="securitySettings.auto_lock_manual_control" 
                 type="checkbox"
                 class="form-check-input"
-              /> 
+              > 
               Auto-lock Manual Control
             </label>
           </div>
           
-          <button @click="saveSecuritySettings" class="btn btn-primary" :disabled="saving">
+          <button class="btn btn-primary" :disabled="saving" @click="saveSecuritySettings">
             {{ saving ? 'Saving...' : 'Save Security Settings' }}
           </button>
         </div>
@@ -151,7 +151,7 @@
                 type="password" 
                 class="form-control"
                 placeholder="Enter tunnel token"
-              />
+              >
             </div>
           </div>
           
@@ -163,7 +163,7 @@
                 type="password" 
                 class="form-control"
                 placeholder="Enter ngrok token"
-              />
+              >
             </div>
           </div>
           
@@ -175,7 +175,7 @@
                 type="text" 
                 class="form-control"
                 placeholder="example.com"
-              />
+              >
             </div>
             
             <div class="form-group">
@@ -184,7 +184,7 @@
                   v-model="remoteSettings.auto_tls" 
                   type="checkbox"
                   class="form-check-input"
-                /> 
+                > 
                 Automatic TLS (Let's Encrypt)
               </label>
             </div>
@@ -196,12 +196,12 @@
                 v-model="remoteSettings.enabled" 
                 type="checkbox"
                 class="form-check-input"
-              /> 
+              > 
               Enable Remote Access
             </label>
           </div>
           
-          <button @click="saveRemoteSettings" class="btn btn-primary" :disabled="saving">
+          <button class="btn btn-primary" :disabled="saving" @click="saveRemoteSettings">
             {{ saving ? 'Saving...' : 'Save Remote Access Settings' }}
           </button>
         </div>
@@ -232,7 +232,7 @@
                 type="password" 
                 class="form-control"
                 placeholder="Enter your Google Maps API key"
-              />
+              >
               <small class="form-text text-muted">
                 Required for Google Maps features. Get your key at 
                 <a href="https://developers.google.com/maps" target="_blank">Google Cloud Console</a>
@@ -245,7 +245,7 @@
                   v-model="mapsSettings.google_billing_warnings" 
                   type="checkbox"
                   class="form-check-input"
-                /> 
+                > 
                 Show billing warnings
               </label>
             </div>
@@ -261,7 +261,7 @@
             </select>
           </div>
           
-          <button @click="saveMapsSettings" class="btn btn-primary" :disabled="saving">
+          <button class="btn btn-primary" :disabled="saving" @click="saveMapsSettings">
             {{ saving ? 'Saving...' : 'Save Maps Settings' }}
           </button>
         </div>
@@ -293,7 +293,7 @@
                 class="form-control"
                 min="1" 
                 max="10"
-              />
+              >
               <small class="form-text text-muted">
                 Maximum time to continue without GPS (recommended: ≤2 minutes)
               </small>
@@ -308,7 +308,7 @@
                 min="0.1" 
                 max="1.0" 
                 step="0.1"
-              />
+              >
               <small class="form-text text-muted">
                 Speed multiplier during dead reckoning (0.1 = 10% speed)
               </small>
@@ -323,10 +323,10 @@
               class="form-control"
               min="1" 
               max="10"
-            />
+            >
           </div>
           
-          <button @click="saveGpsSettings" class="btn btn-primary" :disabled="saving">
+          <button class="btn btn-primary" :disabled="saving" @click="saveGpsSettings">
             {{ saving ? 'Saving...' : 'Save GPS Settings' }}
           </button>
         </div>

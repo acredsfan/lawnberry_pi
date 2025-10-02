@@ -479,8 +479,78 @@ This document provides a complete matrix of hardware components, their capabilit
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** December 2024  
-**Next Review:** March 2025
+## Software Integration Features (V2 API)
 
-This hardware feature matrix provides comprehensive information for planning, deploying, and maintaining LawnBerryPi systems across different hardware configurations and use cases.
+### Backend Services
+
+| Service | Purpose | Status | Key Features |
+|---------|---------|--------|--------------|
+| **TelemetryHub** | Real-time data aggregation | ✅ Implemented | WebSocket streaming, persistence, export |
+| **SensorManager** | Hardware sensor coordination | ✅ Implemented | Multi-sensor fusion, calibration |
+| **RoboHATService** | Serial bridge to RP2040 | ✅ Implemented | Command translation, status monitoring |
+| **MotorService** | Motor control coordination | ✅ Implemented | Safety interlocks, speed control |
+| **MapsService** | Map provider management | ✅ Implemented | GeoJSON validation, fallback support |
+| **SettingsService** | Configuration management | ✅ Implemented | Profile versioning, validation |
+
+### Frontend Components
+
+| Component | Purpose | Status | Capabilities |
+|-----------|---------|--------|--------------|
+| **SystemStore** | Telemetry state management | ✅ Implemented | Real-time updates, error handling |
+| **ControlStore** | Control command management | ✅ Implemented | Lockout handling, command queuing |
+| **MapStore** | Map configuration state | ✅ Implemented | Boundary editing, marker management |
+| **DashboardView** | System overview UI | ✅ Implemented | Telemetry display, status cards |
+| **ControlView** | Motor control interface | ✅ Implemented | Command buttons, safety indicators |
+| **MapView** | Interactive map UI | ✅ Implemented | Boundary editor, zone management |
+| **SettingsView** | Configuration UI | ✅ Implemented | Profile management, validation |
+| **DocsHubView** | Documentation browser | ✅ Implemented | Offline bundle support |
+
+### API Endpoints (V2)
+
+| Endpoint Category | Count | Status | Features |
+|------------------|-------|--------|----------|
+| **Telemetry** | 3 | ✅ Complete | Stream, export, subscribe |
+| **Control** | 4 | ✅ Complete | Drive, blade, stop, status |
+| **Maps** | 4 | ✅ Complete | Configuration CRUD, fallback |
+| **Settings** | 2 | ✅ Complete | Profile GET/PUT, validation |
+| **Documentation** | 2 | ✅ Complete | Bundle generation, artifacts |
+| **Planning** | 3 | ✅ Complete | Job management, scheduling |
+| **AI** | 2 | ✅ Complete | Dataset management, export |
+
+### WebSocket Topics
+
+| Topic | Purpose | Update Rate | Status |
+|-------|---------|-------------|--------|
+| **telemetry** | Sensor data streaming | 1-10Hz | ✅ Active |
+| **control** | Command echoes, lockouts | On event | ✅ Active |
+| **maps** | Map updates | On change | ✅ Active |
+| **ai** | Processing results | On completion | ✅ Active |
+
+### Data Models
+
+| Model Category | Models | Status | Validation |
+|----------------|--------|--------|------------|
+| **Telemetry** | 8 models | ✅ Complete | Pydantic v2 |
+| **Control** | 4 models | ✅ Complete | Pydantic v2 |
+| **Maps** | 5 models | ✅ Complete | GeoJSON + Shapely |
+| **Settings** | 9 models | ✅ Complete | Branding checksums |
+| **Planning** | 3 models | ✅ Complete | Pydantic v2 |
+
+### Constitutional Compliance
+
+| Requirement | Implementation | Status | Validation Method |
+|-------------|----------------|--------|-------------------|
+| **Latency Targets** | ≤250ms (Pi 5), ≤350ms (Pi 4B) | ✅ Enforced | Performance tests |
+| **Audit Logging** | All state changes logged | ✅ Implemented | Audit trail verification |
+| **Remediation Links** | All errors include docs links | ✅ Implemented | Error response inspection |
+| **Branding Validation** | Checksum verification | ✅ Implemented | Settings validation |
+| **SIM Mode Coverage** | All hardware operations | ✅ Implemented | Test suite verification |
+| **Offline Documentation** | Bundle generation | ✅ Implemented | Archive creation script |
+
+---
+
+**Document Version:** 2.0  
+**Last Updated:** October 2025  
+**Next Review:** January 2026
+
+This hardware feature matrix provides comprehensive information for planning, deploying, and maintaining LawnBerryPi systems across different hardware configurations and use cases. For V2 API details and operational procedures, see [OPERATIONS.md](OPERATIONS.md).

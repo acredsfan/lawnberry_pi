@@ -1,8 +1,12 @@
 import httpx
 import json
+import uuid
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from enum import Enum
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class MapProvider(str, Enum):
@@ -251,6 +255,81 @@ class MapsService:
         lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * y / n)))
         lat_deg = math.degrees(lat_rad)
         return (lat_deg, lon_deg)
+
+
+    async def save_map_configuration(self, config: 'MapConfiguration', persistence) -> 'MapConfiguration':
+        """Save map configuration to persistence layer."""
+        from ..models.zone import MapConfiguration
+        
+        # Validate configuration before saving
+        if not config.validate_configuration():
+            raise ValueError(f"Invalid map configuration: {config.validation_errors}")
+        
+        # Increment version on update
+        config.config_version += 1
+        config.last_modified = datetime.now(timezone.utc)
+        
+        # Persist to database
+        config_json = config.json()
+        await persistence.save_map_configuration(config.config_id, config_json)
+        
+        logger.info(f"Saved map configuration {config.config_id} v{config.config_version}")
+        return config
+    
+    async def load_map_configuration(self, config_id: str, persistence) -> Optional['MapConfiguration']:
+        """Load map configuration from persistence layer."""
+        from ..models.zone import MapConfiguration
+        
+        config_json = await persistence.load_map_configuration(config_id)
+        if not config_json:
+            return None
+        
+        config = MapConfiguration.parse_raw(config_json)
+        logger.info(f"Loaded map configuration {config.config_id} v{config.config_version}")
+        return config
+    
+    def validate_geojson_zone(self, geojson: Dict[str, Any]) -> bool:
+        """Validate GeoJSON polygon/point structure."""
+        if geojson.get('type') not in ['Polygon', 'Point', 'MultiPolygon']:
+            return False
+        
+        coordinates = geojson.get('coordinates')
+        if not coordinates:
+            return False
+        
+        # Basic validation - can be extended with more rigorous checks
+        if geojson['type'] == 'Polygon':
+            # Polygon should have at least one ring with at least 3 points
+            if not isinstance(coordinates, list) or len(coordinates) < 1:
+                return False
+            if not isinstance(coordinates[0], list) or len(coordinates[0]) < 3:
+                return False
+        
+        return True
+    
+    def check_overlap(self, zone1: 'Zone', zone2: 'Zone') -> bool:
+        """Check if two zones overlap using shapely if available."""
+        try:
+            from shapely.geometry import Polygon
+            
+            coords1 = [(p.longitude, p.latitude) for p in zone1.polygon]
+            coords2 = [(p.longitude, p.latitude) for p in zone2.polygon]
+            
+            poly1 = Polygon(coords1)
+            poly2 = Polygon(coords2)
+            
+            return poly1.intersects(poly2)
+        except ImportError:
+            logger.warning("Shapely not available, skipping overlap check")
+            return False
+    
+    def attempt_provider_fallback(self) -> bool:
+        """Attempt to fallback from Google Maps to OSM."""
+        if self.provider == MapProvider.GOOGLE:
+            logger.info("Falling back from Google Maps to OSM")
+            self.provider = MapProvider.OSM
+            return True
+        return False
 
 
 # Global instance  

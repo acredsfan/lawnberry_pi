@@ -11,7 +11,9 @@ from contextlib import asynccontextmanager
 
 from ..models import (
     SensorData, GpsReading, ImuReading, TofReading, EnvironmentalReading, 
-    PowerReading, SensorType, SensorStatus, GpsMode
+    PowerReading, SensorType, SensorStatus, GpsMode,
+    HardwareTelemetryStream, ComponentId, ComponentStatus, RtkFixType,
+    GPSData, IMUData, PowerData, ToFData
 )
 
 logger = logging.getLogger(__name__)
@@ -458,3 +460,179 @@ class SensorManager:
         logger.info("Shutting down sensor manager")
         # Sensor shutdown logic would go here
         self.initialized = False
+    
+    async def generate_telemetry_streams(self) -> List[HardwareTelemetryStream]:
+        """Generate HardwareTelemetryStream objects from current sensor readings"""
+        if not self.initialized:
+            logger.warning("Sensor manager not initialized")
+            return []
+        
+        streams = []
+        start_time = datetime.now(timezone.utc)
+        
+        # Read all sensors
+        sensor_data = await self.read_all_sensors()
+        end_time = datetime.now(timezone.utc)
+        latency_ms = (end_time - start_time).total_seconds() * 1000
+        
+        # GPS stream
+        if sensor_data.gps:
+            gps_reading = sensor_data.gps
+            gps_data = GPSData(
+                latitude=gps_reading.latitude or 0.0,
+                longitude=gps_reading.longitude or 0.0,
+                altitude_m=gps_reading.altitude or 0.0,
+                speed_mps=0.0,
+                heading_deg=0.0,
+                hdop=gps_reading.accuracy or 99.9,
+                satellites=gps_reading.satellites or 0,
+                fix_type=self._map_rtk_fix_type(gps_reading),
+                rtk_status_message=self._get_rtk_status_message(gps_reading)
+            )
+            streams.append(HardwareTelemetryStream(
+                timestamp=start_time,
+                component_id=ComponentId.GPS,
+                value=f"{gps_data.latitude},{gps_data.longitude}",
+                status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.GPS)),
+                latency_ms=latency_ms,
+                gps_data=gps_data
+            ))
+        
+        # IMU stream
+        if sensor_data.imu:
+            imu_reading = sensor_data.imu
+            imu_data = IMUData(
+                roll_deg=imu_reading.roll,
+                pitch_deg=imu_reading.pitch,
+                yaw_deg=imu_reading.yaw,
+                accel_x=imu_reading.accel_x,
+                accel_y=imu_reading.accel_y,
+                accel_z=imu_reading.accel_z,
+                gyro_x=imu_reading.gyro_x,
+                gyro_y=imu_reading.gyro_y,
+                gyro_z=imu_reading.gyro_z,
+                calibration_sys=3 if imu_reading.calibration_status == "fully_calibrated" else 1
+            )
+            streams.append(HardwareTelemetryStream(
+                timestamp=start_time,
+                component_id=ComponentId.IMU,
+                value=f"{imu_data.roll_deg:.2f},{imu_data.pitch_deg:.2f},{imu_data.yaw_deg:.2f}",
+                status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.IMU)),
+                latency_ms=latency_ms,
+                imu_data=imu_data
+            ))
+        
+        # Power stream
+        if sensor_data.power:
+            power_reading = sensor_data.power
+            power_data = PowerData(
+                battery_voltage=power_reading.battery_voltage,
+                battery_current=power_reading.battery_current,
+                battery_power=power_reading.battery_power,
+                solar_voltage=power_reading.solar_voltage,
+                solar_current=power_reading.solar_current,
+                solar_power=power_reading.solar_power,
+                battery_soc_percent=self._estimate_battery_soc(power_reading.battery_voltage),
+                battery_health=ComponentStatus.HEALTHY if power_reading.battery_voltage > 11.0 else ComponentStatus.WARNING
+            )
+            streams.append(HardwareTelemetryStream(
+                timestamp=start_time,
+                component_id=ComponentId.POWER,
+                value=power_data.battery_voltage,
+                status=power_data.battery_health,
+                latency_ms=latency_ms,
+                power_data=power_data
+            ))
+        
+        # ToF left stream
+        if sensor_data.tof_left:
+            tof_left = sensor_data.tof_left
+            tof_data = ToFData(
+                distance_mm=int(tof_left.distance),
+                range_status=tof_left.range_status,
+                signal_rate=tof_left.signal_strength
+            )
+            streams.append(HardwareTelemetryStream(
+                timestamp=start_time,
+                component_id=ComponentId.TOF_LEFT,
+                value=tof_data.distance_mm,
+                status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.TOF_LEFT)),
+                latency_ms=latency_ms,
+                tof_data=tof_data
+            ))
+        
+        # ToF right stream
+        if sensor_data.tof_right:
+            tof_right = sensor_data.tof_right
+            tof_data = ToFData(
+                distance_mm=int(tof_right.distance),
+                range_status=tof_right.range_status,
+                signal_rate=tof_right.signal_strength
+            )
+            streams.append(HardwareTelemetryStream(
+                timestamp=start_time,
+                component_id=ComponentId.TOF_RIGHT,
+                value=tof_data.distance_mm,
+                status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.TOF_RIGHT)),
+                latency_ms=latency_ms,
+                tof_data=tof_data
+            ))
+        
+        return streams
+    
+    def _map_rtk_fix_type(self, gps_reading: GpsReading) -> RtkFixType:
+        """Map GPS reading to RTK fix type"""
+        if hasattr(gps_reading, 'rtk_status'):
+            status = gps_reading.rtk_status.upper() if gps_reading.rtk_status else ""
+            if "FIXED" in status or "RTK_FIXED" in status:
+                return RtkFixType.RTK_FIXED
+            elif "FLOAT" in status or "RTK_FLOAT" in status:
+                return RtkFixType.RTK_FLOAT
+            elif "DGPS" in status:
+                return RtkFixType.DGPS_FIX
+        
+        # Fallback to satellites count
+        if gps_reading.satellites and gps_reading.satellites >= 6:
+            return RtkFixType.GPS_FIX
+        return RtkFixType.NO_FIX
+    
+    def _get_rtk_status_message(self, gps_reading: GpsReading) -> str:
+        """Generate human-readable RTK status message"""
+        fix_type = self._map_rtk_fix_type(gps_reading)
+        satellites = gps_reading.satellites or 0
+        accuracy = gps_reading.accuracy or 99.9
+        
+        if fix_type == RtkFixType.RTK_FIXED:
+            return f"RTK Fixed - {satellites} satellites, {accuracy:.1f}m accuracy"
+        elif fix_type == RtkFixType.RTK_FLOAT:
+            return f"RTK Float - {satellites} satellites, {accuracy:.1f}m accuracy"
+        elif fix_type == RtkFixType.GPS_FIX:
+            return f"GPS Fix - {satellites} satellites, {accuracy:.1f}m accuracy"
+        elif fix_type == RtkFixType.DGPS_FIX:
+            return f"DGPS Fix - {satellites} satellites, {accuracy:.1f}m accuracy"
+        else:
+            return f"No GPS fix - {satellites} satellites visible"
+    
+    def _map_sensor_status(self, status: Optional[SensorStatus]) -> ComponentStatus:
+        """Map SensorStatus to ComponentStatus"""
+        if status == SensorStatus.ONLINE:
+            return ComponentStatus.HEALTHY
+        elif status == SensorStatus.ERROR:
+            return ComponentStatus.FAULT
+        else:
+            return ComponentStatus.WARNING
+    
+    def _estimate_battery_soc(self, voltage: float) -> Optional[float]:
+        """Estimate battery state of charge from voltage (simplified)"""        
+        if voltage >= 12.6:
+            return 100.0
+        elif voltage >= 12.4:
+            return 75.0
+        elif voltage >= 12.2:
+            return 50.0
+        elif voltage >= 12.0:
+            return 25.0
+        elif voltage >= 11.8:
+            return 10.0
+        else:
+            return 0.0

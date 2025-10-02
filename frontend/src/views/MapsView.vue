@@ -30,7 +30,7 @@
                 :type="showApiKey ? 'text' : 'password'"
                 class="form-control"
                 placeholder="Enter your Google Maps API key"
-              />
+              >
               <button 
                 type="button" 
                 class="btn btn-secondary"
@@ -53,7 +53,7 @@
                 v-model="settings.google_billing_warnings" 
                 type="checkbox"
                 class="form-check-input"
-              /> 
+              > 
               Show billing warnings
             </label>
             <small class="form-text text-muted">
@@ -61,7 +61,7 @@
             </small>
           </div>
 
-          <div class="api-status" v-if="apiStatus">
+          <div v-if="apiStatus" class="api-status">
             <div class="status-indicator" :class="apiStatus.valid ? 'status-success' : 'status-error'">
               {{ apiStatus.valid ? '✅ API Key Valid' : '❌ API Key Invalid' }}
             </div>
@@ -83,10 +83,10 @@
         </div>
 
         <div class="action-buttons">
-          <button @click="testConnection" class="btn btn-info" :disabled="testing">
+          <button class="btn btn-info" :disabled="testing" @click="testConnection">
             {{ testing ? 'Testing...' : 'Test Connection' }}
           </button>
-          <button @click="saveSettings" class="btn btn-primary" :disabled="saving">
+          <button class="btn btn-primary" :disabled="saving" @click="saveSettings">
             {{ saving ? 'Saving...' : 'Save Settings' }}
           </button>
         </div>
@@ -108,14 +108,14 @@
                 type="number" 
                 step="0.0001"
                 class="form-control-sm"
-              />
+              >
               <label>Longitude:</label>
               <input 
                 v-model.number="previewLon" 
                 type="number" 
                 step="0.0001"
                 class="form-control-sm"
-              />
+              >
               <label>Zoom:</label>
               <input 
                 v-model.number="previewZoom" 
@@ -123,7 +123,7 @@
                 min="1" 
                 max="20"
                 class="form-control-sm"
-              />
+              >
             </div>
           </div>
           
@@ -137,7 +137,7 @@
               alt="Map tile preview"
               @error="onPreviewError"
               @load="onPreviewLoad"
-            />
+            >
             <div class="preview-meta">
               Provider: {{ settings.provider.toUpperCase() }} | 
               Style: {{ settings.style }} |
@@ -155,10 +155,10 @@
       </div>
       <div class="card-body">
         <div class="pin-categories">
-          <div class="category" v-for="category in pinCategories" :key="category.id">
+          <div v-for="category in pinCategories" :key="category.id" class="category">
             <div class="category-header">
               <h4>{{ category.name }}</h4>
-              <button @click="addPin(category.id)" class="btn btn-sm btn-primary">
+              <button class="btn btn-sm btn-primary" @click="addPin(category.id)">
                 Add Pin
               </button>
             </div>
@@ -177,10 +177,10 @@
                   <div class="pin-coords">{{ pin.lat.toFixed(6) }}, {{ pin.lon.toFixed(6) }}</div>
                 </div>
                 <div class="pin-actions">
-                  <button @click.stop="editPin(pin)" class="btn btn-xs btn-secondary">
+                  <button class="btn btn-xs btn-secondary" @click.stop="editPin(pin)">
                     ✏️
                   </button>
-                  <button @click.stop="deletePin(pin)" class="btn btn-xs btn-danger">
+                  <button class="btn btn-xs btn-danger" @click.stop="deletePin(pin)">
                     🗑️
                   </button>
                 </div>
@@ -196,12 +196,12 @@
       <div class="modal-content" @click.stop>
         <div class="modal-header">
           <h3>{{ editingPin ? 'Edit Pin' : 'Add Pin' }}</h3>
-          <button @click="closePinEditor" class="btn btn-sm btn-secondary">✖️</button>
+          <button class="btn btn-sm btn-secondary" @click="closePinEditor">✖️</button>
         </div>
         <div class="modal-body">
           <div class="form-group">
             <label>Pin Name</label>
-            <input v-model="pinForm.name" type="text" class="form-control" />
+            <input v-model="pinForm.name" type="text" class="form-control">
           </div>
           
           <div class="form-group">
@@ -219,9 +219,9 @@
               <button 
                 v-for="icon in availableIcons" 
                 :key="icon"
-                @click="pinForm.icon = icon"
                 class="icon-button"
                 :class="{ active: pinForm.icon === icon }"
+                @click="pinForm.icon = icon"
               >
                 {{ icon }}
               </button>
@@ -231,22 +231,32 @@
           <div class="form-row">
             <div class="form-group">
               <label>Latitude</label>
-              <input v-model.number="pinForm.lat" type="number" step="0.000001" class="form-control" />
+              <input
+                v-model.number="pinForm.lat"
+                type="number"
+                step="0.000001"
+                class="form-control"
+              >
             </div>
             <div class="form-group">
               <label>Longitude</label>
-              <input v-model.number="pinForm.lon" type="number" step="0.000001" class="form-control" />
+              <input
+                v-model.number="pinForm.lon"
+                type="number"
+                step="0.000001"
+                class="form-control"
+              >
             </div>
           </div>
           
           <div class="form-group">
             <label>Description</label>
-            <textarea v-model="pinForm.description" class="form-control" rows="3"></textarea>
+            <textarea v-model="pinForm.description" class="form-control" rows="3" />
           </div>
         </div>
         <div class="modal-footer">
-          <button @click="closePinEditor" class="btn btn-secondary">Cancel</button>
-          <button @click="savePin" class="btn btn-primary">Save Pin</button>
+          <button class="btn btn-secondary" @click="closePinEditor">Cancel</button>
+          <button class="btn btn-primary" @click="savePin">Save Pin</button>
         </div>
       </div>
     </div>

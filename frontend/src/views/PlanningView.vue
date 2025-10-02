@@ -7,13 +7,13 @@
 
     <!-- Quick Start Actions -->
     <div class="quick-actions">
-      <button @click="startQuickMow" class="btn btn-primary quick-btn">
+      <button class="btn btn-primary quick-btn" @click="startQuickMow">
         ⚡ Quick Mow
       </button>
-      <button @click="openScheduleModal" class="btn btn-success quick-btn">
+      <button class="btn btn-success quick-btn" @click="openScheduleModal">
         📅 Schedule Job
       </button>
-      <button @click="activeTab = 'zones'" class="btn btn-info quick-btn">
+      <button class="btn btn-info quick-btn" @click="activeTab = 'zones'">
         🗺️ Manage Zones
       </button>
     </div>
@@ -24,8 +24,8 @@
         v-for="tab in tabs" 
         :key="tab.id"
         :class="{ active: activeTab === tab.id }"
-        @click="activeTab = tab.id"
         class="tab-button"
+        @click="activeTab = tab.id"
       >
         {{ tab.label }}
       </button>
@@ -36,14 +36,14 @@
       <div class="card">
         <div class="card-header">
           <h3>Current & Queued Jobs</h3>
-          <button @click="refreshJobs" class="btn btn-sm btn-secondary">
+          <button class="btn btn-sm btn-secondary" @click="refreshJobs">
             🔄 Refresh
           </button>
         </div>
         <div class="card-body">
           <div v-if="jobs.length === 0" class="empty-state">
             <p>No active or queued jobs</p>
-            <button @click="openScheduleModal" class="btn btn-primary">
+            <button class="btn btn-primary" @click="openScheduleModal">
               Schedule First Job
             </button>
           </div>
@@ -65,29 +65,29 @@
                 <div class="job-actions">
                   <button 
                     v-if="job.status === 'scheduled'"
-                    @click="startJob(job)"
                     class="btn btn-xs btn-success"
+                    @click="startJob(job)"
                   >
                     ▶️ Start
                   </button>
                   <button 
                     v-if="job.status === 'running'"
-                    @click="pauseJob(job)"
                     class="btn btn-xs btn-warning"
+                    @click="pauseJob(job)"
                   >
                     ⏸️ Pause
                   </button>
                   <button 
                     v-if="job.status === 'paused'"
-                    @click="resumeJob(job)"
                     class="btn btn-xs btn-success"
+                    @click="resumeJob(job)"
                   >
                     ▶️ Resume
                   </button>
                   <button 
-                    @click="cancelJob(job)"
                     class="btn btn-xs btn-danger"
                     :disabled="job.status === 'completed'"
+                    @click="cancelJob(job)"
                   >
                     ❌ Cancel
                   </button>
@@ -103,7 +103,7 @@
                 
                 <div v-if="job.status === 'running'" class="job-progress">
                   <div class="progress-bar">
-                    <div class="progress-fill" :style="{ width: `${job.progress}%` }"></div>
+                    <div class="progress-fill" :style="{ width: `${job.progress}%` }" />
                   </div>
                   <span class="progress-text">{{ job.progress }}% complete</span>
                   <span v-if="job.estimated_remaining" class="time-remaining">
@@ -148,7 +148,7 @@
       <div class="card">
         <div class="card-header">
           <h3>Recurring Schedules</h3>
-          <button @click="openScheduleModal" class="btn btn-sm btn-primary">
+          <button class="btn btn-sm btn-primary" @click="openScheduleModal">
             ➕ Add Schedule
           </button>
         </div>
@@ -170,16 +170,16 @@
                 </div>
                 <div class="schedule-actions">
                   <button 
-                    @click="toggleSchedule(schedule)"
                     class="btn btn-xs"
                     :class="schedule.enabled ? 'btn-warning' : 'btn-success'"
+                    @click="toggleSchedule(schedule)"
                   >
                     {{ schedule.enabled ? '⏸️ Disable' : '▶️ Enable' }}
                   </button>
-                  <button @click="editSchedule(schedule)" class="btn btn-xs btn-secondary">
+                  <button class="btn btn-xs btn-secondary" @click="editSchedule(schedule)">
                     ✏️ Edit
                   </button>
-                  <button @click="deleteSchedule(schedule)" class="btn btn-xs btn-danger">
+                  <button class="btn btn-xs btn-danger" @click="deleteSchedule(schedule)">
                     🗑️ Delete
                   </button>
                 </div>
@@ -237,7 +237,7 @@
       <div class="card">
         <div class="card-header">
           <h3>Mowing Zones</h3>
-          <button @click="openZoneModal" class="btn btn-sm btn-primary">
+          <button class="btn btn-sm btn-primary" @click="openZoneModal">
             ➕ Add Zone
           </button>
         </div>
@@ -273,10 +273,10 @@
               </div>
               
               <div class="zone-actions">
-                <button @click.stop="mowZone(zone)" class="btn btn-xs btn-success">
+                <button class="btn btn-xs btn-success" @click.stop="mowZone(zone)">
                   🌱 Mow Now
                 </button>
-                <button @click.stop="editZone(zone)" class="btn btn-xs btn-secondary">
+                <button class="btn btn-xs btn-secondary" @click.stop="editZone(zone)">
                   ✏️ Edit
                 </button>
               </div>
@@ -302,7 +302,7 @@
               @click="selectedPattern = pattern.id"
             >
               <div class="pattern-preview">
-                <div class="pattern-visual" :class="`pattern-${pattern.id}`"></div>
+                <div class="pattern-visual" :class="`pattern-${pattern.id}`" />
               </div>
               <div class="pattern-info">
                 <h4>{{ pattern.name }}</h4>
@@ -323,12 +323,12 @@
       <div class="modal-content" @click.stop>
         <div class="modal-header">
           <h3>{{ editingSchedule ? 'Edit Schedule' : 'Schedule Mowing Job' }}</h3>
-          <button @click="closeScheduleModal" class="btn btn-sm btn-secondary">✖️</button>
+          <button class="btn btn-sm btn-secondary" @click="closeScheduleModal">✖️</button>
         </div>
         <div class="modal-body">
           <div class="form-group">
             <label>Job Name</label>
-            <input v-model="scheduleForm.name" type="text" class="form-control" />
+            <input v-model="scheduleForm.name" type="text" class="form-control">
           </div>
           
           <div class="form-group">
@@ -336,10 +336,10 @@
             <div class="zone-checkboxes">
               <label v-for="zone in zones" :key="zone.id" class="checkbox-label">
                 <input 
-                  type="checkbox" 
+                  v-model="scheduleForm.zones" 
+                  type="checkbox"
                   :value="zone.id"
-                  v-model="scheduleForm.zones"
-                />
+                >
                 {{ zone.name }}
               </label>
             </div>
@@ -368,7 +368,7 @@
               v-model="scheduleForm.startTime" 
               type="datetime-local" 
               class="form-control"
-            />
+            >
           </div>
           
           <div v-if="scheduleForm.type === 'recurring'" class="recurring-options">
@@ -388,13 +388,13 @@
                 v-model="scheduleForm.timeOfDay" 
                 type="time" 
                 class="form-control"
-              />
+              >
             </div>
           </div>
         </div>
         <div class="modal-footer">
-          <button @click="closeScheduleModal" class="btn btn-secondary">Cancel</button>
-          <button @click="saveSchedule" class="btn btn-primary">
+          <button class="btn btn-secondary" @click="closeScheduleModal">Cancel</button>
+          <button class="btn btn-primary" @click="saveSchedule">
             {{ editingSchedule ? 'Update' : 'Schedule' }}
           </button>
         </div>

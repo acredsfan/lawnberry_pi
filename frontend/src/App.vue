@@ -1,6 +1,6 @@
 <template>
   <div id="app" class="retro-app">
-    <div class="retro-grid-bg"></div>
+    <div class="retro-grid-bg" />
     <header class="app-header">
       <nav class="navbar">
         <div class="nav-brand">

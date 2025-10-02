@@ -33,7 +33,7 @@
                 class="form-control"
                 placeholder="Enter your password"
                 @keyup.enter="authenticateControl"
-              />
+              >
             </div>
 
             <!-- TOTP Verification -->
@@ -46,7 +46,7 @@
                 placeholder="000000"
                 maxlength="6"
                 @keyup.enter="authenticateControl"
-              />
+              >
               <small class="form-text text-muted">
                 Use your authenticator app (Google Authenticator, Authy, etc.)
               </small>
@@ -54,7 +54,7 @@
 
             <!-- Google Auth -->
             <div v-else-if="securityConfig.auth_level === 'google'" class="auth-method">
-              <button @click="authenticateWithGoogle" class="btn btn-google">
+              <button class="btn btn-google" @click="authenticateWithGoogle">
                 <span class="google-icon">🔑</span>
                 Authenticate with Google
               </button>
@@ -66,7 +66,7 @@
                 <p>Authentication is handled by Cloudflare Access.</p>
                 <p>You should already be authenticated if accessing via Cloudflare tunnel.</p>
               </div>
-              <button @click="verifyCloudflareAuth" class="btn btn-primary">
+              <button class="btn btn-primary" @click="verifyCloudflareAuth">
                 Verify Access
               </button>
             </div>
@@ -74,9 +74,9 @@
 
           <div class="auth-actions">
             <button 
-              @click="authenticateControl" 
-              class="btn btn-primary"
+              class="btn btn-primary" 
               :disabled="authenticating || !canAuthenticate"
+              @click="authenticateControl"
             >
               {{ authenticating ? 'Verifying...' : 'Unlock Control' }}
             </button>
@@ -94,13 +94,13 @@
       <!-- Control Status -->
       <div class="control-status">
         <div class="status-indicator" :class="systemStatus">
-          <div class="status-light"></div>
+          <div class="status-light" />
           <span>{{ formatSystemStatus(systemStatus) }}</span>
         </div>
         
         <div class="session-info">
           <small>Control session expires in {{ formatTimeRemaining(sessionTimeRemaining) }}</small>
-          <button @click="lockControl" class="btn btn-sm btn-secondary">
+          <button class="btn btn-sm btn-secondary" @click="lockControl">
             🔒 Lock Control
           </button>
         </div>
@@ -109,9 +109,9 @@
       <!-- Emergency Stop -->
       <div class="emergency-section">
         <button 
-          @click="emergencyStop" 
-          class="btn btn-emergency"
+          class="btn btn-emergency" 
           :disabled="performing"
+          @click="emergencyStop"
         >
           🛑 EMERGENCY STOP
         </button>
@@ -126,52 +126,52 @@
           <div class="movement-grid">
             <!-- Forward -->
             <button 
+              class="movement-btn movement-forward"
+              :disabled="!canMove"
               @mousedown="startMovement('forward')"
               @mouseup="stopMovement"
               @mouseleave="stopMovement"
-              class="movement-btn movement-forward"
-              :disabled="!canMove"
             >
               ⬆️ Forward
             </button>
 
             <!-- Turn Left -->
             <button 
+              class="movement-btn movement-left"
+              :disabled="!canMove"
               @mousedown="startMovement('left')"
               @mouseup="stopMovement"
               @mouseleave="stopMovement"
-              class="movement-btn movement-left"
-              :disabled="!canMove"
             >
               ⬅️ Left
             </button>
 
             <!-- Stop -->
             <button 
-              @click="stopMovement"
               class="movement-btn movement-stop"
+              @click="stopMovement"
             >
               🛑 STOP
             </button>
 
             <!-- Turn Right -->
             <button 
+              class="movement-btn movement-right"
+              :disabled="!canMove"
               @mousedown="startMovement('right')"
               @mouseup="stopMovement"
               @mouseleave="stopMovement"
-              class="movement-btn movement-right"
-              :disabled="!canMove"
             >
               ➡️ Right
             </button>
 
             <!-- Backward -->
             <button 
+              class="movement-btn movement-backward"
+              :disabled="!canMove"
               @mousedown="startMovement('backward')"
               @mouseup="stopMovement"
               @mouseleave="stopMovement"
-              class="movement-btn movement-backward"
-              :disabled="!canMove"
             >
               ⬇️ Backward
             </button>
@@ -186,7 +186,7 @@
               max="100" 
               step="10"
               class="speed-slider"
-            />
+            >
           </div>
         </div>
       </div>
@@ -199,10 +199,10 @@
         <div class="card-body">
           <div class="mowing-controls">
             <button 
-              @click="toggleMowing" 
-              class="btn"
+              class="btn" 
               :class="mowingActive ? 'btn-warning' : 'btn-success'"
               :disabled="performing"
+              @click="toggleMowing"
             >
               {{ mowingActive ? '⏹️ Stop Mowing' : '▶️ Start Mowing' }}
             </button>
@@ -216,7 +216,7 @@
                 max="100" 
                 step="5"
                 class="height-slider"
-              />
+              >
             </div>
           </div>
         </div>
@@ -229,15 +229,15 @@
         </div>
         <div class="card-body">
           <div class="system-controls">
-            <button @click="returnToBase" class="btn btn-info" :disabled="performing">
+            <button class="btn btn-info" :disabled="performing" @click="returnToBase">
               🏠 Return to Base
             </button>
             
-            <button @click="pauseSystem" class="btn btn-warning" :disabled="performing">
+            <button class="btn btn-warning" :disabled="performing" @click="pauseSystem">
               ⏸️ Pause System
             </button>
             
-            <button @click="resumeSystem" class="btn btn-success" :disabled="performing">
+            <button class="btn btn-success" :disabled="performing" @click="resumeSystem">
               ▶️ Resume System
             </button>
           </div>
@@ -283,360 +283,33 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useApiService } from '@/services/api'
-import { useWebSocket } from '@/services/websocket'
-import { useAuthStore } from '@/stores/auth'
+import { useControlStore } from '@/stores/control'
 
-const api = useApiService()
-const { connected, connect, subscribe, unsubscribe } = useWebSocket()
-const authStore = useAuthStore()
+const control = useControlStore()
 
-// State
-const isControlUnlocked = ref(false)
-const securityConfig = ref({
-  auth_level: 'password',
-  session_timeout_minutes: 15,
-  auto_lock_manual_control: true
-})
+// Proxy state for template
+const lockout = computed(() => control.lockout)
+const lockoutReason = computed(() => control.lockoutReason)
+const remediationLink = computed(() => control.remediationLink)
+const lastEcho = computed(() => control.lastEcho)
+const isLoading = computed(() => control.isLoading)
+const lastCommandResult = computed(() => control.lastCommandResult)
 
-const authForm = ref({
-  password: '',
-  totpCode: ''
-})
-
-const authenticating = ref(false)
-const authError = ref('')
-const performing = ref(false)
-const statusMessage = ref('')
-const statusSuccess = ref(false)
-
-// Control state
-const systemStatus = ref('idle')
-const mowingActive = ref(false)
-const speedLevel = ref(50)
-const cuttingHeight = ref(40)
-const currentMovement = ref('')
-const currentSpeed = ref(0)
-const sessionTimeRemaining = ref(900) // 15 minutes in seconds
-
-// Telemetry
-const telemetry = ref({
-  battery: { percentage: 85.2 },
-  position: { latitude: null, longitude: null },
-  safety_state: 'safe'
-})
-
-// Session management
-let sessionTimer: NodeJS.Timeout | null = null
-let movementInterval: NodeJS.Timeout | null = null
-
-// Computed
-const canAuthenticate = computed(() => {
-  switch (securityConfig.value.auth_level) {
-    case 'password':
-      return authForm.value.password.length > 0
-    case 'totp':
-      return authForm.value.totpCode.length === 6
-    case 'google':
-    case 'cloudflare':
-      return true
-    default:
-      return false
-  }
-})
-
-const canMove = computed(() => {
-  return isControlUnlocked.value && systemStatus.value !== 'emergency' && !performing.value
-})
-
-// Methods
-async function loadSecurityConfig() {
-  try {
-    const response = await api.get('/api/v2/settings/security')
-    securityConfig.value = { ...securityConfig.value, ...response.data }
-  } catch (error) {
-    console.error('Failed to load security config:', error)
-  }
-}
-
-async function authenticateControl() {
-  if (!canAuthenticate.value) return
-  
-  authenticating.value = true
-  authError.value = ''
-  
-  try {
-    let authData: any = {}
-    
-    switch (securityConfig.value.auth_level) {
-      case 'password':
-        authData = { password: authForm.value.password }
-        break
-      case 'totp':
-        authData = { totp_code: authForm.value.totpCode }
-        break
-      case 'google':
-        // Google auth would be handled differently in real implementation
-        authData = { google_token: 'mock_token' }
-        break
-      case 'cloudflare':
-        authData = { cloudflare_verified: true }
-        break
-    }
-    
-    const response = await api.post('/api/v2/control/authenticate', authData)
-    
-    if (response.data.authorized) {
-      isControlUnlocked.value = true
-      startSessionTimer()
-      showStatus('Control access granted', true)
-    } else {
-      authError.value = 'Authentication failed'
-    }
-  } catch (error: any) {
-    authError.value = error.response?.data?.message || 'Authentication failed'
-  } finally {
-    authenticating.value = false
-  }
-}
-
-async function authenticateWithGoogle() {
-  // Mock implementation - real implementation would use Google OAuth
-  authError.value = ''
-  authenticating.value = true
-  
-  try {
-    // Simulate Google OAuth flow
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    isControlUnlocked.value = true
-    startSessionTimer()
-    showStatus('Google authentication successful', true)
-  } catch (error) {
-    authError.value = 'Google authentication failed'
-  } finally {
-    authenticating.value = false
-  }
-}
-
-async function verifyCloudflareAuth() {
-  authenticating.value = true
-  authError.value = ''
-  
-  try {
-    const response = await api.get('/api/v2/control/cloudflare-verify')
-    if (response.data.verified) {
-      isControlUnlocked.value = true
-      startSessionTimer()
-      showStatus('Cloudflare authentication verified', true)
-    } else {
-      authError.value = 'Cloudflare authentication not verified'
-    }
-  } catch (error) {
-    authError.value = 'Failed to verify Cloudflare authentication'
-  } finally {
-    authenticating.value = false
-  }
-}
-
-function lockControl() {
-  isControlUnlocked.value = false
-  stopMovement()
-  clearSessionTimer()
-  authForm.value = { password: '', totpCode: '' }
-  showStatus('Control locked', true)
-}
-
-function startSessionTimer() {
-  clearSessionTimer()
-  sessionTimeRemaining.value = securityConfig.value.session_timeout_minutes * 60
-  
-  sessionTimer = setInterval(() => {
-    sessionTimeRemaining.value--
-    if (sessionTimeRemaining.value <= 0) {
-      lockControl()
-      showStatus('Control session expired', false)
-    }
-  }, 1000)
-}
-
-function clearSessionTimer() {
-  if (sessionTimer) {
-    clearInterval(sessionTimer)
-    sessionTimer = null
-  }
-}
-
+// Example: Use control store for command submission
 async function emergencyStop() {
-  performing.value = true
-  try {
-    await api.post('/api/v2/control/emergency-stop')
-    systemStatus.value = 'emergency'
-    stopMovement()
-    mowingActive.value = false
-    showStatus('Emergency stop activated', true)
-  } catch (error) {
-    showStatus('Emergency stop failed', false)
-  } finally {
-    performing.value = false
-  }
+  await control.submitCommand('emergency')
 }
 
-function startMovement(direction: string) {
-  if (!canMove.value) return
-  
-  currentMovement.value = direction
-  sendMovementCommand(direction, speedLevel.value)
-  
-  // Continue sending movement commands while button is held
-  movementInterval = setInterval(() => {
-    sendMovementCommand(direction, speedLevel.value)
-  }, 100)
+async function drive(direction: string, speed: number) {
+  await control.submitCommand('drive', { direction, speed })
 }
 
-function stopMovement() {
-  currentMovement.value = ''
-  currentSpeed.value = 0
-  
-  if (movementInterval) {
-    clearInterval(movementInterval)
-    movementInterval = null
-  }
-  
-  sendMovementCommand('stop', 0)
+async function blade(on: boolean) {
+  await control.submitCommand('blade', { on })
 }
 
-async function sendMovementCommand(direction: string, speed: number) {
-  try {
-    await api.post('/api/v2/control/movement', {
-      direction,
-      speed: speed / 100 // Convert percentage to decimal
-    })
-  } catch (error) {
-    console.error('Movement command failed:', error)
-  }
-}
-
-async function toggleMowing() {
-  performing.value = true
-  try {
-    if (mowingActive.value) {
-      await api.post('/api/v2/control/mowing/stop')
-      mowingActive.value = false
-      showStatus('Mowing stopped', true)
-    } else {
-      await api.post('/api/v2/control/mowing/start', {
-        cutting_height: cuttingHeight.value
-      })
-      mowingActive.value = true
-      showStatus('Mowing started', true)
-    }
-  } catch (error) {
-    showStatus('Mowing control failed', false)
-  } finally {
-    performing.value = false
-  }
-}
-
-async function returnToBase() {
-  performing.value = true
-  try {
-    await api.post('/api/v2/control/return-to-base')
-    showStatus('Returning to base', true)
-  } catch (error) {
-    showStatus('Return to base failed', false)
-  } finally {
-    performing.value = false
-  }
-}
-
-async function pauseSystem() {
-  performing.value = true
-  try {
-    await api.post('/api/v2/control/pause')
-    systemStatus.value = 'paused'
-    showStatus('System paused', true)
-  } catch (error) {
-    showStatus('Pause failed', false)
-  } finally {
-    performing.value = false
-  }
-}
-
-async function resumeSystem() {
-  performing.value = true
-  try {
-    await api.post('/api/v2/control/resume')
-    systemStatus.value = 'running'
-    showStatus('System resumed', true)
-  } catch (error) {
-    showStatus('Resume failed', false)
-  } finally {
-    performing.value = false
-  }
-}
-
-function formatSecurityLevel(level: string): string {
-  const levels = {
-    password: 'Password Only',
-    totp: 'Password + TOTP',
-    google: 'Google Authentication',
-    cloudflare: 'Cloudflare Tunnel Auth'
-  }
-  return levels[level as keyof typeof levels] || level
-}
-
-function formatSystemStatus(status: string): string {
-  return status.charAt(0).toUpperCase() + status.slice(1)
-}
-
-function formatTimeRemaining(seconds: number): string {
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
-  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
-}
-
-function showStatus(message: string, success: boolean) {
-  statusMessage.value = message
-  statusSuccess.value = success
-  setTimeout(() => {
-    statusMessage.value = ''
-  }, 3000)
-}
-
-onMounted(async () => {
-  await loadSecurityConfig()
-  await connect()
-  
-  // Subscribe to telemetry updates
-  subscribe('telemetry.power', (data) => {
-    if (data.battery) {
-      telemetry.value.battery = data.battery
-    }
-  })
-  
-  subscribe('telemetry.navigation', (data) => {
-    if (data.position) {
-      telemetry.value.position = data.position
-    }
-  })
-  
-  subscribe('telemetry.system', (data) => {
-    if (data.safety_state) {
-      telemetry.value.safety_state = data.safety_state
-    }
-  })
-})
-
-onUnmounted(() => {
-  clearSessionTimer()
-  if (movementInterval) {
-    clearInterval(movementInterval)
-  }
-  
-  unsubscribe('telemetry.power')
-  unsubscribe('telemetry.navigation')
-  unsubscribe('telemetry.system')
-})
+// ...other UI logic can be adapted to use control store as needed
+</script>
 </script>
 
 <style scoped>

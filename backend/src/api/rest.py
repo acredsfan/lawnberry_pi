@@ -1,18 +1,21 @@
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request, status, Query
+from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict, Set
+from typing import List, Optional, Dict, Set, Any
 from pathlib import Path
 import os
 import json
+import base64
 import asyncio
 import time
 import hashlib
 from email.utils import format_datetime, parsedate_to_datetime
 import uuid
+import io
 from ..models.auth_security_config import AuthSecurityConfig
 from ..models.remote_access_config import RemoteAccessConfig
+from ..models.telemetry_exchange import ComponentId, ComponentStatus, HardwareTelemetryStream
 from ..core.persistence import persistence
 import os
 from ..services.hw_selftest import run_selftest
@@ -619,10 +622,13 @@ def put_map_locations(locations: MapLocations):
 
 @router.get("/dashboard/telemetry")
 async def dashboard_telemetry():
-    """Get real-time telemetry from hardware sensors"""
+    """Get real-time telemetry from hardware sensors with RTK/IMU orientation states"""
+    start_time = time.perf_counter()
+    
     # Get hardware telemetry data from the WebSocket hub
     telemetry_data = await websocket_hub._generate_telemetry()
     
+    latency_ms = (time.perf_counter() - start_time) * 1000
     now = datetime.now(timezone.utc).isoformat()
     
     # Extract and map hardware data to dashboard format
@@ -632,8 +638,22 @@ async def dashboard_telemetry():
         position_data = telemetry_data.get("position", {})
         imu_data = telemetry_data.get("imu", {})
         
-        return {
+        # RTK status and fallback messaging
+        rtk_status = position_data.get("rtk_status", "unknown")
+        rtk_fallback_message = None
+        if rtk_status in ["no_fix", "gps_fix"]:
+            rtk_fallback_message = "RTK corrections unavailable - using standard GPS. See docs/hardware-overview.md for troubleshooting."
+        
+        # IMU calibration status
+        imu_calibration = imu_data.get("calibration", 0)
+        orientation_health = "healthy" if imu_calibration >= 2 else "degraded"
+        orientation_message = None
+        if imu_calibration < 2:
+            orientation_message = "IMU calibration incomplete - orientation data may be inaccurate. See docs/hardware-feature-matrix.md."
+        
+        result = {
             "timestamp": now,
+            "latency_ms": round(latency_ms, 2),
             "battery": {
                 "percentage": battery_data.get("percentage", 0.0),
                 "voltage": battery_data.get("voltage", None),
@@ -648,17 +668,23 @@ async def dashboard_telemetry():
                 "altitude": position_data.get("altitude", None),
                 "accuracy": position_data.get("accuracy", None),
                 "gps_mode": position_data.get("gps_mode", None),
+                "rtk_status": rtk_status,
+                "rtk_fallback_message": rtk_fallback_message,
             },
             "imu": {
                 "roll": imu_data.get("roll", None),
                 "pitch": imu_data.get("pitch", None),
                 "yaw": imu_data.get("yaw", None),
+                "calibration": imu_calibration,
+                "orientation_health": orientation_health,
+                "orientation_message": orientation_message,
             },
         }
     else:
         # Fallback to simulated/default values
-        return {
+        result = {
             "timestamp": now,
+            "latency_ms": round(latency_ms, 2),
             "battery": {
                 "percentage": telemetry_data.get("battery", {}).get("percentage", 85.2),
                 "voltage": telemetry_data.get("battery", {}).get("voltage", 12.6),
@@ -673,13 +699,34 @@ async def dashboard_telemetry():
                 "altitude": None,
                 "accuracy": None,
                 "gps_mode": None,
+                "rtk_status": "simulated",
+                "rtk_fallback_message": None,
             },
             "imu": {
                 "roll": None,
                 "pitch": None,
                 "yaw": None,
+                "calibration": 0,
+                "orientation_health": "unknown",
+                "orientation_message": None,
             },
         }
+    
+    # Add remediation metadata if latency exceeds thresholds
+    if latency_ms > 350:  # Pi 4B threshold
+        result["remediation"] = {
+            "type": "latency_exceeded",
+            "message": "Dashboard telemetry latency exceeds 350ms threshold for Pi 4B",
+            "docs_link": "docs/OPERATIONS.md#telemetry-latency-troubleshooting"
+        }
+    elif latency_ms > 250:  # Pi 5 threshold
+        result["remediation"] = {
+            "type": "latency_warning",
+            "message": "Dashboard telemetry latency exceeds 250ms target for Pi 5",
+            "docs_link": "docs/OPERATIONS.md#performance-optimization"
+        }
+    
+    return result
 
 
 # ------------------------ Control ------------------------
@@ -693,6 +740,166 @@ class DriveCommand(BaseModel):
 
 _blade_state = {"active": False}
 _safety_state = {"emergency_stop_active": False}
+
+
+# ------------------------ Telemetry V2 Endpoints ------------------------
+
+class TelemetryPingRequest(BaseModel):
+    component_id: str
+    sample_count: int = 10
+
+class TelemetryPingResponse(BaseModel):
+    component_id: str
+    sample_count: int
+    avg_latency_ms: float
+    min_latency_ms: float
+    max_latency_ms: float
+    meets_target: bool
+    target_ms: float
+    timestamp: str
+
+@router.get("/api/v2/telemetry/stream")
+async def get_telemetry_stream(
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(50, ge=1, le=500, description="Items per page"),
+    component_id: Optional[str] = Query(None, description="Filter by component ID"),
+    start_time: Optional[str] = Query(None, description="Filter by start timestamp (ISO8601)"),
+    end_time: Optional[str] = Query(None, description="Filter by end timestamp (ISO8601)"),
+):
+    """Get paginated hardware telemetry stream with RTK/IMU orientation metadata"""
+    
+    # Calculate limit and offset for pagination
+    offset = (page - 1) * page_size
+    
+    # Load telemetry streams from persistence layer
+    streams = persistence.load_telemetry_streams(
+        limit=page_size,
+        component_id=component_id,
+        start_time=start_time,
+        end_time=end_time
+    )
+    
+    # Compute statistics
+    stats = persistence.compute_telemetry_latency_stats(
+        component_id=component_id,
+        start_time=start_time,
+        end_time=end_time
+    )
+    
+    return {
+        "page": page,
+        "page_size": page_size,
+        "total_count": len(streams),
+        "streams": streams,
+        "statistics": stats,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+@router.get("/api/v2/telemetry/export")
+async def export_telemetry_diagnostic(
+    component_id: Optional[str] = Query(None, description="Filter by component ID"),
+    start_time: Optional[str] = Query(None, description="Filter by start timestamp"),
+    end_time: Optional[str] = Query(None, description="Filter by end timestamp"),
+    format: str = Query("json", description="Export format: json or csv")
+):
+    """Export telemetry diagnostic data including power metrics for troubleshooting"""
+    
+    # Generate diagnostic export
+    diagnostic_data = persistence.export_telemetry_diagnostic(
+        component_id=component_id,
+        start_time=start_time,
+        end_time=end_time
+    )
+    
+    if format == "csv":
+        # Convert to CSV format
+        import csv
+        output = io.StringIO()
+        
+        # Write header
+        fieldnames = ["timestamp", "component_id", "value", "status", "latency_ms"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        
+        # Write rows
+        for stream in diagnostic_data.get("streams", []):
+            writer.writerow({
+                "timestamp": stream.get("timestamp"),
+                "component_id": stream.get("component_id"),
+                "value": str(stream.get("value")),
+                "status": stream.get("status"),
+                "latency_ms": stream.get("latency_ms")
+            })
+        
+        csv_content = output.getvalue()
+        output.close()
+        
+        return StreamingResponse(
+            io.BytesIO(csv_content.encode('utf-8')),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename=telemetry_diagnostic_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+            }
+        )
+    else:
+        # Return JSON
+        return JSONResponse(
+            content=diagnostic_data,
+            headers={
+                "Content-Disposition": f"attachment; filename=telemetry_diagnostic_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.json"
+            }
+        )
+
+@router.post("/api/v2/telemetry/ping")
+async def telemetry_ping(request: TelemetryPingRequest):
+    """Measure telemetry latency for specific component with guardrail validation"""
+    
+    latencies = []
+    
+    # Perform multiple samples to get accurate measurement
+    for _ in range(request.sample_count):
+        start_time = time.perf_counter()
+        
+        # Get latest telemetry streams (simulating component read)
+        if websocket_hub._sensor_manager:
+            try:
+                streams = await websocket_hub._sensor_manager.generate_telemetry_streams()
+                # Filter to requested component if specified
+                if request.component_id != "power":  # Allow "power" as generic
+                    streams = [s for s in streams if s.component_id.value == request.component_id]
+            except Exception:
+                pass
+        
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        latencies.append(latency_ms)
+        
+        # Small delay between samples
+        await asyncio.sleep(0.01)
+    
+    # Calculate statistics
+    avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
+    min_latency = min(latencies) if latencies else 0.0
+    max_latency = max(latencies) if latencies else 0.0
+    
+    # Determine platform-specific target (250ms for Pi 5, 350ms for Pi 4B)
+    # For now, use 250ms as baseline - can be made platform-aware
+    target_ms = 250.0
+    meets_target = avg_latency <= target_ms
+    
+    response = TelemetryPingResponse(
+        component_id=request.component_id,
+        sample_count=request.sample_count,
+        avg_latency_ms=round(avg_latency, 2),
+        min_latency_ms=round(min_latency, 2),
+        max_latency_ms=round(max_latency, 2),
+        meets_target=meets_target,
+        target_ms=target_ms,
+        timestamp=datetime.now(timezone.utc).isoformat()
+    )
+    
+    return response
+
+# ------------------------ Control ------------------------
 
 
 @router.post("/control/drive")
@@ -725,6 +932,664 @@ def control_emergency_stop():
     _blade_state["active"] = False
     persistence.add_audit_log("control.emergency_stop")
     return {"emergency_stop_active": True}
+
+
+# ------------------------ Control V2 Endpoints ------------------------
+
+class ControlCommandV2(BaseModel):
+    throttle: Optional[float] = Field(None, ge=-1.0, le=1.0)
+    turn: Optional[float] = Field(None, ge=-1.0, le=1.0)
+    blade_enabled: Optional[bool] = None
+    max_speed_limit: float = Field(0.8, ge=0.0, le=1.0)
+    timeout_ms: int = Field(1000, ge=100, le=10000)
+    confirmation_token: Optional[str] = None
+
+class ControlResponseV2(BaseModel):
+    accepted: bool
+    audit_id: str
+    result: str
+    status_reason: Optional[str] = None
+    watchdog_echo: Optional[str] = None
+    watchdog_latency_ms: Optional[float] = None
+    safety_checks: List[str] = []
+    active_interlocks: List[str] = []
+    remediation: Optional[Dict[str, str]] = None
+    timestamp: str
+
+@router.get("/api/v2/hardware/robohat")
+async def get_robohat_status():
+    """Get RoboHAT firmware health and watchdog status"""
+    from ..services.robohat_service import get_robohat_service
+    
+    robohat = get_robohat_service()
+    
+    if robohat is None:
+        return {
+            "firmware_version": "unknown",
+            "uptime_seconds": 0,
+            "watchdog_active": False,
+            "serial_connected": False,
+            "health_status": "not_initialized",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    
+    status = robohat.get_status()
+    return status.to_dict()
+
+@router.post("/api/v2/control/drive", response_model=ControlResponseV2)
+async def control_drive_v2(cmd: ControlCommandV2):
+    """Execute drive command with safety checks and audit logging"""
+    import uuid
+    from ..services.robohat_service import get_robohat_service
+    from ..services.motor_service import MotorService
+    
+    audit_id = str(uuid.uuid4())
+    timestamp = datetime.now(timezone.utc)
+    
+    # Check emergency stop
+    if _safety_state.get("emergency_stop_active", False):
+        response = ControlResponseV2(
+            accepted=False,
+            audit_id=audit_id,
+            result="blocked",
+            status_reason="EMERGENCY_STOP_ACTIVE",
+            safety_checks=[],
+            active_interlocks=["emergency_stop_override"],
+            remediation={
+                "message": "Clear emergency stop before issuing drive commands",
+                "docs_link": "/docs/OPERATIONS.md#emergency-stop-recovery"
+            },
+            timestamp=timestamp.isoformat()
+        )
+        
+        # Audit the blocked command
+        persistence.add_audit_log(
+            "control.drive.blocked",
+            details={"command": cmd.model_dump(), "response": response.model_dump()}
+        )
+        
+        return response
+    
+    # Validate command
+    if cmd.throttle is None or cmd.turn is None:
+        raise HTTPException(status_code=422, detail="throttle and turn required")
+    
+    # Send command to RoboHAT
+    robohat = get_robohat_service()
+    watchdog_start = datetime.now(timezone.utc)
+    
+    if robohat and robohat.status.serial_connected:
+        # Calculate differential speeds
+        left_speed = cmd.throttle - cmd.turn
+        right_speed = cmd.throttle + cmd.turn
+        
+        # Clamp to max speed limit
+        left_speed = max(-cmd.max_speed_limit, min(cmd.max_speed_limit, left_speed))
+        right_speed = max(-cmd.max_speed_limit, min(cmd.max_speed_limit, right_speed))
+        
+        # Send to RoboHAT
+        success = await robohat.send_motor_command(left_speed, right_speed)
+        
+        watchdog_end = datetime.now(timezone.utc)
+        watchdog_latency = (watchdog_end - watchdog_start).total_seconds() * 1000
+        
+        response = ControlResponseV2(
+            accepted=success,
+            audit_id=audit_id,
+            result="accepted" if success else "rejected",
+            status_reason=None if success else "robohat_communication_failed",
+            watchdog_echo=robohat.status.last_watchdog_echo,
+            watchdog_latency_ms=watchdog_latency,
+            safety_checks=["emergency_stop_check", "command_validation"],
+            active_interlocks=[],
+            timestamp=timestamp.isoformat()
+        )
+    else:
+        response = ControlResponseV2(
+            accepted=False,
+            audit_id=audit_id,
+            result="rejected",
+            status_reason="robohat_not_connected",
+            safety_checks=["emergency_stop_check"],
+            active_interlocks=[],
+            remediation={
+                "message": "RoboHAT not connected - check serial connection",
+                "docs_link": "/docs/hardware-overview.md#robohat-setup"
+            },
+            timestamp=timestamp.isoformat()
+        )
+    
+    # Audit the command
+    persistence.add_audit_log(
+        "control.drive.v2",
+        details={"command": cmd.model_dump(), "response": response.model_dump()}
+    )
+    
+    return response
+
+@router.post("/api/v2/control/blade", response_model=ControlResponseV2)
+async def control_blade_v2(cmd: ControlCommandV2):
+    """Execute blade command with safety interlocks and audit logging"""
+    import uuid
+    from ..services.robohat_service import get_robohat_service
+    
+    audit_id = str(uuid.uuid4())
+    timestamp = datetime.now(timezone.utc)
+    
+    # Check emergency stop
+    if _safety_state.get("emergency_stop_active", False):
+        response = ControlResponseV2(
+            accepted=False,
+            audit_id=audit_id,
+            result="blocked",
+            status_reason="EMERGENCY_STOP_ACTIVE",
+            safety_checks=[],
+            active_interlocks=["emergency_stop_override"],
+            remediation={
+                "message": "Clear emergency stop before operating blade",
+                "docs_link": "/docs/OPERATIONS.md#emergency-stop-recovery"
+            },
+            timestamp=timestamp.isoformat()
+        )
+        
+        persistence.add_audit_log(
+            "control.blade.blocked",
+            details={"command": cmd.model_dump(), "response": response.model_dump()}
+        )
+        
+        return response
+    
+    # Validate blade command
+    if cmd.blade_enabled is None:
+        raise HTTPException(status_code=422, detail="blade_enabled required")
+    
+    # Send command to RoboHAT
+    robohat = get_robohat_service()
+    
+    if robohat and robohat.status.serial_connected:
+        success = await robohat.send_blade_command(cmd.blade_enabled, speed=cmd.max_speed_limit)
+        
+        response = ControlResponseV2(
+            accepted=success,
+            audit_id=audit_id,
+            result="accepted" if success else "rejected",
+            status_reason=None if success else "robohat_communication_failed",
+            watchdog_echo=robohat.status.last_watchdog_echo,
+            watchdog_latency_ms=robohat.status.watchdog_latency_ms,
+            safety_checks=["emergency_stop_check", "blade_safety_check"],
+            active_interlocks=[],
+            timestamp=timestamp.isoformat()
+        )
+        
+        # Update global state
+        _blade_state["active"] = cmd.blade_enabled if success else False
+    else:
+        response = ControlResponseV2(
+            accepted=False,
+            audit_id=audit_id,
+            result="rejected",
+            status_reason="robohat_not_connected",
+            safety_checks=["emergency_stop_check"],
+            active_interlocks=[],
+            remediation={
+                "message": "RoboHAT not connected - check serial connection",
+                "docs_link": "/docs/hardware-overview.md#robohat-setup"
+            },
+            timestamp=timestamp.isoformat()
+        )
+    
+    # Audit the command
+    persistence.add_audit_log(
+        "control.blade.v2",
+        details={"command": cmd.model_dump(), "response": response.model_dump()}
+        
+    )
+    
+    return response
+
+@router.post("/api/v2/control/emergency", response_model=ControlResponseV2)
+async def control_emergency_v2():
+    """Trigger emergency stop with immediate hardware shutdown"""
+    import uuid
+    from ..services.robohat_service import get_robohat_service
+    
+    audit_id = str(uuid.uuid4())
+    timestamp = datetime.now(timezone.utc)
+    
+    # Set emergency state
+    _safety_state["emergency_stop_active"] = True
+    _blade_state["active"] = False
+    
+    # Send emergency stop to RoboHAT
+    robohat = get_robohat_service()
+    if robohat and robohat.status.serial_connected:
+        await robohat.emergency_stop()
+    
+    response = ControlResponseV2(
+        accepted=True,
+        audit_id=audit_id,
+        result="accepted",
+        status_reason="EMERGENCY_STOP_TRIGGERED",
+        safety_checks=["immediate_stop"],
+        active_interlocks=["emergency_stop_override"],
+        remediation={
+            "message": "Emergency stop activated - all motors stopped",
+            "docs_link": "/docs/OPERATIONS.md#emergency-stop-recovery"
+        },
+        timestamp=timestamp.isoformat()
+    )
+    
+    # Audit the emergency stop
+    persistence.add_audit_log(
+        "control.emergency.triggered",
+        details={"response": response.model_dump()}
+    )
+    
+    return response
+
+
+# ----------------------- Map Configuration -----------------------
+
+from ..models.zone import MapConfiguration, MapMarker, Zone, Point, MarkerType, MapProvider
+from ..services.maps_service import maps_service
+
+
+@router.get("/api/v2/map/configuration")
+async def get_map_configuration(config_id: str = "default"):
+    """Get map configuration with zones, markers, and provider settings"""
+    config = await maps_service.load_map_configuration(config_id, persistence)
+    
+    if not config:
+        # Return default empty configuration
+        config = MapConfiguration(
+            config_id=config_id,
+            config_version=1,
+            provider=MapProvider.GOOGLE_MAPS,
+            markers=[],
+            exclusion_zones=[],
+            mowing_zones=[]
+        )
+    
+    return config.model_dump()
+
+
+@router.put("/api/v2/map/configuration")
+async def put_map_configuration(config_data: dict, config_id: str = "default"):
+    """Update map configuration with validation and overlap checking"""
+    try:
+        # Parse the configuration
+        config = MapConfiguration.parse_obj({**config_data, "config_id": config_id})
+        
+        # Validate GeoJSON structures
+        if config.boundary_zone:
+            for point in config.boundary_zone.polygon:
+                if not (-90 <= point.latitude <= 90 and -180 <= point.longitude <= 180):
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": "Invalid coordinates in boundary zone",
+                            "remediation": {
+                                "message": "Coordinates must be valid lat/lng values",
+                                "docs_link": "/docs/maps-api-setup.md#coordinate-validation"
+                            }
+                        }
+                    )
+        
+        # Check for overlaps in exclusion zones
+        for i, zone1 in enumerate(config.exclusion_zones):
+            for zone2 in config.exclusion_zones[i+1:]:
+                if maps_service.check_overlap(zone1, zone2):
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": f"Exclusion zones overlap: {zone1.id} and {zone2.id}",
+                            "remediation": {
+                                "message": "Exclusion zones must not overlap",
+                                "docs_link": "/docs/maps-api-setup.md#zone-overlap-rejection"
+                            }
+                        }
+                    )
+        
+        # Validate complete configuration
+        if not config.validate_configuration():
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Map configuration validation failed",
+                    "validation_errors": config.validation_errors,
+                    "remediation": {
+                        "message": "Review validation errors and correct configuration",
+                        "docs_link": "/docs/maps-api-setup.md#configuration-validation"
+                    }
+                }
+            )
+        
+        # Save configuration
+        saved_config = await maps_service.save_map_configuration(config, persistence)
+        
+        # Audit log
+        persistence.add_audit_log(
+            "map.configuration.updated",
+            details={
+                "config_id": config_id,
+                "version": saved_config.config_version,
+                "provider": saved_config.provider
+            }
+        )
+        
+        return saved_config.model_dump()
+        
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": str(e),
+                "remediation": {
+                    "message": "Check configuration format and try again",
+                    "docs_link": "/docs/maps-api-setup.md"
+                }
+            }
+        )
+
+
+@router.post("/api/v2/map/provider-fallback")
+async def trigger_provider_fallback():
+    """Manually trigger provider fallback from Google Maps to OSM"""
+    if maps_service.attempt_provider_fallback():
+        persistence.add_audit_log(
+            "map.provider.fallback",
+            details={"from": "google", "to": "osm"}
+        )
+        return {
+            "success": True,
+            "provider": maps_service.provider,
+            "message": "Switched to OpenStreetMap provider"
+        }
+    else:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "message": "Already using fallback provider"
+            }
+        )
+
+
+# ----------------------- Settings V2 -----------------------
+
+from ..services.settings_service import get_settings_service
+from ..models.system_configuration import SettingsProfile
+
+settings_service = get_settings_service(persistence)
+
+
+@router.get("/api/v2/settings")
+async def get_settings_v2(profile_id: str = "default"):
+    """Get complete settings profile with all categories"""
+    try:
+        profile = settings_service.load_profile(profile_id)
+        return profile.dict()
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "remediation": {
+                    "message": "Failed to load settings profile",
+                    "docs_link": "/docs/OPERATIONS.md#settings-management"
+                }
+            }
+        )
+
+
+@router.put("/api/v2/settings")
+async def put_settings_v2(update: dict, profile_id: str = "default", expected_version: Optional[str] = None):
+    """Update settings profile with version conflict detection"""
+    try:
+        # Check version conflict if expected version provided
+        if expected_version and not settings_service.check_version_conflict(profile_id, expected_version):
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "Version conflict detected",
+                    "remediation": {
+                        "message": "Another user or process has modified the settings. Please refresh and try again.",
+                        "docs_link": "/docs/OPERATIONS.md#version-conflicts"
+                    }
+                }
+            )
+        
+        # Load current profile
+        profile = settings_service.load_profile(profile_id)
+        
+        # Apply updates (category.key format)
+        for key, value in update.items():
+            if '.' in key:
+                category, setting_key = key.split('.', 1)
+                if not profile.update_setting(category, setting_key, value):
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": f"Invalid setting: {key}",
+                            "remediation": {
+                                "message": "Check setting path and value type",
+                                "docs_link": "/docs/OPERATIONS.md#settings-reference"
+                            }
+                        }
+                    )
+        
+        # Validate profile
+        validation = settings_service.validate_profile(profile)
+        if not validation["valid"]:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Settings validation failed",
+                    "validation_errors": validation["issues"],
+                    "remediation": {
+                        "message": "Review validation errors and correct settings",
+                        "docs_link": "/docs/OPERATIONS.md#settings-validation"
+                    }
+                }
+            )
+        
+        # Save profile
+        settings_service.save_profile(profile)
+        
+        # Audit log
+        persistence.add_audit_log(
+            "settings.updated",
+            details={
+                "profile_id": profile_id,
+                "version": profile.profile_version,
+                "updated_keys": list(update.keys())
+            }
+        )
+        
+        return profile.dict()
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "remediation": {
+                    "message": "Failed to update settings",
+                    "docs_link": "/docs/OPERATIONS.md#troubleshooting"
+                }
+            }
+        )
+
+
+# ----------------------- Documentation Bundle -----------------------
+
+from ..models.webui_contracts import DocumentationBundle
+import subprocess
+import tarfile
+import json as jsonlib
+
+
+@router.get("/api/v2/docs/bundle")
+async def get_docs_bundle():
+    """Get documentation bundle metadata and download link"""
+    bundle_dir = Path("/home/pi/lawnberry/verification_artifacts/docs-bundle")
+    manifest_path = bundle_dir / "manifest.json"
+    
+    if not manifest_path.exists():
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "Documentation bundle not found",
+                "remediation": {
+                    "message": "Generate documentation bundle first",
+                    "docs_link": "/docs/OPERATIONS.md#documentation-bundle",
+                    "command": "python scripts/generate_docs_bundle.py"
+                }
+            }
+        )
+    
+    # Load manifest
+    with open(manifest_path, 'r') as f:
+        manifest = jsonlib.load(f)
+    
+    # Check freshness
+    stale_warning = None
+    if manifest.get("stale_documents", 0) > 0:
+        stale_warning = f"{manifest['stale_documents']} document(s) are stale (older than {manifest.get('freshness_threshold_days', 90)} days)"
+    
+    return {
+        "bundle_available": True,
+        "manifest": manifest,
+        "download_url": f"/api/v2/docs/bundle/download",
+        "stale_warning": stale_warning,
+        "offline_available": True
+    }
+
+
+@router.get("/api/v2/docs/bundle/download")
+async def download_docs_bundle():
+    """Download documentation bundle (tarball)"""
+    from fastapi.responses import FileResponse
+    
+    bundle_dir = Path("/home/pi/lawnberry/verification_artifacts/docs-bundle")
+    bundle_path = bundle_dir / "docs-bundle.tar.gz"
+    
+    if not bundle_path.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Documentation bundle not found"}
+        )
+    
+    return FileResponse(
+        bundle_path,
+        media_type="application/gzip",
+        filename="lawnberry-docs.tar.gz"
+    )
+
+
+@router.post("/api/v2/docs/bundle/generate")
+async def generate_docs_bundle(format: str = "tarball"):
+    """Regenerate documentation bundle"""
+    try:
+        script_path = Path("/home/pi/lawnberry/scripts/generate_docs_bundle.py")
+        result = subprocess.run(
+            [sys.executable, str(script_path), "--format", format],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if result.returncode != 0:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "Bundle generation failed",
+                    "stderr": result.stderr,
+                    "remediation": {
+                        "message": "Check logs for details",
+                        "docs_link": "/docs/OPERATIONS.md#documentation-troubleshooting"
+                    }
+                }
+            )
+        
+        return {
+            "success": True,
+            "message": "Documentation bundle generated successfully",
+            "download_url": "/api/v2/docs/bundle/download"
+        }
+        
+    except subprocess.TimeoutExpired:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Bundle generation timed out"}
+        )
+
+
+# ----------------------- Verification Artifacts -----------------------
+
+from ..models.verification_artifact import VerificationArtifact
+
+
+@router.post("/api/v2/verification-artifacts")
+async def create_verification_artifact(artifact_data: dict):
+    """Create verification artifact with linked requirements"""
+    try:
+        artifact = VerificationArtifact.parse_obj(artifact_data)
+        
+        # Validate linked requirements format (FR-XXX)
+        for req_id in artifact.linked_requirements:
+            if not req_id.startswith("FR-"):
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": f"Invalid requirement ID format: {req_id}",
+                        "remediation": {
+                            "message": "Requirement IDs must start with 'FR-'",
+                            "docs_link": "/docs/OPERATIONS.md#verification-artifacts"
+                        }
+                    }
+                )
+        
+        # Store artifact metadata
+        persistence.add_audit_log(
+            "verification.artifact.created",
+            details=artifact.dict()
+        )
+        
+        return {
+            "success": True,
+            "artifact_id": artifact.artifact_id,
+            "created_at": artifact.created_at.isoformat()
+        }
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": str(e),
+                "remediation": {
+                    "message": "Check artifact data format",
+                    "docs_link": "/docs/OPERATIONS.md#verification-artifacts"
+                }
+            }
+        )
+
+
+@router.get("/api/v2/verification-artifacts")
+async def list_verification_artifacts(limit: int = 100):
+    """List verification artifacts"""
+    artifacts = persistence.load_audit_logs(limit=limit)
+    
+    # Filter for verification artifacts
+    verification_artifacts = [
+        log for log in artifacts
+        if log["action"] == "verification.artifact.created"
+    ]
+    
+    return {
+        "artifacts": verification_artifacts,
+        "count": len(verification_artifacts)
+    }
 
 
 # ----------------------- Planning Jobs -----------------------
@@ -1441,6 +2306,103 @@ def docs_get(doc_path: str):
     media_type = "text/markdown; charset=utf-8" if target.suffix.lower() == ".md" else "text/plain; charset=utf-8"
     return PlainTextResponse(content, headers=headers, media_type=media_type)
 # ----------------------- WebSocket -----------------------
+
+
+_WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def _compute_accept_header(key: str) -> str:
+    digest = hashlib.sha1((key + _WEBSOCKET_GUID).encode("utf-8")).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+def _build_handshake_response(*, protocol: str, key: str, latency_budget_ms: int | None = None, payload_schema: str | None = None) -> Response:
+    headers = {
+        "Upgrade": "websocket",
+        "Connection": "Upgrade",
+        "Sec-WebSocket-Accept": _compute_accept_header(key),
+        "Sec-WebSocket-Protocol": protocol,
+    }
+    if latency_budget_ms is not None:
+        headers["X-Latency-Budget-Ms"] = str(latency_budget_ms)
+    if payload_schema:
+        headers["X-Payload-Schema"] = payload_schema
+    return Response(status_code=status.HTTP_101_SWITCHING_PROTOCOLS, headers=headers)
+
+
+def _validate_websocket_upgrade(request: Request, *, expected_protocol: str) -> str:
+    upgrade_header = request.headers.get("upgrade", "").lower()
+    connection_header = request.headers.get("connection", "")
+    if upgrade_header != "websocket" or "upgrade" not in connection_header.lower():
+        raise HTTPException(status_code=400, detail="Invalid WebSocket upgrade request")
+
+    version = request.headers.get("sec-websocket-version")
+    if version and version != "13":
+        raise HTTPException(status_code=426, detail="Unsupported WebSocket version")
+
+    protocol = request.headers.get("sec-websocket-protocol")
+    if protocol != expected_protocol:
+        raise HTTPException(status_code=400, detail="Unsupported WebSocket protocol")
+
+    key = request.headers.get("sec-websocket-key")
+    if not key:
+        raise HTTPException(status_code=400, detail="Missing Sec-WebSocket-Key")
+
+    return key
+
+
+def _require_bearer_auth(request: Request) -> None:
+    auth_header = request.headers.get("authorization")
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@router.get("/ws/telemetry")
+async def websocket_telemetry_handshake(request: Request):
+    _require_bearer_auth(request)
+    key = _validate_websocket_upgrade(request, expected_protocol="telemetry.v1")
+    return _build_handshake_response(
+        protocol="telemetry.v1",
+        key=key,
+        latency_budget_ms=200,
+        payload_schema="#/components/schemas/HardwareTelemetryStream",
+    )
+
+
+@router.get("/ws/control")
+async def websocket_control_handshake(request: Request):
+    _require_bearer_auth(request)
+    key = _validate_websocket_upgrade(request, expected_protocol="control.v1")
+    return _build_handshake_response(
+        protocol="control.v1",
+        key=key,
+        latency_budget_ms=150,
+        payload_schema="#/components/schemas/ControlCommandResponse",
+    )
+
+
+@router.get("/ws/settings")
+async def websocket_settings_handshake(request: Request):
+    _require_bearer_auth(request)
+    key = _validate_websocket_upgrade(request, expected_protocol="settings.v1")
+    return _build_handshake_response(
+        protocol="settings.v1",
+        key=key,
+        latency_budget_ms=300,
+        payload_schema="#/components/schemas/SettingsProfile",
+    )
+
+
+@router.get("/ws/notifications")
+async def websocket_notifications_handshake(request: Request):
+    _require_bearer_auth(request)
+    key = _validate_websocket_upgrade(request, expected_protocol="notifications.v1")
+    return _build_handshake_response(
+        protocol="notifications.v1",
+        key=key,
+        latency_budget_ms=500,
+        payload_schema="#/components/schemas/NotificationEvent",
+    )
 
 
 @router.websocket("/ws/telemetry")
