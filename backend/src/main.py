@@ -1,14 +1,38 @@
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from .api.rest import router as rest_router, websocket_hub
+
+from fastapi import FastAPI
+
+from .api.dashboard import router as dashboard_router
+from .api.fusion import router as fusion_router
+from .api.metrics import router as metrics_router
+from .api.motors import router as motors_router
+from .api.navigation import router as navigation_router
+from .api.rest import router as rest_router
+from .api.rest import websocket_hub
+from .api.rest_v1 import router as rest_v1_router
+from .api.safety import router as safety_router
+from .api.status import router as status_router
+from .core.config_loader import ConfigLoader
+from .nav.gps_degradation import GPSDegradationMonitor
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    # Load configuration (hardware + safety limits) and attach to app.state
+    loader = ConfigLoader()
+    hardware_cfg, safety_limits = loader.get()
+    app.state.config_loader = loader
+    app.state.hardware_config = hardware_cfg
+    app.state.safety_limits = safety_limits
+    # Start GPS degradation monitor
+    app.state.gps_deg_monitor = GPSDegradationMonitor()
+    await app.state.gps_deg_monitor.start()
     await websocket_hub.start_telemetry_loop()
     yield
     # Shutdown
+    if getattr(app.state, "gps_deg_monitor", None):
+        await app.state.gps_deg_monitor.stop()
     await websocket_hub.stop_telemetry_loop()
 
 
@@ -20,9 +44,14 @@ app = FastAPI(
 )
 
 app.include_router(rest_router, prefix="/api/v2")
+app.include_router(metrics_router)
+app.include_router(status_router)
+app.include_router(navigation_router)
+app.include_router(motors_router, prefix="/api/v2")
+app.include_router(safety_router, prefix="/api/v2")
+app.include_router(fusion_router)
+app.include_router(dashboard_router)
 
-# Add v1 API router for contract compliance
-from .api.rest_v1 import router as rest_v1_router
 app.include_router(rest_v1_router, prefix="/api/v1")
 
 
@@ -53,4 +82,12 @@ def root():
 # Health check endpoint
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "service": "lawnberry-backend"}
+    # Minimal subsystem reporting; will be wired to real services in later tasks
+    return {
+        "status": "healthy",
+        "service": "lawnberry-backend",
+        "message_bus": {"status": "unknown"},
+        "drivers": {"status": "unknown"},
+        "persistence": {"status": "unknown"},
+        "safety": {"status": "unknown"},
+    }

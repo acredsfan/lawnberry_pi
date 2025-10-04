@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, validator
 import uuid
+from ..models.auth_security_config import SecurityLevel
 
 
 class SessionStatus(str, Enum):
@@ -190,6 +191,8 @@ class UserSession(BaseModel):
     # Session identification
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str = "operator"  # Single operator model
+    # Compatibility username field for tests
+    username: str = "operator"
     
     # Session timing
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -211,6 +214,12 @@ class UserSession(BaseModel):
     
     # Security and permissions
     security_context: SecurityContext = Field(default_factory=SecurityContext)
+    # Compatibility flags/metadata used by auth tests
+    security_level: Optional[SecurityLevel] = None
+    mfa_verified: bool = False
+    backup_code_used: bool = False
+    oauth_provider: Optional[str] = None
+    tunnel_authenticated: bool = False
     
     # User preferences
     preferences: UserPreferences = Field(default_factory=UserPreferences)

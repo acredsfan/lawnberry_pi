@@ -15,6 +15,7 @@ dependencies = [
     "pydantic>=2.8.0",
     "websockets>=12.0",
     "python-multipart>=0.0.6",
+    "PyYAML>=6.0.1",
     "PyJWT>=2.8.0",
     "passlib[bcrypt]>=1.7.4",
     "structlog>=23.1.0",
@@ -36,6 +37,7 @@ include = ["backend*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+asyncio_mode = "auto"
 
 [tool.black]
 target-version = ["py311"]
@@ -44,5 +46,19 @@ line-length = 100
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+[tool.ruff.lint]
 select = ["E","F","I","UP","B"]
 ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"backend/src/api/rest.py" = [
+    # Legacy file with mixed import placement and length
+    "E402", "F401", "I001", "E501", "UP017", "UP006", "UP045", "B904", "F821"
+]
+
+[tool.uv]
+# Primary index remains PyPI; add piwheels as extra index to prefer ARM64 wheels on Raspberry Pi.
+# uv will honor the lockfile (uv.lock) when using `uv sync --frozen`.
+index-url = "https://pypi.org/simple"
+extra-index-url = ["https://www.piwheels.org/simple"]

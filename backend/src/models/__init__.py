@@ -75,6 +75,12 @@ from .verification_artifact import (
     PlatformInfo, PerformanceMetrics as VerificationPerformanceMetrics,
     TelemetrySnapshot
 )
+from .navigation_waypoint import NavigationWaypoint
+from .sensor_reading import SensorReadingV2
+from .geofence import Geofence, LatLng
+from .scheduled_job import ScheduledJob, JobState, RetryPolicy
+from .coverage_pattern import CoveragePattern
+from .log_bundle import LogBundle
 
 __all__ = [
     # Sensor Data
@@ -148,3 +154,17 @@ __all__ = [
     "VerificationArtifact", "VerificationArtifactCollection", "ArtifactType",
     "PlatformInfo", "VerificationPerformanceMetrics", "TelemetrySnapshot"
 ]
+
+# Additional exports for Phase 4/6/7 models
+__all__ += [
+    "NavigationWaypoint",
+    "SensorReadingV2",
+    "Geofence",
+    "LatLng",
+    "ScheduledJob",
+    "JobState",
+    "RetryPolicy",
+    "CoveragePattern",
+    "LogBundle",
+]
+

@@ -28,6 +28,8 @@ __pycache__/*.so
 
 venv/
 
+.venv/
+
 # Distribution / packagingenv/
 
 build/ENV/

@@ -1,0 +1,52 @@
+{
+  "version": 133,
+  "last_modified": "2025-10-04 17:46:15.714551+00:00",
+  "hardware": {
+    "sim_mode": true,
+    "robohat_port": null
+  },
+  "network": {
+    "wifi_ssid": null,
+    "wifi_password": null,
+    "ap_enabled": false,
+    "ap_ssid": null
+  },
+  "telemetry": {
+    "stream_enabled": true,
+    "persist_enabled": true,
+    "retention_days": 30,
+    "cadence_hz": 7,
+    "latency_targets": {
+      "pi5_ms": 250,
+      "pi4b_ms": 350
+    }
+  },
+  "control": {
+    "lockout_enabled": true,
+    "lockout_timeout": 30,
+    "blade_safety": true
+  },
+  "maps": {
+    "provider": "leaflet",
+    "api_key": null,
+    "fallback_enabled": true,
+    "cache_tiles": true
+  },
+  "camera": {
+    "enabled": true,
+    "resolution": "1280x720",
+    "framerate": 30,
+    "quality": 80
+  },
+  "ai": {
+    "obstacle_detection": true,
+    "path_optimization": true,
+    "learning_enabled": false
+  },
+  "system": {
+    "log_level": "INFO",
+    "auto_updates": false,
+    "remote_access": false,
+    "branding_checksum": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

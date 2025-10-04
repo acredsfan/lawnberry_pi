@@ -1,9 +1,23 @@
 """Global test configuration for LawnBerry Pi v2."""
 import os
+import sys
+from pathlib import Path
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator
 import asyncio
+
+# Ensure repository root on sys.path for 'backend' imports and compat stubs
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+# Make optional dependency stubs importable in all tests (bcrypt, pyotp, google, psutil)
+compat_stubs = ROOT / "backend" / "src" / "compat_stubs"
+if compat_stubs.exists():
+    p = str(compat_stubs)
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 # Ensure SIM_MODE=1 for all tests unless explicitly overridden
 os.environ.setdefault("SIM_MODE", "1")

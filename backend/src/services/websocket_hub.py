@@ -11,7 +11,8 @@ class WebSocketHub:
     """Centralized WebSocket hub for real-time communication."""
     
     def __init__(self):
-        self.connections: Dict[str, WebSocket] = {}
+        # Align attribute name with tests (they use `.clients`)
+        self.clients: Dict[str, WebSocket] = {}
         self.subscriptions: Dict[str, Set[str]] = {}  # topic -> client_ids
         self.telemetry_cadence_hz = 5.0
         self._telemetry_task: Optional[asyncio.Task] = None
@@ -20,7 +21,7 @@ class WebSocketHub:
     async def connect(self, websocket: WebSocket, client_id: str):
         """Connect a new WebSocket client."""
         await websocket.accept()
-        self.connections[client_id] = websocket
+        self.clients[client_id] = websocket
         
         # Send connection confirmation
         await self._send_to_client(client_id, {
@@ -31,8 +32,8 @@ class WebSocketHub:
         
     def disconnect(self, client_id: str):
         """Disconnect a WebSocket client."""
-        if client_id in self.connections:
-            del self.connections[client_id]
+        if client_id in self.clients:
+            del self.clients[client_id]
             
         # Remove from all subscriptions
         for topic, subscribers in self.subscriptions.items():
@@ -89,9 +90,9 @@ class WebSocketHub:
         disconnected_clients = []
         
         for client_id in self.subscriptions[topic].copy():
-            if client_id in self.connections:
+            if client_id in self.clients:
                 try:
-                    await self.connections[client_id].send_text(message_json)
+                    await self.clients[client_id].send_text(message_json)
                 except Exception:
                     disconnected_clients.append(client_id)
                     
@@ -102,6 +103,19 @@ class WebSocketHub:
     async def broadcast_alert(self, alert: Alert):
         """Broadcast system alert to all connected clients."""
         await self.broadcast_to_topic("alerts/system", alert.dict())
+
+    async def broadcast(self, message: str | dict):
+        """Broadcast a raw message to all connected clients (compat for tests)."""
+        if isinstance(message, dict):
+            message = json.dumps(message)
+        disconnected = []
+        for client_id, ws in list(self.clients.items()):
+            try:
+                await ws.send_text(message)
+            except Exception:
+                disconnected.append(client_id)
+        for cid in disconnected:
+            self.disconnect(cid)
         
     async def start_telemetry_loop(self):
         """Start the telemetry broadcast loop."""
@@ -130,12 +144,7 @@ class WebSocketHub:
                 telemetry_data = await self._generate_telemetry()
                 
                 # Broadcast to different topics
-                await self.broadcast_to_topic("telemetry/state", telemetry_data)
-                await self.broadcast_to_topic("telemetry/power", {
-                    "battery_percentage": telemetry_data.get("battery", {}).get("percentage", 0),
-                    "battery_voltage": telemetry_data.get("battery", {}).get("voltage"),
-                    "charging": telemetry_data.get("charging", False)
-                })
+                await self._broadcast_telemetry_topics(telemetry_data)
                 
                 # Wait based on cadence
                 await asyncio.sleep(1.0 / self.telemetry_cadence_hz)
@@ -147,6 +156,18 @@ class WebSocketHub:
                 print(f"Telemetry loop error: {e}")
                 await asyncio.sleep(1.0)
                 
+    async def _broadcast_telemetry_topics(self, telemetry_data: dict):
+        """Broadcast telemetry data to topic channels (compat for tests)."""
+        await self.broadcast_to_topic("telemetry", telemetry_data)
+        if "battery" in telemetry_data:
+            await self.broadcast_to_topic("telemetry/power", {
+                "battery_percentage": telemetry_data.get("battery", {}).get("percentage", 0),
+                "battery_voltage": telemetry_data.get("battery", {}).get("voltage"),
+                "charging": telemetry_data.get("charging", False)
+            })
+        if "position" in telemetry_data:
+            await self.broadcast_to_topic("telemetry/state", telemetry_data)
+
     async def _generate_telemetry(self) -> dict:
         """Generate telemetry data (placeholder implementation)."""
         # This would integrate with real sensor services
@@ -162,9 +183,9 @@ class WebSocketHub:
         
     async def _send_to_client(self, client_id: str, message: dict):
         """Send message to specific client."""
-        if client_id in self.connections:
+        if client_id in self.clients:
             try:
-                await self.connections[client_id].send_text(json.dumps(message))
+                await self.clients[client_id].send_text(json.dumps(message))
             except Exception:
                 self.disconnect(client_id)
 

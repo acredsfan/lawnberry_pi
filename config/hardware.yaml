@@ -1,0 +1,32 @@
+# LawnBerry hardware configuration (example)
+# See specs and docs for details. This file declares which hardware modules
+# are present. For SIM_MODE=1, this file may be left minimal.
+
+# Flat form (direct to HardwareConfig) or nested form (compatibility) supported.
+# Example nested form used by tests:
+#
+gps:
+  type: ZED-F9P
+imu:
+  type: BNO085
+sensors:
+  tof:
+    - left
+    - right
+power_monitor:
+  type: INA3221
+motor_controller:
+  type: RoboHAT_RP2040
+blade_controller:
+  type: IBT_4
+
+# Flat alternatives (uncomment to use):
+# gps_type: zed-f9p-usb
+# gps_ntrip_enabled: false
+# imu_type: bno085-uart
+# tof_sensors: [left, right]
+# env_sensor: true
+# power_monitor: true
+# motor_controller: robohat-rp2040   # Drive via RoboHAT → Cytron MDDRC10
+# blade_controller: ibt-4            # Blade via IBT-4 H-Bridge (GPIO24→IN1, GPIO25→IN2)
+# camera_enabled: false

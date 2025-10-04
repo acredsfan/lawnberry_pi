@@ -1,9 +1,17 @@
+import pytest
+
+# This file has been superseded by tests/unit/test_auth_security_levels_unit.py.
+# Skip this module to avoid pytest import file mismatch with the similarly named
+# integration test module.
+pytest.skip(
+    "Superseded by test_auth_security_levels_unit.py; skipping to avoid name conflict",
+    allow_module_level=True,
+)
+
 """
 Unit tests for enhanced authentication security levels
 Tests the configurable authentication system with multiple security levels
 """
-
-import pytest
 import asyncio
 from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime, timezone, timedelta

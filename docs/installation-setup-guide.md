@@ -15,8 +15,8 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 ## Hardware Requirements
 
 ### Primary Platform
-- **Raspberry Pi 5** (4GB or 8GB RAM recommended)
-- **Raspberry Pi OS Bookworm 64-bit** (latest)
+- **Raspberry Pi 5** (4GB/8GB/16GB)
+- **Raspberry Pi OS Bookworm 64-bit** (only supported)
 - **MicroSD Card**: 32GB minimum, Class 10 or better
 - **Power Supply**: Official Pi 5 27W USB-C power adapter
 
@@ -26,7 +26,7 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 - **MicroSD Card**: 32GB minimum, Class 10 or better
 - **Power Supply**: Official Pi 4 15W USB-C power adapter
 
-### Required Sensors & Hardware
+### Required Sensors & Hardware (reference spec/hardware.yaml)
 
 #### Navigation & Positioning
 - **GPS Module**: USB GPS receiver or GPIO-connected module
@@ -60,7 +60,7 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 
 ## Initial Setup
 
-### 1. Prepare Raspberry Pi OS
+### 1. Prepare Raspberry Pi OS (64-bit Bookworm)
 
 1. **Download and Flash OS**
    ```bash
@@ -79,7 +79,7 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
    
    # Enable required interfaces
    sudo raspi-config
-   # Enable: Camera, I2C, SPI, GPIO Serial
+   # Enable: Camera, I2C, SPI, Serial (login shell disabled)
    ```
 
 3. **Install Dependencies**
@@ -93,12 +93,12 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
                        gfortran libhdf5-dev libhdf5-serial-dev \
                        python3-dev
    
-   # Install Node.js for frontend
-   curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+   # Install Node.js for frontend (if building UI locally)
+   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
    sudo apt install -y nodejs
    ```
 
-### 2. Hardware Assembly
+### 2. Hardware Assembly (Pi 4B/5 compatible)
 
 1. **Mount Sensors**
    - Connect GPS module via USB or GPIO UART
@@ -121,28 +121,22 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 ### 1. Clone Repository
 ```bash
 cd /home/pi
-git clone https://github.com/lawnberry/lawnberry-pi.git lawnberry
-cd lawnberry/lawnberry-rebuild
+git clone https://github.com/acredsfan/lawnberry_pi.git lawnberry
+cd lawnberry
 ```
 
-### 2. Backend Setup
+### 2. Backend Setup (Python 3.11)
 ```bash
-# Create Python virtual environment
-cd backend
-python3 -m venv venv
-source venv/bin/activate
+# Use uv for reproducible installs (preferred)
+uv sync
 
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Initialize database
-python -m backend.src.core.persistence init
-
-# Run hardware self-test
-SIM_MODE=0 python -m backend.src.services.hw_selftest
+# Optional: create venv manually
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
 ```
 
-### 3. Frontend Setup
+### 3. Frontend Setup (optional on headless Pi)
 ```bash
 cd ../frontend
 npm install
@@ -151,7 +145,7 @@ npm run build
 
 ### 4. Install systemd Services
 ```bash
-cd ../systemd
+cd systemd
 sudo bash install_services.sh
 ```
 
@@ -171,18 +165,16 @@ sudo lawnberry-pi config --setup-wizard
 
 ### 2. Test Installation
 ```bash
-# Start core services
-sudo systemctl start lawnberry-database
-sudo systemctl start lawnberry-backend
-sudo systemctl start lawnberry-frontend
+# Enable and start services
+sudo systemctl enable --now lawnberry-backend lawnberry-health lawnberry-sensors
 
 # Check service status
 sudo systemctl status lawnberry-backend
 
-# Test API
-curl http://localhost:8081/api/v1/status
+# Test API (port 8081)
+curl http://localhost:8081/health
 
-# Access web interface
+# Access web interface (if running frontend)
 # Open browser to http://<pi-ip>:3000
 ```
 
@@ -302,7 +294,7 @@ For detailed configuration of advanced features, see the dedicated guides:
    sudo journalctl -u lawnberry-backend -f
    ```
 
-### Performance Optimization
+### Performance Optimization (Pi 4B vs Pi 5)
 
 1. **System Performance**
    ```bash

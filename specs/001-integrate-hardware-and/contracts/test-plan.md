@@ -9,7 +9,7 @@
 | `GET /hardware/robohat` | Firmware metadata present, watchdog stale heartbeat triggers warning, 503 unreachable controller | Requires serial bridge stub for CI.
 | `GET/PUT /map/configuration` | Round-trip persistence of markers/polygons, validation rejection for overlapping zones, provider switch to OSM fallback | Ensure saved payload updates SQLite and triggers WebSocket sync.
 | `POST /control/drive` | Accepted command with telemetry echo, blocked due to lockout, rejected for invalid payload | Assert audit log entry creation.
-| `POST /control/blade` | Engage/disengage flows, lockout enforcement, dual command debouncing | Must confirm RoboHAT acknowledgement.
+| `POST /control/blade` | Engage/disengage flows, lockout enforcement, dual command debouncing | Must confirm driver acknowledgement (IBT-4 GPIO path), not RoboHAT.
 | `POST /control/emergency` | Emergency stop accepted, repeated call idempotency | Confirm safety interlock resets control UI.
 | `GET/PUT /settings` | Fetch default profile, update cadence with version bump, conflict when outdated version submitted | Validate branding checksum recompute.
 | `GET /docs/bundle` | Returns offline-available docs list, checksum mismatch triggers warning header | Use fixture docs.

@@ -1,43 +1,44 @@
 # LawnBerry Pi v2 - Operations Guide
 
-This document summarizes common operational procedures and API references relevant to day-to-day use on Raspberry Pi OS (64-bit, Bookworm).
+This document summarizes common operational procedures and API references relevant to day-to-day use on Raspberry Pi OS (64-bit, Bookworm). All examples target Raspberry Pi 5 primarily, with Pi 4B compatibility noted where relevant.
 
 ## Services
-- Backend API (FastAPI/Uvicorn): port 8001
+- Backend API (FastAPI/Uvicorn): port 8081
 - Web UI (Vite dev): port 3000 (proxy to /api → /api/v2)
-- WebSocket: ws://127.0.0.1:8001/api/v2/ws/telemetry
+- WebSocket: ws://127.0.0.1:8081/api/v2/ws/telemetry
 
 ## Health & Status
-- GET http://127.0.0.1:8001/health → { status: "healthy" }
-- GET http://127.0.0.1:8001/api/v2/dashboard/status → system status
-- GET http://127.0.0.1:8001/api/v2/dashboard/telemetry → telemetry snapshot
-- GET http://127.0.0.1:8001/api/v2/telemetry/stream → telemetry stream
-- GET http://127.0.0.1:8001/api/v2/telemetry/export → export telemetry data
+- GET http://127.0.0.1:8081/health → { status: "healthy" }
+- GET http://127.0.0.1:8081/api/v2/dashboard/status → system status
+- GET http://127.0.0.1:8081/api/v2/dashboard/telemetry → telemetry snapshot
+- GET http://127.0.0.1:8081/api/v2/telemetry/stream → telemetry stream
+- GET http://127.0.0.1:8081/api/v2/telemetry/export → export telemetry data
 
 ## Map & Planning
-- GET/POST http://127.0.0.1:8001/api/v2/map/zones
-- GET/PUT http://127.0.0.1:8001/api/v2/map/locations
-- GET/PUT http://127.0.0.1:8001/api/v2/map/configuration → map configuration CRUD
-- POST http://127.0.0.1:8001/api/v2/map/fallback → trigger provider fallback
-- GET/POST/DELETE http://127.0.0.1:8001/api/v2/planning/jobs
+- GET/POST http://127.0.0.1:8081/api/v2/map/zones
+- GET/PUT http://127.0.0.1:8081/api/v2/map/locations
+- GET/PUT http://127.0.0.1:8081/api/v2/map/configuration → map configuration CRUD
+- POST http://127.0.0.1:8081/api/v2/map/provider-fallback → trigger provider fallback
+- GET/POST/DELETE http://127.0.0.1:8081/api/v2/planning/jobs
 
 ## Control
-- POST http://127.0.0.1:8001/api/v2/control/drive
-- POST http://127.0.0.1:8001/api/v2/control/blade
-- POST http://127.0.0.1:8001/api/v2/control/emergency-stop
-- GET http://127.0.0.1:8001/api/v2/control/robohat-status → RoboHAT status
+- POST http://127.0.0.1:8081/api/v2/control/drive
+- POST http://127.0.0.1:8081/api/v2/control/blade
+- POST http://127.0.0.1:8081/api/v2/control/emergency-stop
+- POST http://127.0.0.1:8081/api/v2/control/emergency_clear → clear E-stop with confirmation
+- GET http://127.0.0.1:8081/api/v2/hardware/robohat → RoboHAT status
 
 ## AI
-- GET http://127.0.0.1:8001/api/v2/ai/datasets
-- POST http://127.0.0.1:8001/api/v2/ai/datasets/{datasetId}/export
+- GET http://127.0.0.1:8081/api/v2/ai/datasets
+- POST http://127.0.0.1:8081/api/v2/ai/datasets/{datasetId}/export
 
 ## Settings
-- GET/PUT http://127.0.0.1:8001/api/v2/settings → settings profile management
-- GET http://127.0.0.1:8001/api/v2/docs/bundle → offline documentation bundle
-- POST http://127.0.0.1:8001/api/v2/verification-artifacts → upload verification artifacts
+- GET/PUT http://127.0.0.1:8081/api/v2/settings → settings profile management
+- GET http://127.0.0.1:8081/api/v2/docs/bundle → offline documentation bundle
+- POST http://127.0.0.1:8081/api/v2/verification-artifacts → upload verification artifacts
 
 ## Systemd
-See systemd/*.service and systemd/install_services.sh for installation.
+See systemd/*.service and systemd/install_services.sh for installation. Backend service listens on port 8081.
 
 ## WebSocket Topics
 The V2 API provides WebSocket subscriptions for real-time data:
@@ -46,7 +47,7 @@ The V2 API provides WebSocket subscriptions for real-time data:
 - `maps`: Map updates and provider status changes
 - `ai`: AI processing results and status updates
 
-Connect to ws://127.0.0.1:8001/api/v2/ws/telemetry and send:
+Connect to ws://127.0.0.1:8081/api/v2/ws/telemetry and send:
 ```json
 {
   "action": "subscribe",
@@ -65,7 +66,7 @@ Use `scripts/test_performance_degradation.py` to validate latency compliance.
 ## Telemetry Export
 Export telemetry data for analysis:
 ```bash
-curl -X POST http://127.0.0.1:8001/api/v2/telemetry/export \
+curl -X POST http://127.0.0.1:8081/api/v2/telemetry/export \
   -H "Content-Type: application/json" \
   -d '{"start_time": "2025-01-01T00:00:00Z", "end_time": "2025-01-31T23:59:59Z", "format": "json"}'
 ```
@@ -77,6 +78,75 @@ cd /home/pi/lawnberry
 python scripts/generate_docs_bundle.py
 # Output: verification_artifacts/docs-bundle/lawnberry-docs-{timestamp}.tar.gz
 ```
+
+## Emergency Stop Recovery
+When an emergency stop is active, all motion is locked out. To clear it:
+
+1) Ensure the physical E-stop button is released and area is safe
+2) Clear via API with explicit confirmation flag:
+
+```bash
+curl -X POST http://127.0.0.1:8081/api/v2/control/emergency_clear \
+  -H "Content-Type: application/json" \
+  -d '{"confirmation": true}'
+```
+
+The system will return status EMERGENCY_CLEARED.
+
+## Blade Safety Lockout
+By default, blade engagement is locked out until safety preconditions are satisfied (no emergency stop, motors not active, authorization present). If a blade command is rejected, check active interlocks and remediate hazards before retrying.
+
+## IMU Calibration
+For best orientation accuracy, calibrate the IMU after installation:
+- Warm up system for 2 minutes
+- Perform figure-eight motions and gentle tilts on all axes
+- In simulation (SIM_MODE=1), calibration is bypassed; in hardware mode, verify orientation health in /api/v2/dashboard/telemetry
+
+## GPS Setup
+- Preferred: ZED-F9P via USB; alternative: Neo-8M via UART
+- Optional NTRIP corrections for RTK: configure in your deployment tooling (see hardware overview)
+- Validate GPS health via GET /api/v2/sensors/health and /api/v2/fusion/state
+
+## Geofence Definition
+Use the map configuration API to define boundaries and exclusion zones:
+```bash
+curl -X PUT http://127.0.0.1:8081/api/v2/map/configuration \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"osm","zones":[{"zone_id":"boundary1","zone_type":"boundary","geometry":{"type":"Polygon","coordinates":[[[-122.4195,37.7750],[-122.4190,37.7750],[-122.4190,37.7745],[-122.4195,37.7745],[-122.4195,37.7750]]]}}]}'
+```
+
+## Telemetry Latency Troubleshooting
+If dashboard telemetry latency exceeds targets:
+- Reduce cadence via settings or WebSocket set_cadence
+- Check CPU/memory usage; Pi 4B may require lower rates
+- See also Performance Optimization below
+
+## Performance Optimization
+- Prefer Pi 5 for higher telemetry rates (target ≤250ms p95)
+- On Pi 4B, reduce telemetry rate and background tasks (target ≤350ms p95)
+- Use scripts/test_performance_degradation.py to measure and tune
+
+## Documentation Troubleshooting
+If documentation bundle generation fails:
+- Check scripts/generate_docs_bundle.py output
+- Ensure docs/ exists and markdown files are readable
+- Re-run: python scripts/generate_docs_bundle.py --format tarball
+
+## Verification Artifacts
+Create verification artifacts to record validation evidence:
+```bash
+curl -X POST http://127.0.0.1:8081/api/v2/verification-artifacts \
+  -H "Content-Type: application/json" \
+  -d '{"type":"quickstart","location":"/home/pi/lawnberry/verification_artifacts","summary":"Quickstart passed","linked_requirements":["FR-001","FR-047"],"created_by":"operator"}'
+```
+
+## Settings Management
+- GET/PUT /api/v2/settings to retrieve/update the active profile
+- Version conflicts return HTTP 409; update profile_version and retry
+- Branding checksum validation ensures asset integrity
+
+## Branding Assets
+Branding assets are validated via checksum in settings. Provide a 64-character SHA-256 string; invalid lengths return error BRANDING_ASSET_MISMATCH.
 
 ## Constitutional Compliance
 All API endpoints include remediation metadata in error responses:
