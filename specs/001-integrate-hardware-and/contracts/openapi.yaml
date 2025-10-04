@@ -167,7 +167,7 @@ paths:
           description: Safety lockout preventing drive command.
   /control/blade:
     post:
-      summary: Toggle blade state
+  summary: Toggle blade state (IBT-4 GPIO controlled)
       operationId: postBladeToggle
       requestBody:
         required: true
@@ -177,7 +177,7 @@ paths:
               $ref: '#/components/schemas/BladeCommandRequest'
       responses:
         '202':
-          description: Blade command accepted.
+          description: Blade command accepted by blade GPIO driver.
           content:
             application/json:
               schema:

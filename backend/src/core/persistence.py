@@ -27,7 +27,7 @@ class Migration:
 class PersistenceLayer:
     """SQLite-based persistence layer for LawnBerry Pi v2."""
     
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 4
     
     MIGRATIONS = [
         Migration(
@@ -106,6 +106,41 @@ class PersistenceLayer:
             );
 
             INSERT OR REPLACE INTO schema_version (version) VALUES (2);
+            """
+        )
+        ,
+        Migration(
+            version=3,
+            description="Ensure telemetry streams table exists",
+            sql="""
+            CREATE TABLE IF NOT EXISTS hardware_telemetry_streams (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TIMESTAMP NOT NULL,
+                component_id TEXT NOT NULL,
+                value TEXT NOT NULL,
+                status TEXT NOT NULL,
+                latency_ms REAL NOT NULL,
+                stream_json TEXT NOT NULL,
+                verification_artifact_id TEXT,
+                UNIQUE(timestamp, component_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_telemetry_timestamp ON hardware_telemetry_streams(timestamp DESC);
+            CREATE INDEX IF NOT EXISTS idx_telemetry_component ON hardware_telemetry_streams(component_id);
+            INSERT OR REPLACE INTO schema_version (version) VALUES (3);
+            """
+        )
+        ,
+        Migration(
+            version=4,
+            description="Add map_config table for map configuration storage",
+            sql="""
+            CREATE TABLE IF NOT EXISTS map_config (
+                id TEXT PRIMARY KEY,
+                config_json TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            INSERT OR REPLACE INTO schema_version (version) VALUES (4);
             """
         )
     ]
@@ -285,10 +320,13 @@ class PersistenceLayer:
     async def save_map_configuration(self, config_id: str, config_json: str) -> None:
         """Save map configuration to database."""
         with self.get_connection() as conn:
-            conn.execute("""
-                INSERT OR REPLACE INTO system_config (id, config_json, updated_at)
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO map_config (id, config_json, updated_at)
                 VALUES (?, ?, ?)
-            """, (f"map_config_{config_id}", config_json, datetime.now(timezone.utc)))
+                """,
+                (config_id, config_json, datetime.now(timezone.utc)),
+            )
             conn.commit()
             logger.info(f"Saved map configuration {config_id} to persistence")
     
@@ -296,8 +334,8 @@ class PersistenceLayer:
         """Load map configuration from database."""
         with self.get_connection() as conn:
             cursor = conn.execute(
-                "SELECT config_json FROM system_config WHERE id = ?",
-                (f"map_config_{config_id}",)
+                "SELECT config_json FROM map_config WHERE id = ?",
+                (config_id,),
             )
             result = cursor.fetchone()
             if result:
@@ -481,6 +519,27 @@ class PersistenceLayer:
             "stream_count": len(streams),
             "streams": streams
         }
+
+    # Test helper: seed minimal simulated streams when SIM_MODE enabled
+    def seed_simulated_streams(self, count: int = 10) -> None:
+        import os
+        if os.environ.get("SIM_MODE") != "1":
+            return
+        now = datetime.now(timezone.utc)
+        rows = []
+        for i in range(count):
+            ts = (now).isoformat()
+            rows.append({
+                "timestamp": ts,
+                "component_id": "power",
+                "value": {"voltage": 12.5, "percentage": 80},
+                "status": "healthy",
+                "latency_ms": 0.0,
+            })
+        try:
+            self.save_telemetry_streams(rows)
+        except Exception:
+            pass
 
 
 # Global persistence instance

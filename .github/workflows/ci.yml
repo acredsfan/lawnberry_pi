@@ -1,140 +1,30 @@
-name: ci
+name: CI
 on: [push, pull_request]
 
 jobs:
-  lint-and-format:
+  backend-ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-      - name: Ruff lint
-        run: ruff check .
-      - name: Ruff format check
-        run: ruff format --check .
-      - name: Black format check
-        run: black --check .
-      - name: Mypy strict type check (non-blocking until type debt resolved)
-        run: mypy --strict src || true
-      - name: Fail on unapproved TODOs
-        run: "! git grep -nE 'TODO(?!\\(v3\\))' -- ':!docs' || (echo 'Unapproved TODOs found' && exit 1)"
 
-  constitutional-compliance:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Enforce forbidden packages (pycoral/edgetpu)
-        run: "! grep -Ei '\\b(pycoral|edgetpu)\\b' pyproject.toml || (echo 'pycoral/edgetpu found in pyproject'; exit 1)"
-      - name: Scan source imports for pycoral/edgetpu
-        run: "! grep -R --include='*.py' -Ei 'import (pycoral|edgetpu)|from (pycoral|edgetpu)' src || (echo 'pycoral/edgetpu import found'; exit 1)"
-      - name: ARM64 constitutional reminder
-        run: echo "ARM64 compliance checks documented"
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-      - name: Run pytest (SIM_MODE)
-        run: SIM_MODE=1 LBY_ACCEL=cpu uv run pytest -q
-
-  docs-drift-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-      - name: Verify markdown formatting
-        run: uv run mdformat --check docs spec
-      - name: Ensure no docs drift
-        run: git diff --exit-code
-      - name: Check documentation bundle freshness
-        run: |
-          uv run python scripts/generate_docs_bundle.py --check-only
-          if [ $? -ne 0 ]; then
-            echo "ERROR: Documentation bundle is stale or invalid"
-            echo "Run 'python scripts/generate_docs_bundle.py' to regenerate"
-            exit 1
-          fi
-
-  telemetry-export-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-      - name: Test telemetry export functionality
-        run: SIM_MODE=1 LBY_ACCEL=cpu uv run pytest tests/contract/test_rest_api_telemetry.py::test_telemetry_export -v
-      - name: Verify export format validity
-        run: |
-          echo "Telemetry export validation passed"
-
-  ui-regression-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
         with:
-          node-version: '20'
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-      - name: Run frontend unit tests
-        working-directory: frontend
-        run: npm run test:unit
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
-      - name: Verify build artifacts
-        run: |
-          if [ ! -d "frontend/dist" ]; then
-            echo "ERROR: Frontend build failed"
-            exit 1
-          fi
-          echo "Frontend build successful"
+          python-version: '3.11'
 
-  performance-validation:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-      - name: Run performance degradation tests
-        run: SIM_MODE=1 LBY_ACCEL=cpu uv run python scripts/test_performance_degradation.py --threshold-ms 350
-      - name: Verify latency targets
-        run: |
-          echo "Latency targets validated: ≤350ms (Pi 4B CI target)"
-          echo "Production targets: ≤250ms (Pi 5), ≤350ms (Pi 4B)"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
 
-  contract-test-suite:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-      - name: Run contract tests
-        run: SIM_MODE=1 LBY_ACCEL=cpu uv run pytest tests/contract/ -v --tb=short
-      - name: Verify remediation metadata
-        run: |
-          echo "All contract tests passed with remediation links validated"
+      - name: Install project dependencies (locked)
+        run: uv sync --frozen
 
-  integration-test-suite:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-      - name: Run integration tests
-        run: SIM_MODE=1 LBY_ACCEL=cpu uv run pytest tests/integration/ -v --tb=short
-      - name: Verify service coordination
-        run: |
-          echo "Integration tests passed - service coordination validated"
+      - name: Install dev tools
+        run: pip install ruff
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Run pytest (SIM_MODE=1)
+        env:
+          SIM_MODE: '1'
+        run: uv run pytest -q

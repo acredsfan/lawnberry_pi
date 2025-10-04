@@ -1,5 +1,51 @@
 {
   "test_name": "test_evidence_capture_for_verification",
-  "timestamp": 1759424453.5085266,
-  "samples": []
+  "timestamp": 1759599990.6077054,
+  "samples": [
+    {
+      "sample_id": 0,
+      "item_count": 1,
+      "latency_summary": {
+        "avg": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "sample_id": 1,
+      "item_count": 1,
+      "latency_summary": {
+        "avg": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "sample_id": 2,
+      "item_count": 1,
+      "latency_summary": {
+        "avg": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "sample_id": 3,
+      "item_count": 1,
+      "latency_summary": {
+        "avg": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "sample_id": 4,
+      "item_count": 1,
+      "latency_summary": {
+        "avg": 0.0,
+        "min": 0.0,
+        "max": 0.0
+      }
+    }
+  ]
 }

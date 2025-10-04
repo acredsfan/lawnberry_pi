@@ -3,6 +3,9 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
+
+# Skip this test module if shapely is not installed
+pytest.importorskip("shapely")
 from shapely.geometry import Polygon
 
 from backend.src.services.maps_service import MapsService
