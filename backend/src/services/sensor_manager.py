@@ -63,23 +63,23 @@ class GPSSensorInterface:
         self.coordinator = coordinator
         self.last_reading: Optional[GpsReading] = None
         self.status = SensorStatus.OFFLINE
+        # Concrete driver (lazy, SIM-safe)
+        try:
+            from ..drivers.sensors.gps_driver import GPSDriver  # type: ignore
+            self._driver = GPSDriver({"mode": gps_mode})
+        except Exception:  # pragma: no cover - keep SIM-safe
+            self._driver = None
         
     async def initialize(self) -> bool:
         """Initialize GPS sensor"""
         try:
-            if self.gps_mode == GpsMode.F9P_USB:
-                # Initialize u-blox ZED-F9P via USB
-                logger.info("Initializing u-blox ZED-F9P GPS via USB")
-                # USB GPS initialization would go here
+            if self._driver is not None:
+                await self._driver.initialize()
+                await self._driver.start()
                 self.status = SensorStatus.ONLINE
-                
-            elif self.gps_mode == GpsMode.NEO8M_UART:
-                # Initialize u-blox Neo-8M via UART
-                logger.info("Initializing u-blox Neo-8M GPS via UART0")
-                async with self.coordinator.acquire_uart("UART0", "GPS"):
-                    # UART GPS initialization would go here
-                    self.status = SensorStatus.ONLINE
-            
+            else:
+                # Fallback placeholder
+                self.status = SensorStatus.ONLINE
             return True
             
         except Exception as e:
@@ -93,29 +93,21 @@ class GPSSensorInterface:
             return None
         
         try:
-            if self.gps_mode == GpsMode.F9P_USB:
-                # Read from USB GPS
+            if getattr(self, "_driver", None) is not None:
+                reading = await self._driver.read_position()
+                if reading is None:
+                    # Keep last_reading if available
+                    reading = self.last_reading
+            else:
+                # Placeholder data
                 reading = GpsReading(
-                    latitude=40.7128,  # Placeholder data
+                    latitude=40.7128,
                     longitude=-74.0060,
                     altitude=10.0,
-                    accuracy=0.5,
-                    satellites=12,
-                    mode=GpsMode.F9P_USB,
-                    rtk_status="RTK_FIXED"
+                    accuracy=3.0,
+                    satellites=8,
+                    mode=self.gps_mode
                 )
-                
-            else:  # NEO8M_UART
-                async with self.coordinator.acquire_uart("UART0", "GPS"):
-                    # Read from UART GPS
-                    reading = GpsReading(
-                        latitude=40.7128,  # Placeholder data
-                        longitude=-74.0060,
-                        altitude=10.0,
-                        accuracy=3.0,
-                        satellites=8,
-                        mode=GpsMode.NEO8M_UART
-                    )
             
             self.last_reading = reading
             return reading
@@ -133,13 +125,21 @@ class IMUSensorInterface:
         self.coordinator = coordinator
         self.last_reading: Optional[ImuReading] = None
         self.status = SensorStatus.OFFLINE
+        try:
+            from ..drivers.sensors.bno085_driver import BNO085Driver  # type: ignore
+            self._driver = BNO085Driver({})
+        except Exception:  # pragma: no cover
+            self._driver = None
         
     async def initialize(self) -> bool:
         """Initialize BNO085 IMU"""
         try:
-            async with self.coordinator.acquire_uart("UART4", "IMU"):
-                logger.info("Initializing BNO085 IMU via UART4")
-                # BNO085 initialization would go here
+            if self._driver is not None:
+                await self._driver.initialize()
+                await self._driver.start()
+                self.status = SensorStatus.ONLINE
+                return True
+            else:
                 self.status = SensorStatus.ONLINE
                 return True
                 
@@ -154,20 +154,20 @@ class IMUSensorInterface:
             return None
         
         try:
-            async with self.coordinator.acquire_uart("UART4", "IMU"):
-                # Read from BNO085
-                reading = ImuReading(
-                    roll=0.0,    # Placeholder data
-                    pitch=2.1,
-                    yaw=45.5,
-                    accel_x=0.1,
-                    accel_y=0.0,
-                    accel_z=9.8,
-                    gyro_x=0.0,
-                    gyro_y=0.0,
-                    gyro_z=0.0,
-                    calibration_status="fully_calibrated"
-                )
+            if getattr(self, "_driver", None) is not None:
+                o = await self._driver.read_orientation()
+                if o is not None:
+                    reading = ImuReading(
+                        roll=o.get("roll"),
+                        pitch=o.get("pitch"),
+                        yaw=o.get("yaw"),
+                        accel_z=9.8,  # minimal gravity placeholder
+                        calibration_status="unknown"
+                    )
+                else:
+                    reading = self.last_reading
+            else:
+                reading = ImuReading(roll=0.0, pitch=0.0, yaw=0.0, calibration_status="unknown")
                 
                 self.last_reading = reading
                 return reading
@@ -186,14 +186,25 @@ class ToFSensorInterface:
         self.left_reading: Optional[TofReading] = None
         self.right_reading: Optional[TofReading] = None
         self.status = SensorStatus.OFFLINE
+        try:
+            from ..drivers.sensors.vl53l0x_driver import VL53L0XDriver  # type: ignore
+            self._left = VL53L0XDriver("left", {})
+            self._right = VL53L0XDriver("right", {})
+        except Exception:  # pragma: no cover
+            self._left = None
+            self._right = None
         
     async def initialize(self) -> bool:
         """Initialize VL53L0X sensors"""
         try:
-            async with self.coordinator.acquire_i2c("TOF"):
-                logger.info("Initializing VL53L0X ToF sensors")
-                # VL53L0X initialization would go here
-                # Setup left sensor at 0x29, right at 0x30
+            if self._left is not None and self._right is not None:
+                await self._left.initialize()
+                await self._right.initialize()
+                await self._left.start()
+                await self._right.start()
+                self.status = SensorStatus.ONLINE
+                return True
+            else:
                 self.status = SensorStatus.ONLINE
                 return True
                 
@@ -208,26 +219,26 @@ class ToFSensorInterface:
             return None, None
         
         try:
-            async with self.coordinator.acquire_i2c("TOF"):
-                # Read left sensor (0x29)
+            if self._left is not None and self._right is not None:
+                dl = await self._left.read_distance_mm()
+                dr = await self._right.read_distance_mm()
                 left_reading = TofReading(
-                    distance=1250.0,  # mm, placeholder
-                    signal_strength=80.0,
-                    range_status="valid",
-                    sensor_side="left"
+                    distance=float(dl) if dl is not None else None,
+                    signal_strength=None,
+                    range_status="valid" if dl else "unknown",
+                    sensor_side="left",
                 )
-                
-                # Read right sensor (0x30)
                 right_reading = TofReading(
-                    distance=2100.0,  # mm, placeholder
-                    signal_strength=75.0,
-                    range_status="valid",
-                    sensor_side="right"
+                    distance=float(dr) if dr is not None else None,
+                    signal_strength=None,
+                    range_status="valid" if dr else "unknown",
+                    sensor_side="right",
                 )
-                
                 self.left_reading = left_reading
                 self.right_reading = right_reading
                 return left_reading, right_reading
+            else:
+                return self.left_reading, self.right_reading
                 
         except Exception as e:
             logger.error(f"ToF reading failed: {e}")
@@ -242,13 +253,21 @@ class EnvironmentalSensorInterface:
         self.coordinator = coordinator
         self.last_reading: Optional[EnvironmentalReading] = None
         self.status = SensorStatus.OFFLINE
+        try:
+            from ..drivers.sensors.bme280_driver import BME280Driver  # type: ignore
+            self._driver = BME280Driver({})
+        except Exception:  # pragma: no cover
+            self._driver = None
         
     async def initialize(self) -> bool:
         """Initialize BME280 sensor"""
         try:
-            async with self.coordinator.acquire_i2c("BME280"):
-                logger.info("Initializing BME280 environmental sensor")
-                # BME280 initialization would go here
+            if self._driver is not None:
+                await self._driver.initialize()
+                await self._driver.start()
+                self.status = SensorStatus.ONLINE
+                return True
+            else:
                 self.status = SensorStatus.ONLINE
                 return True
                 
@@ -263,14 +282,18 @@ class EnvironmentalSensorInterface:
             return None
         
         try:
-            async with self.coordinator.acquire_i2c("BME280"):
-                # Read from BME280
-                reading = EnvironmentalReading(
-                    temperature=22.5,    # °C, placeholder
-                    humidity=65.0,       # %RH
-                    pressure=1013.25,    # hPa
-                    altitude=100.0       # meters
-                )
+            if getattr(self, "_driver", None) is not None:
+                env = await self._driver.read_environment()
+                if env is not None:
+                    reading = EnvironmentalReading(
+                        temperature=env.get("temperature_celsius"),
+                        humidity=env.get("humidity_percent"),
+                        pressure=env.get("pressure_hpa"),
+                    )
+                else:
+                    reading = self.last_reading
+            else:
+                reading = self.last_reading
                 
                 self.last_reading = reading
                 return reading
@@ -288,13 +311,21 @@ class PowerSensorInterface:
         self.coordinator = coordinator
         self.last_reading: Optional[PowerReading] = None
         self.status = SensorStatus.OFFLINE
+        try:
+            from ..drivers.sensors.ina3221_driver import INA3221Driver  # type: ignore
+            self._driver = INA3221Driver({})
+        except Exception:  # pragma: no cover
+            self._driver = None
         
     async def initialize(self) -> bool:
         """Initialize INA3221 power monitor"""
         try:
-            async with self.coordinator.acquire_i2c("INA3221"):
-                logger.info("Initializing INA3221 power monitor")
-                # INA3221 initialization would go here
+            if self._driver is not None:
+                await self._driver.initialize()
+                await self._driver.start()
+                self.status = SensorStatus.ONLINE
+                return True
+            else:
                 self.status = SensorStatus.ONLINE
                 return True
                 
@@ -309,19 +340,24 @@ class PowerSensorInterface:
             return None
         
         try:
-            async with self.coordinator.acquire_i2c("INA3221"):
-                # Read from INA3221 - Channel 1: Battery, Channel 3: Solar
-                reading = PowerReading(
-                    battery_voltage=12.6,    # V, placeholder
-                    battery_current=-2.5,    # A (negative = discharging)
-                    battery_power=-31.5,     # W
-                    solar_voltage=14.2,      # V
-                    solar_current=1.8,       # A
-                    solar_power=25.6         # W
-                )
-                
-                self.last_reading = reading
-                return reading
+            if getattr(self, "_driver", None) is not None:
+                p = await self._driver.read_power()
+                if p is not None:
+                    reading = PowerReading(
+                        battery_voltage=p.get("battery_voltage"),
+                        battery_current=p.get("battery_current_amps"),
+                        battery_power=(p.get("battery_voltage") or 0.0) * (p.get("battery_current_amps") or 0.0),
+                        solar_voltage=p.get("solar_voltage"),
+                        solar_current=p.get("solar_current_amps"),
+                        solar_power=(p.get("solar_voltage") or 0.0) * (p.get("solar_current_amps") or 0.0),
+                    )
+                else:
+                    reading = self.last_reading
+            else:
+                reading = self.last_reading
+            
+            self.last_reading = reading
+            return reading
                 
         except Exception as e:
             logger.error(f"Power reading failed: {e}")

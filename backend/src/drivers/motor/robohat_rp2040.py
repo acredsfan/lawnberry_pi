@@ -20,6 +20,7 @@ except Exception:  # pragma: no cover - serial not required in SIM
     serial = None  # type: ignore
 
 from ..base import HardwareDriver
+from ...core.simulation import is_simulation_mode
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,8 @@ class RoboHATRP2040Driver(HardwareDriver):
         self.status = RoboHATMotorStatus()
 
     async def initialize(self) -> None:
-        sim_mode = (self.config or {}).get("SIM_MODE", None) or os.environ.get("SIM_MODE", "1")
-        if sim_mode == "1" or serial is None:
+        sim_active = bool((self.config or {}).get("SIM_MODE", None)) or is_simulation_mode()
+        if sim_active or serial is None:
             logger.info("RoboHAT driver SIM_MODE active; skipping serial open")
             self.status.serial_connected = False
             self.initialized = True
