@@ -20,7 +20,7 @@ jobs:
           base=${{ github.event.pull_request.base.sha }}
           head=${{ github.event.pull_request.head.sha }}
           CHANGES=$(git diff --name-only "$base" "$head")
-          if echo "$CHANGES" | grep -qE '^(src|systemd|scripts|web-ui)/'; then
-            echo "$CHANGES" | grep -q '^memory/AGENT_JOURNAL.md' || (echo "Missing AGENT_JOURNAL update" && exit 1)
-            echo "$CHANGES" | grep -q '^docs/' || (echo "Missing docs update" && exit 2)
+          if echo "$CHANGES" | grep -qE '^(backend/|frontend/|systemd/|scripts/|spec/|docs/)' ; then
+            echo "$CHANGES" | grep -qi '^memory/agent_journal.md' || (echo "Missing memory/agent_journal.md update" && exit 1)
+            echo "$CHANGES" | grep -qi '^docs/' || (echo "Missing docs update" && exit 2)
           fi

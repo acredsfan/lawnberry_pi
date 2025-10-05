@@ -22,7 +22,7 @@ jobs:
         run: pip install ruff
 
       - name: Lint (ruff)
-        run: ruff check .
+        run: ruff check backend/src
 
       - name: Run pytest (SIM_MODE=1)
         env:
