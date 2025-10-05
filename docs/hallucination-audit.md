@@ -19,8 +19,8 @@ Scope: Identify out-of-scope or misleading items ("hallucinations"), where they 
 - Jetson Nano / Intel Movidius Neural Compute Stick accelerators
 - Night-vision IR camera and pan/tilt servo mount
 - Perimeter wire sensors
-- u-blox NEO-9M GPS module (recommendation)
-- Non-BNO085 IMUs (BNO055, MPU-9250, LSM9DS1)
+- u-blox NEO-9M GPS module (recommendation) — KEEP (doc-only recommendation)
+- Non-BNO085 IMUs (BNO055, MPU-9250, LSM9DS1) — KEEP BNO055 and MPU-9250 as simple backups; REMOVE LSM9DS1
 - Pi Camera Module v3 as primary
 - BTS7960 motor driver recommendation
 
@@ -108,21 +108,21 @@ Notes:
 - Remediation:
   - Remove from installation guide. If considered later, must go through design, safety, and hardware abstraction updates.
 
-### 10) u-blox NEO-9M GPS (recommendation)
+### 10) u-blox NEO-9M GPS (recommendation) — accepted as doc-only
 - Where found:
   - docs/installation-setup-guide.md → Hardware Requirements → Navigation & Positioning: "Recommended: u-blox NEO-8M or NEO-9M based modules"
-- Why out-of-scope:
-  - spec/hardware.yaml defines primary GPS as SparkFun ZED-F9P (USB) and alternative as NEO-8M via UART. NEO-9M is not listed in the baseline.
+- Why note-worthy:
+  - spec/hardware.yaml baseline lists ZED-F9P (USB) and NEO-8M (UART). NEO-9M is not listed, but the user wants it left as a recommendation.
 - Remediation:
-  - Remove NEO-9M mention; keep only ZED-F9P (USB) and NEO-8M (UART) per spec. If NEO-9M is desired, add to spec with interface and performance details first.
+  - Keep the NEO-9M reference as a recommendation in docs. Mark clearly as "not in baseline; doc-only suggestion" unless/ until added to spec/hardware.yaml with interface/performance details.
 
-### 11) Non-BNO085 IMUs (BNO055, MPU-9250, LSM9DS1)
+### 11) Non-BNO085 IMUs (BNO055, MPU-9250)
 - Where found:
   - docs/installation-setup-guide.md → Hardware Requirements → IMU/Compass: "Recommended: BNO055, MPU-9250, or LSM9DS1"
-- Why out-of-scope:
-  - spec/hardware.yaml specifies BNO085 on UART4 at 3,000,000 baud; no other IMUs are included in the baseline.
+- Why note-worthy:
+  - spec/hardware.yaml baseline is BNO085. The user wants BNO055 and MPU-9250 allowed as simple backup options.
 - Remediation:
-  - Replace the recommendations with BNO085 per spec. If alternatives are needed, enumerate in spec/hardware.yaml with interface, rates, and compatibility constraints.
+  - Keep BNO055 and MPU-9250 mentioned as backups in docs with a clear note: "Backups—check code support before use". Remove LSM9DS1 from recommendations unless added to spec later. If we intend to support BNO055/MPU-9250 in code, enumerate them in spec with interface and data rate constraints.
 
 ### 12) Pi Camera Module v3 (primary)
 - Where found:
