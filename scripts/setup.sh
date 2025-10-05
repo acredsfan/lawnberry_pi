@@ -44,7 +44,9 @@ if [[ ! -f "$CFG_DIR/hardware.yaml" ]]; then
 # - power_monitor: INA3221 (ch1=battery, ch3=solar)
 gps:
   type: ZED-F9P
-  ntrip_enabled: false
+  # NTRIP corrections are typically enabled on the ZED-F9P via u-center (on-device)
+# This flag reflects that RTK corrections are in use, even if not managed by the Pi.
+gps_ntrip_enabled: true
 imu:
   type: BNO085
 sensors:
@@ -60,7 +62,8 @@ power_monitor:
 motor_controller:
   type: RoboHAT_RP2040
 blade_controller:
-  type: Cytron_MDDRC10
+  # Blade uses IBT-4 H-Bridge (GPIO 24 -> IN1, GPIO 25 -> IN2)
+  type: IBT_4
 camera:
   enabled: false
 YAML

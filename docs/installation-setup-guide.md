@@ -46,7 +46,8 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 
 #### Motor & Power
 - **Motor Controllers**: Dual H-bridge motor drivers
-  - Recommended: L298N, BTS7960, or similar
+   - Drive: Cytron MDDRC10 via RoboHAT RP2040 (preferred), or L298N dual H-Bridge (fallback)
+   - Blade: IBT-4 H-Bridge
 - **Motors**: DC geared motors with encoders
 - **Battery**: 12V LiFePO4 or Lead-Acid battery
 - **Power Management Board**: 12V to 5V converter with monitoring

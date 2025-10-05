@@ -52,11 +52,11 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
     │                MOTOR SYSTEMS                │           │
     │                                             │           │
     │  Drive Motors (12V):                        │           │
-    │  ├─ Left Drive Motor  ←─ Cytron MDDRC10 ←───┤           │
-    │  └─ Right Drive Motor ←─ Motor Driver   ←───┤           │
+    │  ├─ Left Drive Motor  ←─ Cytron MDDRC10 (via RoboHAT) ←─┤           │
+    │  └─ Right Drive Motor ←─ Cytron MDDRC10 (via RoboHAT) ←─┤           │
     │                                             │           │
     │  Blade Motor (12V):                         │           │
-    │  └─ 997 DC Motor ←─ IBT-4 Driver ←──────────┤           │
+    │  └─ Blade DC Motor ←─ IBT-4 Driver (GPIO24/25) ←───────┤           │
     │                                             │           │
     │  Control Signals:                           │           │
     │  ├─ GPIO 24 (Blade IN1)                     │           │
@@ -103,7 +103,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 - Control command execution with lockout enforcement
 
 **Control Integration**:
-The RoboHAT provides a serial API for motor control commands. The backend services communicate via the `robohat_service.py` which translates high-level control commands (FORWARD, BACKWARD, ROTATE, STOP) into serial protocol messages. Status updates and command echoes are streamed back via WebSocket to the frontend control interface.
+The RoboHAT provides a serial API specifically for drive motor control. The backend communicates via `robohat_service.py`, translating high-level commands (FORWARD, BACKWARD, ROTATE, STOP) into serial messages for the RoboHAT, which in turn commands the Cytron MDDRC10. Status updates and command echoes are streamed via WebSocket to the frontend. The blade is controlled separately via an IBT-4 driver on GPIO pins 24/25.
 
 **Safety Features**:
 - Hardware emergency stop circuit

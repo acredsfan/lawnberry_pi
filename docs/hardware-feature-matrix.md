@@ -185,9 +185,9 @@ This document provides a complete matrix of hardware components, their capabilit
 
 | Component | Specification | Status | Control Method |
 |-----------|---------------|--------|----------------|
-| **Left Motor** | 12V Worm Gear DC | ✅ Implemented | PWM via MDDRC10 |
-| **Right Motor** | 12V Worm Gear DC | ✅ Implemented | PWM via MDDRC10 |
-| **Motor Driver** | Cytron MDDRC10 | ✅ Implemented | Dual H-bridge |
+| **Left Motor** | 12V Worm Gear DC | ✅ Implemented | PWM via RoboHAT → MDDRC10 |
+| **Right Motor** | 12V Worm Gear DC | ✅ Implemented | PWM via RoboHAT → MDDRC10 |
+| **Motor Driver (Drive)** | Cytron MDDRC10 | ✅ Implemented | Dual H-bridge (via RoboHAT) |
 | **Encoders** | Hall Effect | ✅ Implemented | Speed feedback |
 
 **Drive Capabilities:**
@@ -202,7 +202,7 @@ This document provides a complete matrix of hardware components, their capabilit
 | Component | Specification | Status | Safety Features |
 |-----------|---------------|--------|-----------------|
 | **Blade Motor** | 997 DC Motor | ✅ Implemented | High-speed cutting |
-| **Blade Driver** | IBT-4 H-Bridge | ✅ Implemented | Bidirectional control |
+| **Blade Driver** | IBT-4 H-Bridge | ✅ Implemented | Bidirectional control (GPIO24/25) |
 | **Safety Switch** | Tilt cutoff | ✅ Implemented | Auto-disable on tilt |
 | **Blade Guard** | Physical protection | ✅ Required | User safety |
 

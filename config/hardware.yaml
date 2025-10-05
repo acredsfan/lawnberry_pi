@@ -22,11 +22,11 @@ blade_controller:
 
 # Flat alternatives (uncomment to use):
 # gps_type: zed-f9p-usb
-# gps_ntrip_enabled: false
+# gps_ntrip_enabled: true   # Set true if RTK corrections are enabled on the ZED-F9P (configured via u-center)
 # imu_type: bno085-uart
 # tof_sensors: [left, right]
 # env_sensor: true
 # power_monitor: true
-# motor_controller: robohat-rp2040   # Drive via RoboHAT → Cytron MDDRC10
+# motor_controller: robohat-rp2040   # Drive via RoboHAT → Cytron MDDRC10 (preferred)
 # blade_controller: ibt-4            # Blade via IBT-4 H-Bridge (GPIO24→IN1, GPIO25→IN2)
 # camera_enabled: false

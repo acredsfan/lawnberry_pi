@@ -142,7 +142,7 @@ Notes:
 
 ## Non-Findings (explicitly allowed by spec)
 - OLED SSD1306 display (I2C 0x3C) – In spec/hardware.yaml and integration guide.
-- L298N Dual H-Bridge fallback – In spec/hardware.yaml as alternative drive controller.
+- L298N Dual H-Bridge fallback – Alternative drive controller when RoboHAT+MDDRC10 is unavailable.
 - Coral USB and Hailo-8 accelerators – In spec/hardware.yaml (Hailo optional with conflict note).
 
 ## Recommended Remediation Plan

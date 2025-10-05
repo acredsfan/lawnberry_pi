@@ -48,11 +48,14 @@ Safety:
 ### GPS
 - Preferred: USB (ZED-F9P RTK) → /dev/ttyACM*
 - Alternative: UART0 for NEO-8M → /dev/serial0 at 115200 baud
+ - NTRIP corrections: Typically configured directly on the ZED-F9P via u-center; the Pi does not need to run an NTRIP client if the receiver is pre-configured.
 
-### RoboHAT RP2040 → Cytron MDDRC10 (Drive)
+### Drive Controller: RoboHAT RP2040 → Cytron MDDRC10 (preferred)
 - Serial link: /dev/serial0 or /dev/ttyACM0
 - PWM and direction handled on RoboHAT; Pi communicates via serial API
 - Encoders wired to RoboHAT for real-time counting
+
+Alternative drive controller (fallback): L298N dual H-Bridge (basic PWM/dir via Pi GPIO, no encoder feedback).
 
 ## UART Configuration (Pi OS)
 1. Enable UARTs in `raspi-config` (disable login shell on serial)

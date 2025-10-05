@@ -104,7 +104,7 @@ For best orientation accuracy, calibrate the IMU after installation:
 
 ## GPS Setup
 - Preferred: ZED-F9P via USB; alternative: Neo-8M via UART
-- Optional NTRIP corrections for RTK: configure in your deployment tooling (see hardware overview)
+- NTRIP corrections: Typically enabled directly on the ZED-F9P via u-center. The Pi does not need to manage NTRIP if the receiver is pre-configured.
 - Validate GPS health via GET /api/v2/sensors/health and /api/v2/fusion/state
 
 ## Geofence Definition
