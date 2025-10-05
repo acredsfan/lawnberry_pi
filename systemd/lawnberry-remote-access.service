@@ -8,54 +8,10 @@ PartOf=lawnberry-backend.service
 Type=simple
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/lawnberry/lawnberry-rebuild/backend
-Environment=PYTHONPATH=/home/pi/lawnberry/lawnberry-rebuild/backend/src
+WorkingDirectory=/home/pi/lawnberry
 Environment=SIM_MODE=0
-ExecStart=/home/pi/lawnberry/lawnberry-rebuild/backend/venv/bin/python -c "
-import asyncio
-import logging
-from services.remote_access_service import remote_access_service
-from core.config import config
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-async def main():
-    try:
-        logger.info('Starting remote access service...')
-        await remote_access_service.initialize()
-        
-        # Start configured remote access methods
-        remote_config = config.get_remote_access_config()
-        
-        if remote_config.cloudflare_enabled:
-            await remote_access_service.start_cloudflare_tunnel()
-        
-        if remote_config.ngrok_enabled:
-            await remote_access_service.start_ngrok_tunnel()
-        
-        if remote_config.custom_enabled:
-            await remote_access_service.start_custom_tunnel()
-        
-        # Keep service running
-        while True:
-            await asyncio.sleep(10)
-            # Health check
-            status = await remote_access_service.get_status()
-            if not status.get('healthy', False):
-                logger.warning('Remote access service unhealthy, attempting restart...')
-                await remote_access_service.restart_tunnels()
-    
-    except Exception as e:
-        logger.error(f'Remote access service error: {e}')
-        return 1
-    
-    return 0
-
-if __name__ == '__main__':
-    import sys
-    sys.exit(asyncio.run(main()))
-"
+# Use project virtualenv if present, otherwise rely on system python
+ExecStart=/bin/bash -lc "PY='/home/pi/lawnberry/.venv/bin/python'; if [ ! -x \"$PY\" ]; then PY='python3'; fi; cd /home/pi/lawnberry && \"$PY\" -m backend.src.cli.remote_access_daemon"
 
 Restart=always
 RestartSec=10
@@ -67,7 +23,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
 ProtectSystem=strict
-ReadWritePaths=/home/pi/lawnberry/lawnberry-rebuild /var/lib/lawnberry /tmp
+ReadWritePaths=/home/pi/lawnberry /var/lib/lawnberry /tmp
 
 # Logging
 StandardOutput=journal

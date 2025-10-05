@@ -8,10 +8,9 @@ PartOf=lawnberry-backend.service
 Type=simple
 User=pi
 Group=video
-WorkingDirectory=/home/pi/lawnberry/lawnberry-rebuild/backend
-Environment=PYTHONPATH=/home/pi/lawnberry/lawnberry-rebuild/backend/src
+WorkingDirectory=/home/pi/lawnberry
 Environment=SIM_MODE=0
-ExecStart=/home/pi/lawnberry/lawnberry-rebuild/backend/venv/bin/python -m services.camera_stream_service
+ExecStart=/bin/bash -lc "PY='/home/pi/lawnberry/.venv/bin/python'; if [ ! -x \"$PY\" ]; then PY='python3'; fi; cd /home/pi/lawnberry && \"$PY\" -m backend.src.services.camera_stream_service"
 Restart=always
 RestartSec=5
 KillSignal=SIGTERM
@@ -25,7 +24,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
 ProtectSystem=strict
-ReadWritePaths=/home/pi/lawnberry/lawnberry-rebuild /var/lib/lawnberry /tmp
+ReadWritePaths=/home/pi/lawnberry /var/lib/lawnberry /tmp
 DeviceAllow=/dev/video0 rw
 DeviceAllow=/dev/video1 rw
 DevicePolicy=closed
