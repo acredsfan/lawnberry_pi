@@ -326,9 +326,7 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 
 ### Expansion Possibilities
 **Sensor Additions**:
-- Additional ToF sensors for full perimeter coverage
-- Ultrasonic sensors for different detection characteristics
-- LIDAR module
+- Additional ToF sensors for expanded coverage (within baseline)
 
 **Actuator Additions**:
 - Horn or alarm for safety alerts

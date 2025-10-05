@@ -79,7 +79,7 @@ This document provides a complete matrix of hardware components, their capabilit
 | **ToF Left** | VL53L0X | I2C (0x29) | 30-2000mm | ✅ Implemented | Left side obstacles |
 | **ToF Right** | VL53L0X | I2C (0x30) | 30-2000mm | ✅ Implemented | Right side obstacles |
 | **Camera Vision** | Pi Camera v2 | CSI | Visual range | ✅ Implemented | Object recognition |
-| **Ultrasonic** | HC-SR04 (optional) | GPIO | 20-4000mm | ⚠️ Optional | Additional coverage |
+| **Ultrasonic** | — | — | — | ❌ Not in Baseline | Removed (use ToF sensors) |
 
 **Sensor Fusion Matrix:**
 - ✅ Multi-sensor obstacle detection
@@ -122,8 +122,8 @@ This document provides a complete matrix of hardware components, their capabilit
 | Component | Model | Interface | Status | Performance Gain |
 |-----------|-------|-----------|--------|------------------|
 | **Google Coral TPU** | USB Accelerator | USB 3.0 | ❌ Not Implemented | 10-100x AI speedup |
-| **Neural Compute Stick** | Intel Movidius | USB 3.0 | ⚠️ Compatible | 5-20x AI speedup |
-| **Jetson Nano** | NVIDIA | GPIO/USB | ⚠️ Alternative | Complete AI platform |
+| **Neural Compute Stick** | Intel Movidius | USB 3.0 | ❌ Not in Baseline | Not supported |
+| **Jetson Nano** | NVIDIA | GPIO/USB | ❌ Not in Baseline | Not supported |
 
 **AI Enhancement Matrix:**
 - ❌ TPU-accelerated object detection
@@ -263,7 +263,7 @@ This document provides a complete matrix of hardware components, their capabilit
 
 | Component | Interface | Status | Capabilities |
 |-----------|-----------|--------|--------------|
-| **RC Receiver** | PPM/PWM | ❌ Not Implemented | Manual override |
+| **RC Receiver** | PPM/PWM | ❌ Not in Baseline | Not implemented |
 | **Emergency Remote** | 2.4GHz | ⚠️ Optional | Safety backup |
 | **Range** | 100-500m | ⚠️ Dependent | Line of sight |
 
@@ -271,7 +271,7 @@ This document provides a complete matrix of hardware components, their capabilit
 
 | Sensor Type | Purpose | Interface | Status |
 |-------------|---------|-----------|--------|
-| **LiDAR** | 360° obstacle detection | USB/Serial | ⚠️ Compatible |
+| **LiDAR** | 360° obstacle detection | USB/Serial | ❌ Not in Baseline |
 | **Radar** | Weather-resistant detection | GPIO/SPI | ⚠️ Compatible |
 | **Ground sensors** | Soil moisture, pH | I2C/ADC | ⚠️ Expandable |
 | **Weather station** | Local micro-climate | I2C/1-Wire | ⚠️ Compatible |
@@ -296,8 +296,8 @@ This document provides a complete matrix of hardware components, their capabilit
 | System | Additional Components | Status | Capability Gain |
 |--------|----------------------|--------|-----------------|
 | **AI Processing** | Google Coral TPU | ❌ Available | 10x vision performance |
-| **Remote Control** | RC receiver system | ❌ Available | Manual override |
-| **Advanced Sensors** | LiDAR, additional ToF | ⚠️ Compatible | 360° detection |
+| **Remote Control** | RC receiver system | ❌ Not in Baseline | Not implemented |
+| **Advanced Sensors** | Additional ToF only | ⚠️ Compatible | Per spec |
 | **Power Expansion** | Backup battery | ⚠️ Compatible | Extended operation |
 | **Weather Station** | Local sensors | ⚠️ Compatible | Micro-climate data |
 
@@ -463,10 +463,10 @@ This document provides a complete matrix of hardware components, their capabilit
 | Capability | Current Implementation | Optional Enhancement | Future Potential |
 |------------|----------------------|---------------------|------------------|
 | **Positioning Accuracy** | <10cm RTK | <2cm with base station | mm-level precision |
-| **Obstacle Detection** | 0.03-2m ToF + vision | 360° LiDAR | AI-enhanced detection |
+| **Obstacle Detection** | 0.03-2m ToF + vision | — | — |
 | **Operation Time** | 8-12 hours | 16+ hours with backup | 24/7 with tracking |
 | **AI Processing** | CPU OpenCV | TPU acceleration | Edge AI integration |
-| **Connectivity** | WiFi primary | Cellular backup | Satellite uplink |
+| **Connectivity** | WiFi primary | — | — |
 | **Weather Resistance** | IP54 rating | IP67 upgrade | Extreme weather |
 
 **Performance Benchmarks:**
