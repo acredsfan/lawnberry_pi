@@ -712,18 +712,14 @@ async function loadDocumentation() {
 - **OS**: Raspberry Pi OS Bookworm 64-bit
 
 ## Required Sensors
-- GPS Module (USB or GPIO)
-- IMU/Compass Module
-- Camera Module v3
-- Ultrasonic Distance Sensors (x4)
+- GPS Module (ZED-F9P USB or NEO-8M UART; NEO-9M recommendation only)
+- IMU/Compass (BNO085 baseline; backups: BNO055/MPU-9250)
+- Camera Module v2
 - Motor Controllers
 - Power Management Board
 
 ## Optional Hardware
-- LiDAR Module
-- Additional Camera Modules
-- Weather Station
-- Cellular Modem
+- (Non-baseline items removed: LiDAR, additional cameras, weather station, cellular modem)
 
 ## Power Requirements
 - 5V 4A Power Supply (recommended)

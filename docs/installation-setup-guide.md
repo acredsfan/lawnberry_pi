@@ -30,20 +30,19 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 
 #### Navigation & Positioning
 - **GPS Module**: USB GPS receiver or GPIO-connected module
-  - Recommended: u-blox NEO-8M or NEO-9M based modules
+   - Baseline: SparkFun GPS-RTK-SMA (u-blox ZED-F9P) via USB
+   - Alternative: u-blox NEO-8M via UART
+   - Recommendation: u-blox NEO-9M (doc-only; not in baseline)
   - Alternative: USB GPS dongles (BU-353S4, etc.)
 - **IMU/Compass**: 9-DOF IMU module (I2C)
   - Recommended: BNO055, MPU-9250, or LSM9DS1
 
 #### Camera System
-- **Pi Camera Module v3** (primary)
-- **USB Cameras** (compatible as secondary)
+- **Pi Camera Module v2** (baseline primary)
 - **Camera Cable**: 15-pin to 22-pin adapter if needed
 
 #### Proximity & Safety
-- **Ultrasonic Sensors**: 4x HC-SR04 or equivalent
 - **Safety Switch**: Emergency stop button
-- **Perimeter Wire Sensors** (optional)
 
 #### Motor & Power
 - **Motor Controllers**: Dual H-bridge motor drivers
@@ -53,9 +52,6 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 - **Power Management Board**: 12V to 5V converter with monitoring
 
 #### Optional Hardware
-- **LiDAR Module**: RPLidar A1/A2 or similar
-- **Weather Station**: I2C weather sensors
-- **Cellular Modem**: 4G/LTE USB modem for remote connectivity
 - **Solar Panel**: 12V solar charging system
 
 ## Initial Setup
@@ -102,9 +98,8 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 
 1. **Mount Sensors**
    - Connect GPS module via USB or GPIO UART
-   - Wire IMU to I2C pins (SDA: GPIO 2, SCL: GPIO 3)
-   - Connect ultrasonic sensors to GPIO pins
-   - Install camera module
+   - Wire IMU per spec (BNO085 on UART4; backups: BNO055/MPU-9250 if supported)
+   - Install camera module (Pi Camera v2)
 
 2. **Power System**
    - Connect battery to power management board
