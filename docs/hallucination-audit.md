@@ -19,6 +19,10 @@ Scope: Identify out-of-scope or misleading items ("hallucinations"), where they 
 - Jetson Nano / Intel Movidius Neural Compute Stick accelerators
 - Night-vision IR camera and pan/tilt servo mount
 - Perimeter wire sensors
+- u-blox NEO-9M GPS module (recommendation)
+- Non-BNO085 IMUs (BNO055, MPU-9250, LSM9DS1)
+- Pi Camera Module v3 as primary
+- BTS7960 motor driver recommendation
 
 Notes:
 - Coral USB and Hailo accelerators are listed in spec/hardware.yaml; these are not hallucinations (though Hailo is optional and conflicts with RoboHAT per spec notes).
@@ -103,6 +107,38 @@ Notes:
   - Not present in spec/hardware.yaml or integration guide.
 - Remediation:
   - Remove from installation guide. If considered later, must go through design, safety, and hardware abstraction updates.
+
+### 10) u-blox NEO-9M GPS (recommendation)
+- Where found:
+  - docs/installation-setup-guide.md → Hardware Requirements → Navigation & Positioning: "Recommended: u-blox NEO-8M or NEO-9M based modules"
+- Why out-of-scope:
+  - spec/hardware.yaml defines primary GPS as SparkFun ZED-F9P (USB) and alternative as NEO-8M via UART. NEO-9M is not listed in the baseline.
+- Remediation:
+  - Remove NEO-9M mention; keep only ZED-F9P (USB) and NEO-8M (UART) per spec. If NEO-9M is desired, add to spec with interface and performance details first.
+
+### 11) Non-BNO085 IMUs (BNO055, MPU-9250, LSM9DS1)
+- Where found:
+  - docs/installation-setup-guide.md → Hardware Requirements → IMU/Compass: "Recommended: BNO055, MPU-9250, or LSM9DS1"
+- Why out-of-scope:
+  - spec/hardware.yaml specifies BNO085 on UART4 at 3,000,000 baud; no other IMUs are included in the baseline.
+- Remediation:
+  - Replace the recommendations with BNO085 per spec. If alternatives are needed, enumerate in spec/hardware.yaml with interface, rates, and compatibility constraints.
+
+### 12) Pi Camera Module v3 (primary)
+- Where found:
+  - docs/installation-setup-guide.md → Hardware Requirements → Camera System: "Pi Camera Module v3 (primary)"
+- Why out-of-scope:
+  - spec/hardware.yaml and docs/hardware-overview.md specify Pi Camera v2. Camera ownership and IPC assumptions are defined for that device.
+- Remediation:
+  - Amend to Pi Camera v2. If v3 is supported, update spec/hardware.yaml and camera-stream service notes, and verify on Pi 4/5.
+
+### 13) BTS7960 motor driver (recommendation)
+- Where found:
+  - docs/installation-setup-guide.md → Hardware Requirements → Motor & Power: "Recommended: L298N, BTS7960, or similar"
+- Why out-of-scope:
+  - spec/hardware.yaml defines drive as RoboHAT→Cytron MDDRC10 (preferred) with L298N fallback; cutting system uses IBT-4. BTS7960 is not listed in baseline.
+- Remediation:
+  - Remove BTS7960 recommendation. Keep Cytron MDDRC10 (via RoboHAT) and L298N (fallback) for drive, and IBT-4 for blade per spec.
 
 ## Non-Findings (explicitly allowed by spec)
 - OLED SSD1306 display (I2C 0x3C) – In spec/hardware.yaml and integration guide.
