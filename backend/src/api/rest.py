@@ -1305,6 +1305,24 @@ async def control_blade_v2(cmd: dict, request: Request):
             persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
             return JSONResponse(status_code=200, content=body)
 
+    # Basic control path when explicitly authorized or legacy payloads handled above.
+    try:
+        desired = None
+        if isinstance(cmd, dict) and "action" in cmd:
+            desired = True if str(cmd.get("action")).lower() in {"enable", "on", "start"} else False if str(cmd.get("action")).lower() in {"disable", "off", "stop"} else None
+        elif isinstance(cmd, dict) and "active" in cmd:
+            desired = bool(cmd.get("active"))
+        if desired is not None and not (_emergency_active() or _client_emergency_active(request)):
+            from ..services.blade_service import get_blade_service
+            bs = get_blade_service()
+            await bs.initialize()
+            ok = await bs.set_active(desired)
+            body = {"accepted": ok, "audit_id": audit_id, "result": "accepted" if ok else "rejected", "timestamp": timestamp.isoformat()}
+            persistence.add_audit_log("control.blade.v2", details={"command": cmd, "response": body})
+            return JSONResponse(status_code=200 if ok else 409, content=body)
+    except Exception:
+        pass
+
     payload = {
         "accepted": False,
         "audit_id": audit_id,
