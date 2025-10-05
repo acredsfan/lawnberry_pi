@@ -32,6 +32,24 @@
       
       <div class="toolbar-spacer"></div>
       
+      <!-- Follow and recenter controls -->
+      <label class="follow-toggle">
+        <input type="checkbox" v-model="followMower" />
+        Follow
+      </label>
+      <button class="btn btn-sm btn-secondary" @click="recenterToMower" :disabled="!mowerLatLng">
+        🎯 Recenter
+      </button>
+
+      <button 
+        v-if="currentPolygon.length >= 5" 
+        class="btn btn-sm btn-secondary"
+        @click="simplifyCurrent()"
+        title="Simplify polygon to reduce vertices"
+      >
+        🧹 Simplify
+      </button>
+      
       <button 
         v-if="hasUnsavedChanges" 
         class="btn btn-sm btn-success"
@@ -65,15 +83,89 @@
         </select>
       </div>
 
-      <!-- Map rendering would go here -->
-      <div class="map-placeholder">
-        <div class="placeholder-text">
-          Map component (Google Maps/Leaflet integration)
-        </div>
-        <div v-if="currentPolygon.length > 0" class="current-points">
-          <strong>Current points:</strong> {{ currentPolygon.length }}
-        </div>
-      </div>
+      <!-- Leaflet Map -->
+      <l-map
+        :zoom="zoom"
+        :center="centerLatLng"
+        :use-global-leaflet="false"
+        style="height: 100%; width: 100%"
+        @click="onMapClick"
+      >
+        <!-- Tiles (OSM) -->
+        <l-tile-layer
+          v-if="showTiles"
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors"
+        />
+
+        <!-- Existing boundary polygon -->
+        <l-polygon
+          v-if="boundaryPolygon.length > 0"
+          :lat-lngs="boundaryPolygon"
+          :color="'#00FF92'"
+          :weight="3"
+          :fill="true"
+          :fill-opacity="0.1"
+          @click="onBoundaryClick"
+        />
+
+        <!-- Existing exclusion zones -->
+        <l-polygon
+          v-for="zone in exclusionPolygons"
+          :key="zone.id"
+          :lat-lngs="zone.points"
+          :color="'#ff4343'"
+          :weight="2"
+          :fill="true"
+          :fill-opacity="0.1"
+          :dash-array="'6 6'"
+          @click="() => onExclusionClick(zone.id)"
+        />
+
+        <!-- In-progress polygon -->
+        <l-polygon
+          v-if="currentPolygonLatLng.length > 0"
+          :lat-lngs="currentPolygonLatLng"
+          :color="mode === 'boundary' ? '#00FF92' : '#ffb703'"
+          :weight="2"
+          :fill="false"
+          :dash-array="'4 4'"
+        />
+
+        <!-- Vertex handles for editing current polygon -->
+        <l-marker
+          v-for="(pt, idx) in currentPolygon"
+          :key="`vtx-${idx}`"
+          :lat-lng="[pt.latitude, pt.longitude]"
+          :draggable="true"
+          @moveend="(e:any) => onVertexMoveEnd(idx, e)"
+        />
+
+        <!-- Markers -->
+        <l-marker
+          v-for="m in markers"
+          :key="m.marker_id"
+          :lat-lng="[m.position.latitude, m.position.longitude]"
+        />
+
+        <!-- Live mower location marker -->
+        <l-marker
+          v-if="mowerLatLng && mowerIcon"
+          :lat-lng="mowerLatLng"
+          :icon="mowerIcon"
+        />
+
+        <!-- GPS accuracy circle (approximate with polygon points) -->
+        <l-polygon
+          v-if="mowerLatLng && gpsAccuracyMeters && gpsAccuracyMeters > 0 && accuracyCircleLatLngs.length > 0"
+          :lat-lngs="accuracyCircleLatLngs"
+          :color="'#3399ff'"
+          :weight="1"
+          :fill="true"
+          :fill-opacity="0.15"
+        />
+      </l-map>
+      <div v-if="!showTiles" class="offline-overlay">Offline: drawing without tiles</div>
     </div>
 
     <div class="editor-status">
@@ -88,7 +180,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
+import { LMap, LTileLayer, LMarker, LPolygon } from '@vue-leaflet/vue-leaflet';
+import L from 'leaflet';
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+import { useWebSocket } from '@/services/websocket';
 import { useMapStore } from '../../stores/map';
 import type { Point } from '../../stores/map';
 
@@ -110,11 +208,45 @@ const markerType = ref<'home' | 'am_sun' | 'pm_sun' | 'custom'>('home');
 const hasUnsavedChanges = ref(false);
 const error = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
+const currentPolygonClosed = ref(false);
+const editingZoneId = ref<string | null>(null);
+
+// Map view state
+const zoom = ref(18);
+const centerLatLng = ref<[number, number]>([37.7749, -122.4194]);
+const showTiles = computed(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+
+// Live mower marker (GPS position)
+const mowerLatLng = ref<[number, number] | null>(null);
+const mowerIcon = ref<L.Icon | null>(null);
+const firstLockCentered = ref(false);
+const followMower = ref(false);
+const gpsAccuracyMeters = ref<number | null>(null);
+const accuracyCircleLatLngs = ref<Array<[number, number]>>([]);
+
+// Derived geometry from store
+const boundaryPolygon = computed(() => {
+  const bz = mapStore.configuration?.boundary_zone;
+  return bz?.polygon?.map(p => [p.latitude, p.longitude]) || [];
+});
+
+const exclusionPolygons = computed(() => {
+  return (mapStore.configuration?.exclusion_zones || []).map(z => ({
+    id: z.id,
+    points: z.polygon.map(p => [p.latitude, p.longitude])
+  }));
+});
+
+const markers = computed(() => mapStore.configuration?.markers || []);
+
+const currentPolygonLatLng = computed(() => currentPolygon.value.map(p => [p.latitude, p.longitude]));
 
 // Methods
 function setMode(newMode: 'view' | 'boundary' | 'exclusion' | 'marker') {
   mapStore.setEditMode(newMode);
   currentPolygon.value = [];
+  currentPolygonClosed.value = false;
+  editingZoneId.value = null;
 }
 
 function clearCurrent() {
@@ -127,16 +259,22 @@ async function saveChanges() {
   successMessage.value = null;
   
   try {
-    if (mode.value === 'boundary' && currentPolygon.value.length >= 3) {
+    const ready = currentPolygon.value.length >= 3 || currentPolygonClosed.value;
+    if (!ready) throw new Error('Polygon needs at least 3 points');
+
+    if (editingZoneId.value) {
+      // Update existing zone
+      mapStore.updateZonePolygon(editingZoneId.value, currentPolygon.value);
+    } else if (mode.value === 'boundary') {
       mapStore.setBoundaryZone({
-        id: `boundary_${Date.now()}`,
+        id: mapStore.configuration?.boundary_zone?.id || `boundary_${Date.now()}`,
         name: 'Mowing Boundary',
         zone_type: 'boundary',
         polygon: currentPolygon.value,
         priority: 10,
         enabled: true
       });
-    } else if (mode.value === 'exclusion' && currentPolygon.value.length >= 3) {
+    } else if (mode.value === 'exclusion') {
       mapStore.addExclusionZone({
         id: `exclusion_${Date.now()}`,
         name: 'Exclusion Zone',
@@ -171,7 +309,229 @@ const emit = defineEmits<{
 function emitModeChange() {
   emit('modeChanged', mode.value);
 }
+
+function onMapClick(e: any) {
+  const { latlng } = e;
+  if (!latlng) return;
+
+  if (mode.value === 'boundary' || mode.value === 'exclusion') {
+    if (currentPolygon.value.length >= 3) {
+      const first = currentPolygon.value[0];
+      const d = distanceMeters(first.latitude, first.longitude, latlng.lat, latlng.lng);
+      // Close if click within 1 meter of first point
+      if (d <= 1.0) {
+        currentPolygonClosed.value = true;
+        hasUnsavedChanges.value = true;
+        return;
+      }
+    }
+    if (!currentPolygonClosed.value) {
+      currentPolygon.value.push({ latitude: latlng.lat, longitude: latlng.lng });
+      hasUnsavedChanges.value = true;
+    }
+  } else if (mode.value === 'marker') {
+    mapStore.addMarker(markerType.value, { latitude: latlng.lat, longitude: latlng.lng }, undefined);
+    hasUnsavedChanges.value = true;
+  }
+}
+
+function onVertexMoveEnd(idx: number, e: any) {
+  try {
+    const ll = e?.target?.getLatLng?.();
+    if (!ll) return;
+    const updated = [...currentPolygon.value];
+    updated[idx] = { latitude: ll.lat, longitude: ll.lng };
+    currentPolygon.value = updated;
+    hasUnsavedChanges.value = true;
+  } catch {
+    // ignore
+  }
+}
+
+function onBoundaryClick() {
+  const bz = mapStore.configuration?.boundary_zone;
+  if (!bz) return;
+  currentPolygon.value = bz.polygon.slice();
+  editingZoneId.value = bz.id;
+  mapStore.setEditMode('boundary');
+}
+
+function onExclusionClick(zoneId: string) {
+  const z = (mapStore.configuration?.exclusion_zones || []).find(z => z.id === zoneId);
+  if (!z) return;
+  currentPolygon.value = z.polygon.slice();
+  editingZoneId.value = z.id;
+  mapStore.setEditMode('exclusion');
+}
+
+function distanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000; // Earth radius
+  const toRad = (x: number) => (x * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
+function simplifyCurrent(toleranceMeters: number = 0.5) {
+  if (currentPolygon.value.length < 5) return;
+  currentPolygon.value = simplifyDouglasPeucker(currentPolygon.value, toleranceMeters);
+  hasUnsavedChanges.value = true;
+}
+
+function simplifyDouglasPeucker(points: Point[], tolMeters: number): Point[] {
+  // Convert to planar approx around centroid for simplicity
+  const centroidLat = points.reduce((s,p)=>s+p.latitude,0)/points.length;
+  const mPerDegLat = 111320;
+  const mPerDegLon = 111320 * Math.cos(centroidLat * Math.PI/180);
+  const toXY = (p:Point) => ({x: p.longitude*mPerDegLon, y: p.latitude*mPerDegLat});
+  const toLL = (x:number,y:number):Point => ({ latitude: y/mPerDegLat, longitude: x/mPerDegLon });
+
+  const pts = points.map(toXY);
+  const tol2 = tolMeters*tolMeters;
+
+  function dp(start:number, end:number, keep:boolean[]) {
+    let maxDist = 0; let index = -1;
+    const A = pts[start], B = pts[end];
+    const dx = B.x - A.x, dy = B.y - A.y;
+    const len2 = dx*dx + dy*dy || 1e-12;
+    for (let i=start+1;i<end;i++){
+      const P = pts[i];
+      // perpendicular distance squared
+      const t = ((P.x-A.x)*dx + (P.y-A.y)*dy)/len2;
+      const projX = A.x + t*dx; const projY = A.y + t*dy;
+      const ddx = P.x - projX; const ddy = P.y - projY;
+      const dist2 = ddx*ddx + ddy*ddy;
+      if (dist2 > maxDist){ maxDist = dist2; index = i; }
+    }
+    if (maxDist > tol2 && index !== -1){
+      keep[index] = true;
+      dp(start, index, keep);
+      dp(index, end, keep);
+    }
+  }
+
+  const keep:boolean[] = Array(pts.length).fill(false);
+  keep[0] = keep[pts.length-1] = true;
+  dp(0, pts.length-1, keep);
+  const simplifiedXY = pts.filter((_,i)=>keep[i]);
+  return simplifiedXY.map(p=>toLL(p.x,p.y));
+}
+onMounted(async () => {
+  try {
+    if (!mapStore.configuration) {
+      await mapStore.loadConfiguration('default');
+    }
+    // Initialize center from configuration if available
+    const center = mapStore.configuration?.center_point;
+    if (center) {
+      centerLatLng.value = [center.latitude, center.longitude];
+    } else if (boundaryPolygon.value.length > 0) {
+      centerLatLng.value = boundaryPolygon.value[0] as [number, number];
+    }
+
+    // Prepare mower icon: try custom LawnBerry pin, fallback to Leaflet default
+    await loadMowerIcon();
+
+    // Connect to telemetry and track navigation updates
+    const { connect, subscribe } = useWebSocket('telemetry');
+    await connect();
+    subscribe('telemetry.navigation', (payload: any) => {
+      const pos = payload?.position;
+      if (pos && typeof pos.latitude === 'number' && typeof pos.longitude === 'number') {
+        mowerLatLng.value = [pos.latitude, pos.longitude];
+        gpsAccuracyMeters.value = typeof pos.accuracy === 'number' ? pos.accuracy : null;
+        // Recompute accuracy circle points
+        computeAccuracyCircle();
+        // Auto-center on first GPS lock, or continuously if following
+        if (!firstLockCentered.value || followMower.value) {
+          centerLatLng.value = [pos.latitude, pos.longitude];
+          firstLockCentered.value = true;
+        }
+      }
+    });
+  } catch (e) {
+    // noop: error banner will show via store error
+  }
+});
+
+async function loadMowerIcon() {
+  const customUrl = '/LawnBerryPi_Pin.png';
+  const loaded = await tryLoadImage(customUrl);
+  if (loaded) {
+    mowerIcon.value = L.icon({
+      iconUrl: customUrl,
+      iconSize: [48, 48],
+      iconAnchor: [24, 44],
+      popupAnchor: [0, -44],
+      shadowUrl: markerShadow,
+      shadowSize: [41, 41],
+      shadowAnchor: [12, 41]
+    });
+  } else {
+    mowerIcon.value = L.icon({
+      iconUrl: markerIcon,
+      iconRetinaUrl: markerIcon2x,
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34],
+      shadowUrl: markerShadow,
+      shadowSize: [41, 41]
+    });
+  }
+}
+
+function tryLoadImage(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = url;
+  });
+}
+
+function recenterToMower() {
+  if (mowerLatLng.value) {
+    centerLatLng.value = mowerLatLng.value;
+  }
+}
+
+function computeAccuracyCircle(segments = 48) {
+  if (!mowerLatLng.value || !gpsAccuracyMeters.value || gpsAccuracyMeters.value <= 0) {
+    accuracyCircleLatLngs.value = [];
+    return;
+  }
+  const [lat, lon] = mowerLatLng.value;
+  const R = 6371000; // meters
+  const latRad = (lat * Math.PI) / 180;
+  const d = gpsAccuracyMeters.value / R; // angular distance in radians
+  const pts: Array<[number, number]> = [];
+  for (let i = 0; i < segments; i++) {
+    const brng = (2 * Math.PI * i) / segments;
+    const sinLat = Math.sin(latRad);
+    const cosLat = Math.cos(latRad);
+    const sinD = Math.sin(d);
+    const cosD = Math.cos(d);
+    const lat2 = Math.asin(sinLat * cosD + cosLat * sinD * Math.cos(brng));
+    const lon2 = ((lon * Math.PI) / 180) + Math.atan2(
+      Math.sin(brng) * sinD * cosLat,
+      cosD - sinLat * Math.sin(lat2)
+    );
+    const latDeg = (lat2 * 180) / Math.PI;
+    let lonDeg = (lon2 * 180) / Math.PI;
+    // normalize to [-180, 180]
+    lonDeg = ((lonDeg + 540) % 360) - 180;
+    pts.push([latDeg, lonDeg]);
+  }
+  accuracyCircleLatLngs.value = pts;
+}
 </script>
+
+<style>
+/* Include Leaflet base styles */
+@import url('leaflet/dist/leaflet.css');
+</style>
 
 <style scoped>
 .boundary-editor {
@@ -186,6 +546,8 @@ function emitModeChange() {
   padding: 1rem;
   background: var(--secondary-dark);
   border-bottom: 1px solid var(--primary-light);
+  position: relative;
+  z-index: 200;
 }
 
 .toolbar-spacer {
@@ -239,6 +601,13 @@ function emitModeChange() {
   flex: 1;
   position: relative;
   overflow: hidden;
+}
+
+/* Ensure the Leaflet container fills the canvas */
+.editor-canvas :deep(.leaflet-container) {
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
 }
 
 .editor-instructions {

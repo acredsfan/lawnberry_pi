@@ -8,8 +8,8 @@ Wants=lawnberry-backend.service
 Type=simple
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/lawnberry/lawnberry-rebuild
-Environment=PYTHONPATH=/home/pi/lawnberry/lawnberry-rebuild
+WorkingDirectory=/home/pi/lawnberry
+Environment=PYTHONPATH=/home/pi/lawnberry
 
 # Health monitoring script
 ExecStart=/bin/bash -c 'while true; do \

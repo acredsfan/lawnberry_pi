@@ -13,12 +13,9 @@ sensors:
   tof:
     - left
     - right
-power_monitor:
-  type: INA3221
-motor_controller:
-  type: RoboHAT_RP2040
-blade_controller:
-  type: IBT_4
+power_monitor: true
+motor_controller: robohat-rp2040
+blade_controller: ibt-4
 
 # Flat alternatives (uncomment to use):
 # gps_type: zed-f9p-usb

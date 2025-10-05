@@ -9,8 +9,8 @@ Requires=lawnberry-database.service
 Type=exec
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/lawnberry/lawnberry-rebuild
-Environment=PYTHONPATH=/home/pi/lawnberry/lawnberry-rebuild
+WorkingDirectory=/home/pi/lawnberry
+Environment=PYTHONPATH=/home/pi/lawnberry
 Environment=LAWNBERRY_ENV=production
 Environment=LAWNBERRY_CONFIG_DIR=/home/pi/lawnberry/config
 Environment=LAWNBERRY_LOG_DIR=/home/pi/lawnberry/logs
@@ -18,7 +18,7 @@ Environment=LAWNBERRY_DATA_DIR=/home/pi/lawnberry/data
 Environment=SIM_MODE=0
 
 # Main service command
-ExecStart=/home/pi/lawnberry/lawnberry-rebuild/.venv/bin/uvicorn backend.src.main:app --host 0.0.0.0 --port 8081 --workers 1
+ExecStart=/home/pi/lawnberry/.venv/bin/uvicorn backend.src.main:app --host 0.0.0.0 --port 8081 --workers 1
 
 # Health checks and monitoring
 ExecReload=/bin/kill -HUP $MAINPID

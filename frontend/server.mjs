@@ -32,6 +32,16 @@ app.use(
   })
 )
 
+// Also proxy direct /api/v2 paths to backend (no rewrite) so clients can call /api/v2/* directly
+app.use(
+  '/api/v2',
+  createProxyMiddleware({
+    target: BACKEND_URL,
+    changeOrigin: true,
+    ws: false,
+  })
+)
+
 // Proxy WebSocket path to backend telemetry endpoint
 app.use(
   '/ws',
@@ -40,6 +50,16 @@ app.use(
     changeOrigin: true,
     ws: true,
     pathRewrite: () => '/api/v2/ws/telemetry',
+  })
+)
+
+// Proxy WebSocket for /api/v2/ws/telemetry as-is (frontend connects here by default)
+app.use(
+  '/api/v2/ws/telemetry',
+  createProxyMiddleware({
+    target: BACKEND_URL,
+    changeOrigin: true,
+    ws: true,
   })
 )
 

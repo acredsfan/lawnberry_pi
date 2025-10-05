@@ -47,8 +47,10 @@ class ApiService {
   private client: AxiosInstance
 
   constructor() {
+    // Compute default base URL from current origin to use frontend proxy (/api and /api/v2)
+    const defaultBase = ''
     this.client = axios.create({
-      baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+      baseURL: defaultBase,
       timeout: 10000,
       headers: {
         'Content-Type': 'application/json'

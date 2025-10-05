@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Re
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict, Set, Any
+from typing import Optional, Any
 from pathlib import Path
 import os
 import json
@@ -17,7 +17,6 @@ from ..models.auth_security_config import AuthSecurityConfig, SecurityLevel, TOT
 from ..models.remote_access_config import RemoteAccessConfig
 from ..models.telemetry_exchange import ComponentId, ComponentStatus, HardwareTelemetryStream
 from ..core.persistence import persistence
-import os
 from ..services.hw_selftest import run_selftest
 from ..services.weather_service import weather_service
 
@@ -26,12 +25,15 @@ router = APIRouter()
 # WebSocket Hub for real-time communication
 class WebSocketHub:
     def __init__(self):
-        self.clients: Dict[str, WebSocket] = {}
-        self.subscriptions: Dict[str, Set[str]] = {}  # topic -> client_ids
+        self.clients: dict[str, WebSocket] = {}
+        self.subscriptions: dict[str, set[str]] = {}  # topic -> client_ids
         self.telemetry_cadence_hz = 5.0
         self._telemetry_task: Optional[asyncio.Task] = None
         # Hardware integration
         self._sensor_manager = None  # lazy init to avoid hardware deps on CI
+        self._gps_warm_done = False
+        # Cache last known position to smooth fields missing on alternating NMEA sentences
+        self._last_position: dict[str, Any] = {}
         
     async def connect(self, websocket: WebSocket, client_id: str):
         await websocket.accept()
@@ -46,7 +48,7 @@ class WebSocketHub:
         if client_id in self.clients:
             del self.clients[client_id]
         # Remove from all subscriptions
-        for topic, subscribers in self.subscriptions.items():
+        for _topic, subscribers in self.subscriptions.items():
             subscribers.discard(client_id)
             
     async def subscribe(self, client_id: str, topic: str):
@@ -103,7 +105,7 @@ class WebSocketHub:
             if client_id in self.clients:
                 try:
                     await self.clients[client_id].send_text(message)
-                except:
+                except Exception:
                     disconnected_clients.append(client_id)
                     
         # Clean up disconnected clients
@@ -128,8 +130,7 @@ class WebSocketHub:
         while True:
             try:
                 telemetry_data = await self._generate_telemetry()
-                
-                # Broadcast to topic-specific channels
+                # Broadcast to topic-specific channels immediately
                 await self._broadcast_telemetry_topics(telemetry_data)
                 
                 # Wait based on cadence
@@ -150,8 +151,26 @@ class WebSocketHub:
             })
             
         if "position" in telemetry_data:
+            # Ensure shallow copy to avoid mutation races
+            pos = telemetry_data.get("position") or {}
+            # Merge with last known values to avoid transient None for fields (e.g., altitude/accuracy)
+            cached = self._last_position
+            def _merge_field(key: str):
+                v = pos.get(key) if isinstance(pos, dict) else None
+                return v if v is not None else cached.get(key)
+            merged = {
+                "latitude": _merge_field("latitude"),
+                "longitude": _merge_field("longitude"),
+                "altitude": _merge_field("altitude"),
+                "accuracy": _merge_field("accuracy"),
+                "gps_mode": _merge_field("gps_mode"),
+            }
+            # Update cache with any newly provided non-None values
+            for k, v in merged.items():
+                if v is not None:
+                    self._last_position[k] = v
             await self.broadcast_to_topic("telemetry.navigation", {
-                "position": telemetry_data["position"],
+                "position": merged,
                 "source": telemetry_data.get("source", "unknown")
             })
             
@@ -240,11 +259,29 @@ class WebSocketHub:
                 if self._sensor_manager is None:
                     # Lazy import to avoid unnecessary deps in CI
                     from ..services.sensor_manager import SensorManager  # type: ignore
+                    # Hint GPS device if commonly-present path exists
+                    try:
+                        if os.path.exists('/dev/ttyACM1') and not os.environ.get('GPS_DEVICE'):
+                            os.environ['GPS_DEVICE'] = '/dev/ttyACM1'
+                        elif os.path.exists('/dev/ttyUSB0') and not os.environ.get('GPS_DEVICE'):
+                            os.environ['GPS_DEVICE'] = '/dev/ttyUSB0'
+                    except Exception:
+                        pass
                     self._sensor_manager = SensorManager()
                     # Initialize once (async)
                     await self._sensor_manager.initialize()
 
                 if getattr(self._sensor_manager, "initialized", False):
+                    # One-time warmup to allow GPS first fix to populate
+                    if not self._gps_warm_done:
+                        try:
+                            for _ in range(3):
+                                warm = await self._sensor_manager.read_all_sensors()
+                                if getattr(warm, 'gps', None) and getattr(warm.gps, 'latitude', None) is not None:
+                                    break
+                                await asyncio.sleep(0.2)
+                        finally:
+                            self._gps_warm_done = True
                     data = await self._sensor_manager.read_all_sensors()
                     
                     # Map to telemetry payload expected by clients
@@ -265,8 +302,8 @@ class WebSocketHub:
                             "latitude": getattr(pos, "latitude", None),
                             "longitude": getattr(pos, "longitude", None),
                             "altitude": getattr(pos, "altitude", None),
-                            "accuracy": getattr(pos, "accuracy", None),
-                            "gps_mode": getattr(pos, "mode", None),
+                            "accuracy": getattr(pos, "accuracy", None) if pos else None,
+                            "gps_mode": getattr(pos, "mode", None) if pos else None,
                         },
                         "imu": {
                             "roll": getattr(imu, "roll", None),
@@ -300,11 +337,11 @@ class WebSocketHub:
                                 "client_count": 0,
                                 "last_frame": None
                             }
-                    except Exception as e:
+                    except Exception:
                         telemetry["camera"] = {"active": False, "mode": "error"}
                     
                     return telemetry
-            except Exception as e:
+            except Exception:
                 # Fall back to simulation if hardware path fails
                 pass
 
@@ -349,14 +386,14 @@ websocket_hub = WebSocketHub()
 _app_start_time = time.time()
 
 # Simple in-memory overrides for debug injections (SIM_MODE-friendly)
-_debug_overrides: Dict[str, Any] = {}
+_debug_overrides: dict[str, Any] = {}
 
 
 # ------------------------ Sensors (Health + Debug) ------------------------
 
 class SensorHealthResponse(BaseModel):
     initialized: bool
-    components: Dict[str, Dict[str, Any]]
+    components: dict[str, dict[str, Any]]
     timestamp: str
 
 
@@ -366,7 +403,7 @@ async def get_sensors_health() -> SensorHealthResponse:
 
     Uses SensorManager when available. Safe in SIM_MODE and CI.
     """
-    components: Dict[str, Dict[str, Any]] = {}
+    components: dict[str, dict[str, Any]] = {}
     initialized = False
 
     try:
@@ -422,6 +459,88 @@ async def get_sensors_health() -> SensorHealthResponse:
         components=components,
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
+
+
+# ------------------------ WebSockets ------------------------
+
+@router.websocket("/api/v2/ws/telemetry")
+async def ws_telemetry(websocket: WebSocket):
+    """Primary WebSocket endpoint for telemetry topics.
+
+    The frontend sends JSON control frames with a simple schema:
+    {"type": "subscribe", "topic": "telemetry.system"}
+    {"type": "unsubscribe", "topic": "telemetry.system"}
+    {"type": "set_cadence", "cadence_hz": 5}
+    {"type": "ping"}
+    {"type": "list_topics"}
+    """
+    client_id = "ws-" + uuid.uuid4().hex
+    try:
+        await websocket_hub.connect(websocket, client_id)
+        # Ensure telemetry loop is running
+        await websocket_hub.start_telemetry_loop()
+        while True:
+            msg = await websocket.receive_text()
+            try:
+                payload = json.loads(msg)
+            except Exception:
+                continue
+            mtype = str(payload.get("type", "")).lower()
+            if mtype == "subscribe":
+                topic = str(payload.get("topic", "")).strip()
+                if topic:
+                    await websocket_hub.subscribe(client_id, topic)
+            elif mtype == "unsubscribe":
+                topic = str(payload.get("topic", "")).strip()
+                if topic:
+                    await websocket_hub.unsubscribe(client_id, topic)
+            elif mtype == "set_cadence":
+                try:
+                    hz = float(payload.get("cadence_hz", 5))
+                except Exception:
+                    hz = 5.0
+                await websocket_hub.set_cadence(client_id, hz)
+            elif mtype == "ping":
+                await websocket.send_text(json.dumps({
+                    "event": "pong",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }))
+            elif mtype == "list_topics":
+                await websocket.send_text(json.dumps({
+                    "event": "topics.list",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "topics": sorted(list(websocket_hub.subscriptions.keys())),
+                }))
+            # Unknown message types are ignored for forward compatibility
+    except WebSocketDisconnect:
+        websocket_hub.disconnect(client_id)
+        return
+
+
+@router.websocket("/api/v2/ws/control")
+async def ws_control(websocket: WebSocket):
+    """Secondary WebSocket endpoint for control channel events.
+
+    We currently only acknowledge and keep the socket for presence; messages
+    are accepted with the same lightweight schema as telemetry.
+    """
+    client_id = "ctrl-" + uuid.uuid4().hex
+    try:
+        await websocket.accept()
+        await websocket.send_text(json.dumps({
+            "event": "connection.established",
+            "client_id": client_id,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }))
+        while True:
+            # Drain and ignore messages for now (future: control echo/lockout)
+            _ = await websocket.receive_text()
+            await websocket.send_text(json.dumps({
+                "event": "ack",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }))
+    except WebSocketDisconnect:
+        return
 
 
 class InjectToFRequest(BaseModel):
@@ -518,9 +637,9 @@ AUTH_MAX_ATTEMPTS_PER_WINDOW = 3
 AUTH_LOCKOUT_FAILED_ATTEMPTS = 3
 AUTH_LOCKOUT_SECONDS = 60
 
-_auth_attempts: Dict[str, list[float]] = {}
-_auth_failed_counts: Dict[str, int] = {}
-_auth_lockout_until: Dict[str, float] = {}
+_auth_attempts: dict[str, list[float]] = {}
+_auth_failed_counts: dict[str, int] = {}
+_auth_lockout_until: dict[str, float] = {}
 
 
 @router.post("/auth/login", response_model=AuthResponse)
@@ -661,16 +780,16 @@ class Point(BaseModel):
 class Zone(BaseModel):
     id: str
     name: Optional[str] = None
-    polygon: List[Point]
+    polygon: list[Point]
     priority: int = 0
     exclusion_zone: bool = False
 
 
-_zones_store: List[Zone] = []
+_zones_store: list[Zone] = []
 _zones_last_modified: datetime = datetime.now(timezone.utc)
 
 
-@router.get("/map/zones", response_model=List[Zone])
+@router.get("/map/zones", response_model=list[Zone])
 def get_map_zones(request: Request):
     data = [z.model_dump(mode="json") for z in _zones_store]
     body = json.dumps(data, sort_keys=True).encode()
@@ -696,8 +815,8 @@ def get_map_zones(request: Request):
     return JSONResponse(content=data, headers=headers)
 
 
-@router.post("/map/zones", response_model=List[Zone])
-def post_map_zones(zones: List[Zone]):
+@router.post("/map/zones", response_model=list[Zone])
+def post_map_zones(zones: list[Zone]):
     global _zones_store
     _zones_store = zones
     global _zones_last_modified
@@ -871,7 +990,7 @@ _safety_state = {"emergency_stop_active": False}
 # Short-lived emergency TTL to block immediate subsequent commands without cross-test leakage
 _emergency_until: float = 0.0
 # Per-client emergency flags (scoped by Authorization or X-Client-Id)
-_client_emergency: Dict[str, float] = {}
+_client_emergency: dict[str, float] = {}
 # Legacy control flow state for integration tests
 _legacy_motors_active = False
 
@@ -1034,10 +1153,10 @@ class ControlResponseV2(BaseModel):
     status_reason: Optional[str] = None
     watchdog_echo: Optional[str] = None
     watchdog_latency_ms: Optional[float] = None
-    safety_checks: List[str] = []
-    active_interlocks: List[str] = []
-    remediation: Optional[Dict[str, str]] = None
-    telemetry_snapshot: Optional[Dict[str, Any]] = None
+    safety_checks: list[str] = []
+    active_interlocks: list[str] = []
+    remediation: Optional[dict[str, str]] = None
+    telemetry_snapshot: Optional[dict[str, Any]] = None
     timestamp: str
 
 
@@ -1059,7 +1178,10 @@ def _client_key(request: Request) -> str:
         anon = getattr(request.state, "_anon_client_id", None)
         if not anon:
             anon = "anon-" + uuid.uuid4().hex
-            setattr(request.state, "_anon_client_id", anon)
+            try:
+                request.state._anon_client_id = anon
+            except Exception:
+                pass
         return anon
     except Exception:
         # As a last resort, return a fresh anon id each time
@@ -1142,7 +1264,6 @@ async def control_drive_v2(cmd: dict, request: Request):
     
     # Legacy behavior for integration tests: when payload is legacy style (mode/command),
     # return 200 with calculated motor speeds, unless emergency stop is active (then 403).
-    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     is_legacy = "session_id" not in cmd
     if is_legacy:
         # Emergency stop -> reject legacy drive commands with 403 (short-lived TTL)
@@ -2010,7 +2131,7 @@ class PlanningJob(BaseModel):
     id: str
     name: str
     schedule: str  # e.g., "08:00" for time-based scheduling
-    zones: List[str]  # zone IDs to mow
+    zones: list[str]  # zone IDs to mow
     priority: int = 1
     enabled: bool = True
     created_at: datetime = datetime.now(timezone.utc)
@@ -2018,11 +2139,11 @@ class PlanningJob(BaseModel):
     status: str = "pending"  # pending, running, completed, failed
 
 
-_jobs_store: List[PlanningJob] = []
+_jobs_store: list[PlanningJob] = []
 _job_counter = 0
 
 
-@router.get("/planning/jobs", response_model=List[PlanningJob])
+@router.get("/planning/jobs", response_model=list[PlanningJob])
 def get_planning_jobs():
     return _jobs_store
 
@@ -2068,7 +2189,7 @@ class Dataset(BaseModel):
     description: str
     image_count: int
     labeled_count: int
-    categories: List[str]
+    categories: list[str]
     created_at: datetime
     last_updated: datetime
 
@@ -2113,7 +2234,7 @@ _datasets = [
 _export_counter = 0
 
 
-@router.get("/ai/datasets", response_model=List[Dataset])
+@router.get("/ai/datasets", response_model=list[Dataset])
 def get_ai_datasets(request: Request):
     data = [ds.model_dump(mode="json") for ds in _datasets]
     # Last modified is the latest dataset update
@@ -2935,7 +3056,7 @@ def _is_valid_topic(topic: str) -> bool:
     return topic in valid_topics
 
 
-def _get_valid_topics() -> List[str]:
+def _get_valid_topics() -> list[str]:
     """Get list of valid WebSocket topics."""
     return [
         # Legacy topics (backward compatibility)

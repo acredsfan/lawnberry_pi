@@ -67,6 +67,7 @@ class CameraStreamService:
         # Camera backend
         self.camera = None
         self.executor = ThreadPoolExecutor(max_workers=2)
+        self.hardware_available = False
         
         # Frame storage
         self.storage_dir = Path("/var/lib/lawnberry/camera")
@@ -81,13 +82,14 @@ class CameraStreamService:
             if not self.sim_mode:
                 success = await self._initialize_camera()
                 if not success:
-                    logger.warning("Camera initialization failed, falling back to simulation mode")
-                    self.sim_mode = True
+                    # Do not switch to simulation if SIM_MODE=0
+                    logger.warning("Camera initialization failed and SIM_MODE=0; staying offline (no simulated frames)")
             
             # Set up IPC socket
             await self._setup_ipc_server()
             
-            self.stream.mode = CameraMode.STREAMING if not self.sim_mode else CameraMode.OFFLINE
+            # Start with OFFLINE; start_streaming() will flip to STREAMING when appropriate
+            self.stream.mode = CameraMode.OFFLINE
             self.running = True
             
             logger.info("Camera service initialized successfully")
@@ -114,6 +116,7 @@ class CameraStreamService:
                 
                 # Update capabilities from camera
                 self.stream.capabilities.sensor_type = "Pi Camera v3"
+                self.hardware_available = True
                 return True
                 
             elif OPENCV_AVAILABLE:
@@ -130,14 +133,17 @@ class CameraStreamService:
                 self.camera.set(cv2.CAP_PROP_FPS, self.stream.configuration.framerate)
                 
                 self.stream.capabilities.sensor_type = "USB Camera"
+                self.hardware_available = True
                 return True
             
             else:
                 logger.warning("No camera libraries available")
+                self.hardware_available = False
                 return False
                 
         except Exception as e:
             logger.error(f"Camera initialization error: {e}")
+            self.hardware_available = False
             return False
     
     async def _setup_ipc_server(self):
@@ -257,6 +263,11 @@ class CameraStreamService:
     async def start_streaming(self) -> bool:
         """Start camera streaming."""
         try:
+            if (not self.sim_mode) and (not self.hardware_available):
+                logger.warning("Camera hardware unavailable and SIM disabled; not starting streaming")
+                self.stream.is_active = False
+                self.stream.mode = CameraMode.OFFLINE
+                return False
             if self.capture_active:
                 logger.warning("Streaming already active")
                 return True
@@ -309,7 +320,7 @@ class CameraStreamService:
                 start_time = time.time()
                 
                 if self.sim_mode:
-                    # Simulate frame capture
+                    # In simulation mode, generate frames; in real mode, never simulate
                     frame_data = self._generate_simulated_frame()
                 else:
                     frame_data = self._capture_real_frame()

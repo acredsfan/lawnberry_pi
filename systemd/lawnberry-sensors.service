@@ -8,8 +8,8 @@ Requires=lawnberry-database.service
 Type=simple
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/lawnberry/lawnberry-rebuild
-Environment=PYTHONPATH=/home/pi/lawnberry/lawnberry-rebuild
+WorkingDirectory=/home/pi/lawnberry
+Environment=PYTHONPATH=/home/pi/lawnberry
 Environment=LAWNBERRY_ENV=production
 Environment=LAWNBERRY_CONFIG_DIR=/home/pi/lawnberry/config
 

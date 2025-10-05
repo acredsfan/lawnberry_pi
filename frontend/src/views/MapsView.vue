@@ -132,12 +132,15 @@
               {{ previewError }}
             </div>
             <img 
-              v-else
+              v-else-if="previewUrl"
               :src="previewUrl" 
               alt="Map tile preview"
               @error="onPreviewError"
               @load="onPreviewLoad"
             >
+            <div v-else class="preview-error">
+              Preview unavailable for current provider/style; using editor map below.
+            </div>
             <div class="preview-meta">
               Provider: {{ settings.provider.toUpperCase() }} | 
               Style: {{ settings.style }} |
@@ -145,6 +148,16 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Boundary & Zone Editor -->
+    <div v-if="settings.provider !== 'none'" class="card">
+      <div class="card-header">
+        <h3>Boundary & Zone Editor</h3>
+      </div>
+      <div class="card-body" style="height: 480px;">
+        <BoundaryEditor />
       </div>
     </div>
 
@@ -271,6 +284,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useApiService } from '@/services/api'
+import BoundaryEditor from '@/components/map/BoundaryEditor.vue'
 
 const api = useApiService()
 
@@ -314,15 +328,15 @@ const pinCategories = ref([
     name: 'Waypoints',
     pins: [
       { id: 1, name: 'Home Base', icon: '🏠', lat: 37.7749, lon: -122.4194, description: 'Charging station' },
-      { id: 2, name: 'Garden Entry', icon: '🚪', lat: 37.7750, lon: -122.4195, description: 'Main entrance' }
+  { id: 2, name: 'Lawn Entry', icon: '🚪', lat: 37.7750, lon: -122.4195, description: 'Main entrance' }
     ]
   },
   {
     id: 'zones',
     name: 'Mowing Zones',
     pins: [
-      { id: 3, name: 'Front Lawn', icon: '🌱', lat: 37.7748, lon: -122.4193, description: 'Main mowing area' },
-      { id: 4, name: 'Back Garden', icon: '🌳', lat: 37.7751, lon: -122.4196, description: 'Secondary area' }
+  { id: 3, name: 'Front Lawn', icon: '🌱', lat: 37.7748, lon: -122.4193, description: 'Main mowing area' },
+  { id: 4, name: 'Back Lawn', icon: '🌳', lat: 37.7751, lon: -122.4196, description: 'Secondary area' }
     ]
   },
   {
@@ -340,9 +354,8 @@ const availableIcons = ['📍', '🏠', '🚪', '🌱', '🌳', '🌲', '🟦', 
 // Computed
 const previewUrl = computed(() => {
   if (settings.value.provider === 'none') return ''
-  
+  // Only attempt Google preview when we have a key
   if (settings.value.provider === 'google' && settings.value.google_api_key) {
-    // Google Maps Static API
     const baseUrl = 'https://maps.googleapis.com/maps/api/staticmap'
     const params = new URLSearchParams({
       center: `${previewLat.value},${previewLon.value}`,
@@ -353,11 +366,8 @@ const previewUrl = computed(() => {
     })
     return `${baseUrl}?${params}`
   }
-  
-  // OpenStreetMap tiles
-  const x = Math.floor((previewLon.value + 180) / 360 * Math.pow(2, previewZoom.value))
-  const y = Math.floor((1 - Math.log(Math.tan(previewLat.value * Math.PI / 180) + 1 / Math.cos(previewLat.value * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, previewZoom.value))
-  return `https://tile.openstreetmap.org/${previewZoom.value}/${x}/${y}.png`
+  // For OSM or google-without-key, we skip <img> preview; the editor Leaflet map below is the live preview
+  return ''
 })
 
 // Methods
@@ -390,19 +400,32 @@ async function testConnection() {
   
   try {
     if (settings.value.provider === 'google' && settings.value.google_api_key) {
-      // Test Google Maps API key
-      const testUrl = `https://maps.googleapis.com/maps/api/js?key=${settings.value.google_api_key}`
-      const response = await fetch(testUrl, { method: 'HEAD' })
-      
-      if (response.ok) {
-        apiStatus.value = { valid: true, message: 'Google Maps API key is valid' }
-      } else {
-        apiStatus.value = { valid: false, message: 'Invalid API key or quota exceeded' }
+      // Prefer official JS API loader to validate the key properly
+      try {
+        const { Loader } = await import('@googlemaps/js-api-loader')
+        const loader = new Loader({
+          apiKey: settings.value.google_api_key,
+          version: 'weekly'
+        })
+        await loader.load()
+        apiStatus.value = { valid: true, message: 'Google Maps JavaScript API loaded successfully' }
+      } catch (e: any) {
+        // As a fallback, try loading a tiny static map image to observe HTTP status
+        const params = new URLSearchParams({
+          center: '37.7749,-122.4194',
+          zoom: '12',
+          size: '1x1',
+          key: settings.value.google_api_key
+        })
+        const staticUrl = `https://maps.googleapis.com/maps/api/staticmap?${params}`
+        const imgResp = await fetch(staticUrl, { method: 'GET', mode: 'no-cors' })
+        // no-cors opaque response won't expose status; if no exception, assume network OK but key may still be invalid
+        apiStatus.value = { valid: false, message: 'Failed to load JS API. Check key restrictions (HTTP referrer/IP) and enable Maps JavaScript API.' }
       }
     } else if (settings.value.provider === 'osm') {
       // Test OSM tile server
       const testUrl = 'https://tile.openstreetmap.org/1/0/0.png'
-      const response = await fetch(testUrl, { method: 'HEAD' })
+      const response = await fetch(testUrl, { method: 'GET' })
       
       if (response.ok) {
         apiStatus.value = { valid: true, message: 'OpenStreetMap tiles accessible' }

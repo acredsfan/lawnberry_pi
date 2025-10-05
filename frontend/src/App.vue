@@ -4,7 +4,7 @@
     <header class="app-header">
       <nav class="navbar">
         <div class="nav-brand">
-          <img src="/LawnBerryPi_logo.png" alt="LawnBerry Pi" class="logo">
+          <img :src="logoUrl" alt="LawnBerry Pi" class="logo">
           <h1 class="retro-title">LawnBerry Pi v2</h1>
         </div>
         <div class="nav-links">
@@ -47,6 +47,7 @@ import { computed, onMounted } from 'vue'
 import { useAuthStore } from './stores/auth'
 import { useSystemStore } from './stores/system'
 import UserMenu from './components/UserMenu.vue'
+import logoUrl from '@/assets/logo.png'
 
 const authStore = useAuthStore()
 const systemStore = useSystemStore()

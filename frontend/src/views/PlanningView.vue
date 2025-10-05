@@ -439,7 +439,7 @@ const jobs = ref([
     id: 1,
     name: 'Front Lawn Weekly',
     status: 'running',
-    zones: ['Front Lawn', 'Side Garden'],
+    zones: ['Front Lawn', 'Side Lawn'],
     pattern: 'parallel',
     progress: 45,
     estimated_remaining: 25,
@@ -447,9 +447,9 @@ const jobs = ref([
   },
   {
     id: 2,
-    name: 'Back Garden Maintenance',
+    name: 'Back Lawn Maintenance',
     status: 'scheduled',
-    zones: ['Back Garden'],
+    zones: ['Back Lawn'],
     pattern: 'spiral',
     progress: 0,
     estimated_remaining: null,
@@ -479,7 +479,7 @@ const schedules = ref([
     id: 1,
     name: 'Weekly Full Property',
     frequency: 'weekly',
-    zones: ['Front Lawn', 'Back Garden', 'Side Garden'],
+    zones: ['Front Lawn', 'Back Lawn', 'Side Lawn'],
     pattern: 'parallel',
     enabled: true,
     next_run: '2024-09-30T10:00:00'
@@ -506,7 +506,7 @@ const zones = ref([
   },
   {
     id: 'back_garden',
-    name: 'Back Garden',
+    name: 'Back Lawn',
     area_m2: 150,
     cutting_height: 40,
     priority: 'medium',
@@ -514,7 +514,7 @@ const zones = ref([
   },
   {
     id: 'side_garden',
-    name: 'Side Garden',
+    name: 'Side Lawn',
     area_m2: 75,
     cutting_height: 30,
     priority: 'low',

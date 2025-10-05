@@ -16,7 +16,11 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
+import math
+import glob
+import socket
+import json
 
 from ...core.simulation import is_simulation_mode
 from ...models.sensor_data import GpsMode, GpsReading
@@ -27,7 +31,7 @@ from ..base import HardwareDriver
 class GPSDriverConfig:
     mode: GpsMode = GpsMode.NEO8M_UART
     # Serial/USB configuration (used when not in SIM_MODE)
-    usb_device: str = "/dev/ttyACM0"  # common for ZED-F9P
+    usb_device: str = "/dev/ttyACM1"  # detected on Pi: ACM1 shows NMEA in probe
     uart_device: str = "/dev/ttyAMA0"  # common UART on Pi
     baudrate: int = 9600
 
@@ -53,6 +57,18 @@ class GPSDriver(HardwareDriver):
         self._sim_counter: int = 0
         # Real hardware handles (lazy)
         self._serial = None
+        self._first_read_done = False
+        # Cached baudrates to try for different modules
+        self._baud_candidates = [self.cfg.baudrate]
+        if self.cfg.mode == GpsMode.F9P_USB:
+            # F9P often uses higher baud
+            for b in (115200, 38400, 9600):
+                if b not in self._baud_candidates:
+                    self._baud_candidates.append(b)
+        else:
+            for b in (9600, 38400):
+                if b not in self._baud_candidates:
+                    self._baud_candidates.append(b)
 
     async def initialize(self) -> None:  # noqa: D401
         # In SIM_MODE, we don't touch hardware
@@ -132,24 +148,250 @@ class GPSDriver(HardwareDriver):
         # Real hardware path (not exercised in CI/tests). Keep resilient.
         try:
             if self._serial is None:
-                # Lazy open serial port based on mode
+                # Lazy open serial port based on mode with simple autodetect
                 import serial  # type: ignore
 
-                device = (
-                    self.cfg.usb_device
-                    if self.cfg.mode == GpsMode.F9P_USB
-                    else self.cfg.uart_device
+                candidates: list[str] = []
+                # Env overrides
+                env_dev = os.environ.get("GPS_DEVICE")
+                if env_dev:
+                    candidates.append(env_dev)
+                # Configured default
+                default_dev = (
+                    self.cfg.usb_device if self.cfg.mode == GpsMode.F9P_USB else self.cfg.uart_device
                 )
-                self._serial = serial.Serial(device, self.cfg.baudrate, timeout=0.5)  # type: ignore
+                candidates.append(default_dev)
+                # Common fallbacks on Raspberry Pi
+                candidates.extend([
+                    "/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1",
+                    "/dev/ttyAMA0", "/dev/ttyS0", "/dev/serial0",
+                ])
+                # Add ACM/USB globbed devices if present
+                for pat in ("/dev/ttyACM*", "/dev/ttyUSB*"):
+                    for p in glob.glob(pat):
+                        if p not in candidates:
+                            candidates.append(p)
 
-            # Read NMEA line(s) and parse minimal fields
-            _ = self._serial.readline().decode("ascii", errors="ignore")  # type: ignore
-            # Minimalistic parser for GGA/RMC could be added; return last if parsing fails
-            # For safety, just return last known if available
+                last_err: Optional[Exception] = None
+                for dev in candidates:
+                    for baud in self._baud_candidates:
+                        try:
+                            ser = serial.Serial(dev, baud, timeout=0.25)  # type: ignore
+                            # Try a few reads to confirm NMEA stream presence
+                            has_nmea = False
+                            for _ in range(3):
+                                line = ser.readline()
+                                if not line:
+                                    continue
+                                try:
+                                    s = line.decode("ascii", errors="ignore")
+                                except Exception:
+                                    s = ""
+                                if s.startswith("$"):
+                                    has_nmea = True
+                                    break
+                            if has_nmea:
+                                self._serial = ser
+                                self.cfg.baudrate = baud
+                                break
+                            else:
+                                try:
+                                    ser.close()
+                                except Exception:
+                                    pass
+                        except Exception as e:  # pragma: no cover - hardware dependent
+                            last_err = e
+                            try:
+                                ser.close()  # type: ignore
+                            except Exception:
+                                pass
+                            continue
+                    if self._serial is not None:
+                        break
+                # If not opened, keep last reading
+                if self._serial is None:
+                    return self._last_read
+
+            # Read NMEA lines for a short window and parse
+            # Allow a bit more time on first acquisition
+            deadline = time.time() + (1.5 if not self._first_read_done else 0.75)
+            got_lat = got_lon = False
+            acc: Optional[float] = None
+            sats: Optional[int] = None
+            alt: Optional[float] = None
+            spd: Optional[float] = None
+            hdg: Optional[float] = None
+            lat: Optional[float] = None
+            lon: Optional[float] = None
+            rtk_status: Optional[str] = None
+
+            while time.time() < deadline:
+                raw = self._serial.readline().decode("ascii", errors="ignore")  # type: ignore
+                if not raw or "$GP" not in raw and "$GN" not in raw and "$G" not in raw:
+                    continue
+                raw = raw.strip()
+                if raw.startswith(("$GPGGA", "$GNGGA")):
+                    gga = self._parse_gga(raw)
+                    if gga:
+                        lat, lon, alt_gga, sats_gga, hdop = gga
+                        if lat is not None and lon is not None:
+                            got_lat = got_lon = True
+                        if alt_gga is not None:
+                            alt = alt_gga
+                        if sats_gga is not None:
+                            sats = sats_gga
+                        # Approximate accuracy from HDOP (rough scale)
+                        if hdop is not None:
+                            acc = max(0.5, hdop * 1.0)
+                elif raw.startswith(("$GPRMC", "$GNRMC")):
+                    rmc = self._parse_rmc(raw)
+                    if rmc:
+                        lat_r, lon_r, spd_knots, course = rmc
+                        if lat_r is not None and lon_r is not None:
+                            lat, lon = lat_r, lon_r
+                            got_lat = got_lon = True
+                        if spd_knots is not None:
+                            spd = spd_knots * 0.514444  # knots -> m/s
+                        if course is not None:
+                            hdg = course
+
+                if got_lat and got_lon:
+                    break
+
+            if got_lat and got_lon:
+                reading = GpsReading(
+                    latitude=lat,
+                    longitude=lon,
+                    altitude=alt,
+                    accuracy=acc,
+                    speed=spd,
+                    satellites=sats,
+                    mode=self.cfg.mode,
+                    rtk_status=rtk_status,
+                )
+                self._last_read = reading
+                self._last_read_ts = time.time()
+                self._first_read_done = True
+                return reading
+
+            # Optional gpsd fallback (if service is present on localhost:2947)
+            gd = self._read_from_gpsd(timeout_sec=0.5 if self._first_read_done else 1.0)
+            if gd is not None:
+                self._last_read = gd
+                self._last_read_ts = time.time()
+                self._first_read_done = True
+                return gd
+
+            # If parsing failed, return last known
             return self._last_read
         except Exception:
             # On errors, keep last reading and mark running
             return self._last_read
+
+    @staticmethod
+    def _parse_nmea_coord(val: str, hemi: str) -> Optional[float]:
+        """Convert NMEA ddmm.mmmm (lat) / dddmm.mmmm (lon) to decimal degrees.
+
+        hemi is 'N'/'S' or 'E'/'W'. Returns None if invalid.
+        """
+        try:
+            if not val or not hemi:
+                return None
+            # Split degrees and minutes
+            if "." not in val:
+                return None
+            dot = val.find(".")
+            deg_len = dot - 2  # two digits of minutes before dot
+            deg = int(val[:deg_len])
+            mins = float(val[deg_len:])
+            dec = deg + mins / 60.0
+            if hemi in ("S", "W"):
+                dec = -dec
+            return dec
+        except Exception:
+            return None
+
+    def _parse_gga(self, line: str) -> Optional[tuple[Optional[float], Optional[float], Optional[float], Optional[int], Optional[float]]]:
+        """Parse GGA: returns (lat, lon, altitude_m, satellites, hdop)."""
+        try:
+            parts = line.split(",")
+            # GGA fields: 2=lat,3=N/S,4=lon,5=E/W,6=fix,7=sats,8=HDOP,9=altitude
+            lat = self._parse_nmea_coord(parts[2], parts[3]) if len(parts) > 4 else None
+            lon = self._parse_nmea_coord(parts[4], parts[5]) if len(parts) > 6 else None
+            fix_quality = parts[6] if len(parts) > 6 else "0"
+            sats = int(parts[7]) if len(parts) > 7 and parts[7].isdigit() else None
+            hdop = float(parts[8]) if len(parts) > 8 and parts[8] not in ("", None) else None
+            alt = float(parts[9]) if len(parts) > 9 and parts[9] not in ("", None) else None
+            if fix_quality in {"0", ""}:  # no fix
+                # Keep lat/lon if parser produced values but no fix -> treat as unreliable
+                pass
+            return (lat, lon, alt, sats, hdop)
+        except Exception:
+            return None
+
+    def _parse_rmc(self, line: str) -> Optional[tuple[Optional[float], Optional[float], Optional[float], Optional[float]]]:
+        """Parse RMC: returns (lat, lon, speed_knots, course_deg)."""
+        try:
+            parts = line.split(",")
+            # RMC fields: 3=lat,4=N/S,5=lon,6=E/W,7=speed(knots),8=track/course
+            lat = self._parse_nmea_coord(parts[3], parts[4]) if len(parts) > 4 else None
+            lon = self._parse_nmea_coord(parts[5], parts[6]) if len(parts) > 6 else None
+            spd = float(parts[7]) if len(parts) > 7 and parts[7] not in ("", None) else None
+            course = float(parts[8]) if len(parts) > 8 and parts[8] not in ("", None) else None
+            return (lat, lon, spd, course)
+        except Exception:
+            return None
+
+    def _read_from_gpsd(self, timeout_sec: float = 0.5) -> Optional[GpsReading]:
+        """Try reading a TPV report from gpsd if available.
+
+        Uses a raw TCP socket to 127.0.0.1:2947 to avoid external deps.
+        Returns a GpsReading if lat/lon are present, else None.
+        """
+        host = os.environ.get("GPSD_HOST", "127.0.0.1")
+        port = int(os.environ.get("GPSD_PORT", "2947"))
+        try:
+            with socket.create_connection((host, port), timeout=0.3) as s:
+                s.settimeout(timeout_sec)
+                # Issue WATCH command
+                s.sendall(b'?WATCH={"enable":true,"json":true}\n')
+                start = time.time()
+                buf = b""
+                while time.time() - start < timeout_sec:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    # gpsd streams JSON objects delimited by newlines
+                    while b"\n" in buf:
+                        line, buf = buf.split(b"\n", 1)
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line.decode("utf-8", errors="ignore"))
+                        except Exception:
+                            continue
+                        if obj.get("class") == "TPV":
+                            lat = obj.get("lat")
+                            lon = obj.get("lon")
+                            if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                                alt = obj.get("alt") if isinstance(obj.get("alt"), (int, float)) else None
+                                spd = obj.get("speed") if isinstance(obj.get("speed"), (int, float)) else None
+                                crs = obj.get("track") if isinstance(obj.get("track"), (int, float)) else None
+                                eph = obj.get("eph") if isinstance(obj.get("eph"), (int, float)) else None
+                                return GpsReading(
+                                    latitude=float(lat),
+                                    longitude=float(lon),
+                                    altitude=float(alt) if alt is not None else None,
+                                    accuracy=float(eph) if eph is not None else None,
+                                    speed=float(spd) if spd is not None else None,
+                                    heading=float(crs) if crs is not None else None,
+                                    mode=self.cfg.mode,
+                                )
+                return None
+        except Exception:
+            return None
 
 
 __all__ = ["GPSDriver", "GPSDriverConfig"]

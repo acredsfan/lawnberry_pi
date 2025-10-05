@@ -2,7 +2,7 @@
   <div class="login-container">
     <div class="login-card">
       <div class="login-header">
-        <img src="/lawnberry-icon.svg" alt="LawnBerry Pi" class="login-logo">
+  <img :src="iconUrl" alt="LawnBerry Pi" class="login-logo">
         <h1>LawnBerry Pi v2</h1>
         <p>Autonomous Lawn Care System</p>
       </div>
@@ -65,6 +65,7 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import type { LoginCredentials } from '@/types/auth'
+import iconUrl from '@/assets/lawnberry-icon.svg'
 
 const router = useRouter()
 const authStore = useAuthStore()

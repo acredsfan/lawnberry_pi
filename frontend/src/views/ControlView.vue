@@ -310,7 +310,6 @@ async function blade(on: boolean) {
 
 // ...other UI logic can be adapted to use control store as needed
 </script>
-</script>
 
 <style scoped>
 .control-view {
