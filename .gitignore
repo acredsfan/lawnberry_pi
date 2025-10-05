@@ -408,3 +408,13 @@ uv.lock
 # UV lock file (keep for reproducibility)
 # uv.lock is tracked for dependency locking
 >>>>>>> 49ef02b (docs: amend constitution to v2.0.0 (Engineering Plan alignment + safety-first mandates))
+
+# -----------------------------
+# Virtual environments (explicit)
+# Ensure Python virtual envs are ignored throughout the repo
+.venv/
+venv/
+env/
+ENV/
+.virtualenv/
+venv-coral/
