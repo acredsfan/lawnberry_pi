@@ -63,6 +63,7 @@ const router = createRouter({
 
 // Navigation guard for authentication
 router.beforeEach(async (to, from, next) => {
+  try { (window as any).__TopProgress?.start() } catch {}
   const authStore = useAuthStore()
   
   // Check if route requires authentication
@@ -93,6 +94,10 @@ router.beforeEach(async (to, from, next) => {
   }
   
   next()
+})
+
+router.afterEach(() => {
+  try { (window as any).__TopProgress?.done() } catch {}
 })
 
 export default router

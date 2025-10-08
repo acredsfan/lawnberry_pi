@@ -4,6 +4,7 @@
       <button 
         class="btn btn-sm" 
         :class="{ 'btn-primary': mode === 'view', 'btn-secondary': mode !== 'view' }"
+        title="View mode (no edits)"
         @click="setMode('view')"
       >
         👁️ View
@@ -11,13 +12,15 @@
       <button 
         class="btn btn-sm" 
         :class="{ 'btn-primary': mode === 'boundary', 'btn-secondary': mode !== 'boundary' }"
+        title="Draw or edit outer boundary"
         @click="setMode('boundary')"
       >
-        📍 Boundary
+        🧭 Boundary
       </button>
       <button 
         class="btn btn-sm" 
         :class="{ 'btn-primary': mode === 'exclusion', 'btn-secondary': mode !== 'exclusion' }"
+        title="Draw or edit exclusion zones"
         @click="setMode('exclusion')"
       >
         🚫 Exclusion
@@ -25,6 +28,7 @@
       <button 
         class="btn btn-sm" 
         :class="{ 'btn-primary': mode === 'mowing', 'btn-secondary': mode !== 'mowing' }"
+        title="Draw or edit mowing zones"
         @click="setMode('mowing')"
       >
         🌱 Mowing Zone
@@ -32,6 +36,7 @@
       <button 
         class="btn btn-sm" 
         :class="{ 'btn-primary': mode === 'marker', 'btn-secondary': mode !== 'marker' }"
+        title="Place or move markers"
         @click="setMode('marker')"
       >
         📌 Marker
@@ -61,6 +66,10 @@
         <input type="checkbox" v-model="showCoveragePlan" @change="toggleCoveragePlan" />
         Preview Coverage
       </label>
+      <label class="follow-toggle" title="Snap new/dragged vertices to boundary">
+        <input type="checkbox" v-model="snapToBoundary" />
+        Snap to Boundary
+      </label>
       
       <button 
         v-if="hasUnsavedChanges" 
@@ -69,6 +78,7 @@
       >
         💾 Save
       </button>
+      <span v-if="hasUnsavedChanges" class="unsaved-badge" title="You have unsaved changes">● Unsaved</span>
       <button 
         v-if="currentPolygon.length > 0" 
         class="btn btn-sm btn-warning"
@@ -78,7 +88,7 @@
       </button>
     </div>
 
-    <div class="editor-canvas" ref="canvasContainer">
+  <div class="editor-canvas" ref="canvasContainer" :class="{'cursor-crosshair': mode==='boundary' || mode==='exclusion' || mode==='mowing', 'cursor-pin': mode==='marker'}">
       <div v-if="mode === 'boundary'" class="editor-instructions">
         Click on the map to add boundary points. Close the polygon by clicking near the first point.
       </div>
@@ -99,6 +109,33 @@
       </div>
       <div v-if="props.pickForPin" class="editor-instructions">
         Click anywhere on the map to set pin location
+      </div>
+
+      <div
+        v-if="showPolygonToolbar"
+        class="floating-toolbar"
+      >
+        <button
+          class="mini-btn"
+          :disabled="!canUndoVertex"
+          @click="undoLastVertex"
+        >
+          ↩️ Undo
+        </button>
+        <button
+          class="mini-btn"
+          :disabled="!canClosePolygon"
+          @click="closePolygonManually"
+        >
+          ✅ Close
+        </button>
+        <button
+          v-if="canDeleteCurrent"
+          class="mini-btn mini-btn-danger"
+          @click="deleteEditingZone"
+        >
+          🗑️ Delete
+        </button>
       </div>
 
       <!-- Leaflet Map -->
@@ -153,9 +190,9 @@
           @click="() => onMowingClick(zone.id)"
         />
 
-        <!-- In-progress polygon -->
+        <!-- In-progress polygon (only for polygon edit modes) -->
         <l-polygon
-          v-if="currentPolygonLatLng.length > 0"
+          v-if="currentPolygonLatLng.length > 0 && (mode === 'boundary' || mode === 'exclusion' || mode === 'mowing')"
           :lat-lngs="currentPolygonLatLng"
           :color="mode === 'boundary' ? '#00FF92' : '#ffb703'"
           :weight="2"
@@ -163,9 +200,10 @@
           :dash-array="'4 4'"
         />
 
-        <!-- Vertex handles for editing current polygon -->
+        <!-- Vertex handles for editing current polygon (hidden in marker mode) -->
         <l-marker
           v-for="(pt, idx) in currentPolygon"
+          v-if="mode === 'boundary' || mode === 'exclusion' || mode === 'mowing'"
           :key="`vtx-${idx}`"
           :lat-lng="[pt.latitude, pt.longitude]"
           :draggable="true"
@@ -177,6 +215,9 @@
           v-for="m in markers"
           :key="m.marker_id"
           :lat-lng="[m.position.latitude, m.position.longitude]"
+          :icon="markerDivIcon(m)"
+          :draggable="mode === 'marker'"
+          @moveend="(e:any) => onMarkerMoveEnd(m.marker_id, e)"
         />
 
         <!-- Live mower location marker -->
@@ -231,8 +272,10 @@ import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import { useWebSocket } from '@/services/websocket';
 import { useMapStore } from '../../stores/map';
 import type { Point } from '../../stores/map';
+import { useToastStore } from '@/stores/toast';
 
 const mapStore = useMapStore();
+const toast = useToastStore();
 
 // Props
 interface Props {
@@ -268,32 +311,28 @@ const zoom = ref(18);
 const centerLatLng = ref<[number, number]>([37.7749, -122.4194]);
 const showTiles = computed(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
 
-// Dynamic Leaflet tile layer based on provider/style selection
+// Dynamic Leaflet tile layer when NOT using Google Mutant
 const tileLayerConfig = computed(() => {
   if (props.mapProvider === 'none') return null;
-  if (props.mapProvider === 'google') {
-    const style = props.mapStyle || 'standard';
-    if (style === 'satellite' || style === 'hybrid') {
-      return {
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
-      };
-    }
-    // Standard/terrain: clean street layer
-    return {
-      url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
-    };
-  }
-  // Default OSM
+  // If Google is selected and allowed, we'll use Google Mutant and suppress standard tile layer
+  if (useGoogleMutant.value) return null;
+  // Otherwise fall back to OSM generic
   return {
     url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; OpenStreetMap contributors'
   };
 });
 
-// Use Google Mutant when a key is provided and provider=google
-const useGoogleMutant = computed(() => props.mapProvider === 'google' && !!props.googleApiKey);
+// Helper: Only use Google JS API when running on https OR localhost (dev)
+function isSecureForGoogle(): boolean {
+  const host = window.location.hostname
+  const isLocal = host === 'localhost' || host === '127.0.0.1'
+  const isHttps = window.location.protocol === 'https:'
+  return isHttps || isLocal
+}
+
+// Use Google Mutant when a key is provided, provider=google, and context is allowed
+const useGoogleMutant = computed(() => props.mapProvider === 'google' && !!props.googleApiKey && isSecureForGoogle());
 let googleBaseLayer: any = null;
 const googleLayerActive = ref(false);
 
@@ -340,8 +379,9 @@ async function ensureBaseLayer() {
       await loadScriptOnce('https://unpkg.com/leaflet.gridlayer.googlemutant@0.13.5/dist/Leaflet.GoogleMutant.js');
     }
   } catch (e) {
-    // If Google cannot load, keep existing non-Google tiles (handled by template)
-    return;
+    console.warn('Google Maps JS API failed to load. Falling back to standard tiles.', e)
+    googleLayerActive.value = false
+    return
   }
 
   // Recreate the Google Mutant layer for current style
@@ -369,6 +409,7 @@ const accuracyCircleLatLngs = ref<Array<[number, number]>>([]);
 const showCoveragePlan = ref(false);
 const coverageLatLngs = ref<Array<[number, number]>>([]);
 const restPollTimer = ref<number | null>(null);
+const snapToBoundary = ref(false);
 
 // Derived geometry from store
 const boundaryPolygon = computed(() => {
@@ -394,8 +435,25 @@ const mowingPolygons = computed(() => {
 
 const currentPolygonLatLng = computed(() => currentPolygon.value.map(p => [p.latitude, p.longitude]));
 
+const isPolygonMode = computed(() => mode.value === 'boundary' || mode.value === 'exclusion' || mode.value === 'mowing');
+const showPolygonToolbar = computed(() => isPolygonMode.value && currentPolygon.value.length > 0 && !props.pickForPin);
+const canUndoVertex = computed(() => currentPolygon.value.length > 0);
+const canClosePolygon = computed(() => isPolygonMode.value && currentPolygon.value.length >= 3 && !currentPolygonClosed.value);
+const canDeleteCurrent = computed(() => Boolean(editingZoneId.value) && (mode.value === 'mowing' || mode.value === 'exclusion'));
+
 // Methods
-function setMode(newMode: 'view' | 'boundary' | 'exclusion' | 'marker') {
+function markerDivIcon(m: any) {
+  const emoji = m.marker_type === 'home' ? '🏠' : m.marker_type === 'am_sun' ? '☀️' : m.marker_type === 'pm_sun' ? '🌅' : '📍'
+  const cls = `lb-marker ${m.marker_type}`
+  return L.divIcon({
+    className: cls,
+    html: `<span>${emoji}</span>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14]
+  })
+}
+
+function setMode(newMode: 'view' | 'boundary' | 'exclusion' | 'mowing' | 'marker') {
   mapStore.setEditMode(newMode);
   currentPolygon.value = [];
   currentPolygonClosed.value = false;
@@ -405,6 +463,49 @@ function setMode(newMode: 'view' | 'boundary' | 'exclusion' | 'marker') {
 function clearCurrent() {
   currentPolygon.value = [];
   hasUnsavedChanges.value = false;
+  currentPolygonClosed.value = false;
+  editingZoneId.value = null;
+}
+
+function undoLastVertex() {
+  if (currentPolygon.value.length === 0) return;
+  const next = currentPolygon.value.slice(0, -1);
+  currentPolygon.value = next;
+  currentPolygonClosed.value = false;
+  hasUnsavedChanges.value = next.length > 0;
+}
+
+function closePolygonManually() {
+  if (!isPolygonMode.value || currentPolygon.value.length < 3) return;
+  currentPolygonClosed.value = true;
+  hasUnsavedChanges.value = true;
+}
+
+async function deleteEditingZone() {
+  if (!editingZoneId.value) return;
+  const zoneId = editingZoneId.value;
+  try {
+    if (mode.value === 'mowing') {
+      if (!confirm('Delete this mowing zone?')) return;
+      mapStore.removeMowingZone(zoneId);
+    } else if (mode.value === 'exclusion') {
+      if (!confirm('Delete this exclusion zone?')) return;
+      mapStore.removeExclusionZone(zoneId);
+    } else {
+      return;
+    }
+
+    await mapStore.saveConfiguration();
+    toast.show('Zone deleted', 'success', 2000);
+    currentPolygon.value = [];
+    currentPolygonClosed.value = false;
+    editingZoneId.value = null;
+    hasUnsavedChanges.value = false;
+    mapStore.setEditMode('view');
+  } catch (err: any) {
+    const msg = err?.message || 'Failed to delete zone';
+    toast.show(msg, 'error', 3000);
+  }
 }
 
 async function saveChanges() {
@@ -412,54 +513,84 @@ async function saveChanges() {
   successMessage.value = null;
   
   try {
+    // If we're in marker mode, just persist the current configuration (markers are already in the store)
+    if (mode.value === 'marker') {
+      await mapStore.saveConfiguration();
+      successMessage.value = 'Markers saved';
+      toast.show('Marker(s) saved', 'success', 2000)
+      hasUnsavedChanges.value = false;
+      setTimeout(() => { successMessage.value = null }, 2000)
+      return;
+    }
+
     const ready = currentPolygon.value.length >= 3 || currentPolygonClosed.value;
     if (!ready) throw new Error('Polygon needs at least 3 points');
 
+    let clippedNotice = false;
+
     if (editingZoneId.value) {
-      // Update existing zone
-      mapStore.updateZonePolygon(editingZoneId.value, currentPolygon.value);
+      const result = clipPolygonForMode(mode.value, currentPolygon.value);
+      if (result.collapsed) {
+        throw new Error('Clipped zone collapsed; adjust points to stay within boundary');
+      }
+      mapStore.updateZonePolygon(editingZoneId.value, result.polygon);
+      clippedNotice = result.clipped;
     } else if (mode.value === 'boundary') {
+      const polygonCopy = clonePolygon(currentPolygon.value);
       mapStore.setBoundaryZone({
         id: mapStore.configuration?.boundary_zone?.id || `boundary_${Date.now()}`,
         name: 'Mowing Boundary',
         zone_type: 'boundary',
-        polygon: currentPolygon.value,
+        polygon: polygonCopy,
         priority: 10,
         enabled: true
       });
     } else if (mode.value === 'exclusion') {
+      const polygonCopy = clonePolygon(currentPolygon.value);
       mapStore.addExclusionZone({
         id: `exclusion_${Date.now()}`,
         name: 'Exclusion Zone',
         zone_type: 'exclusion_zone',
-        polygon: currentPolygon.value,
+        polygon: polygonCopy,
         priority: 5,
         enabled: true,
         exclusion_zone: true
       });
     } else if (mode.value === 'mowing') {
+      const result = clipPolygonForMode('mowing', currentPolygon.value);
+      if (result.collapsed) {
+        throw new Error('Mowing zone collapsed after clipping; adjust points and try again');
+      }
       mapStore.addMowingZone({
         id: `mow_${Date.now()}`,
         name: 'Mowing Zone',
         zone_type: 'mow_zone',
-        polygon: currentPolygon.value,
+        polygon: result.polygon,
         priority: 3,
         enabled: true,
         exclusion_zone: false
       });
+      clippedNotice = result.clipped;
+    }
+
+    await mapStore.saveConfiguration();
+    if (clippedNotice) {
+      toast.show('Mowing zone clipped to boundary', 'warning', 2800);
     }
     
-    await mapStore.saveConfiguration();
-    
     successMessage.value = 'Changes saved successfully';
+    toast.show('Map saved successfully', 'success', 2500)
     hasUnsavedChanges.value = false;
     currentPolygon.value = [];
+    currentPolygonClosed.value = false;
+    editingZoneId.value = null;
     
     setTimeout(() => {
       successMessage.value = null;
     }, 3000);
   } catch (e: any) {
     error.value = mapStore.error || e?.message || 'Failed to save changes';
+    toast.show(error.value, 'error', 4000)
   }
 }
 
@@ -496,12 +627,18 @@ function onMapClick(e: any) {
       }
     }
     if (!currentPolygonClosed.value) {
-      currentPolygon.value.push({ latitude: latlng.lat, longitude: latlng.lng });
+      let pt: Point = { latitude: latlng.lat, longitude: latlng.lng };
+      if (snapToBoundary.value && mode.value !== 'boundary') {
+        const snapped = snapPointToBoundary(pt);
+        if (snapped) pt = snapped;
+      }
+      currentPolygon.value.push(pt);
       hasUnsavedChanges.value = true;
     }
   } else if (mode.value === 'marker') {
     mapStore.addMarker(markerType.value, { latitude: latlng.lat, longitude: latlng.lng }, undefined);
     hasUnsavedChanges.value = true;
+    toast.show(`${markerType.value.replace('_',' ').toUpperCase()} marker placed`, 'info', 1800)
   }
 }
 
@@ -509,8 +646,13 @@ function onVertexMoveEnd(idx: number, e: any) {
   try {
     const ll = e?.target?.getLatLng?.();
     if (!ll) return;
+    let pt: Point = { latitude: ll.lat, longitude: ll.lng };
+    if (snapToBoundary.value && mode.value !== 'boundary') {
+      const snapped = snapPointToBoundary(pt);
+      if (snapped) pt = snapped;
+    }
     const updated = [...currentPolygon.value];
-    updated[idx] = { latitude: ll.lat, longitude: ll.lng };
+    updated[idx] = pt;
     currentPolygon.value = updated;
     hasUnsavedChanges.value = true;
   } catch {
@@ -518,29 +660,87 @@ function onVertexMoveEnd(idx: number, e: any) {
   }
 }
 
+function onMarkerMoveEnd(markerId: string, e: any) {
+  try {
+    const ll = e?.target?.getLatLng?.()
+    if (!ll) return
+    mapStore.updateMarker(markerId, { position: { latitude: ll.lat, longitude: ll.lng } } as any)
+    hasUnsavedChanges.value = true
+  } catch {/* ignore */}
+}
+
 function onBoundaryClick() {
   const bz = mapStore.configuration?.boundary_zone;
   if (!bz) return;
-  currentPolygon.value = bz.polygon.slice();
+  currentPolygon.value = clonePolygon(bz.polygon);
   editingZoneId.value = bz.id;
+  currentPolygonClosed.value = true;
+  hasUnsavedChanges.value = false;
   mapStore.setEditMode('boundary');
 }
 
 function onExclusionClick(zoneId: string) {
   const z = (mapStore.configuration?.exclusion_zones || []).find(z => z.id === zoneId);
   if (!z) return;
-  currentPolygon.value = z.polygon.slice();
+  currentPolygon.value = clonePolygon(z.polygon);
   editingZoneId.value = z.id;
+  currentPolygonClosed.value = true;
+  hasUnsavedChanges.value = false;
   mapStore.setEditMode('exclusion');
 }
 
 function onMowingClick(zoneId: string) {
   const z = (mapStore.configuration?.mowing_zones || []).find(z => z.id === zoneId);
   if (!z) return;
-  currentPolygon.value = z.polygon.slice();
+  currentPolygon.value = clonePolygon(z.polygon);
   editingZoneId.value = z.id;
+  currentPolygonClosed.value = true;
+  hasUnsavedChanges.value = false;
   mapStore.setEditMode('mowing');
 }
+
+// External controls for "Edit on map" from parent
+function focusMarker(markerId: string) {
+  const m = (mapStore.configuration?.markers || []).find(mm => mm.marker_id === markerId)
+  if (!m) return
+  centerLatLng.value = [m.position.latitude, m.position.longitude]
+  mapStore.setEditMode('marker')
+}
+
+function editZoneOnMap(zoneId: string, type: 'mowing' | 'exclusion' | 'boundary' = 'mowing') {
+  if (type === 'boundary' && mapStore.configuration?.boundary_zone) {
+    const bz = mapStore.configuration.boundary_zone
+    currentPolygon.value = clonePolygon(bz.polygon)
+    editingZoneId.value = bz.id
+    mapStore.setEditMode('boundary')
+    centerLatLng.value = [currentPolygon.value[0].latitude, currentPolygon.value[0].longitude]
+    currentPolygonClosed.value = true
+    hasUnsavedChanges.value = false
+    return
+  }
+  if (type === 'exclusion') {
+    const z = (mapStore.configuration?.exclusion_zones || []).find(z => z.id === zoneId)
+    if (!z) return
+    currentPolygon.value = clonePolygon(z.polygon)
+    editingZoneId.value = z.id
+    mapStore.setEditMode('exclusion')
+    centerLatLng.value = [currentPolygon.value[0].latitude, currentPolygon.value[0].longitude]
+    currentPolygonClosed.value = true
+    hasUnsavedChanges.value = false
+    return
+  }
+  // default mowing
+  const z = (mapStore.configuration?.mowing_zones || []).find(z => z.id === zoneId)
+  if (!z) return
+  currentPolygon.value = clonePolygon(z.polygon)
+  editingZoneId.value = z.id
+  mapStore.setEditMode('mowing')
+  centerLatLng.value = [currentPolygon.value[0].latitude, currentPolygon.value[0].longitude]
+  currentPolygonClosed.value = true
+  hasUnsavedChanges.value = false
+}
+
+defineExpose({ focusMarker, editZoneOnMap })
 
 function distanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000; // Earth radius
@@ -595,6 +795,155 @@ function simplifyDouglasPeucker(points: Point[], tolMeters: number): Point[] {
   dp(0, pts.length-1, keep);
   const simplifiedXY = pts.filter((_,i)=>keep[i]);
   return simplifiedXY.map(p=>toLL(p.x,p.y));
+}
+
+type ClipResult = {
+  polygon: Point[];
+  clipped: boolean;
+  collapsed: boolean;
+};
+
+const COORD_EPS = 1e-9;
+
+function clonePoint(p: Point): Point {
+  return { latitude: p.latitude, longitude: p.longitude, altitude: p.altitude };
+}
+
+function clonePolygon(poly: Point[]): Point[] {
+  return poly.map(clonePoint);
+}
+
+function polygonsDiffer(a: Point[], b: Point[], epsilon = 1e-9): boolean {
+  if (a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) {
+    if (Math.abs(a[i].latitude - b[i].latitude) > epsilon || Math.abs(a[i].longitude - b[i].longitude) > epsilon) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function signedArea(points: Point[]): number {
+  if (points.length < 3) return 0;
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+    area += (p1.longitude * p2.latitude) - (p2.longitude * p1.latitude);
+  }
+  return area / 2;
+}
+
+function normalizeRing(points: Point[]): Point[] {
+  if (!points.length) return [];
+  const ring = clonePolygon(points);
+  if (ring.length > 1) {
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (Math.abs(first.latitude - last.latitude) <= COORD_EPS && Math.abs(first.longitude - last.longitude) <= COORD_EPS) {
+      ring.pop();
+    }
+  }
+  return ring;
+}
+
+function stripClosingPoint(points: Point[]): Point[] {
+  if (points.length > 1) {
+    const first = points[0];
+    const last = points[points.length - 1];
+    if (Math.abs(first.latitude - last.latitude) <= COORD_EPS && Math.abs(first.longitude - last.longitude) <= COORD_EPS) {
+      return points.slice(0, -1);
+    }
+  }
+  return points;
+}
+
+function pointsEqual(a: Point, b: Point, epsilon = COORD_EPS): boolean {
+  return Math.abs(a.latitude - b.latitude) <= epsilon && Math.abs(a.longitude - b.longitude) <= epsilon;
+}
+
+function isInsideEdge(a: Point, b: Point, p: Point, clipCCW: boolean): boolean {
+  const val = isLeft(a, b, p);
+  if (Math.abs(val) <= COORD_EPS) return true;
+  return clipCCW ? val >= 0 : val <= 0;
+}
+
+function clipPolygonForMode(currentMode: string, poly: Point[]): ClipResult {
+  const original = clonePolygon(poly);
+  if (currentMode !== 'mowing') {
+    return { polygon: original, clipped: false, collapsed: false };
+  }
+  const boundary = mapStore.configuration?.boundary_zone?.polygon;
+  if (!boundary || boundary.length < 3) {
+    return { polygon: original, clipped: false, collapsed: false };
+  }
+  const clipped = polygonClip(boundary, original);
+  const cleaned = stripClosingPoint(clipped);
+  if (cleaned.length < 3) {
+    return { polygon: original, clipped: false, collapsed: true };
+  }
+  const clippedClone = clonePolygon(cleaned);
+  return {
+    polygon: clippedClone,
+    clipped: polygonsDiffer(original, clippedClone),
+    collapsed: false
+  };
+}
+
+// Helper: polygon clip subject by clipper (both arrays of {latitude, longitude})
+function polygonClip(clipper: Point[], subject: Point[]): Point[] {
+  if (!clipper.length || !subject.length) return clonePolygon(subject);
+  const clipRing = normalizeRing(clipper);
+  if (clipRing.length < 3) return clonePolygon(subject);
+
+  let output = clonePolygon(subject);
+  const clipCCW = signedArea(clipRing) >= 0;
+
+  for (let i = 0; i < clipRing.length; i++) {
+    const A = clipRing[i];
+    const B = clipRing[(i + 1) % clipRing.length];
+    if (pointsEqual(A, B)) continue;
+
+    const input = output.slice();
+    output = [];
+    if (!input.length) break;
+
+    for (let j = 0; j < input.length; j++) {
+      const P = input[j];
+      const Q = input[(j + 1) % input.length];
+      const P_in = isInsideEdge(A, B, P, clipCCW);
+      const Q_in = isInsideEdge(A, B, Q, clipCCW);
+
+      if (P_in && Q_in) {
+        output.push(clonePoint(Q));
+      } else if (P_in && !Q_in) {
+        output.push(intersection(A, B, P, Q));
+      } else if (!P_in && Q_in) {
+        output.push(intersection(A, B, P, Q));
+        output.push(clonePoint(Q));
+      }
+    }
+  }
+
+  return output;
+}
+
+function isLeft(a: Point, b: Point, c: Point) {
+  return (b.longitude - a.longitude) * (c.latitude - a.latitude) - (b.latitude - a.latitude) * (c.longitude - a.longitude);
+}
+
+function intersection(a: Point, b: Point, p: Point, q: Point): Point {
+  const x1 = a.longitude, y1 = a.latitude;
+  const x2 = b.longitude, y2 = b.latitude;
+  const x3 = p.longitude, y3 = p.latitude;
+  const x4 = q.longitude, y4 = q.latitude;
+  const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(den) < 1e-12) {
+    return clonePoint(q);
+  }
+  const xi = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / den;
+  const yi = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / den;
+  return { latitude: yi, longitude: xi };
 }
 onMounted(async () => {
   try {
@@ -784,6 +1133,33 @@ function computeAccuracyCircle(segments = 48) {
   }
   accuracyCircleLatLngs.value = pts;
 }
+
+// Snapping helpers
+function snapPointToBoundary(p: Point): Point | null {
+  const boundary = mapStore.configuration?.boundary_zone?.polygon;
+  if (!boundary || boundary.length < 2) return null;
+  let best: { pt: Point; d2: number } | null = null;
+  for (let i = 0; i < boundary.length; i++) {
+    const a = boundary[i];
+    const b = boundary[(i + 1) % boundary.length];
+    const proj = projectPointToSegment(p, a, b);
+    const d2 = (proj.latitude - p.latitude) ** 2 + (proj.longitude - p.longitude) ** 2;
+    if (!best || d2 < best.d2) best = { pt: proj, d2 };
+  }
+  return best?.pt || null;
+}
+
+function projectPointToSegment(p: Point, a: Point, b: Point): Point {
+  const ax = a.longitude, ay = a.latitude;
+  const bx = b.longitude, by = b.latitude;
+  const px = p.longitude, py = p.latitude;
+  const vx = bx - ax, vy = by - ay;
+  const len2 = vx * vx + vy * vy;
+  if (len2 < 1e-12) return a;
+  let t = ((px - ax) * vx + (py - ay) * vy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return { latitude: ay + t * vy, longitude: ax + t * vx };
+}
 </script>
 
 <style>
@@ -861,6 +1237,47 @@ function computeAccuracyCircle(segments = 48) {
   overflow: hidden;
 }
 
+.floating-toolbar {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.75);
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  z-index: 210;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.mini-btn {
+  background: var(--primary-light);
+  border: none;
+  color: var(--text-color);
+  font-size: 0.75rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.mini-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.mini-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.mini-btn-danger {
+  background: #ff4343;
+  color: #fff;
+}
+
+.cursor-crosshair { cursor: crosshair; }
+.cursor-pin { cursor: copy; }
+
 /* Ensure the Leaflet container fills the canvas */
 .editor-canvas :deep(.leaflet-container) {
   width: 100%;
@@ -919,6 +1336,35 @@ function computeAccuracyCircle(segments = 48) {
   min-height: 60px;
 }
 
+.unsaved-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  padding: .25rem .5rem;
+  border-radius: 999px;
+  background: rgba(255,200,0,0.15);
+  color: #ffd166;
+  font-weight: 700;
+  margin-left: .5rem;
+}
+
+/* Emoji divIcon styling for map markers */
+:deep(.lb-marker) {
+  display: grid;
+  place-items: center;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.7);
+  border: 2px solid rgba(255,255,255,0.8);
+  color: #fff;
+  font-size: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+:deep(.lb-marker.home) { border-color: #00ff92; }
+:deep(.lb-marker.am_sun) { border-color: #ffd166; }
+:deep(.lb-marker.pm_sun) { border-color: #ffa3ff; }
+:deep(.lb-marker.custom) { border-color: #66d9ff; }
+
 .alert {
   padding: 0.75rem 1rem;
   border-radius: 4px;
@@ -935,5 +1381,9 @@ function computeAccuracyCircle(segments = 48) {
   background: rgba(255, 67, 67, 0.1);
   border: 1px solid #ff4343;
   color: #ff4343;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none !important; }
 }
 </style>

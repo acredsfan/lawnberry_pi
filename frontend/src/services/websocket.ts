@@ -41,8 +41,10 @@ export class WebSocketService {
         
           this.ws.onopen = () => {
             console.log('WebSocket connected:', target)
-          this.reconnectAttempts = 0
-            this.urlIndex = 0 // stick to the working endpoint
+            this.reconnectAttempts = 0
+            // Remember working endpoint and stick to it across reconnects
+            const goodIndex = this.urlCandidates.indexOf(target)
+            if (goodIndex >= 0) this.urlIndex = goodIndex
           
           // Re-subscribe to topics after reconnection
           this.subscriptions.forEach(topic => {
@@ -136,10 +138,7 @@ export class WebSocketService {
       const jitter = Math.floor(Math.random() * 250)
       console.log(`Attempting to reconnect... (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${backoff + jitter}ms`)
 
-      // Rotate to next candidate for next attempt
-      if (this.urlCandidates.length > 1) {
-        this.urlIndex = (this.urlIndex + 1) % this.urlCandidates.length
-      }
+      // Only rotate if previous attempt failed immediately (onerror). If connection existed, keep same index.
 
       setTimeout(() => {
         this.connect().catch(() => {/* handled inside connect */})
@@ -252,6 +251,7 @@ let wsService: WebSocketService | null = null
 // Factory for telemetry or control WebSocket
 export function useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handlers?: { onMessage?: (msg: any) => void }) {
   let wsUrl: string
+  // If behind a reverse proxy, honor X-Forwarded-Proto via location.protocol
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
   if (type === 'telemetry') {

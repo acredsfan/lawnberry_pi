@@ -6,38 +6,45 @@
     </div>
     
     <!-- Settings Tabs -->
-    <div class="settings-tabs">
+    <div class="settings-tabs" role="tablist" aria-label="Settings sections">
       <button 
-        v-for="tab in tabs" 
+        v-for="(tab, idx) in tabs" 
         :key="tab.id"
         :class="{ active: activeTab === tab.id }"
         class="tab-button"
+        role="tab"
+        :id="tab.id"
+        :aria-selected="activeTab === tab.id"
+        :tabindex="activeTab === tab.id ? 0 : -1"
+        :aria-controls="`panel-${tab.id}`"
         @click="activeTab = tab.id"
+        @keydown="(e) => onTabKeydown(e, idx)"
       >
         {{ tab.label }}
       </button>
     </div>
     
     <!-- System Settings -->
-    <div v-if="activeTab === 'system'" class="settings-section">
+    <div v-if="activeTab === 'system'" class="settings-section" :id="'panel-system'" role="tabpanel" aria-labelledby="system">
       <div class="card">
         <div class="card-header">
           <h3>System Settings</h3>
         </div>
         <div class="card-body">
           <div class="form-group">
-            <label>Device Name</label>
+            <label for="device-name">Device Name</label>
             <input 
               v-model="systemSettings.device_name" 
               type="text" 
               class="form-control"
+              id="device-name"
               placeholder="LawnBerry Pi"
             >
           </div>
           
           <div class="form-group">
-            <label>Timezone</label>
-            <select v-model="systemSettings.timezone" class="form-control">
+            <label for="timezone">Timezone</label>
+            <select v-model="systemSettings.timezone" id="timezone" class="form-control">
               <option value="UTC">UTC</option>
               <option value="US/Eastern">US/Eastern</option>
               <option value="US/Central">US/Central</option>
@@ -59,7 +66,7 @@
             </label>
           </div>
           
-          <button class="btn btn-primary" :disabled="saving" @click="saveSystemSettings">
+          <button class="btn btn-primary" :disabled="saving" @click="saveSystemSettings" aria-label="Save system settings">
             {{ saving ? 'Saving...' : 'Save System Settings' }}
           </button>
         </div>
@@ -67,15 +74,15 @@
     </div>
     
     <!-- Security Settings -->
-    <div v-if="activeTab === 'security'" class="settings-section">
+    <div v-if="activeTab === 'security'" class="settings-section" :id="'panel-security'" role="tabpanel" aria-labelledby="security">
       <div class="card">
         <div class="card-header">
           <h3>Security Settings</h3>
         </div>
         <div class="card-body">
           <div class="form-group">
-            <label>Authentication Level</label>
-            <select v-model="securitySettings.auth_level" class="form-control">
+            <label for="auth-level">Authentication Level</label>
+            <select v-model="securitySettings.auth_level" id="auth-level" class="form-control">
               <option value="password">Password Only</option>
               <option value="totp">Password + TOTP</option>
               <option value="google">Google Authentication</option>
@@ -87,11 +94,12 @@
           </div>
           
           <div class="form-group">
-            <label>Session Timeout (minutes)</label>
+            <label for="session-timeout">Session Timeout (minutes)</label>
             <input 
               v-model.number="securitySettings.session_timeout_minutes" 
               type="number" 
               class="form-control"
+              id="session-timeout"
               min="5" 
               max="1440"
             >
@@ -119,7 +127,7 @@
             </label>
           </div>
           
-          <button class="btn btn-primary" :disabled="saving" @click="saveSecuritySettings">
+          <button class="btn btn-primary" :disabled="saving" @click="saveSecuritySettings" aria-label="Save security settings">
             {{ saving ? 'Saving...' : 'Save Security Settings' }}
           </button>
         </div>
@@ -127,15 +135,15 @@
     </div>
     
     <!-- Remote Access Settings -->
-    <div v-if="activeTab === 'remote'" class="settings-section">
+    <div v-if="activeTab === 'remote'" class="settings-section" :id="'panel-remote'" role="tabpanel" aria-labelledby="remote">
       <div class="card">
         <div class="card-header">
           <h3>Remote Access Settings</h3>
         </div>
         <div class="card-body">
           <div class="form-group">
-            <label>Remote Access Method</label>
-            <select v-model="remoteSettings.method" class="form-control">
+            <label for="remote-method">Remote Access Method</label>
+            <select v-model="remoteSettings.method" id="remote-method" class="form-control">
               <option value="none">Disabled</option>
               <option value="cloudflare">Cloudflare Tunnel</option>
               <option value="ngrok">Ngrok</option>
@@ -145,11 +153,12 @@
           
           <div v-if="remoteSettings.method === 'cloudflare'" class="remote-config">
             <div class="form-group">
-              <label>Cloudflare Tunnel Token</label>
+              <label for="cloudflare-token">Cloudflare Tunnel Token</label>
               <input 
                 v-model="remoteSettings.cloudflare_token" 
                 type="password" 
                 class="form-control"
+                id="cloudflare-token"
                 placeholder="Enter tunnel token"
               >
             </div>
@@ -157,11 +166,12 @@
           
           <div v-if="remoteSettings.method === 'ngrok'" class="remote-config">
             <div class="form-group">
-              <label>Ngrok Auth Token</label>
+              <label for="ngrok-token">Ngrok Auth Token</label>
               <input 
                 v-model="remoteSettings.ngrok_token" 
                 type="password" 
                 class="form-control"
+                id="ngrok-token"
                 placeholder="Enter ngrok token"
               >
             </div>
@@ -169,11 +179,12 @@
           
           <div v-if="remoteSettings.method === 'custom'" class="remote-config">
             <div class="form-group">
-              <label>Custom Domain</label>
+              <label for="custom-domain">Custom Domain</label>
               <input 
                 v-model="remoteSettings.custom_domain" 
                 type="text" 
                 class="form-control"
+                id="custom-domain"
                 placeholder="example.com"
               >
             </div>
@@ -201,7 +212,7 @@
             </label>
           </div>
           
-          <button class="btn btn-primary" :disabled="saving" @click="saveRemoteSettings">
+          <button class="btn btn-primary" :disabled="saving" @click="saveRemoteSettings" aria-label="Save remote access settings">
             {{ saving ? 'Saving...' : 'Save Remote Access Settings' }}
           </button>
         </div>
@@ -209,15 +220,15 @@
     </div>
     
     <!-- Maps Settings -->
-    <div v-if="activeTab === 'maps'" class="settings-section">
+    <div v-if="activeTab === 'maps'" class="settings-section" :id="'panel-maps'" role="tabpanel" aria-labelledby="maps">
       <div class="card">
         <div class="card-header">
           <h3>Maps Settings</h3>
         </div>
         <div class="card-body">
           <div class="form-group">
-            <label>Maps Provider</label>
-            <select v-model="mapsSettings.provider" class="form-control">
+            <label for="maps-provider">Maps Provider</label>
+            <select v-model="mapsSettings.provider" id="maps-provider" class="form-control">
               <option value="osm">OpenStreetMap (Free)</option>
               <option value="google">Google Maps</option>
               <option value="none">Disabled</option>
@@ -226,11 +237,12 @@
           
           <div v-if="mapsSettings.provider === 'google'" class="maps-config">
             <div class="form-group">
-              <label>Google Maps API Key</label>
+              <label for="google-api-key">Google Maps API Key</label>
               <input 
                 v-model="mapsSettings.google_api_key" 
                 type="password" 
                 class="form-control"
+                id="google-api-key"
                 placeholder="Enter your Google Maps API key"
               >
               <small class="form-text text-muted">
@@ -252,8 +264,8 @@
           </div>
           
           <div class="form-group">
-            <label>Map Style</label>
-            <select v-model="mapsSettings.style" class="form-control">
+            <label for="map-style">Map Style</label>
+            <select v-model="mapsSettings.style" id="map-style" class="form-control">
               <option value="standard">Standard</option>
               <option value="satellite">Satellite</option>
               <option value="hybrid">Hybrid</option>
@@ -261,7 +273,7 @@
             </select>
           </div>
           
-          <button class="btn btn-primary" :disabled="saving" @click="saveMapsSettings">
+          <button class="btn btn-primary" :disabled="saving" @click="saveMapsSettings" aria-label="Save maps settings">
             {{ saving ? 'Saving...' : 'Save Maps Settings' }}
           </button>
         </div>
@@ -269,15 +281,15 @@
     </div>
     
     <!-- GPS Policy Settings -->
-    <div v-if="activeTab === 'gps'" class="settings-section">
+    <div v-if="activeTab === 'gps'" class="settings-section" :id="'panel-gps'" role="tabpanel" aria-labelledby="gps">
       <div class="card">
         <div class="card-header">
           <h3>GPS Policy Settings</h3>
         </div>
         <div class="card-body">
           <div class="form-group">
-            <label>GPS Loss Policy</label>
-            <select v-model="gpsSettings.gps_loss_policy" class="form-control">
+            <label for="gps-loss-policy">GPS Loss Policy</label>
+            <select v-model="gpsSettings.gps_loss_policy" id="gps-loss-policy" class="form-control">
               <option value="stop">Stop Immediately</option>
               <option value="return_home">Return to Base</option>
               <option value="dead_reckoning">Continue with Dead Reckoning</option>
@@ -286,11 +298,12 @@
           
           <div v-if="gpsSettings.gps_loss_policy === 'dead_reckoning'" class="gps-config">
             <div class="form-group">
-              <label>Dead Reckoning Duration (minutes)</label>
+              <label for="dead-reckoning-duration">Dead Reckoning Duration (minutes)</label>
               <input 
                 v-model.number="gpsSettings.dead_reckoning_duration_minutes" 
                 type="number" 
                 class="form-control"
+                id="dead-reckoning-duration"
                 min="1" 
                 max="10"
               >
@@ -300,11 +313,12 @@
             </div>
             
             <div class="form-group">
-              <label>Reduced Speed Factor</label>
+              <label for="reduced-speed-factor">Reduced Speed Factor</label>
               <input 
                 v-model.number="gpsSettings.reduced_speed_factor" 
                 type="number" 
                 class="form-control"
+                id="reduced-speed-factor"
                 min="0.1" 
                 max="1.0" 
                 step="0.1"
@@ -316,17 +330,18 @@
           </div>
           
           <div class="form-group">
-            <label>GPS Accuracy Threshold (meters)</label>
+            <label for="accuracy-threshold">GPS Accuracy Threshold (meters)</label>
             <input 
               v-model.number="gpsSettings.accuracy_threshold_meters" 
               type="number" 
               class="form-control"
+              id="accuracy-threshold"
               min="1" 
               max="10"
             >
           </div>
           
-          <button class="btn btn-primary" :disabled="saving" @click="saveGpsSettings">
+          <button class="btn btn-primary" :disabled="saving" @click="saveGpsSettings" aria-label="Save GPS policy settings">
             {{ saving ? 'Saving...' : 'Save GPS Settings' }}
           </button>
         </div>
@@ -334,7 +349,7 @@
     </div>
     
     <!-- Status indicator -->
-    <div v-if="saveMessage" class="alert" :class="saveSuccess ? 'alert-success' : 'alert-danger'">
+    <div v-if="saveMessage" class="alert" :class="saveSuccess ? 'alert-success' : 'alert-danger'" role="status" aria-live="polite">
       {{ saveMessage }}
     </div>
   </div>
@@ -343,8 +358,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useApiService } from '@/services/api'
+import { useToastStore } from '@/stores/toast'
 
 const api = useApiService()
+const toast = useToastStore()
 
 // State
 const activeTab = ref('system')
@@ -414,9 +431,11 @@ async function loadAllSettings() {
     remoteSettings.value = { ...remoteSettings.value, ...remote.data }
     mapsSettings.value = { ...mapsSettings.value, ...maps.data }
     gpsSettings.value = { ...gpsSettings.value, ...gps.data }
+    toast.show('Settings loaded', 'info', 2000)
   } catch (error) {
     console.error('Failed to load settings:', error)
     showMessage('Failed to load settings', false)
+    toast.show('Failed to load settings', 'error', 4000)
   }
 }
 
@@ -446,9 +465,11 @@ async function saveSettings(endpoint: string, data: any) {
   try {
     await api.put(endpoint, data)
     showMessage('Settings saved successfully!', true)
+    toast.show('Settings saved', 'success', 2500)
   } catch (error) {
     console.error('Failed to save settings:', error)
     showMessage('Failed to save settings', false)
+    toast.show('Failed to save settings', 'error', 4000)
   } finally {
     saving.value = false
   }
@@ -465,6 +486,18 @@ function showMessage(message: string, success: boolean) {
 onMounted(() => {
   loadAllSettings()
 })
+
+function onTabKeydown(e: KeyboardEvent, idx: number) {
+  if (e.key === 'ArrowRight') {
+    const next = (idx + 1) % tabs.length
+    activeTab.value = tabs[next].id
+    e.preventDefault()
+  } else if (e.key === 'ArrowLeft') {
+    const prev = (idx - 1 + tabs.length) % tabs.length
+    activeTab.value = tabs[prev].id
+    e.preventDefault()
+  }
+}
 </script>
 
 <style scoped>
@@ -499,6 +532,11 @@ onMounted(() => {
   white-space: nowrap;
 }
 
+.tab-button:focus-visible {
+  outline: 2px solid var(--accent-green);
+  outline-offset: 2px;
+}
+
 .tab-button:hover {
   background-color: var(--primary-dark);
   color: var(--primary-light);
@@ -522,6 +560,15 @@ onMounted(() => {
   to {
     opacity: 1;
     transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-button, .btn {
+    transition: none !important;
+  }
+  .settings-section {
+    animation: none !important;
   }
 }
 
@@ -598,6 +645,11 @@ onMounted(() => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent-green);
+  outline-offset: 2px;
 }
 
 .btn-primary {

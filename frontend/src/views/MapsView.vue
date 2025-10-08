@@ -1,155 +1,11 @@
 <template>
   <div class="maps-view">
     <div class="page-header">
-      <h1>Map Setup</h1>
-      <p class="text-muted">Configure map providers, API keys, and manage pin assets</p>
+      <h1>Map Editor</h1>
+      <p class="text-muted">Edit boundary, zones, and waypoints; view coverage and mower location</p>
     </div>
 
-    <!-- Map Provider Configuration -->
-    <div class="card">
-      <div class="card-header">
-        <h3>Map Provider Configuration</h3>
-      </div>
-      <div class="card-body">
-        <div class="form-group">
-          <label>Map Provider</label>
-          <select v-model="settings.provider" class="form-control" @change="onProviderChange">
-            <option value="osm">OpenStreetMap (Free)</option>
-            <option value="google">Google Maps</option>
-            <option value="none">Disabled</option>
-          </select>
-        </div>
-
-        <!-- Google Maps Configuration -->
-        <div v-if="settings.provider === 'google'" class="provider-config">
-          <div class="form-group">
-            <label>Google Maps API Key</label>
-            <div class="input-group">
-              <input 
-                v-model="settings.google_api_key" 
-                :type="showApiKey ? 'text' : 'password'"
-                class="form-control"
-                placeholder="Enter your Google Maps API key"
-              >
-              <button 
-                type="button" 
-                class="btn btn-secondary"
-                @click="showApiKey = !showApiKey"
-              >
-                {{ showApiKey ? '👁️' : '👁️‍🗨️' }}
-              </button>
-            </div>
-            <small class="form-text text-muted">
-              Get your API key at 
-              <a href="https://developers.google.com/maps/documentation/javascript/get-api-key" target="_blank">
-                Google Cloud Console
-              </a>
-            </small>
-          </div>
-
-          <div class="form-group">
-            <label>
-              <input 
-                v-model="settings.google_billing_warnings" 
-                type="checkbox"
-                class="form-check-input"
-              > 
-              Show billing warnings
-            </label>
-            <small class="form-text text-muted">
-              Warn when approaching API usage limits
-            </small>
-          </div>
-
-          <div v-if="apiStatus" class="api-status">
-            <div class="status-indicator" :class="apiStatus.valid ? 'status-success' : 'status-error'">
-              {{ apiStatus.valid ? '✅ API Key Valid' : '❌ API Key Invalid' }}
-            </div>
-            <div v-if="apiStatus.message" class="status-message">
-              {{ apiStatus.message }}
-            </div>
-          </div>
-        </div>
-
-        <!-- Map Style Configuration -->
-        <div v-if="settings.provider !== 'none'" class="form-group">
-          <label>Map Style</label>
-          <select v-model="settings.style" class="form-control">
-            <option value="standard">Standard</option>
-            <option value="satellite">Satellite</option>
-            <option value="hybrid">Hybrid</option>
-            <option value="terrain">Terrain</option>
-          </select>
-        </div>
-
-        <div class="action-buttons">
-          <button class="btn btn-info" :disabled="testing" @click="testConnection">
-            {{ testing ? 'Testing...' : 'Test Connection' }}
-          </button>
-          <button class="btn btn-primary" :disabled="saving" @click="saveSettings">
-            {{ saving ? 'Saving...' : 'Save Settings' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Map Preview -->
-    <div v-if="settings.provider !== 'none'" class="card">
-      <div class="card-header">
-        <h3>Map Preview</h3>
-      </div>
-      <div class="card-body">
-        <div class="map-preview">
-          <div class="preview-controls">
-            <div class="coordinate-inputs">
-              <label>Latitude:</label>
-              <input 
-                v-model.number="previewLat" 
-                type="number" 
-                step="0.0001"
-                class="form-control-sm"
-              >
-              <label>Longitude:</label>
-              <input 
-                v-model.number="previewLon" 
-                type="number" 
-                step="0.0001"
-                class="form-control-sm"
-              >
-              <label>Zoom:</label>
-              <input 
-                v-model.number="previewZoom" 
-                type="number" 
-                min="1" 
-                max="20"
-                class="form-control-sm"
-              >
-            </div>
-          </div>
-          
-          <div class="tile-preview">
-            <div v-if="previewError" class="preview-error">
-              {{ previewError }}
-            </div>
-            <img 
-              v-else-if="previewUrl"
-              :src="previewUrl" 
-              alt="Map tile preview"
-              @error="onPreviewError"
-              @load="onPreviewLoad"
-            >
-            <div v-else class="preview-error">
-              Preview unavailable for current provider/style; using editor map below.
-            </div>
-            <div class="preview-meta">
-              Provider: {{ settings.provider.toUpperCase() }} | 
-              Style: {{ settings.style }} |
-              Zoom: {{ previewZoom }}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- Provider configuration and preview moved to Settings; retained settings load to drive editor tiles. -->
 
     <!-- Boundary & Zone Editor -->
     <div v-if="settings.provider !== 'none'" class="card">
@@ -158,7 +14,8 @@
       </div>
       <div class="card-body" style="height: 720px;">
         <BoundaryEditor
-          :map-provider="settings.provider"
+          ref="editorRef"
+          :map-provider="settings.provider === 'google' ? 'google' : (settings.provider === 'osm' ? 'osm' : 'none')"
           :map-style="settings.style"
           :google-api-key="settings.google_api_key"
           :pick-for-pin="pickForPin"
@@ -167,42 +24,99 @@
       </div>
     </div>
 
-    <!-- Pin Asset Management -->
+    <!-- Pin & Zone Asset Management -->
     <div class="card">
       <div class="card-header">
-        <h3>Pin Asset Management</h3>
+        <h3>Pins & Zones</h3>
       </div>
       <div class="card-body">
         <div class="pin-categories">
-          <div v-for="category in pinCategories" :key="category.id" class="category">
+          <!-- Waypoints / Markers -->
+          <div class="category">
             <div class="category-header">
-              <h4>{{ category.name }}</h4>
-              <button class="btn btn-sm btn-primary" @click="addPin(category.id)">
-                Add Pin
-              </button>
+              <h4>Waypoints</h4>
+              <div style="display:flex; gap:.5rem">
+                <button class="btn btn-sm btn-primary" @click="addPin('waypoints')">Add Pin</button>
+              </div>
             </div>
-            
             <div class="pin-list">
               <div 
-                v-for="pin in category.pins" 
-                :key="pin.id"
+                v-for="m in (mapStore.configuration?.markers || [])" 
+                :key="m.marker_id"
                 class="pin-item"
-                :class="{ active: selectedPin?.id === pin.id }"
-                @click="selectPin(pin)"
+                :class="{ active: selectedPinId === m.marker_id }"
+                @click="selectMarker(m)"
               >
-                <div class="pin-icon">{{ pin.icon }}</div>
+                <div class="pin-icon">{{ iconForMarker(m.marker_type) }}</div>
                 <div class="pin-info">
-                  <div class="pin-name">{{ pin.name }}</div>
-                  <div class="pin-coords">{{ pin.lat.toFixed(6) }}, {{ pin.lon.toFixed(6) }}</div>
+                  <div class="pin-name">{{ m.label || m.marker_type }}</div>
+                  <div class="pin-coords">{{ m.position.latitude.toFixed(6) }}, {{ m.position.longitude.toFixed(6) }}</div>
                 </div>
                 <div class="pin-actions">
-                  <button class="btn btn-xs btn-secondary" @click.stop="editPin(pin)">
-                    ✏️
-                  </button>
-                  <button class="btn btn-xs btn-danger" @click.stop="deletePin(pin)">
-                    🗑️
-                  </button>
+                  <button class="btn btn-xs btn-secondary" @click.stop="editMarker(m)">✏️</button>
+                  <button class="btn btn-xs btn-info" @click.stop="editMarkerOnMap(m)">🗺️ Edit on map</button>
+                  <button class="btn btn-xs btn-danger" @click.stop="deleteMarker(m)">🗑️</button>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mowing Zones -->
+          <div class="category">
+            <div class="category-header">
+              <h4>Mowing Zones</h4>
+            </div>
+            <div class="pin-list">
+              <div 
+                v-for="z in (mapStore.configuration?.mowing_zones || [])" 
+                :key="z.id"
+                class="pin-item"
+              >
+                <div class="pin-icon">🌱</div>
+                <div class="pin-info">
+                  <div class="pin-name">{{ z.name }}</div>
+                  <div class="pin-coords">{{ z.polygon.length }} points</div>
+                </div>
+                <div class="pin-actions">
+                  <button class="btn btn-xs btn-secondary" @click.stop="renameZone(z)">✏️</button>
+                  <button class="btn btn-xs btn-info" @click.stop="editZoneOnMap(z)">🗺️ Edit on map</button>
+                  <button class="btn btn-xs btn-danger" @click.stop="removeMow(z)">🗑️</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Exclusion Zones -->
+          <div class="category">
+            <div class="category-header">
+              <h4>Exclusion Zones</h4>
+            </div>
+            <div class="pin-list">
+              <div 
+                v-for="z in (mapStore.configuration?.exclusion_zones || [])" 
+                :key="z.id"
+                class="pin-item"
+              >
+                <div class="pin-icon">🚫</div>
+                <div class="pin-info">
+                  <div class="pin-name">{{ z.name }}</div>
+                  <div class="pin-coords">{{ z.polygon.length }} points</div>
+                </div>
+                <div class="pin-actions">
+                  <button class="btn btn-xs btn-secondary" @click.stop="renameZone(z)">✏️</button>
+                  <button class="btn btn-xs btn-info" @click.stop="editExclusionOnMap(z)">🗺️ Edit on map</button>
+                  <button class="btn btn-xs btn-danger" @click.stop="removeExclusion(z)">🗑️</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Boundary quick-edit -->
+          <div class="category">
+            <div class="category-header">
+              <h4>Boundary</h4>
+              <div style="display:flex; gap:.5rem">
+                <button class="btn btn-sm btn-info" @click="editBoundaryOnMap">🗺️ Edit boundary on map</button>
               </div>
             </div>
           </div>
@@ -223,14 +137,7 @@
             <input v-model="pinForm.name" type="text" class="form-control">
           </div>
           
-          <div class="form-group">
-            <label>Category</label>
-            <select v-model="pinForm.category" class="form-control">
-              <option v-for="cat in pinCategories" :key="cat.id" :value="cat.id">
-                {{ cat.name }}
-              </option>
-            </select>
-          </div>
+          
           
           <div class="form-group">
             <label>Icon</label>
@@ -278,6 +185,7 @@
           <div class="form-group">
             <label>Description</label>
             <textarea v-model="pinForm.description" class="form-control" rows="3" />
+            <small class="form-text text-muted">Note: This mower uses solar charging; no dock is required. Use AM/PM Sun spots for optimal charging behavior.</small>
           </div>
         </div>
         <div class="modal-footer">
@@ -298,8 +206,13 @@
 import { ref, computed, onMounted } from 'vue'
 import { useApiService } from '@/services/api'
 import BoundaryEditor from '@/components/map/BoundaryEditor.vue'
+import { useMapStore } from '@/stores/map'
+import { useToastStore } from '@/stores/toast'
 
 const api = useApiService()
+const mapStore = useMapStore()
+const toast = useToastStore()
+const editorRef = ref<any>(null)
 
 // State
 const settings = ref({
@@ -311,10 +224,6 @@ const settings = ref({
 
 const showApiKey = ref(false)
 const apiStatus = ref<{valid: boolean, message?: string} | null>(null)
-const testing = ref(false)
-const saving = ref(false)
-const statusMessage = ref('')
-const statusSuccess = ref(false)
 
 // Preview state
 const previewLat = ref(37.7749)
@@ -322,13 +231,13 @@ const previewLon = ref(-122.4194)
 const previewZoom = ref(15)
 const previewError = ref('')
 
-// Pin management state
+// Pin management state (for add/edit)
 const showPinEditor = ref(false)
-const editingPin = ref<any>(null)
-const selectedPin = ref<any>(null)
+const editingMarkerId = ref<string | null>(null)
+const selectedPinId = ref<string | null>(null)
 const pinForm = ref({
   name: '',
-  category: 'waypoints',
+  type: 'custom',
   icon: '📍',
   lat: 0,
   lon: 0,
@@ -337,35 +246,9 @@ const pinForm = ref({
 
 // Pin pick-from-map state
 const pickForPin = ref(false)
+let reopenAfterPick = false
 
-const pinCategories = ref([
-  {
-    id: 'waypoints',
-    name: 'Waypoints',
-    pins: [
-      { id: 1, name: 'Home Base', icon: '🏠', lat: 37.7749, lon: -122.4194, description: 'Charging station' },
-  { id: 2, name: 'Lawn Entry', icon: '🚪', lat: 37.7750, lon: -122.4195, description: 'Main entrance' }
-    ]
-  },
-  {
-    id: 'zones',
-    name: 'Mowing Zones',
-    pins: [
-  { id: 3, name: 'Front Lawn', icon: '🌱', lat: 37.7748, lon: -122.4193, description: 'Main mowing area' },
-  { id: 4, name: 'Back Lawn', icon: '🌳', lat: 37.7751, lon: -122.4196, description: 'Secondary area' }
-    ]
-  },
-  {
-    id: 'obstacles',
-    name: 'Obstacles',
-    pins: [
-      { id: 5, name: 'Tree', icon: '🌲', lat: 37.7749, lon: -122.4193, description: 'Large oak tree' },
-      { id: 6, name: 'Pond', icon: '🟦', lat: 37.7750, lon: -122.4195, description: 'Water feature' }
-    ]
-  }
-])
-
-const availableIcons = ['📍', '🏠', '🚪', '🌱', '🌳', '🌲', '🟦', '⚠️', '🔧', '⛽', '🎯', '📡']
+const availableIcons = ['📍', '🏠', '☀️', '🌅', '🚪', '🌱', '🌳', '🌲', '🟦', '⚠️', '🔧', '⛽', '🎯', '📡']
 
 // Computed
 const previewUrl = computed(() => {
@@ -391,65 +274,14 @@ async function loadSettings() {
   try {
     const response = await api.get('/api/v2/settings/maps')
     settings.value = { ...settings.value, ...response.data }
+    toast.show('Map settings loaded', 'info', 2000)
   } catch (error) {
     console.error('Failed to load map settings:', error)
     showStatus('Failed to load settings', false)
+    toast.show('Failed to load map settings', 'error')
   }
 }
 
-async function saveSettings() {
-  saving.value = true
-  try {
-    await api.put('/api/v2/settings/maps', settings.value)
-    showStatus('Settings saved successfully!', true)
-  } catch (error) {
-    console.error('Failed to save settings:', error)
-    showStatus('Failed to save settings', false)
-  } finally {
-    saving.value = false
-  }
-}
-
-async function testConnection() {
-  testing.value = true
-  apiStatus.value = null
-  
-  try {
-    if (settings.value.provider === 'google' && settings.value.google_api_key) {
-      // Prefer official JS API loader to validate the key properly
-      try {
-        const { Loader } = await import('@googlemaps/js-api-loader')
-        const loader = new Loader({
-          apiKey: settings.value.google_api_key,
-          version: 'weekly'
-        })
-        await loader.load()
-        apiStatus.value = { valid: true, message: 'Google Maps JavaScript API loaded successfully' }
-      } catch (e: any) {
-        // Could not verify automatically (common with HTTP referrer/IP restrictions).
-        // Treat as usable and surface a helpful message instead of hard "invalid" to avoid false negatives.
-        apiStatus.value = {
-          valid: true,
-          message: 'Could not validate automatically (referrer/IP restrictions). The editor will attempt to load Google tiles; if they do not appear, check key restrictions and enable Maps JavaScript API.'
-        }
-      }
-    } else if (settings.value.provider === 'osm') {
-      // Test OSM tile server
-      const testUrl = 'https://tile.openstreetmap.org/1/0/0.png'
-      const response = await fetch(testUrl, { method: 'GET' })
-      
-      if (response.ok) {
-        apiStatus.value = { valid: true, message: 'OpenStreetMap tiles accessible' }
-      } else {
-        apiStatus.value = { valid: false, message: 'Unable to access OSM tiles' }
-      }
-    }
-  } catch (error) {
-    apiStatus.value = { valid: false, message: 'Connection test failed' }
-  } finally {
-    testing.value = false
-  }
-}
 
 function onProviderChange() {
   apiStatus.value = null
@@ -464,20 +296,14 @@ function onPreviewLoad() {
   previewError.value = ''
 }
 
-function showStatus(message: string, success: boolean) {
-  statusMessage.value = message
-  statusSuccess.value = success
-  setTimeout(() => {
-    statusMessage.value = ''
-  }, 3000)
-}
+function showStatus(_message: string, _success: boolean) {}
 
 // Pin management
-function addPin(categoryId: string) {
-  editingPin.value = null
+function addPin(_categoryId: string) {
+  editingMarkerId.value = null
   pinForm.value = {
     name: '',
-    category: categoryId,
+    type: 'custom',
     icon: '📍',
     lat: previewLat.value,
     lon: previewLon.value,
@@ -486,53 +312,53 @@ function addPin(categoryId: string) {
   showPinEditor.value = true
 }
 
-function editPin(pin: any) {
-  editingPin.value = pin
-  pinForm.value = { ...pin }
+function editMarker(m: any) {
+  editingMarkerId.value = m.marker_id
+  pinForm.value = { name: m.label || '', type: m.marker_type, icon: iconForMarker(m.marker_type), lat: m.position.latitude, lon: m.position.longitude, description: '' }
   showPinEditor.value = true
 }
 
-function deletePin(pin: any) {
-  if (confirm(`Delete pin "${pin.name}"?`)) {
-    const category = pinCategories.value.find(cat => 
-      cat.pins.some(p => p.id === pin.id)
-    )
-    if (category) {
-      const index = category.pins.findIndex(p => p.id === pin.id)
-      if (index > -1) {
-        category.pins.splice(index, 1)
-      }
-    }
+async function deleteMarker(m: any) {
+  if (!confirm(`Delete marker "${m.label || m.marker_type}"?`)) return
+  try {
+    mapStore.removeMarker(m.marker_id)
+    await mapStore.saveConfiguration()
+    toast.show('Marker removed', 'success', 1500)
+  } catch (error) {
+    console.error(error)
+    toast.show('Failed to delete marker', 'error')
   }
 }
 
-function selectPin(pin: any) {
-  selectedPin.value = pin
-  previewLat.value = pin.lat
-  previewLon.value = pin.lon
+function selectMarker(m: any) {
+  selectedPinId.value = m.marker_id
+  previewLat.value = m.position.latitude
+  previewLon.value = m.position.longitude
 }
 
-function savePin() {
-  if (editingPin.value) {
-    // Update existing pin
-    Object.assign(editingPin.value, pinForm.value)
-  } else {
-    // Add new pin
-    const category = pinCategories.value.find(cat => cat.id === pinForm.value.category)
-    if (category) {
-      const newPin = {
-        ...pinForm.value,
-        id: Date.now() // Simple ID generation
-      }
-      category.pins.push(newPin)
+async function savePin() {
+  try {
+    if (editingMarkerId.value) {
+      mapStore.updateMarker(editingMarkerId.value, {
+        label: pinForm.value.name || undefined,
+        marker_type: pinForm.value.type,
+        position: { latitude: pinForm.value.lat, longitude: pinForm.value.lon }
+      } as any)
+    } else {
+      mapStore.addMarker(pinForm.value.type as any, { latitude: pinForm.value.lat, longitude: pinForm.value.lon }, pinForm.value.name)
     }
+    await mapStore.saveConfiguration()
+    toast.show('Marker saved', 'success', 1800)
+  } catch (e) {
+    console.error(e)
+    toast.show('Failed to save marker', 'error')
   }
   closePinEditor()
 }
 
 function closePinEditor() {
   showPinEditor.value = false
-  editingPin.value = null
+  editingMarkerId.value = null
   pickForPin.value = false
 }
 
@@ -541,14 +367,102 @@ onMounted(() => {
 })
 
 function enablePickOnMap() {
-  pickForPin.value = true
+  // Hide the modal so map clicks are not blocked
+  reopenAfterPick = true
+  showPinEditor.value = false
+  // Slight delay to allow modal transition (if any)
+  setTimeout(() => { pickForPin.value = true }, 50)
 }
 
 function onPinPicked(coords: { latitude: number; longitude: number }) {
-  if (!showPinEditor.value) return
+  // Reopen editor if we initiated pick from modal
+  if (reopenAfterPick) {
+    showPinEditor.value = true
+    reopenAfterPick = false
+  }
   pinForm.value.lat = coords.latitude
   pinForm.value.lon = coords.longitude
   pickForPin.value = false
+}
+
+// Apply the current Pin modal coordinates to the live configuration as a marker
+const applyMarkerType = ref<'home'|'am_sun'|'pm_sun'|'custom'>('home')
+async function applyPinToConfiguration() {
+  try {
+    if (!mapStore.configuration) {
+      await mapStore.loadConfiguration('default')
+    }
+    mapStore.addMarker(applyMarkerType.value, { latitude: pinForm.value.lat, longitude: pinForm.value.lon })
+    await mapStore.saveConfiguration()
+    showStatus('Marker applied to configuration', true)
+  } catch (e) {
+    showStatus('Failed to apply marker', false)
+  }
+}
+
+// Quick actions: Add polygon zones via the map editor
+function addMowingZoneOnMap() {
+  mapStore.setEditMode('mowing')
+}
+function addExclusionZoneOnMap() {
+  mapStore.setEditMode('exclusion')
+}
+
+function iconForMarker(type: string) {
+  return type === 'home' ? '🏠' : type === 'am_sun' ? '☀️' : type === 'pm_sun' ? '🌅' : '📍'
+}
+
+async function removeMow(z: any) {
+  if (!confirm(`Delete mowing zone "${z.name}"?`)) return
+  try {
+    mapStore.removeMowingZone(z.id)
+    await mapStore.saveConfiguration()
+    toast.show('Mowing zone removed', 'success', 1500)
+  } catch (error) {
+    console.error(error)
+    toast.show('Failed to delete mowing zone', 'error')
+  }
+}
+
+async function renameZone(z: any) {
+  const name = prompt('Zone name', z.name)
+  if (!name) return
+  mapStore.updateZoneName(z.id, name)
+  try {
+    await mapStore.saveConfiguration()
+    toast.show('Zone renamed', 'success', 1500)
+  } catch (error) {
+    console.error(error)
+    toast.show('Failed to rename zone', 'error')
+  }
+}
+
+async function removeExclusion(z: any) {
+  if (!confirm(`Delete exclusion zone "${z.name}"?`)) return
+  try {
+    mapStore.removeExclusionZone(z.id)
+    await mapStore.saveConfiguration()
+    toast.show('Exclusion zone removed', 'success', 1500)
+  } catch (error) {
+    console.error(error)
+    toast.show('Failed to delete exclusion zone', 'error')
+  }
+}
+
+function editMarkerOnMap(m: any) {
+  try { editorRef.value?.focusMarker(m.marker_id) } catch {}
+}
+
+function editZoneOnMap(z: any) {
+  try { editorRef.value?.editZoneOnMap(z.id, 'mowing') } catch {}
+}
+
+function editExclusionOnMap(z: any) {
+  try { editorRef.value?.editZoneOnMap(z.id, 'exclusion') } catch {}
+}
+
+function editBoundaryOnMap() {
+  try { editorRef.value?.editZoneOnMap('', 'boundary') } catch {}
 }
 </script>
 

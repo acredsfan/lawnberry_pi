@@ -114,6 +114,7 @@ class MapMarker(BaseModel):
     position: Point
     label: Optional[str] = None
     icon: Optional[str] = None  # Icon identifier for UI rendering
+    # Optional scheduling or conditions: e.g., {"use_when": "am|pm|rain|always", "time_window": {"start":"08:00","end":"11:00"}}
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -252,9 +253,12 @@ class MapConfiguration(BaseModel):
         
         # Check for marker overlaps (basic validation)
         marker_types = [m.marker_type for m in self.markers]
-        required_markers = [MarkerType.HOME]
-        for required in required_markers:
-            if required not in marker_types:
-                self.validation_errors.append(f"Missing required marker: {required.value}")
+        # HOME marker is strongly recommended for navigation, but don't block persistence
+        if MarkerType.HOME not in marker_types:
+            self.validation_errors.append("Missing recommended marker: home")
         
-        return len(self.validation_errors) == 0
+        # Only treat geometry/placement errors as fatal; allow marker advisories
+        return all(
+            not msg.lower().startswith("missing recommended marker")
+            for msg in self.validation_errors
+        )

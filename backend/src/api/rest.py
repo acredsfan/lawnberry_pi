@@ -1634,8 +1634,25 @@ async def get_map_configuration(config_id: str = "default", simulate_fallback: O
     for z in config.mowing_zones:
         zones.append(_zone_to_envelope(z, "mow"))
 
+    # Project markers to a simple contract for UI
+    markers_out = []
+    for m in config.markers:
+        try:
+            mt = m.marker_type if isinstance(m.marker_type, str) else m.marker_type.value
+        except Exception:
+            mt = str(m.marker_type)
+        markers_out.append({
+            "marker_id": m.marker_id,
+            "marker_type": mt,
+            "position": {"latitude": m.position.latitude, "longitude": m.position.longitude},
+            "label": m.label,
+            "icon": m.icon,
+            "metadata": getattr(m, "metadata", {}) or {},
+        })
+
     return {
         "zones": zones,
+        "markers": markers_out,
         "provider": provider_str.replace("_", "-"),
         "updated_at": config.last_modified.isoformat(),
         "updated_by": "system",

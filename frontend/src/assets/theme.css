@@ -1,0 +1,35 @@
+:root {
+  --bg: #0a0a0a;
+  --text: #e6f0ff;
+  --muted: #9db0c6;
+  --primary: #00d1b2;
+  --primary-600: #00b39a;
+  --accent: #7c5cff;
+  --danger: #ff5a7a;
+  --card: #12141a;
+  --card-2: #151823;
+  --border: #1e2230;
+}
+
+[data-theme="pro"] {
+  --bg: #0c1016;
+  --text: #e6f0ff;
+  --muted: #99a7bd;
+  --primary: #17c964;
+  --primary-600: #13a454;
+  --accent: #0072f5;
+  --danger: #f31260;
+  --card: #0f1722;
+  --card-2: #0b1420;
+  --border: #162032;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.card { background: var(--card); border-color: var(--border); }
+.card-header, .card-footer { background: var(--card-2); }
+.btn-primary { background: var(--primary); }
+.btn-primary:hover { background: var(--primary-600); }

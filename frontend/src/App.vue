@@ -1,7 +1,9 @@
 <template>
   <div id="app" class="retro-app">
     <div class="retro-grid-bg" />
+    <TopProgress />
     <header class="app-header">
+      <a class="skip-link" href="#main-content">Skip to content</a>
       <nav class="navbar">
         <div class="nav-brand">
           <img :src="logoUrl" alt="LawnBerry Pi" class="logo">
@@ -15,15 +17,18 @@
           <router-link to="/settings" class="nav-link">Settings</router-link>
         </div>
         <div class="nav-user">
+          <button class="theme-toggle" @click="toggleTheme" :title="`Theme: ${theme}`">
+            {{ theme === 'pro' ? '🌗 Pro' : '💾 Retro' }}
+          </button>
           <UserMenu v-if="user" />
-          <router-link v-else to="/login" class="login-link">
-            Sign In
-          </router-link>
+          <router-link v-else to="/login" class="login-link">Sign In</router-link>
         </div>
       </nav>
     </header>
     
-    <main class="app-main">
+    <main id="main-content" class="app-main">
+      <ToastHost />
+      <CommandPalette />
       <router-view />
     </main>
     
@@ -47,6 +52,9 @@ import { computed, onMounted } from 'vue'
 import { useAuthStore } from './stores/auth'
 import { useSystemStore } from './stores/system'
 import UserMenu from './components/UserMenu.vue'
+import ToastHost from './components/ToastHost.vue'
+import CommandPalette from './components/CommandPalette.vue'
+import TopProgress from './components/TopProgress.vue'
 import logoUrl from '@/assets/logo.png'
 
 const authStore = useAuthStore()
@@ -55,6 +63,16 @@ const systemStore = useSystemStore()
 const user = computed(() => authStore.user)
 const systemStatus = computed(() => systemStore.status)
 const connectionStatus = computed(() => systemStore.connectionStatus)
+
+const theme = computed({
+  get: () => (document.documentElement.getAttribute('data-theme') || 'retro'),
+  set: (val: string) => document.documentElement.setAttribute('data-theme', val)
+}) as any
+function toggleTheme() {
+  const next = theme.value === 'pro' ? 'retro' : 'pro'
+  theme.value = next
+  try { localStorage.setItem('lb_theme', next) } catch {}
+}
 
 onMounted(async () => {
   // Initialize system store
@@ -75,10 +93,30 @@ onMounted(async () => {
   activityEvents.forEach(event => {
     document.addEventListener(event, handleActivity, { passive: true })
   })
+  // Restore theme
+  try { const saved = localStorage.getItem('lb_theme'); if (saved) theme.value = saved } catch {}
 })
 </script>
 
 <style scoped>
+/* Skip link accessibility */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.skip-link:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: .5rem 1rem;
+  background: #00ffff;
+  color: #000;
+  border-radius: 6px;
+}
 /* 1980s Techno Theme */
 .retro-app {
   background: #0a0a0a;
@@ -234,6 +272,15 @@ onMounted(async () => {
 
 .nav-user {
   position: relative;
+}
+
+.theme-toggle {
+  margin-right: .5rem;
+  color: #00ffff;
+  background: rgba(0,255,255,0.08);
+  border: 1px solid rgba(0,255,255,0.3);
+  padding: .5rem .75rem;
+  cursor: pointer;
 }
 
 .login-link {
