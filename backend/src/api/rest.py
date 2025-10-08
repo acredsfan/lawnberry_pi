@@ -1594,6 +1594,7 @@ async def control_emergency_clear(body: Optional[dict] = None, request: Request 
 
 from ..models.zone import MapConfiguration, MapMarker, Zone, Point, MarkerType, MapProvider
 from ..services.maps_service import maps_service
+from ..nav.coverage_planner import plan_coverage
 
 
 @router.get("/map/configuration")
@@ -1775,6 +1776,52 @@ async def trigger_provider_fallback():
 
 
 # ----------------------- Settings V2 -----------------------
+
+# ----------------------- Navigation / Coverage Planning -----------------------
+
+
+@router.get("/nav/coverage-plan")
+async def get_coverage_plan(
+    config_id: str = "default",
+    spacing_m: float = 0.6,
+    angle_deg: float = 0.0,
+    max_rows: int = 2000,
+):
+    """Compute a simple serpentine coverage plan from the saved map configuration.
+
+    Returns a contract-shaped response with a GeoJSON-like polyline and stats.
+    """
+    cfg = await maps_service.load_map_configuration(config_id, persistence)
+    if not cfg or not cfg.boundary_zone:
+        return JSONResponse(status_code=404, content={"error": "No boundary configured"})
+
+    # Convert zones to (lat,lon) tuples expected by planner
+    boundary = [(p.latitude, p.longitude) for p in cfg.boundary_zone.polygon]
+    holes = []
+    for z in cfg.exclusion_zones:
+        holes.append([(p.latitude, p.longitude) for p in z.polygon])
+
+    path, rows, length_m = plan_coverage(
+        boundary,
+        holes,
+        spacing_m=spacing_m,
+        angle_deg=angle_deg,
+        max_rows=max_rows,
+    )
+    coords = [[lon, lat] for (lat, lon) in path]
+    return {
+        "plan": {
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": coords},
+            "properties": {
+                "spacing_m": spacing_m,
+                "angle_deg": angle_deg,
+                "rows": rows,
+                "length_m": round(length_m, 2),
+                "points": len(coords),
+            },
+        }
+    }
 
 from ..services.settings_service import get_settings_service, SettingsService
 
@@ -2530,10 +2577,17 @@ def put_settings_remote_access(update: dict):
         raise HTTPException(status_code=422, detail=f"Invalid remote access settings: {str(e)}")
 
 
-# Maps settings (provider toggle, API key management, bypass) - placeholder
+# Maps settings (provider toggle, API key management, style)
 _maps_settings: dict = {
-    "provider": "google",  # "google" or "osm"
-    "api_key": None,
+    # Provider options match frontend: 'google' | 'osm' | 'none'
+    "provider": "google",
+    # Persisted API key field aligned with frontend
+    "google_api_key": None,
+    # UI toggles
+    "google_billing_warnings": True,
+    # Map style options: 'standard' | 'satellite' | 'hybrid' | 'terrain'
+    "style": "standard",
+    # Optional: bypass external maps entirely (offline drawing)
     "bypass_external": False,
 }
 _maps_last_modified: datetime = datetime.now(timezone.utc)
@@ -2568,10 +2622,21 @@ def get_settings_maps(request: Request):
 @router.put("/settings/maps")
 def put_settings_maps(update: dict):
     global _maps_settings, _maps_last_modified
-    allowed_providers = {"google", "osm"}
+    # Back-compat: accept 'api_key' and map to 'google_api_key'
+    if "api_key" in update and "google_api_key" not in update:
+        update["google_api_key"] = update.get("api_key")
+
+    allowed_providers = {"google", "osm", "none"}
+    allowed_styles = {"standard", "satellite", "hybrid", "terrain"}
     if "provider" in update and update["provider"] not in allowed_providers:
-        raise HTTPException(status_code=422, detail="provider must be 'google' or 'osm'")
-    _maps_settings.update(update)
+        raise HTTPException(status_code=422, detail="provider must be 'google', 'osm', or 'none'")
+    if "style" in update and update["style"] not in allowed_styles:
+        raise HTTPException(status_code=422, detail="style must be one of: standard, satellite, hybrid, terrain")
+
+    # Only persist known keys to avoid accidental bloat, but allow forward-compatible extras
+    for k, v in list(update.items()):
+        _maps_settings[k] = v
+
     _maps_last_modified = datetime.now(timezone.utc)
     return _maps_settings
 

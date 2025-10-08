@@ -16,46 +16,84 @@ export class WebSocketService {
   private subscriptions = new Set<string>()
   private listeners = new Map<string, Array<(data: any) => void>>()
 
-  constructor(private url: string) {}
+  private urlCandidates: string[]
+  private urlIndex = 0
+
+  constructor(private url: string) {
+    // Build fallback candidates: primary /api/v2/ws/telemetry, then /ws
+    try {
+      const u = new URL(url)
+      const alt = `${u.protocol}//${u.host}/ws`
+      this.urlCandidates = [url]
+      if (alt !== url) this.urlCandidates.push(alt)
+    } catch {
+      // Fallback if URL parsing fails
+      this.urlCandidates = [url]
+    }
+  }
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(this.url)
+      const tryConnect = () => {
+        const target = this.urlCandidates[this.urlIndex] || this.urlCandidates[0]
+        try {
+          this.ws = new WebSocket(target)
         
-        this.ws.onopen = () => {
-          console.log('WebSocket connected')
+          this.ws.onopen = () => {
+            console.log('WebSocket connected:', target)
           this.reconnectAttempts = 0
+            this.urlIndex = 0 // stick to the working endpoint
           
           // Re-subscribe to topics after reconnection
           this.subscriptions.forEach(topic => {
             this.subscribe(topic)
           })
+            // Optional: set default cadence
+            this.setCadence(5)
           
           resolve()
-        }
+          }
         
-        this.ws.onmessage = (event) => {
+          this.ws.onmessage = (event) => {
           try {
             const message: WebSocketMessage = JSON.parse(event.data)
             this.handleMessage(message)
           } catch (error) {
             console.error('Failed to parse WebSocket message:', error)
           }
-        }
+          }
         
-        this.ws.onclose = () => {
-          console.log('WebSocket disconnected')
-          this.handleReconnect()
-        }
+          this.ws.onclose = () => {
+            console.log('WebSocket disconnected')
+            this.handleReconnect()
+          }
         
-        this.ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
-          reject(error)
+          this.ws.onerror = (error) => {
+            console.error('WebSocket error:', error)
+            // Try alternate candidate once before giving up initial connect
+            if (this.urlCandidates.length > 1 && this.urlIndex < this.urlCandidates.length - 1) {
+              this.urlIndex++
+              tryConnect()
+            } else {
+              // Allow reconnect loop to proceed
+              this.handleReconnect()
+              // Resolve after scheduling reconnect to avoid unhandled rejections in callers
+              resolve()
+            }
+          }
+        } catch (error) {
+          // Try alternate or schedule reconnect
+          if (this.urlCandidates.length > 1 && this.urlIndex < this.urlCandidates.length - 1) {
+            this.urlIndex++
+            tryConnect()
+          } else {
+            this.handleReconnect()
+            resolve()
+          }
         }
-      } catch (error) {
-        reject(error)
       }
+
+      tryConnect()
     })
   }
 
@@ -94,13 +132,18 @@ export class WebSocketService {
   private handleReconnect() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++
-      console.log(`Attempting to reconnect... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
-      
+      const backoff = this.reconnectDelay * this.reconnectAttempts
+      const jitter = Math.floor(Math.random() * 250)
+      console.log(`Attempting to reconnect... (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${backoff + jitter}ms`)
+
+      // Rotate to next candidate for next attempt
+      if (this.urlCandidates.length > 1) {
+        this.urlIndex = (this.urlIndex + 1) % this.urlCandidates.length
+      }
+
       setTimeout(() => {
-        this.connect().catch(error => {
-          console.error('Reconnection failed:', error)
-        })
-      }, this.reconnectDelay * this.reconnectAttempts)
+        this.connect().catch(() => {/* handled inside connect */})
+      }, backoff + jitter)
     } else {
       console.error('Max reconnection attempts reached')
     }
@@ -131,9 +174,13 @@ export class WebSocketService {
       this.listeners.set(topic, [])
     }
     this.listeners.get(topic)!.push(callback)
-    
-    // Subscribe to the topic if not already subscribed
-    if (!this.subscriptions.has(topic)) {
+
+    // Track desired subscription regardless of current socket state so we can
+    // resubscribe on reconnect or initial open.
+    const firstTime = !this.subscriptions.has(topic)
+    this.subscriptions.add(topic)
+    // If connected now, send subscribe frame immediately.
+    if (firstTime && this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.subscribe(topic)
     }
   }

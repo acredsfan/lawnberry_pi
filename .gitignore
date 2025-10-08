@@ -154,6 +154,8 @@ logs/.cache
 
 *.potcoverage.xml
 
+logs/*.log.*
+
 npm-debug.log**.cover
 
 yarn-debug.log*.hypothesis/

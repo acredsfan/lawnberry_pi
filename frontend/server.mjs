@@ -21,24 +21,61 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://127.0.0.1:8081'
 app.use(morgan('combined'))
 app.use(compression())
 
-// Proxy API to backend, rewriting /api -> /api/v2
+// Serve branding assets (e.g., LawnBerryPi_Pin.png) so they are available to the UI
+const brandingDir = path.resolve(__dirname, '../branding')
+app.use('/branding', express.static(brandingDir, { maxAge: '30d' }))
+// Back-compat: expose the primary mower pin at the root path expected by the editor
+app.get('/LawnBerryPi_Pin.png', (_req, res) => {
+  res.sendFile(path.join(brandingDir, 'LawnBerryPi_Pin.png'))
+})
+
+// IMPORTANT: Register more specific proxies BEFORE generic ones to avoid mismatches
+
+// Proxy WebSocket for /api/v2/ws/telemetry as-is (frontend connects here by default)
 app.use(
-  '/api',
+  '/api/v2/ws/telemetry',
   createProxyMiddleware({
     target: BACKEND_URL,
     changeOrigin: true,
-    ws: false,
-    pathRewrite: (path) => `/api/v2${path}`,
+    ws: true,
   })
 )
 
-// Also proxy direct /api/v2 paths to backend (no rewrite) so clients can call /api/v2/* directly
+// Direct /api/v2 passthrough (must be before generic '/api')
+app.use('/api/v2', (req, _res, next) => {
+  console.log(`[proxy] match /api/v2 -> ${req.method} ${req.originalUrl}`)
+  next()
+})
 app.use(
   '/api/v2',
   createProxyMiddleware({
     target: BACKEND_URL,
     changeOrigin: true,
     ws: false,
+    logLevel: 'debug',
+    pathRewrite: (path) => '/api/v2' + path,
+  })
+)
+
+// Proxy API to backend. Express strips the mount prefix '/api', so inside
+// this middleware, `path` will start with '/v2/...' or '/something'.
+// - If it's '/v2/...', prepend '/api' -> '/api/v2/...'
+// - Else, prepend '/api/v2' -> '/api/v2/...'
+app.use('/api', (req, _res, next) => {
+  console.log(`[proxy] match /api -> ${req.method} ${req.originalUrl}`)
+  next()
+})
+app.use(
+  '/api',
+  createProxyMiddleware({
+    target: BACKEND_URL,
+    changeOrigin: true,
+    ws: false,
+    logLevel: 'debug',
+    pathRewrite: (path) => {
+      if (path.startsWith('/v2/')) return '/api' + path
+      return '/api/v2' + path
+    },
   })
 )
 
@@ -53,15 +90,7 @@ app.use(
   })
 )
 
-// Proxy WebSocket for /api/v2/ws/telemetry as-is (frontend connects here by default)
-app.use(
-  '/api/v2/ws/telemetry',
-  createProxyMiddleware({
-    target: BACKEND_URL,
-    changeOrigin: true,
-    ws: true,
-  })
-)
+// (kept earlier and more specific above)
 
 // Serve static built files
 const distDir = path.resolve(__dirname, 'dist')

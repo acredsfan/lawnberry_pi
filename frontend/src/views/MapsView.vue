@@ -156,8 +156,14 @@
       <div class="card-header">
         <h3>Boundary & Zone Editor</h3>
       </div>
-      <div class="card-body" style="height: 480px;">
-        <BoundaryEditor />
+      <div class="card-body" style="height: 720px;">
+        <BoundaryEditor
+          :map-provider="settings.provider"
+          :map-style="settings.style"
+          :google-api-key="settings.google_api_key"
+          :pick-for-pin="pickForPin"
+          @pinPicked="onPinPicked"
+        />
       </div>
     </div>
 
@@ -261,6 +267,13 @@
               >
             </div>
           </div>
+
+          <div class="form-group">
+            <button class="btn btn-secondary" type="button" @click="enablePickOnMap">
+              📍 Pick location on map
+            </button>
+            <span v-if="pickForPin" style="margin-left: .5rem; color: var(--accent-green);">Click on the map…</span>
+          </div>
           
           <div class="form-group">
             <label>Description</label>
@@ -321,6 +334,9 @@ const pinForm = ref({
   lon: 0,
   description: ''
 })
+
+// Pin pick-from-map state
+const pickForPin = ref(false)
 
 const pinCategories = ref([
   {
@@ -410,17 +426,12 @@ async function testConnection() {
         await loader.load()
         apiStatus.value = { valid: true, message: 'Google Maps JavaScript API loaded successfully' }
       } catch (e: any) {
-        // As a fallback, try loading a tiny static map image to observe HTTP status
-        const params = new URLSearchParams({
-          center: '37.7749,-122.4194',
-          zoom: '12',
-          size: '1x1',
-          key: settings.value.google_api_key
-        })
-        const staticUrl = `https://maps.googleapis.com/maps/api/staticmap?${params}`
-        const imgResp = await fetch(staticUrl, { method: 'GET', mode: 'no-cors' })
-        // no-cors opaque response won't expose status; if no exception, assume network OK but key may still be invalid
-        apiStatus.value = { valid: false, message: 'Failed to load JS API. Check key restrictions (HTTP referrer/IP) and enable Maps JavaScript API.' }
+        // Could not verify automatically (common with HTTP referrer/IP restrictions).
+        // Treat as usable and surface a helpful message instead of hard "invalid" to avoid false negatives.
+        apiStatus.value = {
+          valid: true,
+          message: 'Could not validate automatically (referrer/IP restrictions). The editor will attempt to load Google tiles; if they do not appear, check key restrictions and enable Maps JavaScript API.'
+        }
       }
     } else if (settings.value.provider === 'osm') {
       // Test OSM tile server
@@ -522,11 +533,23 @@ function savePin() {
 function closePinEditor() {
   showPinEditor.value = false
   editingPin.value = null
+  pickForPin.value = false
 }
 
 onMounted(() => {
   loadSettings()
 })
+
+function enablePickOnMap() {
+  pickForPin.value = true
+}
+
+function onPinPicked(coords: { latitude: number; longitude: number }) {
+  if (!showPinEditor.value) return
+  pinForm.value.lat = coords.latitude
+  pinForm.value.lon = coords.longitude
+  pickForPin.value = false
+}
 </script>
 
 <style scoped>

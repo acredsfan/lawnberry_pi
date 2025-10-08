@@ -65,7 +65,8 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import type { LoginCredentials } from '@/types/auth'
-import iconUrl from '@/assets/lawnberry-icon.svg'
+
+const iconUrl = '/branding/LawnBerryPi_icon2.png'
 
 const router = useRouter()
 const authStore = useAuthStore()

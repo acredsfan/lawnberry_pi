@@ -16,6 +16,7 @@
     "test:ui": "vitest run --runInBand --dir tests/ui --passWithNoTests"
   },
   "dependencies": {
+    "leaflet.gridlayer.googlemutant": "^0.13.5",
     "@googlemaps/js-api-loader": "^1.16.5",
     "@types/dompurify": "^3.0.5",
     "@vueuse/core": "^10.9.0",

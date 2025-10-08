@@ -8,7 +8,7 @@ import type {
   IMUOrientation,
   PowerMetrics 
 } from '@/types/telemetry'
-import { useWebSocket } from '@/composables/useWebSocket'
+import { useWebSocket } from '@/services/websocket'
 import apiService from '@/services/api'
 
 export const useSystemStore = defineStore('system', () => {
@@ -25,7 +25,7 @@ export const useSystemStore = defineStore('system', () => {
   const powerMetrics = ref<PowerMetrics | null>(null)
   const hardwareStreams = ref<HardwareTelemetryStream[]>([])
 
-  const { connect, disconnect, isConnected, lastMessage } = useWebSocket()
+  const { connect, disconnect, connected } = useWebSocket()
 
   const isOnline = computed(() => connectionStatus.value === 'connected')
   const isSystemHealthy = computed(() => status.value === 'active')
@@ -37,17 +37,7 @@ export const useSystemStore = defineStore('system', () => {
       
       // Connect to WebSocket for real-time updates
       await connect()
-      
-      // Watch for connection status changes
-      if (isConnected.value) {
-        connectionStatus.value = 'connected'
-      }
-      
-      // Watch for telemetry messages
-      if (lastMessage.value) {
-        telemetryData.value = lastMessage.value
-        updateSystemStatus(lastMessage.value)
-      }
+      connectionStatus.value = connected.value ? 'connected' : 'disconnected'
       
     } catch (err: any) {
       error.value = err.message || 'System initialization failed'

@@ -24,6 +24,13 @@
       </button>
       <button 
         class="btn btn-sm" 
+        :class="{ 'btn-primary': mode === 'mowing', 'btn-secondary': mode !== 'mowing' }"
+        @click="setMode('mowing')"
+      >
+        🌱 Mowing Zone
+      </button>
+      <button 
+        class="btn btn-sm" 
         :class="{ 'btn-primary': mode === 'marker', 'btn-secondary': mode !== 'marker' }"
         @click="setMode('marker')"
       >
@@ -37,7 +44,7 @@
         <input type="checkbox" v-model="followMower" />
         Follow
       </label>
-      <button class="btn btn-sm btn-secondary" @click="recenterToMower" :disabled="!mowerLatLng">
+      <button class="btn btn-sm btn-secondary" @click="recenterToMower">
         🎯 Recenter
       </button>
 
@@ -49,6 +56,11 @@
       >
         🧹 Simplify
       </button>
+      
+      <label class="follow-toggle">
+        <input type="checkbox" v-model="showCoveragePlan" @change="toggleCoveragePlan" />
+        Preview Coverage
+      </label>
       
       <button 
         v-if="hasUnsavedChanges" 
@@ -73,6 +85,9 @@
       <div v-if="mode === 'exclusion'" class="editor-instructions">
         Click on the map to add exclusion zone points. Close the polygon by clicking near the first point.
       </div>
+      <div v-if="mode === 'mowing'" class="editor-instructions">
+        Click on the map to add mowing zone points. Close the polygon by clicking near the first point.
+      </div>
       <div v-if="mode === 'marker'" class="editor-instructions">
         Click on the map to place a marker.
         <select v-model="markerType" class="marker-type-select">
@@ -82,20 +97,24 @@
           <option value="custom">📍 Custom</option>
         </select>
       </div>
+      <div v-if="props.pickForPin" class="editor-instructions">
+        Click anywhere on the map to set pin location
+      </div>
 
       <!-- Leaflet Map -->
       <l-map
         :zoom="zoom"
         :center="centerLatLng"
-        :use-global-leaflet="false"
+        :use-global-leaflet="useGlobalLeaflet"
         style="height: 100%; width: 100%"
         @click="onMapClick"
+        ref="mapRef"
       >
-        <!-- Tiles (OSM) -->
+        <!-- Dynamic tiles based on provider/style -->
         <l-tile-layer
-          v-if="showTiles"
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors"
+          v-if="showTiles && tileLayerConfig && !googleLayerActive"
+          :url="tileLayerConfig.url"
+          :attribution="tileLayerConfig.attribution"
         />
 
         <!-- Existing boundary polygon -->
@@ -120,6 +139,18 @@
           :fill-opacity="0.1"
           :dash-array="'6 6'"
           @click="() => onExclusionClick(zone.id)"
+        />
+
+        <!-- Existing mowing zones -->
+        <l-polygon
+          v-for="zone in mowingPolygons"
+          :key="zone.id"
+          :lat-lngs="zone.points"
+          :color="'#00c853'"
+          :weight="2"
+          :fill="true"
+          :fill-opacity="0.08"
+          @click="() => onMowingClick(zone.id)"
         />
 
         <!-- In-progress polygon -->
@@ -164,6 +195,15 @@
           :fill="true"
           :fill-opacity="0.15"
         />
+
+        <!-- Coverage plan polyline -->
+        <l-polyline
+          v-if="coverageLatLngs.length > 1"
+          :lat-lngs="coverageLatLngs"
+          :color="'#ffaa00'"
+          :weight="2"
+          :dash-array="'8 6'"
+        />
       </l-map>
       <div v-if="!showTiles" class="offline-overlay">Offline: drawing without tiles</div>
     </div>
@@ -180,9 +220,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { LMap, LTileLayer, LMarker, LPolygon } from '@vue-leaflet/vue-leaflet';
+import { LPolyline } from '@vue-leaflet/vue-leaflet';
 import L from 'leaflet';
+// Register Google Mutant plugin (adds L.gridLayer.googleMutant)
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -195,10 +237,19 @@ const mapStore = useMapStore();
 // Props
 interface Props {
   configId?: string;
+  mapProvider?: 'google' | 'osm' | 'none';
+  mapStyle?: 'standard' | 'satellite' | 'hybrid' | 'terrain';
+  googleApiKey?: string;
+  // When true, a single map click will emit a pin coordinate instead of editing geometry
+  pickForPin?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  configId: 'default'
+  configId: 'default',
+  mapProvider: 'osm',
+  mapStyle: 'standard',
+  googleApiKey: '',
+  pickForPin: false
 });
 
 // State
@@ -212,9 +263,101 @@ const currentPolygonClosed = ref(false);
 const editingZoneId = ref<string | null>(null);
 
 // Map view state
+const mapRef = ref<any>(null);
 const zoom = ref(18);
 const centerLatLng = ref<[number, number]>([37.7749, -122.4194]);
 const showTiles = computed(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+
+// Dynamic Leaflet tile layer based on provider/style selection
+const tileLayerConfig = computed(() => {
+  if (props.mapProvider === 'none') return null;
+  if (props.mapProvider === 'google') {
+    const style = props.mapStyle || 'standard';
+    if (style === 'satellite' || style === 'hybrid') {
+      return {
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+      };
+    }
+    // Standard/terrain: clean street layer
+    return {
+      url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    };
+  }
+  // Default OSM
+  return {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; OpenStreetMap contributors'
+  };
+});
+
+// Use Google Mutant when a key is provided and provider=google
+const useGoogleMutant = computed(() => props.mapProvider === 'google' && !!props.googleApiKey);
+let googleBaseLayer: any = null;
+const googleLayerActive = ref(false);
+
+// When using Google Mutant, prefer global Leaflet to allow plugin to attach to window.L
+const useGlobalLeaflet = computed(() => useGoogleMutant.value);
+
+function loadScriptOnce(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const existing = Array.from(document.getElementsByTagName('script')).find(s => s.src === src);
+    if (existing) { resolve(); return; }
+    const el = document.createElement('script');
+    el.src = src;
+    el.async = true;
+    el.onload = () => resolve();
+    el.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.appendChild(el);
+  });
+}
+
+async function ensureBaseLayer() {
+  await nextTick();
+  const map: L.Map | undefined = mapRef.value?.leafletObject as L.Map | undefined;
+  if (!map) return;
+
+  // Remove residual Google base if not using it
+  if (!useGoogleMutant.value) {
+    if (googleBaseLayer) {
+      try { map.removeLayer(googleBaseLayer); } catch {}
+      googleBaseLayer = null;
+    }
+    googleLayerActive.value = false;
+    return;
+  }
+
+  // Load Google JS API using official loader
+  try {
+    const { Loader } = await import('@googlemaps/js-api-loader');
+    if (!(window as any).google?.maps) {
+      const loader = new Loader({ apiKey: String(props.googleApiKey), version: 'weekly' });
+      await loader.load();
+    }
+    // Load the Leaflet Google Mutant plugin via CDN to avoid bundler issues
+    if (!(window as any).L?.gridLayer?.googleMutant && !(L as any).gridLayer?.googleMutant) {
+      await loadScriptOnce('https://unpkg.com/leaflet.gridlayer.googlemutant@0.13.5/dist/Leaflet.GoogleMutant.js');
+    }
+  } catch (e) {
+    // If Google cannot load, keep existing non-Google tiles (handled by template)
+    return;
+  }
+
+  // Recreate the Google Mutant layer for current style
+  if (googleBaseLayer) {
+    try { map.removeLayer(googleBaseLayer); } catch {}
+    googleBaseLayer = null;
+  }
+  const style = props.mapStyle || 'standard';
+  const typeMap: Record<string, string> = { standard: 'roadmap', satellite: 'satellite', hybrid: 'hybrid', terrain: 'terrain' };
+  const gmType = (typeMap[style] || 'roadmap') as any;
+  const Lref: any = (window as any).L || L;
+  // @ts-ignore plugin augments gridLayer
+  googleBaseLayer = Lref.gridLayer.googleMutant({ type: gmType });
+  googleBaseLayer.addTo(map);
+  googleLayerActive.value = true;
+}
 
 // Live mower marker (GPS position)
 const mowerLatLng = ref<[number, number] | null>(null);
@@ -223,6 +366,9 @@ const firstLockCentered = ref(false);
 const followMower = ref(false);
 const gpsAccuracyMeters = ref<number | null>(null);
 const accuracyCircleLatLngs = ref<Array<[number, number]>>([]);
+const showCoveragePlan = ref(false);
+const coverageLatLngs = ref<Array<[number, number]>>([]);
+const restPollTimer = ref<number | null>(null);
 
 // Derived geometry from store
 const boundaryPolygon = computed(() => {
@@ -238,6 +384,13 @@ const exclusionPolygons = computed(() => {
 });
 
 const markers = computed(() => mapStore.configuration?.markers || []);
+
+const mowingPolygons = computed(() => {
+  return (mapStore.configuration?.mowing_zones || []).map(z => ({
+    id: z.id,
+    points: z.polygon.map(p => [p.latitude, p.longitude])
+  }));
+});
 
 const currentPolygonLatLng = computed(() => currentPolygon.value.map(p => [p.latitude, p.longitude]));
 
@@ -284,6 +437,16 @@ async function saveChanges() {
         enabled: true,
         exclusion_zone: true
       });
+    } else if (mode.value === 'mowing') {
+      mapStore.addMowingZone({
+        id: `mow_${Date.now()}`,
+        name: 'Mowing Zone',
+        zone_type: 'mow_zone',
+        polygon: currentPolygon.value,
+        priority: 3,
+        enabled: true,
+        exclusion_zone: false
+      });
     }
     
     await mapStore.saveConfiguration();
@@ -304,6 +467,7 @@ async function saveChanges() {
 const emit = defineEmits<{
   (e: 'modeChanged', mode: string): void;
   (e: 'saved'): void;
+  (e: 'pinPicked', coords: { latitude: number; longitude: number }): void;
 }>();
 
 function emitModeChange() {
@@ -314,7 +478,13 @@ function onMapClick(e: any) {
   const { latlng } = e;
   if (!latlng) return;
 
-  if (mode.value === 'boundary' || mode.value === 'exclusion') {
+  // If parent wants a pin coordinate, emit and do nothing else
+  if (props.pickForPin) {
+    emit('pinPicked', { latitude: latlng.lat, longitude: latlng.lng });
+    return;
+  }
+
+  if (mode.value === 'boundary' || mode.value === 'exclusion' || mode.value === 'mowing') {
     if (currentPolygon.value.length >= 3) {
       const first = currentPolygon.value[0];
       const d = distanceMeters(first.latitude, first.longitude, latlng.lat, latlng.lng);
@@ -362,6 +532,14 @@ function onExclusionClick(zoneId: string) {
   currentPolygon.value = z.polygon.slice();
   editingZoneId.value = z.id;
   mapStore.setEditMode('exclusion');
+}
+
+function onMowingClick(zoneId: string) {
+  const z = (mapStore.configuration?.mowing_zones || []).find(z => z.id === zoneId);
+  if (!z) return;
+  currentPolygon.value = z.polygon.slice();
+  editingZoneId.value = z.id;
+  mapStore.setEditMode('mowing');
 }
 
 function distanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -431,33 +609,74 @@ onMounted(async () => {
       centerLatLng.value = boundaryPolygon.value[0] as [number, number];
     }
 
-    // Prepare mower icon: try custom LawnBerry pin, fallback to Leaflet default
+  // Prepare mower icon: try custom LawnBerry pin, fallback to Leaflet default
     await loadMowerIcon();
+
+  // Setup base layer (Google when available)
+  await ensureBaseLayer();
 
     // Connect to telemetry and track navigation updates
     const { connect, subscribe } = useWebSocket('telemetry');
     await connect();
     subscribe('telemetry.navigation', (payload: any) => {
       const pos = payload?.position;
-      if (pos && typeof pos.latitude === 'number' && typeof pos.longitude === 'number') {
-        mowerLatLng.value = [pos.latitude, pos.longitude];
-        gpsAccuracyMeters.value = typeof pos.accuracy === 'number' ? pos.accuracy : null;
+      const lat = Number(pos?.latitude)
+      const lon = Number(pos?.longitude)
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        mowerLatLng.value = [lat, lon]
+        gpsAccuracyMeters.value = Number.isFinite(Number(pos?.accuracy)) ? Number(pos?.accuracy) : null
         // Recompute accuracy circle points
-        computeAccuracyCircle();
+        computeAccuracyCircle()
         // Auto-center on first GPS lock, or continuously if following
         if (!firstLockCentered.value || followMower.value) {
-          centerLatLng.value = [pos.latitude, pos.longitude];
-          firstLockCentered.value = true;
+          centerLatLng.value = [lat, lon]
+          firstLockCentered.value = true
         }
       }
     });
+
+    // REST fallback: poll dashboard telemetry in case WebSocket is blocked by proxies
+    restPollTimer.value = window.setInterval(async () => {
+      try {
+        const res = await fetch('/api/v2/dashboard/telemetry')
+        if (!res.ok) return
+        const data = await res.json()
+        const lat = Number(data?.position?.latitude)
+        const lon = Number(data?.position?.longitude)
+        if (Number.isFinite(lat) && Number.isFinite(lon)) {
+          mowerLatLng.value = [lat, lon]
+          gpsAccuracyMeters.value = Number.isFinite(Number(data?.position?.accuracy)) ? Number(data?.position?.accuracy) : null
+          computeAccuracyCircle()
+          if (!firstLockCentered.value || followMower.value) {
+            centerLatLng.value = [lat, lon]
+            firstLockCentered.value = true
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }, 2000)
   } catch (e) {
     // noop: error banner will show via store error
   }
 });
 
-async function loadMowerIcon() {
-  const customUrl = '/LawnBerryPi_Pin.png';
+onUnmounted(() => {
+  if (restPollTimer.value) {
+    clearInterval(restPollTimer.value)
+    restPollTimer.value = null
+  }
+})
+
+// React to provider/style/key changes
+watch(() => [props.mapProvider, props.mapStyle, props.googleApiKey], async () => {
+  await ensureBaseLayer();
+});
+
+async function loadMowerIcon(retryOnce = true) {
+  // Bust any stale 404 cache by appending a version query
+  const base = '/LawnBerryPi_Pin.png';
+  const customUrl = `${base}?v=2`;
   const loaded = await tryLoadImage(customUrl);
   if (loaded) {
     mowerIcon.value = L.icon({
@@ -470,6 +689,7 @@ async function loadMowerIcon() {
       shadowAnchor: [12, 41]
     });
   } else {
+    // Fallback to Leaflet default for now
     mowerIcon.value = L.icon({
       iconUrl: markerIcon,
       iconRetinaUrl: markerIcon2x,
@@ -479,6 +699,12 @@ async function loadMowerIcon() {
       shadowUrl: markerShadow,
       shadowSize: [41, 41]
     });
+    // Retry once shortly after in case the asset just became available
+    if (retryOnce) {
+      setTimeout(() => {
+        loadMowerIcon(false).catch(() => {/* ignore */});
+      }, 1500);
+    }
   }
 }
 
@@ -492,8 +718,40 @@ function tryLoadImage(url: string): Promise<boolean> {
 }
 
 function recenterToMower() {
+  // Prefer mower location when available; otherwise try browser geolocation
   if (mowerLatLng.value) {
     centerLatLng.value = mowerLatLng.value;
+    return;
+  }
+  if (navigator?.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords as GeolocationCoordinates
+        centerLatLng.value = [latitude, longitude]
+      },
+      () => {
+        /* ignore errors */
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 3000 }
+    )
+  }
+}
+
+async function toggleCoveragePlan() {
+  if (!showCoveragePlan.value) {
+    coverageLatLngs.value = [];
+    return;
+  }
+  try {
+    const res = await fetch(`/api/v2/nav/coverage-plan?config_id=default&spacing_m=0.6`);
+    if (!res.ok) throw new Error('Failed to fetch coverage plan');
+    const data = await res.json();
+    const coords: [number, number][] = (data?.plan?.geometry?.coordinates || []).map((c: number[]) => [c[1], c[0]]);
+    coverageLatLngs.value = coords;
+  } catch (e) {
+    // silent fail; UI remains unchanged
+    coverageLatLngs.value = [];
+    showCoveragePlan.value = false;
   }
 }
 

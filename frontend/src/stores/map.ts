@@ -50,7 +50,7 @@ export const useMapStore = defineStore('map', () => {
   const isLoading = ref(false);
   const error = ref<string | null>(null);
   const selectedZoneId = ref<string | null>(null);
-  const editMode = ref<'view' | 'boundary' | 'exclusion' | 'marker'>('view');
+  const editMode = ref<'view' | 'boundary' | 'exclusion' | 'mowing' | 'marker'>('view');
   const providerFallbackActive = ref(false);
 
   // Computed
@@ -171,9 +171,23 @@ export const useMapStore = defineStore('map', () => {
     configuration.value.last_modified = new Date().toISOString();
   }
 
+  function addMowingZone(zone: Zone) {
+    if (!configuration.value) return;
+    configuration.value.mowing_zones.push(zone);
+    configuration.value.last_modified = new Date().toISOString();
+  }
+
   function removeExclusionZone(zoneId: string) {
     if (!configuration.value) return;
     configuration.value.exclusion_zones = configuration.value.exclusion_zones.filter(
+      z => z.id !== zoneId
+    );
+    configuration.value.last_modified = new Date().toISOString();
+  }
+
+  function removeMowingZone(zoneId: string) {
+    if (!configuration.value) return;
+    configuration.value.mowing_zones = configuration.value.mowing_zones.filter(
       z => z.id !== zoneId
     );
     configuration.value.last_modified = new Date().toISOString();
@@ -192,11 +206,17 @@ export const useMapStore = defineStore('map', () => {
     if (exclusionIndex !== -1) {
       configuration.value.exclusion_zones[exclusionIndex].polygon = polygon;
     }
+
+    // Update mowing zones
+    const mowIndex = configuration.value.mowing_zones.findIndex(z => z.id === zoneId);
+    if (mowIndex !== -1) {
+      configuration.value.mowing_zones[mowIndex].polygon = polygon;
+    }
     
     configuration.value.last_modified = new Date().toISOString();
   }
 
-  function setEditMode(mode: 'view' | 'boundary' | 'exclusion' | 'marker') {
+  function setEditMode(mode: 'view' | 'boundary' | 'exclusion' | 'mowing' | 'marker') {
     editMode.value = mode;
   }
 
@@ -231,7 +251,9 @@ export const useMapStore = defineStore('map', () => {
     removeMarker,
     setBoundaryZone,
     addExclusionZone,
+  addMowingZone,
     removeExclusionZone,
+  removeMowingZone,
     updateZonePolygon,
     setEditMode,
     selectZone,
