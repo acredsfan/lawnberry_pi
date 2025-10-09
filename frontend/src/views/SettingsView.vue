@@ -61,6 +61,8 @@
                 v-model="systemSettings.debug_mode" 
                 type="checkbox"
                 class="form-check-input"
+                id="debug-mode-toggle"
+                name="debug-mode"
               > 
               Enable Debug Mode
             </label>
@@ -111,6 +113,8 @@
                 v-model="securitySettings.require_https" 
                 type="checkbox"
                 class="form-check-input"
+                id="require-https-toggle"
+                name="require-https"
               > 
               Require HTTPS
             </label>
@@ -122,6 +126,8 @@
                 v-model="securitySettings.auto_lock_manual_control" 
                 type="checkbox"
                 class="form-check-input"
+                id="auto-lock-control-toggle"
+                name="auto-lock-control"
               > 
               Auto-lock Manual Control
             </label>
@@ -194,7 +200,9 @@
                 <input 
                   v-model="remoteSettings.auto_tls" 
                   type="checkbox"
-                  class="form-check-input"
+                    class="form-check-input"
+                    id="auto-tls-toggle"
+                    name="auto-tls"
                 > 
                 Automatic TLS (Let's Encrypt)
               </label>
@@ -207,6 +215,8 @@
                 v-model="remoteSettings.enabled" 
                 type="checkbox"
                 class="form-check-input"
+                id="remote-access-toggle"
+                name="remote-access"
               > 
               Enable Remote Access
             </label>
@@ -257,6 +267,8 @@
                   v-model="mapsSettings.google_billing_warnings" 
                   type="checkbox"
                   class="form-check-input"
+                  id="google-billing-warnings"
+                  name="google-billing-warnings"
                 > 
                 Show billing warnings
               </label>

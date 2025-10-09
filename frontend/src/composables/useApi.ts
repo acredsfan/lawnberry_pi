@@ -2,9 +2,16 @@ import axios from 'axios'
 import type { AxiosInstance } from 'axios'
 import type { AuthResponse, RefreshResponse, LoginCredentials, User } from '@/types/auth'
 
+const PRIMARY_API_BASE = typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_API_BASE_URL
+  ? (import.meta as any).env.VITE_API_BASE_URL
+  : '/api/v2'
+const FALLBACK_API_BASE = typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_API_FALLBACK_BASE
+  ? (import.meta as any).env.VITE_API_FALLBACK_BASE
+  : '/api'
+
 // Create axios instance with base configuration
 const apiClient: AxiosInstance = axios.create({
-  baseURL: '/api',
+  baseURL: PRIMARY_API_BASE,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -45,25 +52,64 @@ apiClient.interceptors.response.use(
   }
 )
 
+function shouldAttemptFallback(error: any): boolean {
+  if (!error || apiClient.defaults.baseURL === FALLBACK_API_BASE) {
+    return false
+  }
+  const status = error?.response?.status
+  if (status === 404) {
+    return true
+  }
+  if (!status && error?.code === 'ERR_NETWORK') {
+    return true
+  }
+  return false
+}
+
 // Auth API endpoints
 export const authApi = {
   login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
-    const response = await apiClient.post('/auth/login', credentials)
-    return response.data
+    try {
+      const response = await apiClient.post('/auth/login', credentials)
+      return response.data
+    } catch (error: any) {
+      if (shouldAttemptFallback(error)) {
+        const response = await apiClient.post('/auth/login', credentials, { baseURL: FALLBACK_API_BASE })
+        return response.data
+      }
+      throw error
+    }
   },
 
   logout: async (): Promise<void> => {
-    await apiClient.post('/auth/logout')
+    try {
+      await apiClient.post('/auth/logout')
+    } catch (error: any) {
+      if (!shouldAttemptFallback(error)) throw error
+      await apiClient.post('/auth/logout', undefined, { baseURL: FALLBACK_API_BASE })
+    }
   },
 
   refresh: async (): Promise<RefreshResponse> => {
-    const response = await apiClient.post('/auth/refresh')
-    return response.data
+    try {
+      const response = await apiClient.post('/auth/refresh')
+      return response.data
+    } catch (error: any) {
+      if (!shouldAttemptFallback(error)) throw error
+      const response = await apiClient.post('/auth/refresh', undefined, { baseURL: FALLBACK_API_BASE })
+      return response.data
+    }
   },
 
   getProfile: async (): Promise<User> => {
-    const response = await apiClient.get('/auth/profile')
-    return response.data
+    try {
+      const response = await apiClient.get('/auth/profile')
+      return response.data
+    } catch (error: any) {
+      if (!shouldAttemptFallback(error)) throw error
+      const response = await apiClient.get('/auth/profile', { baseURL: FALLBACK_API_BASE })
+      return response.data
+    }
   },
 }
 

@@ -44,6 +44,7 @@ from .telemetry_exchange import (
 )
 from .zone import (
     Zone, ZoneType, Point, ZoneSettings, ZoneStatistics,
+    MarkerSchedule, MarkerTimeWindow, MarkerTriggerSet,
     MapConfiguration, MapMarker, MarkerType, MapProvider
 )
 from .control_session import (
@@ -124,6 +125,7 @@ __all__ = [
     
     # Zones and Map Configuration
     "Zone", "ZoneType", "Point", "ZoneSettings", "ZoneStatistics",
+    "MarkerSchedule", "MarkerTimeWindow", "MarkerTriggerSet",
     "MapConfiguration", "MapMarker", "MarkerType", "MapProvider",
     
     # Control Session

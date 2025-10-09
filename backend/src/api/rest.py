@@ -10,6 +10,7 @@ import base64
 import asyncio
 import time
 import hashlib
+import logging
 from email.utils import format_datetime, parsedate_to_datetime
 import uuid
 import io
@@ -20,6 +21,7 @@ from ..core.persistence import persistence
 from ..services.hw_selftest import run_selftest
 from ..services.weather_service import weather_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # WebSocket Hub for real-time communication
@@ -1592,7 +1594,18 @@ async def control_emergency_clear(body: Optional[dict] = None, request: Request 
 
 # ----------------------- Map Configuration -----------------------
 
-from ..models.zone import MapConfiguration, MapMarker, Zone, Point, MarkerType, MapProvider
+from ..models.zone import (
+    MapConfiguration,
+    MapMarker,
+    MarkerSchedule,
+    MarkerTimeWindow,
+    MarkerTriggerSet,
+    Zone,
+    ZoneType,
+    Point,
+    MarkerType,
+    MapProvider,
+)
 from ..services.maps_service import maps_service
 from ..nav.coverage_planner import plan_coverage
 
@@ -1621,6 +1634,7 @@ async def get_map_configuration(config_id: str = "default", simulate_fallback: O
         return {
             "zone_id": z.id,
             "zone_type": ztype,
+            "name": getattr(z, "name", z.id),
             "geometry": {"type": "Polygon", "coordinates": [coords]},
             "priority": getattr(z, "priority", 1),
             "color": "#00FF00",
@@ -1641,6 +1655,14 @@ async def get_map_configuration(config_id: str = "default", simulate_fallback: O
             mt = m.marker_type if isinstance(m.marker_type, str) else m.marker_type.value
         except Exception:
             mt = str(m.marker_type)
+
+        schedule_payload = None
+        if getattr(m, "schedule", None):
+            try:
+                schedule_payload = m.schedule.dict()
+            except Exception:
+                schedule_payload = None
+
         markers_out.append({
             "marker_id": m.marker_id,
             "marker_type": mt,
@@ -1648,6 +1670,8 @@ async def get_map_configuration(config_id: str = "default", simulate_fallback: O
             "label": m.label,
             "icon": m.icon,
             "metadata": getattr(m, "metadata", {}) or {},
+            "schedule": schedule_payload,
+            "is_home": bool(getattr(m, "is_primary_home", False) or mt == MarkerType.HOME.value),
         })
 
     return {
@@ -1698,7 +1722,22 @@ async def put_map_configuration(envelope: dict, config_id: str = "default"):
                 ring = coords[0]
                 # Input coordinates are [lng, lat]
                 points = [Point(latitude=lat, longitude=lng) for lng, lat in ring]
-                zone = Zone(id=zid, name=zid, polygon=points, exclusion_zone=(ztype == "exclusion"))
+                zone_name_raw = z.get("name") or z.get("zone_name")
+                zone_name = str(zone_name_raw) if zone_name_raw is not None else zid
+
+                zone_type_enum = ZoneType.BOUNDARY
+                if ztype == "exclusion":
+                    zone_type_enum = ZoneType.EXCLUSION_ZONE
+                elif ztype == "mow":
+                    zone_type_enum = ZoneType.MOW_ZONE
+
+                zone = Zone(
+                    id=zid,
+                    name=zone_name,
+                    polygon=points,
+                    exclusion_zone=(ztype == "exclusion"),
+                    zone_type=zone_type_enum,
+                )
                 if ztype == "boundary" and not boundary_set:
                     cfg.boundary_zone = zone
                     boundary_set = True
@@ -1725,10 +1764,114 @@ async def put_map_configuration(envelope: dict, config_id: str = "default"):
                         marker_id=zid,
                         marker_type=MarkerType.HOME,
                         position=Point(latitude=float(lat), longitude=float(lng)),
-                        label="Home"
+                        label="Home",
+                        metadata={"source": "zone_home"},
+                        is_primary_home=True,
                     ))
                 except Exception:
                     pass
+
+        def _parse_schedule(raw: Any) -> Optional[MarkerSchedule]:
+            if not isinstance(raw, dict):
+                return None
+
+            windows_raw = raw.get("time_windows") or raw.get("windows") or []
+            time_windows: list[MarkerTimeWindow] = []
+            for entry in windows_raw:
+                if not isinstance(entry, dict):
+                    continue
+                start = entry.get("start")
+                end = entry.get("end")
+                if start is None or end is None:
+                    continue
+                try:
+                    time_windows.append(MarkerTimeWindow(start=str(start), end=str(end)))
+                except Exception:
+                    continue
+
+            days_raw = raw.get("days_of_week") or raw.get("days") or []
+            days: list[int] = []
+            for d in days_raw:
+                try:
+                    days.append(int(d))
+                except Exception:
+                    continue
+            days = sorted(set(days))
+
+            trig_raw = raw.get("triggers") or {}
+            triggers = MarkerTriggerSet(
+                needs_charge=bool(trig_raw.get("needs_charge")),
+                precipitation=bool(trig_raw.get("precipitation")),
+                manual_override=bool(trig_raw.get("manual_override")),
+            )
+
+            if not time_windows and not days and not any(triggers.dict().values()):
+                return None
+
+            return MarkerSchedule(
+                time_windows=time_windows,
+                days_of_week=days,
+                triggers=triggers,
+            )
+
+        markers_in = envelope.get("markers", [])
+        for marker_payload in markers_in:
+            try:
+                marker_id = str(marker_payload.get("marker_id") or uuid.uuid4())
+            except Exception:
+                marker_id = str(uuid.uuid4())
+
+            raw_type = str(marker_payload.get("marker_type") or "custom")
+            try:
+                marker_type = MarkerType(raw_type)
+            except Exception:
+                marker_type = MarkerType.CUSTOM
+
+            position_raw = marker_payload.get("position") or {}
+            lat = position_raw.get("latitude")
+            lon = position_raw.get("longitude")
+            if lat is None or lon is None:
+                continue
+            try:
+                point = Point(latitude=float(lat), longitude=float(lon))
+            except Exception:
+                continue
+
+            metadata_raw = marker_payload.get("metadata")
+            metadata = metadata_raw.dict() if hasattr(metadata_raw, "dict") else (
+                dict(metadata_raw) if isinstance(metadata_raw, dict) else {}
+            )
+
+            schedule_raw = marker_payload.get("schedule") or metadata.get("schedule")
+            schedule = _parse_schedule(schedule_raw)
+            if schedule is not None:
+                metadata = dict(metadata)
+                metadata["schedule"] = schedule.dict()
+
+            is_home_flag = bool(marker_payload.get("is_home")) or marker_type == MarkerType.HOME
+            if is_home_flag:
+                schedule = None
+                if isinstance(metadata, dict) and "schedule" in metadata:
+                    metadata = dict(metadata)
+                    metadata.pop("schedule", None)
+
+            marker = MapMarker(
+                marker_id=marker_id,
+                marker_type=marker_type,
+                position=point,
+                label=marker_payload.get("label"),
+                icon=marker_payload.get("icon"),
+                metadata=metadata,
+                schedule=schedule,
+                is_primary_home=is_home_flag,
+            )
+
+            # Remove existing entries with same id or duplicate home markers
+            cfg.markers = [existing for existing in cfg.markers if existing.marker_id != marker_id]
+            if marker.marker_type == MarkerType.HOME:
+                cfg.markers = [existing for existing in cfg.markers if existing.marker_type != MarkerType.HOME]
+
+            cfg.markers.append(marker)
 
         # Overlap detection between boundary polygons in input (contract test case)
         boundary_ids = [z.get("zone_id") for z in zones_in if z.get("zone_type") == "boundary"]
@@ -1762,6 +1905,18 @@ async def put_map_configuration(envelope: dict, config_id: str = "default"):
 
         return {"status": "accepted", "updated_at": saved.last_modified.isoformat()}
     except Exception as e:
+        try:
+            logger.exception(
+                "Map configuration save failed",
+                extra={
+                    "config_id": config_id,
+                    "zone_count": len(envelope.get("zones", [])) if isinstance(envelope, dict) else None,
+                    "marker_count": len(envelope.get("markers", [])) if isinstance(envelope, dict) else None,
+                    "provider": envelope.get("provider") if isinstance(envelope, dict) else None,
+                },
+            )
+        except Exception:
+            logger.exception("Map configuration save failed (logging extras)" )
         return JSONResponse(status_code=400, content={
             "error": str(e),
             "detail": str(e),
@@ -2615,23 +2770,10 @@ def get_settings_maps(request: Request):
     data = _maps_settings
     body = json.dumps(data, sort_keys=True).encode()
     etag = hashlib.sha256(body).hexdigest()
-    inm = request.headers.get("if-none-match")
-    ims = request.headers.get("if-modified-since")
-    if inm == etag:
-        return JSONResponse(status_code=304, content=None)
-    if ims:
-        try:
-            ims_dt = parsedate_to_datetime(ims)
-            if ims_dt.tzinfo is None:
-                ims_dt = ims_dt.replace(tzinfo=timezone.utc)
-            if ims_dt >= _maps_last_modified.replace(microsecond=0):
-                return JSONResponse(status_code=304, content=None)
-        except Exception:
-            pass
     headers = {
         "ETag": etag,
         "Last-Modified": format_datetime(_maps_last_modified),
-        "Cache-Control": "public, max-age=30",
+        "Cache-Control": "no-store",
     }
     return JSONResponse(content=data, headers=headers)
 

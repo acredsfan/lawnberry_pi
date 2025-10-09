@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { User, LoginCredentials } from '@/types/auth'
 import { authApi } from '@/composables/useApi'
 
@@ -13,13 +13,13 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   const lastActivity = ref<number>(Date.now())
+  const expiryHandled = ref(false)
 
   const isAuthenticated = computed(() => {
     if (!token.value || !user.value) return false
     
     // Check if token is expired
     if (tokenExpiry.value && Date.now() > tokenExpiry.value) {
-      console.warn('Token has expired')
       return false
     }
     
@@ -194,6 +194,18 @@ export const useAuthStore = defineStore('auth', () => {
   const updateActivity = () => {
     lastActivity.value = Date.now()
   }
+
+  watch([token, tokenExpiry], ([tok, expiry]) => {
+    if (tok && expiry && Date.now() > expiry) {
+      if (!expiryHandled.value) {
+        console.warn('Token has expired')
+        expiryHandled.value = true
+        void logout()
+      }
+    } else {
+      expiryHandled.value = false
+    }
+  }, { immediate: true })
 
   return {
     user,

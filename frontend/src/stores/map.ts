@@ -9,6 +9,23 @@ export interface Point {
   altitude?: number | null;
 }
 
+export interface MarkerTimeWindow {
+  start: string;
+  end: string;
+}
+
+export interface MarkerTriggers {
+  needs_charge: boolean;
+  precipitation: boolean;
+  manual_override: boolean;
+}
+
+export interface MarkerSchedule {
+  time_windows: MarkerTimeWindow[];
+  days_of_week: number[];
+  triggers: MarkerTriggers;
+}
+
 export interface Zone {
   id: string;
   name: string;
@@ -26,6 +43,8 @@ export interface MapMarker {
   label?: string | null;
   icon?: string | null;
   metadata?: Record<string, any> | null;
+  schedule?: MarkerSchedule | null;
+  is_home?: boolean;
 }
 
 export interface MapConfiguration {
@@ -57,6 +76,89 @@ function clonePolygon(points: Point[]): Point[] {
   return points.map(clonePoint);
 }
 
+function coerceTimeString(value: string | null | undefined): string {
+  if (!value || typeof value !== 'string') return '';
+  const [hourStr = '', minuteStr = ''] = value.split(':');
+  const hour = Number.parseInt(hourStr, 10);
+  const minute = Number.parseInt(minuteStr, 10);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return '';
+  const h = Math.min(Math.max(hour, 0), 23);
+  const m = Math.min(Math.max(minute, 0), 59);
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+}
+
+function cloneSchedule(schedule: MarkerSchedule | null | undefined): MarkerSchedule | null {
+  if (!schedule) return null;
+  return {
+    time_windows: (schedule.time_windows || []).map(w => ({ start: w.start, end: w.end })),
+    days_of_week: [...(schedule.days_of_week || [])],
+    triggers: {
+      needs_charge: Boolean(schedule.triggers?.needs_charge),
+      precipitation: Boolean(schedule.triggers?.precipitation),
+      manual_override: Boolean(schedule.triggers?.manual_override),
+    },
+  };
+}
+
+function normalizeSchedule(schedule: MarkerSchedule | null | undefined): MarkerSchedule | null {
+  const cloned = cloneSchedule(schedule);
+  if (!cloned) return null;
+
+  cloned.time_windows = cloned.time_windows
+    .map(w => ({ start: coerceTimeString(w.start), end: coerceTimeString(w.end) }))
+    .filter(w => w.start && w.end);
+
+  cloned.days_of_week = Array.from(new Set(
+    (cloned.days_of_week || []).map(d => Number.parseInt(String(d), 10)).filter(d => d >= 0 && d <= 6)
+  )).sort((a, b) => a - b);
+
+  cloned.triggers = {
+    needs_charge: Boolean(cloned.triggers?.needs_charge),
+    precipitation: Boolean(cloned.triggers?.precipitation),
+    manual_override: Boolean(cloned.triggers?.manual_override),
+  };
+
+  if (
+    !cloned.time_windows.length &&
+    !cloned.days_of_week.length &&
+    !cloned.triggers.needs_charge &&
+    !cloned.triggers.precipitation &&
+    !cloned.triggers.manual_override
+  ) {
+    return null;
+  }
+
+  return cloned;
+}
+
+function scheduleFromPayload(raw: any): MarkerSchedule | null {
+  if (!raw) return null;
+
+  const windowsSource = Array.isArray(raw.time_windows)
+    ? raw.time_windows
+    : Array.isArray(raw.windows)
+      ? raw.windows
+      : [];
+
+  const candidate: MarkerSchedule = {
+    time_windows: windowsSource
+      .map((entry: any) => ({ start: entry?.start, end: entry?.end }))
+      .filter((entry: any) => entry.start != null && entry.end != null),
+    days_of_week: Array.isArray(raw.days_of_week)
+      ? raw.days_of_week
+      : Array.isArray(raw.days)
+        ? raw.days
+        : [],
+    triggers: {
+      needs_charge: Boolean(raw.triggers?.needs_charge || raw.needs_charge),
+      precipitation: Boolean(raw.triggers?.precipitation || raw.precipitation),
+      manual_override: Boolean(raw.triggers?.manual_override || raw.manual_override),
+    },
+  };
+
+  return normalizeSchedule(candidate);
+}
+
 export const useMapStore = defineStore('map', () => {
   // State
   const configuration = ref<MapConfiguration | null>(null);
@@ -70,7 +172,7 @@ export const useMapStore = defineStore('map', () => {
   const hasConfiguration = computed(() => configuration.value !== null);
   const currentProvider = computed(() => configuration.value?.provider || 'google_maps');
   const homeMarker = computed(() => 
-    configuration.value?.markers.find(m => m.marker_type === 'home') || null
+    configuration.value?.markers.find(m => m.marker_type === 'home' || m.is_home) || null
   );
   const sunMarkers = computed(() => 
     configuration.value?.markers.filter(m => 
@@ -79,6 +181,15 @@ export const useMapStore = defineStore('map', () => {
   );
 
   // Actions
+  type MarkerCreateOptions = {
+    label?: string;
+    icon?: string | null;
+    metadata?: Record<string, any> | null;
+    schedule?: MarkerSchedule | null;
+    markerId?: string;
+    isHome?: boolean;
+  };
+
   async function loadConfiguration(configId: string = 'default') {
     isLoading.value = true;
     error.value = null;
@@ -150,27 +261,58 @@ export const useMapStore = defineStore('map', () => {
     }
   }
 
-  function addMarker(markerType: 'home' | 'am_sun' | 'pm_sun' | 'custom', position: Point, label?: string) {
+  function addMarker(
+    markerType: 'home' | 'am_sun' | 'pm_sun' | 'custom',
+    position: Point,
+    labelOrOptions?: string | MarkerCreateOptions
+  ) {
     if (!configuration.value) return;
-    
-    const marker: MapMarker = {
-      marker_id: `marker_${Date.now()}`,
-      marker_type: markerType,
-      position: clonePoint(position),
-      label: label || markerType.replace('_', ' ').toUpperCase(),
-      metadata: {}
-    };
-    
-    // Remove existing marker of same type (except custom)
-    if (markerType !== 'custom') {
-      configuration.value.markers = configuration.value.markers.filter(
-        m => m.marker_type !== markerType
-      );
+
+    let options: MarkerCreateOptions = {};
+    if (typeof labelOrOptions === 'string') {
+      options = { label: labelOrOptions };
+    } else if (labelOrOptions) {
+      options = labelOrOptions;
     }
+
+    const schedule = normalizeSchedule(options.schedule ?? null);
+    const metadataSource = options.metadata && typeof options.metadata === 'object'
+      ? options.metadata
+      : undefined;
+    const metadata: Record<string, any> = metadataSource ? { ...metadataSource } : {};
+    if (schedule) {
+      metadata.schedule = cloneSchedule(schedule);
+    } else if ('schedule' in metadata) {
+      delete metadata.schedule;
+    }
+
+    const isHome = options.isHome ?? markerType === 'home';
+    const finalType: MapMarker['marker_type'] = isHome ? 'home' : markerType;
+    const defaultLabel = finalType === 'home'
+      ? 'Home'
+      : markerType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+    const marker: MapMarker = {
+      marker_id: options.markerId || `marker_${Date.now()}`,
+      marker_type: finalType,
+      position: clonePoint(position),
+      label: options.label || defaultLabel,
+      icon: options.icon ?? null,
+      metadata,
+      schedule: cloneSchedule(schedule),
+      is_home: isHome,
+    };
+
+    // Remove existing marker of same id and ensure only one marker per special type
     configuration.value.markers = configuration.value.markers.filter(
       m => m.marker_id !== marker.marker_id
     );
-    
+    if (marker.marker_type !== 'custom') {
+      configuration.value.markers = configuration.value.markers.filter(
+        m => m.marker_type !== marker.marker_type
+      );
+    }
+
     configuration.value.markers.push(marker);
     configuration.value.last_modified = new Date().toISOString();
   }
@@ -185,14 +327,57 @@ export const useMapStore = defineStore('map', () => {
 
   function updateMarker(markerId: string, changes: Partial<MapMarker>) {
     if (!configuration.value) return;
-    const idx = configuration.value.markers.findIndex(m => m.marker_id === markerId)
+    const markers = [...configuration.value.markers];
+    const idx = markers.findIndex(m => m.marker_id === markerId);
     if (idx === -1) return;
-    const existing = configuration.value.markers[idx];
-    configuration.value.markers[idx] = {
+
+    const existing = markers[idx];
+    const metadataSource = changes.metadata !== undefined ? changes.metadata : existing.metadata;
+    const metadata: Record<string, any> = metadataSource && typeof metadataSource === 'object'
+      ? { ...metadataSource }
+      : {};
+
+    const scheduleInput = changes.schedule !== undefined
+      ? changes.schedule
+      : existing.schedule ?? null;
+    const schedule = normalizeSchedule(scheduleInput);
+    if (schedule) {
+      metadata.schedule = cloneSchedule(schedule);
+    } else if ('schedule' in metadata) {
+      delete metadata.schedule;
+    }
+
+    const candidateType = changes.marker_type ?? existing.marker_type;
+    const homeFromType = candidateType === 'home';
+    const isHomeFlag = 'is_home' in changes
+      ? Boolean(changes.is_home)
+      : Boolean(existing.is_home || homeFromType);
+    const finalType: MapMarker['marker_type'] = isHomeFlag ? 'home' : (homeFromType ? 'custom' : candidateType);
+
+    if (isHomeFlag) {
+      metadata.is_home = true;
+    } else if ('is_home' in metadata) {
+      delete metadata.is_home;
+    }
+
+    const updated: MapMarker = {
       ...existing,
       ...changes,
+      marker_type: finalType,
       position: changes.position ? clonePoint(changes.position) : existing.position,
+      metadata,
+      schedule: cloneSchedule(schedule),
+      is_home: isHomeFlag,
     };
+
+    markers[idx] = updated;
+
+    let nextMarkers = markers;
+    if (updated.marker_type === 'home') {
+      nextMarkers = markers.filter((m, index) => index === idx || m.marker_type !== 'home');
+    }
+
+    configuration.value.markers = nextMarkers;
     configuration.value.last_modified = new Date().toISOString();
   }
 
@@ -303,6 +488,7 @@ export const useMapStore = defineStore('map', () => {
       zones.push({
         zone_id: cfg.boundary_zone.id,
         zone_type: 'boundary',
+        name: cfg.boundary_zone.name || cfg.boundary_zone.id,
         geometry: { type: 'Polygon', coordinates: toCoords(cfg.boundary_zone.polygon) }
       });
     }
@@ -310,6 +496,7 @@ export const useMapStore = defineStore('map', () => {
       zones.push({
         zone_id: z.id,
         zone_type: 'exclusion',
+        name: z.name || z.id,
         geometry: { type: 'Polygon', coordinates: toCoords(z.polygon) }
       });
     }
@@ -317,6 +504,7 @@ export const useMapStore = defineStore('map', () => {
       zones.push({
         zone_id: z.id,
         zone_type: 'mow',
+        name: z.name || z.id,
         geometry: { type: 'Polygon', coordinates: toCoords(z.polygon) }
       });
     }
@@ -330,14 +518,34 @@ export const useMapStore = defineStore('map', () => {
       });
     }
     const provider = cfg.provider === 'google_maps' ? 'google-maps' : 'osm';
-    const markers = (cfg.markers || []).map(m => ({
-      marker_id: m.marker_id,
-      marker_type: m.marker_type,
-      position: { latitude: m.position.latitude, longitude: m.position.longitude },
-      label: m.label ?? null,
-      icon: m.icon ?? null,
-      metadata: m.metadata ?? {}
-    }));
+    const markers = (cfg.markers || []).map(m => {
+  const metadataSource = m.metadata && typeof m.metadata === 'object' ? m.metadata : {};
+  const metadata = { ...metadataSource };
+      const scheduleResolved = m.schedule
+        ? cloneSchedule(m.schedule)
+        : scheduleFromPayload(metadata?.schedule);
+      if (scheduleResolved) {
+        metadata.schedule = cloneSchedule(scheduleResolved);
+      } else if ('schedule' in metadata) {
+        delete metadata.schedule;
+      }
+      if (m.is_home || m.marker_type === 'home') {
+        metadata.is_home = true;
+      } else if ('is_home' in metadata) {
+        delete metadata.is_home;
+      }
+
+      return {
+        marker_id: m.marker_id,
+        marker_type: m.marker_type,
+        position: { latitude: m.position.latitude, longitude: m.position.longitude },
+        label: m.label ?? null,
+        icon: m.icon ?? null,
+        metadata,
+        schedule: scheduleResolved ? cloneSchedule(scheduleResolved) : null,
+        is_home: Boolean(m.is_home || m.marker_type === 'home'),
+      };
+    });
     return { zones, provider, markers };
   }
 
@@ -360,19 +568,44 @@ export const useMapStore = defineStore('map', () => {
     };
     const markers: MapMarker[] = [];
     const pushMarker = (marker: MapMarker) => {
-      const byIdIndex = markers.findIndex(m => m.marker_id === marker.marker_id);
-      if (byIdIndex !== -1) {
-        markers[byIdIndex] = marker;
-        return;
+      const metadata: Record<string, any> = marker.metadata && typeof marker.metadata === 'object'
+        ? { ...marker.metadata }
+        : {};
+      const resolvedSchedule = normalizeSchedule(marker.schedule ?? metadata?.schedule ?? null);
+      if (resolvedSchedule) {
+        metadata.schedule = cloneSchedule(resolvedSchedule);
+      } else if ('schedule' in metadata) {
+        delete metadata.schedule;
       }
-      if (marker.marker_type !== 'custom') {
-        const sameTypeIndex = markers.findIndex(m => m.marker_type === marker.marker_type);
-        if (sameTypeIndex !== -1) {
-          markers[sameTypeIndex] = marker;
-          return;
+
+      const isHome = Boolean(marker.is_home || marker.marker_type === 'home');
+      const markerType: MapMarker['marker_type'] = isHome ? 'home' : marker.marker_type;
+      if (isHome) {
+        metadata.is_home = true;
+      } else if ('is_home' in metadata) {
+        delete metadata.is_home;
+      }
+
+      const normalized: MapMarker = {
+        ...marker,
+        marker_type: markerType,
+        metadata,
+        schedule: cloneSchedule(resolvedSchedule),
+        is_home: isHome,
+      };
+
+      for (let i = markers.length - 1; i >= 0; i -= 1) {
+        const existing = markers[i];
+        if (existing.marker_id === normalized.marker_id) {
+          markers.splice(i, 1);
+          continue;
+        }
+        if (normalized.marker_type !== 'custom' && existing.marker_type === normalized.marker_type) {
+          markers.splice(i, 1);
         }
       }
-      markers.push(marker);
+
+      markers.push(normalized);
     };
     const zones = Array.isArray(env.zones) ? env.zones : [];
     for (const z of zones) {
@@ -381,7 +614,8 @@ export const useMapStore = defineStore('map', () => {
       if (geom.type === 'Polygon' && Array.isArray(geom.coordinates) && geom.coordinates[0]) {
         const ring = geom.coordinates[0] as [number, number][];
         const poly: Point[] = ring.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
-        const zone: Zone = { id: z.zone_id || ztype, name: z.zone_id || ztype, zone_type: ztype, polygon: poly };
+        const zoneName = typeof z.name === 'string' && z.name.trim() ? z.name : (z.zone_id || ztype);
+        const zone: Zone = { id: z.zone_id || ztype, name: zoneName, zone_type: ztype, polygon: poly };
         if (ztype === 'boundary') cfg.boundary_zone = zone;
         else if (ztype === 'exclusion') cfg.exclusion_zones.push(zone);
         else if (ztype === 'mow') cfg.mowing_zones.push(zone);
@@ -408,6 +642,19 @@ export const useMapStore = defineStore('map', () => {
           if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
             continue;
           }
+          const metadata = m.metadata && typeof m.metadata === 'object' ? { ...m.metadata } : {};
+          const schedule = scheduleFromPayload(m.schedule ?? metadata?.schedule);
+          if (schedule) {
+            metadata.schedule = cloneSchedule(schedule);
+          } else if ('schedule' in metadata) {
+            delete metadata.schedule;
+          }
+          const isHome = Boolean(m.is_home || mt === 'home' || metadata?.is_home);
+          if (isHome) {
+            metadata.is_home = true;
+          } else if ('is_home' in metadata) {
+            delete metadata.is_home;
+          }
           const marker: MapMarker = {
             marker_id: String(m.marker_id || `${mt}_${Date.now()}`),
             marker_type: mt,
@@ -418,7 +665,9 @@ export const useMapStore = defineStore('map', () => {
             },
             label: m.label ?? null,
             icon: m.icon ?? null,
-            metadata: m.metadata ?? {},
+            metadata,
+            schedule,
+            is_home: isHome,
           };
           pushMarker(marker);
         } catch {}

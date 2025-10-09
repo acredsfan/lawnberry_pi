@@ -88,7 +88,7 @@
       </button>
     </div>
 
-  <div class="editor-canvas" ref="canvasContainer" :class="{'cursor-crosshair': mode==='boundary' || mode==='exclusion' || mode==='mowing', 'cursor-pin': mode==='marker'}">
+  <div class="editor-canvas" ref="canvasContainer" :class="{'cursor-crosshair': mode==='boundary' || mode==='exclusion' || mode==='mowing', 'cursor-pin': mode==='marker', 'google-active': useGoogleMutant}">
       <div v-if="mode === 'boundary'" class="editor-instructions">
         Click on the map to add boundary points. Close the polygon by clicking near the first point.
       </div>
@@ -138,11 +138,16 @@
         </button>
       </div>
 
+      <div v-if="useGoogleMutant" class="provider-badge">
+        Google Maps imagery · Leaflet editing controls remain active
+      </div>
+
       <!-- Leaflet Map -->
       <l-map
         :zoom="zoom"
         :center="centerLatLng"
         :use-global-leaflet="useGlobalLeaflet"
+        :options="leafletOptions"
         style="height: 100%; width: 100%"
         @click="onMapClick"
         ref="mapRef"
@@ -162,6 +167,7 @@
           :weight="3"
           :fill="true"
           :fill-opacity="0.1"
+          :interactive="mode === 'view'"
           @click="onBoundaryClick"
         />
 
@@ -175,6 +181,7 @@
           :fill="true"
           :fill-opacity="0.1"
           :dash-array="'6 6'"
+          :interactive="mode === 'view'"
           @click="() => onExclusionClick(zone.id)"
         />
 
@@ -187,6 +194,7 @@
           :weight="2"
           :fill="true"
           :fill-opacity="0.08"
+          :interactive="mode === 'view'"
           @click="() => onMowingClick(zone.id)"
         />
 
@@ -273,6 +281,7 @@ import { useWebSocket } from '@/services/websocket';
 import { useMapStore } from '../../stores/map';
 import type { Point } from '../../stores/map';
 import { useToastStore } from '@/stores/toast';
+import { shouldUseGoogleProvider } from '@/utils/mapProviders';
 
 const mapStore = useMapStore();
 const toast = useToastStore();
@@ -323,21 +332,17 @@ const tileLayerConfig = computed(() => {
   };
 });
 
-// Helper: Only use Google JS API when running on https OR localhost (dev)
-function isSecureForGoogle(): boolean {
-  const host = window.location.hostname
-  const isLocal = host === 'localhost' || host === '127.0.0.1'
-  const isHttps = window.location.protocol === 'https:'
-  return isHttps || isLocal
-}
-
-// Use Google Mutant when a key is provided, provider=google, and context is allowed
-const useGoogleMutant = computed(() => props.mapProvider === 'google' && !!props.googleApiKey && isSecureForGoogle());
+const useGoogleMutant = computed(() => shouldUseGoogleProvider(
+  props.mapProvider,
+  props.googleApiKey,
+  typeof window !== 'undefined' ? window.location : null
+));
 let googleBaseLayer: any = null;
 const googleLayerActive = ref(false);
 
 // When using Google Mutant, prefer global Leaflet to allow plugin to attach to window.L
 const useGlobalLeaflet = computed(() => useGoogleMutant.value);
+const leafletOptions = computed(() => ({ attributionControl: !useGoogleMutant.value }));
 
 function loadScriptOnce(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -636,7 +641,7 @@ function onMapClick(e: any) {
       hasUnsavedChanges.value = true;
     }
   } else if (mode.value === 'marker') {
-    mapStore.addMarker(markerType.value, { latitude: latlng.lat, longitude: latlng.lng }, undefined);
+    mapStore.addMarker(markerType.value, { latitude: latlng.lat, longitude: latlng.lng });
     hasUnsavedChanges.value = true;
     toast.show(`${markerType.value.replace('_',' ').toUpperCase()} marker placed`, 'info', 1800)
   }
@@ -670,6 +675,7 @@ function onMarkerMoveEnd(markerId: string, e: any) {
 }
 
 function onBoundaryClick() {
+  if (mode.value !== 'view') return;
   const bz = mapStore.configuration?.boundary_zone;
   if (!bz) return;
   currentPolygon.value = clonePolygon(bz.polygon);
@@ -680,6 +686,7 @@ function onBoundaryClick() {
 }
 
 function onExclusionClick(zoneId: string) {
+  if (mode.value !== 'view') return;
   const z = (mapStore.configuration?.exclusion_zones || []).find(z => z.id === zoneId);
   if (!z) return;
   currentPolygon.value = clonePolygon(z.polygon);
@@ -690,6 +697,7 @@ function onExclusionClick(zoneId: string) {
 }
 
 function onMowingClick(zoneId: string) {
+  if (mode.value !== 'view') return;
   const z = (mapStore.configuration?.mowing_zones || []).find(z => z.id === zoneId);
   if (!z) return;
   currentPolygon.value = clonePolygon(z.polygon);
@@ -1250,6 +1258,21 @@ function projectPointToSegment(p: Point, a: Point, b: Point): Point {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
+.provider-badge {
+  position: absolute;
+  bottom: 1rem;
+  left: 1rem;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  z-index: 205;
+  backdrop-filter: blur(2px);
+}
+
 .mini-btn {
   background: var(--primary-light);
   border: none;
@@ -1283,6 +1306,10 @@ function projectPointToSegment(p: Point, a: Point, b: Point): Point {
   width: 100%;
   height: 100%;
   pointer-events: auto;
+}
+
+.editor-canvas.google-active :deep(.leaflet-control-attribution) {
+  display: none;
 }
 
 .editor-instructions {

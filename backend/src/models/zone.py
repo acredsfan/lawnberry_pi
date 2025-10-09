@@ -39,6 +39,48 @@ class ZoneStatistics(BaseModel):
     grass_growth_rate: Optional[str] = None  # "slow", "medium", "fast"
     
 
+class MarkerTriggerSet(BaseModel):
+    """Trigger flags determining when a marker should be visited."""
+    needs_charge: bool = False
+    precipitation: bool = False
+    manual_override: bool = False
+
+
+class MarkerTimeWindow(BaseModel):
+    """Allowed time window in 24h HH:MM format."""
+    start: str
+    end: str
+
+    @validator('start', 'end')
+    def validate_clock_format(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError('Time must be a string')
+        parts = value.split(':')
+        if len(parts) != 2:
+            raise ValueError('Time must be in HH:MM format')
+        hour, minute = parts
+        if not (hour.isdigit() and minute.isdigit()):
+            raise ValueError('Time must be numeric HH:MM')
+        h = int(hour)
+        m = int(minute)
+        if h < 0 or h > 23 or m < 0 or m > 59:
+            raise ValueError('Time values out of range')
+        return f"{h:02d}:{m:02d}"
+
+
+class MarkerSchedule(BaseModel):
+    """Structured schedule definition for a marker."""
+    time_windows: List[MarkerTimeWindow] = Field(default_factory=list)
+    days_of_week: List[int] = Field(default_factory=list)  # 0 = Sunday
+    triggers: MarkerTriggerSet = Field(default_factory=MarkerTriggerSet)
+
+    @validator('days_of_week', each_item=True)
+    def validate_days(cls, value: int) -> int:
+        if value < 0 or value > 6:
+            raise ValueError('days_of_week must be between 0 (Sunday) and 6 (Saturday)')
+        return value
+
+
 class Zone(BaseModel):
     """Geographic zone definition for mowing areas."""
     
@@ -116,6 +158,8 @@ class MapMarker(BaseModel):
     icon: Optional[str] = None  # Icon identifier for UI rendering
     # Optional scheduling or conditions: e.g., {"use_when": "am|pm|rain|always", "time_window": {"start":"08:00","end":"11:00"}}
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    schedule: Optional[MarkerSchedule] = None
+    is_primary_home: bool = False
 
 
 class MapProvider(str, Enum):
@@ -253,12 +297,12 @@ class MapConfiguration(BaseModel):
         
         # Check for marker overlaps (basic validation)
         marker_types = [m.marker_type for m in self.markers]
-        # HOME marker is strongly recommended for navigation, but don't block persistence
+        # HOME marker is strongly recommended for navigation, but keep advisory-only
         if MarkerType.HOME not in marker_types:
             self.validation_errors.append("Missing recommended marker: home")
-        
-        # Only treat geometry/placement errors as fatal; allow marker advisories
-        return all(
-            not msg.lower().startswith("missing recommended marker")
-            for msg in self.validation_errors
-        )
+
+        fatal_errors = [
+            msg for msg in self.validation_errors
+            if not msg.lower().startswith("missing recommended marker")
+        ]
+        return len(fatal_errors) == 0

@@ -44,13 +44,17 @@
                 v-for="m in (mapStore.configuration?.markers || [])" 
                 :key="m.marker_id"
                 class="pin-item"
-                :class="{ active: selectedPinId === m.marker_id }"
+                :class="{ active: selectedPinId === m.marker_id, home: m.marker_type === 'home' || m.is_home }"
                 @click="selectMarker(m)"
               >
-                <div class="pin-icon">{{ iconForMarker(m.marker_type) }}</div>
+                <div class="pin-icon">{{ m.icon || iconForMarker(m.marker_type) }}</div>
                 <div class="pin-info">
-                  <div class="pin-name">{{ m.label || m.marker_type }}</div>
+                  <div class="pin-name">
+                    {{ displayMarkerName(m) }}
+                    <span v-if="m.marker_type === 'home' || m.is_home" class="pin-badge">Home</span>
+                  </div>
                   <div class="pin-coords">{{ m.position.latitude.toFixed(6) }}, {{ m.position.longitude.toFixed(6) }}</div>
+                  <div v-if="summarizeSchedule(m)" class="pin-schedule">{{ summarizeSchedule(m) }}</div>
                 </div>
                 <div class="pin-actions">
                   <button class="btn btn-xs btn-secondary" @click.stop="editMarker(m)">✏️</button>
@@ -136,9 +140,25 @@
             <label>Pin Name</label>
             <input v-model="pinForm.name" type="text" class="form-control">
           </div>
-          
-          
-          
+
+          <div class="form-group">
+            <label>Pin Type</label>
+            <select v-model="pinForm.type" class="form-control" :disabled="pinForm.isHome">
+              <option value="custom">Custom</option>
+              <option value="am_sun">AM Sun</option>
+              <option value="pm_sun">PM Sun</option>
+            </select>
+            <small v-if="!pinForm.isHome" class="form-text text-muted">Type helps categorize scheduled visits.</small>
+          </div>
+
+          <div class="form-group form-switch">
+            <label class="toggle-label">
+              <input type="checkbox" v-model="pinForm.isHome">
+              Designate as home location
+            </label>
+            <small class="form-text text-muted">Home is the default return spot when other conditions are not met.</small>
+          </div>
+
           <div class="form-group">
             <label>Icon</label>
             <div class="icon-picker">
@@ -181,7 +201,66 @@
             </button>
             <span v-if="pickForPin" style="margin-left: .5rem; color: var(--accent-green);">Click on the map…</span>
           </div>
-          
+
+          <fieldset class="schedule-fieldset" :disabled="pinForm.isHome">
+            <legend>Conditions &amp; Triggers</legend>
+            <div class="form-group">
+              <label>Time Windows</label>
+              <div
+                class="time-window-row"
+                v-for="(window, idx) in pinForm.schedule.windows"
+                :key="`tw-${idx}`"
+              >
+                <input type="time" class="form-control-sm" v-model="window.start">
+                <span>to</span>
+                <input type="time" class="form-control-sm" v-model="window.end">
+                <button
+                  v-if="pinForm.schedule.windows.length > 1"
+                  class="btn btn-xs btn-danger"
+                  type="button"
+                  @click="removeTimeWindow(pinForm.schedule, idx)"
+                >
+                  ✖️
+                </button>
+              </div>
+              <button class="btn btn-xs btn-secondary" type="button" @click="addTimeWindow(pinForm.schedule)">
+                ➕ Add window
+              </button>
+            </div>
+
+            <div class="form-group">
+              <label>Days of Week</label>
+              <div class="day-toggle-row">
+                <button
+                  v-for="day in daysOfWeek"
+                  :key="day.value"
+                  type="button"
+                  class="day-toggle"
+                  :class="{ active: isDaySelected(pinForm.schedule, day.value) }"
+                  @click="toggleDay(pinForm.schedule, day.value)"
+                >
+                  {{ day.short }}
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Triggers</label>
+              <label class="form-check-inline">
+                <input type="checkbox" v-model="pinForm.schedule.triggers.needs_charge">
+                Needs charge
+              </label>
+              <label class="form-check-inline">
+                <input type="checkbox" v-model="pinForm.schedule.triggers.precipitation">
+                Dry weather
+              </label>
+              <label class="form-check-inline">
+                <input type="checkbox" v-model="pinForm.schedule.triggers.manual_override">
+                Manual
+              </label>
+            </div>
+          </fieldset>
+
           <div class="form-group">
             <label>Description</label>
             <textarea v-model="pinForm.description" class="form-control" rows="3" />
@@ -203,11 +282,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useApiService } from '@/services/api'
 import BoundaryEditor from '@/components/map/BoundaryEditor.vue'
 import { useMapStore } from '@/stores/map'
 import { useToastStore } from '@/stores/toast'
+import type { MarkerSchedule } from '@/stores/map'
 
 const api = useApiService()
 const mapStore = useMapStore()
@@ -220,6 +300,26 @@ const settings = ref({
   google_api_key: '',
   google_billing_warnings: true,
   style: 'standard'
+})
+
+type ScheduleForm = {
+  windows: Array<{ start: string; end: string }>
+  days: number[]
+  triggers: {
+    needs_charge: boolean
+    precipitation: boolean
+    manual_override: boolean
+  }
+}
+
+const defaultScheduleForm = (): ScheduleForm => ({
+  windows: [{ start: '08:00', end: '10:00' }],
+  days: [],
+  triggers: {
+    needs_charge: false,
+    precipitation: false,
+    manual_override: false
+  }
 })
 
 const showApiKey = ref(false)
@@ -241,7 +341,9 @@ const pinForm = ref({
   icon: '📍',
   lat: 0,
   lon: 0,
-  description: ''
+  description: '',
+  isHome: false,
+  schedule: defaultScheduleForm()
 })
 
 // Pin pick-from-map state
@@ -249,6 +351,110 @@ const pickForPin = ref(false)
 let reopenAfterPick = false
 
 const availableIcons = ['📍', '🏠', '☀️', '🌅', '🚪', '🌱', '🌳', '🌲', '🟦', '⚠️', '🔧', '⛽', '🎯', '📡']
+
+const daysOfWeek = [
+  { value: 0, label: 'Sunday', short: 'Su' },
+  { value: 1, label: 'Monday', short: 'Mo' },
+  { value: 2, label: 'Tuesday', short: 'Tu' },
+  { value: 3, label: 'Wednesday', short: 'We' },
+  { value: 4, label: 'Thursday', short: 'Th' },
+  { value: 5, label: 'Friday', short: 'Fr' },
+  { value: 6, label: 'Saturday', short: 'Sa' }
+]
+
+function toMarkerSchedule(form: ScheduleForm): MarkerSchedule | null {
+  const windows = form.windows
+    .filter(w => w.start && w.end)
+    .map(w => ({ start: w.start, end: w.end }))
+  const days = Array.from(new Set(form.days)).filter(d => d >= 0 && d <= 6).sort((a, b) => a - b)
+  const triggers = {
+    needs_charge: Boolean(form.triggers.needs_charge),
+    precipitation: Boolean(form.triggers.precipitation),
+    manual_override: Boolean(form.triggers.manual_override)
+  }
+  if (!windows.length && !days.length && !triggers.needs_charge && !triggers.precipitation && !triggers.manual_override) {
+    return null
+  }
+  return {
+    time_windows: windows,
+    days_of_week: days,
+    triggers
+  }
+}
+
+function scheduleFormFromMarker(marker: any): ScheduleForm {
+  const schedule: MarkerSchedule | undefined = marker?.schedule || marker?.metadata?.schedule || null
+  if (!schedule) {
+    return defaultScheduleForm()
+  }
+  const windows = Array.isArray(schedule.time_windows) && schedule.time_windows.length
+    ? schedule.time_windows.map((w: any) => ({ start: w?.start || '', end: w?.end || '' }))
+    : [{ start: '08:00', end: '10:00' }]
+  const days = Array.isArray(schedule.days_of_week) ? [...schedule.days_of_week] : []
+  const triggers = {
+    needs_charge: Boolean(schedule.triggers?.needs_charge),
+    precipitation: Boolean(schedule.triggers?.precipitation),
+    manual_override: Boolean(schedule.triggers?.manual_override)
+  }
+  return {
+    windows,
+    days,
+    triggers
+  }
+}
+
+function addTimeWindow(target: ScheduleForm) {
+  target.windows.push({ start: '08:00', end: '10:00' })
+}
+
+function removeTimeWindow(target: ScheduleForm, idx: number) {
+  if (target.windows.length <= 1) {
+    target.windows[0] = { start: '08:00', end: '10:00' }
+    return
+  }
+  target.windows.splice(idx, 1)
+}
+
+function toggleDay(target: ScheduleForm, dayValue: number) {
+  const pos = target.days.indexOf(dayValue)
+  if (pos === -1) {
+    target.days.push(dayValue)
+  } else {
+    target.days.splice(pos, 1)
+  }
+}
+
+function isDaySelected(target: ScheduleForm, dayValue: number): boolean {
+  return target.days.includes(dayValue)
+}
+
+function summarizeSchedule(marker: any): string | null {
+  const schedule: MarkerSchedule | undefined = marker?.schedule || marker?.metadata?.schedule
+  if (!schedule) {
+    return null
+  }
+  const parts: string[] = []
+  if (Array.isArray(schedule.days_of_week) && schedule.days_of_week.length) {
+    const dayLbl = schedule.days_of_week
+      .map((d: number) => daysOfWeek.find(day => day.value === d)?.short || '')
+      .filter(Boolean)
+      .join(' ')
+    if (dayLbl) parts.push(dayLbl)
+  }
+  if (Array.isArray(schedule.time_windows) && schedule.time_windows.length) {
+    const winLbl = schedule.time_windows
+      .map((w: any) => `${w.start ?? ''}-${w.end ?? ''}`.trim())
+      .filter(Boolean)
+      .join(', ')
+    if (winLbl) parts.push(winLbl)
+  }
+  const triggerParts: string[] = []
+  if (schedule.triggers?.needs_charge) triggerParts.push('needs charge')
+  if (schedule.triggers?.precipitation) triggerParts.push('dry weather')
+  if (schedule.triggers?.manual_override) triggerParts.push('manual')
+  if (triggerParts.length) parts.push(triggerParts.join(', '))
+  return parts.length ? parts.join(' • ') : null
+}
 
 // Computed
 const previewUrl = computed(() => {
@@ -272,8 +478,9 @@ const previewUrl = computed(() => {
 // Methods
 async function loadSettings() {
   try {
-    const response = await api.get('/api/v2/settings/maps')
-    settings.value = { ...settings.value, ...response.data }
+    const response = await api.get('/api/v2/settings/maps', { headers: { 'Cache-Control': 'no-cache' } })
+    const payload = response?.data && typeof response.data === 'object' ? response.data : {}
+    settings.value = { ...settings.value, ...payload }
     toast.show('Map settings loaded', 'info', 2000)
   } catch (error) {
     console.error('Failed to load map settings:', error)
@@ -307,14 +514,27 @@ function addPin(_categoryId: string) {
     icon: '📍',
     lat: previewLat.value,
     lon: previewLon.value,
-    description: ''
+    description: '',
+    isHome: false,
+    schedule: defaultScheduleForm()
   }
   showPinEditor.value = true
 }
 
 function editMarker(m: any) {
   editingMarkerId.value = m.marker_id
-  pinForm.value = { name: m.label || '', type: m.marker_type, icon: iconForMarker(m.marker_type), lat: m.position.latitude, lon: m.position.longitude, description: '' }
+  const isHome = m.marker_type === 'home' || m.is_home
+  const baseType = ['custom', 'am_sun', 'pm_sun'].includes(m.marker_type) ? m.marker_type : 'custom'
+  pinForm.value = {
+    name: m.label || '',
+    type: isHome ? 'custom' : baseType,
+    icon: m.icon || iconForMarker(m.marker_type),
+    lat: m.position.latitude,
+    lon: m.position.longitude,
+    description: m.metadata?.description || '',
+    isHome,
+    schedule: isHome ? defaultScheduleForm() : scheduleFormFromMarker(m)
+  }
   showPinEditor.value = true
 }
 
@@ -338,14 +558,41 @@ function selectMarker(m: any) {
 
 async function savePin() {
   try {
+    const schedule = pinForm.value.isHome ? null : toMarkerSchedule(pinForm.value.schedule)
+    const metadata: Record<string, any> = {}
+    if (pinForm.value.description) {
+      metadata.description = pinForm.value.description
+    }
+    if (schedule) {
+      metadata.schedule = schedule
+    }
+    if (pinForm.value.isHome) {
+      metadata.is_home = true
+    }
+    const markerType = pinForm.value.isHome ? 'home' : (pinForm.value.type as any)
+    const label = pinForm.value.name || undefined
     if (editingMarkerId.value) {
       mapStore.updateMarker(editingMarkerId.value, {
-        label: pinForm.value.name || undefined,
-        marker_type: pinForm.value.type,
-        position: { latitude: pinForm.value.lat, longitude: pinForm.value.lon }
-      } as any)
+        label,
+        marker_type: markerType,
+        position: { latitude: pinForm.value.lat, longitude: pinForm.value.lon },
+        icon: pinForm.value.icon,
+        metadata,
+        schedule,
+        is_home: pinForm.value.isHome
+      })
     } else {
-      mapStore.addMarker(pinForm.value.type as any, { latitude: pinForm.value.lat, longitude: pinForm.value.lon }, pinForm.value.name)
+      mapStore.addMarker(
+        markerType,
+        { latitude: pinForm.value.lat, longitude: pinForm.value.lon },
+        {
+          label,
+          icon: pinForm.value.icon,
+          metadata,
+          schedule,
+          isHome: pinForm.value.isHome
+        }
+      )
     }
     await mapStore.saveConfiguration()
     toast.show('Marker saved', 'success', 1800)
@@ -360,10 +607,26 @@ function closePinEditor() {
   showPinEditor.value = false
   editingMarkerId.value = null
   pickForPin.value = false
+  pinForm.value = {
+    name: '',
+    type: 'custom',
+    icon: '📍',
+    lat: previewLat.value,
+    lon: previewLon.value,
+    description: '',
+    isHome: false,
+    schedule: defaultScheduleForm()
+  }
 }
 
 onMounted(() => {
   loadSettings()
+})
+
+watch(() => pinForm.value.isHome, (isHome) => {
+  if (isHome) {
+    pinForm.value.schedule = defaultScheduleForm()
+  }
 })
 
 function enablePickOnMap() {
@@ -392,7 +655,20 @@ async function applyPinToConfiguration() {
     if (!mapStore.configuration) {
       await mapStore.loadConfiguration('default')
     }
-    mapStore.addMarker(applyMarkerType.value, { latitude: pinForm.value.lat, longitude: pinForm.value.lon })
+    const schedule = applyMarkerType.value === 'home' ? null : toMarkerSchedule(pinForm.value.schedule)
+    const metadata = schedule
+      ? { schedule: { ...schedule, time_windows: schedule.time_windows.map(w => ({ ...w })) } }
+      : undefined
+    mapStore.addMarker(
+      applyMarkerType.value,
+      { latitude: pinForm.value.lat, longitude: pinForm.value.lon },
+      {
+        label: pinForm.value.name || undefined,
+        metadata,
+        schedule,
+        isHome: applyMarkerType.value === 'home'
+      }
+    )
     await mapStore.saveConfiguration()
     showStatus('Marker applied to configuration', true)
   } catch (e) {
@@ -406,6 +682,14 @@ function addMowingZoneOnMap() {
 }
 function addExclusionZoneOnMap() {
   mapStore.setEditMode('exclusion')
+}
+
+function displayMarkerName(marker: any) {
+  if (marker?.label) return marker.label
+  const type = String(marker?.marker_type || '')
+  if (type === 'home') return 'Home'
+  if (!type) return 'Pin'
+  return type.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())
 }
 
 function iconForMarker(type: string) {
@@ -512,6 +796,20 @@ function editBoundaryOnMap() {
   margin-bottom: 0.5rem;
   color: var(--text-color);
   font-weight: 500;
+}
+
+.form-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+  color: var(--text-color);
 }
 
 .form-control, .form-control-sm {
@@ -758,9 +1056,35 @@ function editBoundaryOnMap() {
   color: var(--text-color);
 }
 
+.pin-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.4rem;
+  margin-left: 0.5rem;
+  border-radius: 999px;
+  background: rgba(0, 255, 146, 0.15);
+  color: var(--accent-green);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .pin-coords {
   font-size: 0.875rem;
   color: var(--text-muted);
+}
+
+.pin-schedule {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.pin-item.home {
+  border-left: 3px solid var(--accent-green);
+}
+
+.pin-item.home .pin-icon {
+  transform: scale(1.05);
 }
 
 .pin-actions {
@@ -806,6 +1130,56 @@ function editBoundaryOnMap() {
 
 .modal-body {
   padding: 1.5rem;
+}
+
+.schedule-fieldset {
+  border: 1px solid var(--primary-light);
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.schedule-fieldset legend {
+  padding: 0 0.5rem;
+  font-size: 0.95rem;
+  color: var(--accent-green);
+}
+
+.time-window-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.day-toggle-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.day-toggle {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--primary-light);
+  border-radius: 4px;
+  background: var(--primary-dark);
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.day-toggle.active {
+  background: rgba(0, 255, 146, 0.15);
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+.form-check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-right: 1rem;
+  color: var(--text-color);
 }
 
 .modal-footer {
