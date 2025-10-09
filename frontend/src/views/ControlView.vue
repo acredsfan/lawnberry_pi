@@ -282,12 +282,36 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import type { AxiosError } from 'axios'
 import { useControlStore } from '@/stores/control'
+import { useApiService } from '@/services/api'
+import { useToastStore } from '@/stores/toast'
+
+interface ManualControlSecurityConfig {
+  auth_level: 'password' | 'totp' | 'google' | 'cloudflare'
+  session_timeout_minutes: number
+  require_https: boolean
+  auto_lock_manual_control: boolean
+}
+
+interface ManualControlSession {
+  session_id: string
+  expires_at?: string
+}
+
+interface ControlTelemetry {
+  battery?: { percentage?: number }
+  position?: { latitude?: number | null; longitude?: number | null }
+  safety_state?: string
+  velocity?: { linear?: { x?: number } }
+}
 
 const control = useControlStore()
+const api = useApiService()
+const toast = useToastStore()
 
-// Proxy state for template
+// Store-backed state
 const lockout = computed(() => control.lockout)
 const lockoutReason = computed(() => control.lockoutReason)
 const remediationLink = computed(() => control.remediationLink)
@@ -295,20 +319,463 @@ const lastEcho = computed(() => control.lastEcho)
 const isLoading = computed(() => control.isLoading)
 const lastCommandResult = computed(() => control.lastCommandResult)
 
-// Example: Use control store for command submission
+// Manual control security configuration and authentication state
+const securityConfig = ref<ManualControlSecurityConfig>({
+  auth_level: 'password',
+  session_timeout_minutes: 15,
+  require_https: false,
+  auto_lock_manual_control: true
+})
+
+const isControlUnlocked = ref(false)
+const authenticating = ref(false)
+const authError = ref('')
+const authForm = reactive({
+  password: '',
+  totpCode: ''
+})
+
+const session = ref<ManualControlSession | null>(null)
+const sessionTimeRemaining = ref(0)
+let sessionTimer: number | undefined
+
+// UI state
+const statusMessage = ref('')
+const statusSuccess = ref(false)
+const performing = ref(false)
+const systemStatus = ref('unknown')
+const telemetry = ref<ControlTelemetry>({ safety_state: 'unknown' })
+const currentSpeed = ref(0)
+const mowingActive = ref(false)
+const cuttingHeight = ref(50)
+const speedLevel = ref(50)
+
+// Derived state
+const canAuthenticate = computed(() => {
+  switch (securityConfig.value.auth_level) {
+    case 'password':
+      return authForm.password.trim().length > 0
+    case 'totp':
+      return authForm.password.trim().length > 0 && authForm.totpCode.trim().length === 6
+    case 'google':
+      return true
+    case 'cloudflare':
+      return true
+    default:
+      return false
+  }
+})
+
+const canMove = computed(() =>
+  isControlUnlocked.value && !performing.value && !lockout.value
+)
+
+const canSubmitBlade = computed(() =>
+  isControlUnlocked.value && !performing.value && !lockout.value
+)
+
+// Helpers
+function mapSecurityLevel(value: unknown): ManualControlSecurityConfig['auth_level'] {
+  if (typeof value === 'string') {
+    switch (value) {
+      case 'password_only':
+      case 'password':
+        return 'password'
+      case 'password_totp':
+      case 'totp':
+        return 'totp'
+      case 'google_auth':
+      case 'google':
+        return 'google'
+      case 'cloudflare_tunnel_auth':
+      case 'tunnel':
+      case 'cloudflare':
+        return 'cloudflare'
+      default:
+        return 'password'
+    }
+  }
+
+  if (typeof value === 'number') {
+    if (value >= 4) return 'cloudflare'
+    if (value === 3) return 'google'
+    if (value === 2) return 'totp'
+    return 'password'
+  }
+
+  return 'password'
+}
+
+function formatSecurityLevel(level: ManualControlSecurityConfig['auth_level']) {
+  switch (level) {
+    case 'password':
+      return 'Password'
+    case 'totp':
+      return 'Password + TOTP'
+    case 'google':
+      return 'Google OAuth'
+    case 'cloudflare':
+      return 'Cloudflare Access'
+    default:
+      return 'Unknown'
+  }
+}
+
+function formatSystemStatus(status: string) {
+  switch (status?.toLowerCase()) {
+    case 'nominal':
+    case 'ok':
+    case 'ready':
+      return 'Ready'
+    case 'active':
+    case 'running':
+      return 'Active'
+    case 'caution':
+    case 'warning':
+      return 'Caution'
+    case 'emergency':
+    case 'fault':
+      return 'Emergency Stop'
+    default:
+      return 'Unknown'
+  }
+}
+
+function formatTimeRemaining(seconds: number) {
+  if (!seconds || seconds <= 0) {
+    return 'expired'
+  }
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  if (mins === 0) {
+    return `${secs}s`
+  }
+  return `${mins}m ${secs.toString().padStart(2, '0')}s`
+}
+
+function showStatus(message: string, success: boolean, timeout = 4000) {
+  statusMessage.value = message
+  statusSuccess.value = success
+  if (timeout > 0) {
+    window.setTimeout(() => {
+      statusMessage.value = ''
+    }, timeout)
+  }
+}
+
+function updateSessionTimer(expiresAt?: string) {
+  if (sessionTimer) {
+    window.clearInterval(sessionTimer)
+    sessionTimer = undefined
+  }
+
+  const expiration = expiresAt ? new Date(expiresAt).getTime() : null
+
+  if (!expiration) {
+    sessionTimeRemaining.value = securityConfig.value.session_timeout_minutes * 60
+    return
+  }
+
+  const tick = () => {
+    const remaining = Math.max(0, Math.floor((expiration - Date.now()) / 1000))
+    sessionTimeRemaining.value = remaining
+    if (remaining === 0) {
+      lockControl()
+      showStatus('Manual control session expired', false)
+      toast.show('Manual control session expired', 'warning', 4000)
+    }
+  }
+
+  tick()
+  sessionTimer = window.setInterval(tick, 1000)
+}
+
+async function loadSecurityConfig() {
+  try {
+    const response = await api.get('/api/v2/settings/security')
+    const data = response.data ?? {}
+    securityConfig.value = {
+      auth_level: mapSecurityLevel(data.security_level ?? data.level),
+      session_timeout_minutes: data.session_timeout_minutes ?? securityConfig.value.session_timeout_minutes,
+      require_https: Boolean(data.require_https ?? securityConfig.value.require_https),
+      auto_lock_manual_control: Boolean(data.auto_lock_manual_control ?? securityConfig.value.auto_lock_manual_control)
+    }
+  } catch (error) {
+    console.warn('Failed to load security configuration, using defaults.', error)
+  }
+}
+
+async function refreshTelemetry() {
+  try {
+    const snapshot = await control.fetchRoboHATStatus()
+    telemetry.value = {
+      ...telemetry.value,
+      ...snapshot
+    }
+    if (snapshot?.safety_state) {
+      systemStatus.value = snapshot.safety_state
+    }
+    if (snapshot?.velocity?.linear?.x !== undefined && snapshot.velocity.linear.x !== null) {
+      currentSpeed.value = Math.abs(Number(snapshot.velocity.linear.x))
+    }
+  } catch (error) {
+    // Non-fatal: keep previous telemetry
+  }
+}
+
+function ensureSession() {
+  if (!session.value) {
+    session.value = {
+      session_id: `local-${Date.now().toString(36)}`
+    }
+  }
+  return session.value
+}
+
+async function authenticateControl() {
+  if (!canAuthenticate.value || authenticating.value) return
+
+  authenticating.value = true
+  authError.value = ''
+
+  const payload: Record<string, unknown> = {
+    method: securityConfig.value.auth_level,
+    password: authForm.password || undefined,
+    totp_code: authForm.totpCode || undefined
+  }
+
+  try {
+    const response = await api.post('/api/v2/control/manual-unlock', payload)
+    const data = response.data ?? {}
+    session.value = {
+      session_id: data.session_id || `session-${Date.now().toString(36)}`,
+      expires_at: data.expires_at
+    }
+    updateSessionTimer(data.expires_at)
+    isControlUnlocked.value = true
+    toast.show('Manual control unlocked', 'success', 2500)
+    showStatus('Manual control unlocked', true)
+  } catch (error) {
+    const axiosError = error as AxiosError
+    const status = axiosError.response?.status
+    if (status === 404 || status === 501) {
+      // Backend fallback not implemented – unlock locally with warning
+      session.value = ensureSession()
+      updateSessionTimer()
+      isControlUnlocked.value = true
+      toast.show('Manual control unlocked locally (offline mode)', 'warning', 4000)
+      showStatus('Manual control unlocked (local mode)', true)
+    } else {
+      const message = (axiosError.response?.data as any)?.detail || axiosError.message || 'Authentication failed'
+      authError.value = message
+      showStatus(message, false)
+    }
+  } finally {
+    authenticating.value = false
+  }
+}
+
+function lockControl() {
+  isControlUnlocked.value = false
+  session.value = null
+  sessionTimeRemaining.value = 0
+  if (sessionTimer) {
+    window.clearInterval(sessionTimer)
+    sessionTimer = undefined
+  }
+  currentSpeed.value = 0
+}
+
+async function verifyCloudflareAuth() {
+  try {
+    const response = await api.get('/api/v2/control/manual-unlock/status')
+    const data = response.data ?? {}
+    if (data?.authorized) {
+      session.value = {
+        session_id: data.session_id || `session-${Date.now().toString(36)}`,
+        expires_at: data.expires_at
+      }
+      updateSessionTimer(data.expires_at)
+      isControlUnlocked.value = true
+      showStatus('Cloudflare Access verified', true)
+      toast.show('Cloudflare Access verified', 'success', 2500)
+    } else {
+      showStatus('Cloudflare verification failed', false)
+    }
+  } catch (error) {
+    console.warn('Cloudflare verification failed, falling back to local unlock.', error)
+    session.value = ensureSession()
+    updateSessionTimer()
+    isControlUnlocked.value = true
+    showStatus('Cloudflare Access assumed (offline mode)', true)
+  }
+}
+
+function authenticateWithGoogle() {
+  toast.show('Google authentication flow is not configured in this environment.', 'info', 4000)
+}
+
+function setPerforming(flag: boolean) {
+  performing.value = flag
+}
+
+async function sendDriveCommand(direction: string) {
+  if (!canMove.value) return
+  setPerforming(true)
+  try {
+    const speedFactor = speedLevel.value / 100
+    const vector = (() => {
+      switch (direction) {
+        case 'forward':
+          return { linear: speedFactor, angular: 0 }
+        case 'backward':
+          return { linear: -speedFactor, angular: 0 }
+        case 'left':
+          return { linear: speedFactor * 0.6, angular: -speedFactor }
+        case 'right':
+          return { linear: speedFactor * 0.6, angular: speedFactor }
+        default:
+          return { linear: 0, angular: 0 }
+      }
+    })()
+    await control.submitCommand('drive', {
+      session_id: ensureSession().session_id,
+      vector,
+      duration_ms: 200,
+      reason: `manual-${direction}`
+    })
+    currentSpeed.value = Math.abs(vector.linear ?? 0)
+  } catch (error) {
+    showStatus('Failed to send drive command', false)
+  } finally {
+    setPerforming(false)
+  }
+}
+
+async function startMovement(direction: 'forward' | 'left' | 'right' | 'backward') {
+  await sendDriveCommand(direction)
+}
+
+async function stopMovement() {
+  if (!isControlUnlocked.value) return
+  setPerforming(true)
+  try {
+    await control.submitCommand('drive', {
+      session_id: ensureSession().session_id,
+      vector: { linear: 0, angular: 0 },
+      duration_ms: 0,
+      reason: 'manual-stop'
+    })
+  } catch (error) {
+    showStatus('Failed to stop movement', false)
+  } finally {
+    currentSpeed.value = 0
+    setPerforming(false)
+  }
+}
+
 async function emergencyStop() {
-  await control.submitCommand('emergency')
+  setPerforming(true)
+  try {
+    await control.submitCommand('emergency', { session_id: ensureSession().session_id })
+    currentSpeed.value = 0
+    mowingActive.value = false
+    showStatus('Emergency stop activated', true)
+  } catch (error) {
+    showStatus('Failed to trigger emergency stop', false)
+  } finally {
+    setPerforming(false)
+  }
 }
 
-async function drive(direction: string, speed: number) {
-  await control.submitCommand('drive', { direction, speed })
+async function toggleMowing() {
+  if (!canSubmitBlade.value) return
+  setPerforming(true)
+  try {
+    const action = mowingActive.value ? 'disable' : 'enable'
+    const response = await control.submitCommand('blade', {
+      session_id: ensureSession().session_id,
+      action,
+      reason: 'manual-control'
+    })
+    if (response?.result === 'blocked') {
+      showStatus('Blade action blocked by safety system', false)
+    } else {
+      mowingActive.value = !mowingActive.value
+      showStatus(mowingActive.value ? 'Mowing started' : 'Mowing stopped', true)
+    }
+  } catch (error) {
+    showStatus('Failed to toggle mowing', false)
+  } finally {
+    setPerforming(false)
+  }
 }
 
-async function blade(on: boolean) {
-  await control.submitCommand('blade', { on })
+async function returnToBase() {
+  showStatus('Return to base command queued (placeholder)', true)
 }
 
-// ...other UI logic can be adapted to use control store as needed
+async function pauseSystem() {
+  showStatus('System paused (placeholder)', true)
+}
+
+async function resumeSystem() {
+  showStatus('System resume command queued (placeholder)', true)
+}
+
+// Reactive updates from store events
+watch(lockout, (value) => {
+  if (value) {
+    lockControl()
+    const reason = lockoutReason.value || 'Safety lockout active'
+    showStatus(reason, false, 6000)
+  }
+})
+
+watch(lastCommandResult, (result) => {
+  if (!result) return
+  if (result.result === 'blocked' || result.result === 'error') {
+    showStatus(result.status_reason || 'Command blocked', false)
+  }
+})
+
+watch(lastEcho, (payload) => {
+  if (!payload) return
+  if (payload.telemetry) {
+    telemetry.value = {
+      ...telemetry.value,
+      ...payload.telemetry
+    }
+  }
+  if (payload.system_status) {
+    systemStatus.value = payload.system_status
+  }
+})
+
+watch(speedLevel, (value) => {
+  if (!isControlUnlocked.value) return
+  // Approximate display speed in m/s for the UI
+  currentSpeed.value = Number((value / 100 * 1.2).toFixed(2))
+})
+
+let telemetryInterval: number | undefined
+
+onMounted(async () => {
+  await loadSecurityConfig()
+  await refreshTelemetry()
+  telemetryInterval = window.setInterval(refreshTelemetry, 5000)
+})
+
+onUnmounted(() => {
+  if (telemetryInterval) {
+    window.clearInterval(telemetryInterval)
+    telemetryInterval = undefined
+  }
+  if (sessionTimer) {
+    window.clearInterval(sessionTimer)
+    sessionTimer = undefined
+  }
+})
 </script>
 
 <style scoped>
