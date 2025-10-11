@@ -4,16 +4,18 @@ Manages camera capture, streaming, and IPC communication
 """
 
 import asyncio
+import io
 import json
 import logging
 import os
 import signal
 import socket
+import stat
 import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Callable, Any
+from typing import Dict, List, Optional, Set, Callable, Any, Tuple
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -27,16 +29,18 @@ from ..models.camera_stream import (
 try:
     import cv2
     OPENCV_AVAILABLE = True
-except ImportError:
+except Exception as exc:  # catch ABI mismatches as well
     OPENCV_AVAILABLE = False
-    print("OpenCV not available - camera service will run in simulation mode")
+    print(f"OpenCV not available - camera service will run in simulation mode ({exc})")
+    if "numpy" in str(exc).lower():
+        print("Hint: ensure numpy < 2.0 or rebuild OpenCV against the installed numpy version.")
 
 try:
     from picamera2 import Picamera2
     PICAMERA_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     PICAMERA_AVAILABLE = False
-    print("PiCamera2 not available - using OpenCV or simulation mode")
+    print(f"PiCamera2 not available - using OpenCV or simulation mode ({exc})")
 
 
 logger = logging.getLogger(__name__)
@@ -58,7 +62,9 @@ class CameraStreamService:
         # Threading for camera capture
         self.capture_thread: Optional[threading.Thread] = None
         self.capture_active = False
-        self.frame_queue = asyncio.Queue(maxsize=10)
+        self.frame_queue: Optional[asyncio.Queue[CameraFrame]] = None
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self._last_queue_warning = 0.0
         
         # IPC server
         self.ipc_server: Optional[asyncio.Server] = None
@@ -77,13 +83,15 @@ class CameraStreamService:
         """Initialize camera service and IPC."""
         try:
             logger.info(f"Initializing camera service (SIM_MODE={self.sim_mode})")
+            self.loop = asyncio.get_running_loop()
             
             # Initialize camera backend
             if not self.sim_mode:
                 success = await self._initialize_camera()
                 if not success:
-                    # Do not switch to simulation if SIM_MODE=0
-                    logger.warning("Camera initialization failed and SIM_MODE=0; staying offline (no simulated frames)")
+                    logger.warning("Camera initialization failed; enabling simulation fallback")
+                    self.sim_mode = True
+                    self.stream.capabilities.sensor_type = "Simulated Camera"
             
             # Set up IPC socket
             await self._setup_ipc_server()
@@ -103,44 +111,121 @@ class CameraStreamService:
         """Initialize camera hardware."""
         try:
             if PICAMERA_AVAILABLE:
-                logger.info("Initializing Pi Camera...")
-                self.camera = Picamera2()
-                
-                # Configure camera
-                config = self.camera.create_preview_configuration(
-                    main={"size": (self.stream.configuration.width, 
-                                  self.stream.configuration.height)}
-                )
-                self.camera.configure(config)
-                self.camera.start()
-                
-                # Update capabilities from camera
-                self.stream.capabilities.sensor_type = "Pi Camera v3"
-                self.hardware_available = True
-                return True
-                
-            elif OPENCV_AVAILABLE:
+                try:
+                    logger.info("Initializing Pi Camera...")
+                    self.camera = Picamera2()
+
+                    # Configure camera
+                    config = self.camera.create_video_configuration(
+                        main={
+                            "format": "RGB888",
+                            "size": (
+                                self.stream.configuration.width,
+                                self.stream.configuration.height,
+                            ),
+                        }
+                    )
+                    # Keep buffer small to minimise latency
+                    try:
+                        config["buffer_count"] = max(3, min(6, self.stream.configuration.buffer_size))
+                    except Exception:
+                        pass
+                    self.camera.configure(config)
+                    self.camera.start()
+
+                    # Apply desired frame rate constraints where supported
+                    fps = self.stream.configuration.framerate
+                    if fps > 0:
+                        frame_duration_us = int(1_000_000 / fps)
+                        try:
+                            self.camera.set_controls({
+                                "FrameDurationLimits": (frame_duration_us, frame_duration_us)
+                            })
+                        except Exception as exc:
+                            logger.debug("Unable to enforce PiCamera2 frame duration limits: %s", exc)
+
+                    # Update capabilities from camera
+                    self.stream.capabilities.sensor_type = "Pi Camera v3"
+                    self.stream.device_path = "picamera2"
+                    self.hardware_available = True
+                    return True
+                except Exception as exc:
+                    logger.error(
+                        "PiCamera2 initialization failed, falling back to OpenCV: %s",
+                        exc,
+                    )
+                    try:
+                        if self.camera:
+                            self.camera.close()
+                    except Exception:
+                        pass
+                    self.camera = None
+
+            if OPENCV_AVAILABLE:
                 logger.info("Initializing OpenCV camera...")
-                self.camera = cv2.VideoCapture(0)
-                
-                if not self.camera.isOpened():
-                    logger.error("Failed to open camera with OpenCV")
+
+                device_info = self._discover_opencv_device()
+                if not device_info:
+                    logger.error("Unable to locate a usable /dev/video* node")
                     return False
-                
-                # Set camera properties
-                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.stream.configuration.width)
-                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.stream.configuration.height)
-                self.camera.set(cv2.CAP_PROP_FPS, self.stream.configuration.framerate)
-                
-                self.stream.capabilities.sensor_type = "USB Camera"
+
+                device_path, friendly_name = device_info
+                logger.info("Attempting to open camera device %s", device_path)
+                api_preference = getattr(cv2, "CAP_V4L2", getattr(cv2, "CAP_ANY", 0))
+                self.camera = cv2.VideoCapture(device_path, api_preference)
+
+                if not self.camera or not self.camera.isOpened():
+                    logger.error("Failed to open camera device %s with OpenCV", device_path)
+                    return False
+
+                # Set camera properties; best-effort because some drivers reject the request.
+                width = self.stream.configuration.width
+                height = self.stream.configuration.height
+                fps = self.stream.configuration.framerate
+                for prop, value in (
+                    (cv2.CAP_PROP_FRAME_WIDTH, width),
+                    (cv2.CAP_PROP_FRAME_HEIGHT, height),
+                    (cv2.CAP_PROP_FPS, fps),
+                ):
+                    if not self.camera.set(prop, value):
+                        logger.debug(
+                            "Camera device %s rejected property %s=%s",
+                            device_path,
+                            prop,
+                            value,
+                        )
+
+                # Perform a lightweight probe to ensure frames are readable.
+                ok, frame = self.camera.read()
+                if not ok or frame is None or frame.size == 0:
+                    logger.error(
+                        "Camera device %s opened but failed to deliver a probe frame",
+                        device_path,
+                    )
+                    self.camera.release()
+                    self.camera = None
+                    return False
+
+                logger.info(
+                    "OpenCV camera %s ready (%sx%s @ %.2ffps)%s",
+                    device_path,
+                    frame.shape[1],
+                    frame.shape[0],
+                    fps,
+                    f" [{friendly_name}]" if friendly_name else "",
+                )
+                self.stream.device_path = device_path
+                if friendly_name:
+                    self.stream.capabilities.sensor_type = friendly_name
+                else:
+                    self.stream.capabilities.sensor_type = "V4L2 Camera"
                 self.hardware_available = True
                 return True
-            
-            else:
-                logger.warning("No camera libraries available")
-                self.hardware_available = False
-                return False
-                
+
+            logger.warning("No camera libraries available")
+            self.hardware_available = False
+            return False
+
         except Exception as e:
             logger.error(f"Camera initialization error: {e}")
             self.hardware_available = False
@@ -273,6 +358,13 @@ class CameraStreamService:
                 return True
             
             logger.info("Starting camera streaming...")
+
+            if not self.loop or self.loop.is_closed():
+                self.loop = asyncio.get_running_loop()
+
+            # Refresh frame queue with current configuration buffer size
+            buffer_size = max(1, int(self.stream.configuration.buffer_size))
+            self.frame_queue = asyncio.Queue(maxsize=buffer_size)
             
             # Start capture thread
             self.capture_active = True
@@ -314,39 +406,47 @@ class CameraStreamService:
     def _capture_frames_thread(self):
         """Camera capture thread (runs in separate thread)."""
         logger.info("Camera capture thread started")
-        
+        next_frame_time: Optional[float] = None
+
         while self.capture_active:
             try:
-                start_time = time.time()
+                loop_start = time.perf_counter()
                 
                 if self.sim_mode:
                     # In simulation mode, generate frames; in real mode, never simulate
-                    frame_data = self._generate_simulated_frame()
+                    frame_payload = self._generate_simulated_frame()
                 else:
-                    frame_data = self._capture_real_frame()
-                
-                if frame_data:
-                    # Create frame object
-                    frame = self._create_frame_object(frame_data)
-                    
-                    # Add to queue (non-blocking)
-                    try:
-                        self.frame_queue.put_nowait(frame)
-                    except asyncio.QueueFull:
-                        logger.warning("Frame queue full, dropping frame")
-                        self.stream.statistics.frames_dropped += 1
-                
-                # Update timing statistics
-                processing_time = (time.time() - start_time) * 1000  # Convert to ms
-                self.stream.update_statistics(processing_time)
+                    frame_payload = self._capture_real_frame()
+
+                if frame_payload:
+                    frame_data, dimensions = frame_payload
+                    frame = self._create_frame_object(frame_data, dimensions)
+                    self._schedule_frame_enqueue(frame)
                 
                 # Control frame rate
-                target_interval = 1.0 / self.stream.configuration.framerate
-                elapsed = time.time() - start_time
-                sleep_time = max(0, target_interval - elapsed)
-                
+                processing_elapsed = time.perf_counter() - loop_start
+                target_fps = self.stream.configuration.framerate or 1.0
+                target_fps = max(target_fps, 0.1)
+                target_interval = 1.0 / target_fps
+
+                if next_frame_time is None:
+                    next_frame_time = loop_start + target_interval
+                else:
+                    next_frame_time += target_interval
+
+                now = time.perf_counter()
+                if next_frame_time < now:
+                    next_frame_time = now
+                sleep_time = next_frame_time - now
+
                 if sleep_time > 0:
                     time.sleep(sleep_time)
+
+                total_duration = time.perf_counter() - loop_start
+                self.stream.update_statistics(
+                    frame_duration_ms=total_duration * 1000.0,
+                    processing_time_ms=processing_elapsed * 1000.0,
+                )
                 
             except Exception as e:
                 logger.error(f"Frame capture error: {e}")
@@ -355,39 +455,173 @@ class CameraStreamService:
         
         logger.info("Camera capture thread stopped")
     
-    def _capture_real_frame(self) -> Optional[bytes]:
+    def _schedule_frame_enqueue(self, frame: CameraFrame) -> None:
+        """Schedule a frame enqueue on the main event loop."""
+        if not self.loop or self.loop.is_closed():
+            return
+
+        def _enqueue():
+            if not self.frame_queue:
+                return
+            if self.frame_queue.full():
+                self.stream.statistics.frames_dropped += 1
+                self.stream.statistics.buffer_overruns += 1
+                try:
+                    self.frame_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                now = time.monotonic()
+                if now - self._last_queue_warning > 5.0:
+                    logger.warning("Frame queue full, dropping frame")
+                    self._last_queue_warning = now
+            self.frame_queue.put_nowait(frame)
+
+        try:
+            self.loop.call_soon_threadsafe(_enqueue)
+        except RuntimeError:
+            # Loop may be closing; drop frame silently
+            pass
+
+    def _resolve_jpeg_quality(self) -> int:
+        """Determine JPEG quality based on configured stream quality."""
+        quality_map = {
+            StreamQuality.LOW: 60,
+            StreamQuality.MEDIUM: 72,
+            StreamQuality.HIGH: 85,
+            StreamQuality.ULTRA: 92,
+        }
+        quality_key: Any = self.stream.configuration.quality
+        if isinstance(quality_key, str):
+            try:
+                quality_key = StreamQuality(quality_key)
+            except ValueError:
+                quality_key = None
+        return quality_map.get(quality_key, 80)
+
+    def _encode_numpy_frame_to_jpeg(self, frame: Any) -> Optional[bytes]:
+        """Encode an RGB numpy frame to JPEG, preferring OpenCV."""
+        quality = self._resolve_jpeg_quality()
+
+        if OPENCV_AVAILABLE:
+            try:
+                if frame.ndim >= 3 and frame.shape[2] == 3:
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                else:
+                    frame_bgr = frame
+                success, buffer = cv2.imencode(
+                    ".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, quality]
+                )
+                if success:
+                    return buffer.tobytes()
+            except Exception as exc:
+                logger.warning("OpenCV JPEG encode failed: %s", exc)
+
+        try:
+            from PIL import Image
+
+            image = Image.fromarray(frame)
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=quality)
+            return buffer.getvalue()
+        except Exception as exc:
+            logger.error("Fallback JPEG encoding failed: %s", exc)
+            return None
+
+    def _capture_real_frame(self) -> Optional[Tuple[bytes, Tuple[int, int]]]:
         """Capture frame from real camera."""
         try:
             if PICAMERA_AVAILABLE and isinstance(self.camera, Picamera2):
-                # Capture with Pi Camera
-                array = self.camera.capture_array()
-                
-                # Convert to JPEG
-                import cv2
-                success, buffer = cv2.imencode('.jpg', array, 
-                    [cv2.IMWRITE_JPEG_QUALITY, 85])
-                
-                if success:
-                    return buffer.tobytes()
-                    
+                frame = self.camera.capture_array("main")
+                if frame is None:
+                    return None
+
+                height, width = frame.shape[:2]
+                encoded = self._encode_numpy_frame_to_jpeg(frame)
+                if encoded:
+                    return encoded, (width, height)
+
+                # Fallback to slower capture_file path if encoding failed
+                buffer = io.BytesIO()
+                self.camera.capture_file(buffer, format="jpeg")
+                return buffer.getvalue(), (
+                    self.stream.configuration.width,
+                    self.stream.configuration.height,
+                )
+
             elif OPENCV_AVAILABLE and isinstance(self.camera, cv2.VideoCapture):
                 # Capture with OpenCV
                 ret, frame = self.camera.read()
                 
                 if ret:
-                    success, buffer = cv2.imencode('.jpg', frame,
-                        [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    height, width = frame.shape[:2]
+                    success, buffer = cv2.imencode(
+                        '.jpg',
+                        frame,
+                        [cv2.IMWRITE_JPEG_QUALITY, self._resolve_jpeg_quality()]
+                    )
                     
                     if success:
-                        return buffer.tobytes()
+                        return buffer.tobytes(), (width, height)
             
             return None
             
         except Exception as e:
             logger.error(f"Real frame capture error: {e}")
             return None
+
+    def _discover_opencv_device(self) -> Optional[Tuple[str, Optional[str]]]:
+        """Identify a usable V4L2 device for OpenCV capture."""
+        # Honor explicit request first.
+        explicit = os.getenv("CAMERA_DEVICE")
+        if explicit:
+            path = explicit if explicit.startswith("/dev/") else f"/dev/{explicit}"
+            if Path(path).exists():
+                friendly = None
+                try:
+                    friendly = (Path("/sys/class/video4linux") / Path(path).name / "name").read_text().strip()
+                except Exception:
+                    pass
+                return path, friendly
+            logger.warning("CAMERA_DEVICE %s was provided but does not exist", explicit)
+
+        video_devices = []
+        try:
+            video_devices = sorted(Path("/dev").glob("video*"))
+        except Exception as exc:  # pragma: no cover - filesystem failure
+            logger.error("Failed to enumerate /dev/video* nodes: %s", exc)
+            return None
+
+        # Prefer lower indices but keep deterministic ordering.
+        sys_class = Path("/sys/class/video4linux")
+
+        for device in video_devices:
+            try:
+                info = device.stat()
+                if not stat.S_ISCHR(info.st_mode):
+                    continue
+            except FileNotFoundError:
+                continue
+
+            friendly = None
+            try:
+                sys_entry = (sys_class / device.name / "name")
+                sys_text = sys_entry.read_text().strip()
+                friendly = sys_text
+                sys_name = sys_text.lower()
+                if any(token in sys_name for token in ("decoder", "stat", "metadata", "output")):
+                    logger.debug("Skipping %s (sysfs reports %s)", device, sys_text)
+                    continue
+            except FileNotFoundError:
+                pass
+            except Exception as exc:  # pragma: no cover - sysfs read failure
+                logger.debug("Unable to inspect sysfs name for %s: %s", device, exc)
+                friendly = None
+
+            return device.as_posix(), friendly
+
+        return None
     
-    def _generate_simulated_frame(self) -> bytes:
+    def _generate_simulated_frame(self) -> Tuple[bytes, Tuple[int, int]]:
         """Generate simulated camera frame for testing."""
         try:
             # Create a simple test pattern
@@ -422,23 +656,30 @@ class CameraStreamService:
             # Convert to JPEG bytes
             buffer = io.BytesIO()
             image.save(buffer, format='JPEG', quality=85)
-            return buffer.getvalue()
+            return buffer.getvalue(), (width, height)
             
         except Exception as e:
             logger.error(f"Simulated frame generation error: {e}")
             # Return minimal JPEG
-            return b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00H\x00H\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x11\x08\x00\x01\x00\x01\x01\x01\x11\x00\x02\x11\x01\x03\x11\x01\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00\x3f\x00\xaa\xff\xd9'
+            minimal = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00H\x00H\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x11\x08\x00\x01\x00\x01\x01\x01\x11\x00\x02\x11\x01\x03\x11\x01\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00\x3f\x00\xaa\xff\xd9'
+            return minimal, (1, 1)
     
-    def _create_frame_object(self, frame_data: bytes) -> CameraFrame:
+    def _create_frame_object(self, frame_data: bytes, dimensions: Optional[Tuple[int, int]] = None) -> CameraFrame:
         """Create CameraFrame object from raw frame data."""
         frame_id = f"frame_{self.stream.statistics.frames_captured:06d}"
+
+        if dimensions:
+            width, height = dimensions
+        else:
+            width = self.stream.configuration.width
+            height = self.stream.configuration.height
         
         metadata = FrameMetadata(
             frame_id=frame_id,
             timestamp=datetime.now(timezone.utc),
             sequence_number=self.stream.statistics.frames_captured,
-            width=self.stream.configuration.width,
-            height=self.stream.configuration.height,
+            width=width,
+            height=height,
             format=FrameFormat.JPEG,
             size_bytes=len(frame_data)
         )
@@ -454,6 +695,9 @@ class CameraStreamService:
         
         while self.running:
             try:
+                if not self.frame_queue:
+                    await asyncio.sleep(0.05)
+                    continue
                 # Get frame from queue with timeout
                 frame = await asyncio.wait_for(
                     self.frame_queue.get(), timeout=1.0
@@ -607,12 +851,37 @@ class CameraStreamService:
         """Apply configuration to camera hardware."""
         try:
             if PICAMERA_AVAILABLE and isinstance(self.camera, Picamera2):
-                # Reconfigure Pi Camera
-                config = self.camera.create_preview_configuration(
-                    main={"size": (self.stream.configuration.width, 
-                                  self.stream.configuration.height)}
+                # Reconfigure Pi Camera with video-friendly settings
+                config = self.camera.create_video_configuration(
+                    main={
+                        "format": "RGB888",
+                        "size": (
+                            self.stream.configuration.width,
+                            self.stream.configuration.height,
+                        ),
+                    }
                 )
+                try:
+                    config["buffer_count"] = max(3, min(6, self.stream.configuration.buffer_size))
+                except Exception:
+                    pass
+
+                try:
+                    self.camera.stop()
+                except Exception:
+                    pass
                 self.camera.configure(config)
+                self.camera.start()
+
+                fps = self.stream.configuration.framerate
+                if fps > 0:
+                    frame_duration_us = int(1_000_000 / fps)
+                    try:
+                        self.camera.set_controls({
+                            "FrameDurationLimits": (frame_duration_us, frame_duration_us)
+                        })
+                    except Exception as exc:
+                        logger.debug("Unable to enforce PiCamera2 frame duration limits: %s", exc)
                 
             elif OPENCV_AVAILABLE and isinstance(self.camera, cv2.VideoCapture):
                 # Update OpenCV camera properties

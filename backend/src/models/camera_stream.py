@@ -119,6 +119,7 @@ class StreamStatistics(BaseModel):
     average_frame_time_ms: float = 0.0
     max_frame_time_ms: float = 0.0
     min_frame_time_ms: float = 0.0
+    average_processing_time_ms: float = 0.0
     
     # Quality metrics
     average_frame_size: int = 0
@@ -226,31 +227,46 @@ class CameraStream(BaseModel):
         use_enum_values = True
         json_encoders = {datetime: lambda v: v.isoformat()}
     
-    def update_statistics(self, processing_time_ms: float):
-        """Update streaming statistics with new frame"""
-        self.statistics.frames_captured += 1
-        
-        # Update timing statistics
-        if self.statistics.frames_captured == 1:
-            self.statistics.min_frame_time_ms = processing_time_ms
-            self.statistics.max_frame_time_ms = processing_time_ms
-            self.statistics.average_frame_time_ms = processing_time_ms
+    def update_statistics(self, frame_duration_ms: float, processing_time_ms: float | None = None):
+        """Update streaming statistics with new frame timing."""
+        stats = self.statistics
+        stats.frames_captured += 1
+
+        # Update frame duration metrics
+        if stats.frames_captured == 1:
+            stats.min_frame_time_ms = frame_duration_ms
+            stats.max_frame_time_ms = frame_duration_ms
+            stats.average_frame_time_ms = frame_duration_ms
         else:
-            self.statistics.min_frame_time_ms = min(
-                self.statistics.min_frame_time_ms, processing_time_ms
+            stats.min_frame_time_ms = min(stats.min_frame_time_ms, frame_duration_ms)
+            stats.max_frame_time_ms = max(stats.max_frame_time_ms, frame_duration_ms)
+            n = stats.frames_captured
+            stats.average_frame_time_ms = (
+                (stats.average_frame_time_ms * (n - 1) + frame_duration_ms) / n
             )
-            self.statistics.max_frame_time_ms = max(
-                self.statistics.max_frame_time_ms, processing_time_ms
-            )
-            # Running average
-            n = self.statistics.frames_captured
-            self.statistics.average_frame_time_ms = (
-                (self.statistics.average_frame_time_ms * (n - 1) + processing_time_ms) / n
-            )
-        
-        # Calculate current FPS
-        if processing_time_ms > 0:
-            self.statistics.current_fps = 1000.0 / processing_time_ms
+
+        # Track processing time separately when provided
+        if processing_time_ms is not None:
+            if stats.frames_captured == 1:
+                stats.average_processing_time_ms = processing_time_ms
+            else:
+                n = stats.frames_captured
+                stats.average_processing_time_ms = (
+                    (stats.average_processing_time_ms * (n - 1) + processing_time_ms) / n
+                )
+
+        # Derive FPS metrics based on actual frame duration
+        if frame_duration_ms > 0:
+            stats.current_fps = 1000.0 / frame_duration_ms
+        else:
+            stats.current_fps = self.configuration.framerate
+
+        if stats.average_frame_time_ms > 0:
+            stats.average_fps = 1000.0 / stats.average_frame_time_ms
+        else:
+            stats.average_fps = self.configuration.framerate
+
+        stats.target_fps = self.configuration.framerate
     
     def is_healthy(self) -> bool:
         """Check if camera stream is operating normally"""

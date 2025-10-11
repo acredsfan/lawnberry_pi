@@ -297,6 +297,7 @@ class WebSocketHub:
 
                     pos = data.gps
                     imu = data.imu
+                    speed_mps = getattr(pos, "speed", None) if pos else None
                     telemetry = {
                         "source": "hardware",
                         "battery": {"percentage": battery_pct, "voltage": batt_v},
@@ -306,14 +307,22 @@ class WebSocketHub:
                             "altitude": getattr(pos, "altitude", None),
                             "accuracy": getattr(pos, "accuracy", None) if pos else None,
                             "gps_mode": getattr(pos, "mode", None) if pos else None,
+                            "satellites": getattr(pos, "satellites", None) if pos else None,
+                            "speed": speed_mps,
+                            "rtk_status": getattr(pos, "rtk_status", None) if pos else None,
                         },
                         "imu": {
                             "roll": getattr(imu, "roll", None),
                             "pitch": getattr(imu, "pitch", None),
                             "yaw": getattr(imu, "yaw", None),
+                            "gyro_z": getattr(imu, "gyro_z", None),
+                        },
+                        "velocity": {
+                            "linear": {"x": speed_mps, "y": None, "z": None},
+                            "angular": {"x": None, "y": None, "z": getattr(imu, "gyro_z", None)},
                         },
                         "motor_status": "idle",
-                        "safety_state": "safe",
+                        "safety_state": "emergency_stop" if _safety_state.get("emergency_stop_active", False) else "nominal",
                         "uptime_seconds": time.time(),
                     }
                     
@@ -350,10 +359,15 @@ class WebSocketHub:
         # Simulated data
         telemetry = {
             "source": "simulated",
-            "battery": {"percentage": 85.2, "voltage": 12.6},
-            "position": {"latitude": 40.7128, "longitude": -74.0060},
+            "battery": {"percentage": None, "voltage": None},
+            "position": {"latitude": None, "longitude": None},
+            "imu": {"roll": None, "pitch": None, "yaw": None, "gyro_z": None},
+            "velocity": {
+                "linear": {"x": None, "y": None, "z": None},
+                "angular": {"x": None, "y": None, "z": None},
+            },
             "motor_status": "idle",
-            "safety_state": "safe",
+            "safety_state": "emergency_stop" if _safety_state.get("emergency_stop_active", False) else "nominal",
             "uptime_seconds": time.time(),
         }
         
@@ -1240,6 +1254,39 @@ async def get_robohat_status():
     # Contract-friendly aliases/fields
     payload["watchdog_heartbeat_ms"] = payload.get("watchdog_latency_ms")
     payload["safety_state"] = safety_state
+    telemetry_snapshot: dict[str, Any] | None = None
+    try:
+        telemetry_snapshot = await websocket_hub._generate_telemetry()
+    except Exception as exc:
+        logger.warning("Failed to gather hardware telemetry snapshot: %s", exc)
+
+    if telemetry_snapshot:
+        source = telemetry_snapshot.get("source") or "unknown"
+        payload["telemetry_source"] = source
+        if telemetry_snapshot.get("safety_state"):
+            payload["safety_state"] = telemetry_snapshot["safety_state"]
+        if telemetry_snapshot.get("camera") is not None:
+            payload["camera"] = telemetry_snapshot.get("camera")
+
+        if source == "hardware":
+            for key in ("battery", "position", "imu", "velocity", "motor_status", "uptime_seconds"):
+                value = telemetry_snapshot.get(key)
+                if value is not None:
+                    payload[key] = value
+        else:
+            # Avoid presenting simulated values as live data
+            payload.setdefault("battery", {"percentage": None, "voltage": None})
+            payload.setdefault("position", {"latitude": None, "longitude": None})
+            payload.setdefault(
+                "velocity",
+                {
+                    "linear": {"x": None, "y": None, "z": None},
+                    "angular": {"x": None, "y": None, "z": None},
+                },
+            )
+    else:
+        payload["telemetry_source"] = "unknown"
+
     return payload
 
 class Vector2D(BaseModel):
