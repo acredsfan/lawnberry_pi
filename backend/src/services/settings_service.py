@@ -154,7 +154,7 @@ class SettingsService:
         profile = self.load_profile(profile_id)
         
         with open(export_path, 'w') as f:
-            json.dump(profile.dict(), f, indent=2, default=str)
+            json.dump(profile.model_dump(), f, indent=2, default=str)
         
         logger.info(f"Exported profile {profile_id} to {export_path}")
     

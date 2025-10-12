@@ -89,8 +89,34 @@
           <div class="gps-icon">📡</div>
         </div>
         <div class="card-content">
-          <div class="metric-value">{{ gpsPosition }}</div>
+          <div class="metric-value gps-value">
+            <template v-if="hasGpsFix">
+              <span class="coord">
+                <span class="coord-label">LAT</span>
+                <span class="coord-value">{{ gpsLatitude }}</span>
+              </span>
+              <span class="coord">
+                <span class="coord-label">LON</span>
+                <span class="coord-value">{{ gpsLongitude }}</span>
+              </span>
+            </template>
+            <span v-else class="coord no-fix">NO SIGNAL</span>
+          </div>
           <div class="metric-status" :class="gpsStatusClass">{{ gpsStatus }}</div>
+          <div class="gps-metrics" v-if="hasGpsFix">
+            <div class="metric-line">
+              ACCURACY: <span>{{ gpsAccuracyDisplay }} {{ gpsAccuracyUnit }}</span>
+            </div>
+            <div class="metric-line">
+              HDOP: <span>{{ gpsHdopDisplay }}</span>
+            </div>
+            <div class="metric-line">
+              SATS: <span>{{ gpsSatellitesDisplay }}</span>
+            </div>
+            <div class="metric-line" v-if="gpsRtkStatus">
+              RTK: <span>{{ gpsRtkStatus }}</span>
+            </div>
+          </div>
         </div>
       </div>
       
@@ -101,12 +127,12 @@
           <div class="battery-icon" :class="batteryIconClass">🔋</div>
         </div>
         <div class="card-content">
-          <div class="metric-value">{{ batteryLevel.toFixed(1) }}%</div>
+          <div class="metric-value">{{ batteryLevelDisplay }}%</div>
           <div class="battery-bar">
             <div class="battery-fill" :style="{ width: `${batteryLevel}%` }" :class="batteryBarClass" />
             <div class="battery-segments" />
           </div>
-          <div class="metric-status">{{ batteryVoltage }}V</div>
+          <div class="metric-status">{{ batteryVoltageDisplay }}V</div>
         </div>
       </div>
       
@@ -117,23 +143,90 @@
           <div class="speed-icon">🚀</div>
         </div>
         <div class="card-content">
-          <div class="metric-value">{{ speed.toFixed(1) }} <span class="unit">m/s</span></div>
+          <div class="metric-value">{{ speedDisplay }} <span class="unit">{{ speedUnit }}</span></div>
           <div class="speed-trend" :class="speedTrendClass">
             {{ speedTrend > 0 ? '▲' : speedTrend < 0 ? '▼' : '▬' }} {{ Math.abs(speedTrend) }}%
           </div>
         </div>
       </div>
       
-      <!-- Temperature -->
-      <div class="retro-card telemetry-card">
+      <!-- Environmental Sensors -->
+      <div class="retro-card telemetry-card environmental-card">
         <div class="card-header">
-          <h4>TEMPERATURE</h4>
+          <h4>ENVIRONMENT</h4>
           <div class="temp-icon">🌡️</div>
         </div>
         <div class="card-content">
-          <div class="metric-value">{{ temperature.toFixed(1) }}<span class="unit">°C</span></div>
-          <div class="temp-status" :class="tempStatusClass">{{ tempStatus }}</div>
+          <div class="env-grid">
+            <div class="env-metric">
+              <span class="metric-label">Temp</span>
+              <span class="metric-value">{{ temperatureDisplay }}<span class="unit">{{ temperatureUnit }}</span></span>
+              <span class="metric-status" :class="tempStatusClass">{{ tempStatus }}</span>
+            </div>
+            <div class="env-metric">
+              <span class="metric-label">Humidity</span>
+              <span class="metric-value">{{ humidityDisplay }}<span class="unit">%</span></span>
+            </div>
+            <div class="env-metric">
+              <span class="metric-label">Pressure</span>
+              <span class="metric-value">{{ pressureDisplay }}<span class="unit">{{ pressureUnit }}</span></span>
+            </div>
+            <div class="env-metric">
+              <span class="metric-label">Altitude</span>
+              <span class="metric-value">{{ altitudeDisplay }}<span class="unit">{{ altitudeUnit }}</span></span>
+            </div>
+          </div>
+          <div class="env-source">Source: {{ environmentalSourceLabel }}</div>
         </div>
+      </div>
+
+      <!-- ToF Sensors -->
+      <div class="retro-card telemetry-card tof-card">
+        <div class="card-header">
+          <h4>TOF RANGE</h4>
+          <div class="tof-icon">🛰️</div>
+        </div>
+        <div class="card-content tof-grid">
+          <div class="tof-column">
+            <div class="metric-label">LEFT</div>
+            <div class="metric-value">{{ tofLeftDisplay }}<span class="unit">{{ tofUnit }}</span></div>
+            <div class="metric-status" :class="tofStatusClass(tofLeft.status)">{{ formatTofStatus(tofLeft.status) }}</div>
+          </div>
+          <div class="tof-column">
+            <div class="metric-label">RIGHT</div>
+            <div class="metric-value">{{ tofRightDisplay }}<span class="unit">{{ tofUnit }}</span></div>
+            <div class="metric-status" :class="tofStatusClass(tofRight.status)">{{ formatTofStatus(tofRight.status) }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- IMU Calibration -->
+    <div class="retro-card calibration-card">
+      <div class="card-header">
+        <h3>◢ IMU CALIBRATION ◣</h3>
+        <div class="calibration-indicator" :class="calibrationStatusClass" />
+      </div>
+      <div class="card-content">
+        <div class="calibration-row">
+          <span class="metric-label">Status</span>
+          <span class="metric-value">{{ imuCalibrationLabel }}</span>
+        </div>
+        <div class="calibration-row">
+          <span class="metric-label">Score</span>
+          <span class="metric-value">{{ imuCalibrationScore }} / 3</span>
+        </div>
+        <div class="calibration-row">
+          <span class="metric-label">Last Run</span>
+          <span class="metric-value">{{ lastCalibrationSummary }}</span>
+        </div>
+        <button class="retro-btn calibrate-btn" :disabled="imuCalibrating || !imuSupported" @click="runImuCalibration">
+          <span class="btn-icon">♻</span>
+          {{ !imuSupported ? 'NOT SUPPORTED' : imuCalibrating ? 'CALIBRATING…' : 'RUN CALIBRATION' }}
+        </button>
+        <p v-if="calibrationError" class="calibration-error">⚠ {{ calibrationError }}</p>
+        <p v-else-if="!imuSupported" class="calibration-note unsupported">IMU calibration not supported on this hardware.</p>
+        <p v-else-if="lastCalibration?.notes" class="calibration-note">{{ lastCalibration?.notes }}</p>
       </div>
     </div>
 
@@ -162,15 +255,37 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { systemApi, controlApi, telemetryApi, weatherApi } from '@/composables/useApi'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { systemApi, controlApi, telemetryApi, weatherApi, settingsApi, maintenanceApi } from '@/composables/useApi'
 import { useWebSocket } from '@/services/websocket'
+import { usePreferencesStore } from '@/stores/preferences'
 
-const { connected, connecting, connect, subscribe, unsubscribe } = useWebSocket()
+interface TofState {
+  distance: number | null
+  status: string | null
+  signal: number | null
+}
+
+interface ImuCalibrationResult {
+  status: string
+  calibration_status?: string | null
+  calibration_score: number
+  timestamp: string
+  started_at?: string | null
+  notes?: string | null
+  steps: Array<Record<string, any>>
+}
+
+const { connected, connecting, connect, subscribe, unsubscribe, setCadence } = useWebSocket()
 
 // Loading and UI state
 const isLoading = ref(false)
 const dataStreamText = ref('>>> INITIALIZING SYSTEM CONNECTION...')
+
+// Preferences
+const preferences = usePreferencesStore()
+preferences.ensureInitialized()
+const unitSystem = computed(() => preferences.unitSystem)
 
 // Core system state
 const currentMode = ref('IDLE')
@@ -180,45 +295,105 @@ const systemStatus = ref('Unknown')
 const connectionStatus = ref('Disconnected')
 
 // Telemetry data
-const gpsPosition = ref('N/A')
+const gpsLatitude = ref<string | null>(null)
+const gpsLongitude = ref<string | null>(null)
 const gpsStatus = ref('NO SIGNAL')
+const gpsAccuracy = ref<number | null>(null)
+const gpsHdop = ref<number | null>(null)
+const gpsSatellites = ref<number | null>(null)
+const gpsRtkStatus = ref<string | null>(null)
+
 const batteryLevel = ref(0)
 const batteryVoltage = ref(0)
-const speed = ref(0.0)
+const speed = ref(0)
 const speedTrend = ref(0)
-const temperature = ref(0.0)
+
+const temperature = ref<number | null>(null)
+const humidity = ref<number | null>(null)
+const pressure = ref<number | null>(null)
+const altitude = ref<number | null>(null)
+const environmentalSource = ref<'hardware' | 'weather' | 'unknown'>('unknown')
+
+const tofLeft = ref<TofState>({ distance: null, status: null, signal: null })
+const tofRight = ref<TofState>({ distance: null, status: null, signal: null })
+
+const imuCalibrationScore = ref(0)
+const imuCalibrationStatus = ref<string>('unknown')
+const imuCalibrating = ref(false)
+const lastCalibration = ref<ImuCalibrationResult | null>(null)
+const calibrationError = ref<string | null>(null)
+const imuSupported = ref(true)
+let calibrationPollHandle: number | null = null
 
 // Event log
 const recentEvents = ref([
   { id: Date.now(), timestamp: new Date(), message: 'System initializing...', level: 'info' },
 ])
 
-// Computed properties for styling
+// Computed properties for styling and display
 const systemStatusClass = computed(() => {
   switch (systemStatus.value.toLowerCase()) {
-    case 'active': case 'running': return 'status-active'
-    case 'warning': case 'caution': return 'status-warning'
-    case 'error': case 'critical': return 'status-error'
-    default: return 'status-unknown'
+    case 'active':
+    case 'running':
+      return 'status-active'
+    case 'warning':
+    case 'caution':
+      return 'status-warning'
+    case 'error':
+    case 'critical':
+      return 'status-error'
+    default:
+      return 'status-unknown'
   }
 })
 
 const connectionStatusClass = computed(() => {
   switch (connectionStatus.value.toLowerCase()) {
-    case 'connected': case 'online': return 'status-active'
-    case 'connecting': return 'status-warning'
-    default: return 'status-error'
+    case 'connected':
+    case 'online':
+      return 'status-active'
+    case 'connecting':
+      return 'status-warning'
+    default:
+      return 'status-error'
   }
 })
 
+const hasGpsFix = computed(() => gpsLatitude.value !== null && gpsLongitude.value !== null)
+
+const gpsAccuracyUnit = computed(() => unitSystem.value === 'imperial' ? 'ft' : 'm')
+
+const gpsAccuracyDisplay = computed(() => {
+  if (gpsAccuracy.value === null) return '--'
+  const base = unitSystem.value === 'imperial' ? gpsAccuracy.value * 3.28084 : gpsAccuracy.value
+  return base >= 100 ? base.toFixed(0) : base.toFixed(2)
+})
+
+const gpsHdopDisplay = computed(() => {
+  if (gpsHdop.value === null) return '--'
+  return gpsHdop.value.toFixed(2)
+})
+
+const gpsSatellitesDisplay = computed(() => {
+  if (gpsSatellites.value === null) return '--'
+  return gpsSatellites.value.toString()
+})
+
 const gpsStatusClass = computed(() => {
-  if (gpsPosition.value !== 'N/A' && !gpsPosition.value.includes('NO')) return 'status-active'
-  return 'status-error'
+  if (!hasGpsFix.value) return 'status-error'
+  if (gpsAccuracy.value !== null && gpsAccuracy.value > 2.0) return 'status-warning'
+  return 'status-active'
+})
+
+const gpsAccuracySummary = computed(() => {
+  if (!hasGpsFix.value) return 'NO SIGNAL'
+  if (gpsAccuracy.value === null) return 'SIGNAL ACQUIRED'
+  return `Accuracy ±${gpsAccuracyDisplay.value} ${gpsAccuracyUnit.value}`
 })
 
 const batteryIconClass = computed(() => {
   if (batteryLevel.value > 50) return 'battery-high'
-  if (batteryLevel.value > 20) return 'battery-medium' 
+  if (batteryLevel.value > 20) return 'battery-medium'
   return 'battery-low'
 })
 
@@ -228,18 +403,317 @@ const batteryBarClass = computed(() => {
   return 'battery-critical'
 })
 
-const speedTrendClass = computed(() => speedTrend.value > 0 ? 'trend-up' : speedTrend.value < 0 ? 'trend-down' : 'trend-stable')
+const batteryLevelDisplay = computed(() => batteryLevel.value.toFixed(1))
+const batteryVoltageDisplay = computed(() => batteryVoltage.value.toFixed(1))
+
+const speedTrendClass = computed(() => (speedTrend.value > 0 ? 'trend-up' : speedTrend.value < 0 ? 'trend-down' : 'trend-stable'))
+
+const speedDisplay = computed(() => {
+  const value = speed.value || 0
+  const converted = unitSystem.value === 'imperial' ? value * 2.23694 : value
+  return converted.toFixed(1)
+})
+
+const speedUnit = computed(() => (unitSystem.value === 'imperial' ? 'mph' : 'm/s'))
+
+const temperatureDisplay = computed(() => {
+  if (temperature.value === null) return '--'
+  const converted = unitSystem.value === 'imperial' ? (temperature.value * 9) / 5 + 32 : temperature.value
+  return converted.toFixed(1)
+})
+
+const temperatureUnit = computed(() => (unitSystem.value === 'imperial' ? '°F' : '°C'))
 
 const tempStatus = computed(() => {
+  if (temperature.value === null) return 'UNKNOWN'
   if (temperature.value > 40) return 'CRITICAL'
   if (temperature.value > 30) return 'WARNING'
   return 'NORMAL'
 })
 
 const tempStatusClass = computed(() => {
+  if (temperature.value === null) return 'status-unknown'
   if (temperature.value > 40) return 'status-error'
   if (temperature.value > 30) return 'status-warning'
   return 'status-active'
+})
+
+const humidityDisplay = computed(() => (humidity.value === null ? '--' : humidity.value.toFixed(1)))
+
+const pressureDisplay = computed(() => {
+  if (pressure.value === null) return '--'
+  if (unitSystem.value === 'imperial') {
+    const inHg = pressure.value * 0.0295299831
+    return inHg.toFixed(2)
+  }
+  return pressure.value.toFixed(1)
+})
+
+const pressureUnit = computed(() => (unitSystem.value === 'imperial' ? 'inHg' : 'hPa'))
+
+const altitudeDisplay = computed(() => {
+  if (altitude.value === null) return '--'
+  const converted = unitSystem.value === 'imperial' ? altitude.value * 3.28084 : altitude.value
+  return converted.toFixed(1)
+})
+
+const altitudeUnit = computed(() => (unitSystem.value === 'imperial' ? 'ft' : 'm'))
+
+const environmentalSourceLabel = computed(() => {
+  switch (environmentalSource.value) {
+    case 'hardware':
+      return 'Hardware'
+    case 'weather':
+      return 'Weather service'
+    default:
+      return 'Unknown'
+  }
+})
+
+const tofUnit = computed(() => (unitSystem.value === 'imperial' ? 'in' : 'cm'))
+
+const formatTofDistance = (distanceMm: number | null) => {
+  if (distanceMm === null) return '--'
+  if (unitSystem.value === 'imperial') {
+    return (distanceMm / 25.4).toFixed(1)
+  }
+  return (distanceMm / 10).toFixed(1)
+}
+
+const tofLeftDisplay = computed(() => formatTofDistance(tofLeft.value.distance))
+const tofRightDisplay = computed(() => formatTofDistance(tofRight.value.distance))
+
+const formatTofStatus = (status: string | null) => {
+  if (!status) return 'UNKNOWN'
+  return status.replace(/_/g, ' ').toUpperCase()
+}
+
+const tofStatusClass = (status: string | null) => {
+  if (!status) return 'status-unknown'
+  const norm = status.toLowerCase()
+  if (['valid', 'ok', 'good'].includes(norm)) return 'status-active'
+  if (['wrap_around', 'warning', 'calibrating'].includes(norm)) return 'status-warning'
+  return 'status-error'
+}
+
+const imuCalibrationLabel = computed(() => {
+  if (!imuSupported.value) return 'NOT SUPPORTED'
+  if (imuCalibrating.value) return 'Calibrating…'
+  if (imuCalibrationStatus.value) return imuCalibrationStatus.value.replace(/_/g, ' ').toUpperCase()
+  return 'UNKNOWN'
+})
+
+const calibrationStatusClass = computed(() => {
+  if (!imuSupported.value) return 'status-unknown'
+  if (imuCalibrating.value) return 'status-warning'
+  if (imuCalibrationScore.value >= 2) return 'status-active'
+  if (imuCalibrationScore.value === 0) return 'status-error'
+  return 'status-warning'
+})
+
+const lastCalibrationSummary = computed(() => {
+  if (!imuSupported.value) return 'Unavailable'
+  if (!lastCalibration.value) return 'Never'
+  try {
+    return new Date(lastCalibration.value.timestamp).toLocaleString()
+  } catch (error) {
+    return lastCalibration.value.timestamp
+  }
+})
+
+const coerceFiniteNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (trimmed.length === 0) return undefined
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
+}
+
+const estimateBatteryFromVoltage = (voltage: unknown): number | null => {
+  if (typeof voltage !== 'number' || Number.isNaN(voltage)) {
+    return null
+  }
+  const minV = 11.5
+  const maxV = 13.0
+  if (voltage <= minV) return 0.0
+  if (voltage >= maxV) return 100.0
+  const pct = ((voltage - minV) / (maxV - minV)) * 100.0
+  return Number.isFinite(pct) ? Number(pct.toFixed(1)) : null
+}
+
+const applyBatteryMetrics = (payload: any) => {
+  if (payload === null || payload === undefined) return
+  if (typeof payload === 'number') {
+    const estimated = estimateBatteryFromVoltage(payload)
+    if (estimated !== null) {
+      batteryLevel.value = Math.max(0, Math.min(100, estimated))
+    }
+    batteryVoltage.value = payload
+    return
+  }
+  if (typeof payload === 'string') {
+    const numeric = coerceFiniteNumber(payload)
+    if (numeric !== undefined) {
+      const estimated = estimateBatteryFromVoltage(numeric)
+      if (estimated !== null) {
+        batteryLevel.value = Math.max(0, Math.min(100, estimated))
+      }
+      batteryVoltage.value = numeric
+    }
+    return
+  }
+  if (typeof payload !== 'object') return
+  const battery = payload?.battery ?? payload?.power?.battery ?? payload
+  const percentCandidates = [
+    battery?.percentage,
+    battery?.soc,
+    battery?.soc_percent,
+    battery?.percent,
+    battery?.charge_percent,
+    battery?.level,
+    payload?.battery_percentage,
+    payload?.battery_soc_percent,
+    payload?.power?.battery_percentage,
+    payload?.power?.battery_soc_percent,
+  ]
+  const voltageCandidates = [
+    battery?.voltage,
+    battery?.battery_voltage,
+    battery?.pack_voltage,
+    payload?.battery_voltage,
+    payload?.power?.battery_voltage,
+  ]
+
+  let percent = percentCandidates
+    .map((value) => coerceFiniteNumber(value))
+    .find((value) => value !== undefined)
+  const voltage = voltageCandidates
+    .map((value) => coerceFiniteNumber(value))
+    .find((value) => value !== undefined)
+  if ((percent === undefined || percent === null) && voltage !== undefined) {
+    const estimated = estimateBatteryFromVoltage(voltage)
+    if (estimated !== null) {
+      percent = estimated
+    }
+  }
+  if (typeof percent === 'number' && !Number.isNaN(percent)) {
+    const normalizedPercent = Number(percent.toFixed(1))
+    batteryLevel.value = Math.max(0, Math.min(100, normalizedPercent))
+  }
+  if (typeof voltage === 'number' && !Number.isNaN(voltage)) {
+    batteryVoltage.value = voltage
+  }
+}
+
+const coerceTofReading = (reading: any): TofState => {
+  if (typeof reading === 'number') {
+    return Number.isFinite(reading)
+      ? { distance: reading, status: null, signal: null }
+      : { distance: null, status: null, signal: null }
+  }
+  if (typeof reading === 'string') {
+    const numeric = coerceFiniteNumber(reading)
+    return numeric !== undefined
+      ? { distance: numeric, status: null, signal: null }
+      : { distance: null, status: reading, signal: null }
+  }
+  if (!reading || typeof reading !== 'object') {
+    return { distance: null, status: null, signal: null }
+  }
+  const distanceCandidates = [
+    reading.distance_mm,
+    reading.distance,
+    reading.range,
+    reading.measurement_mm,
+    reading.measurement,
+    reading.distance_mm_estimate,
+  ]
+  const distance = distanceCandidates
+    .map((value) => coerceFiniteNumber(value))
+    .find((value) => value !== undefined)
+
+  const status = reading.range_status ?? reading.status ?? reading.state ?? reading.quality ?? null
+  const signalCandidates = [
+    reading.signal_strength,
+    reading.signal_rate,
+    reading.signal,
+    reading.signal_strength_raw,
+  ]
+  const signal = signalCandidates
+    .map((value) => coerceFiniteNumber(value))
+    .find((value) => value !== undefined)
+  return {
+    distance: distance ?? null,
+    status,
+    signal: signal ?? null
+  }
+}
+
+const applyTofMetrics = (payload: any) => {
+  if (!payload) {
+    tofLeft.value = coerceTofReading(null)
+    tofRight.value = coerceTofReading(null)
+    return
+  }
+
+  let source = payload
+  if (Array.isArray(source)) {
+    source = source[0] ?? {}
+  }
+  if (source.tof) {
+    source = source.tof
+  }
+
+  const leftSrc =
+    source.left ??
+    source.tof_left ??
+    source.left_sensor ??
+    source.front_left ??
+    source.left_reading ??
+    source.left_distance_mm ??
+    source.left_distance ??
+    source.distance_left ??
+    null
+
+  const rightSrc =
+    source.right ??
+    source.tof_right ??
+    source.right_sensor ??
+    source.front_right ??
+    source.right_reading ??
+    source.right_distance_mm ??
+    source.right_distance ??
+    source.distance_right ??
+    null
+
+  if (leftSrc == null && rightSrc == null) {
+    const shared =
+      source.distance_mm ??
+      source.distance ??
+      source.range ??
+      source.measurement_mm ??
+      source.measurement ??
+      null
+    tofLeft.value = coerceTofReading(shared)
+    tofRight.value = coerceTofReading(shared)
+    return
+  }
+
+  tofLeft.value = coerceTofReading(leftSrc)
+  tofRight.value = coerceTofReading(rightSrc)
+}
+
+watch(unitSystem, () => {
+  if (hasGpsFix.value) {
+    gpsStatus.value = gpsAccuracySummary.value
+  }
 })
 
 // System control methods
@@ -321,6 +795,109 @@ const addLogEntry = (message: string, level: 'info' | 'success' | 'warning' | 'e
   }
 }
 
+const loadUnitPreference = async () => {
+  try {
+    const settings = await settingsApi.getSettings()
+    const systemPrefs = settings?.system ?? settings?.categories?.system ?? {}
+    const preference = typeof systemPrefs?.unit_system === 'string' ? systemPrefs.unit_system.toLowerCase() : null
+    if (preference === 'metric' || preference === 'imperial') {
+      preferences.setUnitSystem(preference)
+    }
+  } catch (error) {
+    console.error('Failed to load unit preference:', error)
+  }
+}
+
+const applyCalibrationResult = (result: ImuCalibrationResult) => {
+  lastCalibration.value = result
+  imuCalibrationStatus.value = result.calibration_status ?? result.status
+  imuCalibrationScore.value = typeof result.calibration_score === 'number' ? result.calibration_score : 0
+}
+
+const stopCalibrationPolling = () => {
+  if (calibrationPollHandle !== null) {
+    window.clearInterval(calibrationPollHandle)
+    calibrationPollHandle = null
+  }
+}
+
+const handleImuUnsupported = () => {
+  if (!imuSupported.value) return
+  imuSupported.value = false
+  imuCalibrating.value = false
+  stopCalibrationPolling()
+  imuCalibrationStatus.value = 'not_supported'
+  imuCalibrationScore.value = 0
+  lastCalibration.value = null
+  calibrationError.value = null
+  addLogEntry('IMU calibration not supported on this hardware.', 'warning')
+}
+
+const refreshCalibrationStatus = async () => {
+  try {
+    const status = await maintenanceApi.getImuCalibrationStatus()
+    imuSupported.value = true
+    calibrationError.value = null
+    imuCalibrating.value = Boolean(status.in_progress)
+    if (status.last_result) {
+      applyCalibrationResult(status.last_result)
+    }
+    if (status.in_progress) {
+      if (calibrationPollHandle === null) {
+        calibrationPollHandle = window.setInterval(refreshCalibrationStatus, 2000)
+      }
+    } else {
+      stopCalibrationPolling()
+    }
+  } catch (error) {
+    const responseStatus = (error as any)?.response?.status
+    if (responseStatus === 404) {
+      handleImuUnsupported()
+      return
+    }
+    console.error('Failed to fetch calibration status:', error)
+  }
+}
+
+const runImuCalibration = async () => {
+  if (imuCalibrating.value) return
+  if (!imuSupported.value) {
+    addLogEntry('IMU calibration requested but hardware reports it is unsupported.', 'warning')
+    calibrationError.value = null
+    return
+  }
+  imuCalibrating.value = true
+  calibrationError.value = null
+  addLogEntry('Starting IMU calibration routine…', 'info')
+  if (calibrationPollHandle === null) {
+    calibrationPollHandle = window.setInterval(refreshCalibrationStatus, 2000)
+  }
+  try {
+    const result = await maintenanceApi.runImuCalibration()
+    applyCalibrationResult(result)
+    const level = result.calibration_score >= 2 ? 'success' : 'warning'
+    const message = result.calibration_score >= 2
+      ? 'IMU calibration completed successfully'
+      : 'IMU calibration incomplete—continue motion for better score'
+    addLogEntry(message, level)
+  } catch (error: any) {
+    const responseStatus = error?.response?.status
+    if (responseStatus === 404) {
+      handleImuUnsupported()
+      return
+    }
+    const detail = error?.response?.data?.detail || error?.message || 'Calibration failed'
+    calibrationError.value = detail
+    addLogEntry(`IMU calibration failed: ${detail}`, 'error')
+  } finally {
+    if (imuSupported.value) {
+      await refreshCalibrationStatus()
+    } else {
+      imuCalibrating.value = false
+    }
+  }
+}
+
 // Data loading methods
 const loadSystemStatus = async () => {
   try {
@@ -342,20 +919,55 @@ const loadTelemetryData = async () => {
     const telemetry = await telemetryApi.getCurrent()
     
     // Update battery data
-    if (telemetry.battery) {
-      batteryLevel.value = telemetry.battery.percentage || 0
-      batteryVoltage.value = telemetry.battery.voltage || 0
-    }
+    applyBatteryMetrics(telemetry)
     
     // Update GPS data
-    if (telemetry.position && telemetry.position.latitude && telemetry.position.longitude) {
-      gpsPosition.value = `${telemetry.position.latitude.toFixed(6)}, ${telemetry.position.longitude.toFixed(6)}`
-      gpsStatus.value = 'SIGNAL ACQUIRED'
+    const lat = telemetry.position?.latitude
+    const lon = telemetry.position?.longitude
+    if (typeof lat === 'number' && typeof lon === 'number') {
+      gpsLatitude.value = lat.toFixed(6)
+      gpsLongitude.value = lon.toFixed(6)
+      gpsAccuracy.value = typeof telemetry.position?.accuracy === 'number' ? telemetry.position.accuracy : null
+      gpsHdop.value = typeof telemetry.position?.hdop === 'number' ? telemetry.position.hdop : null
+      gpsSatellites.value = typeof telemetry.position?.satellites === 'number' ? telemetry.position.satellites : null
+      gpsRtkStatus.value = telemetry.position?.rtk_status ?? null
+      gpsStatus.value = gpsAccuracySummary.value
     } else {
-      gpsPosition.value = 'NO SIGNAL'
+      gpsLatitude.value = null
+      gpsLongitude.value = null
+      gpsAccuracy.value = null
+      gpsHdop.value = null
+      gpsSatellites.value = null
+      gpsRtkStatus.value = null
       gpsStatus.value = 'SEARCHING...'
     }
     
+    const speedValue = telemetry.position?.speed ?? telemetry.speed_mps
+    if (typeof speedValue === 'number') {
+      const delta = speedValue - speed.value
+      speedTrend.value = speed.value > 0.1 ? (delta / speed.value) * 100 : 0
+      speed.value = speedValue
+    }
+
+    // Update environmental data
+    if (telemetry.environmental) {
+      const env = telemetry.environmental
+      temperature.value = typeof env.temperature_c === 'number' ? env.temperature_c : null
+      humidity.value = typeof env.humidity_percent === 'number' ? env.humidity_percent : null
+      pressure.value = typeof env.pressure_hpa === 'number' ? env.pressure_hpa : null
+      altitude.value = typeof env.altitude_m === 'number' ? env.altitude_m : null
+      environmentalSource.value = 'hardware'
+    }
+
+    // Update ToF data
+    applyTofMetrics(telemetry)
+
+    // Update IMU calibration snapshot
+    if (telemetry.imu) {
+      imuCalibrationScore.value = telemetry.imu.calibration ?? 0
+      imuCalibrationStatus.value = telemetry.imu.calibration_status ?? 'unknown'
+    }
+
     // Update motor status
     if (telemetry.motor_status) {
       currentMode.value = telemetry.motor_status.toUpperCase()
@@ -370,7 +982,19 @@ const loadTelemetryData = async () => {
 const loadWeatherData = async () => {
   try {
     const weather = await weatherApi.getCurrent()
-    temperature.value = weather.temperature_c || 0
+    if (typeof weather.temperature_c === 'number' && temperature.value === null) {
+      temperature.value = weather.temperature_c
+      environmentalSource.value = 'weather'
+    }
+    if (typeof weather.humidity_percent === 'number' && humidity.value === null) {
+      humidity.value = weather.humidity_percent
+    }
+    if (pressure.value === null && (weather as any)?.pressure_hpa !== undefined) {
+      const pressureValue = Number((weather as any).pressure_hpa)
+      if (!Number.isNaN(pressureValue)) {
+        pressure.value = pressureValue
+      }
+    }
   } catch (error) {
     console.error('Failed to load weather:', error)
   }
@@ -382,9 +1006,11 @@ onMounted(async () => {
   
   // Load initial data
   await Promise.all([
+    loadUnitPreference(),
     loadSystemStatus(),
     loadTelemetryData(),
-    loadWeatherData()
+    loadWeatherData(),
+    refreshCalibrationStatus()
   ])
   
   // Connect to WebSocket for real-time updates
@@ -397,25 +1023,35 @@ onMounted(async () => {
       
       // Subscribe to telemetry topics with real data handling
       subscribe('telemetry.power', (data) => {
-        if (data.battery) {
-          batteryLevel.value = data.battery.percentage || 0
-          batteryVoltage.value = (data.battery.voltage || 0).toFixed(1)
-        }
-        dataStreamText.value = `>>> POWER: ${batteryLevel.value.toFixed(1)}% | ${batteryVoltage.value}V`
+        applyBatteryMetrics(data)
+        dataStreamText.value = `>>> POWER: ${batteryLevelDisplay.value}% | ${batteryVoltageDisplay.value}V`
       })
       
       subscribe('telemetry.navigation', (data) => {
-        if (data.position && data.position.latitude && data.position.longitude) {
-          gpsPosition.value = `${data.position.latitude.toFixed(6)}, ${data.position.longitude.toFixed(6)}`
-          gpsStatus.value = 'SIGNAL ACQUIRED'
+        const lat = data.position?.latitude
+        const lon = data.position?.longitude
+        if (typeof lat === 'number' && typeof lon === 'number') {
+          gpsLatitude.value = lat.toFixed(6)
+          gpsLongitude.value = lon.toFixed(6)
+          gpsAccuracy.value = typeof data.position?.accuracy === 'number' ? data.position.accuracy : null
+          gpsHdop.value = typeof (data.hdop ?? data.position?.hdop) === 'number' ? (data.hdop ?? data.position?.hdop) : null
+          gpsSatellites.value = typeof data.position?.satellites === 'number' ? data.position.satellites : null
+          gpsRtkStatus.value = data.position?.rtk_status ?? null
+          gpsStatus.value = gpsAccuracySummary.value
         } else {
-          gpsPosition.value = 'NO SIGNAL'
+          gpsLatitude.value = null
+          gpsLongitude.value = null
+          gpsAccuracy.value = null
+          gpsHdop.value = null
+          gpsSatellites.value = null
+          gpsRtkStatus.value = null
           gpsStatus.value = 'SEARCHING...'
         }
         
-        if (data.speed_mps !== undefined) {
-          const newSpeed = data.speed_mps
-          speedTrend.value = ((newSpeed - speed.value) / Math.max(speed.value, 0.1)) * 100
+        const navSpeed = typeof data.speed_mps === 'number' ? data.speed_mps : typeof data.position?.speed === 'number' ? data.position.speed : null
+        if (navSpeed !== null) {
+          const newSpeed = navSpeed
+          speedTrend.value = speed.value > 0.1 ? ((newSpeed - speed.value) / speed.value) * 100 : 0
           speed.value = newSpeed
         }
       })
@@ -436,13 +1072,54 @@ onMounted(async () => {
         }
         
         if (data.safety_state) {
-          systemStatus.value = data.safety_state === 'safe' ? 'Active' : 'Warning'
+          if (data.safety_state === 'nominal' || data.safety_state === 'safe') {
+            systemStatus.value = 'Active'
+          } else if (data.safety_state === 'emergency_stop') {
+            systemStatus.value = 'Emergency Stop'
+          } else {
+            systemStatus.value = 'Warning'
+          }
         }
       })
       
       subscribe('telemetry.weather', (data) => {
         if (data.temperature_c !== undefined) {
           temperature.value = data.temperature_c
+          environmentalSource.value = 'weather'
+        }
+        if (data.humidity_percent !== undefined) {
+          humidity.value = data.humidity_percent
+        }
+      })
+
+      subscribe('telemetry.environmental', (data) => {
+        const env = data.environmental || {}
+        if (env.temperature_c !== undefined) {
+          temperature.value = env.temperature_c
+        }
+        if (env.humidity_percent !== undefined) {
+          humidity.value = env.humidity_percent
+        }
+        if (env.pressure_hpa !== undefined) {
+          pressure.value = env.pressure_hpa
+        }
+        if (env.altitude_m !== undefined) {
+          altitude.value = env.altitude_m
+        }
+        environmentalSource.value = 'hardware'
+      })
+
+      subscribe('telemetry.tof', (data) => {
+        applyTofMetrics(data)
+      })
+
+      subscribe('telemetry.sensors', (data) => {
+        if (data.imu) {
+          imuCalibrationScore.value = data.imu.calibration ?? imuCalibrationScore.value
+          imuCalibrationStatus.value = data.imu.calibration_status ?? imuCalibrationStatus.value
+        }
+        if (data.tof) {
+          applyTofMetrics(data)
         }
       })
       
@@ -461,7 +1138,6 @@ onMounted(async () => {
       
       // Set telemetry cadence to 5Hz for real-time dashboard
       setTimeout(() => {
-        const { setCadence } = useWebSocket()
         setCadence(5)
         addLogEntry('Telemetry cadence set to 5Hz', 'info')
       }, 1000)
@@ -478,6 +1154,7 @@ onMounted(async () => {
   const refreshInterval = setInterval(async () => {
     if (!connected.value) {
       await Promise.all([
+        loadUnitPreference(),
         loadSystemStatus(),
         loadTelemetryData(),
         loadWeatherData()
@@ -488,12 +1165,16 @@ onMounted(async () => {
   // Cleanup on unmount
   onUnmounted(() => {
     clearInterval(refreshInterval)
+    stopCalibrationPolling()
     if (connected.value) {
       unsubscribe('telemetry.power')
       unsubscribe('telemetry.navigation')  
       unsubscribe('telemetry.motors')
       unsubscribe('telemetry.system')
       unsubscribe('telemetry.weather')
+      unsubscribe('telemetry.environmental')
+      unsubscribe('telemetry.tof')
+      unsubscribe('telemetry.sensors')
       unsubscribe('jobs.progress')
     }
   })
@@ -679,6 +1360,19 @@ onMounted(async () => {
   margin-bottom: 2rem;
 }
 
+.gps-metrics {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  letter-spacing: 1px;
+}
+
+.gps-metrics .metric-line span {
+  color: #ffff00;
+  margin-left: 0.5rem;
+}
+
 /* Retro Cards */
 .retro-card {
   background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 30%, #16213e 70%, #0a0a0a 100%);
@@ -741,6 +1435,154 @@ onMounted(async () => {
 
 .card-content {
   padding: 1.5rem;
+}
+
+.environmental-card .env-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+.environmental-card .env-metric .metric-label {
+  display: block;
+  font-size: 0.8rem;
+  letter-spacing: 2px;
+  color: #00ffff;
+  margin-bottom: 0.25rem;
+}
+
+.environmental-card .env-metric .metric-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #ffff00;
+}
+
+.environmental-card .env-metric .metric-status {
+  font-size: 0.75rem;
+  letter-spacing: 1px;
+  display: inline-block;
+  margin-top: 0.35rem;
+}
+
+.environmental-card .env-source {
+  margin-top: 1rem;
+  font-size: 0.75rem;
+  letter-spacing: 2px;
+  color: rgba(0, 255, 255, 0.7);
+  text-transform: uppercase;
+}
+
+.tof-card .tof-grid {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.tof-card .tof-column {
+  flex: 1 1 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tof-card .metric-label {
+  font-size: 0.8rem;
+  letter-spacing: 2px;
+  color: #00ffff;
+}
+
+.tof-card .metric-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #ffff00;
+}
+
+.tof-card .metric-status {
+  font-size: 0.8rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.calibration-card {
+  margin-bottom: 2rem;
+}
+
+.calibration-card .card-header {
+  align-items: center;
+}
+
+.calibration-indicator {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #666;
+  box-shadow: 0 0 15px currentColor;
+}
+
+.calibration-indicator.status-active {
+  background: #00ff00;
+  color: #00ff00;
+}
+
+.calibration-indicator.status-warning {
+  background: #ffff00;
+  color: #ffff00;
+}
+
+.calibration-indicator.status-error {
+  background: #ff0040;
+  color: #ff0040;
+}
+
+.calibration-indicator.status-unknown {
+  background: #888;
+  color: #888;
+}
+
+.calibration-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 1px;
+  margin-bottom: 0.75rem;
+  text-transform: uppercase;
+}
+
+.calibration-row .metric-value {
+  color: #ffff00;
+  font-weight: 700;
+}
+
+.calibrate-btn {
+  margin-top: 1rem;
+  width: 100%;
+  background: rgba(0, 255, 255, 0.1);
+  border: 1px solid #00ffff;
+}
+
+.calibrate-btn:hover:not(:disabled) {
+  background: rgba(0, 255, 255, 0.2);
+}
+
+.calibration-error {
+  margin-top: 0.75rem;
+  color: #ff4343;
+  font-size: 0.85rem;
+  letter-spacing: 1px;
+}
+
+.calibration-note {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: rgba(0, 255, 255, 0.7);
+  letter-spacing: 1px;
+}
+
+.calibration-note.unsupported {
+  color: rgba(255, 255, 0, 0.9);
+  text-transform: uppercase;
 }
 
 /* Status Indicators */
@@ -1023,6 +1865,53 @@ onMounted(async () => {
   font-weight: 700;
   letter-spacing: 1px;
   text-transform: uppercase;
+}
+
+.gps-value {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 1.5rem;
+  font-size: 1.6rem;
+  letter-spacing: 1px;
+  text-transform: none;
+  text-shadow: none;
+}
+
+.gps-value::after {
+  display: none;
+}
+
+.gps-value .coord {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 140px;
+  font-family: 'Courier New', monospace;
+  color: #ffff00;
+  text-shadow: 0 0 12px rgba(255, 255, 0, 0.5);
+}
+
+.gps-value .coord-label {
+  font-size: 0.75rem;
+  letter-spacing: 2px;
+  color: #00ffff;
+  text-shadow: 0 0 8px rgba(0, 255, 255, 0.5);
+  margin-bottom: 0.35rem;
+}
+
+.gps-value .coord-value {
+  font-size: 1.9rem;
+  letter-spacing: 0.5px;
+}
+
+.gps-value .coord.no-fix {
+  align-items: center;
+  font-size: 1.4rem;
+  letter-spacing: 2px;
+  color: #ff0040;
+  text-shadow: 0 0 12px rgba(255, 0, 64, 0.6);
 }
 
 .gps-icon, .battery-icon, .speed-icon, .temp-icon {

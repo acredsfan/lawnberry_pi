@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Optional, Dict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class RemoteAccessProvider(str, Enum):
@@ -35,5 +35,4 @@ class RemoteAccessConfig(BaseModel):
     ngrok: NgrokConfig = Field(default_factory=NgrokConfig)
     custom: CustomTunnelConfig = Field(default_factory=CustomTunnelConfig)
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)

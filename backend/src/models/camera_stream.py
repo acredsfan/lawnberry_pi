@@ -6,7 +6,7 @@ Camera frame data and streaming metadata
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 import base64
 
 
@@ -88,8 +88,6 @@ class CameraFrame(BaseModel):
     file_path: Optional[str] = None
     checksum: Optional[str] = None
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
     
     def set_frame_data(self, frame_bytes: bytes):
         """Set frame data from raw bytes"""
@@ -161,25 +159,25 @@ class CameraConfiguration(BaseModel):
     streaming_enabled: bool = True
     recording_enabled: bool = False
     
-    @validator('width', 'height')
+    @field_validator('width', 'height')
     def validate_resolution(cls, v):
         if v <= 0 or v > 4096:
             raise ValueError('Resolution must be between 1 and 4096')
         return v
     
-    @validator('framerate')
+    @field_validator('framerate')
     def validate_framerate(cls, v):
         if v <= 0 or v > 60:
             raise ValueError('Framerate must be between 0.1 and 60 fps')
         return v
     
-    @validator('brightness', 'contrast', 'saturation', 'sharpness')
+    @field_validator('brightness', 'contrast', 'saturation', 'sharpness')
     def validate_image_adjustments(cls, v):
         if not (-1.0 <= v <= 1.0):
             raise ValueError('Image adjustments must be between -1.0 and 1.0')
         return v
     
-    @validator('rotation')
+    @field_validator('rotation')
     def validate_rotation(cls, v):
         if v not in [0, 90, 180, 270]:
             raise ValueError('Rotation must be 0, 90, 180, or 270 degrees')
@@ -223,9 +221,7 @@ class CameraStream(BaseModel):
     
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def update_statistics(self, frame_duration_ms: float, processing_time_ms: float | None = None):
         """Update streaming statistics with new frame timing."""

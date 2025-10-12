@@ -135,12 +135,19 @@ class ConfigLoader:
         if isinstance(gps, dict) and "type" in gps and "gps_type" not in mapped:
             # Normalize common string values to enum values
             t = str(gps.get("type")).strip().lower()
-            if t in {"zed-f9p", "zed_f9p", "zed-f9p-usb", "zed f9p usb"}:
-                mapped["gps_type"] = "zed-f9p-usb"
+            connection = str(gps.get("connection", "")).strip().lower()
+            if t in {"zed-f9p", "zed_f9p", "zed-f9p-usb", "zed f9p usb", "zed-f9p-uart", "zed f9p"}:
+                if connection == "uart" or t in {"zed-f9p-uart", "zed f9p uart"}:
+                    mapped["gps_type"] = "zed-f9p-uart"
+                else:
+                    mapped["gps_type"] = "zed-f9p-usb"
             elif t in {"neo-8m", "neo8m", "neo-8m-uart", "neo 8m uart"}:
                 mapped["gps_type"] = "neo-8m-uart"
             else:
                 mapped["gps_type"] = gps.get("type")
+
+        if isinstance(gps, dict) and "ntrip_enabled" in gps and "gps_ntrip_enabled" not in mapped:
+            mapped["gps_ntrip_enabled"] = bool(gps.get("ntrip_enabled"))
 
         imu = cfg.get("imu") or {}
         if isinstance(imu, dict) and "type" in imu and "imu_type" not in mapped:

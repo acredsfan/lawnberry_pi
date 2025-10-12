@@ -54,6 +54,17 @@
               <option value="Europe/Paris">Europe/Paris</option>
             </select>
           </div>
+
+          <div class="form-group">
+            <label for="unit-system">Measurement Units</label>
+            <select v-model="systemSettings.ui.unit_system" id="unit-system" class="form-control">
+              <option value="metric">Metric (°C, m/s, meters)</option>
+              <option value="imperial">Imperial (°F, mph, feet)</option>
+            </select>
+            <small class="form-text text-muted">
+              Controls how telemetry is displayed across the dashboard.
+            </small>
+          </div>
           
           <div class="form-group">
             <label>
@@ -368,12 +379,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useApiService } from '@/services/api'
 import { useToastStore } from '@/stores/toast'
+import { usePreferencesStore } from '@/stores/preferences'
 
 const api = useApiService()
 const toast = useToastStore()
+const preferences = usePreferencesStore()
+preferences.ensureInitialized()
 
 // State
 const activeTab = ref('system')
@@ -394,7 +408,13 @@ const tabs = [
 const systemSettings = ref({
   device_name: 'LawnBerry Pi',
   timezone: 'UTC',
-  debug_mode: false
+  debug_mode: false,
+  ui: {
+    unit_system: 'metric',
+    theme: 'retro-amber',
+    auto_refresh: true,
+    map_provider: 'google'
+  }
 })
 
 const securitySettings = ref({
@@ -427,6 +447,16 @@ const gpsSettings = ref({
   accuracy_threshold_meters: 3
 })
 
+watch(
+  () => systemSettings.value.ui.unit_system,
+  (value) => {
+    if (value === 'metric' || value === 'imperial') {
+      preferences.setUnitSystem(value)
+    }
+  },
+  { immediate: true }
+)
+
 // Load settings
 async function loadAllSettings() {
   try {
@@ -438,7 +468,15 @@ async function loadAllSettings() {
       api.get('/api/v2/settings/gps-policy')
     ])
     
-    systemSettings.value = { ...systemSettings.value, ...system.data }
+    const systemData = system.data || {}
+    systemSettings.value = {
+      ...systemSettings.value,
+      ...systemData,
+      ui: {
+        ...systemSettings.value.ui,
+        ...(systemData.ui || {})
+      }
+    }
     securitySettings.value = { ...securitySettings.value, ...security.data }
     remoteSettings.value = { ...remoteSettings.value, ...remote.data }
     mapsSettings.value = { ...mapsSettings.value, ...maps.data }

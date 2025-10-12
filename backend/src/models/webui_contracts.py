@@ -6,7 +6,7 @@ WebUI page definitions and data flow contracts
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class WebUIPageSlug(str, Enum):
@@ -131,9 +131,7 @@ class WebUIPageContract(BaseModel):
     last_modified: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     version: str = "1.0"
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def add_rest_dependency(self, endpoint: str, required: bool = True, **kwargs):
         """Add a REST API dependency"""
@@ -188,9 +186,7 @@ class WebUIPageContracts(BaseModel):
     contract_version: str = "2.0"
     last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def add_page(self, page_contract: WebUIPageContract):
         """Add a page contract"""
@@ -314,9 +310,6 @@ class DocumentationFile(BaseModel):
     offline_available: bool = True
     requires_auth: bool = False
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
-
 
 class DocumentationBundle(BaseModel):
     """Collection of synchronized documentation artifacts"""
@@ -358,9 +351,7 @@ class DocumentationBundle(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def add_file(self, file: DocumentationFile):
         """Add a documentation file to the bundle"""

@@ -6,7 +6,7 @@ Motor commands and status for drive and blade systems
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class DriveController(str, Enum):
@@ -49,13 +49,13 @@ class DriveCommand(BaseModel):
     ramp_rate: Optional[float] = None  # acceleration/deceleration rate
     timeout_ms: int = 1000  # command timeout in milliseconds
     
-    @validator('left_motor_speed', 'right_motor_speed', 'throttle', 'turn')
+    @field_validator('left_motor_speed', 'right_motor_speed', 'throttle', 'turn')
     def validate_motor_range(cls, v):
         if v is not None and not (-1.0 <= v <= 1.0):
             raise ValueError('Motor values must be between -1.0 and 1.0')
         return v
     
-    @validator('max_speed_limit')
+    @field_validator('max_speed_limit')
     def validate_speed_limit(cls, v):
         if not (0.0 <= v <= 1.0):
             raise ValueError('Speed limit must be between 0.0 and 1.0')
@@ -70,7 +70,7 @@ class BladeCommand(BaseModel):
     safety_enabled: bool = True
     timeout_ms: int = 1000  # command timeout in milliseconds
     
-    @validator('speed')
+    @field_validator('speed')
     def validate_speed_range(cls, v):
         if not (0.0 <= v <= 1.0):
             raise ValueError('Blade speed must be between 0.0 and 1.0')
@@ -137,9 +137,7 @@ class MotorControl(BaseModel):
     
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def is_safe_to_operate(self) -> bool:
         """Check if it's safe to operate motors"""

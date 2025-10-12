@@ -6,7 +6,7 @@ Operational parameters and user-defined settings
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 import json
 
 
@@ -20,7 +20,8 @@ class OperationalMode(str, Enum):
 
 class GpsModeConfig(str, Enum):
     """GPS module configuration"""
-    F9P_USB = "f9p_usb"      # u-blox ZED-F9P via USB with RTK
+    F9P_USB = "f9p_usb"       # u-blox ZED-F9P via USB with RTK
+    F9P_UART = "f9p_uart"     # u-blox ZED-F9P via UART with RTK
     NEO8M_UART = "neo8m_uart" # u-blox Neo-8M via UART
 
 
@@ -63,8 +64,6 @@ class SensorCalibration(BaseModel):
     temp_coefficient: Optional[float] = None
     reference_temperature: float = 25.0  # °C
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class NavigationSettings(BaseModel):
@@ -250,9 +249,7 @@ class SystemConfiguration(BaseModel):
     last_modified: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_backup: Optional[datetime] = None
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def add_sensor_calibration(self, sensor_type: str, calibration: SensorCalibration):
         """Add or update sensor calibration"""
@@ -284,7 +281,7 @@ class SystemConfiguration(BaseModel):
     
     def to_json(self) -> str:
         """Export configuration as JSON"""
-        return json.dumps(self.dict(), indent=2, default=str)
+        return json.dumps(self.model_dump(), indent=2, default=str)
     
     def validate_configuration(self) -> List[str]:
         """Validate configuration and return any issues"""
@@ -335,7 +332,7 @@ class TelemetrySettings(BaseModel):
     buffer_size: int = 100
     compression_enabled: bool = False
     
-    @validator('cadence_hz')
+    @field_validator('cadence_hz')
     def validate_cadence(cls, v):
         if not 1.0 <= v <= 10.0:
             raise ValueError('Telemetry cadence must be between 1 and 10 Hz')
@@ -370,13 +367,13 @@ class CameraSettings(BaseModel):
     quality: int = 85  # 0-100
     auto_exposure: bool = True
     
-    @validator('resolution_width', 'resolution_height')
+    @field_validator('resolution_width', 'resolution_height')
     def validate_resolution(cls, v):
         if v < 640 or v > 4096:
             raise ValueError('Resolution must be between 640 and 4096')
         return v
     
-    @validator('framerate')
+    @field_validator('framerate')
     def validate_framerate(cls, v):
         if v not in [15, 24, 30, 60]:
             raise ValueError('Framerate must be one of: 15, 24, 30, 60')
@@ -431,8 +428,6 @@ class SettingsProfile(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
     
     def bump_version(self, bump_type: str = "patch"):
         """Bump semantic version (major.minor.patch)"""

@@ -301,7 +301,7 @@ class CameraStreamService:
         if command == 'get_status':
             return {
                 'status': 'success',
-                'data': self.stream.dict()
+                'data': self.stream.model_dump()
             }
         
         elif command == 'get_frame':
@@ -309,7 +309,7 @@ class CameraStreamService:
             if frame:
                 return {
                     'status': 'success',
-                    'data': frame.dict()
+                    'data': frame.model_dump()
                 }
             else:
                 return {
@@ -778,7 +778,7 @@ class CameraStreamService:
             # Create frame message
             message = {
                 "type": "frame",
-                "data": frame.dict()
+                "data": frame.model_dump()
             }
             message_data = json.dumps(message).encode() + b'\n'
             

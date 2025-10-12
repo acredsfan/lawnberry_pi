@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class ZoneType(str, Enum):
@@ -51,7 +51,7 @@ class MarkerTimeWindow(BaseModel):
     start: str
     end: str
 
-    @validator('start', 'end')
+    @field_validator('start', 'end')
     def validate_clock_format(cls, value: str) -> str:
         if not isinstance(value, str):
             raise ValueError('Time must be a string')
@@ -74,10 +74,11 @@ class MarkerSchedule(BaseModel):
     days_of_week: List[int] = Field(default_factory=list)  # 0 = Sunday
     triggers: MarkerTriggerSet = Field(default_factory=MarkerTriggerSet)
 
-    @validator('days_of_week', each_item=True)
-    def validate_days(cls, value: int) -> int:
-        if value < 0 or value > 6:
-            raise ValueError('days_of_week must be between 0 (Sunday) and 6 (Saturday)')
+    @field_validator('days_of_week')
+    def validate_days(cls, value: List[int]) -> List[int]:
+        for day in value:
+            if day < 0 or day > 6:
+                raise ValueError('days_of_week must be between 0 (Sunday) and 6 (Saturday)')
         return value
 
 
@@ -90,7 +91,7 @@ class Zone(BaseModel):
     zone_type: ZoneType = ZoneType.MOW_ZONE
     
     # Geographic definition
-    polygon: List[Point] = Field(min_items=3)  # At least 3 points for a polygon
+    polygon: List[Point] = Field(min_length=3)  # At least 3 points for a polygon
     area_sqm: Optional[float] = None
     perimeter_m: Optional[float] = None
     
@@ -124,21 +125,19 @@ class Zone(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    @validator('polygon')
+    @field_validator('polygon')
     def validate_polygon(cls, v):
         if len(v) < 3:
             raise ValueError('Polygon must have at least 3 points')
         return v
         
-    @validator('priority')
+    @field_validator('priority')
     def validate_priority(cls, v):
         if not (1 <= v <= 10):
             raise ValueError('Priority must be between 1 and 10')
         return v
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class MarkerType(str, Enum):
@@ -195,9 +194,7 @@ class MapConfiguration(BaseModel):
     last_modified: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def add_marker(self, marker_type: MarkerType, position: Point, label: Optional[str] = None) -> MapMarker:
         """Add a special marker to the map"""

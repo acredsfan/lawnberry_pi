@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request, status, Query
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 from pathlib import Path
@@ -17,6 +17,14 @@ import io
 from ..models.auth_security_config import AuthSecurityConfig, SecurityLevel, TOTPConfig, GoogleAuthConfig
 from ..models.remote_access_config import RemoteAccessConfig
 from ..models.telemetry_exchange import ComponentId, ComponentStatus, HardwareTelemetryStream
+from ..models.sensor_data import GpsMode
+from ..models.hardware_config import GPSType
+from ..services.calibration_service import (
+    imu_calibration_service,
+    CalibrationInProgressError,
+    DriveControllerUnavailableError,
+)
+from ..services.ntrip_client import NtripForwarder
 from ..core.persistence import persistence
 from ..services.hw_selftest import run_selftest
 from ..services.weather_service import weather_service
@@ -36,7 +44,90 @@ class WebSocketHub:
         self._gps_warm_done = False
         # Cache last known position to smooth fields missing on alternating NMEA sentences
         self._last_position: dict[str, Any] = {}
-        
+        # Optional link back to FastAPI app state so other endpoints can reuse services
+        self._app_state: Any | None = None
+        # Prevent concurrent calibration runs
+        self._calibration_lock = asyncio.Lock()
+        # Optional NTRIP bridge for RTK corrections
+        self._ntrip_forwarder: NtripForwarder | None = None
+
+    def bind_app_state(self, state: Any) -> None:
+        """Expose app.state to the hub so lazily-created services can be shared."""
+        self._app_state = state
+        if state is not None:
+            try:
+                state.websocket_hub = self
+            except Exception:
+                pass
+
+    async def _ensure_sensor_manager(self):
+        """Lazy-create the SensorManager with appropriate GPS configuration."""
+        if self._sensor_manager is not None:
+            return self._sensor_manager
+
+        from ..services.sensor_manager import SensorManager  # type: ignore
+
+        gps_mode = GpsMode.NEO8M_UART
+        ntrip_enabled = False
+        if self._app_state is not None:
+            try:
+                hw_cfg = getattr(self._app_state, "hardware_config", None)
+            except Exception:
+                hw_cfg = None
+            if hw_cfg and getattr(hw_cfg, "gps_type", None) in {GPSType.ZED_F9P_USB, GPSType.ZED_F9P_UART}:
+                gps_mode = GpsMode.F9P_USB if getattr(hw_cfg, "gps_type", None) == GPSType.ZED_F9P_USB else GpsMode.F9P_UART
+                ntrip_enabled = bool(getattr(hw_cfg, "gps_ntrip_enabled", False))
+
+        # Hint GPS device if a common device node is present
+        try:
+            if not os.environ.get("GPS_DEVICE"):
+                candidates = [
+                    "/dev/ttyACM1",
+                    "/dev/ttyACM0",
+                    "/dev/ttyAMA0",
+                    "/dev/ttyUSB0",
+                ]
+                for candidate in candidates:
+                    if os.path.exists(candidate):
+                        os.environ["GPS_DEVICE"] = candidate
+                        break
+        except Exception:
+            pass
+
+        logger.info(
+            "Initializing SensorManager with GPS mode %s (NTRIP %s)",
+            gps_mode.value,
+            "enabled" if ntrip_enabled else "disabled",
+        )
+
+        self._sensor_manager = SensorManager(gps_mode=gps_mode)
+        await self._sensor_manager.initialize()
+        if ntrip_enabled:
+            await self._ensure_ntrip_forwarder(gps_mode)
+        if self._app_state is not None:
+            try:
+                setattr(self._app_state, "sensor_manager", self._sensor_manager)
+            except Exception:
+                pass
+        return self._sensor_manager
+
+    async def _ensure_ntrip_forwarder(self, gps_mode: GpsMode) -> None:
+        """Start the NTRIP client when hardware requests RTK corrections."""
+        if self._ntrip_forwarder is not None:
+            return
+        if os.getenv("SIM_MODE", "0") == "1":
+            return
+        forwarder = NtripForwarder.from_environment(gps_mode=gps_mode)
+        if forwarder is None:
+            logger.warning("NTRIP forwarding requested but configuration is incomplete; set NTRIP_* env vars")
+            return
+        try:
+            await forwarder.start()
+        except Exception as exc:
+            logger.error("Failed to start NTRIP forwarder: %s", exc)
+            return
+        self._ntrip_forwarder = forwarder
+
     async def connect(self, websocket: WebSocket, client_id: str):
         await websocket.accept()
         self.clients[client_id] = websocket
@@ -166,19 +257,45 @@ class WebSocketHub:
                 "altitude": _merge_field("altitude"),
                 "accuracy": _merge_field("accuracy"),
                 "gps_mode": _merge_field("gps_mode"),
+                "hdop": _merge_field("hdop"),
+                "speed": _merge_field("speed"),
+                "rtk_status": _merge_field("rtk_status"),
+                "satellites": _merge_field("satellites"),
             }
             # Update cache with any newly provided non-None values
             for k, v in merged.items():
                 if v is not None:
                     self._last_position[k] = v
-            await self.broadcast_to_topic("telemetry.navigation", {
+            nav_payload = {
                 "position": merged,
-                "source": telemetry_data.get("source", "unknown")
-            })
+                "source": telemetry_data.get("source", "unknown"),
+            }
+            speed_val = merged.get("speed")
+            if isinstance(speed_val, (int, float)):
+                nav_payload["speed_mps"] = speed_val
+            accuracy_val = merged.get("accuracy")
+            if isinstance(accuracy_val, (int, float)):
+                nav_payload["accuracy_m"] = accuracy_val
+            hdop_val = merged.get("hdop")
+            if isinstance(hdop_val, (int, float)):
+                nav_payload["hdop"] = hdop_val
+            await self.broadcast_to_topic("telemetry.navigation", nav_payload)
             
         if "imu" in telemetry_data:
             await self.broadcast_to_topic("telemetry.sensors", {
                 "imu": telemetry_data["imu"],
+                "source": telemetry_data.get("source", "unknown")
+            })
+
+        if "environmental" in telemetry_data:
+            await self.broadcast_to_topic("telemetry.environmental", {
+                "environmental": telemetry_data["environmental"],
+                "source": telemetry_data.get("source", "unknown")
+            })
+
+        if "tof" in telemetry_data:
+            await self.broadcast_to_topic("telemetry.tof", {
+                "tof": telemetry_data["tof"],
                 "source": telemetry_data.get("source", "unknown")
             })
             
@@ -200,21 +317,72 @@ class WebSocketHub:
         # Legacy support: broadcast full data to general telemetry topic
         await self.broadcast_to_topic("telemetry/updates", telemetry_data)
         
-        # Additional simulated topics (for demo/testing)
-        await self._broadcast_additional_topics()
+        # Additional topics (hardware when available, otherwise simulated)
+        await self._broadcast_additional_topics(telemetry_data)
         
-    async def _broadcast_additional_topics(self):
-        """Broadcast simulated data for topics that don't have real hardware yet."""
+    async def _broadcast_additional_topics(self, telemetry_data: Optional[dict] = None):
+        """Broadcast supplemental topics, preferring hardware readings when present."""
         import random
-        
-        # Weather data
-        weather_data = {
-            "temperature_c": round(random.uniform(15, 30), 1),
-            "humidity_percent": round(random.uniform(40, 80), 1),
-            "wind_speed_ms": round(random.uniform(0, 10), 1),
-            "precipitation_mm": round(random.uniform(0, 5), 2),
-            "source": "simulated"
-        }
+
+        weather_data: Optional[dict[str, Any]] = None
+        env = (telemetry_data or {}).get("environmental") if telemetry_data else None
+
+        if isinstance(env, dict) and any(env.get(key) is not None for key in ("temperature_c", "humidity_percent", "pressure_hpa")):
+            weather_data = {
+                "temperature_c": env.get("temperature_c"),
+                "humidity_percent": env.get("humidity_percent"),
+                "pressure_hpa": env.get("pressure_hpa"),
+                "altitude_m": env.get("altitude_m"),
+                "wind_speed_ms": None,
+                "precipitation_mm": None,
+                "source": telemetry_data.get("source", "hardware") if telemetry_data else "hardware"
+            }
+
+        if weather_data is None and self._sensor_manager is not None:
+            env_iface = getattr(self._sensor_manager, "environmental", None)
+            if env_iface is not None:
+                try:
+                    reading = await env_iface.read_environmental()
+                except Exception:
+                    reading = None
+                if reading is not None:
+                    weather_data = {
+                        "temperature_c": getattr(reading, "temperature", None),
+                        "humidity_percent": getattr(reading, "humidity", None),
+                        "pressure_hpa": getattr(reading, "pressure", None),
+                        "altitude_m": getattr(reading, "altitude", None),
+                        "wind_speed_ms": None,
+                        "precipitation_mm": None,
+                        "source": "hardware"
+                    }
+
+        if weather_data is None:
+            try:
+                snapshot = await weather_service.get_current_async()
+            except Exception:
+                snapshot = None
+            if snapshot and any(snapshot.get(key) is not None for key in ("temperature_c", "humidity_percent", "pressure_hpa")):
+                weather_data = {
+                    "temperature_c": snapshot.get("temperature_c"),
+                    "humidity_percent": snapshot.get("humidity_percent"),
+                    "pressure_hpa": snapshot.get("pressure_hpa"),
+                    "altitude_m": snapshot.get("altitude_m"),
+                    "wind_speed_ms": snapshot.get("wind_speed_ms") if snapshot.get("wind_speed_ms") is not None else None,
+                    "precipitation_mm": snapshot.get("precipitation_mm") if snapshot.get("precipitation_mm") is not None else None,
+                    "source": snapshot.get("source", "simulated")
+                }
+
+        if weather_data is None:
+            weather_data = {
+                "temperature_c": None,
+                "humidity_percent": None,
+                "pressure_hpa": None,
+                "altitude_m": None,
+                "wind_speed_ms": None,
+                "precipitation_mm": None,
+                "source": "unavailable"
+            }
+
         await self.broadcast_to_topic("telemetry.weather", weather_data)
         
         # Job status (simulated)
@@ -227,7 +395,7 @@ class WebSocketHub:
         }
         await self.broadcast_to_topic("jobs.progress", job_data)
         
-        # System performance
+    # System performance
         perf_data = {
             "cpu_usage_percent": round(random.uniform(10, 60), 1),
             "memory_usage_percent": round(random.uniform(20, 70), 1),
@@ -252,52 +420,63 @@ class WebSocketHub:
 
         Safe on CI: imports and hardware init are lazy and wrapped in try/except.
         """
-        # SIM_MODE: default to simulation unless explicitly set to '0'
-        sim_mode = os.getenv("SIM_MODE", "1") != "0"
+        # SIM_MODE: default to hardware unless explicitly set to '1'
+        sim_mode = os.getenv("SIM_MODE", "0") != "0"
 
         if not sim_mode:
             # Try to read from SensorManager
             try:
-                if self._sensor_manager is None:
-                    # Lazy import to avoid unnecessary deps in CI
-                    from ..services.sensor_manager import SensorManager  # type: ignore
-                    # Hint GPS device if commonly-present path exists
-                    try:
-                        if os.path.exists('/dev/ttyACM1') and not os.environ.get('GPS_DEVICE'):
-                            os.environ['GPS_DEVICE'] = '/dev/ttyACM1'
-                        elif os.path.exists('/dev/ttyUSB0') and not os.environ.get('GPS_DEVICE'):
-                            os.environ['GPS_DEVICE'] = '/dev/ttyUSB0'
-                    except Exception:
-                        pass
-                    self._sensor_manager = SensorManager()
-                    # Initialize once (async)
-                    await self._sensor_manager.initialize()
+                manager = await self._ensure_sensor_manager()
 
-                if getattr(self._sensor_manager, "initialized", False):
+                if getattr(manager, "initialized", False):
                     # One-time warmup to allow GPS first fix to populate
                     if not self._gps_warm_done:
                         try:
                             for _ in range(3):
-                                warm = await self._sensor_manager.read_all_sensors()
+                                warm = await manager.read_all_sensors()
                                 if getattr(warm, 'gps', None) and getattr(warm.gps, 'latitude', None) is not None:
                                     break
                                 await asyncio.sleep(0.2)
                         finally:
                             self._gps_warm_done = True
-                    data = await self._sensor_manager.read_all_sensors()
+                    data = await manager.read_all_sensors()
                     
                     # Map to telemetry payload expected by clients
                     battery_pct = None
                     batt_v = None
                     if data.power and data.power.battery_voltage is not None:
-                        batt_v = data.power.battery_voltage
-                        # Rough estimate of percentage from voltage for 12V lead-acid/LiFePO4 profiles
-                        # This is placeholder logic; real calibration to be added later
-                        battery_pct = max(0.0, min(100.0, (batt_v - 11.0) / (13.0 - 11.0) * 100.0))
+                        batt_v = float(data.power.battery_voltage)
+                        estimate = None
+                        try:
+                            estimate = manager._estimate_battery_soc(batt_v)
+                        except Exception:
+                            estimate = None
+                        if estimate is None:
+                            estimate = max(0.0, min(100.0, (batt_v - 11.0) / (13.0 - 11.0) * 100.0))
+                        battery_pct = float(estimate)
 
                     pos = data.gps
                     imu = data.imu
                     speed_mps = getattr(pos, "speed", None) if pos else None
+                    accuracy_m = getattr(pos, "accuracy", None) if pos else None
+                    hdop = getattr(pos, "hdop", None) if pos else None
+                    if accuracy_m is None and hdop is not None:
+                        try:
+                            accuracy_m = float(hdop) * 1.0
+                        except Exception:
+                            accuracy_m = None
+
+                    cal_status = getattr(imu, "calibration_status", None)
+                    _cal_map = {
+                        "fully_calibrated": 3,
+                        "calibrated": 3,
+                        "calibrating": 2,
+                        "partial": 2,
+                        "unknown": 1,
+                        None: 0,
+                    }
+                    cal_score = _cal_map.get(cal_status, 1 if cal_status else 0)
+
                     telemetry = {
                         "source": "hardware",
                         "battery": {"percentage": battery_pct, "voltage": batt_v},
@@ -305,17 +484,20 @@ class WebSocketHub:
                             "latitude": getattr(pos, "latitude", None),
                             "longitude": getattr(pos, "longitude", None),
                             "altitude": getattr(pos, "altitude", None),
-                            "accuracy": getattr(pos, "accuracy", None) if pos else None,
+                            "accuracy": accuracy_m,
                             "gps_mode": getattr(pos, "mode", None) if pos else None,
                             "satellites": getattr(pos, "satellites", None) if pos else None,
                             "speed": speed_mps,
                             "rtk_status": getattr(pos, "rtk_status", None) if pos else None,
+                            "hdop": hdop,
                         },
                         "imu": {
                             "roll": getattr(imu, "roll", None),
                             "pitch": getattr(imu, "pitch", None),
                             "yaw": getattr(imu, "yaw", None),
                             "gyro_z": getattr(imu, "gyro_z", None),
+                            "calibration": cal_score,
+                            "calibration_status": cal_status,
                         },
                         "velocity": {
                             "linear": {"x": speed_mps, "y": None, "z": None},
@@ -325,6 +507,48 @@ class WebSocketHub:
                         "safety_state": "emergency_stop" if _safety_state.get("emergency_stop_active", False) else "nominal",
                         "uptime_seconds": time.time(),
                     }
+
+                    env = getattr(data, "environmental", None)
+                    if env:
+                        environmental_payload = {
+                            "temperature_c": getattr(env, "temperature", None),
+                            "humidity_percent": getattr(env, "humidity", None),
+                            "pressure_hpa": getattr(env, "pressure", None),
+                            "altitude_m": getattr(env, "altitude", None),
+                        }
+                        if any(v is not None for v in environmental_payload.values()):
+                            telemetry["environmental"] = environmental_payload
+
+                    tof_left = getattr(data, "tof_left", None)
+                    tof_right = getattr(data, "tof_right", None)
+                    tof_payload: dict[str, Any] = {}
+                    if tof_left is not None:
+                        tof_payload["left"] = {
+                            "distance_mm": getattr(tof_left, "distance", None),
+                            "range_status": getattr(tof_left, "range_status", None),
+                            "signal_strength": getattr(tof_left, "signal_strength", None),
+                        }
+                    if tof_right is not None:
+                        tof_payload["right"] = {
+                            "distance_mm": getattr(tof_right, "distance", None),
+                            "range_status": getattr(tof_right, "range_status", None),
+                            "signal_strength": getattr(tof_right, "signal_strength", None),
+                        }
+                    if tof_payload:
+                        telemetry["tof"] = tof_payload
+
+                    if "environmental" not in telemetry:
+                        telemetry["environmental"] = {
+                            "temperature_c": None,
+                            "humidity_percent": None,
+                            "pressure_hpa": None,
+                            "altitude_m": None,
+                        }
+                    if "tof" not in telemetry:
+                        telemetry["tof"] = {
+                            "left": {"distance_mm": None, "range_status": None},
+                            "right": {"distance_mm": None, "range_status": None},
+                        }
                     
                     # Add camera data if available
                     try:
@@ -360,8 +584,8 @@ class WebSocketHub:
         telemetry = {
             "source": "simulated",
             "battery": {"percentage": None, "voltage": None},
-            "position": {"latitude": None, "longitude": None},
-            "imu": {"roll": None, "pitch": None, "yaw": None, "gyro_z": None},
+            "position": {"latitude": None, "longitude": None, "accuracy": None, "gps_mode": None, "hdop": None},
+            "imu": {"roll": None, "pitch": None, "yaw": None, "gyro_z": None, "calibration": 0, "calibration_status": None},
             "velocity": {
                 "linear": {"x": None, "y": None, "z": None},
                 "angular": {"x": None, "y": None, "z": None},
@@ -369,6 +593,16 @@ class WebSocketHub:
             "motor_status": "idle",
             "safety_state": "emergency_stop" if _safety_state.get("emergency_stop_active", False) else "nominal",
             "uptime_seconds": time.time(),
+        }
+        telemetry["environmental"] = {
+            "temperature_c": None,
+            "humidity_percent": None,
+            "pressure_hpa": None,
+            "altitude_m": None,
+        }
+        telemetry["tof"] = {
+            "left": {"distance_mm": None, "range_status": None},
+            "right": {"distance_mm": None, "range_status": None},
         }
         
         # Add simulated camera data
@@ -399,6 +633,7 @@ class WebSocketHub:
 
 # Global WebSocket hub instance
 websocket_hub = WebSocketHub()
+weather_service.register_sensor_manager(lambda: websocket_hub._sensor_manager)
 _app_start_time = time.time()
 
 # Simple in-memory overrides for debug injections (SIM_MODE-friendly)
@@ -411,6 +646,26 @@ class SensorHealthResponse(BaseModel):
     initialized: bool
     components: dict[str, dict[str, Any]]
     timestamp: str
+
+
+class IMUCalibrationResultPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    status: str = Field(..., description="High-level outcome for the calibration run.")
+    calibration_status: str | None = Field(default=None, description="Raw status reported by the IMU.")
+    calibration_score: int = Field(default=0, ge=0, le=3, description="Normalized score from 0-3.")
+    steps: list[dict[str, Any]] = Field(default_factory=list, description="Diagnostic step snapshots captured during calibration.")
+    timestamp: str = Field(..., description="Completion timestamp (ISO 8601).")
+    started_at: str | None = Field(default=None, description="Timestamp when the calibration routine began.")
+    notes: str | None = Field(default=None, description="Additional guidance for the operator.")
+
+
+class IMUCalibrationStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    in_progress: bool = Field(..., description="True when a calibration routine is currently executing.")
+    last_result: IMUCalibrationResultPayload | None = Field(
+        default=None,
+        description="Most recent calibration summary if available.",
+    )
 
 
 @router.get("/sensors/health")
@@ -475,6 +730,52 @@ async def get_sensors_health() -> SensorHealthResponse:
         components=components,
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
+
+
+@router.post("/maintenance/imu/calibrate", response_model=IMUCalibrationResultPayload)
+async def post_calibrate_imu(request: Request) -> IMUCalibrationResultPayload:
+    """Execute the IMU calibration routine and return the resulting summary."""
+    hub: WebSocketHub = getattr(request.app.state, "websocket_hub", websocket_hub)
+
+    if hub._calibration_lock.locked() or imu_calibration_service.is_running():
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="IMU calibration already in progress")
+
+    async with hub._calibration_lock:
+        try:
+            sensor_manager = await hub._ensure_sensor_manager()
+        except Exception as exc:
+            logger.exception("Failed to prepare SensorManager for calibration: %s", exc)
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Unable to initialize sensors for calibration",
+            ) from exc
+
+        try:
+            result = await imu_calibration_service.run(sensor_manager)
+        except CalibrationInProgressError:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail="IMU calibration already in progress")
+        except DriveControllerUnavailableError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            logger.exception("IMU calibration routine failed: %s", exc)
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="IMU calibration failed to complete",
+            ) from exc
+
+    return IMUCalibrationResultPayload.model_validate(result)
+
+
+@router.get("/maintenance/imu/calibrate", response_model=IMUCalibrationStatusResponse)
+async def get_calibration_status(request: Request) -> IMUCalibrationStatusResponse:
+    """Return current calibration activity state and the most recent result."""
+    hub: WebSocketHub = getattr(request.app.state, "websocket_hub", websocket_hub)
+
+    in_progress = imu_calibration_service.is_running() or hub._calibration_lock.locked()
+    last = imu_calibration_service.last_result()
+    result_model = IMUCalibrationResultPayload.model_validate(last) if last else None
+
+    return IMUCalibrationStatusResponse(in_progress=in_progress, last_result=result_model)
 
 
 # ------------------------ WebSockets ------------------------
@@ -922,6 +1223,7 @@ async def dashboard_telemetry():
         if imu_calibration < 2:
             orientation_message = "IMU calibration incomplete - orientation data may be inaccurate. See docs/hardware-feature-matrix.md."
         
+        env = telemetry_data.get("environmental", {}) if isinstance(telemetry_data, dict) else {}
         result = {
             "timestamp": now,
             "latency_ms": round(latency_ms, 2),
@@ -931,7 +1233,7 @@ async def dashboard_telemetry():
             },
             "temperatures": {
                 "cpu": None,  # Add CPU temperature monitoring if available
-                "ambient": None,  # Add from environmental sensor if available
+                "ambient": env.get("temperature_c"),
             },
             "position": {
                 "latitude": position_data.get("latitude", None),
@@ -953,6 +1255,7 @@ async def dashboard_telemetry():
         }
     else:
         # Fallback to simulated/default values
+        env = telemetry_data.get("environmental", {}) if isinstance(telemetry_data, dict) else {}
         result = {
             "timestamp": now,
             "latency_ms": round(latency_ms, 2),
@@ -962,7 +1265,7 @@ async def dashboard_telemetry():
             },
             "temperatures": {
                 "cpu": None,
-                "ambient": None,
+                "ambient": env.get("temperature_c"),
             },
             "position": {
                 "latitude": telemetry_data.get("position", {}).get("latitude", None),
@@ -1660,7 +1963,7 @@ from ..nav.coverage_planner import plan_coverage
 @router.get("/map/configuration")
 async def get_map_configuration(config_id: str = "default", simulate_fallback: Optional[str] = None):
     """Get map configuration in contract envelope with fallback metadata."""
-    config = await maps_service.load_map_configuration(config_id, persistence)
+    config = await maps_service.load_map_configuration_async(config_id, persistence)
     if not config:
         config = MapConfiguration(config_id=config_id)
 
@@ -1704,11 +2007,15 @@ async def get_map_configuration(config_id: str = "default", simulate_fallback: O
             mt = str(m.marker_type)
 
         schedule_payload = None
-        if getattr(m, "schedule", None):
+        schedule_obj = getattr(m, "schedule", None)
+        if schedule_obj is not None:
             try:
-                schedule_payload = m.schedule.dict()
-            except Exception:
-                schedule_payload = None
+                schedule_payload = schedule_obj.model_dump()
+            except AttributeError:
+                try:
+                    schedule_payload = dict(schedule_obj)
+                except Exception:
+                    schedule_payload = None
 
         markers_out.append({
             "marker_id": m.marker_id,
@@ -1852,7 +2159,7 @@ async def put_map_configuration(envelope: dict, config_id: str = "default"):
                 manual_override=bool(trig_raw.get("manual_override")),
             )
 
-            if not time_windows and not days and not any(triggers.dict().values()):
+            if not time_windows and not days and not any(triggers.model_dump().values()):
                 return None
 
             return MarkerSchedule(
@@ -1885,15 +2192,18 @@ async def put_map_configuration(envelope: dict, config_id: str = "default"):
                 continue
 
             metadata_raw = marker_payload.get("metadata")
-            metadata = metadata_raw.dict() if hasattr(metadata_raw, "dict") else (
-                dict(metadata_raw) if isinstance(metadata_raw, dict) else {}
-            )
+            if hasattr(metadata_raw, "model_dump"):
+                metadata = metadata_raw.model_dump()
+            elif isinstance(metadata_raw, dict):
+                metadata = dict(metadata_raw)
+            else:
+                metadata = {}
 
             schedule_raw = marker_payload.get("schedule") or metadata.get("schedule")
             schedule = _parse_schedule(schedule_raw)
             if schedule is not None:
                 metadata = dict(metadata)
-                metadata["schedule"] = schedule.dict()
+                metadata["schedule"] = schedule.model_dump()
 
             is_home_flag = bool(marker_payload.get("is_home")) or marker_type == MarkerType.HOME
             if is_home_flag:
@@ -1945,9 +2255,8 @@ async def put_map_configuration(envelope: dict, config_id: str = "default"):
                 "conflicts": sorted(set(conflicts)),
                 "detail": "Geometry overlap detected among zones",
             })
-
         # Persist via service
-        saved = await maps_service.save_map_configuration(cfg, persistence)
+        saved = await maps_service.save_map_configuration_async(cfg, persistence)
         persistence.add_audit_log("map.configuration.updated", details={"config_id": config_id, "provider": provider_enum.value})
 
         return {"status": "accepted", "updated_at": saved.last_modified.isoformat()}
@@ -2010,7 +2319,7 @@ async def get_coverage_plan(
 
     Returns a contract-shaped response with a GeoJSON-like polyline and stats.
     """
-    cfg = await maps_service.load_map_configuration(config_id, persistence)
+    cfg = await maps_service.load_map_configuration_async(config_id, persistence)
     if not cfg or not cfg.boundary_zone:
         return JSONResponse(status_code=404, content={"error": "No boundary configured"})
 
@@ -2052,7 +2361,12 @@ async def get_settings_v2(profile_id: str = "default"):
     """Get complete settings profile with contract fields"""
     try:
         p = settings_service.load_profile(profile_id)
-        raw = p.model_dump() if hasattr(p, "model_dump") else p.dict()
+        if hasattr(p, "model_dump"):
+            raw = p.model_dump()
+        elif hasattr(p, "__dict__"):
+            raw = vars(p)
+        else:
+            raw = p
         # Project to contract shape
         response = {
             "profile_version": f"0.0.{int(raw.get('version', 1))}",
@@ -2066,6 +2380,7 @@ async def get_settings_v2(profile_id: str = "default"):
             "branding_checksum": raw.get("system", {}).get("branding_checksum") or ("").rjust(64, "0"),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+        response["system"] = raw.get("system", {})
         # Also expose legacy categories envelope expected by some tests
         response["categories"] = {
             "telemetry": response["telemetry"],
@@ -2146,6 +2461,14 @@ async def put_settings_v2(update: dict):
             base.update_setting("hardware.sim_mode", bool(update["simulation_mode"]))
         if "branding_checksum" in update:
             base.update_setting("system.branding_checksum", str(update["branding_checksum"]))
+        if "system" in update and isinstance(update["system"], dict) and "unit_system" in update["system"]:
+            unit_raw = str(update["system"]["unit_system"]).lower()
+            if unit_raw not in {"metric", "imperial"}:
+                return JSONResponse(
+                    status_code=422,
+                    content={"error_code": "UNSUPPORTED_UNIT_SYSTEM", "accepted": ["metric", "imperial"]},
+                )
+            base.update_setting("system.unit_system", unit_raw)
 
         # Persist
         SettingsService().save_profile(base)  # use module defaults
@@ -2558,6 +2881,7 @@ def post_ai_dataset_export(datasetId: str, export_req: ExportRequest):
 
 
 class SystemSettings(BaseModel):
+    model_config = ConfigDict(extra="allow")
     hardware: dict = {
         "gps_module": "ZED-F9P",  # or "Neo-8M"
         "drive_controller": "RoboHAT-Cytron",  # or "L298N"
@@ -2583,7 +2907,8 @@ class SystemSettings(BaseModel):
     ui: dict = {
         "theme": "retro-amber",
         "auto_refresh": True,
-        "map_provider": "google"  # or "osm"
+        "map_provider": "google",  # or "osm"
+        "unit_system": "metric",
     }
 
 
@@ -2641,6 +2966,12 @@ def put_settings_system(settings_update: dict):
         cadence = current["telemetry"]["cadence_hz"]
         if not isinstance(cadence, int) or cadence < 1 or cadence > 10:
             raise HTTPException(status_code=422, detail="cadence_hz must be between 1 and 10")
+
+    if "ui" in current and isinstance(current["ui"], dict) and "unit_system" in current["ui"]:
+        unit_value = str(current["ui"]["unit_system"]).lower()
+        if unit_value not in {"metric", "imperial"}:
+            raise HTTPException(status_code=422, detail="unit_system must be 'metric' or 'imperial'")
+        current["ui"]["unit_system"] = unit_value
     
     # Update the settings object
     try:
@@ -2977,7 +3308,7 @@ async def camera_status():
         if camera_service.stream:
             return {
                 "status": "success",
-                "data": camera_service.stream.dict()
+                "data": camera_service.stream.model_dump()
             }
         else:
             return {
@@ -2999,7 +3330,7 @@ async def camera_current_frame():
         if frame:
             return {
                 "status": "success",
-                "data": frame.dict()
+                "data": frame.model_dump()
             }
         else:
             return {
@@ -3051,7 +3382,7 @@ async def camera_get_configuration():
     try:
         return {
             "status": "success",
-            "data": camera_service.stream.configuration.dict()
+            "data": camera_service.stream.configuration.model_dump()
         }
     except Exception as e:
         return {
@@ -3083,7 +3414,7 @@ async def camera_get_statistics():
         stats = await camera_service.get_stream_statistics()
         return {
             "status": "success",
-            "data": stats.dict()
+            "data": stats.model_dump()
         }
     except Exception as e:
         return {
@@ -3338,6 +3669,8 @@ def _get_valid_topics() -> list[str]:
         "telemetry.navigation", 
         "telemetry.motors",
         "telemetry.power",
+    "telemetry.environmental",
+    "telemetry.tof",
         "telemetry.camera",
         "telemetry.weather",
         "telemetry.system",

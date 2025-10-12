@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class MotorMode(str, Enum):
@@ -39,18 +39,16 @@ class MotorCommand(BaseModel):
     command_id: Optional[str] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    @validator('throttle', 'turn', 'left_track', 'right_track', 'left_motor_speed', 'right_motor_speed')
+    @field_validator('throttle', 'turn', 'left_track', 'right_track', 'left_motor_speed', 'right_motor_speed')
     def validate_motor_values(cls, v):
         if v is not None and not (-1.0 <= v <= 1.0):
             raise ValueError('Motor values must be between -1.0 and 1.0')
         return v
     
-    @validator('max_speed_limit')
+    @field_validator('max_speed_limit')
     def validate_speed_limit(cls, v):
         if not (0.0 <= v <= 1.0):
             raise ValueError('Speed limit must be between 0.0 and 1.0')
         return v
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)

@@ -62,6 +62,7 @@ class SystemSettings(BaseModel):
     auto_updates: bool = False
     remote_access: bool = False
     branding_checksum: Optional[str] = None
+    unit_system: str = Field(default="metric", description="Preferred measurement system: metric or imperial.")
 
 
 class SettingsProfile(BaseModel):
@@ -121,6 +122,14 @@ class SettingsProfile(BaseModel):
                 issues.append("Invalid log_level")
         except Exception:
             issues.append("Invalid log_level")
+
+        # Unit system validation
+        try:
+            unit = str(self.system.unit_system).lower()
+            if unit not in {"metric", "imperial"}:
+                issues.append("Invalid unit_system")
+        except Exception:
+            issues.append("Invalid unit_system")
         return issues
 
     def compute_branding_checksum(self, required_assets: List[str]) -> str:

@@ -1,6 +1,6 @@
 """GPS Driver (T058)
 
-Supports u-blox ZED-F9P via USB and Neo-8M via UART. This driver follows the
+Supports u-blox ZED-F9P via USB or UART and Neo-8M via UART. This driver follows the
 HardwareDriver lifecycle and returns GPS positions at ~1Hz when polled.
 
 SIM_MODE notes:
@@ -60,7 +60,7 @@ class GPSDriver(HardwareDriver):
         self._first_read_done = False
         # Cached baudrates to try for different modules
         self._baud_candidates = [self.cfg.baudrate]
-        if self.cfg.mode == GpsMode.F9P_USB:
+        if self.cfg.mode in (GpsMode.F9P_USB, GpsMode.F9P_UART):
             # F9P often uses higher baud
             for b in (115200, 38400, 9600):
                 if b not in self._baud_candidates:
@@ -129,9 +129,11 @@ class GPSDriver(HardwareDriver):
             lat = base_lat + d
             lon = base_lon - d
             self._sim_counter += 1
-            acc = 0.6 if self.cfg.mode == GpsMode.F9P_USB else 3.0
-            sats = 18 if self.cfg.mode == GpsMode.F9P_USB else 8
-            rtk = "RTK_FIXED" if self.cfg.mode == GpsMode.F9P_USB else None
+            is_f9p = self.cfg.mode in (GpsMode.F9P_USB, GpsMode.F9P_UART)
+            acc = 0.6 if is_f9p else 3.0
+            sats = 18 if is_f9p else 8
+            rtk = "RTK_FIXED" if is_f9p else None
+            hdop = 0.5 if is_f9p else 2.5
             reading = GpsReading(
                 latitude=lat,
                 longitude=lon,
@@ -140,6 +142,7 @@ class GPSDriver(HardwareDriver):
                 satellites=sats,
                 mode=self.cfg.mode,
                 rtk_status=rtk,
+                hdop=hdop,
             )
             self._last_read = reading
             self._last_read_ts = time.time()
@@ -217,6 +220,7 @@ class GPSDriver(HardwareDriver):
             deadline = time.time() + (1.5 if not self._first_read_done else 0.75)
             got_lat = got_lon = False
             acc: Optional[float] = None
+            hdop_val: Optional[float] = None
             sats: Optional[int] = None
             alt: Optional[float] = None
             spd: Optional[float] = None
@@ -242,6 +246,7 @@ class GPSDriver(HardwareDriver):
                             sats = sats_gga
                         # Approximate accuracy from HDOP (rough scale)
                         if hdop is not None:
+                            hdop_val = hdop
                             acc = max(0.5, hdop * 1.0)
                 elif raw.startswith(("$GPRMC", "$GNRMC")):
                     rmc = self._parse_rmc(raw)
@@ -268,6 +273,7 @@ class GPSDriver(HardwareDriver):
                     satellites=sats,
                     mode=self.cfg.mode,
                     rtk_status=rtk_status,
+                    hdop=hdop_val,
                 )
                 self._last_read = reading
                 self._last_read_ts = time.time()
@@ -388,6 +394,7 @@ class GPSDriver(HardwareDriver):
                                     speed=float(spd) if spd is not None else None,
                                     heading=float(crs) if crs is not None else None,
                                     mode=self.cfg.mode,
+                                    hdop=float(eph) if eph is not None else None,
                                 )
                 return None
         except Exception:

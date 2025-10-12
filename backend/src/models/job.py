@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, time
 from enum import Enum
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class JobStatus(str, Enum):
@@ -91,9 +91,4 @@ class Job(BaseModel):
     # Custom parameters
     parameters: Dict[str, Any] = Field(default_factory=dict)
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat(),
-            time: lambda v: v.strftime('%H:%M:%S')
-        }
+    model_config = ConfigDict(use_enum_values=True)

@@ -6,7 +6,7 @@ Evidence package for telemetry validation, UI walkthroughs, and documentation co
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class ArtifactType(str, Enum):
@@ -42,8 +42,6 @@ class PlatformInfo(BaseModel):
     # Detection timestamp
     detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class PerformanceMetrics(BaseModel):
@@ -77,8 +75,6 @@ class PerformanceMetrics(BaseModel):
     sample_count: int = 0
     measured_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class TelemetrySnapshot(BaseModel):
@@ -114,8 +110,6 @@ class TelemetrySnapshot(BaseModel):
     platform_detected: Optional[str] = None
     sim_mode_active: bool = False
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class VerificationArtifact(BaseModel):
@@ -157,9 +151,7 @@ class VerificationArtifact(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     tags: List[str] = Field(default_factory=list)
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def add_telemetry_snapshot(self, snapshot: TelemetrySnapshot):
         """Add a telemetry snapshot to the artifact"""
@@ -220,9 +212,7 @@ class VerificationArtifactCollection(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     finalized_at: Optional[datetime] = None
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def add_artifact(self, artifact: VerificationArtifact):
         """Add an artifact to the collection"""

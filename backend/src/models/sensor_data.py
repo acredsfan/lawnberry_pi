@@ -6,7 +6,7 @@ Hardware sensor readings and status information
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class SensorType(str, Enum):
@@ -32,6 +32,7 @@ class SensorStatus(str, Enum):
 class GpsMode(str, Enum):
     """GPS module configuration"""
     F9P_USB = "f9p_usb"  # u-blox ZED-F9P via USB with RTK
+    F9P_UART = "f9p_uart"  # u-blox ZED-F9P via UART with RTK
     NEO8M_UART = "neo8m_uart"  # u-blox Neo-8M via UART
 
 
@@ -123,6 +124,4 @@ class SensorData(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     hardware_baseline_id: Optional[str] = None  # Reference to hardware configuration
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)

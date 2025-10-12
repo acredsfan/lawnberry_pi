@@ -6,7 +6,7 @@ Hardware configuration and capability tracking
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class RaspberryPiModel(str, Enum):
@@ -70,9 +70,6 @@ class HardwareComponent(BaseModel):
     alternative_models: List[str] = Field(default_factory=list)
     fallback_available: bool = False
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
-
 
 class GPIOPinAssignment(BaseModel):
     """GPIO pin assignment tracking"""
@@ -88,7 +85,7 @@ class GPIOPinAssignment(BaseModel):
     pi4_alternative_pin: Optional[int] = None
     pi5_alternative_pin: Optional[int] = None
     
-    @validator('physical_pin', 'gpio_number')
+    @field_validator('physical_pin', 'gpio_number')
     def validate_pin_numbers(cls, v):
         if v < 1 or v > 40:
             raise ValueError('Pin numbers must be between 1 and 40')
@@ -184,9 +181,7 @@ class HardwareBaseline(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_modified: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def add_component(self, component: HardwareComponent):
         """Add a hardware component"""

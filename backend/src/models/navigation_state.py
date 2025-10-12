@@ -6,7 +6,7 @@ Current position, planned path, and movement state
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class NavigationMode(str, Enum):
@@ -120,9 +120,7 @@ class NavigationState(BaseModel):
     
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def get_current_waypoint(self) -> Optional[Waypoint]:
         """Get the current target waypoint"""

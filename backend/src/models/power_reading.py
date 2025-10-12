@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class PowerSource(str, Enum):
@@ -56,18 +56,16 @@ class PowerReading(BaseModel):
     
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    @validator('battery_percentage')
+    @field_validator('battery_percentage')
     def validate_percentage(cls, v):
         if v is not None and not (0.0 <= v <= 100.0):
             raise ValueError('Battery percentage must be between 0.0 and 100.0')
         return v
     
-    @validator('battery_voltage', 'charging_voltage')
+    @field_validator('battery_voltage', 'charging_voltage')
     def validate_voltage(cls, v):
         if v is not None and v < 0:
             raise ValueError('Voltage values must be non-negative')
         return v
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)

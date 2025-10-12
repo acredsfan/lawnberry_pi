@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class JobState(str, Enum):
@@ -43,5 +43,4 @@ class ScheduledJob(BaseModel):
     weather_check_enabled: bool = True
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)

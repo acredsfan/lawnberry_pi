@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class GPSType(str, Enum):
     ZED_F9P_USB = "zed-f9p-usb"
+    ZED_F9P_UART = "zed-f9p-uart"
     NEO_8M_UART = "neo-8m-uart"
 
 
@@ -45,7 +46,7 @@ class HardwareConfig(BaseModel):
     def ntrip_requires_zed_f9p(cls, v: bool, info):
         if v:
             gps_type = info.data.get("gps_type")
-            if gps_type != GPSType.ZED_F9P_USB:
+            if gps_type not in {GPSType.ZED_F9P_USB, GPSType.ZED_F9P_UART}:
                 raise ValueError("NTRIP corrections require ZED-F9P GPS")
         return v
 

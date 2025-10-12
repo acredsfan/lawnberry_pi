@@ -312,6 +312,47 @@ export const aiApi = {
   },
 }
 
+// Maintenance API endpoints
+export const maintenanceApi = {
+  runImuCalibration: async () => {
+    try {
+      const response = await apiClient.post('/maintenance/imu/calibrate')
+      return response.data
+    } catch (error: any) {
+      if (shouldAttemptFallback(error)) {
+        const response = await apiClient.post('/maintenance/imu/calibrate', undefined, { baseURL: FALLBACK_API_BASE })
+        return response.data
+      }
+      if (error?.response?.status === 404) {
+        const unsupported = new Error('IMU calibration endpoint not available')
+        ;(unsupported as any).unsupported = true
+        throw unsupported
+      }
+      throw error
+    }
+  },
+
+  getImuCalibrationStatus: async () => {
+    try {
+      const response = await apiClient.get('/maintenance/imu/calibrate')
+      return response.data
+    } catch (error: any) {
+      if (shouldAttemptFallback(error)) {
+        const response = await apiClient.get('/maintenance/imu/calibrate', { baseURL: FALLBACK_API_BASE })
+        return response.data
+      }
+      if (error?.response?.status === 404) {
+        return {
+          in_progress: false,
+          last_result: null,
+          supported: false,
+        }
+      }
+      throw error
+    }
+  },
+}
+
 // Weather API endpoints
 export const weatherApi = {
   getCurrent: async (params?: { lat?: number; lon?: number }) => {

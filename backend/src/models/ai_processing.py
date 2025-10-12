@@ -6,7 +6,7 @@ AI inference results, model management, and hardware acceleration
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class AIAccelerator(str, Enum):
@@ -51,7 +51,7 @@ class BoundingBox(BaseModel):
     width: float
     height: float
     
-    @validator('x', 'y', 'width', 'height')
+    @field_validator('x', 'y', 'width', 'height')
     def validate_normalized_coords(cls, v):
         if not (0.0 <= v <= 1.0):
             raise ValueError('Coordinates must be normalized between 0.0 and 1.0')
@@ -70,7 +70,7 @@ class DetectedObject(BaseModel):
     relative_bearing: Optional[float] = None  # degrees from camera center
     tracking_id: Optional[int] = None  # For object tracking across frames
     
-    @validator('confidence')
+    @field_validator('confidence')
     def validate_confidence(cls, v):
         if not (0.0 <= v <= 1.0):
             raise ValueError('Confidence must be between 0.0 and 1.0')
@@ -109,8 +109,6 @@ class InferenceResult(BaseModel):
     model_version: str = "1.0"
     confidence_threshold: float = 0.5
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class ModelInfo(BaseModel):
@@ -142,8 +140,6 @@ class ModelInfo(BaseModel):
     load_time: Optional[datetime] = None
     error_message: Optional[str] = None
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class AcceleratorStatus(BaseModel):
@@ -172,8 +168,6 @@ class AcceleratorStatus(BaseModel):
     venv_path: Optional[str] = None
     venv_active: bool = False
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class AIProcessing(BaseModel):
@@ -219,9 +213,7 @@ class AIProcessing(BaseModel):
     
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def get_best_accelerator(self) -> AIAccelerator:
         """Get the best available accelerator"""

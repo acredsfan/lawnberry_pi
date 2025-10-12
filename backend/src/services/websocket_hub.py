@@ -102,7 +102,7 @@ class WebSocketHub:
             
     async def broadcast_alert(self, alert: Alert):
         """Broadcast system alert to all connected clients."""
-        await self.broadcast_to_topic("alerts/system", alert.dict())
+        await self.broadcast_to_topic("alerts/system", alert.model_dump())
 
     async def broadcast(self, message: str | dict):
         """Broadcast a raw message to all connected clients (compat for tests)."""

@@ -6,7 +6,7 @@ Auditable record of manual control interactions and safety interlocks
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class ControlCommandType(str, Enum):
@@ -73,11 +73,9 @@ class ControlCommand(BaseModel):
     executed_at: Optional[datetime] = None
     acknowledged_at: Optional[datetime] = None
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
-    @validator('latency_ms', 'watchdog_latency_ms')
+    @field_validator('latency_ms', 'watchdog_latency_ms')
     def validate_latency(cls, v):
         if v is not None and (v < 0 or v > 10000):
             raise ValueError('Latency must be between 0 and 10000 ms')
@@ -110,9 +108,7 @@ class ControlAuditEntry(BaseModel):
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class EmergencyState(BaseModel):
@@ -136,9 +132,7 @@ class EmergencyState(BaseModel):
     # Audit trail
     audit_entries: List[str] = Field(default_factory=list)  # References to audit IDs
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def trigger_emergency(self, reason: str, source: str = "manual"):
         """Trigger emergency stop"""
@@ -209,9 +203,7 @@ class ControlSession(BaseModel):
     ended_at: Optional[datetime] = None
     last_command_at: Optional[datetime] = None
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def issue_command(self, command: ControlCommand) -> ControlAuditEntry:
         """Issue a control command and create audit entry"""

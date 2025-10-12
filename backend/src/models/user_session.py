@@ -6,7 +6,7 @@ Web interface connections and user management
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, ConfigDict
 import uuid
 from ..models.auth_security_config import SecurityLevel
 
@@ -240,9 +240,7 @@ class UserSession(BaseModel):
     
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def is_expired(self) -> bool:
         """Check if session is expired"""

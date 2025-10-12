@@ -6,7 +6,7 @@ AI training dataset management and image collection
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 import uuid
 
 
@@ -44,7 +44,7 @@ class BoundingBoxAnnotation(BaseModel):
     width: float
     height: float
     
-    @validator('x', 'y', 'width', 'height')
+    @field_validator('x', 'y', 'width', 'height')
     def validate_normalized_coords(cls, v):
         if not (0.0 <= v <= 1.0):
             raise ValueError('Coordinates must be normalized between 0.0 and 1.0')
@@ -69,7 +69,7 @@ class ObjectAnnotation(BaseModel):
     annotation_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     verification_status: str = "unverified"  # "unverified", "verified", "rejected"
     
-    @validator('confidence')
+    @field_validator('confidence')
     def validate_confidence(cls, v):
         if not (0.0 <= v <= 1.0):
             raise ValueError('Confidence must be between 0.0 and 1.0')
@@ -116,9 +116,6 @@ class TrainingImage(BaseModel):
     # Processing history
     last_modified: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     processing_history: List[Dict[str, Any]] = Field(default_factory=list)
-    
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
     
     def add_annotation(self, annotation: ObjectAnnotation):
         """Add an object annotation"""
@@ -202,9 +199,6 @@ class DatasetExport(BaseModel):
     error_message: Optional[str] = None
     retry_count: int = 0
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
-
 
 class TrainingData(BaseModel):
     """Complete training dataset management"""
@@ -241,9 +235,7 @@ class TrainingData(BaseModel):
     compression_enabled: bool = True
     backup_enabled: bool = True
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def add_image(self, image: TrainingImage):
         """Add a training image to the dataset"""

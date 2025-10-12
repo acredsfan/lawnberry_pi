@@ -6,7 +6,7 @@ Battery status, solar charging, and power monitoring
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class PowerMode(str, Enum):
@@ -65,11 +65,11 @@ class BatteryStatus(BaseModel):
     over_current_fault: bool = False
     over_temperature_fault: bool = False
     
-    @validator('percentage', 'health_percentage')
+    @field_validator('percentage', 'health_percentage')
     def validate_percentage(cls, v):
         return max(0.0, min(100.0, v))
     
-    @validator('voltage')
+    @field_validator('voltage')
     def validate_voltage_range(cls, v):
         if v < 0:
             raise ValueError('Voltage cannot be negative')
@@ -184,9 +184,7 @@ class PowerManagement(BaseModel):
     
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def update_power_mode(self) -> PowerMode:
         """Update power mode based on current conditions"""

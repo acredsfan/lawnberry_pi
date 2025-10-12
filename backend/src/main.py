@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
     app.state.config_loader = loader
     app.state.hardware_config = hardware_cfg
     app.state.safety_limits = safety_limits
+    websocket_hub.bind_app_state(app.state)
     # Start GPS degradation monitor
     app.state.gps_deg_monitor = GPSDegradationMonitor()
     await app.state.gps_deg_monitor.start()

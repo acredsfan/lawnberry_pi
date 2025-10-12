@@ -6,7 +6,7 @@ Historical operational data and performance tracking
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, ConfigDict
 import uuid
 
 
@@ -76,9 +76,7 @@ class OperationalEvent(BaseModel):
     downtime_minutes: float = 0.0
     affected_operations: List[str] = Field(default_factory=list)
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class PerformanceMetrics(BaseModel):
@@ -122,8 +120,6 @@ class PerformanceMetrics(BaseModel):
     mtbf_hours: Optional[float] = None  # Mean time between failures
     mttr_minutes: Optional[float] = None  # Mean time to repair
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class MaintenanceRecord(BaseModel):
@@ -150,8 +146,6 @@ class MaintenanceRecord(BaseModel):
     next_maintenance_due: Optional[datetime] = None
     maintenance_notes: Optional[str] = None
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class JobExecution(BaseModel):
@@ -190,8 +184,6 @@ class JobExecution(BaseModel):
     error_count: int = 0
     recovery_actions: List[str] = Field(default_factory=list)
     
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
 
 
 class SystemHealth(BaseModel):
@@ -263,9 +255,7 @@ class OperationalData(BaseModel):
     metrics_retention_days: int = 365
     job_history_retention_days: int = 180
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def add_event(self, event: OperationalEvent):
         """Add an operational event"""

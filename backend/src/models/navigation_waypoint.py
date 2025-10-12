@@ -42,5 +42,3 @@ class NavigationWaypoint(BaseModel):
             raise ValueError("longitude must be between -180 and 180")
         return v
 
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}

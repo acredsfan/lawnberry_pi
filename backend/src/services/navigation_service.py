@@ -374,10 +374,25 @@ class NavigationService:
         try:
             if self.weather is not None:
                 pos = self.navigation_state.current_position
-                current = self.weather.get_current(
-                    latitude=getattr(pos, 'latitude', None),
-                    longitude=getattr(pos, 'longitude', None),
-                )
+                latitude = getattr(pos, 'latitude', None)
+                longitude = getattr(pos, 'longitude', None)
+
+                current = None
+                if hasattr(self.weather, "get_current_async"):
+                    current = await self.weather.get_current_async(
+                        latitude=latitude,
+                        longitude=longitude,
+                    )
+                elif hasattr(self.weather, "get_current"):
+                    maybe = self.weather.get_current(
+                        latitude=latitude,
+                        longitude=longitude,
+                    )
+                    if asyncio.iscoroutine(maybe):
+                        current = await maybe
+                    else:
+                        current = maybe
+
                 advice = self.weather.get_planning_advice(current)
                 if advice and advice.get("advice") == "avoid":
                     logger.warning("Navigation start blocked by weather: %s", advice)

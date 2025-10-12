@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class AlertSeverity(str, Enum):
@@ -137,6 +137,4 @@ class Alert(BaseModel):
             return False
         return True
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)

@@ -6,7 +6,7 @@ Real-time data streaming and telemetry management
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List, Union
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 import json
 
 
@@ -55,13 +55,13 @@ class GPSData(BaseModel):
     fix_type: RtkFixType = RtkFixType.NO_FIX
     rtk_status_message: Optional[str] = None  # Human-readable RTK status
     
-    @validator('latitude')
+    @field_validator('latitude')
     def validate_latitude(cls, v):
         if not -90 <= v <= 90:
             raise ValueError('Latitude must be between -90 and 90')
         return v
     
-    @validator('longitude')
+    @field_validator('longitude')
     def validate_longitude(cls, v):
         if not -180 <= v <= 180:
             raise ValueError('Longitude must be between -180 and 180')
@@ -158,11 +158,9 @@ class HardwareTelemetryStream(BaseModel):
     # Verification artifact reference
     verification_artifact_id: Optional[str] = None
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
-    @validator('latency_ms')
+    @field_validator('latency_ms')
     def validate_latency(cls, v):
         if v < 0 or v > 10000:  # 10 second max
             raise ValueError('Latency must be between 0 and 10000 ms')
@@ -226,9 +224,7 @@ class TelemetryMessage(BaseModel):
     target_clients: Optional[List[str]] = None  # Specific client IDs (None = all)
     client_filter: Optional[Dict[str, Any]] = None  # Filter criteria
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def to_websocket_message(self) -> str:
         """Convert to WebSocket JSON message"""
@@ -270,7 +266,7 @@ class StreamConfiguration(BaseModel):
     payload_schema: Optional[str] = None  # JSON schema reference
     data_filters: List[str] = Field(default_factory=list)  # Filter expressions
     
-    @validator('cadence_hz', 'burst_max_hz', 'diagnostic_floor_hz')
+    @field_validator('cadence_hz', 'burst_max_hz', 'diagnostic_floor_hz')
     def validate_frequencies(cls, v):
         if v <= 0 or v > 100:
             raise ValueError('Frequency must be between 0.1 and 100 Hz')
@@ -333,9 +329,7 @@ class StreamStatistics(BaseModel):
     last_message_time: Optional[datetime] = None
     last_reset_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class TelemetryHub(BaseModel):
@@ -366,9 +360,7 @@ class TelemetryHub(BaseModel):
     
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     def add_stream(self, topic: TelemetryTopic, config: StreamConfiguration):
         """Add or update a stream configuration"""
@@ -483,9 +475,7 @@ class TelemetryExchange(BaseModel):
     
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
-    class Config:
-        use_enum_values = True
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(use_enum_values=True)
     
     @classmethod
     def create_default_exchange(cls) -> 'TelemetryExchange':

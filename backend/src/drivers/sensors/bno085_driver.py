@@ -55,13 +55,24 @@ class BNO085Driver(HardwareDriver):
             pitch = math.cos(self._cycle / 25) * 3
             if self._cycle % 50 == 10:
                 roll = 35.0 + random.uniform(0, 2)  # simulate unsafe tilt
+            calibration_state = "calibrating" if self._cycle < 80 else "fully_calibrated"
             self._cycle += 1
-            self._last_orientation = {"roll": roll, "pitch": pitch, "yaw": yaw}
+            self._last_orientation = {
+                "roll": roll,
+                "pitch": pitch,
+                "yaw": yaw,
+                "calibration_status": calibration_state,
+            }
             self._last_read_ts = time.time()
             return self._last_orientation
         # Real hardware: read quaternion → convert to Euler
         if self._last_orientation is None:
-            self._last_orientation = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+            self._last_orientation = {
+                "roll": 0.0,
+                "pitch": 0.0,
+                "yaw": 0.0,
+                "calibration_status": "unknown",
+            }
         self._last_read_ts = time.time()
         return self._last_orientation
 

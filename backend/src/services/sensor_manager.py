@@ -162,16 +162,17 @@ class IMUSensorInterface:
                         pitch=o.get("pitch"),
                         yaw=o.get("yaw"),
                         accel_z=9.8,  # minimal gravity placeholder
-                        calibration_status="unknown"
+                        calibration_status=o.get("calibration_status") or "unknown"
                     )
                 else:
                     reading = self.last_reading
             else:
                 reading = ImuReading(roll=0.0, pitch=0.0, yaw=0.0, calibration_status="unknown")
-                
+
+            if reading is not None:
                 self.last_reading = reading
-                return reading
-                
+            return reading
+
         except Exception as e:
             logger.error(f"IMU reading failed: {e}")
             self.status = SensorStatus.ERROR
@@ -289,15 +290,17 @@ class EnvironmentalSensorInterface:
                         temperature=env.get("temperature_celsius"),
                         humidity=env.get("humidity_percent"),
                         pressure=env.get("pressure_hpa"),
+                        altitude=env.get("altitude_meters"),
                     )
                 else:
                     reading = self.last_reading
             else:
                 reading = self.last_reading
-                
+
+            if reading is not None:
                 self.last_reading = reading
-                return reading
-                
+            return reading
+
         except Exception as e:
             logger.error(f"Environmental reading failed: {e}")
             self.status = SensorStatus.ERROR
@@ -658,17 +661,21 @@ class SensorManager:
         else:
             return ComponentStatus.WARNING
     
-    def _estimate_battery_soc(self, voltage: float) -> Optional[float]:
-        """Estimate battery state of charge from voltage (simplified)"""        
-        if voltage >= 12.6:
-            return 100.0
-        elif voltage >= 12.4:
-            return 75.0
-        elif voltage >= 12.2:
-            return 50.0
-        elif voltage >= 12.0:
-            return 25.0
-        elif voltage >= 11.8:
-            return 10.0
-        else:
+    def _estimate_battery_soc(self, voltage: Optional[float]) -> Optional[float]:
+        """Estimate battery state-of-charge using a clamped linear model."""
+        if voltage is None:
+            return None
+        try:
+            value = float(voltage)
+        except (TypeError, ValueError):
+            return None
+
+        min_v = 11.5
+        max_v = 13.0
+        if value <= min_v:
             return 0.0
+        if value >= max_v:
+            return 100.0
+
+        ratio = (value - min_v) / (max_v - min_v)
+        return round(ratio * 100.0, 1)
