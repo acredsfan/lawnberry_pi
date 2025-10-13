@@ -157,6 +157,16 @@
           v-if="showTiles && tileLayerConfig && !googleLayerActive"
           :url="tileLayerConfig.url"
           :attribution="tileLayerConfig.attribution"
+          :subdomains="tileLayerConfig.subdomains"
+          :max-zoom="tileLayerConfig.maxZoom"
+        />
+        <l-tile-layer
+          v-if="showTiles && tileLayerConfig?.overlay && !googleLayerActive"
+          :url="tileLayerConfig.overlay.url"
+          :attribution="tileLayerConfig.overlay.attribution || tileLayerConfig.attribution"
+          :subdomains="tileLayerConfig.overlay.subdomains"
+          :max-zoom="tileLayerConfig.overlay.maxZoom"
+          :options="{ zIndex: 5 }"
         />
 
         <!-- Existing boundary polygon -->
@@ -281,7 +291,7 @@ import { useWebSocket } from '@/services/websocket';
 import { useMapStore } from '../../stores/map';
 import type { Point } from '../../stores/map';
 import { useToastStore } from '@/stores/toast';
-import { shouldUseGoogleProvider } from '@/utils/mapProviders';
+import { shouldUseGoogleProvider, getOsmTileLayer, type TileLayerConfig } from '@/utils/mapProviders';
 
 const mapStore = useMapStore();
 const toast = useToastStore();
@@ -321,15 +331,14 @@ const centerLatLng = ref<[number, number]>([37.7749, -122.4194]);
 const showTiles = computed(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
 
 // Dynamic Leaflet tile layer when NOT using Google Mutant
-const tileLayerConfig = computed(() => {
+const tileLayerConfig = computed<TileLayerConfig | null>(() => {
   if (props.mapProvider === 'none') return null;
-  // If Google is selected and allowed, we'll use Google Mutant and suppress standard tile layer
   if (useGoogleMutant.value) return null;
-  // Otherwise fall back to OSM generic
-  return {
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; OpenStreetMap contributors'
-  };
+  if (props.mapProvider === 'osm') {
+    return getOsmTileLayer(props.mapStyle);
+  }
+  // Google provider without a usable API key falls back to a basic OSM layer for editing
+  return getOsmTileLayer('standard');
 });
 
 const useGoogleMutant = computed(() => shouldUseGoogleProvider(

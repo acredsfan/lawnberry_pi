@@ -24,7 +24,6 @@ Python 3.11 (backend), TypeScript + Vue 3 (frontend): Follow standard convention
 - 002-complete-engineering-plan: Added Python 3.11.x (backend), TypeScript (frontend - existing) + FastAPI, Uvicorn, Pydantic v2, asyncio, python-periphery, lgpio, pyserial, websockets, Vue 3 (existing), Vite, Pinia
 - 001-integrate-hardware-and: Added Python 3.11 (backend), TypeScript + Vue 3 (frontend) + FastAPI, Uvicorn, Pydantic v2, websockets, Vue 3 + Vite, Pinia, Leaflet/Google Maps SDK
 
-<!-- MANUAL ADDITIONS START -->
 ## Reasoning for problem solving approach
 - Think like a developer when solving this issue, when you think you know how to attack the problem, think it through before deploying and make targeted/precise edits to avoid unintentionally causing issues with another part of the program.
 - If you are unsure about something, ask for clarification or more information.
@@ -32,7 +31,9 @@ Python 3.11 (backend), TypeScript + Vue 3 (frontend): Follow standard convention
 ## Running CLI Commands
 - Always ensure you use timeouts and error handling when running CLI commands from within the codebase to avoid hanging processes or unhandled exceptions.
 
+## Tools Available for Agent Use
+
+
 ## Additional Notes
 - Ensure to follow best practices for both backend and frontend development.
 - Regularly update dependencies to maintain security and performance.
-<!-- MANUAL ADDITIONS END -->

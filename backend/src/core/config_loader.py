@@ -161,6 +161,11 @@ class ConfigLoader:
         tof = sensors.get("tof") if isinstance(sensors, dict) else None
         if isinstance(tof, list) and "tof_sensors" not in mapped:
             mapped["tof_sensors"] = tof
+        # Optional typed ToF config block
+        tof_cfg = sensors.get("tof_config") if isinstance(sensors, dict) else None
+        if isinstance(tof_cfg, dict):
+            # Preserve as-is; Pydantic model on HardwareConfig will validate
+            mapped["tof_config"] = tof_cfg
 
         power = cfg.get("power_monitor") or {}
         if isinstance(power, dict) and "type" in power and "power_monitor" not in mapped:

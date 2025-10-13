@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Re
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timedelta, timezone
+import math
 from typing import Optional, Any
 from pathlib import Path
 import os
@@ -50,6 +51,8 @@ class WebSocketHub:
         self._calibration_lock = asyncio.Lock()
         # Optional NTRIP bridge for RTK corrections
         self._ntrip_forwarder: NtripForwarder | None = None
+        # Simulation helpers for deterministic synthetic telemetry
+        self._sim_cycle: int = 0
 
     def bind_app_state(self, state: Any) -> None:
         """Expose app.state to the hub so lazily-created services can be shared."""
@@ -100,7 +103,19 @@ class WebSocketHub:
             "enabled" if ntrip_enabled else "disabled",
         )
 
-        self._sensor_manager = SensorManager(gps_mode=gps_mode)
+        # Extract typed ToF configuration from app.state.hardware_config
+        tof_cfg: dict | None = None
+        if self._app_state and getattr(self._app_state, "hardware_config", None):
+            try:
+                hwc = self._app_state.hardware_config
+                tc = getattr(hwc, "tof_config", None)
+                if tc is not None:
+                    # Convert to dict for SensorManager
+                    tof_cfg = tc.model_dump()
+            except Exception:
+                tof_cfg = None
+
+        self._sensor_manager = SensorManager(gps_mode=gps_mode, tof_config=tof_cfg)
         await self._sensor_manager.initialize()
         if ntrip_enabled:
             await self._ensure_ntrip_forwarder(gps_mode)
@@ -420,165 +435,166 @@ class WebSocketHub:
 
         Safe on CI: imports and hardware init are lazy and wrapped in try/except.
         """
-        # SIM_MODE: default to hardware unless explicitly set to '1'
         sim_mode = os.getenv("SIM_MODE", "0") != "0"
 
-        if not sim_mode:
-            # Try to read from SensorManager
+        manager: Any | None = None
+        try:
+            manager = await self._ensure_sensor_manager()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.warning("SensorManager initialization failed: %s", exc)
+            manager = None
+
+        if manager and getattr(manager, "initialized", False):
             try:
-                manager = await self._ensure_sensor_manager()
-
-                if getattr(manager, "initialized", False):
-                    # One-time warmup to allow GPS first fix to populate
-                    if not self._gps_warm_done:
-                        try:
-                            for _ in range(3):
-                                warm = await manager.read_all_sensors()
-                                if getattr(warm, 'gps', None) and getattr(warm.gps, 'latitude', None) is not None:
-                                    break
-                                await asyncio.sleep(0.2)
-                        finally:
-                            self._gps_warm_done = True
-                    data = await manager.read_all_sensors()
-                    
-                    # Map to telemetry payload expected by clients
-                    battery_pct = None
-                    batt_v = None
-                    if data.power and data.power.battery_voltage is not None:
-                        batt_v = float(data.power.battery_voltage)
-                        estimate = None
-                        try:
-                            estimate = manager._estimate_battery_soc(batt_v)
-                        except Exception:
-                            estimate = None
-                        if estimate is None:
-                            estimate = max(0.0, min(100.0, (batt_v - 11.0) / (13.0 - 11.0) * 100.0))
-                        battery_pct = float(estimate)
-
-                    pos = data.gps
-                    imu = data.imu
-                    speed_mps = getattr(pos, "speed", None) if pos else None
-                    accuracy_m = getattr(pos, "accuracy", None) if pos else None
-                    hdop = getattr(pos, "hdop", None) if pos else None
-                    if accuracy_m is None and hdop is not None:
-                        try:
-                            accuracy_m = float(hdop) * 1.0
-                        except Exception:
-                            accuracy_m = None
-
-                    cal_status = getattr(imu, "calibration_status", None)
-                    _cal_map = {
-                        "fully_calibrated": 3,
-                        "calibrated": 3,
-                        "calibrating": 2,
-                        "partial": 2,
-                        "unknown": 1,
-                        None: 0,
-                    }
-                    cal_score = _cal_map.get(cal_status, 1 if cal_status else 0)
-
-                    telemetry = {
-                        "source": "hardware",
-                        "battery": {"percentage": battery_pct, "voltage": batt_v},
-                        "position": {
-                            "latitude": getattr(pos, "latitude", None),
-                            "longitude": getattr(pos, "longitude", None),
-                            "altitude": getattr(pos, "altitude", None),
-                            "accuracy": accuracy_m,
-                            "gps_mode": getattr(pos, "mode", None) if pos else None,
-                            "satellites": getattr(pos, "satellites", None) if pos else None,
-                            "speed": speed_mps,
-                            "rtk_status": getattr(pos, "rtk_status", None) if pos else None,
-                            "hdop": hdop,
-                        },
-                        "imu": {
-                            "roll": getattr(imu, "roll", None),
-                            "pitch": getattr(imu, "pitch", None),
-                            "yaw": getattr(imu, "yaw", None),
-                            "gyro_z": getattr(imu, "gyro_z", None),
-                            "calibration": cal_score,
-                            "calibration_status": cal_status,
-                        },
-                        "velocity": {
-                            "linear": {"x": speed_mps, "y": None, "z": None},
-                            "angular": {"x": None, "y": None, "z": getattr(imu, "gyro_z", None)},
-                        },
-                        "motor_status": "idle",
-                        "safety_state": "emergency_stop" if _safety_state.get("emergency_stop_active", False) else "nominal",
-                        "uptime_seconds": time.time(),
-                    }
-
-                    env = getattr(data, "environmental", None)
-                    if env:
-                        environmental_payload = {
-                            "temperature_c": getattr(env, "temperature", None),
-                            "humidity_percent": getattr(env, "humidity", None),
-                            "pressure_hpa": getattr(env, "pressure", None),
-                            "altitude_m": getattr(env, "altitude", None),
-                        }
-                        if any(v is not None for v in environmental_payload.values()):
-                            telemetry["environmental"] = environmental_payload
-
-                    tof_left = getattr(data, "tof_left", None)
-                    tof_right = getattr(data, "tof_right", None)
-                    tof_payload: dict[str, Any] = {}
-                    if tof_left is not None:
-                        tof_payload["left"] = {
-                            "distance_mm": getattr(tof_left, "distance", None),
-                            "range_status": getattr(tof_left, "range_status", None),
-                            "signal_strength": getattr(tof_left, "signal_strength", None),
-                        }
-                    if tof_right is not None:
-                        tof_payload["right"] = {
-                            "distance_mm": getattr(tof_right, "distance", None),
-                            "range_status": getattr(tof_right, "range_status", None),
-                            "signal_strength": getattr(tof_right, "signal_strength", None),
-                        }
-                    if tof_payload:
-                        telemetry["tof"] = tof_payload
-
-                    if "environmental" not in telemetry:
-                        telemetry["environmental"] = {
-                            "temperature_c": None,
-                            "humidity_percent": None,
-                            "pressure_hpa": None,
-                            "altitude_m": None,
-                        }
-                    if "tof" not in telemetry:
-                        telemetry["tof"] = {
-                            "left": {"distance_mm": None, "range_status": None},
-                            "right": {"distance_mm": None, "range_status": None},
-                        }
-                    
-                    # Add camera data if available
+                # One-time warmup to allow GPS first fix to populate
+                if not self._gps_warm_done:
                     try:
-                        from ..services.camera_stream_service import camera_service
-                        camera_frame = await camera_service.get_current_frame()
-                        if camera_frame and camera_service.stream:
-                            telemetry["camera"] = {
-                                "active": camera_service.stream.is_active,
-                                "mode": camera_service.stream.mode,
-                                "fps": camera_service.stream.statistics.current_fps,
-                                "frame_count": camera_service.stream.statistics.frames_captured,
-                                "client_count": camera_service.stream.client_count,
-                                "last_frame": camera_frame.metadata.timestamp.isoformat() if camera_frame else None
-                            }
-                        else:
-                            telemetry["camera"] = {
-                                "active": False,
-                                "mode": "offline",
-                                "fps": 0.0,
-                                "frame_count": 0,
-                                "client_count": 0,
-                                "last_frame": None
-                            }
+                        for _ in range(3):
+                            warm = await manager.read_all_sensors()
+                            if getattr(warm, "gps", None) and getattr(warm.gps, "latitude", None) is not None:
+                                break
+                            await asyncio.sleep(0.2)
+                    finally:
+                        self._gps_warm_done = True
+
+                data = await manager.read_all_sensors()
+            except Exception as exc:
+                logger.warning("SensorManager telemetry read failed: %s", exc)
+            else:
+                battery_pct = None
+                batt_v = None
+                if data.power and data.power.battery_voltage is not None:
+                    batt_v = float(data.power.battery_voltage)
+                    estimate = None
+                    try:
+                        estimate = manager._estimate_battery_soc(batt_v)
                     except Exception:
-                        telemetry["camera"] = {"active": False, "mode": "error"}
-                    
-                    return telemetry
-            except Exception:
-                # Fall back to simulation if hardware path fails
-                pass
+                        estimate = None
+                    if estimate is None:
+                        estimate = max(0.0, min(100.0, (batt_v - 11.0) / (13.0 - 11.0) * 100.0))
+                    battery_pct = float(estimate)
+
+                pos = data.gps
+                imu = data.imu
+                speed_mps = getattr(pos, "speed", None) if pos else None
+                accuracy_m = getattr(pos, "accuracy", None) if pos else None
+                hdop = getattr(pos, "hdop", None) if pos else None
+                if accuracy_m is None and hdop is not None:
+                    try:
+                        accuracy_m = float(hdop)
+                    except Exception:
+                        accuracy_m = None
+
+                cal_status = getattr(imu, "calibration_status", None)
+                _cal_map = {
+                    "fully_calibrated": 3,
+                    "calibrated": 3,
+                    "calibrating": 2,
+                    "partial": 2,
+                    "unknown": 1,
+                    None: 0,
+                }
+                cal_score = _cal_map.get(cal_status, 1 if cal_status else 0)
+
+                telemetry = {
+                    "source": "hardware",
+                    "simulated": bool(sim_mode),
+                    "battery": {"percentage": battery_pct, "voltage": batt_v},
+                    "position": {
+                        "latitude": getattr(pos, "latitude", None),
+                        "longitude": getattr(pos, "longitude", None),
+                        "altitude": getattr(pos, "altitude", None),
+                        "accuracy": accuracy_m,
+                        "gps_mode": getattr(pos, "mode", None) if pos else None,
+                        "satellites": getattr(pos, "satellites", None) if pos else None,
+                        "speed": speed_mps,
+                        "rtk_status": getattr(pos, "rtk_status", None) if pos else None,
+                        "hdop": hdop,
+                    },
+                    "imu": {
+                        "roll": getattr(imu, "roll", None),
+                        "pitch": getattr(imu, "pitch", None),
+                        "yaw": getattr(imu, "yaw", None),
+                        "gyro_z": getattr(imu, "gyro_z", None),
+                        "calibration": cal_score,
+                        "calibration_status": cal_status,
+                    },
+                    "velocity": {
+                        "linear": {"x": speed_mps, "y": None, "z": None},
+                        "angular": {"x": None, "y": None, "z": getattr(imu, "gyro_z", None)},
+                    },
+                    "motor_status": "idle",
+                    "safety_state": "emergency_stop" if _safety_state.get("emergency_stop_active", False) else "nominal",
+                    "uptime_seconds": time.time(),
+                }
+
+                env = getattr(data, "environmental", None)
+                if env:
+                    environmental_payload = {
+                        "temperature_c": getattr(env, "temperature", None),
+                        "humidity_percent": getattr(env, "humidity", None),
+                        "pressure_hpa": getattr(env, "pressure", None),
+                        "altitude_m": getattr(env, "altitude", None),
+                    }
+                    if any(v is not None for v in environmental_payload.values()):
+                        telemetry["environmental"] = environmental_payload
+
+                tof_left = getattr(data, "tof_left", None)
+                tof_right = getattr(data, "tof_right", None)
+                tof_payload: dict[str, Any] = {}
+                if tof_left is not None:
+                    tof_payload["left"] = {
+                        "distance_mm": getattr(tof_left, "distance", None),
+                        "range_status": getattr(tof_left, "range_status", None),
+                        "signal_strength": getattr(tof_left, "signal_strength", None),
+                    }
+                if tof_right is not None:
+                    tof_payload["right"] = {
+                        "distance_mm": getattr(tof_right, "distance", None),
+                        "range_status": getattr(tof_right, "range_status", None),
+                        "signal_strength": getattr(tof_right, "signal_strength", None),
+                    }
+                if tof_payload:
+                    telemetry["tof"] = tof_payload
+
+                if "environmental" not in telemetry:
+                    telemetry["environmental"] = {
+                        "temperature_c": None,
+                        "humidity_percent": None,
+                        "pressure_hpa": None,
+                        "altitude_m": None,
+                    }
+                if "tof" not in telemetry:
+                    telemetry["tof"] = {
+                        "left": {"distance_mm": None, "range_status": None, "signal_strength": None},
+                        "right": {"distance_mm": None, "range_status": None, "signal_strength": None},
+                    }
+
+                try:
+                    from ..services.camera_stream_service import camera_service
+                    camera_frame = await camera_service.get_current_frame()
+                    if camera_frame and camera_service.stream:
+                        telemetry["camera"] = {
+                            "active": camera_service.stream.is_active,
+                            "mode": camera_service.stream.mode,
+                            "fps": camera_service.stream.statistics.current_fps,
+                            "frame_count": camera_service.stream.statistics.frames_captured,
+                            "client_count": camera_service.stream.client_count,
+                            "last_frame": camera_frame.metadata.timestamp.isoformat() if camera_frame else None,
+                        }
+                    else:
+                        telemetry["camera"] = {
+                            "active": False,
+                            "mode": "offline",
+                            "fps": 0.0,
+                            "frame_count": 0,
+                            "client_count": 0,
+                            "last_frame": None,
+                        }
+                except Exception:
+                    telemetry["camera"] = {"active": False, "mode": "error"}
+
+                return telemetry
 
         # Simulated data
         telemetry = {
@@ -600,9 +616,29 @@ class WebSocketHub:
             "pressure_hpa": None,
             "altitude_m": None,
         }
+        cycle = self._sim_cycle
+        self._sim_cycle = (self._sim_cycle + 1) % 10000
+        left_distance = 1200 + 250 * math.sin(cycle / 6.0)
+        right_distance = 1180 + 220 * math.cos((cycle + 3) / 5.0)
+        left_status = "valid"
+        right_status = "valid"
+        if cycle % 24 == 12:
+            left_distance = 160.0
+            left_status = "obstacle"
+        if cycle % 32 == 16:
+            right_distance = 180.0
+            right_status = "obstacle"
         telemetry["tof"] = {
-            "left": {"distance_mm": None, "range_status": None},
-            "right": {"distance_mm": None, "range_status": None},
+            "left": {
+                "distance_mm": round(left_distance, 1),
+                "range_status": left_status,
+                "signal_strength": 1400 + 100 * math.sin(cycle / 4.0),
+            },
+            "right": {
+                "distance_mm": round(right_distance, 1),
+                "range_status": right_status,
+                "signal_strength": 1350 + 90 * math.cos(cycle / 4.0),
+            },
         }
         
         # Add simulated camera data
@@ -668,6 +704,53 @@ class IMUCalibrationStatusResponse(BaseModel):
     )
 
 
+class ToFProbe(BaseModel):
+    sensor_side: str
+    backend: str | None = None
+    i2c_bus: int | None = None
+    i2c_address: str | None = None
+    initialized: bool | None = None
+    running: bool | None = None
+    last_distance_mm: int | None = None
+    last_read_age_s: float | None = None
+
+
+class ToFStatusResponse(BaseModel):
+    sim_mode: bool
+    left: ToFProbe | None
+    right: ToFProbe | None
+    timestamp: str
+
+
+class GPSSummary(BaseModel):
+    mode: str | None = None
+    initialized: bool | None = None
+    running: bool | None = None
+    last_read_age_s: float | None = None
+    last_reading: dict[str, Any] | None = None
+
+
+class IMUSummary(BaseModel):
+    initialized: bool | None = None
+    running: bool | None = None
+    last_read_age_s: float | None = None
+    last_reading: dict[str, Any] | None = None
+
+
+class EnvSummary(BaseModel):
+    initialized: bool | None = None
+    running: bool | None = None
+    last_read_age_s: float | None = None
+    last_reading: dict[str, Any] | None = None
+
+
+class PowerSummary(BaseModel):
+    initialized: bool | None = None
+    running: bool | None = None
+    last_read_age_s: float | None = None
+    last_reading: dict[str, Any] | None = None
+
+
 @router.get("/sensors/health")
 async def get_sensors_health() -> SensorHealthResponse:
     """Return minimal sensor health snapshot.
@@ -730,6 +813,172 @@ async def get_sensors_health() -> SensorHealthResponse:
         components=components,
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
+
+
+@router.get("/sensors/tof/status", response_model=ToFStatusResponse)
+async def get_tof_status() -> ToFStatusResponse:
+    """Detailed ToF driver status for hardware verification.
+
+    Returns per-sensor backend info (binding name), bus/address, and last reading.
+    Safe on systems without the VL53L0X binding: fields will be None.
+    """
+    sim_mode = os.getenv("SIM_MODE", "0") != "0"
+    left_probe: ToFProbe | None = None
+    right_probe: ToFProbe | None = None
+    try:
+        if websocket_hub._sensor_manager is None:
+            from ..services.sensor_manager import SensorManager  # type: ignore
+            websocket_hub._sensor_manager = SensorManager()
+            await websocket_hub._sensor_manager.initialize()
+        sm = websocket_hub._sensor_manager
+        tof = getattr(sm, "tof", None)
+        left = getattr(tof, "_left", None)
+        right = getattr(tof, "_right", None)
+        if left is not None:
+            left_probe = ToFProbe(
+                sensor_side="left",
+                backend=getattr(left, "_driver_backend", None),
+                i2c_bus=getattr(left, "_i2c_bus", None),
+                i2c_address=hex(getattr(left, "_i2c_address", 0)) if getattr(left, "_i2c_address", None) is not None else None,
+                initialized=getattr(left, "initialized", None),
+                running=getattr(left, "running", None),
+                last_distance_mm=getattr(left, "_last_distance_mm", None),
+                last_read_age_s=(time.time() - getattr(left, "_last_read_ts", time.time())) if getattr(left, "_last_read_ts", None) else None,
+            )
+        if right is not None:
+            right_probe = ToFProbe(
+                sensor_side="right",
+                backend=getattr(right, "_driver_backend", None),
+                i2c_bus=getattr(right, "_i2c_bus", None),
+                i2c_address=hex(getattr(right, "_i2c_address", 0)) if getattr(right, "_i2c_address", None) is not None else None,
+                initialized=getattr(right, "initialized", None),
+                running=getattr(right, "running", None),
+                last_distance_mm=getattr(right, "_last_distance_mm", None),
+                last_read_age_s=(time.time() - getattr(right, "_last_read_ts", time.time())) if getattr(right, "_last_read_ts", None) else None,
+            )
+    except Exception:
+        pass
+
+    return ToFStatusResponse(
+        sim_mode=sim_mode,
+        left=left_probe,
+        right=right_probe,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@router.get("/sensors/gps/status", response_model=GPSSummary)
+async def get_gps_status() -> GPSSummary:
+    sim_mode = os.getenv("SIM_MODE", "0") != "0"
+    try:
+        if websocket_hub._sensor_manager is None:
+            from ..services.sensor_manager import SensorManager  # type: ignore
+            websocket_hub._sensor_manager = SensorManager()
+            await websocket_hub._sensor_manager.initialize()
+        sm = websocket_hub._sensor_manager
+        gps = getattr(sm, "gps", None)
+        if gps is None:
+            return GPSSummary()
+        # Attempt a non-blocking read
+        reading = await gps.read_gps()
+        age = None
+        try:
+            # health_check not exposed; compute age from manager read cadence indirectly
+            age = 0.0
+        except Exception:
+            age = None
+        return GPSSummary(
+            mode=str(getattr(gps, "gps_mode", None)) if gps else None,
+            initialized=getattr(gps, "status", None) is not None,
+            running=True,
+            last_read_age_s=age,
+            last_reading=reading.model_dump() if reading else None,
+        )
+    except Exception:
+        return GPSSummary()
+
+
+@router.get("/sensors/imu/status", response_model=IMUSummary)
+async def get_imu_status() -> IMUSummary:
+    try:
+        if websocket_hub._sensor_manager is None:
+            from ..services.sensor_manager import SensorManager  # type: ignore
+            websocket_hub._sensor_manager = SensorManager()
+            await websocket_hub._sensor_manager.initialize()
+        sm = websocket_hub._sensor_manager
+        imu = getattr(sm, "imu", None)
+        if imu is None:
+            return IMUSummary()
+        reading = await imu.read_imu()
+        return IMUSummary(
+            initialized=getattr(imu, "status", None) is not None,
+            running=True,
+            last_read_age_s=0.0,
+            last_reading=reading.model_dump() if reading else None,
+        )
+    except Exception:
+        return IMUSummary()
+
+
+@router.get("/sensors/environmental/status", response_model=EnvSummary)
+async def get_env_status() -> EnvSummary:
+    try:
+        if websocket_hub._sensor_manager is None:
+            from ..services.sensor_manager import SensorManager  # type: ignore
+            websocket_hub._sensor_manager = SensorManager()
+            await websocket_hub._sensor_manager.initialize()
+        sm = websocket_hub._sensor_manager
+        env = getattr(sm, "environmental", None)
+        if env is None:
+            return EnvSummary()
+        reading = await env.read_environmental()
+        # Convert to plain dict
+        payload = None
+        if reading is not None:
+            payload = {
+                "temperature": getattr(reading, "temperature", None),
+                "humidity": getattr(reading, "humidity", None),
+                "pressure": getattr(reading, "pressure", None),
+                "altitude": getattr(reading, "altitude", None),
+            }
+        return EnvSummary(
+            initialized=getattr(env, "status", None) is not None,
+            running=True,
+            last_read_age_s=0.0,
+            last_reading=payload,
+        )
+    except Exception:
+        return EnvSummary()
+
+
+@router.get("/sensors/power/status", response_model=PowerSummary)
+async def get_power_status() -> PowerSummary:
+    try:
+        if websocket_hub._sensor_manager is None:
+            from ..services.sensor_manager import SensorManager  # type: ignore
+            websocket_hub._sensor_manager = SensorManager()
+            await websocket_hub._sensor_manager.initialize()
+        sm = websocket_hub._sensor_manager
+        p = getattr(sm, "power", None)
+        if p is None:
+            return PowerSummary()
+        reading = await p.read_power()
+        payload = None
+        if reading is not None:
+            payload = {
+                "battery_voltage": getattr(reading, "battery_voltage", None),
+                "battery_current": getattr(reading, "battery_current", None),
+                "solar_voltage": getattr(reading, "solar_voltage", None),
+                "solar_current": getattr(reading, "solar_current", None),
+            }
+        return PowerSummary(
+            initialized=getattr(p, "status", None) is not None,
+            running=True,
+            last_read_age_s=0.0,
+            last_reading=payload,
+        )
+    except Exception:
+        return PowerSummary()
 
 
 @router.post("/maintenance/imu/calibrate", response_model=IMUCalibrationResultPayload)
@@ -1204,11 +1453,12 @@ async def dashboard_telemetry():
     now = datetime.now(timezone.utc).isoformat()
     
     # Extract and map hardware data to dashboard format
-    if "source" in telemetry_data and telemetry_data["source"] == "hardware":
+    if "source" in telemetry_data and telemetry_data["source"] in {"hardware", "hardware_simulated"}:
         # Use real hardware data
         battery_data = telemetry_data.get("battery", {})
         position_data = telemetry_data.get("position", {})
         imu_data = telemetry_data.get("imu", {})
+        tof_data = telemetry_data.get("tof", {}) if isinstance(telemetry_data, dict) else {}
         
         # RTK status and fallback messaging
         rtk_status = position_data.get("rtk_status", "unknown")
@@ -1227,6 +1477,8 @@ async def dashboard_telemetry():
         result = {
             "timestamp": now,
             "latency_ms": round(latency_ms, 2),
+            "source": telemetry_data.get("source", "hardware"),
+            "simulated": telemetry_data.get("simulated", False),
             "battery": {
                 "percentage": battery_data.get("percentage", 0.0),
                 "voltage": battery_data.get("voltage", None),
@@ -1252,13 +1504,28 @@ async def dashboard_telemetry():
                 "orientation_health": orientation_health,
                 "orientation_message": orientation_message,
             },
+            "tof": {
+                "left": {
+                    "distance_mm": tof_data.get("left", {}).get("distance_mm"),
+                    "range_status": tof_data.get("left", {}).get("range_status"),
+                    "signal_strength": tof_data.get("left", {}).get("signal_strength"),
+                },
+                "right": {
+                    "distance_mm": tof_data.get("right", {}).get("distance_mm"),
+                    "range_status": tof_data.get("right", {}).get("range_status"),
+                    "signal_strength": tof_data.get("right", {}).get("signal_strength"),
+                },
+            },
         }
     else:
         # Fallback to simulated/default values
         env = telemetry_data.get("environmental", {}) if isinstance(telemetry_data, dict) else {}
+        tof_data = telemetry_data.get("tof", {}) if isinstance(telemetry_data, dict) else {}
         result = {
             "timestamp": now,
             "latency_ms": round(latency_ms, 2),
+            "source": telemetry_data.get("source", "simulated"),
+            "simulated": telemetry_data.get("simulated", telemetry_data.get("source", "simulated") != "hardware"),
             "battery": {
                 "percentage": telemetry_data.get("battery", {}).get("percentage", 85.2),
                 "voltage": telemetry_data.get("battery", {}).get("voltage", 12.6),
@@ -1283,6 +1550,18 @@ async def dashboard_telemetry():
                 "calibration": 0,
                 "orientation_health": "unknown",
                 "orientation_message": None,
+            },
+            "tof": {
+                "left": {
+                    "distance_mm": tof_data.get("left", {}).get("distance_mm"),
+                    "range_status": tof_data.get("left", {}).get("range_status"),
+                    "signal_strength": tof_data.get("left", {}).get("signal_strength"),
+                },
+                "right": {
+                    "distance_mm": tof_data.get("right", {}).get("distance_mm"),
+                    "range_status": tof_data.get("right", {}).get("range_status"),
+                    "signal_strength": tof_data.get("right", {}).get("signal_strength"),
+                },
             },
         }
     

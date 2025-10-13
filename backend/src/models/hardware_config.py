@@ -40,6 +40,8 @@ class HardwareConfig(BaseModel):
     motor_controller: Optional[MotorControllerType] = Field(default=None)
     blade_controller: Optional[BladeControllerType] = Field(default=None)
     camera_enabled: bool = Field(default=False)
+    # Optional typed ToF configuration (sensors.tof_config in hardware.yaml)
+    tof_config: Optional["ToFConfig"] = Field(default=None)
 
     @field_validator("gps_ntrip_enabled")
     @classmethod
@@ -55,3 +57,14 @@ class HardwareConfig(BaseModel):
     def motor_controller_required(cls, v: Optional[MotorControllerType]):
         # System requires a motor controller for motion; allow None for SIM_MODE setups.
         return v
+
+
+class ToFConfig(BaseModel):
+    bus: Optional[int] = Field(default=1)
+    left_address: Optional[int] = Field(default=0x29)
+    right_address: Optional[int] = Field(default=0x30)
+    ranging_mode: Optional[str] = Field(default="better_accuracy")
+    left_shutdown_gpio: Optional[int] = Field(default=None)
+    right_shutdown_gpio: Optional[int] = Field(default=None)
+    timing_budget_us: Optional[int] = Field(default=None)
+

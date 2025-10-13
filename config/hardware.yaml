@@ -13,6 +13,16 @@ sensors:
   tof:
     - left
     - right
+  # Optional advanced configuration for ToF sensors (VL53L0X)
+  # Uncomment and adjust if your wiring differs from defaults
+  tof_config:
+    bus: 1            # I2C bus number
+    left_address: 0x29
+    right_address: 0x30
+    ranging_mode: best_accuracy   # options: short|better_accuracy|best_accuracy|long_range|high_speed
+    left_shutdown_gpio: 22       # optional XSHUT pin to assign unique address at boot
+    right_shutdown_gpio: 23
+    timing_budget_us: 200000     # optional: improve accuracy, adjust if needed
 power_monitor: true
 motor_controller: robohat-rp2040
 blade_controller: ibt-4

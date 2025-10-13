@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isSecureMapsContext, shouldUseGoogleProvider } from '@/utils/mapProviders'
+import { getOsmTileLayer, isSecureMapsContext, shouldUseGoogleProvider } from '@/utils/mapProviders'
 
 describe('map provider helpers', () => {
   describe('isSecureMapsContext', () => {
@@ -55,6 +55,25 @@ describe('map provider helpers', () => {
     it('allows google provider when key and secure context present', () => {
       expect(shouldUseGoogleProvider('google', 'key', { protocol: 'https:', hostname: 'example.com' })).toBe(true)
       expect(shouldUseGoogleProvider('google', 'key', { protocol: 'http:', hostname: '192.168.1.5' })).toBe(true)
+    })
+  })
+
+  describe('getOsmTileLayer', () => {
+    it('returns standard layer by default', () => {
+      const config = getOsmTileLayer(undefined)
+      expect(config.url).toContain('tile.openstreetmap.org')
+      expect(config.attribution.toLowerCase()).toContain('openstreetmap')
+    })
+
+    it('normalizes style casing', () => {
+      const config = getOsmTileLayer('TERRAIN')
+      expect(config.url).toContain('opentopomap')
+    })
+
+    it('provides overlay definition for hybrid', () => {
+      const config = getOsmTileLayer('hybrid')
+      expect(config.overlay).toBeTruthy()
+      expect(config.overlay?.url).toContain('World_Boundaries_and_Places')
     })
   })
 })

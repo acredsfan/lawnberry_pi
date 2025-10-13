@@ -16,6 +16,10 @@ from .core.config_loader import ConfigLoader
 from .nav.gps_degradation import GPSDegradationMonitor
 from .services.robohat_service import initialize_robohat_service, shutdown_robohat_service
 from .services.camera_stream_service import camera_service
+import os
+import logging
+
+_log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -28,6 +32,28 @@ async def lifespan(app: FastAPI):
     app.state.hardware_config = hardware_cfg
     app.state.safety_limits = safety_limits
     websocket_hub.bind_app_state(app.state)
+
+    # Small boot hook: ensure dual VL53L0X are addressed uniquely via XSHUT (left 0x29, right default 0x30)
+    try:
+        if os.getenv("SIM_MODE", "0") == "0":
+            tc = getattr(hardware_cfg, "tof_config", None)
+            if tc and getattr(tc, "left_shutdown_gpio", None) is not None and getattr(tc, "right_shutdown_gpio", None) is not None:
+                try:
+                    # Lazy import to keep CI SIM-safe
+                    from .drivers.sensors.vl53l0x_driver import ensure_pair_addressing  # type: ignore
+                    right_addr = getattr(tc, "right_address", 0x30) or 0x30
+                    ok = await ensure_pair_addressing(tc.left_shutdown_gpio, tc.right_shutdown_gpio, right_addr=int(right_addr))
+                    _log.info(
+                        "ToF XSHUT pair addressing %s (left_gpio=%s right_gpio=%s right_addr=0x%x)",
+                        "completed" if ok else "skipped",
+                        tc.left_shutdown_gpio,
+                        tc.right_shutdown_gpio,
+                        int(right_addr),
+                    )
+                except Exception as e:  # pragma: no cover - hardware dependent
+                    _log.warning("ToF pair addressing failed: %s", e)
+    except Exception:
+        pass
     # Start GPS degradation monitor
     app.state.gps_deg_monitor = GPSDegradationMonitor()
     await app.state.gps_deg_monitor.start()

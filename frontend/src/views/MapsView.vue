@@ -282,7 +282,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useApiService } from '@/services/api'
 import BoundaryEditor from '@/components/map/BoundaryEditor.vue'
 import { useMapStore } from '@/stores/map'
@@ -351,6 +351,10 @@ const pickForPin = ref(false)
 let reopenAfterPick = false
 
 const availableIcons = ['📍', '🏠', '☀️', '🌅', '🚪', '🌱', '🌳', '🌲', '🟦', '⚠️', '🔧', '⛽', '🎯', '📡']
+
+const statusMessage = ref('')
+const statusSuccess = ref(true)
+const statusTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
 const daysOfWeek = [
   { value: 0, label: 'Sunday', short: 'Su' },
@@ -503,7 +507,17 @@ function onPreviewLoad() {
   previewError.value = ''
 }
 
-function showStatus(_message: string, _success: boolean) {}
+function showStatus(message: string, success: boolean) {
+  statusMessage.value = message
+  statusSuccess.value = success
+  if (statusTimer.value) {
+    clearTimeout(statusTimer.value)
+  }
+  statusTimer.value = setTimeout(() => {
+    statusMessage.value = ''
+    statusTimer.value = null
+  }, 3000)
+}
 
 // Pin management
 function addPin(_categoryId: string) {
@@ -619,8 +633,24 @@ function closePinEditor() {
   }
 }
 
-onMounted(() => {
-  loadSettings()
+onMounted(async () => {
+  await loadSettings()
+  try {
+    if (!mapStore.configuration) {
+      await mapStore.loadConfiguration('default')
+    }
+  } catch (error) {
+    console.error('Failed to load map configuration:', error)
+    showStatus('Failed to load map configuration', false)
+    toast.show('Failed to load map configuration', 'error')
+  }
+})
+
+onUnmounted(() => {
+  if (statusTimer.value) {
+    clearTimeout(statusTimer.value)
+    statusTimer.value = null
+  }
 })
 
 watch(() => pinForm.value.isHome, (isHome) => {

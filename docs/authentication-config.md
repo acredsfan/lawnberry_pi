@@ -550,6 +550,50 @@ lawnberry-pi config security --email-alerts admin@yourdomain.com
    lawnberry-pi auth tunnel --update-certs
    ```
 
+3. **DNS NXDOMAIN for Tunnel Hostname**:
+
+If your browser console shows `net::ERR_NAME_NOT_RESOLVED` for your tunnel domain (e.g., `lawnberry.yourdomain.com`), the public DNS record is missing or misconfigured.
+
+Steps to fix:
+
+1) Verify from the Pi that DNS is missing:
+
+```bash
+getent hosts lawnberry.yourdomain.com || host lawnberry.yourdomain.com
+```
+
+2) Restore the hostname in Cloudflare Zero Trust:
+
+- Cloudflare Dashboard → Zero Trust → Access → Tunnels → select your tunnel → Public Hostnames → Add application
+- Hostname: `lawnberry.yourdomain.com`
+- Service: `http://localhost:3000` (frontend server)
+- Save and wait ~1–2 minutes for propagation
+
+3) Confirm Cloudflare created the DNS record in the domain’s DNS app:
+
+- DNS → Check for a CNAME `lawnberry` pointing to `<tunnel-uuid>.cfargotunnel.com` with Proxied = ON
+
+4) Restart the connector (optional but helps pick up config):
+
+```bash
+sudo systemctl restart cloudflared
+sudo systemctl status cloudflared --no-pager
+```
+
+5) Re-test resolution and connectivity from the Pi:
+
+```bash
+getent hosts lawnberry.yourdomain.com
+curl -sS https://lawnberry.yourdomain.com/ | head -c 200
+curl -sS -X POST https://lawnberry.yourdomain.com/api/v2/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"admin","password":"admin"}'
+```
+
+Notes:
+- If you prefer direct backend access too, add a second public hostname mapping `lawnberry-backend.yourdomain.com` → `http://localhost:8081`.
+- Cloudflare tunnels created via token (no local config.yml) manage hostnames from the dashboard; local `/etc/cloudflared/config.yml` may not exist.
+
 ### Debug Commands
 
 ```bash

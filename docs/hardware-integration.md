@@ -30,6 +30,22 @@ Safety:
   - ToF Left IRQ: GPIO 6
   - ToF Right IRQ: GPIO 12
 
+Driver behavior (backend/src/drivers/sensors/vl53l0x_driver.py):
+- Uses Python VL53L0X bindings if present (modules: `VL53L0X` or `vl53l0x`).
+- Falls back to previous reading if hardware access errors occur.
+- Honors environment overrides:
+  - TOF_BUS (default 1)
+  - TOF_LEFT_ADDR (default 0x29)
+  - TOF_RIGHT_ADDR (default 0x30)
+  - TOF_RANGING_MODE (short|better_accuracy|best_accuracy|long_range|high_speed; default better_accuracy)
+- You can also set these in `config/hardware.yaml` under `sensors.tof_config`.
+
+Verification steps:
+1. Ensure SIM_MODE=0 in the systemd unit or shell.
+2. `sudo i2cdetect -y 1` should show 0x29 and 0x30.
+3. Start the backend and open the dashboard; the ToF tiles should update with live distances.
+4. If no readings appear, check journal logs for `vl53l0x` messages and verify the Python binding is installed.
+
 ### Environmental Sensor (BME280)
 - I2C Bus 1: Address 0x76
 

@@ -30,6 +30,18 @@ dependencies = [
     "numpy>=1.26.4,<2.0"
 ]
 
+# Optional extras for hardware backends (install with: pip install .[hardware])
+[project.optional-dependencies]
+hardware = [
+    # Adafruit Blinka + CircuitPython VL53L0X for ToF (preferred on Pi)
+    "adafruit-blinka>=8.8.0",
+    "adafruit-circuitpython-vl53l0x>=3.7.3",
+    # GPIO providers (any one is sufficient)
+    "lgpio>=0.2.2; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
+    "python-periphery>=2.4.1",
+    "RPi.GPIO>=0.7.1; platform_machine == 'armv7l'",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["backend*"]

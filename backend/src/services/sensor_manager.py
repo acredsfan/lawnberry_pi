@@ -181,16 +181,29 @@ class IMUSensorInterface:
 
 class ToFSensorInterface:
     """VL53L0X Time-of-Flight sensor interface"""
-    
-    def __init__(self, coordinator: SensorCoordinator):
+
+    def __init__(self, coordinator: SensorCoordinator, tof_config: dict | None = None):
         self.coordinator = coordinator
         self.left_reading: Optional[TofReading] = None
         self.right_reading: Optional[TofReading] = None
         self.status = SensorStatus.OFFLINE
         try:
             from ..drivers.sensors.vl53l0x_driver import VL53L0XDriver  # type: ignore
-            self._left = VL53L0XDriver("left", {})
-            self._right = VL53L0XDriver("right", {})
+            cfg = tof_config or {}
+            left_cfg = {
+                "bus": cfg.get("bus"),
+                "address": cfg.get("left_address"),
+                "shutdown_gpio": cfg.get("left_shutdown_gpio"),
+                "ranging_mode": cfg.get("ranging_mode"),
+            }
+            right_cfg = {
+                "bus": cfg.get("bus"),
+                "address": cfg.get("right_address"),
+                "shutdown_gpio": cfg.get("right_shutdown_gpio"),
+                "ranging_mode": cfg.get("ranging_mode"),
+            }
+            self._left = VL53L0XDriver("left", left_cfg)
+            self._right = VL53L0XDriver("right", right_cfg)
         except Exception:  # pragma: no cover
             self._left = None
             self._right = None
@@ -221,8 +234,10 @@ class ToFSensorInterface:
         
         try:
             if self._left is not None and self._right is not None:
-                dl = await self._left.read_distance_mm()
-                dr = await self._right.read_distance_mm()
+                # Coordinate I2C access across sensors
+                async with self.coordinator.acquire_i2c("vl53l0x_pair"):
+                    dl = await self._left.read_distance_mm()
+                    dr = await self._right.read_distance_mm()
                 left_reading = TofReading(
                     distance=float(dl) if dl is not None else None,
                     signal_strength=None,
@@ -371,13 +386,13 @@ class PowerSensorInterface:
 class SensorManager:
     """Main sensor manager coordinating all sensor interfaces"""
     
-    def __init__(self, gps_mode: GpsMode = GpsMode.NEO8M_UART):
+    def __init__(self, gps_mode: GpsMode = GpsMode.NEO8M_UART, tof_config: dict | None = None):
         self.coordinator = SensorCoordinator()
         
         # Initialize sensor interfaces
         self.gps = GPSSensorInterface(gps_mode, self.coordinator)
         self.imu = IMUSensorInterface(self.coordinator)
-        self.tof = ToFSensorInterface(self.coordinator)
+        self.tof = ToFSensorInterface(self.coordinator, tof_config=tof_config)
         self.environmental = EnvironmentalSensorInterface(self.coordinator)
         self.power = PowerSensorInterface(self.coordinator)
         

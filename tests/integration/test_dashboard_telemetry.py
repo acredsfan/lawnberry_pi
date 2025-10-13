@@ -133,7 +133,8 @@ async def test_telemetry_data_completeness():
             "battery",
             "position", 
             "temperatures",
-            "imu"
+            "imu",
+            "tof",
         ]
         
         for field in required_fields:
@@ -150,6 +151,14 @@ async def test_telemetry_data_completeness():
             expected_pos_fields = ["latitude", "longitude", "altitude", "accuracy", "gps_mode"]
             for field in expected_pos_fields:
                 assert field in position
+
+        if "tof" in data:
+            tof = data["tof"]
+            for side in ("left", "right"):
+                assert side in tof, f"Missing ToF side '{side}'"
+                side_payload = tof[side]
+                assert "distance_mm" in side_payload
+                assert "range_status" in side_payload
 
 
 @pytest.mark.asyncio
