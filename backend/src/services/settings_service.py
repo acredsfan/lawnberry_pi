@@ -81,12 +81,19 @@ class SettingsService:
         profile.last_modified = datetime.now(timezone.utc)
         
         # Save to SQLite
-        if persist_to_db and hasattr(self.persistence, "save_settings_profile"):
-            try:
-                self.persistence.save_settings_profile(profile.model_dump())
-                logger.info(f"Saved profile to database")
-            except Exception as e:
-                logger.error(f"Failed to save profile to database: {e}")
+        if persist_to_db:
+            if hasattr(self.persistence, "save_settings_profile"):
+                try:
+                    self.persistence.save_settings_profile(profile.model_dump())
+                    logger.info("Saved profile to database")
+                except Exception as e:
+                    logger.error(f"Failed to save profile to database: {e}")
+            elif hasattr(self.persistence, "save_system_config"):
+                try:
+                    self.persistence.save_system_config(profile.model_dump())
+                    logger.info("Saved profile to system_config store")
+                except Exception as e:
+                    logger.error(f"Failed to save profile to system_config: {e}")
         
         # Save to config file
         if persist_to_file:

@@ -134,7 +134,7 @@
               </div>
               <div class="history-details">
                 <span>Duration: {{ job.actual_duration }} min</span>
-                <span>Area: {{ job.area_covered }} m²</span>
+                <span>Area: {{ formatArea(job.area_covered) }} {{ areaUnit }}</span>
                 <span class="success-indicator">✅ Completed</span>
               </div>
             </div>
@@ -208,7 +208,7 @@
                 {{ currentWeather.condition || 'Loading...' }}
               </div>
               <div class="condition-detail">
-                {{ currentWeather.temperature_c }}°C, {{ currentWeather.humidity_percent }}% humidity
+                {{ weatherTemperatureDisplay }}{{ temperatureUnit }}, {{ currentWeather.humidity_percent }}% humidity
               </div>
             </div>
             
@@ -260,11 +260,11 @@
               <div class="zone-stats">
                 <div class="stat">
                   <span class="stat-label">Area</span>
-                  <span class="stat-value">{{ zone.area_m2 }} m²</span>
+                  <span class="stat-value">{{ formatArea(zone.area_m2) }} {{ areaUnit }}</span>
                 </div>
                 <div class="stat">
                   <span class="stat-label">Height</span>
-                  <span class="stat-value">{{ zone.cutting_height }}mm</span>
+                  <span class="stat-value">{{ formatCuttingHeight(zone.cutting_height) }} {{ cuttingHeightUnit }}</span>
                 </div>
                 <div class="stat">
                   <span class="stat-label">Last Cut</span>
@@ -410,11 +410,17 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useApiService } from '@/services/api'
 import { useWebSocket } from '@/services/websocket'
+import { usePreferencesStore } from '@/stores/preferences'
 
 const api = useApiService()
 const { connected, connect, subscribe, unsubscribe } = useWebSocket()
+const preferences = usePreferencesStore()
+
+preferences.ensureInitialized()
+const { unitSystem } = storeToRefs(preferences)
 
 // State
 const activeTab = ref('current')
@@ -558,6 +564,56 @@ const currentWeather = ref({
   humidity_percent: 65,
   condition: 'Partly Cloudy'
 })
+
+const temperatureUnit = computed(() => (unitSystem.value === 'imperial' ? '°F' : '°C'))
+const weatherTemperatureDisplay = computed(() => {
+  const raw = Number(currentWeather.value.temperature_c)
+  if (!Number.isFinite(raw)) {
+    return '--'
+  }
+  const converted = unitSystem.value === 'imperial' ? (raw * 9) / 5 + 32 : raw
+  const formatter = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })
+  return formatter.format(converted)
+})
+
+const areaUnit = computed(() => (unitSystem.value === 'imperial' ? 'ft²' : 'm²'))
+const cuttingHeightUnit = computed(() => (unitSystem.value === 'imperial' ? 'in' : 'mm'))
+
+const formatArea = (value: unknown): string => {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) {
+    return 'N/A'
+  }
+  const converted = unitSystem.value === 'imperial' ? numeric * 10.7639104167 : numeric
+  const formatter = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: converted >= 100 ? 0 : 1,
+    maximumFractionDigits: converted >= 100 ? 0 : 1,
+  })
+  return formatter.format(converted)
+}
+
+const formatCuttingHeight = (value: unknown): string => {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) {
+    return 'N/A'
+  }
+  if (unitSystem.value === 'imperial') {
+    const inches = numeric * 0.0393700787
+    const formatter = new Intl.NumberFormat(undefined, {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    })
+    return formatter.format(inches)
+  }
+  const formatter = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })
+  return formatter.format(numeric)
+}
 
 const recommendation = ref({
   advice: 'Proceed',
@@ -849,7 +905,7 @@ onMounted(async () => {
   // Subscribe to weather updates
   subscribe('telemetry.weather', (data) => {
     currentWeather.value = {
-      temperature_c: data.temperature_c || currentWeather.value.temperature_c,
+      temperature_c: data.temperature_c ?? currentWeather.value.temperature_c,
       humidity_percent: data.humidity_percent || currentWeather.value.humidity_percent,
       condition: data.condition || currentWeather.value.condition
     }

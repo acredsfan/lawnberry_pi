@@ -3259,6 +3259,19 @@ def put_settings_system(settings_update: dict):
         _settings_last_modified = datetime.now(timezone.utc)
         result = _system_settings.model_dump()
         persistence.add_audit_log("settings.update", details=settings_update)
+
+        # Keep the primary settings profile (used by /api/v2/settings) in sync
+        try:
+            unit_pref = str(result.get("ui", {}).get("unit_system", "")).lower()
+            if unit_pref in {"metric", "imperial"}:
+                svc = SettingsService()
+                profile = svc.load_profile()
+                if getattr(profile.system, "unit_system", None) != unit_pref:
+                    profile.system.unit_system = unit_pref
+                    svc.save_profile(profile)
+        except Exception as exc:
+            logger.warning("Failed to sync unit preference to settings profile: %s", exc)
+
         return result
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Invalid settings: {str(e)}")

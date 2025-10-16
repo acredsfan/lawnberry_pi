@@ -51,6 +51,7 @@
 import { computed, onMounted } from 'vue'
 import { useAuthStore } from './stores/auth'
 import { useSystemStore } from './stores/system'
+import { usePreferencesStore } from './stores/preferences'
 import UserMenu from './components/UserMenu.vue'
 import ToastHost from './components/ToastHost.vue'
 import CommandPalette from './components/CommandPalette.vue'
@@ -59,6 +60,9 @@ import logoUrl from '@/assets/logo.png'
 
 const authStore = useAuthStore()
 const systemStore = useSystemStore()
+const preferencesStore = usePreferencesStore()
+
+preferencesStore.ensureInitialized()
 
 const user = computed(() => authStore.user)
 const systemStatus = computed(() => systemStore.status)
@@ -77,6 +81,7 @@ function toggleTheme() {
 onMounted(async () => {
   // Initialize system store
   systemStore.initialize()
+  await preferencesStore.syncWithServer()
   
   // Validate user session on app start
   if (authStore.token) {

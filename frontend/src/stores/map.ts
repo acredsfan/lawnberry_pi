@@ -66,9 +66,9 @@ export interface MapConfiguration {
 
 function clonePoint(pt: Point): Point {
   return {
-    latitude: pt.latitude,
-    longitude: pt.longitude,
-    altitude: pt.altitude ?? null,
+    latitude: pt ? pt.latitude : 0,
+    longitude: pt ? pt.longitude : 0,
+    altitude: pt ? (pt.altitude ?? null) : null,
   };
 }
 
@@ -162,14 +162,20 @@ function scheduleFromPayload(raw: any): MarkerSchedule | null {
 export const useMapStore = defineStore('map', () => {
   // State
   const configuration = ref<MapConfiguration | null>(null);
+  const loading = ref(false);
   const isLoading = ref(false);
-  const error = ref<string | null>(null);
+  const error = ref<string | null>('');
+  const isDirty = ref(false);
   const selectedZoneId = ref<string | null>(null);
   const editMode = ref<'view' | 'boundary' | 'exclusion' | 'mowing' | 'marker'>('view');
   const providerFallbackActive = ref(false);
 
   // Computed
   const hasConfiguration = computed(() => configuration.value !== null);
+  const hasUnsavedChanges = computed(() => isDirty.value);
+  const exclusionZoneCount = computed(() => {
+    return configuration.value?.exclusion_zones?.length || 0;
+  });
   const currentProvider = computed(() => configuration.value?.provider || 'google_maps');
   const homeMarker = computed(() => 
     configuration.value?.markers.find(m => m.marker_type === 'home' || m.is_home) || null
@@ -191,23 +197,26 @@ export const useMapStore = defineStore('map', () => {
   };
 
   async function loadConfiguration(configId: string = 'default') {
+    loading.value = true;
     isLoading.value = true;
-    error.value = null;
+    error.value = '';
     try {
       const response: AxiosResponse<any> = await apiService.get(
         `/api/v2/map/configuration?config_id=${configId}`
       );
       // Support contract envelope from backend
-      if (response.data && response.data.zones) {
+      if (response && response.data && response.data.zones) {
         configuration.value = envelopeToConfig(configId, response.data);
-      } else {
-        configuration.value = response.data as MapConfiguration;
+      } else if (response) {
+        configuration.value = response as MapConfiguration;
       }
-      return response.data;
+      isDirty.value = false;
+      return response;
     } catch (e: any) {
       error.value = e?.response?.data?.error || e?.message || 'Failed to load map configuration';
       throw e;
     } finally {
+      loading.value = false;
       isLoading.value = false;
     }
   }
@@ -217,16 +226,18 @@ export const useMapStore = defineStore('map', () => {
       throw new Error('No configuration to save');
     }
     
+    loading.value = true;
     isLoading.value = true;
-    error.value = null;
+    error.value = '';
     try {
       const env = configToEnvelope(configuration.value);
-      await apiService.put(
+      const response = await apiService.put(
         `/api/v2/map/configuration?config_id=${configuration.value.config_id}`,
         env
       );
       // Re-load to reflect backend's persisted state
       await loadConfiguration(configuration.value.config_id);
+      isDirty.value = false;
       return configuration.value;
     } catch (e: any) {
       error.value = e?.response?.data?.error || e?.message || 'Failed to save map configuration';
@@ -237,26 +248,29 @@ export const useMapStore = defineStore('map', () => {
       }
       throw e;
     } finally {
+      loading.value = false;
       isLoading.value = false;
     }
   }
 
   async function triggerProviderFallback() {
+    loading.value = true;
     isLoading.value = true;
-    error.value = null;
+    error.value = '';
     try {
       const response = await apiService.post('/api/v2/map/provider-fallback');
-      if (response.data.success) {
+      if (response && response.data && response.data.success) {
         providerFallbackActive.value = true;
         if (configuration.value) {
           configuration.value.provider = 'osm';
         }
       }
-      return response.data;
+      return response ? response.data : response;
     } catch (e: any) {
       error.value = e?.response?.data?.message || e?.message || 'Failed to trigger provider fallback';
       throw e;
     } finally {
+      loading.value = false;
       isLoading.value = false;
     }
   }
@@ -290,7 +304,7 @@ export const useMapStore = defineStore('map', () => {
     const finalType: MapMarker['marker_type'] = isHome ? 'home' : markerType;
     const defaultLabel = finalType === 'home'
       ? 'Home'
-      : markerType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      : String(markerType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
     const marker: MapMarker = {
       marker_id: options.markerId || `marker_${Date.now()}`,
@@ -315,6 +329,7 @@ export const useMapStore = defineStore('map', () => {
 
     configuration.value.markers.push(marker);
     configuration.value.last_modified = new Date().toISOString();
+    isDirty.value = true;
   }
 
   function removeMarker(markerId: string) {
@@ -323,6 +338,7 @@ export const useMapStore = defineStore('map', () => {
       m => m.marker_id !== markerId
     );
     configuration.value.last_modified = new Date().toISOString();
+    isDirty.value = true;
   }
 
   function updateMarker(markerId: string, changes: Partial<MapMarker>) {
@@ -391,12 +407,15 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function addExclusionZone(zone: Zone) {
-    if (!configuration.value) return;
+    if (!configuration.value) {
+      throw new Error('No configuration loaded');
+    }
     configuration.value.exclusion_zones.push({
       ...zone,
       polygon: clonePolygon(zone.polygon),
     });
     configuration.value.last_modified = new Date().toISOString();
+    isDirty.value = true;
   }
 
   function addMowingZone(zone: Zone) {
@@ -411,9 +430,10 @@ export const useMapStore = defineStore('map', () => {
   function removeExclusionZone(zoneId: string) {
     if (!configuration.value) return;
     configuration.value.exclusion_zones = configuration.value.exclusion_zones.filter(
-      z => z.id !== zoneId
+      z => z.zone_id !== zoneId && z.id !== zoneId
     );
     configuration.value.last_modified = new Date().toISOString();
+    isDirty.value = true;
   }
 
   function removeMowingZone(zoneId: string) {
@@ -453,13 +473,17 @@ export const useMapStore = defineStore('map', () => {
       configuration.value.exclusion_zones[exclusionIndex].polygon = polyCopy;
     }
 
-    // Update mowing zones
+    // Update mowing zones - ensure array exists
+    if (!configuration.value.mowing_zones) {
+      configuration.value.mowing_zones = [];
+    }
     const mowIndex = configuration.value.mowing_zones.findIndex(z => z.id === zoneId);
     if (mowIndex !== -1) {
       configuration.value.mowing_zones[mowIndex].polygon = polyCopy;
     }
     
     configuration.value.last_modified = new Date().toISOString();
+    isDirty.value = true;
   }
 
   function setEditMode(mode: 'view' | 'boundary' | 'exclusion' | 'mowing' | 'marker') {
@@ -680,14 +704,18 @@ export const useMapStore = defineStore('map', () => {
   return {
     // State
     configuration,
+    loading,
     isLoading,
     error,
+    isDirty,
     selectedZoneId,
     editMode,
     providerFallbackActive,
     
     // Computed
     hasConfiguration,
+    hasUnsavedChanges,
+    exclusionZoneCount,
     currentProvider,
     homeMarker,
     sunMarkers,

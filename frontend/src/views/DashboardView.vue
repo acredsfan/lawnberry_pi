@@ -256,7 +256,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { systemApi, controlApi, telemetryApi, weatherApi, settingsApi, maintenanceApi } from '@/composables/useApi'
+import { storeToRefs } from 'pinia'
+import { systemApi, controlApi, telemetryApi, weatherApi, maintenanceApi } from '@/composables/useApi'
 import { useWebSocket } from '@/services/websocket'
 import { usePreferencesStore } from '@/stores/preferences'
 
@@ -285,7 +286,7 @@ const dataStreamText = ref('>>> INITIALIZING SYSTEM CONNECTION...')
 // Preferences
 const preferences = usePreferencesStore()
 preferences.ensureInitialized()
-const unitSystem = computed(() => preferences.unitSystem)
+const { unitSystem } = storeToRefs(preferences)
 
 // Core system state
 const currentMode = ref('IDLE')
@@ -797,12 +798,7 @@ const addLogEntry = (message: string, level: 'info' | 'success' | 'warning' | 'e
 
 const loadUnitPreference = async () => {
   try {
-    const settings = await settingsApi.getSettings()
-    const systemPrefs = settings?.system ?? settings?.categories?.system ?? {}
-    const preference = typeof systemPrefs?.unit_system === 'string' ? systemPrefs.unit_system.toLowerCase() : null
-    if (preference === 'metric' || preference === 'imperial') {
-      preferences.setUnitSystem(preference)
-    }
+    await preferences.syncWithServer()
   } catch (error) {
     console.error('Failed to load unit preference:', error)
   }

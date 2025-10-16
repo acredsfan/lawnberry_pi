@@ -287,7 +287,7 @@
             </div>
             <div class="telemetry-item">
               <label>Speed</label>
-              <div class="value">{{ currentSpeed.toFixed(1) }} m/s</div>
+              <div class="value">{{ displaySpeed }} {{ speedUnit }}</div>
             </div>
             <div class="telemetry-item">
               <label>Safety</label>
@@ -310,9 +310,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import type { AxiosError } from 'axios'
+import { storeToRefs } from 'pinia'
 import { useControlStore } from '@/stores/control'
 import { useApiService } from '@/services/api'
 import { useToastStore } from '@/stores/toast'
+import { usePreferencesStore } from '@/stores/preferences'
 
 interface ManualControlSecurityConfig {
   auth_level: 'password' | 'totp' | 'google' | 'cloudflare'
@@ -345,6 +347,10 @@ interface CameraStatusSummary {
 const control = useControlStore()
 const api = useApiService()
 const toast = useToastStore()
+const preferences = usePreferencesStore()
+
+preferences.ensureInitialized()
+const { unitSystem } = storeToRefs(preferences)
 
 // Store-backed state
 const lockout = computed(() => control.lockout)
@@ -381,6 +387,15 @@ const performing = ref(false)
 const systemStatus = ref('unknown')
 const telemetry = ref<ControlTelemetry>({ safety_state: 'unknown', telemetry_source: 'unknown' })
 const currentSpeed = ref(0)
+const displaySpeed = computed(() => {
+  const value = Number(currentSpeed.value)
+  if (!Number.isFinite(value)) {
+    return '0.0'
+  }
+  const converted = unitSystem.value === 'imperial' ? value * 2.23694 : value
+  return converted.toFixed(1)
+})
+const speedUnit = computed(() => (unitSystem.value === 'imperial' ? 'mph' : 'm/s'))
 const mowingActive = ref(false)
 const speedLevel = ref(50)
 
