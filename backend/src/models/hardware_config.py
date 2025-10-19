@@ -5,6 +5,17 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
+class Ina3221Config(BaseModel):
+    address: Optional[int] = Field(default=None, description="I2C address override for INA3221")
+    bus: Optional[int] = Field(default=None, description="I2C bus override for INA3221")
+    shunt_ohms_ch1: Optional[float] = Field(default=None, description="Override shunt resistance for channel 1 (solar)")
+    shunt_ohms_ch2: Optional[float] = Field(default=None, description="Override shunt resistance for channel 2")
+    shunt_ohms_ch3: Optional[float] = Field(default=None, description="Override shunt resistance for channel 3 (battery)")
+    shunt_spec_ch1: Optional[str] = Field(default=None, description="Channel 1 shunt spec, e.g. '30A/75mV'")
+    shunt_spec_ch2: Optional[str] = Field(default=None, description="Channel 2 shunt spec, e.g. '5A/50mV'")
+    shunt_spec_ch3: Optional[str] = Field(default=None, description="Channel 3 shunt spec, e.g. '50A/75mV'")
+
+
 class GPSType(str, Enum):
     ZED_F9P_USB = "zed-f9p-usb"
     ZED_F9P_UART = "zed-f9p-uart"
@@ -42,6 +53,8 @@ class HardwareConfig(BaseModel):
     camera_enabled: bool = Field(default=False)
     # Optional typed ToF configuration (sensors.tof_config in hardware.yaml)
     tof_config: Optional["ToFConfig"] = Field(default=None)
+    # Optional INA3221 configuration overrides (ina3221 block in hardware.yaml)
+    ina3221_config: Optional[Ina3221Config] = Field(default=None)
 
     @field_validator("gps_ntrip_enabled")
     @classmethod

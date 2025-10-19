@@ -105,6 +105,7 @@ class WebSocketHub:
 
         # Extract typed ToF configuration from app.state.hardware_config
         tof_cfg: dict | None = None
+        power_cfg: dict | None = None
         if self._app_state and getattr(self._app_state, "hardware_config", None):
             try:
                 hwc = self._app_state.hardware_config
@@ -112,10 +113,14 @@ class WebSocketHub:
                 if tc is not None:
                     # Convert to dict for SensorManager
                     tof_cfg = tc.model_dump()
+                pc = getattr(hwc, "ina3221_config", None)
+                if pc is not None:
+                    power_cfg = pc.model_dump(exclude_none=True)
             except Exception:
                 tof_cfg = None
+                power_cfg = None
 
-        self._sensor_manager = SensorManager(gps_mode=gps_mode, tof_config=tof_cfg)
+        self._sensor_manager = SensorManager(gps_mode=gps_mode, tof_config=tof_cfg, power_config=power_cfg)
         await self._sensor_manager.initialize()
         if ntrip_enabled:
             await self._ensure_ntrip_forwarder(gps_mode)

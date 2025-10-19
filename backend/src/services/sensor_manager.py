@@ -325,13 +325,14 @@ class EnvironmentalSensorInterface:
 class PowerSensorInterface:
     """INA3221 power monitoring interface"""
     
-    def __init__(self, coordinator: SensorCoordinator):
+    def __init__(self, coordinator: SensorCoordinator, driver_config: dict[str, Any] | None = None):
         self.coordinator = coordinator
         self.last_reading: Optional[PowerReading] = None
         self.status = SensorStatus.OFFLINE
+        self._driver_config = driver_config or {}
         try:
             from ..drivers.sensors.ina3221_driver import INA3221Driver  # type: ignore
-            self._driver = INA3221Driver({})
+            self._driver = INA3221Driver(self._driver_config)
         except Exception:  # pragma: no cover
             self._driver = None
         
@@ -386,7 +387,12 @@ class PowerSensorInterface:
 class SensorManager:
     """Main sensor manager coordinating all sensor interfaces"""
     
-    def __init__(self, gps_mode: GpsMode = GpsMode.NEO8M_UART, tof_config: dict | None = None):
+    def __init__(
+        self,
+        gps_mode: GpsMode = GpsMode.NEO8M_UART,
+        tof_config: dict | None = None,
+        power_config: dict | None = None,
+    ):
         self.coordinator = SensorCoordinator()
         
         # Initialize sensor interfaces
@@ -394,7 +400,7 @@ class SensorManager:
         self.imu = IMUSensorInterface(self.coordinator)
         self.tof = ToFSensorInterface(self.coordinator, tof_config=tof_config)
         self.environmental = EnvironmentalSensorInterface(self.coordinator)
-        self.power = PowerSensorInterface(self.coordinator)
+        self.power = PowerSensorInterface(self.coordinator, driver_config=power_config)
         
         self.initialized = False
         self.validation_enabled = True

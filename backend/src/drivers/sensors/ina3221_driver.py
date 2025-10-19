@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -24,9 +25,12 @@ class _Ina3221Config:
     address: int = 0x40
     bus: int = 1
     # Ohmic values for each channel shunt resistor; tune via config if wiring differs
-    shunt_ohms_ch1: float = 0.01  # Solar input
-    shunt_ohms_ch2: float = 0.01  # Reserved
-    shunt_ohms_ch3: float = 0.01  # Battery pack
+    # Defaults tuned for recent hardware changes:
+    #  - Solar side: 30 A / 75 mV -> R = 0.075 V / 30 A = 0.0025 ohm
+    #  - Battery side: 50 A / 75 mV -> R = 0.075 V / 50 A = 0.0015 ohm
+    shunt_ohms_ch1: float = 0.0025  # Solar input (default for new hardware)
+    shunt_ohms_ch2: float = 0.01    # Reserved
+    shunt_ohms_ch3: float = 0.0015  # Battery pack (default for new hardware)
 
 
 class INA3221Driver(HardwareDriver):
@@ -35,16 +39,72 @@ class INA3221Driver(HardwareDriver):
     _REG_CONFIG = 0x00
     _CONFIG_DEFAULT = 0x7127  # Continuous mode, 1.1 ms conversion, 64 avg (datasheet)
 
+    @staticmethod
+    def _parse_shunt_value(value: Any) -> float | None:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value) if value > 0 else None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            try:
+                f_val = float(stripped)
+                return f_val if f_val > 0 else None
+            except ValueError:
+                match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*A\s*/\s*([0-9]+(?:\.[0-9]+)?)\s*mV", stripped, re.IGNORECASE)
+                if not match:
+                    return None
+                amps = float(match.group(1))
+                mv = float(match.group(2))
+                if amps <= 0:
+                    return None
+                return (mv / 1000.0) / amps
+        return None
+
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config=config)
         cfg = config or {}
+
+        def _resolve_shunt(channel: int, default: float) -> float:
+            direct_key = f"shunt_ohms_ch{channel}"
+            spec_key = f"shunt_spec_ch{channel}"
+            if direct_key in cfg:
+                parsed = self._parse_shunt_value(cfg.get(direct_key))
+                if parsed is not None:
+                    return parsed
+            if spec_key in cfg:
+                parsed = self._parse_shunt_value(cfg.get(spec_key))
+                if parsed is not None:
+                    return parsed
+            return default
+
+        address = cfg.get("address", _Ina3221Config.address)
+        bus = cfg.get("bus", _Ina3221Config.bus)
         self._cfg = _Ina3221Config(
-            address=int(cfg.get("address", 0x40)),
-            bus=int(cfg.get("bus", 1)),
-            shunt_ohms_ch1=float(cfg.get("shunt_ohms_ch1", 0.01)),
-            shunt_ohms_ch2=float(cfg.get("shunt_ohms_ch2", 0.01)),
-            shunt_ohms_ch3=float(cfg.get("shunt_ohms_ch3", 0.01)),
+            address=int(address) if address is not None else _Ina3221Config.address,
+            bus=int(bus) if bus is not None else _Ina3221Config.bus,
+            shunt_ohms_ch1=_resolve_shunt(1, _Ina3221Config.shunt_ohms_ch1),
+            shunt_ohms_ch2=_resolve_shunt(2, _Ina3221Config.shunt_ohms_ch2),
+            shunt_ohms_ch3=_resolve_shunt(3, _Ina3221Config.shunt_ohms_ch3),
         )
+        # Allow environment overrides. Two forms are supported:
+        #  - Direct ohms value: INA3221_SHUNT_OHMS_CH1=0.0025
+        #  - Shunt spec: INA3221_SHUNT_SPEC_CH1="30A/75mV" (will be parsed to ohms)
+        # Channel mapping: ch1 = solar, ch3 = battery (per driver wiring)
+        env_mappings = [
+            (1, "INA3221_SHUNT_OHMS_CH1", "INA3221_SHUNT_SPEC_CH1"),
+            (2, "INA3221_SHUNT_OHMS_CH2", "INA3221_SHUNT_SPEC_CH2"),
+            (3, "INA3221_SHUNT_OHMS_CH3", "INA3221_SHUNT_SPEC_CH3"),
+        ]
+
+        for ch, env_ohm, env_spec in env_mappings:
+            val = self._parse_shunt_value(os.environ.get(env_ohm))
+            if val is None:
+                val = self._parse_shunt_value(os.environ.get(env_spec))
+            if val is not None and val > 0.0:
+                setattr(self._cfg, f"shunt_ohms_ch{ch}", val)
         self._last_power: dict[str, float] | None = None
         self._last_read_ts: float | None = None
         self._cycle: int = 0  # retained for SIM_MODE behaviour

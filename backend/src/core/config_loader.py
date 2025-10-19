@@ -128,6 +128,9 @@ class ConfigLoader:
             "camera_enabled",
         ):
             if key in cfg:
+                if key == "power_monitor" and isinstance(cfg[key], dict):
+                    # Defer dict handling so we can extract INA3221 config separately
+                    continue
                 mapped[key] = cfg[key]
 
         # Nested mapping compatibility (from tests/driver_registry style)
@@ -167,9 +170,21 @@ class ConfigLoader:
             # Preserve as-is; Pydantic model on HardwareConfig will validate
             mapped["tof_config"] = tof_cfg
 
-        power = cfg.get("power_monitor") or {}
-        if isinstance(power, dict) and "type" in power and "power_monitor" not in mapped:
-            mapped["power_monitor"] = True
+        power_entry = cfg.get("power_monitor")
+        if isinstance(power_entry, dict):
+            if "power_monitor" not in mapped:
+                if "enabled" in power_entry:
+                    mapped["power_monitor"] = bool(power_entry.get("enabled"))
+                elif "type" in power_entry:
+                    mapped["power_monitor"] = True
+            ina_cfg = power_entry.get("ina3221")
+            if isinstance(ina_cfg, dict):
+                mapped["ina3221_config"] = ina_cfg
+        elif isinstance(power_entry, bool) and "power_monitor" not in mapped:
+            mapped["power_monitor"] = power_entry
+
+        if "ina3221" in cfg and isinstance(cfg["ina3221"], dict):
+            mapped["ina3221_config"] = cfg["ina3221"]
 
         motor = cfg.get("motor_controller") or {}
         if isinstance(motor, dict) and "type" in motor and "motor_controller" not in mapped:

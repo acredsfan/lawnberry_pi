@@ -24,6 +24,11 @@ sensors:
     right_shutdown_gpio: 23
     timing_budget_us: 200000     # optional: improve accuracy, adjust if needed
 power_monitor: true
+ina3221:
+  # Solar input channel (ch1) uses 30A/75mV shunt => 0.0025 ohm
+  shunt_ohms_ch1: 0.0025
+  # Battery channel (ch3) uses 50A/75mV shunt => 0.0015 ohm
+  shunt_ohms_ch3: 0.0015
 motor_controller: robohat-rp2040
 blade_controller: ibt-4
 

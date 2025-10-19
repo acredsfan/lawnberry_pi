@@ -1,6 +1,6 @@
 {
-  "version": 210,
-  "last_modified": "2025-10-16 01:53:39.526671+00:00",
+  "version": 221,
+  "last_modified": "2025-10-19 18:08:20.750544+00:00",
   "hardware": {
     "sim_mode": true,
     "robohat_port": null
@@ -48,6 +48,6 @@
     "auto_updates": false,
     "remote_access": false,
     "branding_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
-    "unit_system": "imperial"
+    "unit_system": "metric"
   }
 }
