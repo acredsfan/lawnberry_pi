@@ -66,6 +66,7 @@ class INA3221Driver(HardwareDriver):
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config=config)
         cfg = config or {}
+        base_cfg = _Ina3221Config()
 
         def _resolve_shunt(channel: int, default: float) -> float:
             direct_key = f"shunt_ohms_ch{channel}"
@@ -80,14 +81,14 @@ class INA3221Driver(HardwareDriver):
                     return parsed
             return default
 
-        address = cfg.get("address", _Ina3221Config.address)
-        bus = cfg.get("bus", _Ina3221Config.bus)
+        address = cfg.get("address", base_cfg.address)
+        bus = cfg.get("bus", base_cfg.bus)
         self._cfg = _Ina3221Config(
-            address=int(address) if address is not None else _Ina3221Config.address,
-            bus=int(bus) if bus is not None else _Ina3221Config.bus,
-            shunt_ohms_ch1=_resolve_shunt(1, _Ina3221Config.shunt_ohms_ch1),
-            shunt_ohms_ch2=_resolve_shunt(2, _Ina3221Config.shunt_ohms_ch2),
-            shunt_ohms_ch3=_resolve_shunt(3, _Ina3221Config.shunt_ohms_ch3),
+            address=int(address) if address is not None else base_cfg.address,
+            bus=int(bus) if bus is not None else base_cfg.bus,
+            shunt_ohms_ch1=_resolve_shunt(1, base_cfg.shunt_ohms_ch1),
+            shunt_ohms_ch2=_resolve_shunt(2, base_cfg.shunt_ohms_ch2),
+            shunt_ohms_ch3=_resolve_shunt(3, base_cfg.shunt_ohms_ch3),
         )
         # Allow environment overrides. Two forms are supported:
         #  - Direct ohms value: INA3221_SHUNT_OHMS_CH1=0.0025

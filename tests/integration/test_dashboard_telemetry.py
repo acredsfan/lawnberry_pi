@@ -131,10 +131,11 @@ async def test_telemetry_data_completeness():
         required_fields = [
             "timestamp",
             "battery",
-            "position", 
+            "position",
             "temperatures",
             "imu",
             "tof",
+            "power",
         ]
         
         for field in required_fields:
@@ -159,6 +160,21 @@ async def test_telemetry_data_completeness():
                 side_payload = tof[side]
                 assert "distance_mm" in side_payload
                 assert "range_status" in side_payload
+
+        if "power" in data:
+            power = data["power"]
+            expected_power_fields = [
+                "battery_voltage",
+                "battery_current",
+                "battery_power",
+                "solar_voltage",
+                "solar_current",
+                "solar_power",
+            ]
+            for field in expected_power_fields:
+                assert field in power, f"Missing power field: {field}"
+            assert "battery" in power and isinstance(power["battery"], dict)
+            assert "solar" in power and isinstance(power["solar"], dict)
 
 
 @pytest.mark.asyncio

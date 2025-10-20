@@ -69,7 +69,7 @@ Python 3.11 (backend), TypeScript + Vue 3 (frontend): Follow standard convention
 - IBT-4 Motor Driver connected to 997 DC Motor for Blade Control
 - 12V 30Ah LiFePO4 Battery
 - Google Coral USB Accelerator
-- Victron SmartSolar MPPT 75/15 Solar Charger
+- Victron SmartSolar MPPT 75/15 Solar Charger connected via victron-ble over BLE
 - INA3221 Power Monitor connected via I2C
 - RP2040-Zero is the microcontroller on the RoboHAT MM1
 

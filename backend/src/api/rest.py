@@ -113,9 +113,15 @@ class WebSocketHub:
                 if tc is not None:
                     # Convert to dict for SensorManager
                     tof_cfg = tc.model_dump()
+                power_cfg = {}
                 pc = getattr(hwc, "ina3221_config", None)
                 if pc is not None:
-                    power_cfg = pc.model_dump(exclude_none=True)
+                    power_cfg["ina3221"] = pc.model_dump(exclude_none=True)
+                victron = getattr(hwc, "victron_config", None)
+                if victron is not None:
+                    power_cfg["victron"] = victron.model_dump(exclude_none=True)
+                if not power_cfg:
+                    power_cfg = None
             except Exception:
                 tof_cfg = None
                 power_cfg = None
@@ -501,7 +507,7 @@ class WebSocketHub:
                 }
                 cal_score = _cal_map.get(cal_status, 1 if cal_status else 0)
 
-                telemetry = {
+                telemetry: dict[str, Any] = {
                     "source": "hardware",
                     "simulated": bool(sim_mode),
                     "battery": {"percentage": battery_pct, "voltage": batt_v},
@@ -532,6 +538,20 @@ class WebSocketHub:
                     "safety_state": "emergency_stop" if _safety_state.get("emergency_stop_active", False) else "nominal",
                     "uptime_seconds": time.time(),
                 }
+
+                power = getattr(data, "power", None)
+                if power is not None:
+                    telemetry["power"] = {
+                        "battery_voltage": getattr(power, "battery_voltage", None),
+                        "battery_current": getattr(power, "battery_current", None),
+                        "battery_power": getattr(power, "battery_power", None),
+                        "solar_voltage": getattr(power, "solar_voltage", None),
+                        "solar_current": getattr(power, "solar_current", None),
+                        "solar_power": getattr(power, "solar_power", None),
+                        "timestamp": getattr(power, "timestamp", None),
+                    }
+                    if telemetry["battery"].get("voltage") is None and getattr(power, "battery_voltage", None) is not None:
+                        telemetry["battery"]["voltage"] = float(getattr(power, "battery_voltage"))
 
                 env = getattr(data, "environmental", None)
                 if env:
@@ -1457,6 +1477,66 @@ async def dashboard_telemetry():
     latency_ms = (time.perf_counter() - start_time) * 1000
     now = datetime.now(timezone.utc).isoformat()
     
+    def _coerce_float(value: object) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _extract_power_payload(raw_power: object, default_battery: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = raw_power if isinstance(raw_power, dict) else {}
+        battery_voltage = _coerce_float(
+            payload.get("battery_voltage")
+            or payload.get("pack_voltage")
+            or (default_battery or {}).get("voltage")
+        )
+        battery_current = _coerce_float(
+            payload.get("battery_current")
+            or payload.get("battery_current_amps")
+            or payload.get("current")
+        )
+        battery_power = _coerce_float(
+            payload.get("battery_power")
+            or payload.get("battery_power_w")
+        )
+        if battery_power is None and battery_voltage is not None and battery_current is not None:
+            battery_power = battery_voltage * battery_current
+        solar_voltage = _coerce_float(payload.get("solar_voltage") or payload.get("solar_input_voltage"))
+        solar_current = _coerce_float(
+            payload.get("solar_current")
+            or payload.get("solar_current_amps")
+            or payload.get("solar_input_current")
+        )
+        solar_power = _coerce_float(
+            payload.get("solar_power")
+            or payload.get("solar_power_w")
+        )
+        if solar_power is None and solar_voltage is not None and solar_current is not None:
+            solar_power = solar_voltage * solar_current
+        timestamp = payload.get("timestamp")
+        return {
+            "battery_voltage": battery_voltage,
+            "battery_current": battery_current,
+            "battery_power": battery_power,
+            "solar_voltage": solar_voltage,
+            "solar_current": solar_current,
+            "solar_power": solar_power,
+            "timestamp": timestamp,
+            "battery": {
+                "voltage": battery_voltage,
+                "current": battery_current,
+                "power": battery_power,
+                "soc_percent": _coerce_float(payload.get("battery_percentage") or payload.get("battery_soc_percent")),
+            },
+            "solar": {
+                "voltage": solar_voltage,
+                "current": solar_current,
+                "power": solar_power,
+            },
+        }
+
     # Extract and map hardware data to dashboard format
     if "source" in telemetry_data and telemetry_data["source"] in {"hardware", "hardware_simulated"}:
         # Use real hardware data
@@ -1464,6 +1544,7 @@ async def dashboard_telemetry():
         position_data = telemetry_data.get("position", {})
         imu_data = telemetry_data.get("imu", {})
         tof_data = telemetry_data.get("tof", {}) if isinstance(telemetry_data, dict) else {}
+        power_data = telemetry_data.get("power", {}) if isinstance(telemetry_data, dict) else {}
         
         # RTK status and fallback messaging
         rtk_status = position_data.get("rtk_status", "unknown")
@@ -1479,6 +1560,8 @@ async def dashboard_telemetry():
             orientation_message = "IMU calibration incomplete - orientation data may be inaccurate. See docs/hardware-feature-matrix.md."
         
         env = telemetry_data.get("environmental", {}) if isinstance(telemetry_data, dict) else {}
+        power_payload = _extract_power_payload(power_data, default_battery=battery_data)
+
         result = {
             "timestamp": now,
             "latency_ms": round(latency_ms, 2),
@@ -1488,6 +1571,7 @@ async def dashboard_telemetry():
                 "percentage": battery_data.get("percentage", 0.0),
                 "voltage": battery_data.get("voltage", None),
             },
+            "power": power_payload,
             "temperatures": {
                 "cpu": None,  # Add CPU temperature monitoring if available
                 "ambient": env.get("temperature_c"),
@@ -1526,6 +1610,10 @@ async def dashboard_telemetry():
         # Fallback to simulated/default values
         env = telemetry_data.get("environmental", {}) if isinstance(telemetry_data, dict) else {}
         tof_data = telemetry_data.get("tof", {}) if isinstance(telemetry_data, dict) else {}
+        power_data = telemetry_data.get("power", {}) if isinstance(telemetry_data, dict) else {}
+        fallback_battery = telemetry_data.get("battery", {}) if isinstance(telemetry_data, dict) else {}
+        power_payload = _extract_power_payload(power_data, default_battery=fallback_battery)
+
         result = {
             "timestamp": now,
             "latency_ms": round(latency_ms, 2),
@@ -1535,6 +1623,7 @@ async def dashboard_telemetry():
                 "percentage": telemetry_data.get("battery", {}).get("percentage", 85.2),
                 "voltage": telemetry_data.get("battery", {}).get("voltage", 12.6),
             },
+            "power": power_payload,
             "temperatures": {
                 "cpu": None,
                 "ambient": env.get("temperature_c"),

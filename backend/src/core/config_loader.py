@@ -11,6 +11,7 @@ Acceptance (FR-003, FR-004):
 """
 
 import os
+from copy import deepcopy
 from typing import Optional, Tuple, Dict, Any
 
 import yaml
@@ -41,10 +42,17 @@ class ConfigLoader:
         config_dir: Optional[str] = None,
         hardware_path: Optional[str] = None,
         limits_path: Optional[str] = None,
+        hardware_local_path: Optional[str] = None,
     ) -> None:
         self.config_dir = config_dir or _default_config_dir()
         self.hardware_path = hardware_path or os.path.join(self.config_dir, "hardware.yaml")
         self.limits_path = limits_path or os.path.join(self.config_dir, "limits.yaml")
+        env_local_path = os.environ.get("LAWN_HARDWARE_LOCAL_PATH")
+        self.hardware_local_path = (
+            hardware_local_path
+            or env_local_path
+            or os.path.join(self.config_dir, "hardware.local.yaml")
+        )
         self._cache: Optional[Tuple[HardwareConfig, SafetyLimits]] = None
 
     def _read_yaml(self, path: str) -> Dict[str, Any]:
@@ -64,6 +72,9 @@ class ConfigLoader:
             ValidationError/ValueError on invalid configuration.
         """
         hw_raw = self._read_yaml(self.hardware_path)
+        local_raw = self._read_yaml(self.hardware_local_path) if self.hardware_local_path else {}
+        if local_raw:
+            hw_raw = self._deep_merge(hw_raw, local_raw)
         limits_raw = self._read_yaml(self.limits_path)
 
         try:
@@ -180,11 +191,16 @@ class ConfigLoader:
             ina_cfg = power_entry.get("ina3221")
             if isinstance(ina_cfg, dict):
                 mapped["ina3221_config"] = ina_cfg
+            victron_cfg = power_entry.get("victron") or power_entry.get("victron_vedirect")
+            if isinstance(victron_cfg, dict):
+                mapped["victron_config"] = victron_cfg
         elif isinstance(power_entry, bool) and "power_monitor" not in mapped:
             mapped["power_monitor"] = power_entry
 
         if "ina3221" in cfg and isinstance(cfg["ina3221"], dict):
             mapped["ina3221_config"] = cfg["ina3221"]
+        if "victron" in cfg and isinstance(cfg["victron"], dict):
+            mapped["victron_config"] = cfg["victron"]
 
         motor = cfg.get("motor_controller") or {}
         if isinstance(motor, dict) and "type" in motor and "motor_controller" not in mapped:
@@ -201,6 +217,22 @@ class ConfigLoader:
     @staticmethod
     def _normalize_limits_yaml(cfg: Dict[str, Any]) -> Dict[str, Any]:
         return cfg or {}
+
+    @staticmethod
+    def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge override dict into base dict recursively without mutating inputs."""
+
+        if not base and not override:
+            return {}
+
+        merged: Dict[str, Any] = deepcopy(base) if base else {}
+        for key, value in (override or {}).items():
+            existing = merged.get(key)
+            if isinstance(existing, dict) and isinstance(value, dict):
+                merged[key] = ConfigLoader._deep_merge(existing, value)
+            else:
+                merged[key] = value
+        return merged
 
 
 __all__ = ["ConfigLoader"]

@@ -5,6 +5,7 @@ Hardware sensor interfaces with I2C/UART coordination and validation
 
 import asyncio
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Dict, Optional, List, Any
 from contextlib import asynccontextmanager
@@ -323,35 +324,62 @@ class EnvironmentalSensorInterface:
 
 
 class PowerSensorInterface:
-    """INA3221 power monitoring interface"""
+    """Aggregated power monitoring interface (INA3221 + optional Victron)."""
     
     def __init__(self, coordinator: SensorCoordinator, driver_config: dict[str, Any] | None = None):
         self.coordinator = coordinator
         self.last_reading: Optional[PowerReading] = None
         self.status = SensorStatus.OFFLINE
         self._driver_config = driver_config or {}
-        try:
-            from ..drivers.sensors.ina3221_driver import INA3221Driver  # type: ignore
-            self._driver = INA3221Driver(self._driver_config)
-        except Exception:  # pragma: no cover
-            self._driver = None
+        self._ina_driver = None
+        self._victron_driver = None
+        self._prefer_battery = False
+        self._prefer_solar = False
+        self._prefer_load = False
+
+        ina_cfg = self._extract_ina_config(self._driver_config)
+        victron_cfg = self._extract_victron_config(self._driver_config)
+
+        if ina_cfg is not None:
+            try:
+                from ..drivers.sensors.ina3221_driver import INA3221Driver  # type: ignore
+
+                self._ina_driver = INA3221Driver(ina_cfg)
+            except Exception as exc:  # pragma: no cover - hardware optional
+                logger.warning("INA3221 driver unavailable: %s", exc)
+                self._ina_driver = None
+
+        if victron_cfg is not None and bool(victron_cfg.get("enabled", True)):
+            try:
+                from ..drivers.sensors.victron_vedirect import VictronVeDirectDriver  # type: ignore
+
+                self._victron_driver = VictronVeDirectDriver(victron_cfg)
+                self._prefer_battery = bool(victron_cfg.get("prefer_battery", False))
+                self._prefer_solar = bool(victron_cfg.get("prefer_solar", False))
+                self._prefer_load = bool(victron_cfg.get("prefer_load", False))
+            except Exception as exc:  # pragma: no cover - optional hardware
+                logger.warning("Victron VE.Direct driver unavailable: %s", exc)
+                self._victron_driver = None
+
+        self._drivers = [d for d in (self._ina_driver, self._victron_driver) if d is not None]
         
     async def initialize(self) -> bool:
         """Initialize INA3221 power monitor"""
-        try:
-            if self._driver is not None:
-                await self._driver.initialize()
-                await self._driver.start()
-                self.status = SensorStatus.ONLINE
-                return True
-            else:
-                self.status = SensorStatus.ONLINE
-                return True
-                
-        except Exception as e:
-            logger.error(f"Failed to initialize INA3221: {e}")
-            self.status = SensorStatus.ERROR
+        if not self._drivers:
+            self.status = SensorStatus.OFFLINE
             return False
+
+        any_success = False
+        for driver in self._drivers:
+            try:
+                await driver.initialize()
+                await driver.start()
+                any_success = True
+            except Exception as exc:  # pragma: no cover - hardware dependent
+                logger.error("Failed to initialize power driver %s: %s", driver.__class__.__name__, exc)
+
+        self.status = SensorStatus.ONLINE if any_success else SensorStatus.ERROR
+        return any_success
     
     async def read_power(self) -> Optional[PowerReading]:
         """Read power monitoring data"""
@@ -359,21 +387,47 @@ class PowerSensorInterface:
             return None
         
         try:
-            if getattr(self, "_driver", None) is not None:
-                p = await self._driver.read_power()
-                if p is not None:
-                    reading = PowerReading(
-                        battery_voltage=p.get("battery_voltage"),
-                        battery_current=p.get("battery_current_amps"),
-                        battery_power=(p.get("battery_voltage") or 0.0) * (p.get("battery_current_amps") or 0.0),
-                        solar_voltage=p.get("solar_voltage"),
-                        solar_current=p.get("solar_current_amps"),
-                        solar_power=(p.get("solar_voltage") or 0.0) * (p.get("solar_current_amps") or 0.0),
-                    )
-                else:
-                    reading = self.last_reading
-            else:
+            ina_payload: dict[str, Any] | None = None
+            victron_payload: dict[str, Any] | None = None
+
+            if self._ina_driver is not None:
+                try:
+                    ina_payload = await self._ina_driver.read_power()
+                except Exception as exc:  # pragma: no cover - hardware dependent
+                    logger.error("INA3221 read failed: %s", exc)
+
+            if self._victron_driver is not None:
+                try:
+                    victron_payload = await self._victron_driver.read_power()
+                except Exception as exc:  # pragma: no cover - optional hardware
+                    logger.error("Victron VE.Direct read failed: %s", exc)
+
+            merged = self._merge_power_payload(
+                ina_payload,
+                victron_payload,
+                prefer_battery=self._prefer_battery,
+                prefer_solar=self._prefer_solar,
+                prefer_load=self._prefer_load,
+            )
+
+            if merged is None:
                 reading = self.last_reading
+            else:
+                reading = merged
+                if isinstance(self.last_reading, PowerReading):
+                    # Carry forward stable values when current sample omits them.
+                    if reading.battery_voltage is None:
+                        reading.battery_voltage = self.last_reading.battery_voltage
+                    if reading.battery_current is None:
+                        reading.battery_current = self.last_reading.battery_current
+                    if reading.solar_voltage is None:
+                        reading.solar_voltage = self.last_reading.solar_voltage
+                    if reading.solar_current is None:
+                        reading.solar_current = self.last_reading.solar_current
+                    if reading.battery_power is None and self.last_reading.battery_power is not None:
+                        reading.battery_power = self.last_reading.battery_power
+                    if reading.solar_power is None and self.last_reading.solar_power is not None:
+                        reading.solar_power = self.last_reading.solar_power
             
             self.last_reading = reading
             return reading
@@ -382,6 +436,171 @@ class PowerSensorInterface:
             logger.error(f"Power reading failed: {e}")
             self.status = SensorStatus.ERROR
             return None
+
+    @staticmethod
+    def _extract_ina_config(config: dict[str, Any]) -> Optional[dict[str, Any]]:
+        if not config:
+            return None
+        direct_keys = {
+            "address",
+            "bus",
+            "shunt_ohms_ch1",
+            "shunt_ohms_ch2",
+            "shunt_ohms_ch3",
+            "shunt_spec_ch1",
+            "shunt_spec_ch2",
+            "shunt_spec_ch3",
+        }
+        if any(key in config for key in direct_keys):
+            return {k: config[k] for k in config if k in direct_keys or k.startswith("shunt_")}
+        candidate = config.get("ina3221") or config.get("ina") or config.get("ina_config")
+        if isinstance(candidate, dict):
+            return candidate
+        return None
+
+    @staticmethod
+    def _extract_victron_config(config: dict[str, Any]) -> Optional[dict[str, Any]]:
+        if not config:
+            return None
+        candidate = config.get("victron") or config.get("victron_vedirect") or config.get("victron_config")
+        if isinstance(candidate, dict):
+            return candidate
+        return None
+
+    @staticmethod
+    def _valid_number(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            if isinstance(value, float) and math.isnan(value):
+                return False
+            return True
+        return False
+
+    @classmethod
+    def _pick(cls, *values: Any, min_abs: float | None = None) -> Optional[float]:
+        for value in values:
+            if cls._valid_number(value):
+                numeric = float(value)
+                if min_abs is not None and abs(numeric) < min_abs:
+                    continue
+                return numeric
+        return None
+
+    @classmethod
+    def _merge_power_payload(
+        cls,
+        ina: Optional[dict[str, Any]],
+        victron: Optional[dict[str, Any]],
+        *,
+        prefer_battery: bool = False,
+        prefer_solar: bool = False,
+        prefer_load: bool = False,
+    ) -> Optional[PowerReading]:
+        if not ina and not victron:
+            return None
+
+        battery_voltage = cls._pick(
+            victron.get("battery_voltage") if victron else None,
+            ina.get("battery_voltage") if ina else None,
+            min_abs=0.05,
+        )
+        battery_current_sources: list[Any] = []
+        if prefer_battery:
+            battery_current_sources.extend(
+                [
+                    victron.get("battery_current_amps") if victron else None,
+                    victron.get("battery_current") if victron else None,
+                ]
+            )
+        battery_current_sources.extend(
+            [
+                ina.get("battery_current") if ina else None,
+                ina.get("battery_current_amps") if ina else None,
+            ]
+        )
+        if not prefer_battery:
+            battery_current_sources.extend(
+                [
+                    victron.get("battery_current_amps") if victron else None,
+                    victron.get("battery_current") if victron else None,
+                ]
+            )
+        battery_current = cls._pick(*battery_current_sources)
+        solar_voltage = cls._pick(
+            victron.get("solar_voltage") if victron else None,
+            ina.get("solar_voltage") if ina else None,
+            min_abs=0.05,
+        )
+        solar_current_sources: list[Any] = []
+        if prefer_solar:
+            solar_current_sources.append(victron.get("solar_current_amps") if victron else None)
+        solar_current_sources.append(ina.get("solar_current_amps") if ina else None)
+        if not prefer_solar:
+            solar_current_sources.append(victron.get("solar_current_amps") if victron else None)
+        solar_current = cls._pick(*solar_current_sources)
+
+        solar_power_sources: list[Any] = []
+        if prefer_solar:
+            solar_power_sources.extend(
+                [
+                    victron.get("solar_power_w") if victron else None,
+                    victron.get("solar_power") if victron else None,
+                ]
+            )
+        solar_power_sources.append(ina.get("solar_power_w") if ina else None)
+        if not prefer_solar:
+            solar_power_sources.extend(
+                [
+                    victron.get("solar_power_w") if victron else None,
+                    victron.get("solar_power") if victron else None,
+                ]
+            )
+        solar_power = cls._pick(*solar_power_sources)
+
+        battery_power_sources: list[Any] = []
+        if prefer_battery:
+            battery_power_sources.extend(
+                [
+                    victron.get("battery_power_w") if victron else None,
+                    victron.get("battery_power") if victron else None,
+                ]
+            )
+        battery_power_sources.append(ina.get("battery_power_w") if ina else None)
+        if not prefer_battery:
+            battery_power_sources.extend(
+                [
+                    victron.get("battery_power_w") if victron else None,
+                    victron.get("battery_power") if victron else None,
+                ]
+            )
+        battery_power = cls._pick(*battery_power_sources)
+
+        if battery_power is None and battery_voltage is not None and battery_current is not None:
+            battery_power = round(battery_voltage * battery_current, 3)
+
+        if solar_power is None and solar_voltage is not None and solar_current is not None:
+            solar_power = round(solar_voltage * solar_current, 3)
+
+        load_current_sources: list[Any] = []
+        if prefer_load:
+            load_current_sources.append(victron.get("load_current_amps") if victron else None)
+        load_current_sources.append(ina.get("load_current_amps") if ina else None)
+        if not prefer_load:
+            load_current_sources.append(victron.get("load_current_amps") if victron else None)
+        load_current = cls._pick(*load_current_sources)
+
+        reading = PowerReading(
+            battery_voltage=battery_voltage,
+            battery_current=battery_current,
+            battery_power=battery_power,
+            solar_voltage=solar_voltage,
+            solar_current=solar_current,
+            solar_power=solar_power,
+            load_current=load_current,
+        )
+
+        return reading
 
 
 class SensorManager:

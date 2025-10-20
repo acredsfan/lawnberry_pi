@@ -16,6 +16,39 @@ class Ina3221Config(BaseModel):
     shunt_spec_ch3: Optional[str] = Field(default=None, description="Channel 3 shunt spec, e.g. '50A/75mV'")
 
 
+class VictronBleConfig(BaseModel):
+    enabled: bool = Field(default=True, description="Enable Victron SmartSolar BLE reader")
+    device_id: Optional[str] = Field(default=None, description="Victron identifier or MAC address for BLE connection")
+    device_key: Optional[str] = Field(
+        default=None,
+        description="Optional combined '<address>@<key>' string accepted by victron-ble CLI",
+    )
+    encryption_key: Optional[str] = Field(
+        default=None,
+        description="Victron Instant Readout encryption key; combined with device_id when device_key not provided",
+    )
+    cli_path: str = Field(default="victron-ble", description="victron-ble CLI executable path")
+    adapter: Optional[str] = Field(default=None, description="Optional BLE adapter (passed as --adapter)")
+    read_timeout_s: float = Field(default=8.0, description="Timeout for BLE read command in seconds")
+    prefer_battery: bool = Field(
+        default=False,
+        description="Prefer Victron telemetry for battery voltage/current/power when merging with INA3221",
+    )
+    prefer_solar: bool = Field(
+        default=False,
+        description="Prefer Victron telemetry for solar metrics when merging with INA3221",
+    )
+    prefer_load: bool = Field(
+        default=False,
+        description="Prefer Victron telemetry for load current when merging with INA3221",
+    )
+    sample_limit: int = Field(
+        default=1,
+        ge=1,
+        description="Number of victron-ble frames to collect per poll before returning the most recent",
+    )
+
+
 class GPSType(str, Enum):
     ZED_F9P_USB = "zed-f9p-usb"
     ZED_F9P_UART = "zed-f9p-uart"
@@ -55,6 +88,8 @@ class HardwareConfig(BaseModel):
     tof_config: Optional["ToFConfig"] = Field(default=None)
     # Optional INA3221 configuration overrides (ina3221 block in hardware.yaml)
     ina3221_config: Optional[Ina3221Config] = Field(default=None)
+    # Optional Victron SmartSolar BLE configuration
+    victron_config: Optional[VictronBleConfig] = Field(default=None)
 
     @field_validator("gps_ntrip_enabled")
     @classmethod

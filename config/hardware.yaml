@@ -29,6 +29,22 @@ ina3221:
   shunt_ohms_ch1: 0.0025
   # Battery channel (ch3) uses 50A/75mV shunt => 0.0015 ohm
   shunt_ohms_ch3: 0.0015
+victron:
+  enabled: true
+  # When using BLE, set device_id to the SmartSolar identifier (MAC or name) or leave null to auto-scan
+  device_id: "EC:1A:A8:DD:99:C2"  # Replace with your device MAC (leave quoted)
+  # Provide either the Instant Readout encryption key (preferred) or a pre-composed
+  # '<address>@<key>' device_key string accepted by victron-ble.
+  encryption_key: "<replace-with-instant-readout-key>"
+  # device_key: "EC:1A:A8:DD:99:C2@<replace-with-instant-readout-key>"
+  # Path to victron-ble CLI (must be installed on the system)
+  cli_path: victron-ble
+  # Optional adapter name/number to pass to victron-ble
+  adapter: null
+  # Prefer Victron SmartSolar telemetry for these channels when merging with INA3221.
+  prefer_battery: true
+  prefer_solar: true
+  prefer_load: true
 motor_controller: robohat-rp2040
 blade_controller: ibt-4
 

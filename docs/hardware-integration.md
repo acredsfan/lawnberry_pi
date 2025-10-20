@@ -56,6 +56,12 @@ Verification steps:
   - CH2: Unused
   - CH3: Solar Input
 
+### Victron SmartSolar BLE telemetry
+- Optional replacement or supplement for INA3221 readings.
+- Follow `docs/victron-ble-integration.md` to install the `victron-ble` CLI, patch the upstream scanner guard, and register the Instant Readout key.
+- Configure the `victron` block in `config/hardware.yaml`; set `prefer_battery`, `prefer_solar`, and `prefer_load` to prioritize SmartSolar data when both sources are available. Keep secrets in the untracked `config/hardware.local.yaml` override so the repository never stores live keys.
+- Backend automatically falls back to INA3221 values if Victron telemetry is temporarily unavailable.
+
 ### IMU (BNO085)
 - Preferred: UART4 at 3,000,000 baud
 - Pi 5: /dev/ttyAMA4 → GPIO 12 (TXD4), GPIO 13 (RXD4)
