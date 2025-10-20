@@ -237,7 +237,7 @@ class GPSDriver(HardwareDriver):
                 if raw.startswith(("$GPGGA", "$GNGGA")):
                     gga = self._parse_gga(raw)
                     if gga:
-                        lat, lon, alt_gga, sats_gga, hdop = gga
+                        lat, lon, alt_gga, sats_gga, hdop, fix_quality = gga
                         if lat is not None and lon is not None:
                             got_lat = got_lon = True
                         if alt_gga is not None:
@@ -247,7 +247,12 @@ class GPSDriver(HardwareDriver):
                         # Approximate accuracy from HDOP (rough scale)
                         if hdop is not None:
                             hdop_val = hdop
-                            acc = max(0.5, hdop * 1.0)
+                            hdop_based = max(0.5, hdop * 1.0)
+                            if acc is None or hdop_based < acc:
+                                acc = hdop_based
+                        status = self._map_fix_quality(fix_quality)
+                        if status is not None:
+                            rtk_status = status
                 elif raw.startswith(("$GPRMC", "$GNRMC")):
                     rmc = self._parse_rmc(raw)
                     if rmc:
@@ -259,6 +264,11 @@ class GPSDriver(HardwareDriver):
                             spd = spd_knots * 0.514444  # knots -> m/s
                         if course is not None:
                             hdg = course
+                elif raw.startswith(("$GPGST", "$GNGST")):
+                    gst_accuracy = self._parse_gst(raw)
+                    if gst_accuracy is not None:
+                        if acc is None or gst_accuracy < acc:
+                            acc = max(0.005, gst_accuracy)
 
                 if got_lat and got_lon:
                     break
@@ -317,8 +327,10 @@ class GPSDriver(HardwareDriver):
         except Exception:
             return None
 
-    def _parse_gga(self, line: str) -> Optional[tuple[Optional[float], Optional[float], Optional[float], Optional[int], Optional[float]]]:
-        """Parse GGA: returns (lat, lon, altitude_m, satellites, hdop)."""
+    def _parse_gga(
+        self, line: str
+    ) -> Optional[tuple[Optional[float], Optional[float], Optional[float], Optional[int], Optional[float], Optional[int]]]:
+        """Parse GGA: returns (lat, lon, altitude_m, satellites, hdop, fix_quality)."""
         try:
             parts = line.split(",")
             # GGA fields: 2=lat,3=N/S,4=lon,5=E/W,6=fix,7=sats,8=HDOP,9=altitude
@@ -331,7 +343,11 @@ class GPSDriver(HardwareDriver):
             if fix_quality in {"0", ""}:  # no fix
                 # Keep lat/lon if parser produced values but no fix -> treat as unreliable
                 pass
-            return (lat, lon, alt, sats, hdop)
+            try:
+                fix_int = int(fix_quality)
+            except (TypeError, ValueError):
+                fix_int = None
+            return (lat, lon, alt, sats, hdop, fix_int)
         except Exception:
             return None
 
@@ -347,6 +363,37 @@ class GPSDriver(HardwareDriver):
             return (lat, lon, spd, course)
         except Exception:
             return None
+
+    def _parse_gst(self, line: str) -> Optional[float]:
+        """Parse GST sentence to estimate horizontal accuracy (1-sigma meters)."""
+        try:
+            parts = line.split(",")
+            if len(parts) < 9:
+                return None
+            sd_lat = float(parts[6]) if parts[6] not in ("", None) else None
+            sd_lon = float(parts[7]) if parts[7] not in ("", None) else None
+            if sd_lat is None or sd_lon is None:
+                return None
+            # Combine latitude/longitude deviation into horizontal 1-sigma accuracy
+            return math.sqrt(sd_lat * sd_lat + sd_lon * sd_lon)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _map_fix_quality(fix_quality: Optional[int]) -> Optional[str]:
+        if fix_quality is None:
+            return None
+        mapping = {
+            0: "NO_FIX",
+            1: "GPS_FIX",
+            2: "DGPS",
+            4: "RTK_FIXED",
+            5: "RTK_FLOAT",
+            6: "DEAD_RECKONING",
+            7: "MANUAL",
+            8: "SIMULATION",
+        }
+        return mapping.get(fix_quality)
 
     def _read_from_gpsd(self, timeout_sec: float = 0.5) -> Optional[GpsReading]:
         """Try reading a TPV report from gpsd if available.

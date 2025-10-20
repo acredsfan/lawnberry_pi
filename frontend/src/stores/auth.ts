@@ -57,7 +57,7 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('user_data', JSON.stringify(response.user))
       
       // Start token refresh timer
-      startTokenRefreshTimer()
+      await startTokenRefreshTimer()
       
       return true
     } catch (err: any) {
@@ -70,18 +70,18 @@ export const useAuthStore = defineStore('auth', () => {
 
   let refreshTimer: number | null = null
 
-  const startTokenRefreshTimer = () => {
+  const startTokenRefreshTimer = async () => {
     // Clear existing timer
     if (refreshTimer) {
       clearTimeout(refreshTimer)
     }
-    
+
     if (!tokenExpiry.value) return
-    
-    // Refresh token 5 minutes before expiry
-    const refreshTime = tokenExpiry.value - Date.now() - (5 * 60 * 1000)
-    
-    if (refreshTime > 0) {
+
+    const refreshLeadMs = 5 * 60 * 1000
+    const timeUntilRefresh = tokenExpiry.value - Date.now() - refreshLeadMs
+
+    if (timeUntilRefresh > 0) {
       refreshTimer = window.setTimeout(async () => {
         try {
           await refreshToken()
@@ -89,7 +89,15 @@ export const useAuthStore = defineStore('auth', () => {
           console.error('Token refresh failed:', error)
           await logout()
         }
-      }, refreshTime)
+      }, timeUntilRefresh)
+      return
+    }
+
+    try {
+      await refreshToken()
+    } catch (error) {
+      console.error('Token refresh failed:', error)
+      await logout()
     }
   }
 
@@ -136,7 +144,7 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('token_expiry', expiryTime.toString())
       
       // Restart timer for next refresh
-      startTokenRefreshTimer()
+      await startTokenRefreshTimer()
       
       return true
     } catch (err) {
@@ -164,7 +172,7 @@ export const useAuthStore = defineStore('auth', () => {
             user.value = JSON.parse(storedUser)
             
             // Start refresh timer
-            startTokenRefreshTimer()
+            await startTokenRefreshTimer()
             
             return true
           } else {

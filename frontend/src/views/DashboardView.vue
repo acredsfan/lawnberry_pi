@@ -135,6 +135,28 @@
           <div class="metric-status">{{ batteryVoltageDisplay }}V</div>
         </div>
       </div>
+
+      <!-- Solar Input -->
+      <div class="retro-card telemetry-card solar-card">
+        <div class="card-header">
+          <h4>SOLAR INPUT</h4>
+          <div class="solar-icon">☀️</div>
+        </div>
+        <div class="card-content">
+          <div class="metric-value">{{ solarPowerDisplay }}<span class="unit">W</span></div>
+          <div class="solar-grid">
+            <div class="solar-metric">
+              <span class="metric-label">Voltage</span>
+              <span class="metric-reading">{{ solarVoltageDisplay }}<span class="unit">V</span></span>
+            </div>
+            <div class="solar-metric">
+              <span class="metric-label">Current</span>
+              <span class="metric-reading">{{ solarCurrentDisplay }}<span class="unit">A</span></span>
+            </div>
+          </div>
+          <div class="metric-status solar-status" :class="solarStatusClass">{{ solarStatus }}</div>
+        </div>
+      </div>
       
       <!-- Speed -->
       <div class="retro-card telemetry-card">
@@ -306,6 +328,9 @@ const gpsRtkStatus = ref<string | null>(null)
 
 const batteryLevel = ref(0)
 const batteryVoltage = ref(0)
+const solarVoltage = ref<number | null>(null)
+const solarCurrent = ref<number | null>(null)
+const solarPower = ref<number | null>(null)
 const speed = ref(0)
 const speedTrend = ref(0)
 
@@ -406,6 +431,47 @@ const batteryBarClass = computed(() => {
 
 const batteryLevelDisplay = computed(() => batteryLevel.value.toFixed(1))
 const batteryVoltageDisplay = computed(() => batteryVoltage.value.toFixed(1))
+
+const solarVoltageDisplay = computed(() => {
+  if (solarVoltage.value === null) return '--'
+  return solarVoltage.value.toFixed(1)
+})
+
+const solarCurrentDisplay = computed(() => {
+  if (solarCurrent.value === null) return '--'
+  return solarCurrent.value.toFixed(2)
+})
+
+const solarPowerDisplay = computed(() => {
+  if (solarPower.value === null) return '--'
+  const value = solarPower.value
+  return Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1)
+})
+
+const solarStatus = computed(() => {
+  const value = solarPower.value
+  if (value === null) return 'NO DATA'
+  if (value > 150) return 'PEAK OUTPUT'
+  if (value > 50) return 'HARVESTING'
+  if (value > 5) return 'TRICKLE'
+  if (value > 0.5) return 'IDLE'
+  return 'DARK'
+})
+
+const solarStatusClass = computed(() => {
+  switch (solarStatus.value) {
+    case 'PEAK OUTPUT':
+    case 'HARVESTING':
+      return 'status-active'
+    case 'TRICKLE':
+    case 'IDLE':
+      return 'status-warning'
+    case 'DARK':
+      return 'status-error'
+    default:
+      return 'status-unknown'
+  }
+})
 
 const speedTrendClass = computed(() => (speedTrend.value > 0 ? 'trend-up' : speedTrend.value < 0 ? 'trend-down' : 'trend-stable'))
 
@@ -549,6 +615,130 @@ const estimateBatteryFromVoltage = (voltage: unknown): number | null => {
   return Number.isFinite(pct) ? Number(pct.toFixed(1)) : null
 }
 
+const applySolarMetrics = (payload: any) => {
+  if (payload === null || payload === undefined) return
+
+  if (typeof payload === 'number' || typeof payload === 'string') {
+    const numeric = coerceFiniteNumber(payload)
+    if (numeric !== undefined) {
+      solarVoltage.value = numeric
+    }
+    return
+  }
+
+  const sources: any[] = []
+  if (payload && typeof payload === 'object') {
+    const powerBlock = typeof payload.power === 'object' ? payload.power : undefined
+    if (powerBlock && typeof powerBlock.solar === 'object') {
+      sources.push(powerBlock.solar)
+    }
+    if (typeof payload.solar === 'object') {
+      sources.push(payload.solar)
+    }
+    if (powerBlock) {
+      sources.push(powerBlock)
+    }
+    sources.push(payload)
+  }
+
+  let voltageValue: number | undefined
+  let currentValue: number | undefined
+  let powerValue: number | undefined
+  let voltageExplicitNull = false
+  let currentExplicitNull = false
+  let powerExplicitNull = false
+
+  const extractMetric = (candidate: unknown, markNull: () => void): number | undefined => {
+    if (candidate === null) {
+      markNull()
+      return undefined
+    }
+    return coerceFiniteNumber(candidate)
+  }
+
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue
+
+    if (voltageValue === undefined) {
+      const voltageCandidates = [
+        (source as any).voltage,
+        (source as any).solar_voltage,
+        (source as any).panel_voltage,
+        (source as any).input_voltage,
+        (source as any).solar_input_voltage,
+      ]
+      for (const candidate of voltageCandidates) {
+        const numeric = extractMetric(candidate, () => {
+          voltageExplicitNull = true
+        })
+        if (numeric !== undefined) {
+          voltageValue = numeric
+          break
+        }
+      }
+    }
+
+    if (currentValue === undefined) {
+      const currentCandidates = [
+        (source as any).current,
+        (source as any).solar_current,
+        (source as any).panel_current,
+        (source as any).input_current,
+        (source as any).solar_input_current,
+      ]
+      for (const candidate of currentCandidates) {
+        const numeric = extractMetric(candidate, () => {
+          currentExplicitNull = true
+        })
+        if (numeric !== undefined) {
+          currentValue = numeric
+          break
+        }
+      }
+    }
+
+    if (powerValue === undefined) {
+      const powerCandidates = [
+        (source as any).power,
+        (source as any).solar_power,
+        (source as any).power_w,
+        (source as any).watts,
+      ]
+      for (const candidate of powerCandidates) {
+        const numeric = extractMetric(candidate, () => {
+          powerExplicitNull = true
+        })
+        if (numeric !== undefined) {
+          powerValue = numeric
+          break
+        }
+      }
+    }
+  }
+
+  if (voltageValue !== undefined) {
+    solarVoltage.value = voltageValue
+  } else if (voltageExplicitNull) {
+    solarVoltage.value = null
+  }
+
+  if (currentValue !== undefined) {
+    solarCurrent.value = currentValue
+  } else if (currentExplicitNull) {
+    solarCurrent.value = null
+  }
+
+  if (powerValue === undefined && voltageValue !== undefined && currentValue !== undefined) {
+    powerValue = voltageValue * currentValue
+  }
+
+  if (powerValue !== undefined) {
+    solarPower.value = powerValue
+  } else if (powerExplicitNull) {
+    solarPower.value = null
+  }
+}
+
 const applyBatteryMetrics = (payload: any) => {
   if (payload === null || payload === undefined) return
   if (typeof payload === 'number') {
@@ -610,6 +800,10 @@ const applyBatteryMetrics = (payload: any) => {
   }
   if (typeof voltage === 'number' && !Number.isNaN(voltage)) {
     batteryVoltage.value = voltage
+  }
+
+  if (typeof payload === 'object') {
+    applySolarMetrics(payload)
   }
 }
 
@@ -1020,7 +1214,10 @@ onMounted(async () => {
       // Subscribe to telemetry topics with real data handling
       subscribe('telemetry.power', (data) => {
         applyBatteryMetrics(data)
-        dataStreamText.value = `>>> POWER: ${batteryLevelDisplay.value}% | ${batteryVoltageDisplay.value}V`
+        const solarText = solarPowerDisplay.value === '--'
+          ? 'SOLAR --'
+          : `SOLAR ${solarPowerDisplay.value}W`
+        dataStreamText.value = `>>> POWER: ${batteryLevelDisplay.value}% | ${batteryVoltageDisplay.value}V | ${solarText}`
       })
       
       subscribe('telemetry.navigation', (data) => {
@@ -1995,6 +2192,74 @@ onMounted(async () => {
 .speed-trend.trend-up {
   color: #00ff00;
   text-shadow: 0 0 10px rgba(0, 255, 0, 0.7);
+}
+
+.solar-card .metric-value {
+  color: #ffff00;
+  text-shadow: 0 0 15px rgba(255, 255, 0, 0.7);
+}
+
+.solar-icon {
+  font-size: 1.5rem;
+  color: #ffdd00;
+  filter: drop-shadow(0 0 12px rgba(255, 221, 0, 0.8));
+}
+
+.solar-grid {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.solar-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.solar-metric .metric-label {
+  font-size: 0.75rem;
+  letter-spacing: 1px;
+  color: #00ffff;
+  text-transform: uppercase;
+}
+
+.solar-card .metric-reading {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #ffff00;
+  text-shadow: 0 0 12px rgba(255, 255, 0, 0.6);
+}
+
+.solar-card .metric-reading .unit {
+  font-size: 0.8rem;
+  margin-left: 0.25rem;
+  color: #00ffff;
+}
+
+.solar-status {
+  margin-top: 0.25rem;
+}
+
+.solar-status.status-active {
+  color: #00ff00;
+  text-shadow: 0 0 10px rgba(0, 255, 0, 0.7);
+}
+
+.solar-status.status-warning {
+  color: #ffff00;
+  text-shadow: 0 0 10px rgba(255, 255, 0, 0.7);
+}
+
+.solar-status.status-error {
+  color: #ff6600;
+  text-shadow: 0 0 10px rgba(255, 102, 0, 0.7);
+}
+
+.solar-status.status-unknown {
+  color: #888;
 }
 
 .speed-trend.trend-down {

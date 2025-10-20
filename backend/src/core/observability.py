@@ -185,14 +185,31 @@ class MetricsCollector:
         return metrics
     
     def get_metrics_summary(self) -> Dict[str, Any]:
-        """Get summary of all metrics."""
+        """Get summary of all metrics without risking recursive lock acquisition."""
+        system_snapshot = asdict(self.collect_system_metrics())
+
         with self._lock:
-            return {
-                "system": asdict(self.collect_system_metrics()),
-                "counters": dict(self._counters),
-                "timers": {name: self.get_timer_stats(name) for name in self._timers.keys()},
-                "metrics_count": len(self._metrics_history)
-            }
+            counters_snapshot = dict(self._counters)
+            timers_snapshot: Dict[str, Dict[str, float]] = {}
+            for name, timings in self._timers.items():
+                timings_list = list(timings)
+                if timings_list:
+                    timers_snapshot[name] = {
+                        "count": len(timings_list),
+                        "avg": sum(timings_list) / len(timings_list),
+                        "min": min(timings_list),
+                        "max": max(timings_list),
+                    }
+                else:
+                    timers_snapshot[name] = {"count": 0, "avg": 0.0, "min": 0.0, "max": 0.0}
+            metrics_count = len(self._metrics_history)
+
+        return {
+            "system": system_snapshot,
+            "counters": counters_snapshot,
+            "timers": timers_snapshot,
+            "metrics_count": metrics_count,
+        }
 
 
 class ObservabilityManager:

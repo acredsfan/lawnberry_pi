@@ -28,7 +28,7 @@ Python 3.11 (backend), TypeScript + Vue 3 (frontend): Follow standard convention
 - Think like a developer when solving this issue, when you think you know how to attack the problem, think it through before deploying and make targeted/precise edits to avoid unintentionally causing issues with another part of the program.
 - If you are unsure about something, ask for clarification or more information.
 
-## Running CLI Commands
+## **IMPORTANT** Running CLI Commands
 - Always ensure you use timeouts and error handling when running CLI commands from within the codebase to avoid hanging processes or unhandled exceptions.
 
 ## When to Ask for Help

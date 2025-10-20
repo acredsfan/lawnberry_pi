@@ -275,11 +275,39 @@ class WebSocketHub:
     async def _broadcast_telemetry_topics(self, telemetry_data: dict):
         """Broadcast telemetry data to appropriate topics."""
         # Extract data for specific topics
-        if "battery" in telemetry_data:
-            await self.broadcast_to_topic("telemetry.power", {
-                "battery": telemetry_data["battery"],
-                "source": telemetry_data.get("source", "unknown")
-            })
+        if "battery" in telemetry_data or "power" in telemetry_data:
+            power_payload = telemetry_data.get("power") if isinstance(telemetry_data.get("power"), dict) else None
+            message: dict[str, Any] = {
+                "source": telemetry_data.get("source", "unknown"),
+            }
+            battery_block = telemetry_data.get("battery") if isinstance(telemetry_data.get("battery"), dict) else None
+            if battery_block is not None:
+                message["battery"] = battery_block
+            if power_payload is not None:
+                message["power"] = power_payload
+                battery_voltage = power_payload.get("battery_voltage")
+                battery_current = power_payload.get("battery_current")
+                battery_power = power_payload.get("battery_power")
+                if "battery" not in message and any(value is not None for value in (battery_voltage, battery_current, battery_power)):
+                    message["battery"] = {
+                        "voltage": battery_voltage,
+                        "current": battery_current,
+                        "power": battery_power,
+                    }
+                solar_voltage = power_payload.get("solar_voltage")
+                solar_current = power_payload.get("solar_current")
+                solar_power = power_payload.get("solar_power")
+                if any(value is not None for value in (solar_voltage, solar_current, solar_power)):
+                    message["solar"] = {
+                        "voltage": solar_voltage,
+                        "current": solar_current,
+                        "power": solar_power,
+                        "timestamp": power_payload.get("timestamp"),
+                    }
+                timestamp = power_payload.get("timestamp")
+                if timestamp is not None:
+                    message["timestamp"] = timestamp
+            await self.broadcast_to_topic("telemetry.power", message)
             
         if "position" in telemetry_data:
             # Ensure shallow copy to avoid mutation races
