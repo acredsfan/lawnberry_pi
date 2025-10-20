@@ -161,8 +161,13 @@ class MetricsCollector:
             # Disk usage
             if Path("/home/pi/lawnberry").exists():
                 stat = os.statvfs("/home/pi/lawnberry")
+                free_blocks = getattr(stat, "f_bavail", None)
+                if free_blocks is None:
+                    free_blocks = getattr(stat, "f_available", None)
+                if free_blocks is None:
+                    free_blocks = stat.f_bfree
                 total = stat.f_blocks * stat.f_frsize
-                free = stat.f_available * stat.f_frsize
+                free = free_blocks * stat.f_frsize
                 used = total - free
                 metrics.disk_usage_percent = (used / total) * 100 if total > 0 else 0
             

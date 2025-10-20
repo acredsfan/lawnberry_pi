@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Callable, Any, Tuple
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 from ..models.camera_stream import (
     CameraStream, CameraFrame, CameraMode, FrameFormat, 
@@ -78,6 +78,13 @@ class CameraStreamService:
         # Frame storage
         self.storage_dir = Path("/var/lib/lawnberry/camera")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            timeout_raw = float(os.getenv("CAMERA_STREAM_CLIENT_TIMEOUT", "0.25"))
+        except ValueError:
+            timeout_raw = 0.25
+        self._client_drain_timeout = max(0.05, min(timeout_raw, 5.0))
+        self._enqueue_timeout = 1.0
         
     async def initialize(self) -> bool:
         """Initialize camera service and IPC."""
@@ -364,6 +371,8 @@ class CameraStreamService:
 
             # Refresh frame queue with current configuration buffer size
             buffer_size = max(1, int(self.stream.configuration.buffer_size))
+            fps = self.stream.configuration.framerate or 1.0
+            self._enqueue_timeout = max(1.0, min(3.0, buffer_size / max(0.5, fps)))
             self.frame_queue = asyncio.Queue(maxsize=buffer_size)
             
             # Start capture thread
@@ -460,24 +469,30 @@ class CameraStreamService:
         if not self.loop or self.loop.is_closed():
             return
 
-        def _enqueue():
+        async def _enqueue_async() -> None:
             if not self.frame_queue:
                 return
-            if self.frame_queue.full():
-                self.stream.statistics.frames_dropped += 1
-                self.stream.statistics.buffer_overruns += 1
-                try:
-                    self.frame_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    pass
-                now = time.monotonic()
-                if now - self._last_queue_warning > 5.0:
-                    logger.warning("Frame queue full, dropping frame")
-                    self._last_queue_warning = now
-            self.frame_queue.put_nowait(frame)
+            await self.frame_queue.put(frame)
 
         try:
-            self.loop.call_soon_threadsafe(_enqueue)
+            future = asyncio.run_coroutine_threadsafe(_enqueue_async(), self.loop)
+            try:
+                future.result(timeout=self._enqueue_timeout)
+            except FuturesTimeoutError:
+                self.stream.statistics.frames_dropped += 1
+                self.stream.statistics.buffer_overruns += 1
+                future.cancel()
+                now = time.monotonic()
+                if now - self._last_queue_warning > 5.0:
+                    logger.warning("Frame enqueue stalled; dropping frame to keep stream responsive")
+                    self._last_queue_warning = now
+            except Exception as exc:
+                self.stream.statistics.frames_dropped += 1
+                future.cancel()
+                now = time.monotonic()
+                if now - self._last_queue_warning > 5.0:
+                    logger.error("Frame enqueue failed: %s", exc)
+                    self._last_queue_warning = now
         except RuntimeError:
             # Loop may be closing; drop frame silently
             pass
@@ -778,18 +793,22 @@ class CameraStreamService:
             # Create frame message
             message = {
                 "type": "frame",
-                "data": frame.model_dump()
+                "data": frame.model_dump(mode="json")
             }
             message_data = json.dumps(message).encode() + b'\n'
             
             # Send to all clients
             disconnected_clients = set()
             
-            for client in self.clients:
+            for client in list(self.clients):
                 try:
                     client.write(message_data)
-                    await client.drain()
+                    await asyncio.wait_for(client.drain(), timeout=self._client_drain_timeout)
                     self.stream.statistics.bytes_transmitted += len(message_data)
+                except asyncio.TimeoutError:
+                    logger.warning("Camera client drain exceeded %.2fs; disconnecting", self._client_drain_timeout)
+                    disconnected_clients.add(client)
+                    self.stream.statistics.transmission_errors += 1
                 except Exception as e:
                     logger.warning(f"Failed to send frame to client: {e}")
                     disconnected_clients.add(client)

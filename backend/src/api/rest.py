@@ -15,6 +15,7 @@ import logging
 from email.utils import format_datetime, parsedate_to_datetime
 import uuid
 import io
+import ipaddress
 from ..models.auth_security_config import AuthSecurityConfig, SecurityLevel, TOTPConfig, GoogleAuthConfig
 from ..models.remote_access_config import RemoteAccessConfig
 from ..models.telemetry_exchange import ComponentId, ComponentStatus, HardwareTelemetryStream
@@ -32,6 +33,7 @@ from ..services.weather_service import weather_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+legacy_router = APIRouter()
 
 # WebSocket Hub for real-time communication
 class WebSocketHub:
@@ -155,7 +157,17 @@ class WebSocketHub:
         self._ntrip_forwarder = forwarder
 
     async def connect(self, websocket: WebSocket, client_id: str):
-        await websocket.accept()
+        subprotocol = None
+        try:
+            header_value = websocket.headers.get("sec-websocket-protocol")
+        except Exception:
+            header_value = None
+        if header_value:
+            protocols = [token.strip() for token in header_value.split(",") if token.strip()]
+            if protocols:
+                subprotocol = protocols[0]
+
+        await websocket.accept(subprotocol=subprotocol)
         self.clients[client_id] = websocket
         await websocket.send_text(json.dumps({
             "event": "connection.established",
@@ -1054,7 +1066,8 @@ async def get_calibration_status(request: Request) -> IMUCalibrationStatusRespon
 
 # ------------------------ WebSockets ------------------------
 
-@router.websocket("/api/v2/ws/telemetry")
+@router.websocket("/ws/telemetry")
+@legacy_router.websocket("/ws/telemetry")
 async def ws_telemetry(websocket: WebSocket):
     """Primary WebSocket endpoint for telemetry topics.
 
@@ -1108,7 +1121,8 @@ async def ws_telemetry(websocket: WebSocket):
         return
 
 
-@router.websocket("/api/v2/ws/control")
+@router.websocket("/ws/control")
+@legacy_router.websocket("/ws/control")
 async def ws_control(websocket: WebSocket):
     """Secondary WebSocket endpoint for control channel events.
 
@@ -3899,7 +3913,7 @@ def _build_handshake_response(*, protocol: str, key: str, latency_budget_ms: int
     return Response(status_code=status.HTTP_101_SWITCHING_PROTOCOLS, headers=headers)
 
 
-def _validate_websocket_upgrade(request: Request, *, expected_protocol: str) -> str:
+def _validate_websocket_upgrade(request: Request, *, expected_protocol: str) -> tuple[str, str]:
     upgrade_header = request.headers.get("upgrade", "").lower()
     connection_header = request.headers.get("connection", "")
     if upgrade_header != "websocket" or "upgrade" not in connection_header.lower():
@@ -3909,29 +3923,55 @@ def _validate_websocket_upgrade(request: Request, *, expected_protocol: str) -> 
     if version and version != "13":
         raise HTTPException(status_code=426, detail="Unsupported WebSocket version")
 
-    protocol = request.headers.get("sec-websocket-protocol")
-    if protocol != expected_protocol:
-        raise HTTPException(status_code=400, detail="Unsupported WebSocket protocol")
+    negotiated_protocol = expected_protocol
+    protocol_header = request.headers.get("sec-websocket-protocol")
+    if protocol_header:
+        protocols = [token.strip() for token in protocol_header.split(",") if token.strip()]
+        if expected_protocol not in protocols:
+            raise HTTPException(status_code=400, detail="Unsupported WebSocket protocol")
+        negotiated_protocol = expected_protocol
 
     key = request.headers.get("sec-websocket-key")
     if not key:
         raise HTTPException(status_code=400, detail="Missing Sec-WebSocket-Key")
 
-    return key
+    return key, negotiated_protocol
 
 
 def _require_bearer_auth(request: Request) -> None:
     auth_header = request.headers.get("authorization")
-    if not auth_header or not auth_header.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        return
+
+    client_host: Optional[str] = None
+    if request.client:
+        client_host = request.client.host
+
+    allow_without_token = False
+    if client_host:
+        try:
+            client_ip = ipaddress.ip_address(client_host)
+            if client_ip.is_loopback or client_ip.is_private:
+                allow_without_token = True
+        except ValueError:
+            # Non-IP host (e.g., unix socket); treat as local and allow
+            allow_without_token = True
+
+    if allow_without_token:
+        logger.debug("Permitting WebSocket handshake without bearer token from %s", client_host or "local")
+        return
+
+    logger.warning("Rejected WebSocket handshake without bearer token from %s", client_host or "unknown")
+    raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @router.get("/ws/telemetry")
+@legacy_router.get("/ws/telemetry")
 async def websocket_telemetry_handshake(request: Request):
     _require_bearer_auth(request)
-    key = _validate_websocket_upgrade(request, expected_protocol="telemetry.v1")
+    key, protocol = _validate_websocket_upgrade(request, expected_protocol="telemetry.v1")
     return _build_handshake_response(
-        protocol="telemetry.v1",
+        protocol=protocol,
         key=key,
         latency_budget_ms=200,
         payload_schema="#/components/schemas/HardwareTelemetryStream",
@@ -3939,11 +3979,12 @@ async def websocket_telemetry_handshake(request: Request):
 
 
 @router.get("/ws/control")
+@legacy_router.get("/ws/control")
 async def websocket_control_handshake(request: Request):
     _require_bearer_auth(request)
-    key = _validate_websocket_upgrade(request, expected_protocol="control.v1")
+    key, protocol = _validate_websocket_upgrade(request, expected_protocol="control.v1")
     return _build_handshake_response(
-        protocol="control.v1",
+        protocol=protocol,
         key=key,
         latency_budget_ms=150,
         payload_schema="#/components/schemas/ControlCommandResponse",
@@ -3951,11 +3992,12 @@ async def websocket_control_handshake(request: Request):
 
 
 @router.get("/ws/settings")
+@legacy_router.get("/ws/settings")
 async def websocket_settings_handshake(request: Request):
     _require_bearer_auth(request)
-    key = _validate_websocket_upgrade(request, expected_protocol="settings.v1")
+    key, protocol = _validate_websocket_upgrade(request, expected_protocol="settings.v1")
     return _build_handshake_response(
-        protocol="settings.v1",
+        protocol=protocol,
         key=key,
         latency_budget_ms=300,
         payload_schema="#/components/schemas/SettingsProfile",
@@ -3963,130 +4005,14 @@ async def websocket_settings_handshake(request: Request):
 
 
 @router.get("/ws/notifications")
+@legacy_router.get("/ws/notifications")
 async def websocket_notifications_handshake(request: Request):
     _require_bearer_auth(request)
-    key = _validate_websocket_upgrade(request, expected_protocol="notifications.v1")
+    key, protocol = _validate_websocket_upgrade(request, expected_protocol="notifications.v1")
     return _build_handshake_response(
-        protocol="notifications.v1",
+        protocol=protocol,
         key=key,
         latency_budget_ms=500,
         payload_schema="#/components/schemas/NotificationEvent",
     )
 
-
-@router.websocket("/ws/telemetry")
-async def websocket_telemetry_endpoint(websocket: WebSocket):
-    client_id = f"client_{int(time.time())}"
-    
-    try:
-        await websocket_hub.connect(websocket, client_id)
-        
-        # Start telemetry broadcasting
-        await websocket_hub.start_telemetry_loop()
-        
-        while True:
-            try:
-                # Receive client messages
-                data = await websocket.receive_text()
-                message = json.loads(data)
-                
-                message_type = message.get("type")
-                
-                if message_type == "subscribe":
-                    topic = message.get("topic")
-                    if topic and _is_valid_topic(topic):
-                        await websocket_hub.subscribe(client_id, topic)
-                    else:
-                        await websocket.send_text(json.dumps({
-                            "event": "subscription.error",
-                            "error": "Invalid topic",
-                            "valid_topics": _get_valid_topics(),
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }))
-                        
-                elif message_type == "unsubscribe":
-                    topic = message.get("topic")
-                    if topic:
-                        await websocket_hub.unsubscribe(client_id, topic)
-                        
-                elif message_type == "set_cadence":
-                    cadence_hz = message.get("cadence_hz", 5.0)
-                    await websocket_hub.set_cadence(client_id, cadence_hz)
-                
-                elif message_type == "ping":
-                    # Heartbeat: reply with pong
-                    await websocket.send_text(json.dumps({
-                        "event": "pong",
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    }))
-                    
-                elif message_type == "list_topics":
-                    # Send available topics
-                    await websocket.send_text(json.dumps({
-                        "event": "topics.list",
-                        "topics": _get_valid_topics(),
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    }))
-                    
-            except WebSocketDisconnect:
-                break
-            except json.JSONDecodeError:
-                # Invalid JSON, ignore
-                continue
-                
-    finally:
-        websocket_hub.disconnect(client_id)
-
-
-def _is_valid_topic(topic: str) -> bool:
-    """Validate WebSocket topic names."""
-    valid_topics = _get_valid_topics()
-    return topic in valid_topics
-
-
-def _get_valid_topics() -> list[str]:
-    """Get list of valid WebSocket topics."""
-    return [
-        # Legacy topics (backward compatibility)
-        "telemetry/updates",
-        
-        # Telemetry topics
-        "telemetry.sensors",
-        "telemetry.navigation", 
-        "telemetry.motors",
-        "telemetry.power",
-    "telemetry.environmental",
-    "telemetry.tof",
-        "telemetry.camera",
-        "telemetry.weather",
-        "telemetry.system",
-        
-        # Job/operation topics
-        "jobs.status",
-        "jobs.progress", 
-        "jobs.queue",
-        
-        # Navigation/mapping topics
-        "navigation.position",
-        "navigation.path",
-        "navigation.zones",
-        
-        # Alerts/notifications
-        "alerts.safety",
-        "alerts.maintenance",
-        "alerts.weather",
-        "alerts.system",
-        
-        # System status topics
-        "system.health",
-        "system.connectivity",
-        "system.performance",
-        
-        # Control/command topics
-        "control.manual",
-        "control.autonomous",
-        
-        # Configuration topics
-        "config.updates",
-        "config.validation"
-    ]

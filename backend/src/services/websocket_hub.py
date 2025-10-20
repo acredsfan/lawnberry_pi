@@ -20,7 +20,17 @@ class WebSocketHub:
         
     async def connect(self, websocket: WebSocket, client_id: str):
         """Connect a new WebSocket client."""
-        await websocket.accept()
+        subprotocol = None
+        try:
+            header_value = websocket.headers.get("sec-websocket-protocol")
+        except Exception:
+            header_value = None
+        if header_value:
+            protocols = [token.strip() for token in header_value.split(",") if token.strip()]
+            if protocols:
+                subprotocol = protocols[0]
+
+        await websocket.accept(subprotocol=subprotocol)
         self.clients[client_id] = websocket
         
         # Send connection confirmation
