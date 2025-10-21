@@ -336,6 +336,18 @@ Thumbs.db
 
 # LawnBerryPi_logo.png# Environment variables
 
+# Checklists/Todo lists
+
+PRODUCTION_READINESS_TODO.md
+AVAILABLE_TOOLS.md
+CODEBASE_ANALYSIS_REPORT.md
+CLEANUP_MANIFEST.md
+LawnBerryPi_EngineeringPlan.md
+REPOSITORY_RESTRUCTURE_MANIFEST.md
+CHAT_MODE_MODEL_SELECTION.md
+
+# Secrets and environment
+
 .env
 .env.local
 .env.*.local
@@ -421,3 +433,10 @@ ENV/
 .virtualenv/
 venv-coral/
 Remaining_features.md
+test_satellite_setting.html
+test_error_handling.html
+frontend/tests/unit/test_satellite_google_maps.spec.ts
+frontend/tests/unit/test_satellite_osm_provider.spec.ts
+frontend/tests/unit/test_satellite_settings_persistence.spec.ts
+tests/integration/test_satellite_settings_api.py
+tests/unit/test_manual_control_unlock.py

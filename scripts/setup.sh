@@ -120,4 +120,35 @@ if [[ $UPDATE -eq 1 ]]; then
   (cd "$ROOT_DIR" && uv lock && uv sync)
 fi
 
+# Ensure cloudflared tunnel binary is installed
+if ! command -v cloudflared >/dev/null 2>&1; then
+  echo "[setup] Installing Cloudflare Tunnel (cloudflared)..."
+  TMP_DEB="$(mktemp)"
+  if curl -fsSL --output "$TMP_DEB" https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb; then
+    if ! sudo dpkg -i "$TMP_DEB" >/dev/null 2>&1; then
+      echo "[setup] cloudflared install reported missing dependencies; attempting fix..."
+      sudo apt-get install -y -f >/dev/null 2>&1
+      sudo dpkg -i "$TMP_DEB" >/dev/null 2>&1
+    fi
+  else
+    echo "[setup] WARNING: Failed to download cloudflared binary. Please install manually." >&2
+  fi
+  rm -f "$TMP_DEB"
+else
+  echo "[setup] cloudflared already installed"
+fi
+
+# Ensure ngrok agent is available as fallback provider
+if ! command -v ngrok >/dev/null 2>&1; then
+  echo "[setup] Installing ngrok agent..."
+  if [[ ! -f /etc/apt/sources.list.d/ngrok.list ]]; then
+    curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+    echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list >/dev/null
+  fi
+  sudo apt-get update >/dev/null 2>&1
+  sudo apt-get install -y ngrok >/dev/null 2>&1 || echo "[setup] WARNING: Failed to install ngrok; install manually if needed." >&2
+else
+  echo "[setup] ngrok already installed"
+fi
+
 echo "[setup] Complete. You can now run the backend."

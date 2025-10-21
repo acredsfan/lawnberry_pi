@@ -153,5 +153,5 @@ export interface VerificationArtifact {
   created_by: string;
   created_at: string;
   summary: string;
-  linked_requirements: string[];  // FR-XXX format
+  linked_requirements: string[];  // Functional requirement IDs (e.g., FR-001)
 }

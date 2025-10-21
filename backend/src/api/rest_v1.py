@@ -4,12 +4,16 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from datetime import datetime, timezone
 from typing import List, Optional, Dict
-import time
+import os
 import hashlib
 import json
 from email.utils import format_datetime
 
+from ..services.auth_service import AuthenticationError, primary_auth_service
+
 router = APIRouter()
+
+_auth_service = primary_auth_service
 
 
 # --- Status Endpoint Models ---
@@ -97,29 +101,34 @@ def get_status():
 
 
 @router.post("/auth/login", response_model=AuthResponse)
-def auth_login(payload: AuthLoginRequest):
+async def auth_login(payload: AuthLoginRequest, request: Request):
     """Start login flow (MFA compatible)."""
-    # Determine provided credentials
-    provided_credential = None
-    if payload.credential:
-        provided_credential = payload.credential
-    elif payload.username and payload.password:
-        # Simple compatibility: allow default admin/admin
+    expected_secret = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL", "operator123")
+    credential = payload.credential
+    if credential is None and payload.username and payload.password:
         if payload.username == "admin" and payload.password == "admin":
-            provided_credential = "operator123"
-    
-    # Validate credential
-    if provided_credential != "operator123":
+            credential = expected_secret
+        else:
+            credential = ""
+
+    if credential != expected_secret:
         raise HTTPException(status_code=401, detail="Authentication failed")
-    
-    # Issue token
-    token = "lbp1-" + hashlib.sha256(f"v1-{time.time()}".encode()).hexdigest()[:32]
-    user = UserResponse(id="admin", username="admin")
-    
-    return AuthResponse(
-        access_token=token,
-        user=user
-    )
+
+    try:
+        result = await _auth_service.authenticate(
+            credential or "",
+            client_identifier=request.headers.get("X-Client-Id"),
+            client_ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("User-Agent"),
+        )
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail, headers=exc.headers)
+
+    session = result.session
+    user = UserResponse(id=session.user_id, username=session.username, role=session.security_context.role.value)
+    expires_in = max(0, int((result.expires_at - datetime.now(timezone.utc)).total_seconds()))
+
+    return AuthResponse(access_token=result.token, expires_in=expires_in, user=user)
 
 
 @router.get("/maps/zones", response_model=List[Zone])

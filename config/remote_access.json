@@ -1,0 +1,19 @@
+{
+  "cloudflare": {
+    "account_id": null,
+    "credentials_file": null,
+    "hostname": "mower.example.com",
+    "tunnel_name": "lb-tun"
+  },
+  "custom": {
+    "command": null,
+    "env": {}
+  },
+  "enabled": false,
+  "ngrok": {
+    "authtoken": null,
+    "edge": null,
+    "region": "us"
+  },
+  "provider": "disabled"
+}

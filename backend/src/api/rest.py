@@ -3,7 +3,8 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response, Streami
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timedelta, timezone
 import math
-from typing import Optional, Any
+from typing import Optional, Any, Dict, Mapping
+import inspect
 from pathlib import Path
 import os
 import json
@@ -17,7 +18,15 @@ import uuid
 import io
 import ipaddress
 from ..models.auth_security_config import AuthSecurityConfig, SecurityLevel, TOTPConfig, GoogleAuthConfig
+from ..models.user_session import UserSession
 from ..models.remote_access_config import RemoteAccessConfig
+from ..services.remote_access_service import (
+    CONFIG_PATH as REMOTE_ACCESS_CONFIG_PATH,
+    STATUS_PATH as REMOTE_ACCESS_STATUS_PATH,
+    RemoteAccessService,
+    RemoteAccessStatus,
+)
+from ..services.auth_service import AuthenticationError, primary_auth_service
 from ..models.telemetry_exchange import ComponentId, ComponentStatus, HardwareTelemetryStream
 from ..models.sensor_data import GpsMode
 from ..models.hardware_config import GPSType
@@ -158,12 +167,22 @@ class WebSocketHub:
 
     async def connect(self, websocket: WebSocket, client_id: str):
         subprotocol = None
+        header_value = None
         try:
-            header_value = websocket.headers.get("sec-websocket-protocol")
+            headers = getattr(websocket, "headers", None)
+            if headers is not None:
+                getter = getattr(headers, "get", None)
+                if callable(getter):
+                    value = getter("sec-websocket-protocol")
+                    if inspect.isawaitable(value):
+                        value = await value
+                    header_value = value
+                elif isinstance(headers, Mapping):
+                    header_value = headers.get("sec-websocket-protocol")
         except Exception:
             header_value = None
         if header_value:
-            protocols = [token.strip() for token in header_value.split(",") if token.strip()]
+            protocols = [token.strip() for token in str(header_value).split(",") if token.strip()]
             if protocols:
                 subprotocol = protocols[0]
 
@@ -472,12 +491,30 @@ class WebSocketHub:
         await self.broadcast_to_topic("system.performance", perf_data)
         
         # Connectivity status
+        try:
+            ra_status = RemoteAccessService.load_status_from_disk(
+                REMOTE_ACCESS_STATUS_PATH,
+                configured_provider=_remote_access_settings.provider,
+                enabled=_remote_access_settings.enabled,
+            )
+        except Exception:  # pragma: no cover - defensive
+            ra_status = RemoteAccessStatus(
+                provider=_remote_access_settings.provider,
+                configured_provider=_remote_access_settings.provider,
+                enabled=_remote_access_settings.enabled,
+                active=False,
+                message="unavailable",
+            )
         conn_data = {
             "wifi_signal_strength": random.randint(-80, -30),
             "internet_connected": random.choice([True, False]),
             "mqtt_connected": random.choice([True, False]),
-            "remote_access_active": random.choice([True, False]),
-            "source": "simulated"
+            "remote_access_active": ra_status.active,
+            "remote_access_provider": ra_status.provider,
+            "remote_access_url": ra_status.url,
+            "remote_access_health": ra_status.health,
+            "remote_access_message": ra_status.message,
+            "source": "live" if ra_status.last_checked else "simulated",
         }
         await self.broadcast_to_topic("system.connectivity", conn_data)
 
@@ -739,6 +776,110 @@ _app_start_time = time.time()
 
 # Simple in-memory overrides for debug injections (SIM_MODE-friendly)
 _debug_overrides: dict[str, Any] = {}
+
+# Manual control unlock sessions
+_manual_control_sessions: dict[str, dict[str, Any]] = {}
+
+
+class ManualUnlockRequest(BaseModel):
+    method: Optional[str] = None
+    password: Optional[str] = None
+    totp_code: Optional[str] = None
+
+
+class ManualUnlockResponse(BaseModel):
+    authorized: bool
+    session_id: str
+    expires_at: str
+    principal: Optional[str] = None
+    source: str = "manual_control"
+
+
+class ManualUnlockStatusResponse(BaseModel):
+    authorized: bool
+    session_id: Optional[str] = None
+    expires_at: Optional[str] = None
+    principal: Optional[str] = None
+    reason: Optional[str] = None
+
+
+def _decode_jwt_payload(token: str) -> Dict[str, Any]:
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        payload_segment = parts[1]
+        padding = "=" * ((4 - len(payload_segment) % 4) % 4)
+        decoded = base64.urlsafe_b64decode((payload_segment + padding).encode("utf-8"))
+        data = json.loads(decoded.decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _manual_session_expiry(default_minutes: int | None = None, token_payload: Dict[str, Any] | None = None) -> datetime:
+    now = datetime.now(timezone.utc)
+    if token_payload and isinstance(token_payload.get("exp"), (int, float)):
+        try:
+            exp = datetime.fromtimestamp(float(token_payload["exp"]), tz=timezone.utc)
+            if exp > now:
+                return exp
+        except Exception:
+            pass
+    minutes = default_minutes or 60
+    try:
+        minutes = int(minutes)
+    except Exception:
+        minutes = 60
+    return now + timedelta(minutes=max(1, minutes))
+
+
+def _manual_session_key(seed: str) -> str:
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    return f"manual-{digest[:16]}"
+
+
+def _store_manual_session(seed: str, expires_at: datetime, principal: Optional[str]) -> dict[str, Any]:
+    # Garbage collect expired sessions first
+    now = datetime.now(timezone.utc)
+    for key in list(_manual_control_sessions.keys()):
+        if _manual_control_sessions[key]["expires_at"] <= now:
+            _manual_control_sessions.pop(key, None)
+
+    entry = _manual_control_sessions.get(seed)
+    if entry:
+        entry["expires_at"] = expires_at
+        if principal:
+            entry["principal"] = principal
+        return entry
+
+    session_id = _manual_session_key(seed)
+    entry = {
+        "session_id": session_id,
+        "expires_at": expires_at,
+        "principal": principal,
+    }
+    _manual_control_sessions[seed] = entry
+    return entry
+
+
+def _extract_cloudflare_identity(request: Request) -> tuple[Optional[str], Dict[str, Any], Optional[str]]:
+    token = request.headers.get("CF-Access-Jwt-Assertion") or request.headers.get("cf-access-jwt-assertion")
+    if not token:
+        token = request.cookies.get("CF_Authorization")
+    payload = _decode_jwt_payload(token) if token else {}
+    email = (
+        request.headers.get("CF-Access-Authenticated-User-Email")
+        or request.headers.get("cf-access-authenticated-user-email")
+        or payload.get("email")
+        or payload.get("sub")
+    )
+    if email:
+        try:
+            email = str(email)
+        except Exception:
+            email = None
+    return token, payload, email
 
 
 # ------------------------ Sensors (Health + Debug) ------------------------
@@ -1106,7 +1247,9 @@ async def ws_telemetry(websocket: WebSocket):
     {"type": "ping"}
     {"type": "list_topics"}
     """
+    session = await _authorize_websocket(websocket)
     client_id = "ws-" + uuid.uuid4().hex
+    session.add_websocket_connection(client_id, endpoint="/api/v2/ws/telemetry")
     try:
         await websocket_hub.connect(websocket, client_id)
         # Ensure telemetry loop is running
@@ -1145,8 +1288,10 @@ async def ws_telemetry(websocket: WebSocket):
                 }))
             # Unknown message types are ignored for forward compatibility
     except WebSocketDisconnect:
+        pass
+    finally:
         websocket_hub.disconnect(client_id)
-        return
+        session.remove_websocket_connection(client_id)
 
 
 @router.websocket("/ws/control")
@@ -1157,7 +1302,9 @@ async def ws_control(websocket: WebSocket):
     We currently only acknowledge and keep the socket for presence; messages
     are accepted with the same lightweight schema as telemetry.
     """
+    session = await _authorize_websocket(websocket)
     client_id = "ctrl-" + uuid.uuid4().hex
+    session.add_websocket_connection(client_id, endpoint="/api/v2/ws/control")
     try:
         await websocket.accept()
         await websocket.send_text(json.dumps({
@@ -1173,7 +1320,9 @@ async def ws_control(websocket: WebSocket):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }))
     except WebSocketDisconnect:
-        return
+        pass
+    finally:
+        session.remove_websocket_connection(client_id)
 
 
 class InjectToFRequest(BaseModel):
@@ -1263,82 +1412,93 @@ class AuthResponse(BaseModel):
 
 
 # ------------------------ Auth Hardening ------------------------
+_auth_service = primary_auth_service
 
-# Rate limiting and lockout (simple in-memory, per client)
-AUTH_WINDOW_SECONDS = 60
-AUTH_MAX_ATTEMPTS_PER_WINDOW = 3
-AUTH_LOCKOUT_FAILED_ATTEMPTS = 3
-AUTH_LOCKOUT_SECONDS = 60
 
-_auth_attempts: dict[str, list[float]] = {}
-_auth_failed_counts: dict[str, int] = {}
-_auth_lockout_until: dict[str, float] = {}
+def _client_identifier(request: Request) -> Optional[str]:
+    header = request.headers.get("X-Client-Id")
+    if header:
+        return header
+    request_id = request.headers.get("X-Request-ID")
+    if request_id:
+        return f"request:{request_id}"
+    correlation = request.headers.get("X-Correlation-ID")
+    if correlation:
+        return f"correlation:{correlation}"
+    if os.getenv("SIM_MODE", "0") == "1":
+        return f"sim:{uuid.uuid4().hex}"
+    return None
+
+
+def _client_ip(request: Request) -> Optional[str]:
+    client = request.client
+    if client and getattr(client, "host", None):
+        return str(client.host)
+    return None
+
+
+def _extract_bearer_token(auth_header: Optional[str]) -> Optional[str]:
+    if not auth_header:
+        return None
+    scheme, _, token = auth_header.strip().partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token.strip() or None
+
+
+async def _require_session(request: Request) -> UserSession:
+    token = _extract_bearer_token(request.headers.get("Authorization"))
+    if not token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    session = await _auth_service.verify_token(token)
+    if not session:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return session
+
+
+async def _authorize_websocket(websocket: WebSocket) -> UserSession:
+    token = _extract_bearer_token(websocket.headers.get("Authorization"))
+    if not token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    session = await _auth_service.verify_token(token)
+    if not session:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return session
 
 
 @router.post("/auth/login", response_model=AuthResponse)
-def auth_login(payload: AuthLoginRequest, request: Request):
-    now = time.time()
-    client_id = request.headers.get("X-Client-Id")
-    if not client_id:
-        # Use per-request unique ID to avoid cross-test rate limiting when header is absent
-        client_id = "anon-" + uuid.uuid4().hex
-
-    # Lockout check
-    lock_until = _auth_lockout_until.get(client_id)
-    if lock_until and now < lock_until:
-        retry_after = int(max(1, lock_until - now))
-        raise HTTPException(status_code=429, detail="Too Many Requests", headers={"Retry-After": str(retry_after)})
-
-    # Rate limit: prune old attempts, then check
-    attempts = _auth_attempts.get(client_id, [])
-    cutoff = now - AUTH_WINDOW_SECONDS
-    attempts = [t for t in attempts if t >= cutoff]
-    if len(attempts) >= AUTH_MAX_ATTEMPTS_PER_WINDOW:
-        # Compute retry-after based on oldest attempt in window
-        oldest = min(attempts)
-        retry_after = int(max(1, AUTH_WINDOW_SECONDS - (now - oldest)))
-        _auth_attempts[client_id] = attempts  # persist pruned list
-        raise HTTPException(status_code=429, detail="Too Many Requests", headers={"Retry-After": str(retry_after)})
-
-    # Record this attempt before validating (rate limit applies to all attempts)
-    attempts.append(now)
-    _auth_attempts[client_id] = attempts
-
-    # Determine provided credentials
-    provided_credential = None
-    if payload.credential:
-        provided_credential = payload.credential
-    elif payload.username is not None or payload.password is not None:
-        # Simple compatibility: allow default admin/admin
+async def auth_login(payload: AuthLoginRequest, request: Request):
+    credential = payload.credential
+    if credential is None and payload.username is not None and payload.password is not None:
         if payload.username == "admin" and payload.password == "admin":
-            provided_credential = "operator123"
+            credential = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL", "operator123")
         else:
-            provided_credential = None
+            credential = ""
 
-    # Validate credential
-    if not provided_credential:
-        # Increment failed count
-        failed = _auth_failed_counts.get(client_id, 0) + 1
-        _auth_failed_counts[client_id] = failed
-        # Activate lockout after threshold
-        if failed >= AUTH_LOCKOUT_FAILED_ATTEMPTS:
-            _auth_lockout_until[client_id] = now + AUTH_LOCKOUT_SECONDS
-        raise HTTPException(status_code=401, detail="Authentication failed")
+    try:
+        result = await _auth_service.authenticate(
+            credential or "",
+            client_identifier=_client_identifier(request),
+            client_ip=_client_ip(request),
+            user_agent=request.headers.get("User-Agent"),
+        )
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail, headers=exc.headers)
 
-    # Successful login resets failed count
-    _auth_failed_counts[client_id] = 0
+    session = result.session
+    user = UserOut(
+        id=session.user_id,
+        username=session.username,
+        role=session.security_context.role.value,
+        created_at=session.created_at,
+    )
+    expires_in = max(0, int((result.expires_at - datetime.now(timezone.utc)).total_seconds()))
 
-    # Issue a dummy token compatible with frontend and tests
-    token = "lbp2-" + hashlib.sha256(f"{client_id}-{now}".encode()).hexdigest()[:32]
-    user = UserOut(id="admin", username="admin")
-    expires_in = 3600
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
     return AuthResponse(
-        access_token=token,
-        token=token,
-        token_type="bearer",
+        access_token=result.token,
+        token=result.token,
         expires_in=expires_in,
-        expires_at=expires_at,
+        expires_at=result.expires_at,
         user=user,
     )
 
@@ -1352,22 +1512,29 @@ class RefreshResponse(BaseModel):
 
 
 @router.post("/auth/refresh", response_model=RefreshResponse)
-def auth_refresh():
-    # Return a new dummy token
-    token = "lbp2-" + hashlib.sha256(f"refresh-{time.time()}".encode()).hexdigest()[:32]
-    expires_in = 3600
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
-    return RefreshResponse(access_token=token, token=token, expires_in=expires_in, expires_at=expires_at)
+async def auth_refresh(request: Request):
+    session = await _require_session(request)
+    result = _auth_service.refresh_session_token(session)
+    expires_in = max(0, int((result.expires_at - datetime.now(timezone.utc)).total_seconds()))
+    return RefreshResponse(access_token=result.token, token=result.token, expires_in=expires_in, expires_at=result.expires_at)
 
 
 @router.post("/auth/logout")
-def auth_logout():
+async def auth_logout(request: Request):
+    session = await _require_session(request)
+    await _auth_service.terminate_session(session.session_id, "user_logout")
     return {"ok": True}
 
 
 @router.get("/auth/profile", response_model=UserOut)
-def auth_profile():
-    return UserOut(id="admin", username="admin")
+async def auth_profile(request: Request):
+    session = await _require_session(request)
+    return UserOut(
+        id=session.user_id,
+        username=session.username,
+        role=session.security_context.role.value,
+        created_at=session.created_at,
+    )
 
 
 class Position(BaseModel):
@@ -2006,6 +2173,61 @@ async def get_robohat_status():
         payload["telemetry_source"] = "unknown"
 
     return payload
+
+
+@router.get("/control/manual-unlock/status", response_model=ManualUnlockStatusResponse)
+async def manual_unlock_status(request: Request):
+    token, payload, principal = _extract_cloudflare_identity(request)
+    if not token:
+        return ManualUnlockStatusResponse(
+            authorized=False,
+            reason="missing_cloudflare_token",
+        )
+
+    timeout_minutes = getattr(_security_settings, "session_timeout_minutes", 60)
+    expires_at = _manual_session_expiry(timeout_minutes, payload)
+    session_entry = _store_manual_session(token, expires_at, principal)
+    return ManualUnlockStatusResponse(
+        authorized=True,
+        session_id=session_entry["session_id"],
+        expires_at=session_entry["expires_at"].isoformat(),
+        principal=session_entry.get("principal"),
+    )
+
+
+@router.post("/control/manual-unlock", response_model=ManualUnlockResponse)
+async def manual_unlock(request: Request, body: ManualUnlockRequest):
+    method = (body.method or "").lower()
+    if method in {"cloudflare", "cloudflare_tunnel_auth", "tunnel"}:
+        token, payload, principal = _extract_cloudflare_identity(request)
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Cloudflare Access token missing",
+            )
+
+        timeout_minutes = getattr(_security_settings, "session_timeout_minutes", 60)
+        expires_at = _manual_session_expiry(timeout_minutes, payload)
+        session_entry = _store_manual_session(token, expires_at, principal)
+        return ManualUnlockResponse(
+            authorized=True,
+            session_id=session_entry["session_id"],
+            expires_at=session_entry["expires_at"].isoformat(),
+            principal=session_entry.get("principal"),
+            source="cloudflare_access",
+        )
+
+    if method in {"password", "password_only", "totp", "google", "google_auth"}:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Manual unlock method is not implemented on the backend",
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Unknown manual unlock method",
+    )
+
 
 class Vector2D(BaseModel):
     linear: float
@@ -3511,13 +3733,31 @@ def put_settings_security(update: dict):
 
 
 # Remote access settings (Cloudflare, ngrok, custom)
-_remote_access_settings = RemoteAccessConfig()
-_remote_access_last_modified: datetime = datetime.now(timezone.utc)
+_remote_access_settings = RemoteAccessService.load_config_from_disk(REMOTE_ACCESS_CONFIG_PATH)
+try:
+    _remote_access_last_modified: datetime = datetime.fromtimestamp(
+        REMOTE_ACCESS_CONFIG_PATH.stat().st_mtime,
+        timezone.utc,
+    )
+except FileNotFoundError:
+    _remote_access_last_modified = datetime.now(timezone.utc)
 
 
 @router.get("/settings/remote-access")
 def get_settings_remote_access(request: Request):
+    global _remote_access_settings, _remote_access_last_modified
+    _remote_access_settings = RemoteAccessService.load_config_from_disk(REMOTE_ACCESS_CONFIG_PATH)
+    try:
+        _remote_access_last_modified = datetime.fromtimestamp(
+            REMOTE_ACCESS_CONFIG_PATH.stat().st_mtime,
+            timezone.utc,
+        )
+    except FileNotFoundError:
+        _remote_access_last_modified = datetime.now(timezone.utc)
+
+    status = RemoteAccessService.load_status_from_disk(REMOTE_ACCESS_STATUS_PATH, configured_provider=_remote_access_settings.provider, enabled=_remote_access_settings.enabled)
     data = _remote_access_settings.model_dump(mode="json")
+    data["status"] = status.to_dict()
     body = json.dumps(data, sort_keys=True).encode()
     etag = hashlib.sha256(body).hexdigest()
     inm = request.headers.get("if-none-match")
@@ -3544,13 +3784,27 @@ def get_settings_remote_access(request: Request):
 @router.put("/settings/remote-access")
 def put_settings_remote_access(update: dict):
     global _remote_access_settings, _remote_access_last_modified
-    current = _remote_access_settings.model_dump()
-    for k, v in update.items():
-        current[k] = v
+    current_cfg = RemoteAccessService.load_config_from_disk(REMOTE_ACCESS_CONFIG_PATH)
+    current = current_cfg.model_dump()
+    current.update(update)
     try:
         _remote_access_settings = RemoteAccessConfig(**current)
-        _remote_access_last_modified = datetime.now(timezone.utc)
-        return _remote_access_settings.model_dump()
+        RemoteAccessService.save_config_to_disk(_remote_access_settings, REMOTE_ACCESS_CONFIG_PATH)
+        try:
+            _remote_access_last_modified = datetime.fromtimestamp(
+                REMOTE_ACCESS_CONFIG_PATH.stat().st_mtime,
+                timezone.utc,
+            )
+        except FileNotFoundError:
+            _remote_access_last_modified = datetime.now(timezone.utc)
+        status = RemoteAccessService.load_status_from_disk(
+            REMOTE_ACCESS_STATUS_PATH,
+            configured_provider=_remote_access_settings.provider,
+            enabled=_remote_access_settings.enabled,
+        )
+        data = _remote_access_settings.model_dump()
+        data["status"] = status.to_dict()
+        return data
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Invalid remote access settings: {str(e)}")
 
@@ -3967,29 +4221,13 @@ def _validate_websocket_upgrade(request: Request, *, expected_protocol: str) -> 
 
 
 def _require_bearer_auth(request: Request) -> None:
-    auth_header = request.headers.get("authorization")
-    if auth_header and auth_header.lower().startswith("bearer "):
+    token = _extract_bearer_token(request.headers.get("Authorization"))
+    if token:
         return
-
-    client_host: Optional[str] = None
-    if request.client:
-        client_host = request.client.host
-
-    allow_without_token = False
-    if client_host:
-        try:
-            client_ip = ipaddress.ip_address(client_host)
-            if client_ip.is_loopback or client_ip.is_private:
-                allow_without_token = True
-        except ValueError:
-            # Non-IP host (e.g., unix socket); treat as local and allow
-            allow_without_token = True
-
-    if allow_without_token:
-        logger.debug("Permitting WebSocket handshake without bearer token from %s", client_host or "local")
-        return
-
-    logger.warning("Rejected WebSocket handshake without bearer token from %s", client_host or "unknown")
+    logger.warning(
+        "Rejected WebSocket handshake without bearer token",
+        extra={"correlation_id": request.headers.get("X-Correlation-ID")},
+    )
     raise HTTPException(status_code=401, detail="Unauthorized")
 
 

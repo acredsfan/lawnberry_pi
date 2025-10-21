@@ -16,6 +16,7 @@ from .core.config_loader import ConfigLoader
 from .nav.gps_degradation import GPSDegradationMonitor
 from .services.robohat_service import initialize_robohat_service, shutdown_robohat_service
 from .services.camera_stream_service import camera_service
+from .middleware.security import register_security_middleware
 import os
 import logging
 
@@ -89,6 +90,8 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan
 )
+
+register_security_middleware(app)
 
 app.include_router(rest_router, prefix="/api/v2")
 app.include_router(rest_legacy_router)

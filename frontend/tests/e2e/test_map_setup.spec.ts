@@ -1,5 +1,5 @@
-describe('E2E Map setup polygon + validation (placeholder)', () => {
+describe('E2E Map polygon setup (placeholder)', () => {
   it('should allow drawing and validating polygons (TODO)', () => {
-    // TODO: Implement with Playwright/Cypress in future iteration
+    // TODO(v3): Implement with Playwright in future iteration - Issue #37
   })
 })

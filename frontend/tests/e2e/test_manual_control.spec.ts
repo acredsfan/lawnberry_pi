@@ -1,5 +1,5 @@
-describe('E2E Manual control gated by auth (placeholder)', () => {
+describe('E2E Manual control auth (placeholder)', () => {
   it('should restrict controls to authenticated users (TODO)', () => {
-    // TODO: Implement with Playwright/Cypress in future iteration
+    // TODO(v3): Implement with Playwright in future iteration - Issue #35
   })
 })

@@ -9,17 +9,18 @@ higher-level auth API. The facade methods adapt to the underlying
 AuthService implementation where possible.
 """
 
-import hashlib
-import hmac
 import logging
+import os
 import secrets
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional, Tuple
 
-try:
-    import jwt
-except ImportError:
-    jwt = None
+import bcrypt
+import jwt
+import pyotp
+from passlib.context import CryptContext
 
 from ..models import (
     UserSession, SecurityContext, UserRole, AuthenticationMethod,
@@ -28,121 +29,123 @@ from ..models import (
 from ..models.auth_security_config import (
     AuthSecurityConfig, SecurityLevel, TOTPConfig, GoogleAuthConfig
 )
+from ..core.context import get_correlation_id
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class AuthResult:
+    """Result of a successful authentication exchange."""
+
+    session: UserSession
+    token: str
+    expires_at: datetime
+
+
 class PasswordManager:
-    """Simple password hashing and verification"""
-    
-    def __init__(self):
-        self.salt = b"lawnberry_pi_v2_salt"  # In production, use random salt
-    
+    """Password hashing powered by passlib's CryptContext."""
+
+    def __init__(self) -> None:
+        self._context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
     def hash_password(self, password: str) -> str:
-        """Hash a password using SHA256"""
-        password_bytes = password.encode('utf-8')
-        return hashlib.pbkdf2_hmac('sha256', password_bytes, self.salt, 100000).hex()
-    
+        return self._context.hash(password)
+
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        """Verify a password against its hash"""
-        return self.hash_password(plain_password) == hashed_password
+        return self._context.verify(plain_password, hashed_password)
 
 
 class JWTManager:
     """JWT token management"""
     
-    def __init__(self, secret_key: str = None):
-        self.secret_key = secret_key or secrets.token_urlsafe(32)
+    def __init__(self, secret_key: str | None = None, *, expiry_hours: int = 8) -> None:
+        self.secret_key = secret_key or os.getenv("LAWN_BERRY_AUTH_SECRET") or secrets.token_urlsafe(32)
         self.algorithm = "HS256"
-        self.token_expiry_hours = 8
-    
-    def create_token(self, user_id: str, role: UserRole = UserRole.OPERATOR) -> str:
-        """Create a simple token"""
-        if jwt:
-            now = datetime.now(timezone.utc)
-            payload = {
-                "user_id": user_id,
-                "role": role.value,
-                "iat": now,
-                "exp": now + timedelta(hours=self.token_expiry_hours),
-                "iss": "lawnberry-pi-v2"
-            }
-            return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
-        else:
-            # Fallback simple token
-            return f"{user_id}:{role.value}:{secrets.token_urlsafe(32)}"
-    
+        self.token_expiry_hours = expiry_hours
+
+    def create_token(self, *, session_id: str, user_id: str, role: UserRole) -> Tuple[str, datetime]:
+        """Create a signed JWT token for the supplied session."""
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(hours=self.token_expiry_hours)
+        payload = {
+            "sub": user_id,
+            "sid": session_id,
+            "role": role.value,
+            "iat": int(now.timestamp()),
+            "exp": int(expires_at.timestamp()),
+            "iss": "lawnberry-pi-v2",
+        }
+        token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+        return token, expires_at
+
     def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
-        """Verify and decode a token"""
-        if jwt:
-            try:
-                payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
-                return payload
-            except jwt.ExpiredSignatureError:
-                logger.warning("JWT token expired")
-                return None
-            except jwt.InvalidTokenError as e:
-                logger.warning(f"Invalid JWT token: {e}")
-                return None
-        else:
-            # Simple token verification
-            parts = token.split(":")
-            if len(parts) == 3:
-                return {"user_id": parts[0], "role": parts[1]}
+        """Verify and decode a token."""
+        try:
+            return jwt.decode(token, self.secret_key, algorithms=[self.algorithm], options={"require": ["exp", "sid", "sub"]})
+        except jwt.ExpiredSignatureError:
+            logger.warning("JWT token expired", extra={"correlation_id": get_correlation_id()})
+            return None
+        except jwt.InvalidTokenError as exc:
+            logger.warning("Invalid JWT token", extra={"correlation_id": get_correlation_id(), "error": str(exc)})
             return None
 
 
 class RateLimiter:
-    """Rate limiting for login attempts"""
-    
-    def __init__(self):
-        self.attempts: Dict[str, list] = {}  # IP -> list of attempt timestamps
-        self.max_attempts = 5
-        self.window_minutes = 15
-        self.lockout_minutes = 30
-    
-    def is_rate_limited(self, ip_address: str) -> bool:
-        """Check if IP is rate limited"""
+    """Failure-driven rate limiter used for authentication attempts."""
+
+    def __init__(self, *, failure_limit: int = 3, lockout_seconds: int = 60) -> None:
+        self.failure_limit = max(1, failure_limit)
+        self.lockout_seconds = max(1, lockout_seconds)
+        self._failures: Dict[str, int] = {}
+        self._lockout_until: Dict[str, datetime] = {}
+
+    def lockout_remaining(self, key: str) -> Optional[int]:
         now = datetime.now(timezone.utc)
-        
-        if ip_address not in self.attempts:
-            return False
-        
-        # Clean old attempts
-        cutoff_time = now - timedelta(minutes=self.window_minutes)
-        self.attempts[ip_address] = [
-            attempt for attempt in self.attempts[ip_address]
-            if attempt > cutoff_time
-        ]
-        
-        # Check if rate limited
-        return len(self.attempts[ip_address]) >= self.max_attempts
-    
-    def record_attempt(self, ip_address: str):
-        """Record a login attempt"""
-        now = datetime.now(timezone.utc)
-        
-        if ip_address not in self.attempts:
-            self.attempts[ip_address] = []
-        
-        self.attempts[ip_address].append(now)
-    
-    def get_lockout_remaining(self, ip_address: str) -> Optional[int]:
-        """Get remaining lockout time in minutes"""
-        if ip_address not in self.attempts:
+        until = self._lockout_until.get(key)
+        if not until:
             return None
-        
-        if not self.attempts[ip_address]:
+        if now >= until:
+            self._lockout_until.pop(key, None)
+            self._failures.pop(key, None)
             return None
-        
-        last_attempt = max(self.attempts[ip_address])
-        lockout_end = last_attempt + timedelta(minutes=self.lockout_minutes)
+        return int(max(1, (until - now).total_seconds()))
+
+    def assert_not_locked(self, key: str) -> None:
+        remaining = self.lockout_remaining(key)
+        if remaining is not None:
+            raise AuthenticationError(
+                "Too many authentication attempts",
+                status_code=429,
+                retry_after=remaining,
+            )
+
+    def record_failure(self, key: str) -> Optional[int]:
         now = datetime.now(timezone.utc)
-        
-        if now < lockout_end:
-            return int((lockout_end - now).total_seconds() / 60)
-        
+        failures = self._failures.get(key, 0) + 1
+        self._failures[key] = failures
+        if failures >= self.failure_limit:
+            lockout_until = now + timedelta(seconds=self.lockout_seconds)
+            self._lockout_until[key] = lockout_until
+            self._failures[key] = 0
+            logger.warning(
+                "auth.login.lockout",
+                extra={
+                    "correlation_id": get_correlation_id(),
+                    "client_key": key,
+                    "lockout_seconds": self.lockout_seconds,
+                },
+            )
+            return int(self.lockout_seconds)
         return None
+
+    def reset(self, key: str) -> None:
+        self._failures.pop(key, None)
+        self._lockout_until.pop(key, None)
+
+    def locked_clients(self) -> list[str]:
+        now = datetime.now(timezone.utc)
+        return [key for key, until in self._lockout_until.items() if until > now]
 
 
 class AuthService:
@@ -152,67 +155,122 @@ class AuthService:
         # Managers
         self.password_manager = PasswordManager()
         self.jwt_manager = JWTManager()
-        self.rate_limiter = RateLimiter()
-        
+        self.rate_limiter = RateLimiter(failure_limit=3, lockout_seconds=60)
+
         # Single shared operator credential (per constitutional requirement)
-        self.operator_credential_hash = self._hash_credential(operator_credential)
-        
+        default_secret = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL", operator_credential)
+        self.operator_credential_hash = self._hash_credential(default_secret)
+
         # Active sessions
         self.active_sessions: Dict[str, UserSession] = {}
-        
+
         # Configuration
         self.session_timeout_hours = 8
         self.require_https = False  # Would be True in production
         self.audit_logging_enabled = True
+        self._simulation_mode = os.getenv("SIM_MODE", "0") == "1"
         
     def _hash_credential(self, credential: str) -> str:
         """Hash the operator credential"""
         return self.password_manager.hash_password(credential)
-    
-    async def authenticate(self, credential: str, client_ip: str = None, 
-                          user_agent: str = None) -> Optional[UserSession]:
-        """Authenticate with shared operator credential"""
-        
-        # Check rate limiting
-        if client_ip and self.rate_limiter.is_rate_limited(client_ip):
-            lockout_remaining = self.rate_limiter.get_lockout_remaining(client_ip)
-            logger.warning(f"Rate limited login attempt from {client_ip}, "
-                          f"{lockout_remaining} minutes remaining")
-            return None
-        
-        # Record attempt
+
+    def _client_key(self, client_identifier: Optional[str], client_ip: Optional[str]) -> str:
+        if client_identifier:
+            return client_identifier
         if client_ip:
-            self.rate_limiter.record_attempt(client_ip)
-        
-        # Verify credential
-        if not self.password_manager.verify_password(credential, self.operator_credential_hash):
-            logger.warning(f"Failed login attempt from {client_ip}")
-            return None
-        
-        # Create new session
-        session = UserSession.create_operator_session(client_ip, user_agent)
-        
-        # Generate JWT token
-        token = self.jwt_manager.create_token(session.user_id, session.security_context.role)
-        session.security_context.credential_hash = self._hash_credential(credential)
-        session.security_context.token_expires_at = (
-            datetime.now(timezone.utc) + timedelta(hours=self.session_timeout_hours)
+            return f"ip:{client_ip}"
+        return "anon"
+
+    def _validate_credential(self, credential: str) -> bool:
+        if self._simulation_mode:
+            return bool(credential)
+        return self.password_manager.verify_password(credential, self.operator_credential_hash)
+
+    def _issue_token_for_session(self, session: UserSession) -> AuthResult:
+        token, expires_at = self.jwt_manager.create_token(
+            session_id=session.session_id,
+            user_id=session.user_id,
+            role=session.security_context.role,
         )
-        
-        # Store session
+        session.security_context.token_expires_at = expires_at
+        return AuthResult(session=session, token=token, expires_at=expires_at)
+
+    def refresh_session_token(self, session: UserSession) -> AuthResult:
+        session.extend_session(self.session_timeout_hours)
+        return self._issue_token_for_session(session)
+    
+    async def authenticate(
+        self,
+        credential: str,
+        *,
+        client_identifier: Optional[str] = None,
+        client_ip: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> AuthResult:
+        """Authenticate with shared operator credential."""
+
+        key = self._client_key(client_identifier, client_ip)
+        self.rate_limiter.assert_not_locked(key)
+
+        if not credential:
+            retry_after = self.rate_limiter.record_failure(key)
+            logger.warning(
+                "auth.login.failure",
+                extra={
+                    "correlation_id": get_correlation_id(),
+                    "reason": "missing_credential",
+                    "client_ip": client_ip,
+                },
+            )
+            raise AuthenticationError(
+                "Invalid credentials",
+                status_code=401,
+                retry_after=retry_after,
+            )
+
+        if not self._validate_credential(credential):
+            retry_after = self.rate_limiter.record_failure(key)
+            logger.warning(
+                "auth.login.failure",
+                extra={
+                    "correlation_id": get_correlation_id(),
+                    "reason": "invalid_shared_secret",
+                    "client_ip": client_ip,
+                },
+            )
+            raise AuthenticationError(
+                "Invalid credentials",
+                status_code=401,
+                retry_after=retry_after,
+            )
+
+        session = UserSession.create_operator_session(client_ip, user_agent)
+        session.security_context.authentication_method = AuthenticationMethod.SHARED_CREDENTIAL
+        session.security_context.credential_hash = self.operator_credential_hash
+
+        result = self._issue_token_for_session(session)
+
         self.active_sessions[session.session_id] = session
-        
-        # Audit log
+        self.rate_limiter.reset(key)
+
         if self.audit_logging_enabled:
             session.update_activity(
                 "login",
                 method="shared_credential",
                 ip_address=client_ip,
-                user_agent=user_agent
+                user_agent=user_agent,
             )
-        
-        logger.info(f"Successful login from {client_ip}, session {session.session_id}")
-        return session
+
+        logger.info(
+            "auth.login.success",
+            extra={
+                "correlation_id": get_correlation_id(),
+                "session_id": session.session_id,
+                "client_ip": client_ip,
+            },
+        )
+
+        return result
     
     async def verify_token(self, token: str) -> Optional[UserSession]:
         """Verify JWT token and return session"""
@@ -220,18 +278,19 @@ class AuthService:
         if not payload:
             return None
         
-        user_id = payload.get("user_id")
-        if not user_id:
+        session_id = payload.get("sid")
+        if not session_id:
             return None
-        
-        # Find active session for user
-        for session in self.active_sessions.values():
-            if (session.user_id == user_id and 
-                session.status == SessionStatus.ACTIVE and
-                not session.is_expired()):
-                return session
-        
-        return None
+
+        session = self.active_sessions.get(session_id)
+        if session is None:
+            return None
+
+        if session.is_expired():
+            await self.terminate_session(session_id, "expired")
+            return None
+
+        return session
     
     async def verify_session(self, session_id: str) -> Optional[UserSession]:
         """Verify session by ID"""
@@ -358,13 +417,10 @@ class AuthService:
         """Get authentication statistics"""
         return {
             "active_sessions": len(self.active_sessions),
-            "total_rate_limited_ips": len([
-                ip for ip, attempts in self.rate_limiter.attempts.items()
-                if len(attempts) >= self.rate_limiter.max_attempts
-            ]),
+            "locked_clients": len(self.rate_limiter.locked_clients()),
             "session_timeout_hours": self.session_timeout_hours,
-            "rate_limit_max_attempts": self.rate_limiter.max_attempts,
-            "rate_limit_window_minutes": self.rate_limiter.window_minutes,
+            "rate_limit_failure_threshold": self.rate_limiter.failure_limit,
+            "rate_limit_lockout_seconds": self.rate_limiter.lockout_seconds,
             "audit_logging_enabled": self.audit_logging_enabled
         }
     
@@ -397,7 +453,18 @@ class AuthService:
 # ----------------------- Compatibility Facade -----------------------
 
 class AuthenticationError(Exception):
-    pass
+    def __init__(self, message: str, *, status_code: int = 401, retry_after: Optional[int] = None):
+        super().__init__(message)
+        self.detail = message
+        self.status_code = status_code
+        self.retry_after = retry_after
+
+    @property
+    def headers(self) -> Dict[str, str]:
+        headers: Dict[str, str] = {}
+        if self.retry_after is not None:
+            headers["Retry-After"] = str(self.retry_after)
+        return headers
 
 
 class _AuthServiceFacade:
@@ -454,12 +521,7 @@ class _AuthServiceFacade:
         # Verify password with bcrypt if hash present
         if not self.config.password_hash:
             raise AuthenticationError("Invalid credentials")
-        try:
-            import bcrypt  # type: ignore
-            ok = bool(bcrypt.checkpw(password.encode("utf-8"), self.config.password_hash.encode("utf-8")))
-        except Exception:
-            # If bcrypt unavailable or errors, fallback to simple non-empty check
-            ok = bool(password)
+        ok = bool(bcrypt.checkpw(password.encode("utf-8"), self.config.password_hash.encode("utf-8")))
         if not ok:
             self._failed_attempts[username] = attempts + 1
             raise AuthenticationError("Invalid credentials")
@@ -483,23 +545,17 @@ class _AuthServiceFacade:
         # Verify TOTP code first to avoid failing due to bcrypt stubs in tests
         if not code:
             raise AuthenticationError("Invalid TOTP code")
-        totp_verified = False
-        try:
-            import pyotp  # type: ignore
-            totp = pyotp.TOTP(self.config.totp_config.secret, digits=self.config.totp_config.digits, interval=self.config.totp_config.period)
-            totp_verified = bool(totp.verify(code))
-        except Exception:
-            # If pyotp unavailable, accept any non-empty code
-            totp_verified = True
+        totp = pyotp.TOTP(
+            self.config.totp_config.secret,
+            digits=self.config.totp_config.digits,
+            interval=self.config.totp_config.period,
+        )
+        totp_verified = bool(totp.verify(code))
         if not totp_verified:
             raise AuthenticationError("Invalid TOTP code")
-        # Then perform password check if configured; if bcrypt unavailable, accept non-empty password
+        # Then perform password check if configured
         if self.config.password_hash:
-            try:
-                import bcrypt  # type: ignore
-                ok = bool(bcrypt.checkpw(password.encode("utf-8"), self.config.password_hash.encode("utf-8")))
-            except Exception:
-                ok = bool(password)
+            ok = bool(bcrypt.checkpw(password.encode("utf-8"), self.config.password_hash.encode("utf-8")))
             if not ok:
                 raise AuthenticationError("Invalid credentials")
         session = await self.create_session(username, SecurityLevel.TOTP)
@@ -579,3 +635,6 @@ class _AuthServiceFacade:
 
 # Expose facade instance expected by tests
 auth_service = _AuthServiceFacade()
+
+# Primary AuthService instance used by FastAPI routes
+primary_auth_service = AuthService()

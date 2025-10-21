@@ -1,0 +1,57 @@
+name: TODO Policy Compliance
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main, develop ]
+
+jobs:
+  check-todos:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check TODO Format Compliance
+      run: |
+        echo "Checking for improperly formatted TODOs..."
+        
+        # Search for TODO/FIXME/XXX/HACK markers in source files
+        RESULTS=$(grep -r -n "TODO\|FIXME\|XXX\|HACK" \
+          --include="*.py" \
+          --include="*.ts" \
+          --include="*.vue" \
+          --include="*.js" \
+          --exclude-dir=node_modules \
+          --exclude-dir=.venv \
+          --exclude-dir=__pycache__ \
+          --exclude-dir=dist \
+          backend/src/ frontend/src/ frontend/tests/e2e/ 2>/dev/null || true)
+        
+        if [ -z "$RESULTS" ]; then
+          echo "✅ No TODOs found - all clear!"
+          exit 0
+        fi
+        
+        echo "Found TODO markers:"
+        echo "$RESULTS"
+        echo ""
+        
+        # Check if all TODOs follow the proper format: TODO(vX): ... - Issue #N
+        INVALID_TODOS=$(echo "$RESULTS" | grep -E "TODO|FIXME|XXX|HACK" | grep -v -E "TODO\(v[0-9]+\):.*Issue #[0-9]+" || true)
+        
+        if [ ! -z "$INVALID_TODOS" ]; then
+          echo "❌ Found improperly formatted TODOs:"
+          echo "$INVALID_TODOS"
+          echo ""
+          echo "All TODOs must follow this format:"
+          echo "  // TODO(v3): <description> - Issue #<number>"
+          echo "  # TODO(v3): <description> - Issue #<number>"
+          echo ""
+          echo "Please create a GitHub issue and update the TODO format."
+          exit 1
+        fi
+        
+        echo "✅ All TODOs are properly formatted!"
+        exit 0

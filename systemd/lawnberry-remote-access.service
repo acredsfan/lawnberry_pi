@@ -10,6 +10,11 @@ User=pi
 Group=pi
 WorkingDirectory=/home/pi/lawnberry
 Environment=SIM_MODE=0
+Environment=REMOTE_ACCESS_CONFIG_PATH=/home/pi/lawnberry/config/remote_access.json
+Environment=REMOTE_ACCESS_STATUS_PATH=/home/pi/lawnberry/data/remote_access_status.json
+Environment=REMOTE_ACCESS_POLL_SECONDS=10
+Environment=CLOUDFLARE_METRICS_PORT=53123
+Environment=NGROK_API_PORT=4040
 # Use project virtualenv if present, otherwise rely on system python
 ExecStart=/bin/bash -lc "PY='/home/pi/lawnberry/.venv/bin/python'; if [ ! -x \"$PY\" ]; then PY='python3'; fi; cd /home/pi/lawnberry && \"$PY\" -m backend.src.cli.remote_access_daemon"
 

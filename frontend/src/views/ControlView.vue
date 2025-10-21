@@ -72,7 +72,7 @@
             </div>
           </div>
 
-          <div class="auth-actions">
+          <div class="auth-actions" v-if="securityConfig.auth_level !== 'cloudflare'">
             <button 
               class="btn btn-primary" 
               :disabled="authenticating || !canAuthenticate"
@@ -379,6 +379,7 @@ const authForm = reactive({
 const session = ref<ManualControlSession | null>(null)
 const sessionTimeRemaining = ref(0)
 let sessionTimer: number | undefined
+let cloudflareAutoVerificationAttempted = false
 
 // UI state
 const statusMessage = ref('')
@@ -728,6 +729,11 @@ async function loadSecurityConfig() {
       session_timeout_minutes: data.session_timeout_minutes ?? securityConfig.value.session_timeout_minutes,
       require_https: Boolean(data.require_https ?? securityConfig.value.require_https),
       auto_lock_manual_control: Boolean(data.auto_lock_manual_control ?? securityConfig.value.auto_lock_manual_control)
+    }
+
+    if (securityConfig.value.auth_level === 'cloudflare' && !cloudflareAutoVerificationAttempted) {
+      cloudflareAutoVerificationAttempted = true
+      await verifyCloudflareAuth()
     }
   } catch (error) {
     console.warn('Failed to load security configuration, using defaults.', error)

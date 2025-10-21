@@ -142,6 +142,24 @@
         Google Maps imagery · Leaflet editing controls remain active
       </div>
 
+      <!-- Tile transition overlay -->
+      <div v-if="tileLoadingState === 'loading'" class="tile-transition-overlay"></div>
+
+      <!-- Tile loading indicator -->
+      <div v-if="tileLoadingState === 'loading'" class="tile-loading-indicator">
+        <div class="loading-spinner"></div>
+        <span>{{ loadingMessage }}</span>
+      </div>
+
+      <!-- Tile error message -->
+      <div v-if="tileErrorMessage" class="tile-error-message">
+        <span class="error-icon">⚠️</span>
+        <span>{{ tileErrorMessage }}</span>
+        <button v-if="fallbackToStandard" class="retry-btn" @click="retryOriginalTiles">
+          Retry Original
+        </button>
+      </div>
+
       <!-- Leaflet Map -->
       <l-map
         :zoom="zoom"
@@ -155,18 +173,26 @@
         <!-- Dynamic tiles based on provider/style -->
         <l-tile-layer
           v-if="showTiles && tileLayerConfig && !googleLayerActive"
+          :key="`base-${tileLayerKey}`"
           :url="tileLayerConfig.url"
           :attribution="tileLayerConfig.attribution"
           :subdomains="tileLayerConfig.subdomains"
           :max-zoom="tileLayerConfig.maxZoom"
+          @loading="onTileLoading"
+          @load="onTileLoaded"
+          @tileerror="onTileError"
         />
         <l-tile-layer
           v-if="showTiles && tileLayerConfig?.overlay && !googleLayerActive"
+          :key="`overlay-${tileLayerKey}`"
           :url="tileLayerConfig.overlay.url"
           :attribution="tileLayerConfig.overlay.attribution || tileLayerConfig.attribution"
           :subdomains="tileLayerConfig.overlay.subdomains"
           :max-zoom="tileLayerConfig.overlay.maxZoom"
           :options="{ zIndex: 5 }"
+          @loading="onTileLoading"
+          @load="onTileLoaded"
+          @tileerror="onTileError"
         />
 
         <!-- Existing boundary polygon -->
@@ -324,6 +350,12 @@ const successMessage = ref<string | null>(null);
 const currentPolygonClosed = ref(false);
 const editingZoneId = ref<string | null>(null);
 
+// Tile loading and error state
+const tileLoadingState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+const tileErrorMessage = ref<string | null>(null);
+const fallbackToStandard = ref(false);
+const loadingTimeout = ref<number | null>(null);
+
 // Map view state
 const mapRef = ref<any>(null);
 const zoom = ref(18);
@@ -335,7 +367,9 @@ const tileLayerConfig = computed<TileLayerConfig | null>(() => {
   if (props.mapProvider === 'none') return null;
   if (useGoogleMutant.value) return null;
   if (props.mapProvider === 'osm') {
-    return getOsmTileLayer(props.mapStyle);
+    // If satellite tiles failed and we're in satellite mode, fallback to standard
+    const requestedStyle = fallbackToStandard.value && props.mapStyle === 'satellite' ? 'standard' : props.mapStyle;
+    return getOsmTileLayer(requestedStyle);
   }
   // Google provider without a usable API key falls back to a basic OSM layer for editing
   return getOsmTileLayer('standard');
@@ -348,6 +382,9 @@ const useGoogleMutant = computed(() => shouldUseGoogleProvider(
 ));
 let googleBaseLayer: any = null;
 const googleLayerActive = ref(false);
+
+// Reactive key to force tile layer re-rendering when style changes
+const tileLayerKey = ref(0);
 
 // When using Google Mutant, prefer global Leaflet to allow plugin to attach to window.L
 const useGlobalLeaflet = computed(() => useGoogleMutant.value);
@@ -371,13 +408,28 @@ async function ensureBaseLayer() {
   const map: L.Map | undefined = mapRef.value?.leafletObject as L.Map | undefined;
   if (!map) return;
 
-  // Remove residual Google base if not using it
-  if (!useGoogleMutant.value) {
-    if (googleBaseLayer) {
-      try { map.removeLayer(googleBaseLayer); } catch {}
-      googleBaseLayer = null;
+  // Show loading state when switching base layers
+  tileLoadingState.value = 'loading';
+
+  // Always remove existing Google base layer first to ensure clean switching
+  if (googleBaseLayer) {
+    try { 
+      map.removeLayer(googleBaseLayer); 
+    } catch (e) {
+      console.debug('Error removing Google layer:', e);
     }
+    googleBaseLayer = null;
+  }
+
+  // If not using Google, set inactive and return
+  if (!useGoogleMutant.value) {
     googleLayerActive.value = false;
+    // Set loaded state for OSM tiles (they'll trigger their own events)
+    setTimeout(() => {
+      if (tileLoadingState.value === 'loading') {
+        tileLoadingState.value = 'loaded';
+      }
+    }, 500);
     return;
   }
 
@@ -398,19 +450,42 @@ async function ensureBaseLayer() {
     return
   }
 
-  // Recreate the Google Mutant layer for current style
-  if (googleBaseLayer) {
-    try { map.removeLayer(googleBaseLayer); } catch {}
-    googleBaseLayer = null;
-  }
+  // Create the Google Mutant layer for current style
   const style = props.mapStyle || 'standard';
   const typeMap: Record<string, string> = { standard: 'roadmap', satellite: 'satellite', hybrid: 'hybrid', terrain: 'terrain' };
   const gmType = (typeMap[style] || 'roadmap') as any;
   const Lref: any = (window as any).L || L;
-  // @ts-ignore plugin augments gridLayer
-  googleBaseLayer = Lref.gridLayer.googleMutant({ type: gmType });
-  googleBaseLayer.addTo(map);
-  googleLayerActive.value = true;
+  
+  try {
+    // @ts-ignore plugin augments gridLayer
+    googleBaseLayer = Lref.gridLayer.googleMutant({ type: gmType });
+    
+    // Add error handling for Google Maps tiles
+    googleBaseLayer.on('tileerror', (e: any) => {
+      console.warn('Google Maps tile error:', e);
+      tileLoadingState.value = 'error';
+      tileErrorMessage.value = 'Google Maps imagery failed to load. Check your API key and internet connection.';
+      toast.show('Google Maps tiles failed to load', 'error', 4000);
+    });
+    
+    googleBaseLayer.on('loading', () => {
+      tileLoadingState.value = 'loading';
+      tileErrorMessage.value = null;
+    });
+    
+    googleBaseLayer.on('load', () => {
+      tileLoadingState.value = 'loaded';
+      tileErrorMessage.value = null;
+    });
+    
+    googleBaseLayer.addTo(map);
+    googleLayerActive.value = true;
+  } catch (e) {
+    console.error('Error creating Google Maps layer:', e);
+    googleLayerActive.value = false;
+    tileErrorMessage.value = 'Failed to initialize Google Maps. Check your API key.';
+    toast.show('Google Maps initialization failed', 'error', 4000);
+  }
 }
 
 // Live mower marker (GPS position)
@@ -454,6 +529,21 @@ const showPolygonToolbar = computed(() => isPolygonMode.value && currentPolygon.
 const canUndoVertex = computed(() => currentPolygon.value.length > 0);
 const canClosePolygon = computed(() => isPolygonMode.value && currentPolygon.value.length >= 3 && !currentPolygonClosed.value);
 const canDeleteCurrent = computed(() => Boolean(editingZoneId.value) && (mode.value === 'mowing' || mode.value === 'exclusion'));
+
+// Loading message based on current provider and style
+const loadingMessage = computed(() => {
+  if (useGoogleMutant.value) {
+    const styleText = props.mapStyle === 'satellite' ? 'satellite imagery' : 
+                     props.mapStyle === 'hybrid' ? 'hybrid map' :
+                     props.mapStyle === 'terrain' ? 'terrain map' : 'map tiles';
+    return `Loading Google ${styleText}...`;
+  } else {
+    const styleText = props.mapStyle === 'satellite' ? 'satellite imagery' : 
+                     props.mapStyle === 'hybrid' ? 'hybrid map' :
+                     props.mapStyle === 'terrain' ? 'terrain map' : 'map tiles';
+    return `Loading ${styleText}...`;
+  }
+});
 
 // Methods
 function markerDivIcon(m: any) {
@@ -1032,11 +1122,36 @@ onUnmounted(() => {
     clearInterval(restPollTimer.value)
     restPollTimer.value = null
   }
+  
+  // Clear loading timeout
+  if (loadingTimeout.value) {
+    clearTimeout(loadingTimeout.value);
+    loadingTimeout.value = null;
+  }
 })
 
 // React to provider/style/key changes
 watch(() => [props.mapProvider, props.mapStyle, props.googleApiKey], async () => {
+  // Reset error states when switching providers/styles
+  tileLoadingState.value = 'idle';
+  tileErrorMessage.value = null;
+  fallbackToStandard.value = false;
+  
   await ensureBaseLayer();
+  // Force re-render of tile layers by updating a reactive key
+  tileLayerKey.value++;
+  await nextTick();
+});
+
+// Additional watch specifically for mapStyle to ensure immediate tile layer updates
+watch(() => props.mapStyle, () => {
+  // Show loading state immediately when switching styles
+  tileLoadingState.value = 'loading';
+  tileErrorMessage.value = null;
+  fallbackToStandard.value = false;
+  
+  // Increment tile layer key to force re-render of OSM tiles when style changes
+  tileLayerKey.value++;
 });
 
 async function loadMowerIcon(retryOnce = true) {
@@ -1176,6 +1291,68 @@ function projectPointToSegment(p: Point, a: Point, b: Point): Point {
   let t = ((px - ax) * vx + (py - ay) * vy) / len2;
   t = Math.max(0, Math.min(1, t));
   return { latitude: ay + t * vy, longitude: ax + t * vx };
+}
+
+// Tile layer event handlers
+function onTileLoading() {
+  tileLoadingState.value = 'loading';
+  tileErrorMessage.value = null;
+  
+  // Clear any existing timeout
+  if (loadingTimeout.value) {
+    clearTimeout(loadingTimeout.value);
+  }
+  
+  // Set a timeout to prevent indefinite loading state
+  loadingTimeout.value = window.setTimeout(() => {
+    if (tileLoadingState.value === 'loading') {
+      tileLoadingState.value = 'loaded';
+    }
+  }, 10000); // 10 second timeout
+}
+
+function onTileLoaded() {
+  tileLoadingState.value = 'loaded';
+  tileErrorMessage.value = null;
+  
+  // Clear the loading timeout
+  if (loadingTimeout.value) {
+    clearTimeout(loadingTimeout.value);
+    loadingTimeout.value = null;
+  }
+}
+
+function onTileError(event: any) {
+  console.warn('Tile loading error:', event);
+  tileLoadingState.value = 'error';
+  
+  // Clear the loading timeout
+  if (loadingTimeout.value) {
+    clearTimeout(loadingTimeout.value);
+    loadingTimeout.value = null;
+  }
+  
+  // Check if we're trying to load satellite tiles and can fallback
+  if (props.mapStyle === 'satellite' && !fallbackToStandard.value && props.mapProvider === 'osm') {
+    fallbackToStandard.value = true;
+    tileErrorMessage.value = 'Satellite imagery unavailable. Switched to standard map view.';
+    toast.show('Satellite imagery unavailable, using standard map', 'warning', 4000);
+    
+    // Force tile layer re-render with fallback
+    tileLayerKey.value++;
+  } else {
+    // Generic tile error
+    tileErrorMessage.value = 'Map tiles failed to load. Check your internet connection.';
+    toast.show('Map tiles failed to load', 'error', 3000);
+  }
+}
+
+function retryOriginalTiles() {
+  fallbackToStandard.value = false;
+  tileErrorMessage.value = null;
+  tileLoadingState.value = 'idle';
+  tileLayerKey.value++;
+  toast.show('Retrying original tiles...', 'info', 2000);
 }
 </script>
 
@@ -1417,6 +1594,105 @@ function projectPointToSegment(p: Point, a: Point, b: Point): Point {
   background: rgba(255, 67, 67, 0.1);
   border: 1px solid #ff4343;
   color: #ff4343;
+}
+
+/* Tile loading and error indicators */
+.tile-loading-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.85);
+  color: var(--accent-green);
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(0, 255, 146, 0.2);
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.tile-transition-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.1);
+  z-index: 215;
+  animation: fadeIn 0.2s ease-out;
+  pointer-events: none;
+}
+
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid transparent;
+  border-top: 2px solid var(--accent-green);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.tile-error-message {
+  position: absolute;
+  bottom: 4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 67, 67, 0.9);
+  color: white;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  max-width: 90%;
+  text-align: center;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.error-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.retry-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  margin-left: 0.5rem;
+  transition: background-color 0.2s ease;
+}
+
+.retry-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 @media (prefers-reduced-motion: reduce) {
