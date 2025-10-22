@@ -1,7 +1,7 @@
 import os
 import os.path
-import pytest
 
+import pytest
 
 # Skip placeholder integration tests by default to keep CI green.
 # Run them explicitly by setting RUN_PLACEHOLDER_INTEGRATION=1

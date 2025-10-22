@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import json
+
 import websockets
 
 URI = "ws://127.0.0.1:8001/api/v2/ws/telemetry"
@@ -18,7 +19,7 @@ async def main():
                 if evt.get("event") == "telemetry.data":
                     count += 1
                     print(f"received telemetry #{count}")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             print("WARN: timed out waiting for telemetry messages")
 
 if __name__ == "__main__":

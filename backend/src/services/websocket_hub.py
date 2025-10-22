@@ -2,9 +2,15 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Dict, Set, Optional, Any
+
 from fastapi import WebSocket, WebSocketDisconnect
+
+from ..core.observability import observability
 from ..models.sensor_data import SensorData
 from ..models.alert import Alert
+
+
+logger = observability.get_logger(__name__)
 
 
 class WebSocketHub:
@@ -162,8 +168,13 @@ class WebSocketHub:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                # Log error and continue
-                print(f"Telemetry loop error: {e}")
+                logger.error("Telemetry loop error", exc_info=True)
+                observability.record_error(
+                    origin="telemetry",
+                    message="Telemetry loop error",
+                    exception=e,
+                    metadata={"component": "websocket_hub"},
+                )
                 await asyncio.sleep(1.0)
                 
     async def _broadcast_telemetry_topics(self, telemetry_data: dict):

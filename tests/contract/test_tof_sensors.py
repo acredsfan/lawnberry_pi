@@ -12,8 +12,9 @@ Notes:
 from __future__ import annotations
 
 import os
-import pytest
+
 import httpx
+import pytest
 
 from backend.src.main import app
 
@@ -29,7 +30,10 @@ async def test_tof_obstacle_triggers_emergency_stop_within_threshold():
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         # Simulate obstacle injection endpoint (to be implemented):
         # POST /api/v2/debug/sensors/inject-tof {position: "left", distance_m: 0.15}
-        resp = await client.post("/api/v2/debug/sensors/inject-tof", json={"position": "left", "distance_m": 0.15})
+        resp = await client.post(
+            "/api/v2/debug/sensors/inject-tof",
+            json={"position": "left", "distance_m": 0.15},
+        )
         assert resp.status_code in {200, 404}, "Endpoint not implemented yet; placeholder contract"
 
         # Read safety status and expect emergency_stop_active True when implemented
@@ -49,4 +53,5 @@ async def test_tof_timeout_reports_degraded_health():
         # GET /api/v2/sensors/health should surface ToF status once implemented
         resp = await client.get("/api/v2/sensors/health")
         assert resp.status_code in {200, 404}
-        # When implemented, expect a structure like {"tof_left": {"status": "degraded", "last_error": "timeout"}, ...}
+        # When implemented, expect a structure like
+        # {"tof_left": {"status": "degraded", "last_error": "timeout"}, ...}

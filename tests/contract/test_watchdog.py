@@ -1,5 +1,6 @@
 import asyncio
 import os
+
 import pytest
 
 
@@ -7,8 +8,8 @@ import pytest
 async def test_watchdog_triggers_estop_on_timeout():
     os.environ.setdefault("SIM_MODE", "1")
     try:
-        from backend.src.safety.motor_authorization import MotorAuthorization
         from backend.src.safety.estop_handler import EstopHandler
+        from backend.src.safety.motor_authorization import MotorAuthorization
         from backend.src.safety.watchdog import Watchdog
     except Exception:
         import pytest

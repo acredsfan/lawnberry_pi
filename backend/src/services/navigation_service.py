@@ -13,83 +13,12 @@ from ..models import (
     NavigationState, Position, Waypoint, Obstacle, CoverageCell,
     NavigationMode, PathStatus, SensorData
 )
+from ..nav.path_planner import PathPlanner
 
 logger = logging.getLogger(__name__)
 
 
-class PathPlanner:
-    """Path planning algorithms and utilities"""
-    
-    @staticmethod
-    def calculate_distance(pos1: Position, pos2: Position) -> float:
-        """Calculate distance between two positions in meters"""
-        # Simple Haversine formula for short distances
-        lat_diff = math.radians(pos2.latitude - pos1.latitude)
-        lon_diff = math.radians(pos2.longitude - pos1.longitude)
-        
-        a = (math.sin(lat_diff / 2) ** 2 + 
-             math.cos(math.radians(pos1.latitude)) * 
-             math.cos(math.radians(pos2.latitude)) * 
-             math.sin(lon_diff / 2) ** 2)
-        
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-        return 6371000 * c  # Earth radius in meters
-    
-    @staticmethod
-    def calculate_bearing(pos1: Position, pos2: Position) -> float:
-        """Calculate bearing from pos1 to pos2 in degrees"""
-        lat1 = math.radians(pos1.latitude)
-        lat2 = math.radians(pos2.latitude)
-        lon_diff = math.radians(pos2.longitude - pos1.longitude)
-        
-        x = math.sin(lon_diff) * math.cos(lat2)
-        y = (math.cos(lat1) * math.sin(lat2) - 
-             math.sin(lat1) * math.cos(lat2) * math.cos(lon_diff))
-        
-        bearing = math.atan2(x, y)
-        return (math.degrees(bearing) + 360) % 360
-    
-    @staticmethod
-    def generate_parallel_lines_path(boundaries: List[Position], 
-                                   cutting_width: float = 0.3,
-                                   overlap: float = 0.1) -> List[Waypoint]:
-        """Generate parallel lines mowing pattern"""
-        if len(boundaries) < 3:
-            return []
-        
-        waypoints = []
-        
-        # Calculate bounding box of the area
-        min_lat = min(pos.latitude for pos in boundaries)
-        max_lat = max(pos.latitude for pos in boundaries)
-        min_lon = min(pos.longitude for pos in boundaries)
-        max_lon = max(pos.longitude for pos in boundaries)
-        
-        # Convert cutting width to approximate lat/lon offset
-        effective_width = cutting_width * (1 - overlap)
-        lat_step = effective_width / 111000  # Rough conversion to degrees
-        
-        # Generate parallel lines
-        current_lat = min_lat + lat_step / 2
-        line_direction = 1  # 1 for west-to-east, -1 for east-to-west
-        
-        while current_lat < max_lat:
-            if line_direction == 1:
-                # West to east
-                start_pos = Position(latitude=current_lat, longitude=min_lon)
-                end_pos = Position(latitude=current_lat, longitude=max_lon)
-            else:
-                # East to west
-                start_pos = Position(latitude=current_lat, longitude=max_lon)
-                end_pos = Position(latitude=current_lat, longitude=min_lon)
-            
-            waypoints.append(Waypoint(position=start_pos, target_speed=0.5))
-            waypoints.append(Waypoint(position=end_pos, target_speed=0.5))
-            
-            current_lat += lat_step
-            line_direction *= -1  # Alternate direction
-        
-        return waypoints
+## Path planning moved to backend.src.nav.path_planner.PathPlanner
 
 
 class ObstacleDetector:
@@ -207,11 +136,104 @@ class NavigationService:
         self.total_distance = 0.0
         self.last_position: Optional[Position] = None
         
+    _instance: Optional["NavigationService"] = None
+
+    @classmethod
+    def get_instance(cls, weather=None) -> "NavigationService":
+        if cls._instance is None:
+            cls._instance = NavigationService(weather=weather)
+        return cls._instance
+        
     async def initialize(self) -> bool:
         """Initialize navigation service"""
         logger.info("Initializing navigation service")
         self.navigation_state.navigation_mode = NavigationMode.IDLE
         return True
+    
+    async def execute_mission(self, mission: "Mission"):
+        """Execute a mission by navigating to each waypoint."""
+        from .mission_service import MissionService, get_mission_service
+        mission_service = get_mission_service()
+
+        logger.info(f"Starting mission execution: {mission.id} - {mission.name}")
+        self.navigation_state.navigation_mode = NavigationMode.AUTO
+        self.navigation_state.path_status = PathStatus.EXECUTING
+        
+        # Convert MissionWaypoints to Navigation Waypoints
+        self.navigation_state.planned_path = [
+            Waypoint(
+                position=Position(latitude=wp.lat, longitude=wp.lon), 
+                target_speed=(wp.speed / 100.0 * self.max_speed)
+            )
+            for wp in mission.waypoints
+        ]
+        
+        self.navigation_state.current_waypoint_index = 0
+        self.navigation_state.operation_start_time = datetime.now(timezone.utc)
+
+        while self.navigation_state.current_waypoint_index < len(self.navigation_state.planned_path):
+            status = mission_service.mission_statuses.get(mission.id)
+            if not status or status.status != "running":
+                logger.warning(f"Mission {mission.id} interrupted. Status: {status.status if status else 'N/A'}")
+                self.navigation_state.path_status = PathStatus.INTERRUPTED
+                self.navigation_state.navigation_mode = NavigationMode.IDLE
+                return
+
+            current_mission_waypoint = mission.waypoints[self.navigation_state.current_waypoint_index]
+            await self.go_to_waypoint(current_mission_waypoint)
+
+            # The go_to_waypoint method is blocking until the waypoint is reached or interrupted.
+            # The loop will then proceed to the next waypoint.
+            # We add a small sleep to prevent a tight loop if go_to_waypoint returns immediately.
+            await asyncio.sleep(0.1)
+
+        if self.navigation_state.navigation_mode == NavigationMode.AUTO:
+            self.navigation_state.path_status = PathStatus.COMPLETED
+            self.navigation_state.navigation_mode = NavigationMode.IDLE
+            logger.info(f"Mission {mission.id} completed.")
+
+    async def go_to_waypoint(self, waypoint: "MissionWaypoint"):
+        """Navigate to a single waypoint and block until arrival."""
+        from .mission_service import MissionService, get_mission_service
+        mission_service = get_mission_service()
+        
+        target_pos = Position(latitude=waypoint.lat, longitude=waypoint.lon)
+        logger.info(f"Navigating to waypoint: {target_pos.latitude}, {target_pos.longitude}")
+
+        # Here you would set motor commands based on heading to target
+        # e.g., self.motor_service.set_speed_and_direction(...)
+        
+        # Placeholder for blade control
+        # e.g., self.blade_service.set_blade_on(waypoint.blade_on)
+
+        while True:
+            if not self.navigation_state.current_position:
+                await asyncio.sleep(0.5)
+                continue
+
+            # Check for interruptions (pause/abort)
+            mission_id = next((mid for mid, m in mission_service.missions.items() if waypoint.id in [w.id for w in m.waypoints]), None)
+            if mission_id:
+                status = mission_service.mission_statuses.get(mission_id)
+                if not status or status.status != "running":
+                    logger.info("Waypoint navigation interrupted.")
+                    return
+
+            distance_to_target = self.path_planner.calculate_distance(
+                self.navigation_state.current_position,
+                target_pos
+            )
+
+            if distance_to_target <= self.waypoint_tolerance:
+                logger.info(f"Waypoint reached: {waypoint.lat}, {waypoint.lon}")
+                if self.navigation_state.advance_waypoint():
+                    logger.info(f"Advanced to next waypoint index: {self.navigation_state.current_waypoint_index}")
+                else:
+                    logger.info("Final waypoint in path reached.")
+                break
+            
+            # Simulation of movement
+            await asyncio.sleep(1)
     
     async def update_navigation_state(self, sensor_data: SensorData) -> NavigationState:
         """Update navigation state with sensor fusion"""
@@ -434,15 +456,24 @@ class NavigationService:
             logger.error("No home position set")
             return False
         
-        # Create simple path to home
+        # Plan path (with avoidance and boundary constraints if available)
         if self.navigation_state.current_position:
-            home_waypoint = Waypoint(
-                position=self.navigation_state.home_position,
-                target_speed=self.cruise_speed,
-                action="dock"
+            boundaries = None
+            if self.navigation_state.safety_boundaries:
+                # Use the outer boundary (first polygon) if provided
+                boundaries = self.navigation_state.safety_boundaries[0]
+            obstacles = (
+                self.navigation_state.no_go_zones if self.navigation_state.no_go_zones else None
             )
-            
-            self.navigation_state.planned_path = [home_waypoint]
+
+            waypoints = self.path_planner.return_to_base(
+                current=self.navigation_state.current_position,
+                home=self.navigation_state.home_position,
+                boundary=boundaries,
+                obstacles=obstacles,
+            )
+
+            self.navigation_state.planned_path = waypoints
             self.navigation_state.current_waypoint_index = 0
             self.navigation_state.navigation_mode = NavigationMode.RETURN_HOME
             self.navigation_state.path_status = PathStatus.EXECUTING

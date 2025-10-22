@@ -26,8 +26,11 @@ cp "$SCRIPT_DIR/lawnberry-health.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-frontend.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-camera.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-remote-access.service" "$SYSTEMD_DIR/"
-cp "$SCRIPT_DIR/lawnberry-acme-renew.service" "$SYSTEMD_DIR/"
-cp "$SCRIPT_DIR/lawnberry-acme-renew.timer" "$SYSTEMD_DIR/"
+# Install new certificate renewal units
+cp "$SCRIPT_DIR/lawnberry-cert-renewal.service" "$SYSTEMD_DIR/"
+cp "$SCRIPT_DIR/lawnberry-cert-renewal.timer" "$SYSTEMD_DIR/"
+cp "$SCRIPT_DIR/lawnberry-backup.service" "$SYSTEMD_DIR/"
+cp "$SCRIPT_DIR/lawnberry-backup.timer" "$SYSTEMD_DIR/"
 
 # Set correct permissions
 chmod 644 "$SYSTEMD_DIR/lawnberry-"*.service
@@ -48,8 +51,18 @@ systemctl enable lawnberry-health.service
 systemctl enable lawnberry-frontend.service
 systemctl enable lawnberry-camera.service
 systemctl enable lawnberry-remote-access.service
-systemctl enable lawnberry-acme-renew.service
-systemctl enable lawnberry-acme-renew.timer
+systemctl enable lawnberry-cert-renewal.service
+systemctl enable lawnberry-cert-renewal.timer
+systemctl enable lawnberry-backup.service
+systemctl enable lawnberry-backup.timer
+
+# If legacy ACME units exist, explicitly disable them to avoid conflicts
+if systemctl list-unit-files | grep -q '^lawnberry-acme-renew.timer'; then
+   systemctl disable --now lawnberry-acme-renew.timer || true
+fi
+if systemctl list-unit-files | grep -q '^lawnberry-acme-renew.service'; then
+   systemctl disable --now lawnberry-acme-renew.service || true
+fi
 
 echo ""
 echo "LawnBerry Pi v2 services installed and enabled!"
@@ -62,7 +75,8 @@ echo "  sudo systemctl start lawnberry-health"
 echo "  sudo systemctl start lawnberry-frontend"
 echo "  sudo systemctl start lawnberry-camera"
 echo "  sudo systemctl start lawnberry-remote-access"
-echo "  sudo systemctl start lawnberry-acme-renew.timer"
+echo "  sudo systemctl start lawnberry-cert-renewal.timer"
+echo "  sudo systemctl start lawnberry-backup.timer"
 echo ""
 echo "To check service status:"
 echo "  sudo systemctl status lawnberry-backend"
@@ -74,5 +88,6 @@ echo "  sudo journalctl -u lawnberry-backend -f"
 echo "  sudo journalctl -u lawnberry-frontend -f"
 echo "  sudo journalctl -u lawnberry-camera -f"
 echo "  sudo journalctl -u lawnberry-remote-access -f"
+echo "  sudo journalctl -u lawnberry-backup -f"
 echo ""
 echo "Services will automatically start on boot."

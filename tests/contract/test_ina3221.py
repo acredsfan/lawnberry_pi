@@ -9,8 +9,9 @@ Placeholder contract; skipped by default unless RUN_PLACEHOLDER_CONTRACT=1.
 from __future__ import annotations
 
 import os
-import pytest
+
 import httpx
+import pytest
 
 from backend.src.main import app
 
@@ -24,4 +25,6 @@ async def test_ina3221_reports_power_channels_and_timeouts():
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         resp = await client.get("/api/v2/sensors/health")
         assert resp.status_code in {200, 404}
-        # When implemented, expect fields like battery_voltage, battery_current_amps, solar_voltage, solar_current_amps
+        # When implemented, expect fields like
+        # battery_voltage, battery_current_amps,
+        # solar_voltage, solar_current_amps

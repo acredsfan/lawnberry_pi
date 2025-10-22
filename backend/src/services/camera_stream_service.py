@@ -6,7 +6,6 @@ Manages camera capture, streaming, and IPC communication
 import asyncio
 import io
 import json
-import logging
 import os
 import signal
 import socket
@@ -20,30 +19,42 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 from ..models.camera_stream import (
-    CameraStream, CameraFrame, CameraMode, FrameFormat, 
+    CameraStream, CameraFrame, CameraMode, FrameFormat,
     StreamQuality, CameraConfiguration, FrameMetadata,
-    StreamStatistics
+    StreamStatistics,
 )
+from ..core.observability import observability
 
 # Try to import camera libraries with fallbacks for SIM_MODE
+
+logger = observability.get_logger(__name__)
+
 try:
     import cv2
+
     OPENCV_AVAILABLE = True
 except Exception as exc:  # catch ABI mismatches as well
     OPENCV_AVAILABLE = False
-    print(f"OpenCV not available - camera service will run in simulation mode ({exc})")
+    logger.warning(
+        "OpenCV unavailable; camera service using simulation mode",
+        extra={"library": "opencv", "error": str(exc)},
+    )
     if "numpy" in str(exc).lower():
-        print("Hint: ensure numpy < 2.0 or rebuild OpenCV against the installed numpy version.")
+        logger.info(
+            "OpenCV import failed due to numpy ABI mismatch",
+            extra={"hint": "ensure numpy < 2.0 or rebuild OpenCV against installed version"},
+        )
 
 try:
     from picamera2 import Picamera2
+
     PICAMERA_AVAILABLE = True
 except Exception as exc:
     PICAMERA_AVAILABLE = False
-    print(f"PiCamera2 not available - using OpenCV or simulation mode ({exc})")
-
-
-logger = logging.getLogger(__name__)
+    logger.warning(
+        "PiCamera2 unavailable; falling back to OpenCV or simulation",
+        extra={"library": "picamera2", "error": str(exc)},
+    )
 
 
 class CameraStreamService:

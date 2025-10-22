@@ -1,23 +1,23 @@
 """Unit tests for SettingsService."""
 
 import json
-import pytest
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
+from unittest.mock import patch
 
-from backend.src.services.settings_service import SettingsService
+import pytest
+
 from backend.src.models.settings import (
-    SettingsProfile,
-    HardwareSettings,
-    NetworkSettings,
-    TelemetrySettings,
-    ControlSettings,
-    MapsSettings,
-    CameraSettings,
     AISettings,
+    CameraSettings,
+    ControlSettings,
+    HardwareSettings,
+    MapsSettings,
+    NetworkSettings,
+    SettingsProfile,
     SystemSettings,
+    TelemetrySettings,
 )
+from backend.src.services.settings_service import SettingsService
 
 
 @pytest.fixture
@@ -99,20 +99,55 @@ class TestSettingsService:
         """Test loading profile from JSON when DB fails."""
         mock_persistence.load_settings_profile.return_value = None
         
-        with patch("pathlib.Path.exists", return_value=True), \
-             patch("pathlib.Path.read_text") as mock_read:
-            mock_read.return_value = json.dumps({
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("pathlib.Path.read_text") as mock_read,
+        ):
+            fallback_payload = {
                 "version": 1,
                 "last_modified": datetime.now().isoformat(),
-                "hardware": {"sim_mode": True, "robohat_port": "/dev/ttyACM0"},
-                "network": {"wifi_ssid": "Fallback", "wifi_password": "pass"},
-                "telemetry": {"stream_enabled": True, "persist_enabled": True, "retention_days": 30},
-                "control": {"lockout_enabled": True, "lockout_timeout": 30, "blade_safety": True},
-                "maps": {"provider": "leaflet", "fallback_enabled": True, "cache_tiles": True},
-                "camera": {"enabled": True, "resolution": "1280x720", "framerate": 30, "quality": 80},
-                "ai": {"obstacle_detection": True, "path_optimization": True, "learning_enabled": False},
-                "system": {"log_level": "INFO", "auto_updates": False, "remote_access": False, "branding_checksum": "abc123"},
-            })
+                "hardware": {
+                    "sim_mode": True,
+                    "robohat_port": "/dev/ttyACM0",
+                },
+                "network": {
+                    "wifi_ssid": "Fallback",
+                    "wifi_password": "pass",
+                },
+                "telemetry": {
+                    "stream_enabled": True,
+                    "persist_enabled": True,
+                    "retention_days": 30,
+                },
+                "control": {
+                    "lockout_enabled": True,
+                    "lockout_timeout": 30,
+                    "blade_safety": True,
+                },
+                "maps": {
+                    "provider": "leaflet",
+                    "fallback_enabled": True,
+                    "cache_tiles": True,
+                },
+                "camera": {
+                    "enabled": True,
+                    "resolution": "1280x720",
+                    "framerate": 30,
+                    "quality": 80,
+                },
+                "ai": {
+                    "obstacle_detection": True,
+                    "path_optimization": True,
+                    "learning_enabled": False,
+                },
+                "system": {
+                    "log_level": "INFO",
+                    "auto_updates": False,
+                    "remote_access": False,
+                    "branding_checksum": "abc123",
+                },
+            }
+            mock_read.return_value = json.dumps(fallback_payload)
             
             service = SettingsService()
             profile = service.load_profile()
@@ -166,8 +201,10 @@ class TestSettingsService:
         """Test successful profile validation."""
         service = SettingsService()
         
-        with patch("pathlib.Path.exists", return_value=True), \
-             patch("json.loads", return_value=mock_branding_config):
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("json.loads", return_value=mock_branding_config),
+        ):
             errors = service.validate_profile(sample_profile)
             
             assert len(errors) == 0
@@ -177,8 +214,10 @@ class TestSettingsService:
         sample_profile.system.branding_checksum = "wrong_checksum"
         service = SettingsService()
         
-        with patch("pathlib.Path.exists", return_value=True), \
-             patch("json.loads", return_value={"logo_checksum": "correct_checksum"}):
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("json.loads", return_value={"logo_checksum": "correct_checksum"}),
+        ):
             errors = service.validate_profile(sample_profile)
             
             assert len(errors) > 0

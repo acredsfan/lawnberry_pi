@@ -2,8 +2,15 @@ from pathlib import Path
 
 import pytest
 
-from backend.src.models.remote_access_config import CloudflareConfig, NgrokConfig, RemoteAccessConfig
-from backend.src.services.remote_access_service import RemoteAccessError, RemoteAccessService
+from backend.src.models.remote_access_config import (
+    CloudflareConfig,
+    NgrokConfig,
+    RemoteAccessConfig,
+)
+from backend.src.services.remote_access_service import (
+    RemoteAccessError,
+    RemoteAccessService,
+)
 
 
 @pytest.fixture()
@@ -19,6 +26,7 @@ def test_cloudflare_validation_requires_tunnel(temp_paths):
     cfg = RemoteAccessConfig(provider="cloudflare", enabled=True)
     with pytest.raises(RemoteAccessError):
         service.configure(cfg, persist=False)
+
 
 @pytest.mark.asyncio
 async def test_ngrok_fallback_when_cloudflare_start_fails(monkeypatch, temp_paths):

@@ -1,7 +1,8 @@
 """Contract test (T054): Geofence enforcement.
 
 Test goals (FR-030):
-- When position outside geofence, system should immediately stop (EMERGENCY_STOP or inside_geofence=false)
+- When position outside geofence, system should immediately stop
+    (EMERGENCY_STOP or inside_geofence=false)
 
 Notes:
 - Placeholder: uses /api/v2/debug/geofence and /api/v2/nav/status if implemented.
@@ -9,11 +10,11 @@ Notes:
 from __future__ import annotations
 
 import os
-import pytest
+
 import httpx
+import pytest
 
 from backend.src.main import app
-
 
 BASE_URL = "http://test"
 

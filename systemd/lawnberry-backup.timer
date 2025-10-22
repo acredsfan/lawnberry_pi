@@ -1,0 +1,11 @@
+[Unit]
+Description=LawnBerry Pi - Automated Backup Timer
+
+[Timer]
+# Run daily at 03:15 local time
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

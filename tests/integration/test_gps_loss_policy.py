@@ -1,9 +1,7 @@
 """Integration test for GPS loss policy: grace period then stop/alert."""
-import pytest
-import asyncio
-import time
-from typing import Dict, Any
+
 import httpx
+import pytest
 
 
 @pytest.mark.asyncio
@@ -26,7 +24,7 @@ async def test_gps_loss_dead_reckoning_grace_period():
         assert status_response.status_code == 200
         
         status_data = status_response.json()
-        initial_nav_state = status_data.get("navigation_state", "IDLE")
+        _initial_nav_state = status_data.get("navigation_state", "IDLE")
         
         # This test will initially fail as GPS loss handling isn't implemented
         # When implemented, should test:

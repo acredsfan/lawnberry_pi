@@ -53,6 +53,12 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/mission-planner',
+      name: 'MissionPlanner',
+      component: () => import('@/views/MissionPlannerView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/login',
       name: 'Login',
       component: () => import('@/views/LoginView.vue'),

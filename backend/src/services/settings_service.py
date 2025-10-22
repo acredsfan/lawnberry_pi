@@ -5,14 +5,20 @@ using lightweight compatibility models in backend.src.models.settings and exposi
 module-level `persistence` for easy patching in tests.
 """
 
-import logging
-import json
-from typing import Optional, Dict, Any
-from datetime import datetime, timezone
-from pathlib import Path
+from __future__ import annotations
 
+import json
+import logging
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from ..core.persistence import (
+    persistence as _default_persistence,  # module-level symbol for tests to patch
+)
 from ..models.settings import SettingsProfile
-from ..core.persistence import persistence as persistence  # module-level symbol for tests to patch
+
+persistence = _default_persistence
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +31,12 @@ class SettingsService:
         self.persistence = persistence if persistence is not None else globals().get("persistence")
         self.config_dir = config_dir
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        self._current_profile: Optional[SettingsProfile] = None
+        self._current_profile: SettingsProfile | None = None
     
     def load_profile(self, profile_id: str = "default") -> SettingsProfile:
         """Load settings profile from persistence"""
         # Try a dedicated settings profile loader if available
-        config_data: Optional[Dict[str, Any]] = None
+        config_data: dict[str, Any] | None = None
         loader = getattr(self.persistence, "load_settings_profile", None)
         if callable(loader):
             try:
@@ -71,14 +77,19 @@ class SettingsService:
         self._current_profile = profile
         return profile
     
-    def save_profile(self, profile: SettingsProfile, persist_to_db: bool = True, persist_to_file: bool = True) -> None:
+    def save_profile(
+        self,
+        profile: SettingsProfile,
+        persist_to_db: bool = True,
+        persist_to_file: bool = True,
+    ) -> None:
         """Save settings profile to persistence layer"""
         # Increment version and update timestamp per unit test expectations
         try:
             profile.version = int(getattr(profile, "version", 1)) + 1
         except Exception:
             profile.version = 2
-        profile.last_modified = datetime.now(timezone.utc)
+        profile.last_modified = datetime.now(UTC)
         
         # Save to SQLite
         if persist_to_db:
@@ -98,7 +109,8 @@ class SettingsService:
         # Save to config file
         if persist_to_file:
             try:
-                config_file = self.config_dir / f"{profile_id if (profile_id := 'default') else 'default'}.json"
+                target_profile_id = getattr(profile, "profile_id", None) or "default"
+                config_file = self.config_dir / f"{target_profile_id}.json"
                 config_file.write_text(json.dumps(profile.model_dump(), indent=2, default=str))
                 logger.info("Saved profile to config file")
             except Exception as e:
@@ -127,14 +139,18 @@ class SettingsService:
                     content = "{}"
                 data = json.loads(content) if content is not None else {}
                 expected = data.get("logo_checksum")
-                if expected and profile.system.branding_checksum and expected != profile.system.branding_checksum:
+                if (
+                    expected
+                    and profile.system.branding_checksum
+                    and expected != profile.system.branding_checksum
+                ):
                     issues.append("Branding checksum mismatch")
         except Exception:
             # Non-fatal
             pass
         return issues
     
-    def get_current_profile(self) -> Optional[SettingsProfile]:
+    def get_current_profile(self) -> SettingsProfile | None:
         """Get currently loaded profile"""
         return self._current_profile
     
@@ -165,9 +181,9 @@ class SettingsService:
         
         logger.info(f"Exported profile {profile_id} to {export_path}")
     
-    def import_profile(self, import_path: Path, profile_id: Optional[str] = None) -> SettingsProfile:
+    def import_profile(self, import_path: Path, profile_id: str | None = None) -> SettingsProfile:
         """Import profile from a file"""
-        with open(import_path, 'r') as f:
+        with open(import_path) as f:
             data = json.load(f)
         
         profile = SettingsProfile.model_validate(data)
@@ -205,10 +221,10 @@ class _AdapterProfile:
         path = f"{category}.{key}" if category else key
         return self._p.update_setting(path, value)
 
-    def dict(self) -> Dict[str, Any]:  # FastAPI/rest layer compatibility
+    def dict(self) -> dict[str, Any]:  # FastAPI/rest layer compatibility
         return self._p.model_dump()
 
-    def model_dump(self) -> Dict[str, Any]:
+    def model_dump(self) -> dict[str, Any]:
         return self._p.model_dump()
 
 
@@ -230,7 +246,7 @@ class _RestSettingsServiceAdapter:
         underlying = getattr(profile, "_p", profile)
         self._base.save_profile(underlying)
 
-    def validate_profile(self, profile: Any) -> Dict[str, Any]:
+    def validate_profile(self, profile: Any) -> dict[str, Any]:
         underlying = getattr(profile, "_p", profile)
         issues = self._base.validate_profile(underlying)
         return {"valid": len(issues) == 0, "issues": issues}

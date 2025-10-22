@@ -1,21 +1,21 @@
 """Unit tests for MapsService."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
+from unittest.mock import patch
+
+import pytest
 
 # Skip this test module if shapely is not installed
 pytest.importorskip("shapely")
-from shapely.geometry import Polygon
 
-from backend.src.services.maps_service import MapsService
 from backend.src.models.maps import (
-    MapConfiguration,
-    WorkingBoundary,
     ExclusionZone,
-    Marker,
     LatLng,
+    MapConfiguration,
+    Marker,
+    WorkingBoundary,
 )
+from backend.src.services.maps_service import MapsService
 
 
 @pytest.fixture

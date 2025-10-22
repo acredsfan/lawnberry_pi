@@ -315,6 +315,7 @@
         <div class="card-header">
           <h3>Model Training</h3>
           <button 
+            data-testid="ai-start-training"
             class="btn btn-sm btn-primary" 
             :disabled="isTraining"
             @click="startTraining"

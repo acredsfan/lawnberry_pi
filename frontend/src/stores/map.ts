@@ -202,14 +202,22 @@ export const useMapStore = defineStore('map', () => {
     error.value = '';
     try {
       const response: AxiosResponse<any> = await apiService.get(
-        `/api/v2/map/configuration?config_id=${configId}`
-      );
-      // Support contract envelope from backend
-      if (response && response.data && response.data.zones) {
-        configuration.value = envelopeToConfig(configId, response.data);
-      } else if (response) {
-        configuration.value = response as MapConfiguration;
-      }
+          `/api/v2/map/configuration?config_id=${configId}`
+        );
+        // Support contract envelope from backend
+        if (response?.data?.zones) {
+          configuration.value = envelopeToConfig(configId, response.data);
+        } else if (response?.data) {
+          configuration.value = response.data as MapConfiguration;
+        } else if (response) {
+          configuration.value = response as unknown as MapConfiguration;
+        }
+
+        if (configuration.value) {
+          configuration.value.exclusion_zones = configuration.value.exclusion_zones || []
+          configuration.value.mowing_zones = configuration.value.mowing_zones || []
+          configuration.value.markers = configuration.value.markers || []
+        }
       isDirty.value = false;
       return response;
     } catch (e: any) {

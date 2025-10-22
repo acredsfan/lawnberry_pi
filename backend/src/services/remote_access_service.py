@@ -19,6 +19,7 @@ from ..models.remote_access_config import (
     RemoteAccessConfig,
     RemoteAccessProvider,
 )
+from ..core.observability import observability
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +316,13 @@ class RemoteAccessService:
 
     def record_error(self, message: str, exc: Optional[Exception] = None) -> None:
         logger.error(message, exc_info=exc)
+        observability.record_error(
+            origin="remote_access",
+            message=message,
+            exception=exc,
+            severity="ERROR",
+            metadata={"provider": self._status.provider, "active": self._status.active},
+        )
         self._status.active = False
         self._status.health = "error"
         self._status.message = message

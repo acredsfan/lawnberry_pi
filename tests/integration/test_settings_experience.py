@@ -2,11 +2,11 @@
 Integration tests for settings lifecycle and experience.
 Validates settings GET/PUT, validation, persistence, maps provider fallback, real-time propagation.
 """
-import pytest
-from httpx import AsyncClient, ASGITransport
-from backend.src.main import app
-import os
 
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from backend.src.main import app
 
 pytestmark = pytest.mark.integration
 
@@ -57,7 +57,11 @@ async def test_settings_put_telemetry_cadence_validation():
         payload_valid = {
             "cadence_hz": 5
         }
-        response_valid = await client.put("/api/v2/settings/telemetry", json=payload_valid, headers=headers)
+        response_valid = await client.put(
+            "/api/v2/settings/telemetry",
+            json=payload_valid,
+            headers=headers,
+        )
         
         if response_valid.status_code in (404, 501, 422):
             return
@@ -71,7 +75,11 @@ async def test_settings_put_telemetry_cadence_validation():
         payload_invalid_high = {
             "cadence_hz": 15  # exceeds 10 Hz max
         }
-        response_invalid_high = await client.put("/api/v2/settings/telemetry", json=payload_invalid_high, headers=headers)
+        response_invalid_high = await client.put(
+            "/api/v2/settings/telemetry",
+            json=payload_invalid_high,
+            headers=headers,
+        )
         
         if response_invalid_high.status_code in (404, 501):
             return
@@ -79,13 +87,18 @@ async def test_settings_put_telemetry_cadence_validation():
         # Should reject with 400/422
         assert response_invalid_high.status_code in (400, 422)
         data_invalid_high = response_invalid_high.json()
-        assert "cadence" in data_invalid_high.get("detail", "").lower() or "range" in data_invalid_high.get("detail", "").lower()
+        detail_lower = data_invalid_high.get("detail", "").lower()
+        assert "cadence" in detail_lower or "range" in detail_lower
         
         # Test invalid cadence (too low)
         payload_invalid_low = {
             "cadence_hz": 0  # below 1 Hz min
         }
-        response_invalid_low = await client.put("/api/v2/settings/telemetry", json=payload_invalid_low, headers=headers)
+        response_invalid_low = await client.put(
+            "/api/v2/settings/telemetry",
+            json=payload_invalid_low,
+            headers=headers,
+        )
         
         if response_invalid_low.status_code in (404, 501):
             return
@@ -108,7 +121,11 @@ async def test_settings_persistence_across_server_restart():
         payload = {
             "cadence_hz": 7
         }
-        response_put = await client.put("/api/v2/settings/telemetry", json=payload, headers=headers)
+        response_put = await client.put(
+            "/api/v2/settings/telemetry",
+            json=payload,
+            headers=headers,
+        )
         
         if response_put.status_code in (404, 501, 422):
             return
@@ -142,7 +159,11 @@ async def test_settings_maps_provider_osm_fallback():
             "provider": "osm",
             "zoom_level": 18
         }
-        response = await client.put("/api/v2/settings/maps", json=payload, headers=headers)
+        response = await client.put(
+            "/api/v2/settings/maps",
+            json=payload,
+            headers=headers,
+        )
         
         if response.status_code in (404, 501, 422):
             return
@@ -182,7 +203,11 @@ async def test_settings_realtime_propagation_via_websocket():
         payload = {
             "cadence_hz": 3
         }
-        response_put = await client.put("/api/v2/settings/telemetry", json=payload, headers=headers)
+        response_put = await client.put(
+            "/api/v2/settings/telemetry",
+            json=payload,
+            headers=headers,
+        )
         
         if response_put.status_code in (404, 501, 422):
             return
@@ -213,7 +238,11 @@ async def test_settings_camera_resolution_validation():
             "height": 1080,
             "framerate": 30
         }
-        response_valid = await client.put("/api/v2/settings/camera", json=payload_valid, headers=headers)
+        response_valid = await client.put(
+            "/api/v2/settings/camera",
+            json=payload_valid,
+            headers=headers,
+        )
         
         if response_valid.status_code in (404, 501, 422):
             return
@@ -231,7 +260,11 @@ async def test_settings_camera_resolution_validation():
             "height": 3072,
             "framerate": 60  # Likely exceeds Pi camera capabilities
         }
-        response_invalid = await client.put("/api/v2/settings/camera", json=payload_invalid, headers=headers)
+        response_invalid = await client.put(
+            "/api/v2/settings/camera",
+            json=payload_invalid,
+            headers=headers,
+        )
         
         if response_invalid.status_code in (404, 501):
             return
@@ -255,7 +288,11 @@ async def test_settings_system_sim_mode_toggle():
         payload_enable = {
             "sim_mode": True
         }
-        response_enable = await client.put("/api/v2/settings/system", json=payload_enable, headers=headers)
+        response_enable = await client.put(
+            "/api/v2/settings/system",
+            json=payload_enable,
+            headers=headers,
+        )
         
         if response_enable.status_code in (404, 501, 422):
             return
@@ -284,7 +321,11 @@ async def test_settings_system_sim_mode_toggle():
         payload_disable = {
             "sim_mode": False
         }
-        response_disable = await client.put("/api/v2/settings/system", json=payload_disable, headers=headers)
+        response_disable = await client.put(
+            "/api/v2/settings/system",
+            json=payload_disable,
+            headers=headers,
+        )
         
         if response_disable.status_code in (404, 501, 422):
             return
@@ -310,7 +351,11 @@ async def test_settings_ai_model_selection_validation():
             "model": "yolov8n",
             "confidence_threshold": 0.5
         }
-        response_valid = await client.put("/api/v2/settings/ai", json=payload_valid, headers=headers)
+        response_valid = await client.put(
+            "/api/v2/settings/ai",
+            json=payload_valid,
+            headers=headers,
+        )
         
         if response_valid.status_code in (404, 501, 422):
             return
@@ -326,7 +371,11 @@ async def test_settings_ai_model_selection_validation():
             "model": "nonexistent-model",
             "confidence_threshold": 0.5
         }
-        response_invalid = await client.put("/api/v2/settings/ai", json=payload_invalid, headers=headers)
+        response_invalid = await client.put(
+            "/api/v2/settings/ai",
+            json=payload_invalid,
+            headers=headers,
+        )
         
         if response_invalid.status_code in (404, 501):
             return

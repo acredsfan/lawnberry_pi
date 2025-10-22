@@ -3,15 +3,18 @@ Unit tests for enhanced authentication security levels
 Tests the configurable authentication system with multiple security levels
 """
 
-import pytest
-import asyncio
-from unittest.mock import Mock, patch, AsyncMock
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock, patch
 
-from backend.src.services.auth_service import auth_service, AuthenticationError
+import pytest
+
 from backend.src.models.auth_security_config import (
-    AuthSecurityConfig, SecurityLevel, TOTPConfig, GoogleAuthConfig
+    AuthSecurityConfig,
+    GoogleAuthConfig,
+    SecurityLevel,
+    TOTPConfig,
 )
+from backend.src.services.auth_service import AuthenticationError, auth_service
 
 
 class TestAuthSecurityLevels:
@@ -61,7 +64,9 @@ class TestAuthSecurityLevels:
         return AuthSecurityConfig(
             security_level=SecurityLevel.TUNNEL_AUTH,
             tunnel_auth_enabled=True,
-            required_headers={"CF-Access-Authenticated-User-Email": "user@example.com"},
+            required_headers={
+                "CF-Access-Authenticated-User-Email": "user@example.com"
+            },
             session_timeout_minutes=120
         )
 
@@ -102,12 +107,15 @@ class TestAuthSecurityLevels:
         """Test successful password authentication."""
         with patch.object(auth_service, 'config', auth_config_password):
             with patch('bcrypt.checkpw', return_value=True):
-                result = await auth_service.authenticate_password("admin", "test_password")
+                result = await auth_service.authenticate_password(
+                    "admin",
+                    "test_password",
+                )
                 
                 assert result is not None
                 assert result.username == "admin"
                 assert result.security_level == SecurityLevel.PASSWORD
-                assert result.expires_at > datetime.now(timezone.utc)
+                assert result.expires_at > datetime.now(UTC)
 
     @pytest.mark.asyncio
     async def test_password_authentication_failure(self, auth_config_password):
@@ -115,7 +123,10 @@ class TestAuthSecurityLevels:
         with patch.object(auth_service, 'config', auth_config_password):
             with patch('bcrypt.checkpw', return_value=False):
                 with pytest.raises(AuthenticationError, match="Invalid credentials"):
-                    await auth_service.authenticate_password("admin", "wrong_password")
+                    await auth_service.authenticate_password(
+                        "admin",
+                        "wrong_password",
+                    )
 
     @pytest.mark.asyncio
     async def test_totp_authentication_success(self, auth_config_totp):
@@ -123,7 +134,11 @@ class TestAuthSecurityLevels:
         with patch.object(auth_service, 'config', auth_config_totp):
             with patch('bcrypt.checkpw', return_value=True):
                 with patch('pyotp.TOTP.verify', return_value=True):
-                    result = await auth_service.authenticate_totp("admin", "test_password", "123456")
+                    result = await auth_service.authenticate_totp(
+                        "admin",
+                        "test_password",
+                        "123456",
+                    )
                     
                     assert result is not None
                     assert result.username == "admin"
@@ -137,14 +152,22 @@ class TestAuthSecurityLevels:
             with patch('bcrypt.checkpw', return_value=True):
                 with patch('pyotp.TOTP.verify', return_value=False):
                     with pytest.raises(AuthenticationError, match="Invalid TOTP code"):
-                        await auth_service.authenticate_totp("admin", "test_password", "000000")
+                        await auth_service.authenticate_totp(
+                            "admin",
+                            "test_password",
+                            "000000",
+                        )
 
     @pytest.mark.asyncio
     async def test_totp_backup_code_authentication(self, auth_config_totp):
         """Test authentication with TOTP backup code."""
         with patch.object(auth_service, 'config', auth_config_totp):
             with patch('bcrypt.checkpw', return_value=True):
-                result = await auth_service.authenticate_totp("admin", "test_password", "123456")
+                result = await auth_service.authenticate_totp(
+                    "admin",
+                    "test_password",
+                    "123456",
+                )
                 
                 assert result is not None
                 assert result.backup_code_used is True
@@ -158,16 +181,21 @@ class TestAuthSecurityLevels:
             "aud": "test_client_id.googleusercontent.com",
             "email": "user@example.com",
             "email_verified": True,
-            "exp": int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()),
-            "iat": int(datetime.now(timezone.utc).timestamp()),
+            "exp": int((datetime.now(UTC) + timedelta(hours=1)).timestamp()),
+            "iat": int(datetime.now(UTC).timestamp()),
             "iss": "https://accounts.google.com",
             "sub": "12345678901234567890"
         }
         
         with patch.object(auth_service, 'config', auth_config_google):
             with patch('google.auth.transport.requests.Request'):
-                with patch('google.oauth2.id_token.verify_oauth2_token', return_value=mock_token_info):
-                    result = await auth_service.authenticate_google_oauth("mock_id_token")
+                with patch(
+                    'google.oauth2.id_token.verify_oauth2_token',
+                    return_value=mock_token_info,
+                ):
+                    result = await auth_service.authenticate_google_oauth(
+                        "mock_id_token"
+                    )
                     
                     assert result is not None
                     assert result.username == "user@example.com"
@@ -181,17 +209,25 @@ class TestAuthSecurityLevels:
             "aud": "test_client_id.googleusercontent.com",
             "email": "user@unauthorized.com",  # Not in allowed domains
             "email_verified": True,
-            "exp": int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()),
-            "iat": int(datetime.now(timezone.utc).timestamp()),
+            "exp": int((datetime.now(UTC) + timedelta(hours=1)).timestamp()),
+            "iat": int(datetime.now(UTC).timestamp()),
             "iss": "https://accounts.google.com",
             "sub": "12345678901234567890"
         }
         
         with patch.object(auth_service, 'config', auth_config_google):
             with patch('google.auth.transport.requests.Request'):
-                with patch('google.oauth2.id_token.verify_oauth2_token', return_value=mock_token_info):
-                    with pytest.raises(AuthenticationError, match="Domain not allowed"):
-                        await auth_service.authenticate_google_oauth("mock_id_token")
+                with patch(
+                    'google.oauth2.id_token.verify_oauth2_token',
+                    return_value=mock_token_info,
+                ):
+                    with pytest.raises(
+                        AuthenticationError,
+                        match="Domain not allowed",
+                    ):
+                        await auth_service.authenticate_google_oauth(
+                            "mock_id_token"
+                        )
 
     @pytest.mark.asyncio
     async def test_tunnel_authentication_success(self, auth_config_tunnel):
@@ -223,7 +259,7 @@ class TestAuthSecurityLevels:
         """Test session timeout enforcement."""
         # Create expired session
         expired_session = Mock()
-        expired_session.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        expired_session.expires_at = datetime.now(UTC) - timedelta(minutes=1)
         expired_session.username = "admin"
         
         with patch.object(auth_service, 'config', auth_config_password):
@@ -236,7 +272,7 @@ class TestAuthSecurityLevels:
         # Create session with lower security level
         low_sec_session = Mock()
         low_sec_session.security_level = SecurityLevel.PASSWORD
-        low_sec_session.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        low_sec_session.expires_at = datetime.now(UTC) + timedelta(hours=1)
         
         # Config requires higher security
         high_sec_config = AuthSecurityConfig(
@@ -256,12 +292,21 @@ class TestAuthSecurityLevels:
         
         with patch.object(auth_service, 'config', auth_config_password):
             # Create maximum allowed sessions
-            session1 = await auth_service.create_session("admin", SecurityLevel.PASSWORD)
-            session2 = await auth_service.create_session("admin", SecurityLevel.PASSWORD)
+            session1 = await auth_service.create_session(
+                "admin",
+                SecurityLevel.PASSWORD,
+            )
+            session2 = await auth_service.create_session(
+                "admin",
+                SecurityLevel.PASSWORD,
+            )
             
             # Third session should fail or invalidate oldest
             with patch.object(auth_service, 'active_sessions', {"admin": [session1, session2]}):
-                session3 = await auth_service.create_session("admin", SecurityLevel.PASSWORD)
+                _session3 = await auth_service.create_session(
+                    "admin",
+                    SecurityLevel.PASSWORD,
+                )
                 
                 # Should have exactly max_concurrent_sessions
                 assert len(auth_service.active_sessions.get("admin", [])) <= 2
@@ -308,11 +353,17 @@ class TestAuthSecurityLevels:
                 # Simulate multiple failed attempts
                 for _ in range(5):
                     with pytest.raises(AuthenticationError):
-                        await auth_service.authenticate_password("admin", "wrong_password")
+                        await auth_service.authenticate_password(
+                            "admin",
+                            "wrong_password",
+                        )
                 
                 # Next attempt should be rate limited
                 with pytest.raises(AuthenticationError, match="Too many attempts"):
-                    await auth_service.authenticate_password("admin", "wrong_password")
+                    await auth_service.authenticate_password(
+                        "admin",
+                        "wrong_password",
+                    )
 
     def test_backup_code_generation(self):
         """Test TOTP backup code generation."""
@@ -334,7 +385,11 @@ class TestAuthSecurityLevels:
             with patch('bcrypt.checkpw', return_value=True):
                 with patch('pyotp.TOTP.verify', return_value=True):
                     with patch.object(auth_service, '_log_security_event') as mock_log:
-                        await auth_service.authenticate_totp("admin", "password", "123456")
+                        await auth_service.authenticate_totp(
+                            "admin",
+                            "password",
+                            "123456",
+                        )
                         
                         # Should log successful authentication
                         mock_log.assert_called_with(
@@ -379,19 +434,25 @@ class TestAuthServiceIntegration:
         """Test complete authentication flow from config to session."""
         config = AuthSecurityConfig(
             security_level=SecurityLevel.TOTP,
-            password_hash="$2b$12$LQV3c7yqbczUQWNKlbZp5OXYgUvyYKNfkU9IvTyUkvqhzMBw5RpT6",  # "password"
+            password_hash=(
+                "$2b$12$LQV3c7yqbczUQWNKlbZp5OXYgUvyYKNfkU9IvTyUkvqhzMBw5RpT6"
+            ),  # "password"
             totp_config=TOTPConfig(
                 secret="JBSWY3DPEHPK3PXP",
                 enabled=True,
-                backup_codes=["123456", "789012"]
-            )
+                backup_codes=["123456", "789012"],
+            ),
         )
         
         await auth_service.initialize(config)
         
         with patch('pyotp.TOTP.verify', return_value=True):
             # Authenticate with TOTP
-            session = await auth_service.authenticate_totp("admin", "password", "123456")
+            session = await auth_service.authenticate_totp(
+                "admin",
+                "password",
+                "123456",
+            )
             
             assert session is not None
             assert session.username == "admin"

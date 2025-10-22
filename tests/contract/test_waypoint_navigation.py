@@ -9,11 +9,11 @@ Notes:
 from __future__ import annotations
 
 import os
-import pytest
+
 import httpx
+import pytest
 
 from backend.src.main import app
-
 
 BASE_URL = "http://test"
 
@@ -24,12 +24,25 @@ async def test_waypoint_arrival_detection():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         # Send a single waypoint near a known GPS injection point
-        wp = {"waypoints": [{"waypoint_id": "wp1", "latitude": 37.4220, "longitude": -122.0841, "arrival_threshold_m": 2.0}]}
+        wp = {
+            "waypoints": [
+                {
+                    "waypoint_id": "wp1",
+                    "latitude": 37.4220,
+                    "longitude": -122.0841,
+                    "arrival_threshold_m": 2.0,
+                }
+            ]
+        }
         r = await client.post("/api/v2/nav/waypoints", json=wp)
         assert r.status_code in {200, 404}
 
         # Inject matching GPS position
-        inj = {"latitude": 37.4220, "longitude": -122.0841, "accuracy_m": 3.0}
+        inj = {
+            "latitude": 37.4220,
+            "longitude": -122.0841,
+            "accuracy_m": 3.0,
+        }
         await client.post("/api/v2/debug/gps/inject", json=inj)
 
         nav = await client.get("/api/v2/nav/status")

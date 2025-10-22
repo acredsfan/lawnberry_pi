@@ -3,8 +3,8 @@ import time
 
 def test_estop_triggers_motor_disable_quickly():
     try:
-        from backend.src.safety.motor_authorization import MotorAuthorization
         from backend.src.safety.estop_handler import EstopHandler
+        from backend.src.safety.motor_authorization import MotorAuthorization
     except Exception:
         # Will be implemented in Phase 2
         import pytest

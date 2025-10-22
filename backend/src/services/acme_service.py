@@ -6,6 +6,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
+from ..core.observability import observability
+
+
+logger = observability.get_logger(__name__)
+
 
 class ACMEService:
     """ACME TLS certificate management service."""
@@ -177,13 +182,29 @@ server {{
             result = subprocess.run(["nginx", "-t"], capture_output=True, text=True)
             if result.returncode == 0:
                 subprocess.run(["systemctl", "reload", "nginx"], check=True)
+                logger.info(
+                    "Reloaded nginx after writing ACME challenge configuration",
+                    extra={"command": "nginx -t"},
+                )
                 return True
-            else:
-                print(f"Nginx configuration test failed: {result.stderr}")
-                return False
-                
+            logger.error(
+                "Nginx configuration validation failed",
+                extra={"stderr": result.stderr},
+            )
+            observability.record_error(
+                origin="acme",
+                message="Nginx configuration validation failed",
+                metadata={"stderr": result.stderr},
+            )
+            return False
+
         except Exception as e:
-            print(f"Failed to setup HTTP challenge server: {e}")
+            logger.error("Failed to setup HTTP challenge server", exc_info=True)
+            observability.record_error(
+                origin="acme",
+                message="Failed to setup HTTP challenge server",
+                exception=e,
+            )
             return False
         
     def install_certificate(self, domain: str, cert_path: str, key_path: str, 
@@ -210,7 +231,12 @@ server {{
             return True
             
         except Exception as e:
-            print(f"Certificate installation failed: {e}")
+            logger.error("Certificate installation failed", exc_info=True)
+            observability.record_error(
+                origin="acme",
+                message="Certificate installation failed",
+                exception=e,
+            )
             return False
             
     def reload_web_server(self):
@@ -220,12 +246,20 @@ server {{
             result = subprocess.run(["nginx", "-t"], capture_output=True, text=True)
             if result.returncode == 0:
                 subprocess.run(["systemctl", "reload", "nginx"], check=True)
-                print("Web server reloaded successfully")
-            else:
-                print(f"Nginx configuration test failed: {result.stderr}")
-                raise Exception("Invalid nginx configuration")
+                logger.info("Web server reloaded after certificate update")
+                return
+            logger.error(
+                "Nginx configuration validation failed during reload",
+                extra={"stderr": result.stderr},
+            )
+            raise Exception("Invalid nginx configuration")
         except Exception as e:
-            print(f"Web server reload failed: {e}")
+            logger.error("Web server reload failed", exc_info=True)
+            observability.record_error(
+                origin="acme",
+                message="Web server reload failed",
+                exception=e,
+            )
             raise
             
     def get_renewal_status(self) -> Dict[str, Any]:

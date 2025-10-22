@@ -1,6 +1,6 @@
-import pytest
+
 import httpx
-import json
+import pytest
 
 pytestmark = pytest.mark.integration
 
@@ -118,7 +118,12 @@ async def test_map_configuration_overlap_rejection():
             "boundaries": [
                 {
                     "type": "boundary",
-                    "coordinates": [[40.7128, -74.0060], [40.7130, -74.0058], [40.7132, -74.0062], [40.7128, -74.0060]],
+                    "coordinates": [
+                        [40.7128, -74.0060],
+                        [40.7130, -74.0058],
+                        [40.7132, -74.0062],
+                        [40.7128, -74.0060],
+                    ],
                     "zone_type": "zone1"
                 }
             ],
@@ -126,7 +131,12 @@ async def test_map_configuration_overlap_rejection():
                 {
                     "type": "exclusion",
                     # Overlaps with boundary
-                    "coordinates": [[40.7129, -74.0059], [40.7131, -74.0057], [40.7133, -74.0061], [40.7129, -74.0059]],
+                    "coordinates": [
+                        [40.7129, -74.0059],
+                        [40.7131, -74.0057],
+                        [40.7133, -74.0061],
+                        [40.7129, -74.0059],
+                    ],
                     "name": "overlapping_zone"
                 }
             ]
@@ -157,7 +167,7 @@ async def test_map_provider_osm_fallback():
         
         # May not have /settings/maps endpoint yet (TDD)
         if settings_response.status_code == 200:
-            settings = settings_response.json()
+            _settings = settings_response.json()
             
             # Force OSM fallback by removing API key or setting provider
             fallback_config = {
@@ -247,7 +257,10 @@ async def test_maps_api_key_management_and_bypass():
         assert body1["provider"] == "osm"
 
         # Set Google with a dummy key
-        put2 = await client.put("/api/v2/settings/maps", json={"provider": "google", "api_key": "dummy"})
+        put2 = await client.put(
+            "/api/v2/settings/maps",
+            json={"provider": "google", "api_key": "dummy"},
+        )
         assert put2.status_code == 200
         body2 = put2.json()
         assert body2["provider"] == "google"

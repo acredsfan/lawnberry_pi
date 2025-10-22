@@ -145,6 +145,44 @@ cd systemd
 sudo bash install_services.sh
 ```
 
+### 5. Automatic HTTPS (Zero-Touch)
+
+HTTPS is configured automatically during setup with a self-signed certificate, and seamlessly upgrades to a valid Let's Encrypt certificate when you provide your domain and email in `.env`.
+
+1) Self-signed baseline (automatic):
+   - `scripts/setup.sh` installs nginx (if missing), creates a self-signed cert under `/etc/lawnberry/certs/selfsigned`, configures HTTP→HTTPS redirect, ACME challenge path, and WebSocket proxying.
+   - The site becomes reachable at `https://<pi-ip>/` immediately (your browser will warn about the self-signed certificate until a valid one is installed).
+
+2) Zero-touch Let’s Encrypt (recommended):
+   - Edit `/home/pi/lawnberry/.env` and set:
+     - `LB_DOMAIN=your.domain`
+     - `LETSENCRYPT_EMAIL=you@domain.com`
+     - Optional: `ALT_DOMAINS=www.your.domain,api.your.domain`
+     - Optional (for DNS-01 and wildcards): `CLOUDFLARE_API_TOKEN=cf_...`
+   - Re-run `scripts/setup.sh` or reboot. The setup will provision a valid cert automatically and migrate nginx to use it.
+
+3) Auto-renewal, validation, and fallback:
+   - A daily systemd timer (`lawnberry-cert-renewal.timer`) runs `scripts/renew_certificates.sh` to renew LE certs, validate expiry, and reload nginx.
+   - If renewal fails or the certificate is near expiry, the script falls back to a self-signed certificate automatically to maintain HTTPS availability.
+   - Logs are written to syslog with the tag `lawnberry-cert`.
+
+Check status and logs:
+```bash
+systemctl list-timers | grep lawnberry-cert-renewal
+journalctl -u lawnberry-cert-renewal.service -n 100 --no-pager
+```
+
+Validate HTTPS/ACME locally (no real cert required):
+```bash
+# Run safe validation (installs nginx if needed when flag provided)
+./scripts/validate_https_setup.sh --install-nginx
+
+# What it checks
+# - nginx syntax and service status
+# - ACME challenge path served on http://127.0.0.1/.well-known/acme-challenge
+# - TLS handshake + HTTP response on https://127.0.0.1/
+```
+
 ## Basic Configuration
 
 ### 1. Initial System Config

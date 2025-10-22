@@ -1,8 +1,8 @@
-import pytest
-from datetime import datetime, timezone
 
+import pytest
+
+from backend.src.models import ImuReading, Position, SensorData
 from backend.src.services.navigation_service import NavigationService
-from backend.src.models import Position, SensorData, ImuReading
 
 
 @pytest.mark.asyncio
@@ -28,7 +28,16 @@ async def test_dead_reckoning_resets_with_gps_fix():
     # Provide a GPS fix; dead reckoning should disable
     gps_pos = Position(latitude=37.0, longitude=-122.0)
     sd = SensorData()
-    sd.gps = type("GpsMock", (), {"latitude": gps_pos.latitude, "longitude": gps_pos.longitude, "altitude": None, "accuracy": 2.0})()
+    sd.gps = type(
+        "GpsMock",
+        (),
+        {
+            "latitude": gps_pos.latitude,
+            "longitude": gps_pos.longitude,
+            "altitude": None,
+            "accuracy": 2.0,
+        },
+    )()
     state = await nav.update_navigation_state(sd)
     assert state.dead_reckoning_active is False
     assert state.current_position is not None

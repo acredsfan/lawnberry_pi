@@ -3,11 +3,10 @@
 import base64
 import os
 
-import pytest
 import httpx
+import pytest
 
 from backend.src.main import app
-
 
 BASE_URL = "http://test"
 
@@ -42,7 +41,9 @@ async def test_telemetry_websocket_handshake_includes_latency_budget():
         latency_budget = int(response.headers.get("x-latency-budget-ms", "0"))
         assert latency_budget <= 250
         assert response.headers.get("sec-websocket-protocol") == "telemetry.v1"
-        assert response.headers.get("x-payload-schema") == "#/components/schemas/HardwareTelemetryStream"
+        assert response.headers.get("x-payload-schema") == (
+            "#/components/schemas/HardwareTelemetryStream"
+        )
 
 
 @pytest.mark.asyncio
@@ -67,7 +68,9 @@ async def test_control_websocket_requires_bearer_auth():
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
-        headers = _websocket_headers({"Authorization": None, "Sec-WebSocket-Protocol": "control.v1"})
+        headers = _websocket_headers(
+            {"Authorization": None, "Sec-WebSocket-Protocol": "control.v1"}
+        )
         headers.pop("Authorization", None)
 
         response = await client.get("/api/v2/ws/control", headers=headers)
@@ -91,7 +94,9 @@ async def test_control_websocket_handshake_includes_latency_and_schema():
         assert response.headers.get("sec-websocket-accept")
         latency_budget = int(response.headers.get("x-latency-budget-ms", "0"))
         assert latency_budget <= 200
-        assert response.headers.get("x-payload-schema") == "#/components/schemas/ControlCommandResponse"
+        assert response.headers.get("x-payload-schema") == (
+            "#/components/schemas/ControlCommandResponse"
+        )
 
 
 @pytest.mark.asyncio
@@ -116,7 +121,9 @@ async def test_settings_websocket_requires_bearer_auth():
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
-        headers = _websocket_headers({"Authorization": None, "Sec-WebSocket-Protocol": "settings.v1"})
+        headers = _websocket_headers(
+            {"Authorization": None, "Sec-WebSocket-Protocol": "settings.v1"}
+        )
         headers.pop("Authorization", None)
 
         response = await client.get("/api/v2/ws/settings", headers=headers)
@@ -132,7 +139,9 @@ async def test_notifications_websocket_includes_latency_and_schema():
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
-        headers = _websocket_headers({"Sec-WebSocket-Protocol": "notifications.v1"})
+        headers = _websocket_headers(
+            {"Sec-WebSocket-Protocol": "notifications.v1"}
+        )
         response = await client.get("/api/v2/ws/notifications", headers=headers)
 
         assert response.status_code == 101, response.text
@@ -140,7 +149,9 @@ async def test_notifications_websocket_includes_latency_and_schema():
         assert response.headers.get("sec-websocket-accept")
         latency_budget = int(response.headers.get("x-latency-budget-ms", "0"))
         assert latency_budget <= 500
-        assert response.headers.get("x-payload-schema") == "#/components/schemas/NotificationEvent"
+        assert response.headers.get("x-payload-schema") == (
+            "#/components/schemas/NotificationEvent"
+        )
 
 
 @pytest.mark.asyncio
@@ -149,7 +160,9 @@ async def test_notifications_websocket_requires_bearer_auth():
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
-        headers = _websocket_headers({"Authorization": None, "Sec-WebSocket-Protocol": "notifications.v1"})
+        headers = _websocket_headers(
+            {"Authorization": None, "Sec-WebSocket-Protocol": "notifications.v1"}
+        )
         headers.pop("Authorization", None)
 
         response = await client.get("/api/v2/ws/notifications", headers=headers)

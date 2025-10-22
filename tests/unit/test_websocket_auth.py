@@ -1,6 +1,6 @@
 import pytest
-from starlette.requests import Request
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from backend.src.api import rest
 from backend.src.main import app

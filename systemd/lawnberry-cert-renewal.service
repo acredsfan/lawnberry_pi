@@ -1,0 +1,23 @@
+[Unit]
+Description=LawnBerry Pi certificate renewal and validation
+Documentation=README.md
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/home/pi/lawnberry/scripts/renew_certificates.sh
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/pi/lawnberry
+ExecStart=/usr/bin/env bash -lc 'bash /home/pi/lawnberry/scripts/renew_certificates.sh'
+User=root
+Group=root
+Nice=10
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH
+
+[Install]
+WantedBy=multi-user.target

@@ -1,10 +1,9 @@
 """Contract tests for map configuration endpoints."""
 
-import pytest
 import httpx
+import pytest
 
 from backend.src.main import app
-
 
 BASE_URL = "http://test"
 

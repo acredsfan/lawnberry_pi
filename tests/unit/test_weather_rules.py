@@ -1,8 +1,9 @@
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+import pytest
+
+from backend.src.models import NavigationMode, PathStatus, Position, Waypoint
 from backend.src.services.navigation_service import NavigationService
-from backend.src.models import Position, Waypoint, NavigationMode, PathStatus
 
 
 class FakeWeatherService:
@@ -11,7 +12,7 @@ class FakeWeatherService:
 
     def get_current(self, latitude=None, longitude=None):
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "source": "fake",
             "temperature_c": 20.0,
             "humidity_percent": 50.0,

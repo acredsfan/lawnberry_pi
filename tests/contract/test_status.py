@@ -1,6 +1,5 @@
 """Contract tests for /api/v1/status endpoint."""
 import pytest
-import httpx
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,65 @@
+<template>
+  <div class="waypoint-list">
+    <h2>Waypoints</h2>
+    <draggable v-model="localWaypoints" item-key="id" @end="onDragEnd">
+      <template #item="{ element: waypoint, index }">
+        <li class="waypoint-item">
+          <span>Waypoint {{ index + 1 }}: ({{ waypoint.lat.toFixed(4) }}, {{ waypoint.lon.toFixed(4) }})</span>
+          <div class="waypoint-controls">
+            <label>Blade On: <input type="checkbox" v-model="waypoint.blade_on" @change="updateWaypoint(waypoint)"></label>
+            <label>Speed: <input type="range" min="0" max="100" v-model.number="waypoint.speed" @change="updateWaypoint(waypoint)"> {{ waypoint.speed }}%</label>
+            <button @click="removeWaypoint(waypoint.id)">Remove</button>
+          </div>
+        </li>
+      </template>
+    </draggable>
+    <div v-if="missionStore.waypoints.length === 0">
+      <p>Click on the map to add waypoints.</p>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, watch } from 'vue';
+import { useMissionStore, Waypoint } from '@/stores/mission';
+import draggable from 'vuedraggable';
+
+const missionStore = useMissionStore();
+const localWaypoints = ref([...missionStore.waypoints]);
+
+watch(() => missionStore.waypoints, (newWaypoints) => {
+  localWaypoints.value = [...newWaypoints];
+}, { deep: true });
+
+const removeWaypoint = (id: string) => {
+  missionStore.removeWaypoint(id);
+};
+
+const updateWaypoint = (waypoint: Waypoint) => {
+  missionStore.updateWaypoint(waypoint);
+};
+
+const onDragEnd = () => {
+  missionStore.reorderWaypoints(localWaypoints.value);
+};
+</script>
+
+<style scoped>
+.waypoint-list ul {
+  list-style-type: none;
+  padding: 0;
+}
+.waypoint-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+  border-bottom: 1px solid #eee;
+  cursor: grab;
+}
+.waypoint-controls {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+</style>

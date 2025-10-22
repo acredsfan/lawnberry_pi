@@ -7,6 +7,38 @@ This document summarizes common operational procedures and API references releva
 - Web UI (Vite dev): port 3000 (proxy to /api → /api/v2)
 - WebSocket: ws://127.0.0.1:8081/api/v2/ws/telemetry
 
+## TLS/HTTPS Operations
+
+TLS is managed automatically:
+- On first setup, nginx is installed and configured with a self-signed certificate.
+- If `LB_DOMAIN` and `LETSENCRYPT_EMAIL` are set in `.env`, the system provisions a valid Let’s Encrypt certificate and switches nginx to use it.
+- A daily renewal timer validates and renews certificates; on issues or imminent expiry, the system falls back to self-signed to maintain availability.
+
+Useful commands:
+```bash
+# Check renewal timer status and last/next run
+systemctl list-timers | grep lawnberry-cert-renewal
+
+# Inspect recent renewal logs
+journalctl -u lawnberry-cert-renewal.service -n 200 --no-pager
+
+# Force a renewal/validation cycle
+sudo systemctl start lawnberry-cert-renewal.service
+
+# Dry-run renewal test
+sudo certbot renew --dry-run
+
+# Backend health and metrics for TLS status
+curl -s http://127.0.0.1:8081/api/v2/health | jq '.subsystems.tls'
+curl -s http://127.0.0.1:8081/metrics | grep lawnberry_tls_cert_
+```
+
+Environment variables (set in `.env`):
+- `LB_DOMAIN` – primary domain (CN)
+- `LETSENCRYPT_EMAIL` – contact email for Let’s Encrypt
+- `ALT_DOMAINS` – optional SANs (comma-separated), e.g., `www.example.com,api.example.com`
+- `CLOUDFLARE_API_TOKEN` – optional, for DNS-01 (wildcards or no port 80)
+
 ## Health & Status
 - GET http://127.0.0.1:8081/health → { status: "healthy" }
 - GET http://127.0.0.1:8081/api/v2/dashboard/status → system status
@@ -39,6 +71,10 @@ This document summarizes common operational procedures and API references releva
 
 ## Systemd
 See systemd/*.service and systemd/install_services.sh for installation. Backend service listens on port 8081.
+
+Certificate renewal units:
+- `lawnberry-cert-renewal.service` — on-demand renewal/validation + nginx reload + fallback
+- `lawnberry-cert-renewal.timer` — runs the renewal daily with randomized delay
 
 ## WebSocket Topics
 The V2 API provides WebSocket subscriptions for real-time data:

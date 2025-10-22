@@ -1,10 +1,9 @@
 """Contract tests for documentation bundle and verification artifact endpoints."""
 
-import pytest
 import httpx
+import pytest
 
 from backend.src.main import app
-
 
 BASE_URL = "http://test"
 
@@ -24,7 +23,14 @@ async def test_get_docs_bundle_returns_items_and_offline_header():
         assert isinstance(items, list) and items, "Expected docs bundle entries"
 
         for item in items:
-            for field in ("doc_id", "title", "version", "last_updated", "checksum", "offline_available"):
+            for field in (
+                "doc_id",
+                "title",
+                "version",
+                "last_updated",
+                "checksum",
+                "offline_available",
+            ):
                 assert field in item
             assert len(item["checksum"]) == 64
 

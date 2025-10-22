@@ -1,5 +1,5 @@
-import pytest
 import httpx
+import pytest
 
 pytestmark = pytest.mark.integration
 
@@ -18,11 +18,17 @@ async def test_remote_access_configurations_documented_and_toggleable():
         assert cfg["provider"] in {"disabled", "cloudflare", "ngrok", "custom"}
 
         # Enable Cloudflare provider config (scaffold doesn't start tunnel, just stores)
-        put = await client.put("/api/v2/settings/remote-access", json={
-            "provider": "cloudflare",
-            "enabled": True,
-            "cloudflare": {"tunnel_name": "lb-tun", "hostname": "mower.example.com"}
-        })
+        put = await client.put(
+            "/api/v2/settings/remote-access",
+            json={
+                "provider": "cloudflare",
+                "enabled": True,
+                "cloudflare": {
+                    "tunnel_name": "lb-tun",
+                    "hostname": "mower.example.com",
+                },
+            },
+        )
         assert put.status_code == 200
         body = put.json()
         assert body["enabled"] is True
@@ -30,18 +36,24 @@ async def test_remote_access_configurations_documented_and_toggleable():
         assert body["cloudflare"]["tunnel_name"] == "lb-tun"
 
         # Switch to ngrok, remains enabled
-        put2 = await client.put("/api/v2/settings/remote-access", json={
-            "provider": "ngrok",
-            "enabled": True,
-            "ngrok": {"region": "us"}
-        })
+        put2 = await client.put(
+            "/api/v2/settings/remote-access",
+            json={
+                "provider": "ngrok",
+                "enabled": True,
+                "ngrok": {"region": "us"},
+            },
+        )
         assert put2.status_code == 200
         body2 = put2.json()
         assert body2["provider"] == "ngrok"
         assert body2["enabled"] is True
 
         # Disable remote access
-        put3 = await client.put("/api/v2/settings/remote-access", json={"enabled": False, "provider": "disabled"})
+        put3 = await client.put(
+            "/api/v2/settings/remote-access",
+            json={"enabled": False, "provider": "disabled"},
+        )
         assert put3.status_code == 200
         body3 = put3.json()
         assert body3["enabled"] is False

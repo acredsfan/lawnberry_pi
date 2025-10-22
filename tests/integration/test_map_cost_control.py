@@ -1,8 +1,7 @@
 """Integration test for map cost adaptive use and OSM fallback."""
-import pytest
+
 import httpx
-from typing import Dict, Any
-import asyncio
+import pytest
 
 
 @pytest.mark.asyncio
@@ -85,7 +84,6 @@ async def test_map_cost_threshold_monitoring():
 @pytest.mark.asyncio
 async def test_map_tile_caching():
     """Test that map tiles are cached to reduce API calls."""
-    from backend.src.main import app
     
     # This test should verify:
     # 1. Frequently accessed tiles are cached locally
@@ -138,7 +136,6 @@ async def test_map_provider_switching_preserves_zones():
 @pytest.mark.asyncio
 async def test_google_maps_api_key_validation():
     """Test that Google Maps API key validation works properly."""
-    from backend.src.main import app
     
     # This test should verify:
     # 1. API key format validation

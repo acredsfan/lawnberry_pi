@@ -1,8 +1,8 @@
-import pytest
 import httpx
+import pytest
 
-from backend.src.main import app
 from backend.src.core.persistence import persistence
+from backend.src.main import app
 
 
 @pytest.mark.asyncio
@@ -11,7 +11,11 @@ async def test_audit_manual_control_and_settings():
     headers = {"X-Client-Id": "audit-client-1"}
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         # Drive command
-        resp = await client.post("/api/v2/control/drive", json={"mode": "arcade", "throttle": 0.1, "turn": 0.0}, headers=headers)
+        resp = await client.post(
+            "/api/v2/control/drive",
+            json={"mode": "arcade", "throttle": 0.1, "turn": 0.0},
+            headers=headers,
+        )
         assert resp.status_code == 200
 
         # Blade toggle
@@ -23,7 +27,11 @@ async def test_audit_manual_control_and_settings():
         assert resp.status_code == 200
 
         # Settings update
-        resp = await client.put("/api/v2/settings/system", json={"telemetry": {"cadence_hz": 3}}, headers=headers)
+        resp = await client.put(
+            "/api/v2/settings/system",
+            json={"telemetry": {"cadence_hz": 3}},
+            headers=headers,
+        )
         assert resp.status_code == 200
 
     logs = persistence.load_audit_logs(limit=50)

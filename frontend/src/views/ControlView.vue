@@ -26,8 +26,9 @@
           <div class="auth-methods">
             <!-- Password Verification -->
             <div v-if="securityConfig.auth_level === 'password'" class="auth-method">
-              <label>Confirm Password</label>
+              <label for="control-auth-password">Confirm Password</label>
               <input 
+                id="control-auth-password"
                 v-model="authForm.password"
                 type="password" 
                 class="form-control"
@@ -38,8 +39,9 @@
 
             <!-- TOTP Verification -->
             <div v-else-if="securityConfig.auth_level === 'totp'" class="auth-method">
-              <label>Enter TOTP Code</label>
+              <label for="control-auth-totp">Enter TOTP Code</label>
               <input 
+                id="control-auth-totp"
                 v-model="authForm.totpCode"
                 type="text" 
                 class="form-control totp-input"

@@ -1,16 +1,13 @@
 """Integration test for ACME TLS provisioning and renewal flow."""
-import pytest
-import httpx
-from typing import Dict, Any
-import asyncio
-import ssl
 import socket
+
+import httpx
+import pytest
 
 
 @pytest.mark.asyncio
 async def test_acme_http01_challenge_handling():
     """Test that ACME HTTP-01 challenges are handled correctly."""
-    from backend.src.main import app
     
     # This test verifies FR-028: ACME HTTP-01 auto renewal
     # 1. HTTP-01 challenge endpoint is available on port 80

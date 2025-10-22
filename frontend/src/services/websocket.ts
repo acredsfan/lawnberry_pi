@@ -242,6 +242,10 @@ export class WebSocketService {
   get isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
   }
+
+  dispatchTestMessage(message: WebSocketMessage) {
+    this.handleMessage(message)
+  }
 }
 
 // Global WebSocket service instance
@@ -315,6 +319,7 @@ export function useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handle
     unsubscribe,
     setCadence: (hz: number) => wsService.setCadence(hz),
     ping: () => wsService.ping(),
-    listTopics: () => wsService.listTopics()
+    listTopics: () => wsService.listTopics(),
+    dispatchTestMessage: (message: WebSocketMessage) => wsService.dispatchTestMessage(message)
   }
 }

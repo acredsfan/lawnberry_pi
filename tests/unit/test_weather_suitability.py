@@ -1,4 +1,3 @@
-import pytest
 
 from backend.src.scheduler.weather_api import WeatherAPI, WeatherCache
 from backend.src.scheduler.weather_sensor_fallback import EnvSnapshot, SensorFallbackRules
@@ -24,13 +23,19 @@ def test_sensor_fallback_rules_thresholds():
     rules = SensorFallbackRules(max_humidity_percent=85.0, min_pressure_hpa=1000.0)
 
     # Suitable when within thresholds
-    assert rules.is_suitable(EnvSnapshot(temperature_c=20.0, humidity_percent=60.0, pressure_hpa=1013.0)) is True
+    assert rules.is_suitable(
+        EnvSnapshot(temperature_c=20.0, humidity_percent=60.0, pressure_hpa=1013.0)
+    ) is True
 
     # High humidity blocks
-    assert rules.is_suitable(EnvSnapshot(temperature_c=20.0, humidity_percent=90.0, pressure_hpa=1013.0)) is False
+    assert rules.is_suitable(
+        EnvSnapshot(temperature_c=20.0, humidity_percent=90.0, pressure_hpa=1013.0)
+    ) is False
 
     # Low pressure blocks
-    assert rules.is_suitable(EnvSnapshot(temperature_c=20.0, humidity_percent=60.0, pressure_hpa=990.0)) is False
+    assert rules.is_suitable(
+        EnvSnapshot(temperature_c=20.0, humidity_percent=60.0, pressure_hpa=990.0)
+    ) is False
 
 
 def test_weather_service_combines_api_and_sensors(tmp_path):
@@ -41,7 +46,12 @@ def test_weather_service_combines_api_and_sensors(tmp_path):
     def provider_unsuitable(lat, lon):
         return {"unsuitable": True}
 
-    verdict = service.evaluate(37.0, -122.0, EnvSnapshot(20.0, 50.0, 1012.0), provider=provider_unsuitable)
+    verdict = service.evaluate(
+        37.0,
+        -122.0,
+        EnvSnapshot(20.0, 50.0, 1012.0),
+        provider=provider_unsuitable,
+    )
     assert verdict.suitable is False
     assert verdict.source == "api_or_cache"
 
@@ -49,10 +59,20 @@ def test_weather_service_combines_api_and_sensors(tmp_path):
     # Remove cache to simulate lack of forecast data
     if cache.path.exists():
         cache.path.unlink()
-    verdict2 = service.evaluate(37.0, -122.0, EnvSnapshot(20.0, 50.0, 1012.0), provider=None)
+    verdict2 = service.evaluate(
+        37.0,
+        -122.0,
+        EnvSnapshot(20.0, 50.0, 1012.0),
+        provider=None,
+    )
     assert verdict2.suitable is True
     assert verdict2.source == "sensors"
 
     # Predicate should reflect underlying evaluate
-    pred = service.make_predicate(37.0, -122.0, lambda: EnvSnapshot(20.0, 90.0, 1012.0), provider=None)
+    pred = service.make_predicate(
+        37.0,
+        -122.0,
+        lambda: EnvSnapshot(20.0, 90.0, 1012.0),
+        provider=None,
+    )
     assert pred() is False  # high humidity via sensors

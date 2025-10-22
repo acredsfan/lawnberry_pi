@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from backend.src.cli.sensor_commands import _format_table
 
+
 def test_format_table_basic():
     snapshot = {
         "tof_left": {"value": 0.25, "unit": "m", "status": "ok"},

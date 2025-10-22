@@ -1,12 +1,13 @@
 import asyncio
 import os
+
 import pytest
 
 from backend.src.core.robot_state_manager import get_robot_state_manager
 from backend.src.models.robot_state import NavigationMode
 from backend.src.nav.gps_degradation import (
-    GPSDegradationMonitor,
     GPSDegradationConfig,
+    GPSDegradationMonitor,
 )
 
 

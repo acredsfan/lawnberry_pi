@@ -6,17 +6,16 @@ Creates a compressed archive of all documentation files with checksum validation
 freshness alerts, and path traversal protection.
 """
 
-import os
-import sys
-import hashlib
-import tarfile
-import json
-import zipfile
 import argparse
-from pathlib import Path
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
+import hashlib
+import json
 import logging
+import sys
+import tarfile
+import zipfile
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,7 +32,7 @@ class DocumentationBundleGenerator:
         self.output_dir = project_root / "verification_artifacts" / "docs-bundle"
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
-    def collect_documentation_files(self) -> List[Path]:
+    def collect_documentation_files(self) -> list[Path]:
         """Collect all documentation files"""
         doc_files = []
         
@@ -78,24 +77,32 @@ class DocumentationBundleGenerator:
                 hasher.update(chunk)
         return hasher.hexdigest()
     
-    def check_freshness(self, file_path: Path) -> Dict[str, Any]:
+    def check_freshness(self, file_path: Path) -> dict[str, Any]:
         """Check if documentation is fresh (modified within threshold)"""
-        mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
-        age_days = (datetime.now(timezone.utc) - mtime).days
+        mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=UTC)
+        age_days = (datetime.now(UTC) - mtime).days
         
         is_fresh = age_days <= self.FRESHNESS_THRESHOLD_DAYS
         
+        warning = None
+        if not is_fresh:
+            warning = (
+                "Documentation is "
+                f"{age_days} days old "
+                f"(threshold: {self.FRESHNESS_THRESHOLD_DAYS} days)"
+            )
+
         return {
             "last_modified": mtime.isoformat(),
             "age_days": age_days,
             "is_fresh": is_fresh,
-            "warning": None if is_fresh else f"Documentation is {age_days} days old (threshold: {self.FRESHNESS_THRESHOLD_DAYS} days)"
+            "warning": warning,
         }
     
-    def generate_manifest(self, doc_files: List[Path], bundle_path: Path) -> Dict[str, Any]:
+    def generate_manifest(self, doc_files: list[Path], bundle_path: Path) -> dict[str, Any]:
         """Generate manifest for documentation bundle"""
         manifest = {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "bundle_path": str(bundle_path.relative_to(self.project_root)),
             "bundle_checksum": self.compute_checksum(bundle_path),
             "bundle_size_bytes": bundle_path.stat().st_size,
@@ -130,7 +137,11 @@ class DocumentationBundleGenerator:
         
         return manifest
     
-    def create_tarball(self, doc_files: List[Path], output_name: str = "docs-bundle.tar.gz") -> Path:
+    def create_tarball(
+        self,
+        doc_files: list[Path],
+        output_name: str = "docs-bundle.tar.gz",
+    ) -> Path:
         """Create compressed tarball of documentation"""
         output_path = self.output_dir / output_name
         
@@ -145,7 +156,11 @@ class DocumentationBundleGenerator:
         logger.info(f"Created tarball: {output_path}")
         return output_path
     
-    def create_zipfile(self, doc_files: List[Path], output_name: str = "docs-bundle.zip") -> Path:
+    def create_zipfile(
+        self,
+        doc_files: list[Path],
+        output_name: str = "docs-bundle.zip",
+    ) -> Path:
         """Create ZIP archive of documentation"""
         output_path = self.output_dir / output_name
         
@@ -160,7 +175,7 @@ class DocumentationBundleGenerator:
         logger.info(f"Created ZIP file: {output_path}")
         return output_path
     
-    def generate_bundle(self, format: str = "tarball") -> Dict[str, Any]:
+    def generate_bundle(self, format: str = "tarball") -> dict[str, Any]:
         """Generate complete documentation bundle"""
         logger.info("Starting documentation bundle generation...")
         
@@ -192,15 +207,20 @@ class DocumentationBundleGenerator:
         
         # Check for stale documents
         if manifest["stale_documents"] > 0:
-            logger.warning(f"{manifest['stale_documents']} document(s) are stale (older than {self.FRESHNESS_THRESHOLD_DAYS} days)")
+            logger.warning(
+                "%(count)s document(s) are stale (older than %(threshold)s days)",
+                {
+                    "count": manifest["stale_documents"],
+                    "threshold": self.FRESHNESS_THRESHOLD_DAYS,
+                },
+            )
         
         return manifest
 
 
 def main():
     """CLI entry point"""
-    import argparse
-    
+
     parser = argparse.ArgumentParser(description="Generate offline documentation bundle")
     parser.add_argument(
         "--format",
@@ -253,12 +273,12 @@ def check_bundle_freshness(generator: DocumentationBundleGenerator) -> bool:
         return False
     
     try:
-        with open(manifest_file, 'r') as f:
+        with open(manifest_file) as f:
             manifest = json.load(f)
         
         # Check if bundle is too old
         generated_at = datetime.fromisoformat(manifest['generated_at'])
-        age = datetime.now(timezone.utc) - generated_at
+        age = datetime.now(UTC) - generated_at
         
         if age > timedelta(days=generator.FRESHNESS_THRESHOLD_DAYS):
             logger.error(f"Documentation bundle is stale ({age.days} days old)")

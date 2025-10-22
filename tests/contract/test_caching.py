@@ -1,6 +1,8 @@
 import httpx
 import pytest
+
 from backend.src.main import app
+
 
 @pytest.mark.asyncio
 async def test_etag_and_if_none_match_on_map_zones():

@@ -152,3 +152,63 @@ else
 fi
 
 echo "[setup] Complete. You can now run the backend."
+
+# --- Automated HTTPS & Certificate Setup (idempotent) ---
+# Goal: Zero-touch HTTPS. If nginx is missing, install and configure self-signed.
+# If LB_DOMAIN and LETSENCRYPT_EMAIL are present in .env, automatically switch to Let's Encrypt
+
+# Load .env if present to discover TLS configuration
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  # shellcheck disable=SC1090
+  source "$ROOT_DIR/.env"
+fi
+
+install_units_once() {
+  local unit_src="$ROOT_DIR/systemd"
+  local unit_dst="/etc/systemd/system"
+  sudo install -m 0644 -o root -g root "$unit_src/lawnberry-cert-renewal.service" "$unit_dst/" || true
+  sudo install -m 0644 -o root -g root "$unit_src/lawnberry-cert-renewal.timer" "$unit_dst/" || true
+  sudo systemctl daemon-reload || true
+}
+
+ensure_nginx_https() {
+  if ! command -v nginx >/dev/null 2>&1; then
+    echo "[setup][https] Installing nginx..."
+    sudo apt-get update -y && sudo apt-get install -y nginx
+  fi
+  echo "[setup][https] Ensuring self-signed HTTPS baseline (nginx + redirect + ACME webroot)"
+  sudo FRONTEND_PORT=${FRONTEND_PORT:-3000} BACKEND_PORT=${BACKEND_PORT:-8081} bash "$ROOT_DIR/scripts/setup_https.sh"
+}
+
+maybe_setup_lets_encrypt() {
+  local domain="${LB_DOMAIN:-${DOMAIN:-}}"
+  local email="${LETSENCRYPT_EMAIL:-${EMAIL:-}}"
+  if [[ -n "$domain" && -n "$email" ]]; then
+    echo "[setup][https] Detected LB_DOMAIN/EMAIL; attempting Let's Encrypt provisioning for $domain"
+    sudo DOMAIN="$domain" EMAIL="$email" ALT_DOMAINS="${ALT_DOMAINS:-}" CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}" bash "$ROOT_DIR/scripts/setup_lets_encrypt.sh" || echo "[setup][https] WARNING: Let's Encrypt setup failed; continuing with self-signed"
+  else
+    echo "[setup][https] No LB_DOMAIN/LETSENCRYPT_EMAIL set; keeping self-signed until configured in .env"
+  fi
+}
+
+enable_cert_renew_timer() {
+  install_units_once
+  echo "[setup][https] Enabling certificate renewal/validation timer"
+  sudo systemctl enable --now lawnberry-cert-renewal.timer || true
+  # Prefer our new timer over legacy ACME timer if present
+  if systemctl list-unit-files | grep -q '^lawnberry-acme-renew.timer'; then
+    echo "[setup][https] Disabling legacy lawnberry-acme-renew.timer"
+    sudo systemctl disable --now lawnberry-acme-renew.timer || true
+  fi
+  if systemctl list-unit-files | grep -q '^lawnberry-acme-renew.service'; then
+    echo "[setup][https] Disabling legacy lawnberry-acme-renew.service"
+    sudo systemctl disable --now lawnberry-acme-renew.service || true
+  fi
+}
+
+# Execute HTTPS automation
+ensure_nginx_https
+maybe_setup_lets_encrypt
+enable_cert_renew_timer
+
+echo "[setup][https] HTTPS is configured. If a real domain is set in .env, a valid Let's Encrypt cert will be provisioned automatically."

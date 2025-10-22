@@ -1,12 +1,13 @@
 """Integration test for Dashboard telemetry at 5 Hz with <100ms latency."""
-import pytest
 import asyncio
-import time
-import os
 import json
-from typing import List
+import os
+import time
+from datetime import UTC
 from pathlib import Path
+
 import httpx
+import pytest
 
 
 @pytest.mark.asyncio
@@ -58,7 +59,7 @@ async def test_telemetry_5hz_frequency():
         start_time = time.perf_counter()
         successful_requests = 0
         
-        for i in range(25):  # 5 seconds worth at 5Hz
+        for _ in range(25):  # 5 seconds worth at 5Hz
             request_start = time.perf_counter()
             response = await client.get("/api/v2/dashboard/telemetry")
             
@@ -93,7 +94,7 @@ async def test_telemetry_scalable_to_10hz():
         successful_requests = 0
         start_time = time.perf_counter()
         
-        for i in range(30):  # 3 seconds worth at 10Hz
+        for _ in range(30):  # 3 seconds worth at 10Hz
             request_start = time.perf_counter()
             response = await client.get("/api/v2/dashboard/telemetry")
             
@@ -233,7 +234,7 @@ async def test_telemetry_latency_budgets_pi5():
         # Test POST /api/v2/telemetry/ping for latency measurement
         response = await client.post(
             "/api/v2/telemetry/ping",
-            json={"component_id": "power", "sample_count": 10}
+            json={"component_id": "power", "sample_count": 10},
         )
         
         assert response.status_code == 200
@@ -244,8 +245,15 @@ async def test_telemetry_latency_budgets_pi5():
         assert "samples" in data
         
         # Pi 5 requirement: ≤250 ms p95 latency
-        assert data["latency_ms_p95"] <= 250, f"P95 latency {data['latency_ms_p95']}ms exceeds 250ms budget"
-        assert data["latency_ms_p50"] <= 200, f"P50 latency {data['latency_ms_p50']}ms exceeds 200ms"
+        p95_latency = data["latency_ms_p95"]
+        assert p95_latency <= 250, (
+            f"P95 latency {p95_latency}ms exceeds 250ms budget"
+        )
+
+        p50_latency = data["latency_ms_p50"]
+        assert p50_latency <= 200, (
+            f"P50 latency {p50_latency}ms exceeds 200ms"
+        )
 
 
 @pytest.mark.asyncio
@@ -263,14 +271,17 @@ async def test_telemetry_latency_budgets_pi4():
             
             response = await client.post(
                 "/api/v2/telemetry/ping",
-                json={"component_id": "power", "sample_count": 10}
+                json={"component_id": "power", "sample_count": 10},
             )
             
             assert response.status_code == 200
             data = response.json()
             
             # Pi 4B requirement: ≤350 ms p95 latency (graceful degradation)
-            assert data["latency_ms_p95"] <= 350, f"P95 latency {data['latency_ms_p95']}ms exceeds 350ms budget for Pi 4B"
+            p95_latency = data["latency_ms_p95"]
+            assert p95_latency <= 350, (
+                f"P95 latency {p95_latency}ms exceeds 350ms budget for Pi 4B"
+            )
     
     finally:
         if original_device is None:
@@ -376,18 +387,19 @@ async def test_telemetry_export_diagnostic_download():
 @pytest.mark.asyncio
 async def test_telemetry_export_with_time_range():
     """Test telemetry export with time range filtering."""
+    from datetime import datetime, timedelta
+
     from backend.src.main import app
-    from datetime import datetime, timedelta, timezone
     
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         
         # Define time range (last hour)
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.now(UTC)
         start_time = end_time - timedelta(hours=1)
         
         response = await client.get(
-            f"/api/v2/telemetry/export",
+            "/api/v2/telemetry/export",
             params={
                 "format": "csv",
                 "start": start_time.isoformat(),

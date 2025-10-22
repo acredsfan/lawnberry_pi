@@ -17,6 +17,14 @@ from ..models.safety_interlock import (
 )
 
 
+_event_handler: callable | None = None
+
+
+def set_safety_event_handler(handler: callable | None) -> None:
+    global _event_handler
+    _event_handler = handler
+
+
 class SafetyTriggerManager:
     def __init__(self) -> None:
         self._active: dict[InterlockType, SafetyInterlock] = {}
@@ -40,6 +48,12 @@ class SafetyTriggerManager:
         )
         self._active[itype] = interlock
         self._sync_robot_state()
+        # Notify event bridge
+        try:
+            if _event_handler is not None:
+                _event_handler("activate", interlock)
+        except Exception:
+            pass
         return interlock
 
     def _clear(self, itype: InterlockType) -> None:
@@ -48,6 +62,11 @@ class SafetyTriggerManager:
             inter.state = InterlockState.CLEARED_PENDING_ACK
             inter.cleared_at_us = self._now_us()
             self._sync_robot_state()
+            try:
+                if _event_handler is not None:
+                    _event_handler("clear", inter)
+            except Exception:
+                pass
 
     def _sync_robot_state(self) -> None:
         mgr = get_robot_state_manager()
@@ -115,4 +134,4 @@ def get_safety_trigger_manager() -> SafetyTriggerManager:
     return _manager
 
 
-__all__ = ["SafetyTriggerManager", "get_safety_trigger_manager"]
+__all__ = ["SafetyTriggerManager", "get_safety_trigger_manager", "set_safety_event_handler"]

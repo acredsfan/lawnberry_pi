@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 
-from backend.src.safety.safety_triggers import get_safety_trigger_manager
 from backend.src.core.robot_state_manager import get_robot_state_manager
+from backend.src.safety.safety_triggers import get_safety_trigger_manager
 
 
 def test_tilt_and_obstacle_interlocks_activate_and_reflect_in_state():

@@ -1,9 +1,9 @@
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 try:
     from backend.src.main import app
-except Exception as e:
+except Exception:
     app = None
 
 

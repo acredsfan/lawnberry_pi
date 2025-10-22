@@ -1,9 +1,8 @@
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from backend.src.main import app as fastapi_app
 from backend.src.api.rest import _safety_state
 from backend.src.cli import safety_commands
+from backend.src.main import app as fastapi_app
 
 
 @pytest.mark.asyncio

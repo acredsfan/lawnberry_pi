@@ -1,9 +1,9 @@
 import os
-import pytest
-import httpx
-import asyncio
-from backend.src.main import app
 
+import httpx
+import pytest
+
+from backend.src.main import app
 
 RUN_HW = os.getenv("RUN_HW_TESTS", "0") == "1"
 

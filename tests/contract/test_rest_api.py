@@ -1,5 +1,5 @@
-import pytest
 import httpx
+import pytest
 
 from backend.src.main import app
 

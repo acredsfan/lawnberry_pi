@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from ..core.context import reset_correlation_id, set_correlation_id
+from ..core.context import set_correlation_id
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
@@ -48,9 +48,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         self._lock = asyncio.Lock()
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        correlation_id = self._extract_correlation_id(request)
+        correlation_id = getattr(request.state, "correlation_id", None)
+        if not correlation_id:
+            correlation_id = self._extract_correlation_id(request)
+            request.state.correlation_id = correlation_id
         set_correlation_id(correlation_id)
-        request.state.correlation_id = correlation_id
 
         is_protected = self._is_protected_path(request.url.path)
         client_token = self._client_identifier(request)
@@ -60,7 +62,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             if limited_response is not None:
                 limited_response.headers.setdefault("X-Correlation-ID", correlation_id)
                 self._apply_security_headers(limited_response)
-                reset_correlation_id()
                 return limited_response
 
         try:
@@ -74,7 +75,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
             response = await call_next(request)
         except Exception:
-            reset_correlation_id()
             raise
 
         try:
@@ -84,7 +84,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             self._apply_security_headers(response)
             response.headers.setdefault("X-Correlation-ID", correlation_id)
         finally:
-            reset_correlation_id()
+            pass
 
         return response
 

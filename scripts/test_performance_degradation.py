@@ -7,32 +7,33 @@ Tests telemetry latency against platform-specific guardrails:
 
 Usage:
     python scripts/test_performance_degradation.py [--target TARGET_MS] [--device DEVICE]
-    
+
 Examples:
     # Test with Pi 5 target (250ms)
     python scripts/test_performance_degradation.py --target 0.25
-    
+
     # Test with Pi 4B target (350ms)
     python scripts/test_performance_degradation.py --target 0.35 --device pi4
 """
-import time
-import statistics
-import httpx
 import argparse
+import statistics
 import sys
+import time
+
+import httpx
 
 BASE = "http://127.0.0.1:8001"
 
 def detect_platform():
     """Detect Raspberry Pi platform (simplified detection)"""
     try:
-        with open('/proc/cpuinfo', 'r') as f:
+        with open('/proc/cpuinfo') as f:
             cpuinfo = f.read()
             if 'BCM2712' in cpuinfo:  # Pi 5
                 return 'pi5'
             elif 'BCM2711' in cpuinfo:  # Pi 4B
                 return 'pi4'
-    except:
+    except OSError:
         pass
     return 'unknown'
 
@@ -83,7 +84,7 @@ def analyze_results(latencies: list, target_ms: float, device: str):
     print(f"Device: {device}")
     print(f"Target: {target_ms:.2f}ms")
     print(f"Samples: {len(latencies)}")
-    print(f"\nStatistics:")
+    print("\nStatistics:")
     print(f"  Min:    {min_latency:.2f}ms")
     print(f"  P50:    {p50:.2f}ms")
     print(f"  Avg:    {avg:.2f}ms")
@@ -97,7 +98,7 @@ def analyze_results(latencies: list, target_ms: float, device: str):
     print(f"\nTarget Check: {'PASS' if meets_target else 'FAIL'}")
     if not meets_target:
         print(f"  P95 latency ({p95:.2f}ms) exceeds target ({target_ms:.2f}ms)")
-        print(f"  See docs/OPERATIONS.md#telemetry-latency-troubleshooting for remediation")
+        print("  See docs/OPERATIONS.md#telemetry-latency-troubleshooting for remediation")
     
     return meets_target
 
@@ -130,13 +131,13 @@ if __name__ == "__main__":
             target_seconds = 0.35  # 350ms
         else:
             target_seconds = 0.25  # Default to Pi 5 target
-            print(f"WARNING: Unknown device, using default target of 250ms")
+            print("WARNING: Unknown device, using default target of 250ms")
     else:
         target_seconds = args.target
     
     target_ms = target_seconds * 1000
     
-    print(f"\n=== Performance Degradation Test ===")
+    print("\n=== Performance Degradation Test ===")
     print(f"Target: {target_ms:.2f}ms ({device.upper()})")
     print(f"Base URL: {args.base_url}")
     print()

@@ -1,0 +1,17 @@
+[Unit]
+Description=LawnBerry Pi - Automated Backup
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/lawnberry
+ExecStart=/home/pi/lawnberry/scripts/backup_system.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target

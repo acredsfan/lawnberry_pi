@@ -1,7 +1,6 @@
 """Contract tests for /api/v1/mow/jobs queue and list operations."""
+
 import pytest
-import httpx
-from typing import List, Dict, Any
 
 
 @pytest.mark.asyncio

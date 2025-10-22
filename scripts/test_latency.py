@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import time
+
 import httpx
 
 BASE = "http://127.0.0.1:8001"

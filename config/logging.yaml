@@ -1,0 +1,23 @@
+log_level: INFO
+log_format: structured
+log_to_file: true
+log_to_console: true
+log_file_path: /home/pi/lawnberry/logs/lawnberry.log
+max_file_size_mb: 10
+backup_count: 5
+enable_metrics: true
+metrics_retention_minutes: 60
+metrics_interval_seconds: 10
+metrics_error_backoff_seconds: 30
+retention_days: 7
+performance_warning_ms: 750
+event_history_limit: 500
+error_rate_alert_threshold: 5.0
+error_rate_alert_cooldown_seconds: 300
+extend_default_redactions: true
+redact_fields:
+	- session_token
+	- client_secret
+redact_patterns:
+	- '(?i)(sessionid=)[^\s,;]+'
+	- '(?i)(client-secret[:=]\s*)[^\s,;]+'

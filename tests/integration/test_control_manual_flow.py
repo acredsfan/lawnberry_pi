@@ -1,13 +1,14 @@
 """
 Integration tests for manual control flow.
-Validates drive commands, blade control, emergency commands, latency budgets, audit trails, safety interlocks.
+Validates drive commands, blade control, emergency commands, latency budgets,
+audit trails, safety interlocks.
 """
-import pytest
-from httpx import AsyncClient, ASGITransport
-from backend.src.main import app
-import os
 from datetime import datetime
 
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from backend.src.main import app
 
 pytestmark = pytest.mark.integration
 
@@ -28,7 +29,11 @@ async def test_manual_drive_command_with_joystick_input():
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         headers = {"Authorization": "Bearer test-token", "Content-Type": "application/json"}
-        response = await client.post("/api/v2/control/drive", json=payload, headers=headers)
+        response = await client.post(
+            "/api/v2/control/drive",
+            json=payload,
+            headers=headers,
+        )
         
         # TDD: Allow 404 (not implemented), 501 (not yet available), or 422 (validation)
         if response.status_code in (404, 501, 422):
@@ -42,7 +47,11 @@ async def test_manual_drive_command_with_joystick_input():
         assert -1.0 <= data["left_motor_speed"] <= 1.0
         assert -1.0 <= data["right_motor_speed"] <= 1.0
         assert "safety_status" in data
-        assert data["safety_status"] in ["OK", "LOCKED_OUT", "EMERGENCY_STOP"]
+        assert data["safety_status"] in [
+            "OK",
+            "LOCKED_OUT",
+            "EMERGENCY_STOP",
+        ]
 
 
 @pytest.mark.asyncio
@@ -60,7 +69,11 @@ async def test_blade_control_enable_disable_with_safety_interlock():
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         headers = {"Authorization": "Bearer test-token", "Content-Type": "application/json"}
-        response_enable = await client.post("/api/v2/control/blade", json=payload_enable, headers=headers)
+        response_enable = await client.post(
+            "/api/v2/control/blade",
+            json=payload_enable,
+            headers=headers,
+        )
         
         if response_enable.status_code in (404, 501, 422):
             return
@@ -76,7 +89,11 @@ async def test_blade_control_enable_disable_with_safety_interlock():
             "command": "blade_disable",
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
-        response_disable = await client.post("/api/v2/control/blade", json=payload_disable, headers=headers)
+        response_disable = await client.post(
+            "/api/v2/control/blade",
+            json=payload_disable,
+            headers=headers,
+        )
         
         if response_disable.status_code in (404, 501, 422):
             return
@@ -103,7 +120,11 @@ async def test_emergency_stop_command_overrides_all_control():
             "reason": "operator_request",
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
-        response_emergency = await client.post("/api/v2/control/emergency", json=payload_emergency, headers=headers)
+        response_emergency = await client.post(
+            "/api/v2/control/emergency",
+            json=payload_emergency,
+            headers=headers,
+        )
         
         if response_emergency.status_code in (404, 501, 422):
             return
@@ -122,7 +143,11 @@ async def test_emergency_stop_command_overrides_all_control():
             "turn": 0.0,
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
-        response_drive = await client.post("/api/v2/control/drive", json=payload_drive, headers=headers)
+        response_drive = await client.post(
+            "/api/v2/control/drive",
+            json=payload_drive,
+            headers=headers,
+        )
         
         if response_drive.status_code in (404, 501, 422):
             return
@@ -160,10 +185,14 @@ async def test_control_command_latency_100ms_budget():
         assert "X-Control-Latency-Ms" in response.headers
         
         reported_latency = float(response.headers["X-Control-Latency-Ms"])
-        assert reported_latency <= 100.0, f"Control latency {reported_latency}ms exceeds 100ms budget"
+        assert reported_latency <= 100.0, (
+            f"Control latency {reported_latency}ms exceeds 100ms budget"
+        )
         
         # Sanity check: elapsed time should be close to reported latency
-        assert abs(elapsed_ms - reported_latency) < 50, "Reported latency doesn't match measured time"
+        assert abs(elapsed_ms - reported_latency) < 50, (
+            "Reported latency doesn't match measured time"
+        )
 
 
 @pytest.mark.asyncio
@@ -190,7 +219,13 @@ async def test_control_audit_trail_for_all_commands():
             entry = data["audit_entries"][0]
             assert "timestamp" in entry
             assert "command_type" in entry
-            assert entry["command_type"] in ["drive", "blade_enable", "blade_disable", "emergency_stop", "emergency_clear"]
+            assert entry["command_type"] in [
+                "drive",
+                "blade_enable",
+                "blade_disable",
+                "emergency_stop",
+                "emergency_clear",
+            ]
             assert "user" in entry
             assert "outcome" in entry
             assert entry["outcome"] in ["SUCCESS", "REJECTED", "ERROR"]
@@ -215,7 +250,11 @@ async def test_control_safety_interlock_blade_requires_stopped_motors():
             "turn": 0.0,
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
-        response_drive = await client.post("/api/v2/control/drive", json=payload_drive, headers=headers)
+        response_drive = await client.post(
+            "/api/v2/control/drive",
+            json=payload_drive,
+            headers=headers,
+        )
         
         if response_drive.status_code in (404, 501, 422):
             return
@@ -225,7 +264,11 @@ async def test_control_safety_interlock_blade_requires_stopped_motors():
             "command": "blade_enable",
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
-        response_blade = await client.post("/api/v2/control/blade", json=payload_blade, headers=headers)
+        response_blade = await client.post(
+            "/api/v2/control/blade",
+            json=payload_blade,
+            headers=headers,
+        )
         
         if response_blade.status_code in (404, 501, 422):
             return
@@ -233,7 +276,8 @@ async def test_control_safety_interlock_blade_requires_stopped_motors():
         # When implemented: expect 403 with safety interlock reason
         assert response_blade.status_code == 403
         data_blade = response_blade.json()
-        assert "safety_interlock" in data_blade.get("detail", "").lower() or "motors_active" in data_blade.get("detail", "").lower()
+        detail_lower = data_blade.get("detail", "").lower()
+        assert "safety_interlock" in detail_lower or "motors_active" in detail_lower
 
 
 @pytest.mark.asyncio
@@ -252,7 +296,11 @@ async def test_control_emergency_clear_requires_explicit_confirmation():
             "command": "emergency_clear",
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
-        response_no_confirm = await client.post("/api/v2/control/emergency_clear", json=payload_no_confirm, headers=headers)
+        response_no_confirm = await client.post(
+            "/api/v2/control/emergency_clear",
+            json=payload_no_confirm,
+            headers=headers,
+        )
         
         if response_no_confirm.status_code in (404, 501, 422):
             return
@@ -260,7 +308,8 @@ async def test_control_emergency_clear_requires_explicit_confirmation():
         # When implemented: expect 400 or 422 without confirmation
         assert response_no_confirm.status_code in (400, 422)
         data_no_confirm = response_no_confirm.json()
-        assert "confirmation" in data_no_confirm.get("detail", "").lower() or "confirm" in data_no_confirm.get("detail", "").lower()
+        detail_no_confirm = data_no_confirm.get("detail", "").lower()
+        assert "confirmation" in detail_no_confirm or "confirm" in detail_no_confirm
         
         # Attempt emergency clear WITH confirmation - should succeed
         payload_with_confirm = {
@@ -268,7 +317,11 @@ async def test_control_emergency_clear_requires_explicit_confirmation():
             "confirmation": True,
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
-        response_with_confirm = await client.post("/api/v2/control/emergency_clear", json=payload_with_confirm, headers=headers)
+        response_with_confirm = await client.post(
+            "/api/v2/control/emergency_clear",
+            json=payload_with_confirm,
+            headers=headers,
+        )
         
         if response_with_confirm.status_code in (404, 501, 422):
             return

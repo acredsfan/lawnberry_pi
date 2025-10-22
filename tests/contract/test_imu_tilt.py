@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import os
 import time
-import pytest
+
 import httpx
+import pytest
 
 from backend.src.main import app
 
@@ -25,7 +26,10 @@ async def test_imu_tilt_stops_blade_within_200ms():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         start = time.perf_counter()
-        resp = await client.post("/api/v2/debug/sensors/inject-tilt", json={"roll_deg": 35.0, "pitch_deg": 0.0})
+        resp = await client.post(
+            "/api/v2/debug/sensors/inject-tilt",
+            json={"roll_deg": 35.0, "pitch_deg": 0.0},
+        )
         assert resp.status_code in {200, 404}
         # When implemented, query blade status
         status = await client.get("/api/v2/hardware/robohat")

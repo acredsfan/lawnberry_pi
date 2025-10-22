@@ -1,7 +1,7 @@
 """Integration test for manual control gated by MFA authentication."""
-import pytest
+
 import httpx
-from typing import Dict, Any
+import pytest
 
 
 @pytest.mark.asyncio

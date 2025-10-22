@@ -7,12 +7,16 @@ and provide documentation hooks only.
 from __future__ import annotations
 
 import os
+
 import pytest
 
 RUN = os.getenv("RUN_PLACEHOLDER_INTEGRATION", "0") == "1"
 
 
-@pytest.mark.skipif(not RUN, reason="Placeholder integration test; enable with RUN_PLACEHOLDER_INTEGRATION=1")
+@pytest.mark.skipif(
+    not RUN,
+    reason="Placeholder integration test; enable with RUN_PLACEHOLDER_INTEGRATION=1",
+)
 def test_power_budget_structure_only():
     # Placeholder expectations
     modes = ["idle", "telemetry", "mowing"]

@@ -3,17 +3,14 @@ Performance tests for telemetry pipeline
 Tests WebSocket telemetry performance, latency, and throughput
 """
 
-import pytest
 import asyncio
-import time
 import json
 import statistics
-from typing import List, Dict, Any
-from unittest.mock import Mock, patch, AsyncMock
-import websockets
-from websockets.exceptions import ConnectionClosed
+import time
+from unittest.mock import AsyncMock
 
-from backend.src.api.rest import websocket_hub
+import pytest
+
 from backend.src.services.websocket_hub import WebSocketHub
 
 
@@ -61,12 +58,24 @@ class TestTelemetryPerformance:
         max_time = max(generation_times)
         p95_time = statistics.quantiles(generation_times, n=20)[18]  # 95th percentile
         
-        print(f"Telemetry generation - Avg: {avg_time:.2f}ms, Max: {max_time:.2f}ms, P95: {p95_time:.2f}ms")
+        generation_summary = (
+            "Telemetry generation - "
+            f"Avg: {avg_time:.2f}ms, "
+            f"Max: {max_time:.2f}ms, "
+            f"P95: {p95_time:.2f}ms"
+        )
+        print(generation_summary)
         
         # Performance requirements
-        assert avg_time < 5.0, f"Average telemetry generation time {avg_time:.2f}ms exceeds 5ms threshold"
-        assert max_time < 20.0, f"Maximum telemetry generation time {max_time:.2f}ms exceeds 20ms threshold"
-        assert p95_time < 10.0, f"95th percentile telemetry generation time {p95_time:.2f}ms exceeds 10ms threshold"
+        assert avg_time < 5.0, (
+            f"Average telemetry generation time {avg_time:.2f}ms exceeds 5ms threshold"
+        )
+        assert max_time < 20.0, (
+            f"Maximum telemetry generation time {max_time:.2f}ms exceeds 20ms threshold"
+        )
+        assert p95_time < 10.0, (
+            f"95th percentile telemetry generation time {p95_time:.2f}ms exceeds 10ms threshold"
+        )
 
     @pytest.mark.asyncio
     async def test_broadcast_performance(self, mock_websocket_hub, connected_clients):
@@ -86,11 +95,18 @@ class TestTelemetryPerformance:
         avg_time = statistics.mean(broadcast_times)
         max_time = max(broadcast_times)
         
-        print(f"Broadcast performance - Avg: {avg_time:.2f}ms, Max: {max_time:.2f}ms for {len(connected_clients)} clients")
+        broadcast_summary = (
+            "Broadcast performance - "
+            f"Avg: {avg_time:.2f}ms, "
+            f"Max: {max_time:.2f}ms for {len(connected_clients)} clients"
+        )
+        print(broadcast_summary)
         
         # Performance requirements (should scale with client count)
         expected_max_time = len(connected_clients) * 2.0  # 2ms per client
-        assert avg_time < expected_max_time, f"Broadcast time {avg_time:.2f}ms exceeds expected {expected_max_time:.2f}ms"
+        assert avg_time < expected_max_time, (
+            f"Broadcast time {avg_time:.2f}ms exceeds expected {expected_max_time:.2f}ms"
+        )
 
     @pytest.mark.asyncio 
     async def test_subscription_filtering_performance(self, mock_websocket_hub):
@@ -121,7 +137,9 @@ class TestTelemetryPerformance:
         print(f"Subscription filtering - Avg: {avg_filtering_time:.2f}ms")
         
         # Should be fast even with many subscriptions
-        assert avg_filtering_time < 5.0, f"Subscription filtering time {avg_filtering_time:.2f}ms exceeds 5ms threshold"
+        assert avg_filtering_time < 5.0, (
+            f"Subscription filtering time {avg_filtering_time:.2f}ms exceeds 5ms threshold"
+        )
 
     @pytest.mark.asyncio
     async def test_telemetry_loop_performance(self, mock_websocket_hub):
@@ -169,12 +187,20 @@ class TestTelemetryPerformance:
         max_loop_time = max(loop_times)
         total_messages = sum(message_counts)
         
-        print(f"Telemetry loop - Avg: {avg_loop_time:.2f}ms, Max: {max_loop_time:.2f}ms")
+        loop_summary = (
+            "Telemetry loop - "
+            f"Avg: {avg_loop_time:.2f}ms, "
+            f"Max: {max_loop_time:.2f}ms"
+        )
+        print(loop_summary)
         print(f"Total messages sent: {total_messages}")
         
         # Performance requirements for 10 Hz operation
-        max_allowed_time = (1000 / mock_websocket_hub.telemetry_cadence_hz) * 0.5  # 50% of cycle time
-        assert avg_loop_time < max_allowed_time, f"Telemetry loop time {avg_loop_time:.2f}ms exceeds {max_allowed_time:.2f}ms"
+        max_allowed_time = (1000 / mock_websocket_hub.telemetry_cadence_hz) * 0.5
+        # 50% of cycle time
+        assert avg_loop_time < max_allowed_time, (
+            f"Telemetry loop time {avg_loop_time:.2f}ms exceeds {max_allowed_time:.2f}ms"
+        )
 
     @pytest.mark.asyncio
     async def test_high_frequency_telemetry_stability(self, mock_websocket_hub):
@@ -208,20 +234,32 @@ class TestTelemetryPerformance:
                 print(f"Error in high-frequency test: {e}")
         
         # Stability requirements
-        expected_iterations = int(2.0 * mock_websocket_hub.telemetry_cadence_hz * 0.9)  # 90% tolerance
+        expected_iterations = int(2.0 * mock_websocket_hub.telemetry_cadence_hz * 0.9)
+        # 90% tolerance
         error_rate = error_count / max(iteration_count, 1)
         
-        print(f"High-frequency test - Iterations: {iteration_count}, Errors: {error_count}, Rate: {iteration_count/2.0:.1f} Hz")
+        stability_summary = (
+            "High-frequency test - "
+            f"Iterations: {iteration_count}, "
+            f"Errors: {error_count}, "
+            f"Rate: {iteration_count/2.0:.1f} Hz"
+        )
+        print(stability_summary)
         
-        assert iteration_count >= expected_iterations, f"Insufficient iterations {iteration_count} < {expected_iterations}"
-        assert error_rate < 0.01, f"Error rate {error_rate:.3f} exceeds 1% threshold"
+        assert iteration_count >= expected_iterations, (
+            f"Insufficient iterations {iteration_count} < {expected_iterations}"
+        )
+        assert error_rate < 0.01, (
+            f"Error rate {error_rate:.3f} exceeds 1% threshold"
+        )
 
     @pytest.mark.asyncio
     async def test_memory_usage_stability(self, mock_websocket_hub):
         """Test memory usage stability during continuous operation."""
         import gc
-        import psutil
         import os
+
+        import psutil
         
         process = psutil.Process(os.getpid())
         initial_memory = process.memory_info().rss / 1024 / 1024  # MB
@@ -246,10 +284,18 @@ class TestTelemetryPerformance:
         final_memory = process.memory_info().rss / 1024 / 1024  # MB
         memory_increase = final_memory - initial_memory
         
-        print(f"Memory usage - Initial: {initial_memory:.1f}MB, Final: {final_memory:.1f}MB, Increase: {memory_increase:.1f}MB")
+        memory_summary = (
+            "Memory usage - "
+            f"Initial: {initial_memory:.1f}MB, "
+            f"Final: {final_memory:.1f}MB, "
+            f"Increase: {memory_increase:.1f}MB"
+        )
+        print(memory_summary)
         
         # Memory requirements (should not grow significantly)
-        assert memory_increase < 50.0, f"Memory increase {memory_increase:.1f}MB exceeds 50MB threshold"
+        assert memory_increase < 50.0, (
+            f"Memory increase {memory_increase:.1f}MB exceeds 50MB threshold"
+        )
 
     @pytest.mark.asyncio
     async def test_client_connection_scalability(self, mock_websocket_hub):
@@ -280,12 +326,21 @@ class TestTelemetryPerformance:
         max_connection_time = max(connection_times)
         
         print(f"Scalability test - {client_count} clients")
-        print(f"Connection - Avg: {avg_connection_time:.2f}ms, Max: {max_connection_time:.2f}ms")
+        connection_summary = (
+            "Connection - "
+            f"Avg: {avg_connection_time:.2f}ms, "
+            f"Max: {max_connection_time:.2f}ms"
+        )
+        print(connection_summary)
         print(f"Broadcast time: {broadcast_time:.2f}ms")
         
         # Scalability requirements
-        assert avg_connection_time < 10.0, f"Average connection time {avg_connection_time:.2f}ms exceeds 10ms"
-        assert broadcast_time < client_count * 1.0, f"Broadcast time {broadcast_time:.2f}ms doesn't scale well"
+        assert avg_connection_time < 10.0, (
+            f"Average connection time {avg_connection_time:.2f}ms exceeds 10ms"
+        )
+        assert broadcast_time < client_count * 1.0, (
+            f"Broadcast time {broadcast_time:.2f}ms doesn't scale well"
+        )
 
     @pytest.mark.asyncio
     async def test_disconnection_cleanup_performance(self, mock_websocket_hub):
@@ -316,10 +371,17 @@ class TestTelemetryPerformance:
         avg_cleanup_time = statistics.mean(cleanup_times)
         max_cleanup_time = max(cleanup_times)
         
-        print(f"Cleanup performance - Avg: {avg_cleanup_time:.2f}ms, Max: {max_cleanup_time:.2f}ms")
+        cleanup_summary = (
+            "Cleanup performance - "
+            f"Avg: {avg_cleanup_time:.2f}ms, "
+            f"Max: {max_cleanup_time:.2f}ms"
+        )
+        print(cleanup_summary)
         
         # Cleanup should be fast
-        assert avg_cleanup_time < 5.0, f"Average cleanup time {avg_cleanup_time:.2f}ms exceeds 5ms"
+        assert avg_cleanup_time < 5.0, (
+            f"Average cleanup time {avg_cleanup_time:.2f}ms exceeds 5ms"
+        )
         assert len(mock_websocket_hub.clients) == 0, "Not all clients were cleaned up"
 
     @pytest.mark.asyncio
@@ -358,10 +420,16 @@ class TestTelemetryPerformance:
         # Performance analysis
         avg_error_time = statistics.mean(error_handling_times)
         
-        print(f"Error handling performance - Avg: {avg_error_time:.2f}ms with {len(bad_clients)} failing clients")
+        error_summary = (
+            "Error handling performance - "
+            f"Avg: {avg_error_time:.2f}ms with {len(bad_clients)} failing clients"
+        )
+        print(error_summary)
         
         # Error handling shouldn't significantly impact performance
-        assert avg_error_time < 50.0, f"Error handling time {avg_error_time:.2f}ms exceeds 50ms threshold"
+        assert avg_error_time < 50.0, (
+            f"Error handling time {avg_error_time:.2f}ms exceeds 50ms threshold"
+        )
 
 
 class TestTelemetryLatency:
@@ -412,11 +480,20 @@ class TestTelemetryLatency:
             avg_latency = statistics.mean(latencies)
             max_latency = max(latencies)
             
-            print(f"End-to-end latency - Avg: {avg_latency:.2f}ms, Max: {max_latency:.2f}ms")
+            latency_summary = (
+                "End-to-end latency - "
+                f"Avg: {avg_latency:.2f}ms, "
+                f"Max: {max_latency:.2f}ms"
+            )
+            print(latency_summary)
             
             # Latency requirements
-            assert avg_latency < 100.0, f"Average latency {avg_latency:.2f}ms exceeds 100ms threshold"
-            assert max_latency < 200.0, f"Maximum latency {max_latency:.2f}ms exceeds 200ms threshold"
+            assert avg_latency < 100.0, (
+                f"Average latency {avg_latency:.2f}ms exceeds 100ms threshold"
+            )
+            assert max_latency < 200.0, (
+                f"Maximum latency {max_latency:.2f}ms exceeds 200ms threshold"
+            )
 
 
 class TestTelemetryThroughput:
@@ -451,11 +528,17 @@ class TestTelemetryThroughput:
         actual_duration = time.time() - start_time
         throughput = message_count / actual_duration
         
-        print(f"Maximum throughput: {throughput:.0f} messages/second with {client_count} clients")
+        throughput_summary = (
+            "Maximum throughput: "
+            f"{throughput:.0f} messages/second with {client_count} clients"
+        )
+        print(throughput_summary)
         
         # Throughput requirements
-        expected_min_throughput = client_count * 100  # 100 messages/second per client minimum  
-        assert throughput >= expected_min_throughput, f"Throughput {throughput:.0f} msg/s below minimum {expected_min_throughput}"
+        expected_min_throughput = client_count * 100  # 100 messages/s per client minimum
+        assert throughput >= expected_min_throughput, (
+            f"Throughput {throughput:.0f} msg/s below minimum {expected_min_throughput}"
+        )
 
 
 # Platform-specific performance degradation tests (Pi 4B vs Pi 5)
@@ -489,7 +572,9 @@ async def test_pi4_graceful_performance_degradation(device_model, monkeypatch):
     actual_cadence = sample_count / elapsed
     
     # Pi 4B should run at 2 Hz (± 0.5 Hz tolerance)
-    assert 1.5 <= actual_cadence <= 2.5, f"Pi 4B cadence {actual_cadence:.2f} Hz outside 2 Hz target (± 0.5 Hz)"
+    assert 1.5 <= actual_cadence <= 2.5, (
+        f"Pi 4B cadence {actual_cadence:.2f} Hz outside 2 Hz target (± 0.5 Hz)"
+    )
     
     # Validate telemetry still contains required fields (no data loss)
     assert all('timestamp' in t for t in telemetry_samples)
@@ -501,7 +586,6 @@ async def test_pi4_memory_constraint_compliance(monkeypatch):
     Test Pi 4B memory usage stays within 6 GB constraint.
     Validates buffer sizes, message queues, and history limits reduced for Pi 4B.
     """
-    import os
     import resource
     
     # Simulate Pi 4B platform
@@ -530,7 +614,9 @@ async def test_pi4_memory_constraint_compliance(monkeypatch):
     
     # Pi 4B memory increase should be <500 MB for this test
     # (Real implementation would track total system usage)
-    assert mem_increase < 500, f"Pi 4B memory increase {mem_increase:.1f} MB exceeds 500 MB limit"
+    assert mem_increase < 500, (
+        f"Pi 4B memory increase {mem_increase:.1f} MB exceeds 500 MB limit"
+    )
 
 
 @pytest.mark.asyncio
@@ -550,7 +636,6 @@ async def test_pi4_latency_budget_adjustment(monkeypatch):
         start_time = time.perf_counter()
         # Simulate telemetry generation (would call actual service)
         await asyncio.sleep(0.001)  # Minimal processing time
-        telemetry = {"timestamp": time.time(), "device": "pi4"}
         end_time = time.perf_counter()
         
         latency_ms = (end_time - start_time) * 1000
@@ -561,7 +646,9 @@ async def test_pi4_latency_budget_adjustment(monkeypatch):
     p95 = statistics.quantiles(latencies, n=20)[18] if len(latencies) >= 20 else max(latencies)
     
     # Pi 4B latency budget: p95 ≤ 350ms
-    assert p95 <= 350, f"Pi 4B p95 latency {p95:.1f}ms exceeds 350ms budget"
+    assert p95 <= 350, (
+        f"Pi 4B p95 latency {p95:.1f}ms exceeds 350ms budget"
+    )
     
     # p50 should be well under budget
     assert p50 <= 200, f"Pi 4B p50 latency {p50:.1f}ms unexpectedly high"
@@ -591,14 +678,15 @@ async def test_pi5_performance_baseline(monkeypatch):
     actual_cadence = sample_count / elapsed
     
     # Pi 5 should run at 5 Hz (± 1 Hz tolerance)
-    assert 4.0 <= actual_cadence <= 6.0, f"Pi 5 cadence {actual_cadence:.2f} Hz outside 5 Hz target (± 1 Hz)"
+    assert 4.0 <= actual_cadence <= 6.0, (
+        f"Pi 5 cadence {actual_cadence:.2f} Hz outside 5 Hz target (± 1 Hz)"
+    )
     
     # Measure latency
     latencies = []
     for _ in range(20):
         start_time = time.perf_counter()
         await asyncio.sleep(0.001)  # Minimal processing time
-        telemetry = {"timestamp": time.time(), "device": "pi5"}
         end_time = time.perf_counter()
         
         latency_ms = (end_time - start_time) * 1000

@@ -1,8 +1,13 @@
 import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
+
+from ..core.observability import observability
 from ..models.job import Job, JobStatus, JobType, JobPriority
 from ..models.zone import Zone
+
+
+logger = observability.get_logger(__name__)
 
 
 class JobsService:
@@ -171,7 +176,17 @@ class JobsService:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"Scheduler error: {e}")
+                logger.error(
+                    "Scheduler loop error",
+                    extra={"error": str(e)},
+                    exc_info=True,
+                )
+                observability.record_error(
+                    origin="job_scheduler",
+                    message="Scheduler loop error",
+                    exception=e,
+                    metadata={"context": "_scheduler_loop"},
+                )
                 await asyncio.sleep(60)
                 
     def _update_recurring_schedules(self):

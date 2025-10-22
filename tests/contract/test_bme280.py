@@ -9,8 +9,9 @@ Placeholder contract; skipped by default unless RUN_PLACEHOLDER_CONTRACT=1.
 from __future__ import annotations
 
 import os
-import pytest
+
 import httpx
+import pytest
 
 from backend.src.main import app
 
@@ -24,4 +25,5 @@ async def test_bme280_reports_environmentals_and_handles_timeouts():
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         resp = await client.get("/api/v2/sensors/health")
         assert resp.status_code in {200, 404}
-        # When implemented, assert payload contains bme280 with temperature_celsius/humidity_percent/pressure_hpa
+        # When implemented, assert payload contains bme280 with
+        # temperature_celsius/humidity_percent/pressure_hpa

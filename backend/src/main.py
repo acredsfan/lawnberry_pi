@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from .api.dashboard import router as dashboard_router
 from .api.fusion import router as fusion_router
+from .api.health import router as health_router
 from .api.metrics import router as metrics_router
 from .api.motors import router as motors_router
 from .api.navigation import router as navigation_router
@@ -12,11 +13,21 @@ from .api.rest import websocket_hub
 from .api.rest_v1 import router as rest_v1_router
 from .api.safety import router as safety_router
 from .api.status import router as status_router
+from .api.mission import router as mission_router
 from .core.config_loader import ConfigLoader
 from .nav.gps_degradation import GPSDegradationMonitor
 from .services.robohat_service import initialize_robohat_service, shutdown_robohat_service
 from .services.camera_stream_service import camera_service
+from .middleware.correlation import register_correlation_middleware
 from .middleware.security import register_security_middleware
+from .middleware.rate_limiting import register_global_rate_limiter
+from .middleware.input_validation import register_input_validation_middleware
+from .middleware.sanitization import register_sanitization_middleware
+from .middleware.api_key_auth import register_api_key_auth_middleware
+from .core.env_validation import validate_environment
+from .safety.safety_validator import validate_on_start
+from .safety.safety_monitor import get_safety_monitor
+from .safety.safety_triggers import set_safety_event_handler
 import os
 import logging
 
@@ -58,6 +69,32 @@ async def lifespan(app: FastAPI):
     # Start GPS degradation monitor
     app.state.gps_deg_monitor = GPSDegradationMonitor()
     await app.state.gps_deg_monitor.start()
+
+    # Validate safety limits at startup and attach report
+    try:
+        ok, report = validate_on_start(loader)
+        app.state.safety_validation = report
+    except Exception:
+        _log.exception("Safety limits validation failed at startup")
+
+    # Initialize safety monitor and wire interlock event bridge
+    monitor = get_safety_monitor()
+    async def _event_bridge(action, interlock):
+        try:
+            await monitor.handle_interlock_event(action, interlock)
+        except Exception:
+            pass
+
+    # wrap event bridge to work with sync trigger calls
+    def _handler(action, interlock):
+        import asyncio as _asyncio
+        try:
+            loop = _asyncio.get_running_loop()
+            loop.create_task(monitor.handle_interlock_event(action, interlock))
+        except RuntimeError:
+            _asyncio.run(monitor.handle_interlock_event(action, interlock))
+
+    set_safety_event_handler(_handler)
     # Initialize hardware services (best-effort; keep SIM-safe)
     try:
         await initialize_robohat_service()
@@ -71,6 +108,7 @@ async def lifespan(app: FastAPI):
     await websocket_hub.start_telemetry_loop()
     yield
     # Shutdown
+    set_safety_event_handler(None)
     if getattr(app.state, "gps_deg_monitor", None):
         await app.state.gps_deg_monitor.stop()
     await websocket_hub.stop_telemetry_loop()
@@ -91,7 +129,20 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Validate environment early
+try:
+    if not validate_environment():
+        _log.error("Environment validation failed; service will continue but endpoints may be restricted")
+except Exception:
+    _log.exception("Environment validation crashed")
+
+# Middleware order: global limit -> input validation -> security -> API key -> correlation -> sanitization
+register_global_rate_limiter(app)
+register_input_validation_middleware(app)
 register_security_middleware(app)
+register_api_key_auth_middleware(app)
+register_correlation_middleware(app)
+register_sanitization_middleware(app)
 
 app.include_router(rest_router, prefix="/api/v2")
 app.include_router(rest_legacy_router)
@@ -102,6 +153,8 @@ app.include_router(motors_router, prefix="/api/v2")
 app.include_router(safety_router, prefix="/api/v2")
 app.include_router(fusion_router)
 app.include_router(dashboard_router)
+app.include_router(health_router)
+app.include_router(mission_router)
 
 app.include_router(rest_v1_router, prefix="/api/v1")
 
@@ -127,18 +180,4 @@ def root():
             "/api/v2/dashboard/telemetry",
             "/api/v2/docs/list"
         ]
-    }
-
-
-# Health check endpoint
-@app.get("/health")
-def health_check():
-    # Minimal subsystem reporting; will be wired to real services in later tasks
-    return {
-        "status": "healthy",
-        "service": "lawnberry-backend",
-        "message_bus": {"status": "unknown"},
-        "drivers": {"status": "unknown"},
-        "persistence": {"status": "unknown"},
-        "safety": {"status": "unknown"},
     }

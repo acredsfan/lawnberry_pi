@@ -1,7 +1,6 @@
 """Contract tests for /api/v1/auth/login endpoint with MFA."""
+
 import pytest
-import httpx
-from typing import Dict, Any
 
 
 @pytest.mark.asyncio
@@ -75,7 +74,7 @@ async def test_auth_login_rate_limiting(test_client):
     
     # Make multiple rapid requests
     responses = []
-    for i in range(5):
+    for _ in range(5):
         response = await test_client.post("/api/v1/auth/login", json=invalid_payload)
         responses.append(response.status_code)
     

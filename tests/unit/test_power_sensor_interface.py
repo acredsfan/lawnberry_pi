@@ -1,7 +1,7 @@
 import math
 
-from backend.src.services.sensor_manager import PowerSensorInterface
 from backend.src.drivers.sensors.victron_vedirect import VictronVeDirectDriver
+from backend.src.services.sensor_manager import PowerSensorInterface
 
 
 def test_merge_prefers_victron_battery_current_when_requested():

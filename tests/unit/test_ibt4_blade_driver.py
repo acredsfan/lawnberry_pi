@@ -1,5 +1,5 @@
+
 import pytest
-import asyncio
 
 from backend.src.drivers.blade.ibt4_gpio import IBT4BladeDriver, _GPIOAdapter
 

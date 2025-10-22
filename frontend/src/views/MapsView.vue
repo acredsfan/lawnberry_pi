@@ -274,6 +274,37 @@
       </div>
     </div>
 
+    <div
+      v-if="isE2ETestMode"
+      class="card test-harness-card"
+      data-testid="e2e-map-tools"
+    >
+      <div class="card-header">
+        <h3>E2E Test Harness</h3>
+      </div>
+      <div class="card-body">
+        <p class="text-muted">Synthetic helpers for automated Playwright scenarios.</p>
+        <div class="test-button-row">
+          <button
+            class="btn btn-sm btn-primary"
+            type="button"
+            data-testid="e2e-add-mowing-zone"
+            @click="addSyntheticMowingZone"
+          >
+            ➕ Add synthetic mowing zone
+          </button>
+          <button
+            class="btn btn-sm btn-secondary"
+            type="button"
+            data-testid="e2e-save-map"
+            @click="saveConfigurationForTest"
+          >
+            💾 Save configuration
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Status Messages -->
     <div v-if="statusMessage" class="alert" :class="statusSuccess ? 'alert-success' : 'alert-danger'">
       {{ statusMessage }}
@@ -293,6 +324,7 @@ const api = useApiService()
 const mapStore = useMapStore()
 const toast = useToastStore()
 const editorRef = ref<any>(null)
+const isE2ETestMode = computed(() => typeof window !== 'undefined' && (window.location.search.includes('e2e=1') || window.location.search.includes('e2e=true')))
 
 // State
 const settings = ref({
@@ -712,6 +744,36 @@ function addMowingZoneOnMap() {
 }
 function addExclusionZoneOnMap() {
   mapStore.setEditMode('exclusion')
+}
+
+function addSyntheticMowingZone() {
+  if (!mapStore.configuration) return
+  const zoneId = `test-zone-${Date.now().toString(36)}`
+  const baseLat = 37.7749
+  const baseLon = -122.4194
+  const polygon = [
+    { latitude: baseLat, longitude: baseLon },
+    { latitude: baseLat + 0.0009, longitude: baseLon },
+    { latitude: baseLat + 0.0009, longitude: baseLon + 0.0012 },
+    { latitude: baseLat, longitude: baseLon + 0.0012 },
+  ]
+  mapStore.addMowingZone({
+    id: zoneId,
+    name: `Test Zone ${mapStore.configuration.mowing_zones.length + 1}`,
+    zone_type: 'mow',
+    polygon,
+  })
+  showStatus('Synthetic mowing zone added', true)
+}
+
+async function saveConfigurationForTest() {
+  try {
+    await mapStore.saveConfiguration()
+    showStatus('Configuration saved for test', true)
+  } catch (error) {
+    console.error('Failed to save configuration in test harness', error)
+    showStatus('Failed to save configuration', false)
+  }
 }
 
 function displayMarkerName(marker: any) {
@@ -1218,6 +1280,17 @@ function editBoundaryOnMap() {
   gap: 1rem;
   padding: 1rem;
   border-top: 1px solid var(--primary-light);
+}
+
+.test-harness-card {
+  margin-top: 1.5rem;
+}
+
+.test-button-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .form-row {

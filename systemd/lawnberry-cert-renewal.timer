@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily LawnBerry Pi certificate renewal/validation timer
+Documentation=README.md
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

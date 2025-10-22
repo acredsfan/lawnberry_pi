@@ -1,11 +1,11 @@
-import os
-import json
 import hashlib
-from pathlib import Path
+import os
 from datetime import datetime, timedelta
-from backend.src.main import app
-from fastapi.testclient import TestClient
+
 import pytest
+from fastapi.testclient import TestClient
+
+from backend.src.main import app
 
 client = TestClient(app)
 
@@ -63,7 +63,11 @@ def test_offline_docs_bundle_generation(tmp_path, monkeypatch):
     
     # When implemented: validate bundle response
     assert resp.status_code == 200
-    assert resp.headers['Content-Type'] in ('application/gzip', 'application/zip', 'application/x-tar')
+    assert resp.headers['Content-Type'] in (
+        'application/gzip',
+        'application/zip',
+        'application/x-tar',
+    )
     assert 'Content-Disposition' in resp.headers
     assert 'lawnberry-docs' in resp.headers['Content-Disposition']
     
@@ -189,7 +193,8 @@ def test_docs_path_traversal_protection_comprehensive(tmp_path, monkeypatch):
     assert resp3.status_code in (400, 403, 404), "URL encoded traversal not blocked"
     
     # Attack vector 4: Null byte injection (if applicable)
-    # Note: Python's pathlib may raise ValueError on null bytes - this is acceptable security behavior
+    # Note: Python's pathlib may raise ValueError on null bytes.
+    # This is acceptable security behavior.
     try:
         resp4 = client.get('/api/v2/docs/safe.md%00')
         # If request succeeds, should reject with 4xx

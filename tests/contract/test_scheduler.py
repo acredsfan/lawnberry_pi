@@ -1,5 +1,4 @@
 import asyncio
-import time
 import uuid
 
 import pytest

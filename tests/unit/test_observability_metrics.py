@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.src.core.observability import MetricsCollector
+from backend.src.core.observability import MetricsCollector, observability
 
 
 def test_collect_system_metrics_handles_missing_f_available(monkeypatch):
@@ -42,3 +42,32 @@ def test_collect_system_metrics_handles_missing_f_available(monkeypatch):
     expected_percent = (expected_used / expected_total) * 100
 
     assert metrics.disk_usage_percent == pytest.approx(expected_percent)
+
+
+def test_observability_error_rate_alerts(monkeypatch):
+    observability.reset_events_for_testing()
+    original_threshold = observability.config.error_rate_alert_threshold
+    original_cooldown = observability.config.error_rate_alert_cooldown_seconds
+
+    try:
+        observability.config.error_rate_alert_threshold = 1.0
+        observability.config.error_rate_alert_cooldown_seconds = 0
+
+        for _ in range(2):
+            observability.record_error(origin="http_request", message="api error")
+
+        result = observability.update_error_metrics_for_testing(window_seconds=60)
+        assert result["counts"]["http_request"] == 2
+        assert result["rates"]["http_request"] == pytest.approx(2.0)
+
+        snapshot = observability.get_metrics_snapshot()
+        gauges = snapshot.get("gauges", {})
+        assert gauges["error_rate_per_minute_http_request"] == pytest.approx(2.0)
+
+        alerts = observability.get_recent_events(event_type="alert", within_seconds=60)
+        assert len(alerts) == 1
+        assert alerts[0]["origin"] == "http_request"
+    finally:
+        observability.config.error_rate_alert_threshold = original_threshold
+        observability.config.error_rate_alert_cooldown_seconds = original_cooldown
+        observability.reset_events_for_testing()

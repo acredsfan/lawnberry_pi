@@ -25,139 +25,55 @@
             <span class="status-value" :class="connectionStatusClass">{{ connectionStatus }}</span>
           </div>
           <div class="status-row">
-            <span class="status-label">OVERALL:</span>
+            <span class="status-label">STATUS:</span>
             <span class="status-value" :class="systemStatusClass">{{ systemStatus }}</span>
           </div>
-        </div>
-      </div>
-
-      <!-- Quick Controls -->
-      <div class="retro-card control-card">
-        <div class="card-header">
-          <h3>◢ QUICK CONTROLS ◣</h3>
-          <div class="power-indicator" :class="{ active: currentMode !== 'IDLE' }" />
-        </div>
-        <div class="card-content">
-          <div class="control-grid">
-            <button class="retro-btn start-btn" :disabled="isLoading" @click="startSystem">
-              <span class="btn-icon">▶</span>
-              START
-            </button>
-            <button class="retro-btn pause-btn" :disabled="isLoading" @click="pauseSystem">
-              <span class="btn-icon">⏸</span>
-              PAUSE
-            </button>
-            <button class="retro-btn stop-btn" :disabled="isLoading" @click="stopSystem">
-              <span class="btn-icon">⏹</span>
-              STOP
-            </button>
-            <button class="retro-btn emergency-btn" :disabled="isLoading" @click="emergencyStop">
-              <span class="btn-icon">⚠</span>
-              E-STOP
-            </button>
+          <div class="status-row">
+            <span class="status-label">MODE:</span>
+            <span class="status-value">{{ currentMode }}</span>
           </div>
-          <div class="mode-display">
-            MODE: <span class="mode-value">{{ currentMode }}</span>
+          <div class="status-row">
+            <span class="status-label">PROGRESS:</span>
+            <span class="status-value">{{ progress.toFixed(0) }}%</span>
           </div>
         </div>
       </div>
 
-      <!-- Current Activity -->
-      <div class="retro-card activity-card">
+      <!-- Power / Battery -->
+      <div class="retro-card power-card">
         <div class="card-header">
-          <h3>◢ CURRENT ACTIVITY ◣</h3>
-          <div class="activity-pulse" />
+          <h4>POWER SYSTEM</h4>
+          <div class="power-indicator" :class="batteryIconClass" />
         </div>
-        <div class="card-content">
-          <div class="progress-container">
-            <div class="progress-label">{{ progress }}% COMPLETE</div>
-            <div class="retro-progress">
-              <div class="progress-bar" :style="{ width: `${progress}%` }" />
-              <div class="progress-grid" />
+        <div class="card-content power-content">
+          <div class="battery-panel">
+            <div class="battery-shell" :class="batteryBarClass">
+              <span class="battery-percentage" data-testid="battery-percentage">{{ batteryLevelDisplay }}%</span>
             </div>
+            <div class="battery-terminal" />
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Live Telemetry Grid -->
-    <div class="telemetry-grid">
-      <!-- GPS Position -->
-      <div class="retro-card telemetry-card">
-        <div class="card-header">
-          <h4>GPS POSITION</h4>
-          <div class="gps-icon">📡</div>
-        </div>
-        <div class="card-content">
-          <div class="metric-value gps-value">
-            <template v-if="hasGpsFix">
-              <span class="coord">
-                <span class="coord-label">LAT</span>
-                <span class="coord-value">{{ gpsLatitude }}</span>
-              </span>
-              <span class="coord">
-                <span class="coord-label">LON</span>
-                <span class="coord-value">{{ gpsLongitude }}</span>
-              </span>
-            </template>
-            <span v-else class="coord no-fix">NO SIGNAL</span>
-          </div>
-          <div class="metric-status" :class="gpsStatusClass">{{ gpsStatus }}</div>
-          <div class="gps-metrics" v-if="hasGpsFix">
+          <div class="power-metrics">
             <div class="metric-line">
-              ACCURACY: <span>{{ gpsAccuracyDisplay }} {{ gpsAccuracyUnit }}</span>
+              <span class="metric-label">Battery Voltage</span>
+              <span class="metric-value" data-testid="battery-voltage">{{ batteryVoltageDisplay }}V</span>
             </div>
             <div class="metric-line">
-              HDOP: <span>{{ gpsHdopDisplay }}</span>
+              <span class="metric-label">Solar Voltage</span>
+              <span class="metric-value">{{ solarVoltageDisplay }}V</span>
             </div>
             <div class="metric-line">
-              SATS: <span>{{ gpsSatellitesDisplay }}</span>
+              <span class="metric-label">Solar Current</span>
+              <span class="metric-value">{{ solarCurrentDisplay }}A</span>
             </div>
-            <div class="metric-line" v-if="gpsRtkStatus">
-              RTK: <span>{{ gpsRtkStatus }}</span>
+            <div class="metric-line">
+              <span class="metric-label">Solar Output</span>
+              <span class="metric-value">{{ solarPowerDisplay }}W</span>
             </div>
           </div>
         </div>
-      </div>
-      
-      <!-- Battery Level -->
-      <div class="retro-card telemetry-card battery-card">
-        <div class="card-header">
-          <h4>POWER LEVEL</h4>
-          <div class="battery-icon" :class="batteryIconClass">🔋</div>
-        </div>
-        <div class="card-content">
-          <div class="metric-value">{{ batteryLevelDisplay }}%</div>
-          <div class="battery-bar">
-            <div class="battery-fill" :style="{ width: `${batteryLevel}%` }" :class="batteryBarClass" />
-            <div class="battery-segments" />
-          </div>
-          <div class="metric-status">{{ batteryVoltageDisplay }}V</div>
-        </div>
+        <div class="metric-status solar-status" :class="solarStatusClass">{{ solarStatus }}</div>
       </div>
 
-      <!-- Solar Input -->
-      <div class="retro-card telemetry-card solar-card">
-        <div class="card-header">
-          <h4>SOLAR INPUT</h4>
-          <div class="solar-icon">☀️</div>
-        </div>
-        <div class="card-content">
-          <div class="metric-value">{{ solarPowerDisplay }}<span class="unit">W</span></div>
-          <div class="solar-grid">
-            <div class="solar-metric">
-              <span class="metric-label">Voltage</span>
-              <span class="metric-reading">{{ solarVoltageDisplay }}<span class="unit">V</span></span>
-            </div>
-            <div class="solar-metric">
-              <span class="metric-label">Current</span>
-              <span class="metric-reading">{{ solarCurrentDisplay }}<span class="unit">A</span></span>
-            </div>
-          </div>
-          <div class="metric-status solar-status" :class="solarStatusClass">{{ solarStatus }}</div>
-        </div>
-      </div>
-      
       <!-- Speed -->
       <div class="retro-card telemetry-card">
         <div class="card-header">
@@ -165,9 +81,46 @@
           <div class="speed-icon">🚀</div>
         </div>
         <div class="card-content">
-          <div class="metric-value">{{ speedDisplay }} <span class="unit">{{ speedUnit }}</span></div>
+          <div class="metric-value" data-testid="speed-value">{{ speedDisplay }} <span class="unit">{{ speedUnit }}</span></div>
           <div class="speed-trend" :class="speedTrendClass">
             {{ speedTrend > 0 ? '▲' : speedTrend < 0 ? '▼' : '▬' }} {{ Math.abs(speedTrend) }}%
+          </div>
+        </div>
+      </div>
+
+      <!-- GPS Metrics -->
+      <div class="retro-card telemetry-card gps-card">
+        <div class="card-header">
+          <h4>GPS NAVIGATION</h4>
+          <div class="gps-icon">🧭</div>
+        </div>
+        <div class="card-content gps-content">
+          <div class="gps-status-line" data-testid="gps-status">{{ gpsStatus }}</div>
+          <div class="gps-grid">
+            <div class="gps-metric">
+              <span class="metric-label">Latitude</span>
+              <span class="metric-value">{{ gpsLatitude ?? '--' }}</span>
+            </div>
+            <div class="gps-metric">
+              <span class="metric-label">Longitude</span>
+              <span class="metric-value">{{ gpsLongitude ?? '--' }}</span>
+            </div>
+            <div class="gps-metric">
+              <span class="metric-label">Accuracy</span>
+              <span class="metric-value">{{ gpsAccuracySummary }}</span>
+            </div>
+            <div class="gps-metric">
+              <span class="metric-label">Satellites</span>
+              <span class="metric-value">{{ gpsSatellitesDisplay }}</span>
+            </div>
+            <div class="gps-metric">
+              <span class="metric-label">HDOP</span>
+              <span class="metric-value">{{ gpsHdopDisplay }}</span>
+            </div>
+            <div class="gps-metric">
+              <span class="metric-label">RTK</span>
+              <span class="metric-value">{{ gpsRtkStatus ?? 'N/A' }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -182,20 +135,20 @@
           <div class="env-grid">
             <div class="env-metric">
               <span class="metric-label">Temp</span>
-              <span class="metric-value">{{ temperatureDisplay }}<span class="unit">{{ temperatureUnit }}</span></span>
+              <span class="metric-value" data-testid="temperature-value">{{ temperatureDisplay }}<span class="unit">{{ temperatureUnit }}</span></span>
               <span class="metric-status" :class="tempStatusClass">{{ tempStatus }}</span>
             </div>
             <div class="env-metric">
               <span class="metric-label">Humidity</span>
-              <span class="metric-value">{{ humidityDisplay }}<span class="unit">%</span></span>
+              <span class="metric-value" data-testid="humidity-value">{{ humidityDisplay }}<span class="unit">%</span></span>
             </div>
             <div class="env-metric">
               <span class="metric-label">Pressure</span>
-              <span class="metric-value">{{ pressureDisplay }}<span class="unit">{{ pressureUnit }}</span></span>
+              <span class="metric-value" data-testid="pressure-value">{{ pressureDisplay }}<span class="unit">{{ pressureUnit }}</span></span>
             </div>
             <div class="env-metric">
               <span class="metric-label">Altitude</span>
-              <span class="metric-value">{{ altitudeDisplay }}<span class="unit">{{ altitudeUnit }}</span></span>
+              <span class="metric-value" data-testid="altitude-value">{{ altitudeDisplay }}<span class="unit">{{ altitudeUnit }}</span></span>
             </div>
           </div>
           <div class="env-source">Source: {{ environmentalSourceLabel }}</div>
@@ -299,7 +252,7 @@ interface ImuCalibrationResult {
   steps: Array<Record<string, any>>
 }
 
-const { connected, connecting, connect, subscribe, unsubscribe, setCadence } = useWebSocket()
+const { connected, connecting, connect, subscribe, unsubscribe, setCadence, dispatchTestMessage } = useWebSocket()
 
 // Loading and UI state
 const isLoading = ref(false)
@@ -1011,6 +964,7 @@ const stopCalibrationPolling = () => {
   }
 }
 
+
 const handleImuUnsupported = () => {
   if (!imuSupported.value) return
   imuSupported.value = false
@@ -1190,10 +1144,171 @@ const loadWeatherData = async () => {
   }
 }
 
+let telemetrySubscriptionsRegistered = false
+
+function registerTelemetrySubscriptions() {
+  if (telemetrySubscriptionsRegistered) return
+  telemetrySubscriptionsRegistered = true
+
+  subscribe('telemetry.power', (data) => {
+    applyBatteryMetrics(data)
+    const solarText = solarPowerDisplay.value === '--'
+      ? 'SOLAR --'
+      : `SOLAR ${solarPowerDisplay.value}W`
+    dataStreamText.value = `>>> POWER: ${batteryLevelDisplay.value}% | ${batteryVoltageDisplay.value}V | ${solarText}`
+  })
+
+  subscribe('telemetry.navigation', (data) => {
+    const lat = data.position?.latitude
+    const lon = data.position?.longitude
+    if (typeof lat === 'number' && typeof lon === 'number') {
+      gpsLatitude.value = lat.toFixed(6)
+      gpsLongitude.value = lon.toFixed(6)
+      gpsAccuracy.value = typeof data.position?.accuracy === 'number' ? data.position.accuracy : null
+      gpsHdop.value = typeof (data.hdop ?? data.position?.hdop) === 'number' ? (data.hdop ?? data.position?.hdop) : null
+      gpsSatellites.value = typeof data.position?.satellites === 'number' ? data.position.satellites : null
+      gpsRtkStatus.value = data.position?.rtk_status ?? null
+      gpsStatus.value = gpsAccuracySummary.value
+    } else {
+      gpsLatitude.value = null
+      gpsLongitude.value = null
+      gpsAccuracy.value = null
+      gpsHdop.value = null
+      gpsSatellites.value = null
+      gpsRtkStatus.value = null
+      gpsStatus.value = 'SEARCHING...'
+    }
+
+    const navSpeed = typeof data.speed_mps === 'number'
+      ? data.speed_mps
+      : typeof data.position?.speed === 'number'
+        ? data.position.speed
+        : null
+    if (navSpeed !== null) {
+      const newSpeed = navSpeed
+      speedTrend.value = speed.value > 0.1 ? ((newSpeed - speed.value) / speed.value) * 100 : 0
+      speed.value = newSpeed
+    }
+  })
+
+  subscribe('telemetry.motors', (data) => {
+    if (data.motor_status) {
+      currentMode.value = data.motor_status.toUpperCase()
+      addLogEntry(`Motor status: ${data.motor_status}`, 'info')
+    }
+  })
+
+  subscribe('telemetry.system', (data) => {
+    if (data.uptime_seconds) {
+      const uptimeSeconds = data.uptime_seconds
+      const hours = Math.floor(uptimeSeconds / 3600)
+      const minutes = Math.floor((uptimeSeconds % 3600) / 60)
+      uptime.value = `${hours}h ${minutes}m`
+    }
+
+    if (data.safety_state) {
+      if (data.safety_state === 'nominal' || data.safety_state === 'safe') {
+        systemStatus.value = 'Active'
+      } else if (data.safety_state === 'emergency_stop') {
+        systemStatus.value = 'Emergency Stop'
+      } else {
+        systemStatus.value = 'Warning'
+      }
+    }
+  })
+
+  subscribe('telemetry.weather', (data) => {
+    if (data.temperature_c !== undefined) {
+      temperature.value = data.temperature_c
+      environmentalSource.value = 'weather'
+    }
+    if (data.humidity_percent !== undefined) {
+      humidity.value = data.humidity_percent
+    }
+  })
+
+  subscribe('telemetry.environmental', (data) => {
+    const env = data.environmental || {}
+    if (env.temperature_c !== undefined) {
+      temperature.value = env.temperature_c
+    }
+    if (env.humidity_percent !== undefined) {
+      humidity.value = env.humidity_percent
+    }
+    if (env.pressure_hpa !== undefined) {
+      pressure.value = env.pressure_hpa
+    }
+    if (env.altitude_m !== undefined) {
+      altitude.value = env.altitude_m
+    }
+    environmentalSource.value = 'hardware'
+  })
+
+  subscribe('telemetry.tof', (data) => {
+    applyTofMetrics(data)
+  })
+
+  subscribe('telemetry.sensors', (data) => {
+    if (data.imu) {
+      imuCalibrationScore.value = data.imu.calibration ?? imuCalibrationScore.value
+      imuCalibrationStatus.value = data.imu.calibration_status ?? imuCalibrationStatus.value
+    }
+    if (data.tof) {
+      applyTofMetrics(data)
+    }
+  })
+
+  subscribe('jobs.progress', (data) => {
+    if (data.progress_percent !== undefined) {
+      progress.value = data.progress_percent
+    }
+    if (data.current_job && data.status) {
+      const status = data.status === 'running' ? `RUNNING: ${data.current_job}` : 'IDLE'
+      if (currentMode.value !== status) {
+        currentMode.value = status
+        addLogEntry(`Job status: ${status}`, 'info')
+      }
+    }
+  })
+
+  if (typeof window !== 'undefined') {
+    const hooks = (window as any).__APP_TEST_HOOKS__
+    if (hooks) {
+      hooks.telemetrySubscriptionsReady = true
+    }
+  }
+}
+
 // Component lifecycle and data initialization
 onMounted(async () => {
   addLogEntry('Dashboard initializing...', 'info')
-  
+
+  if (typeof window !== 'undefined') {
+    const hooks = (window as any).__APP_TEST_HOOKS__
+    if (hooks) {
+      hooks.telemetrySubscriptionsReady = false
+      hooks.emitTelemetryMessage = (topicOrMessage: any, maybeData?: any) => {
+        if (typeof topicOrMessage === 'string') {
+          dispatchTestMessage({
+            event: 'telemetry.data',
+            topic: topicOrMessage,
+            timestamp: new Date().toISOString(),
+            data: maybeData,
+          })
+          return
+        }
+        const message = topicOrMessage ?? {}
+        dispatchTestMessage({
+          event: message.event ?? 'telemetry.data',
+          topic: message.topic,
+          timestamp: message.timestamp ?? new Date().toISOString(),
+          data: message.data ?? message,
+        })
+      }
+    }
+  }
+  registerTelemetrySubscriptions()
+
   // Load initial data
   await Promise.all([
     loadUnitPreference(),
@@ -1202,139 +1317,20 @@ onMounted(async () => {
     loadWeatherData(),
     refreshCalibrationStatus()
   ])
-  
+
   // Connect to WebSocket for real-time updates
   try {
     addLogEntry('Establishing WebSocket connection...', 'info')
     await connect()
-    
+
     if (connected.value) {
       addLogEntry('WebSocket connected - subscribing to telemetry feeds', 'success')
-      
-      // Subscribe to telemetry topics with real data handling
-      subscribe('telemetry.power', (data) => {
-        applyBatteryMetrics(data)
-        const solarText = solarPowerDisplay.value === '--'
-          ? 'SOLAR --'
-          : `SOLAR ${solarPowerDisplay.value}W`
-        dataStreamText.value = `>>> POWER: ${batteryLevelDisplay.value}% | ${batteryVoltageDisplay.value}V | ${solarText}`
-      })
-      
-      subscribe('telemetry.navigation', (data) => {
-        const lat = data.position?.latitude
-        const lon = data.position?.longitude
-        if (typeof lat === 'number' && typeof lon === 'number') {
-          gpsLatitude.value = lat.toFixed(6)
-          gpsLongitude.value = lon.toFixed(6)
-          gpsAccuracy.value = typeof data.position?.accuracy === 'number' ? data.position.accuracy : null
-          gpsHdop.value = typeof (data.hdop ?? data.position?.hdop) === 'number' ? (data.hdop ?? data.position?.hdop) : null
-          gpsSatellites.value = typeof data.position?.satellites === 'number' ? data.position.satellites : null
-          gpsRtkStatus.value = data.position?.rtk_status ?? null
-          gpsStatus.value = gpsAccuracySummary.value
-        } else {
-          gpsLatitude.value = null
-          gpsLongitude.value = null
-          gpsAccuracy.value = null
-          gpsHdop.value = null
-          gpsSatellites.value = null
-          gpsRtkStatus.value = null
-          gpsStatus.value = 'SEARCHING...'
-        }
-        
-        const navSpeed = typeof data.speed_mps === 'number' ? data.speed_mps : typeof data.position?.speed === 'number' ? data.position.speed : null
-        if (navSpeed !== null) {
-          const newSpeed = navSpeed
-          speedTrend.value = speed.value > 0.1 ? ((newSpeed - speed.value) / speed.value) * 100 : 0
-          speed.value = newSpeed
-        }
-      })
-      
-      subscribe('telemetry.motors', (data) => {
-        if (data.motor_status) {
-          currentMode.value = data.motor_status.toUpperCase()
-          addLogEntry(`Motor status: ${data.motor_status}`, 'info')
-        }
-      })
-      
-      subscribe('telemetry.system', (data) => {
-        if (data.uptime_seconds) {
-          const uptimeSeconds = data.uptime_seconds
-          const hours = Math.floor(uptimeSeconds / 3600)
-          const minutes = Math.floor((uptimeSeconds % 3600) / 60)
-          uptime.value = `${hours}h ${minutes}m`
-        }
-        
-        if (data.safety_state) {
-          if (data.safety_state === 'nominal' || data.safety_state === 'safe') {
-            systemStatus.value = 'Active'
-          } else if (data.safety_state === 'emergency_stop') {
-            systemStatus.value = 'Emergency Stop'
-          } else {
-            systemStatus.value = 'Warning'
-          }
-        }
-      })
-      
-      subscribe('telemetry.weather', (data) => {
-        if (data.temperature_c !== undefined) {
-          temperature.value = data.temperature_c
-          environmentalSource.value = 'weather'
-        }
-        if (data.humidity_percent !== undefined) {
-          humidity.value = data.humidity_percent
-        }
-      })
 
-      subscribe('telemetry.environmental', (data) => {
-        const env = data.environmental || {}
-        if (env.temperature_c !== undefined) {
-          temperature.value = env.temperature_c
-        }
-        if (env.humidity_percent !== undefined) {
-          humidity.value = env.humidity_percent
-        }
-        if (env.pressure_hpa !== undefined) {
-          pressure.value = env.pressure_hpa
-        }
-        if (env.altitude_m !== undefined) {
-          altitude.value = env.altitude_m
-        }
-        environmentalSource.value = 'hardware'
-      })
-
-      subscribe('telemetry.tof', (data) => {
-        applyTofMetrics(data)
-      })
-
-      subscribe('telemetry.sensors', (data) => {
-        if (data.imu) {
-          imuCalibrationScore.value = data.imu.calibration ?? imuCalibrationScore.value
-          imuCalibrationStatus.value = data.imu.calibration_status ?? imuCalibrationStatus.value
-        }
-        if (data.tof) {
-          applyTofMetrics(data)
-        }
-      })
-      
-      subscribe('jobs.progress', (data) => {
-        if (data.progress_percent !== undefined) {
-          progress.value = data.progress_percent
-        }
-        if (data.current_job && data.status) {
-          const status = data.status === 'running' ? `RUNNING: ${data.current_job}` : 'IDLE'
-          if (currentMode.value !== status) {
-            currentMode.value = status
-            addLogEntry(`Job status: ${status}`, 'info')
-          }
-        }
-      })
-      
       // Set telemetry cadence to 5Hz for real-time dashboard
       setTimeout(() => {
         setCadence(5)
         addLogEntry('Telemetry cadence set to 5Hz', 'info')
       }, 1000)
-      
     } else {
       addLogEntry('WebSocket connection failed - using polling mode', 'warning')
     }
@@ -1359,16 +1355,21 @@ onMounted(async () => {
   onUnmounted(() => {
     clearInterval(refreshInterval)
     stopCalibrationPolling()
-    if (connected.value) {
-      unsubscribe('telemetry.power')
-      unsubscribe('telemetry.navigation')  
-      unsubscribe('telemetry.motors')
-      unsubscribe('telemetry.system')
-      unsubscribe('telemetry.weather')
-      unsubscribe('telemetry.environmental')
-      unsubscribe('telemetry.tof')
-      unsubscribe('telemetry.sensors')
-      unsubscribe('jobs.progress')
+    unsubscribe('telemetry.power')
+    unsubscribe('telemetry.navigation')
+    unsubscribe('telemetry.motors')
+    unsubscribe('telemetry.system')
+    unsubscribe('telemetry.weather')
+    unsubscribe('telemetry.environmental')
+    unsubscribe('telemetry.tof')
+    unsubscribe('telemetry.sensors')
+    unsubscribe('jobs.progress')
+    telemetrySubscriptionsRegistered = false
+    if (typeof window !== 'undefined') {
+      const hooks = (window as any).__APP_TEST_HOOKS__
+      if (hooks) {
+        hooks.telemetrySubscriptionsReady = false
+      }
     }
   })
 })
@@ -1832,6 +1833,91 @@ onMounted(async () => {
   border-bottom: none;
 }
 
+.power-card .power-content {
+  display: flex;
+  align-items: stretch;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.battery-panel {
+  position: relative;
+  width: 160px;
+  height: 70px;
+  border: 2px solid rgba(0, 255, 255, 0.6);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 20, 40, 0.6);
+  box-shadow: inset 0 0 20px rgba(0, 255, 255, 0.2);
+}
+
+.battery-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: linear-gradient(135deg, rgba(0, 255, 255, 0.1), rgba(0, 100, 150, 0.3));
+}
+
+.battery-shell::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 4px;
+  background: rgba(0, 255, 255, 0.08);
+}
+
+.battery-percentage {
+  position: relative;
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #00ffff;
+  z-index: 1;
+  text-shadow: 0 0 12px rgba(0, 255, 255, 0.7);
+}
+
+.battery-terminal {
+  position: absolute;
+  right: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 24px;
+  background: rgba(0, 255, 255, 0.6);
+  border-radius: 3px;
+  box-shadow: 0 0 12px rgba(0, 255, 255, 0.5);
+}
+
+.power-metrics {
+  flex: 1;
+  min-width: 200px;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.power-metrics .metric-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  letter-spacing: 1px;
+}
+
+.power-metrics .metric-label {
+  color: rgba(0, 255, 255, 0.7);
+  text-transform: uppercase;
+}
+
+.power-metrics .metric-value {
+  color: #ffff00;
+  font-weight: 600;
+}
+
 .status-label {
   font-weight: 700;
   letter-spacing: 1px;
@@ -1862,6 +1948,44 @@ onMounted(async () => {
 
 .status-value.status-unknown {
   color: #666;
+}
+
+.gps-card .gps-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.gps-status-line {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #00ff00;
+  text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(0, 255, 0, 0.7);
+}
+
+.gps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.gps-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.9rem;
+  letter-spacing: 1px;
+}
+
+.gps-metric .metric-label {
+  color: rgba(0, 255, 255, 0.7);
+  text-transform: uppercase;
+}
+
+.gps-metric .metric-value {
+  color: #ffff00;
+  font-weight: 600;
 }
 
 /* Control Panel */
