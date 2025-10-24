@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request, status, Query
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timedelta, timezone
@@ -243,13 +244,15 @@ class WebSocketHub:
     async def broadcast_to_topic(self, topic: str, data: dict):
         if topic not in self.subscriptions:
             return
-            
-        message = json.dumps({
+        
+        # Use FastAPI's encoder to safely handle datetimes and Pydantic models
+        payload = {
             "event": "telemetry.data",
             "topic": topic,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "data": data
-        })
+        }
+        message = json.dumps(jsonable_encoder(payload), default=str)
         
         disconnected_clients = []
         for client_id in self.subscriptions[topic]:
@@ -302,21 +305,57 @@ class WebSocketHub:
             }
             battery_block = telemetry_data.get("battery") if isinstance(telemetry_data.get("battery"), dict) else None
             if battery_block is not None:
-                message["battery"] = battery_block
+                # We'll enrich this after we know power payload details
+                message["battery"] = dict(battery_block)
             if power_payload is not None:
-                message["power"] = power_payload
+                # Work on a shallow copy to avoid mutating shared state
+                pp = dict(power_payload)
+                message["power"] = pp
+                # Battery metrics (augment battery block and provide default if absent)
                 battery_voltage = power_payload.get("battery_voltage")
                 battery_current = power_payload.get("battery_current")
                 battery_power = power_payload.get("battery_power")
-                if "battery" not in message and any(value is not None for value in (battery_voltage, battery_current, battery_power)):
-                    message["battery"] = {
-                        "voltage": battery_voltage,
-                        "current": battery_current,
-                        "power": battery_power,
-                    }
-                solar_voltage = power_payload.get("solar_voltage")
-                solar_current = power_payload.get("solar_current")
-                solar_power = power_payload.get("solar_power")
+                # Charging state derived from current direction when available
+                charging_state = None
+                try:
+                    if isinstance(battery_current, (int, float)):
+                        if battery_current > 0.05:
+                            charging_state = "charging"
+                        elif battery_current < -0.05:
+                            charging_state = "discharging"
+                        else:
+                            charging_state = "idle"
+                except Exception:
+                    charging_state = None
+
+                if "battery" not in message:
+                    message["battery"] = {}
+                if battery_voltage is not None:
+                    message["battery"].setdefault("voltage", battery_voltage)
+                if battery_current is not None:
+                    message["battery"]["current"] = battery_current
+                if battery_power is not None:
+                    message["battery"]["power"] = battery_power
+                if charging_state is not None:
+                    message["battery"]["charging_state"] = charging_state
+
+                solar_voltage = pp.get("solar_voltage")
+                solar_current = pp.get("solar_current")
+                solar_power = pp.get("solar_power")
+                # Ensure solar current/power are non-negative for display semantics
+                if isinstance(solar_voltage, (int, float)):
+                    solar_voltage = abs(float(solar_voltage))
+                if isinstance(solar_current, (int, float)):
+                    solar_current = abs(float(solar_current))
+                if isinstance(solar_power, (int, float)):
+                    solar_power = abs(float(solar_power))
+                # Reflect normalization in the power payload for consumer consistency
+                if "solar_voltage" in pp and solar_voltage is not None:
+                    pp["solar_voltage"] = solar_voltage
+                if "solar_current" in pp and solar_current is not None:
+                    pp["solar_current"] = solar_current
+                if "solar_power" in pp and solar_power is not None:
+                    pp["solar_power"] = solar_power
                 if any(value is not None for value in (solar_voltage, solar_current, solar_power)):
                     message["solar"] = {
                         "voltage": solar_voltage,
@@ -324,7 +363,30 @@ class WebSocketHub:
                         "power": solar_power,
                         "timestamp": power_payload.get("timestamp"),
                     }
-                timestamp = power_payload.get("timestamp")
+
+                # Load output (state/current/power) when available
+                load_current = pp.get("load_current")
+                load_power = None
+                if isinstance(load_current, (int, float)) and isinstance(battery_voltage, (int, float)):
+                    try:
+                        load_power = float(battery_voltage) * float(load_current)
+                    except Exception:
+                        load_power = None
+                load_state = None
+                if isinstance(load_current, (int, float)):
+                    load_state = "on" if abs(load_current) > 0.05 else "off"
+                if any(v is not None for v in (load_current, load_power, load_state)):
+                    message["load"] = {
+                        "state": load_state,
+                        "current": load_current,
+                        "power": load_power,
+                    }
+                # Surface derived fields back into power payload for convenience
+                if load_power is not None:
+                    pp["load_power"] = load_power
+                if load_state is not None:
+                    pp["load_state"] = load_state
+                timestamp = pp.get("timestamp")
                 if timestamp is not None:
                     message["timestamp"] = timestamp
             await self.broadcast_to_topic("telemetry.power", message)
@@ -561,7 +623,12 @@ class WebSocketHub:
                         estimate = None
                     if estimate is None:
                         estimate = max(0.0, min(100.0, (batt_v - 11.0) / (13.0 - 11.0) * 100.0))
-                    battery_pct = float(estimate)
+                    # If the battery is actively charging, avoid pegging at 100% just due to surface charge
+                    batt_cur = getattr(data.power, "battery_current", None)
+                    if isinstance(batt_cur, (int, float)) and batt_cur > 0.05:
+                        battery_pct = float(min(99.0, estimate))
+                    else:
+                        battery_pct = float(estimate)
 
                 pos = data.gps
                 imu = data.imu
@@ -626,10 +693,25 @@ class WebSocketHub:
                         "solar_voltage": getattr(power, "solar_voltage", None),
                         "solar_current": getattr(power, "solar_current", None),
                         "solar_power": getattr(power, "solar_power", None),
+                        "solar_yield_today_wh": getattr(power, "solar_yield_today_wh", None),
+                        "load_current": getattr(power, "load_current", None),
                         "timestamp": getattr(power, "timestamp", None),
                     }
+                    # Derived load power/state for convenience
+                    try:
+                        cur = getattr(power, "load_current", None)
+                        if cur is not None and batt_v is not None:
+                            telemetry["power"]["load_power"] = round(float(batt_v) * float(cur), 3)
+                        if isinstance(cur, (int, float)):
+                            telemetry["power"]["load_state"] = "on" if abs(cur) > 0.05 else "off"
+                    except Exception:
+                        pass
                     if telemetry["battery"].get("voltage") is None and getattr(power, "battery_voltage", None) is not None:
                         telemetry["battery"]["voltage"] = float(getattr(power, "battery_voltage"))
+                    # Surface a charging_state hint for the UI
+                    bc = getattr(power, "battery_current", None)
+                    if isinstance(bc, (int, float)):
+                        telemetry["battery"]["charging_state"] = "charging" if bc > 0.05 else ("discharging" if bc < -0.05 else "idle")
 
                 env = getattr(data, "environmental", None)
                 if env:
@@ -1756,6 +1838,39 @@ async def dashboard_telemetry():
         )
         if solar_power is None and solar_voltage is not None and solar_current is not None:
             solar_power = solar_voltage * solar_current
+        # Normalize sign for display semantics (ensure non-negative)
+        if isinstance(solar_voltage, (int, float)):
+            solar_voltage = abs(float(solar_voltage))
+        if isinstance(solar_current, (int, float)):
+            solar_current = abs(float(solar_current))
+        if isinstance(solar_power, (int, float)):
+            solar_power = abs(float(solar_power))
+
+        # Daily solar yield in Wh (convert from kWh if value appears small)
+        solar_yield_today_wh = _coerce_float(
+            payload.get("solar_yield_today_wh")
+            or payload.get("yield_today_wh")
+            or payload.get("yield_today")
+        )
+        if isinstance(solar_yield_today_wh, (int, float)):
+            if solar_yield_today_wh <= 10.0:
+                solar_yield_today_wh = solar_yield_today_wh * 1000.0
+
+        # Load metrics (external_device_load is Victron's load current)
+        load_current = _coerce_float(
+            payload.get("load_current")
+            or payload.get("load_current_amps")
+            or payload.get("external_device_load")
+        )
+        load_power = _coerce_float(payload.get("load_power"))
+        if load_power is None and load_current is not None and battery_voltage is not None:
+            try:
+                load_power = float(battery_voltage) * float(load_current)
+            except Exception:
+                load_power = None
+        load_state = payload.get("load_state") if isinstance(payload.get("load_state"), str) else None
+        if load_state is None and isinstance(load_current, (int, float)):
+            load_state = "on" if abs(load_current) > 0.05 else "off"
         timestamp = payload.get("timestamp")
         return {
             "battery_voltage": battery_voltage,
@@ -1764,6 +1879,10 @@ async def dashboard_telemetry():
             "solar_voltage": solar_voltage,
             "solar_current": solar_current,
             "solar_power": solar_power,
+            "solar_yield_today_wh": solar_yield_today_wh,
+            "load_current": load_current,
+            "load_power": load_power,
+            "load_state": load_state,
             "timestamp": timestamp,
             "battery": {
                 "voltage": battery_voltage,
@@ -3275,6 +3394,95 @@ async def generate_docs_bundle(format: str = "tarball"):
         )
 
 
+@router.get("/documentation")
+async def list_documentation():
+    """List all available user documentation files"""
+    docs_root = _docs_root()
+    docs_list = []
+    
+    if docs_root.exists():
+        for p in sorted(docs_root.glob("*.md")):
+            # Skip internal/audit docs
+            if p.stem in ["hallucination-audit", "constitution"]:
+                continue
+                
+            body = p.read_bytes()
+            # Extract title from first markdown header
+            title = p.stem.replace("-", " ").replace("_", " ").title()
+            try:
+                first_line = body.decode("utf-8").split("\n")[0]
+                if first_line.startswith("#"):
+                    title = first_line.lstrip("#").strip()
+            except Exception:
+                pass
+            
+            docs_list.append({
+                "id": p.stem,
+                "title": title,
+                "filename": p.name,
+                "size": len(body),
+                "last_modified": datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).isoformat(),
+                "url": f"/api/v2/documentation/{p.stem}"
+            })
+    
+    return {
+        "docs": docs_list,
+        "total": len(docs_list)
+    }
+
+
+@router.get("/documentation/{doc_id}")
+async def get_documentation(doc_id: str, format: str = "markdown"):
+    """Get specific documentation file content
+    
+    Args:
+        doc_id: Document ID (filename without extension)
+        format: Response format - 'markdown' (default) or 'html'
+    """
+    docs_root = _docs_root()
+    doc_path = docs_root / f"{doc_id}.md"
+    
+    if not doc_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Documentation '{doc_id}' not found"
+        )
+    
+    # Read file content
+    try:
+        content = doc_path.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.error(f"Error reading documentation {doc_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to read documentation file"
+        )
+    
+    # Get file metadata
+    stat = doc_path.stat()
+    last_modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+    
+    if format == "html":
+        # Return JSON with content and metadata for frontend to render
+        return {
+            "id": doc_id,
+            "content": content,
+            "format": "markdown",
+            "last_modified": last_modified.isoformat(),
+            "size": len(content)
+        }
+    else:
+        # Return raw markdown with proper content-type
+        return PlainTextResponse(
+            content=content,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Last-Modified": format_datetime(last_modified),
+                "Cache-Control": "public, max-age=3600"
+            }
+        )
+
+
 # ----------------------- Verification Artifacts -----------------------
 
 from ..models.verification_artifact import VerificationArtifact
@@ -3905,24 +4113,58 @@ def put_settings_remote_access(update: dict):
         raise HTTPException(status_code=422, detail=f"Invalid remote access settings: {str(e)}")
 
 
-# Maps settings (provider toggle, API key management, style)
-_maps_settings: dict = {
-    # Provider options match frontend: 'google' | 'osm' | 'none'
-    "provider": "google",
-    # Persisted API key field aligned with frontend
-    "google_api_key": None,
-    # UI toggles
-    "google_billing_warnings": True,
-    # Map style options: 'standard' | 'satellite' | 'hybrid' | 'terrain'
-    "style": "standard",
-    # Optional: bypass external maps entirely (offline drawing)
-    "bypass_external": False,
-}
-_maps_last_modified: datetime = datetime.now(timezone.utc)
+"""Maps settings (provider toggle, API key management, style) with persistence"""
+
+MAPS_CONFIG_PATH = Path("/home/pi/lawnberry/config/maps_settings.json")
+
+def _maps_defaults() -> dict:
+    return {
+        # Provider options match frontend: 'google' | 'osm' | 'none'
+        "provider": "google",
+        # Persisted API key field aligned with frontend
+        "google_api_key": None,
+        # UI toggles
+        "google_billing_warnings": True,
+        # Map style options: 'standard' | 'satellite' | 'hybrid' | 'terrain'
+        "style": "standard",
+        # Optional: bypass external maps entirely (offline drawing)
+        "bypass_external": False,
+    }
+
+def _load_maps_from_disk() -> tuple[dict, datetime]:
+    try:
+        if MAPS_CONFIG_PATH.exists():
+            content = MAPS_CONFIG_PATH.read_text()
+            data = json.loads(content) if content else {}
+            if isinstance(data, dict):
+                merged = {**_maps_defaults(), **data}
+            else:
+                merged = _maps_defaults()
+            lm = datetime.fromtimestamp(MAPS_CONFIG_PATH.stat().st_mtime, timezone.utc)
+            return merged, lm
+    except Exception:
+        pass
+    return _maps_defaults(), datetime.now(timezone.utc)
+
+def _save_maps_to_disk(data: dict) -> datetime:
+    try:
+        MAPS_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        MAPS_CONFIG_PATH.write_text(json.dumps(data, indent=2))
+        return datetime.fromtimestamp(MAPS_CONFIG_PATH.stat().st_mtime, timezone.utc)
+    except Exception:
+        return datetime.now(timezone.utc)
+
+_maps_settings, _maps_last_modified = _load_maps_from_disk()
 
 
 @router.get("/settings/maps")
 def get_settings_maps(request: Request):
+    # Reload from disk to ensure persistence across restarts and external edits
+    global _maps_settings, _maps_last_modified
+    try:
+        _maps_settings, _maps_last_modified = _load_maps_from_disk()
+    except Exception:
+        pass
     data = _maps_settings
     body = json.dumps(data, sort_keys=True).encode()
     etag = hashlib.sha256(body).hexdigest()
@@ -3952,7 +4194,8 @@ def put_settings_maps(update: dict):
     for k, v in list(update.items()):
         _maps_settings[k] = v
 
-    _maps_last_modified = datetime.now(timezone.utc)
+    # Persist to disk for durability across restarts/rebuilds
+    _maps_last_modified = _save_maps_to_disk(_maps_settings)
     return _maps_settings
 
 

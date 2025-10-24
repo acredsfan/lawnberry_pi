@@ -1,7 +1,9 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import type { AxiosResponse } from 'axios';
 import apiService from '../services/api';
+
+const MAP_CONFIG_STORAGE_KEY = 'lawnberry_map_configuration_v2';
 
 export interface Point {
   latitude: number;
@@ -170,6 +172,21 @@ export const useMapStore = defineStore('map', () => {
   const editMode = ref<'view' | 'boundary' | 'exclusion' | 'mowing' | 'marker'>('view');
   const providerFallbackActive = ref(false);
 
+  // Watch for changes and save to localStorage
+  watch(
+    configuration,
+    (newConfig) => {
+      if (newConfig) {
+        try {
+          localStorage.setItem(MAP_CONFIG_STORAGE_KEY, JSON.stringify(newConfig));
+        } catch (error) {
+          console.error('Failed to save map configuration to localStorage:', error);
+        }
+      }
+    },
+    { deep: true }
+  );
+
   // Computed
   const hasConfiguration = computed(() => configuration.value !== null);
   const hasUnsavedChanges = computed(() => isDirty.value);
@@ -200,6 +217,37 @@ export const useMapStore = defineStore('map', () => {
     loading.value = true;
     isLoading.value = true;
     error.value = '';
+
+    // Try loading from localStorage first
+    try {
+      const storedConfig = localStorage.getItem(MAP_CONFIG_STORAGE_KEY);
+      if (storedConfig) {
+        const parsedConfig = JSON.parse(storedConfig);
+        // Basic validation
+        if (parsedConfig && parsedConfig.config_id) {
+          configuration.value = parsedConfig as MapConfiguration;
+          isDirty.value = false;
+          loading.value = false;
+          isLoading.value = false;
+          // Still fetch from server in the background to get updates
+          apiService.get(`/api/v2/map/configuration?config_id=${configId}`).then(response => {
+            if (response?.data) {
+              const serverConfig = response.data?.zones ? envelopeToConfig(configId, response.data) : response.data as MapConfiguration;
+              // A simple timestamp check to see if the server has a newer version
+              if (new Date(serverConfig.last_modified) > new Date(configuration.value?.last_modified || 0)) {
+                configuration.value = serverConfig;
+              }
+            }
+          }).catch(e => {
+            console.warn('Background map configuration sync failed:', e);
+          });
+          return;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load map configuration from localStorage:', e);
+    }
+
     try {
       const response: AxiosResponse<any> = await apiService.get(
           `/api/v2/map/configuration?config_id=${configId}`

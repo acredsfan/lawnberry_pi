@@ -31,6 +31,15 @@ from .safety.safety_triggers import set_safety_event_handler
 import os
 import logging
 
+# Load .env early so secrets like NTRIP_* are available under systemd
+try:
+    from dotenv import load_dotenv
+    # Load from project root working directory
+    load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"), override=False)
+except Exception:
+    # Safe to continue without .env
+    pass
+
 _log = logging.getLogger(__name__)
 
 

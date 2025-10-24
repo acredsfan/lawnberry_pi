@@ -21,7 +21,8 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue';
-import { useMissionStore, Waypoint } from '@/stores/mission';
+import { useMissionStore } from '@/stores/mission';
+import type { Waypoint } from '@/stores/mission';
 import draggable from 'vuedraggable';
 
 const missionStore = useMissionStore();

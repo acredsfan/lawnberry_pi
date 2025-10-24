@@ -107,6 +107,7 @@ class PowerReading(BaseModel):
     solar_voltage: Optional[float] = None  # V
     solar_current: Optional[float] = None  # A
     solar_power: Optional[float] = None  # W
+    solar_yield_today_wh: Optional[float] = None  # Wh (daily yield from Victron)
     load_voltage: Optional[float] = None  # V (if applicable)
     load_current: Optional[float] = None  # A (if applicable)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

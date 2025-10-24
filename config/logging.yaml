@@ -16,8 +16,8 @@ error_rate_alert_threshold: 5.0
 error_rate_alert_cooldown_seconds: 300
 extend_default_redactions: true
 redact_fields:
-	- session_token
-	- client_secret
+  - session_token
+  - client_secret
 redact_patterns:
-	- '(?i)(sessionid=)[^\s,;]+'
-	- '(?i)(client-secret[:=]\s*)[^\s,;]+'
+  - '(?i)(sessionid=)[^\s,;]+'
+  - '(?i)(client-secret[:=]\s*)[^\s,;]+'

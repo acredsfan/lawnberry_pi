@@ -14,6 +14,8 @@
           <router-link to="/control" class="nav-link">Control</router-link>
           <router-link to="/maps" class="nav-link">Maps</router-link>
           <router-link to="/planning" class="nav-link">Planning</router-link>
+          <router-link to="/mission-planner" class="nav-link">Mission Planner</router-link>
+          <router-link to="/docs" class="nav-link">📚 Docs</router-link>
           <router-link to="/settings" class="nav-link">Settings</router-link>
         </div>
         <div class="nav-user">

@@ -9,7 +9,7 @@
     "command": null,
     "env": {}
   },
-  "enabled": false,
+  "enabled": true,
   "ngrok": {
     "authtoken": null,
     "edge": null,

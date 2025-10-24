@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
-import { ref, watch } from 'vue';
+import { ref } from 'vue';
+import apiService from '@/services/api';
 
 // Define the types right in the store file for simplicity
 export interface Waypoint {
@@ -52,13 +53,11 @@ export const useMissionStore = defineStore('mission', () => {
 
   const createMission = async (name: string) => {
     try {
-      const response = await fetch('/api/v2/missions/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, waypoints: waypoints.value }),
+      const response = await apiService.post<Mission>('/api/v2/missions/create', {
+        name,
+        waypoints: waypoints.value,
       });
-      if (!response.ok) throw new Error('Failed to create mission');
-      currentMission.value = await response.json();
+      currentMission.value = response.data as any;
       missionStatus.value = 'idle';
     } catch (error) {
       console.error('Error creating mission:', error);
@@ -68,7 +67,7 @@ export const useMissionStore = defineStore('mission', () => {
   const startCurrentMission = async () => {
     if (!currentMission.value) return;
     try {
-      await fetch(`/api/v2/missions/${currentMission.value.id}/start`, { method: 'POST' });
+      await apiService.post(`/api/v2/missions/${currentMission.value.id}/start`);
       missionStatus.value = 'running';
       startStatusPolling();
     } catch (error) {
@@ -79,7 +78,7 @@ export const useMissionStore = defineStore('mission', () => {
   const pauseCurrentMission = async () => {
     if (!currentMission.value) return;
     try {
-      await fetch(`/api/v2/missions/${currentMission.value.id}/pause`, { method: 'POST' });
+      await apiService.post(`/api/v2/missions/${currentMission.value.id}/pause`);
       missionStatus.value = 'paused';
       stopStatusPolling();
     } catch (error) {
@@ -90,7 +89,7 @@ export const useMissionStore = defineStore('mission', () => {
   const resumeCurrentMission = async () => {
     if (!currentMission.value) return;
     try {
-      await fetch(`/api/v2/missions/${currentMission.value.id}/resume`, { method: 'POST' });
+      await apiService.post(`/api/v2/missions/${currentMission.value.id}/resume`);
       missionStatus.value = 'running';
       startStatusPolling();
     } catch (error) {
@@ -101,7 +100,7 @@ export const useMissionStore = defineStore('mission', () => {
   const abortCurrentMission = async () => {
     if (!currentMission.value) return;
     try {
-      await fetch(`/api/v2/missions/${currentMission.value.id}/abort`, { method: 'POST' });
+      await apiService.post(`/api/v2/missions/${currentMission.value.id}/abort`);
       missionStatus.value = 'aborted';
       stopStatusPolling();
       currentMission.value = null;
@@ -113,14 +112,12 @@ export const useMissionStore = defineStore('mission', () => {
   const pollMissionStatus = async () => {
     if (!currentMission.value) return;
     try {
-      const response = await fetch(`/api/v2/missions/${currentMission.value.id}/status`);
-      if (response.ok) {
-        const status = await response.json();
-        missionStatus.value = status.status;
-        progress.value = status.completion_percentage;
-        if (status.status === 'completed' || status.status === 'aborted' || status.status === 'failed') {
-          stopStatusPolling();
-        }
+      const response = await apiService.get(`/api/v2/missions/${currentMission.value.id}/status`);
+      const status: any = response.data;
+      missionStatus.value = status.status;
+      progress.value = status.completion_percentage;
+      if (status.status === 'completed' || status.status === 'aborted' || status.status === 'failed') {
+        stopStatusPolling();
       }
     } catch (error) {
       console.error('Error polling mission status:', error);

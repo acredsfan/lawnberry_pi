@@ -19,7 +19,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import MissionWaypointList from '@/components/MissionWaypointList.vue';
@@ -28,6 +28,7 @@ import { useMissionStore } from '@/stores/mission';
 const missionStore = useMissionStore();
 const mapContainer = ref<HTMLElement | null>(null);
 let map: L.Map | null = null;
+let overlayGroup: L.LayerGroup | null = null;
 const missionName = ref('');
 
 onMounted(() => {
@@ -54,6 +55,8 @@ onMounted(() => {
     satelliteLayer.addTo(map); // Default to satellite view
     L.control.layers(baseMaps).addTo(map);
 
+    overlayGroup = L.layerGroup().addTo(map)
+
     map.on('click', (e: L.LeafletMouseEvent) => {
       missionStore.addWaypoint(e.latlng.lat, e.latlng.lng);
       renderWaypoints();
@@ -70,19 +73,27 @@ onUnmounted(() => {
 });
 
 const renderWaypoints = () => {
-  if (!map) return;
-  // Clear existing markers
-  map.eachLayer((layer) => {
-    if (layer instanceof L.Marker) {
-      map?.removeLayer(layer);
-    }
-  });
+  if (!map || !overlayGroup) return;
+  overlayGroup.clearLayers();
 
-  // Add new markers
+  // Add markers for each waypoint
+  const latlngs: L.LatLngExpression[] = []
   missionStore.waypoints.forEach(wp => {
-    L.marker([wp.lat, wp.lon]).addTo(map!);
-  });
+    const ll: L.LatLngExpression = [wp.lat, wp.lon]
+    latlngs.push(ll)
+    L.marker(ll).addTo(overlayGroup!)
+  })
+
+  // Draw polyline path if 2+ points
+  if (latlngs.length >= 2) {
+    L.polyline(latlngs, { color: '#00ffff', weight: 3 }).addTo(overlayGroup!)
+  }
 };
+
+// Re-render when waypoints change (add/remove/reorder)
+watch(() => missionStore.waypoints, () => {
+  renderWaypoints()
+}, { deep: true })
 
 const createMission = () => {
   if (missionName.value) {

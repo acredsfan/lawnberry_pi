@@ -42,6 +42,7 @@ const routes = computed(() => [
   { name: 'Control', path: '/control' },
   { name: 'Maps', path: '/maps' },
   { name: 'Planning', path: '/planning' },
+  { name: 'Mission Planner', path: '/mission-planner' },
   { name: 'Settings', path: '/settings' },
   { name: 'AI', path: '/ai' },
   { name: 'Telemetry', path: '/telemetry' },
@@ -90,6 +91,7 @@ function onKeydown(e: KeyboardEvent) {
       if (k === 'd') router.push('/')
       if (k === 'm') router.push('/maps')
       if (k === 's') router.push('/settings')
+      if (k === 'p') router.push('/mission-planner')
     }
     window.addEventListener('keydown', onNext, { capture: true } as any)
   }

@@ -541,10 +541,24 @@ function toggleSection(sectionId: string) {
   }
 }
 
-function selectDoc(doc: DocInfo) {
+async function selectDoc(doc: DocInfo) {
   selectedDoc.value = doc
   currentStep.value = 1
   scrollToTop()
+  
+  // Load content from API if not already loaded
+  if (!doc.content && !doc.steps) {
+    try {
+      const response = await api.get(`/documentation/${doc.id}?format=html`)
+      if (response.data && response.data.content) {
+        doc.content = response.data.content
+        doc.lastUpdated = new Date(response.data.last_modified)
+      }
+    } catch (error) {
+      console.error(`Failed to load documentation content for ${doc.id}:`, error)
+      doc.content = `# ${doc.title}\n\nFailed to load documentation content. Please try again later or check your network connection.`
+    }
+  }
 }
 
 // Methods - Search
@@ -685,14 +699,51 @@ function showStatus(message: string, success = false) {
   }, 3000)
 }
 
-// Initialize documentation with featured guides and offline docs
+// Map documentation categories from backend
+function mapDocCategory(docId: string): string {
+  if (docId.includes('install') || docId.includes('setup') || docId.includes('quick')) return 'getting-started'
+  if (docId.includes('hardware') || docId.includes('gps-ntrip')) return 'hardware'
+  if (docId.includes('remote') || docId.includes('lets-encrypt')) return 'networking'
+  if (docId.includes('auth') || docId.includes('privacy')) return 'security'
+  if (docId.includes('maps')) return 'mapping'
+  if (docId.includes('operations') || docId.includes('disaster')) return 'troubleshooting'
+  if (docId.includes('testing')) return 'api'
+  return 'reference'
+}
+
+// Initialize documentation with featured guides and real backend docs
 async function loadDocumentation() {
   try {
     // Load featured guides as base documentation
     docs.value = [...featuredGuides.value]
     
-    // Add additional offline documentation
-    const offlineDocs: DocInfo[] = [
+    // Try to load real documentation from backend API
+    try {
+      const response = await api.get('/documentation')
+      if (response.data && response.data.docs) {
+        const backendDocs: DocInfo[] = response.data.docs.map((doc: any) => ({
+          id: doc.id,
+          title: doc.title,
+          type: 'reference' as const,
+          category: mapDocCategory(doc.id),
+          icon: '📄',
+          lastUpdated: new Date(doc.last_modified),
+          readTime: `${Math.ceil(doc.size / 1000)} min`,
+          tags: [doc.id, 'documentation'],
+          // Content will be loaded on-demand when doc is selected
+        }))
+        
+        // Replace offline docs with real backend docs
+        docs.value = [...featuredGuides.value, ...backendDocs]
+        console.log(`Loaded ${backendDocs.length} documentation files from backend`)
+      }
+    } catch (error) {
+      console.log('Backend docs API not available, using offline documentation')
+    }
+    
+    // Add fallback offline documentation if backend fetch failed
+    if (docs.value.length <= featuredGuides.value.length) {
+      const offlineDocs: DocInfo[] = [
       {
         id: 'hardware-spec',
         title: 'Hardware Specification',
@@ -812,28 +863,7 @@ Real-time telemetry and control interface.
       }
     ]
     
-    docs.value.push(...offlineDocs)
-    
-    // Try to load additional docs from backend
-    try {
-      const response = await api.get('/docs/list')
-      if (response.data) {
-        // Convert backend format to our format
-        const backendDocs = response.data.map((doc: any) => ({
-          id: doc.path,
-          title: doc.name,
-          type: 'reference' as const,
-          category: 'reference',
-          icon: '📄',
-          lastUpdated: new Date(),
-          readTime: '5 min',
-          tags: ['reference'],
-          content: doc.content || ''
-        }))
-        docs.value.push(...backendDocs)
-      }
-    } catch (error) {
-      console.log('Backend docs not available, using offline documentation')
+      docs.value.push(...offlineDocs)
     }
     
   } catch (error) {

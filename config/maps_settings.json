@@ -1,0 +1,7 @@
+{
+  "provider": "google",
+  "google_api_key": "AIzaSyC1yElZWvFr2k8drq3JYMvqk8GGsWpQwGQ",
+  "google_billing_warnings": true,
+  "style": "satellite",
+  "bypass_external": false
+}

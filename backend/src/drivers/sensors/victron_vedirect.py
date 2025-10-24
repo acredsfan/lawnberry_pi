@@ -287,11 +287,29 @@ class VictronVeDirectDriver(HardwareDriver):
             battery_current = _to_float(
                 payload.get("battery_current") or payload.get("battery_charging_current")
             )
+            # BLE JSON frames vary by model/firmware; accept a broad set of aliases
             solar_voltage = _to_float(
-                payload.get("solar_voltage") or payload.get("panel_voltage")
+                payload.get("solar_voltage")
+                or payload.get("panel_voltage")
+                or payload.get("pv_voltage")
+                or payload.get("input_voltage")
+                or payload.get("solar_input_voltage")
             )
-            solar_current = _to_float(payload.get("solar_current") or payload.get("solar_current_amps"))
-            solar_power = _to_float(payload.get("solar_power") or payload.get("solar_power_w"))
+            solar_current = _to_float(
+                payload.get("solar_current")
+                or payload.get("solar_current_amps")
+                or payload.get("panel_current")
+                or payload.get("pv_current")
+                or payload.get("input_current")
+                or payload.get("solar_input_current")
+            )
+            solar_power = _to_float(
+                payload.get("solar_power")
+                or payload.get("solar_power_w")
+                or payload.get("panel_power")
+                or payload.get("pv_power")
+                or payload.get("input_power")
+            )
             load_current = _to_float(
                 payload.get("load_current")
                 or payload.get("load_current_amps")
@@ -332,6 +350,21 @@ class VictronVeDirectDriver(HardwareDriver):
         for optional_key in ("charge_state", "charger_error", "model_name", "yield_today"):
             if optional_key in payload:
                 result.setdefault("meta", {})[optional_key] = payload[optional_key]
+
+        # Surface daily solar yield as Wh if available. Victron sources sometimes
+        # report yield_today in kWh; if the numeric value is small, assume kWh
+        # and convert to Wh. Otherwise treat as Wh.
+        try:
+            yt_raw = payload.get("yield_today")
+            yt_val = _to_float(yt_raw)
+            if yt_val is not None:
+                # Heuristic: values <= 10 are very likely kWh
+                if yt_val <= 10.0:
+                    result["solar_yield_today_wh"] = round(yt_val * 1000.0, 1)
+                else:
+                    result["solar_yield_today_wh"] = round(yt_val, 1)
+        except Exception:
+            pass
 
         return result
 

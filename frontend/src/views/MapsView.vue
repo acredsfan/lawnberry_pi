@@ -12,7 +12,7 @@
       <div class="card-header">
         <h3>Boundary & Zone Editor</h3>
       </div>
-      <div class="card-body" style="height: 720px;">
+      <div class="card-body" style="height: 1080px;">
         <BoundaryEditor
           ref="editorRef"
           :map-provider="settings.provider === 'google' ? 'google' : (settings.provider === 'osm' ? 'osm' : 'none')"

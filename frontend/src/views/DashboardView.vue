@@ -58,6 +58,18 @@
               <span class="metric-value" data-testid="battery-voltage">{{ batteryVoltageDisplay }}V</span>
             </div>
             <div class="metric-line">
+              <span class="metric-label">Battery Current</span>
+              <span class="metric-value">{{ batteryCurrentDisplay }}A</span>
+            </div>
+            <div class="metric-line">
+              <span class="metric-label">Battery Power</span>
+              <span class="metric-value">{{ batteryPowerDisplay }}W</span>
+            </div>
+            <div class="metric-line">
+              <span class="metric-label">Battery State</span>
+              <span class="metric-value">{{ batteryChargeStateDisplay }}</span>
+            </div>
+            <div class="metric-line">
               <span class="metric-label">Solar Voltage</span>
               <span class="metric-value">{{ solarVoltageDisplay }}V</span>
             </div>
@@ -68,6 +80,22 @@
             <div class="metric-line">
               <span class="metric-label">Solar Output</span>
               <span class="metric-value">{{ solarPowerDisplay }}W</span>
+            </div>
+            <div class="metric-line">
+              <span class="metric-label">Solar Yield (Today)</span>
+              <span class="metric-value">{{ solarYieldTodayDisplay }}Wh</span>
+            </div>
+            <div class="metric-line">
+              <span class="metric-label">Load State</span>
+              <span class="metric-value">{{ loadStateDisplay }}</span>
+            </div>
+            <div class="metric-line">
+              <span class="metric-label">Load Current</span>
+              <span class="metric-value">{{ loadCurrentDisplay }}A</span>
+            </div>
+            <div class="metric-line">
+              <span class="metric-label">Load Power</span>
+              <span class="metric-value">{{ loadPowerDisplay }}W</span>
             </div>
           </div>
         </div>
@@ -281,9 +309,16 @@ const gpsRtkStatus = ref<string | null>(null)
 
 const batteryLevel = ref(0)
 const batteryVoltage = ref(0)
+const batteryCurrent = ref<number | null>(null)
+const batteryPower = ref<number | null>(null)
+const batteryChargeState = ref<string | null>(null)
 const solarVoltage = ref<number | null>(null)
 const solarCurrent = ref<number | null>(null)
 const solarPower = ref<number | null>(null)
+const solarYieldTodayWh = ref<number | null>(null)
+const loadState = ref<string | null>(null)
+const loadCurrent = ref<number | null>(null)
+const loadPower = ref<number | null>(null)
 const speed = ref(0)
 const speedTrend = ref(0)
 
@@ -384,6 +419,17 @@ const batteryBarClass = computed(() => {
 
 const batteryLevelDisplay = computed(() => batteryLevel.value.toFixed(1))
 const batteryVoltageDisplay = computed(() => batteryVoltage.value.toFixed(1))
+const batteryCurrentDisplay = computed(() => {
+  if (batteryCurrent.value === null || Number.isNaN(batteryCurrent.value)) return '--'
+  const val = batteryCurrent.value
+  return Math.abs(val) >= 10 ? val.toFixed(0) : val.toFixed(2)
+})
+const batteryPowerDisplay = computed(() => {
+  if (batteryPower.value === null || Number.isNaN(batteryPower.value)) return '--'
+  const val = batteryPower.value
+  return Math.abs(val) >= 100 ? val.toFixed(0) : val.toFixed(1)
+})
+const batteryChargeStateDisplay = computed(() => batteryChargeState.value ? batteryChargeState.value.toUpperCase() : 'UNKNOWN')
 
 const solarVoltageDisplay = computed(() => {
   if (solarVoltage.value === null) return '--'
@@ -392,13 +438,39 @@ const solarVoltageDisplay = computed(() => {
 
 const solarCurrentDisplay = computed(() => {
   if (solarCurrent.value === null) return '--'
-  return solarCurrent.value.toFixed(2)
+  const val = Math.abs(solarCurrent.value)
+  return val.toFixed(2)
 })
 
 const solarPowerDisplay = computed(() => {
   if (solarPower.value === null) return '--'
-  const value = solarPower.value
+  const value = Math.abs(solarPower.value)
   return Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1)
+})
+
+const solarYieldTodayDisplay = computed(() => {
+  if (solarYieldTodayWh.value === null) return '--'
+  const v = Math.max(0, solarYieldTodayWh.value)
+  return v >= 1000 ? v.toFixed(0) : v.toFixed(0)
+})
+
+const loadStateDisplay = computed(() => {
+  if (!loadState.value) return 'UNKNOWN'
+  const s = loadState.value.toLowerCase()
+  if (s === 'on' || s === 'enabled' || s === 'active') return 'ON'
+  if (s === 'off' || s === 'disabled') return 'OFF'
+  return loadState.value.toUpperCase()
+})
+
+const loadCurrentDisplay = computed(() => {
+  if (loadCurrent.value === null) return '--'
+  return Math.abs(loadCurrent.value).toFixed(2)
+})
+
+const loadPowerDisplay = computed(() => {
+  if (loadPower.value === null) return '--'
+  const v = Math.abs(loadPower.value)
+  return v >= 100 ? v.toFixed(0) : v.toFixed(1)
 })
 
 const solarStatus = computed(() => {
@@ -597,6 +669,7 @@ const applySolarMetrics = (payload: any) => {
   let voltageValue: number | undefined
   let currentValue: number | undefined
   let powerValue: number | undefined
+  let yieldTodayValue: number | undefined
   let voltageExplicitNull = false
   let currentExplicitNull = false
   let powerExplicitNull = false
@@ -667,6 +740,22 @@ const applySolarMetrics = (payload: any) => {
         }
       }
     }
+
+    if (yieldTodayValue === undefined) {
+      const yieldCandidates = [
+        (source as any).solar_yield_today_wh,
+        (source as any).yield_today_wh,
+        (source as any).yield_today,
+      ]
+      for (const candidate of yieldCandidates) {
+        const numeric = extractMetric(candidate, () => {})
+        if (numeric !== undefined) {
+          // Assume values <= 10 are kWh and convert to Wh
+          yieldTodayValue = numeric <= 10 ? numeric * 1000 : numeric
+          break
+        }
+      }
+    }
   }
 
   if (voltageValue !== undefined) {
@@ -676,7 +765,7 @@ const applySolarMetrics = (payload: any) => {
   }
 
   if (currentValue !== undefined) {
-    solarCurrent.value = currentValue
+    solarCurrent.value = Math.abs(currentValue)
   } else if (currentExplicitNull) {
     solarCurrent.value = null
   }
@@ -685,10 +774,24 @@ const applySolarMetrics = (payload: any) => {
     powerValue = voltageValue * currentValue
   }
 
+  // If voltage is missing but we have current and power, derive V = P / I
+  if (
+    voltageValue === undefined &&
+    powerValue !== undefined &&
+    currentValue !== undefined &&
+    Math.abs(currentValue) > 1e-6
+  ) {
+    voltageValue = powerValue / currentValue
+  }
+
   if (powerValue !== undefined) {
-    solarPower.value = powerValue
+    solarPower.value = Math.abs(powerValue)
   } else if (powerExplicitNull) {
     solarPower.value = null
+  }
+
+  if (yieldTodayValue !== undefined) {
+    solarYieldTodayWh.value = Math.max(0, yieldTodayValue)
   }
 }
 
@@ -734,6 +837,22 @@ const applyBatteryMetrics = (payload: any) => {
     payload?.battery_voltage,
     payload?.power?.battery_voltage,
   ]
+  const currentCandidates = [
+    battery?.current,
+    payload?.battery_current,
+    payload?.power?.battery_current,
+  ]
+  const powerCandidates = [
+    battery?.power,
+    payload?.battery_power,
+    payload?.power?.battery_power,
+  ]
+  const chargeStateCandidates = [
+    battery?.charging_state,
+    battery?.state,
+    payload?.battery_charging_state,
+    payload?.power?.battery_charging_state,
+  ]
 
   let percent = percentCandidates
     .map((value) => coerceFiniteNumber(value))
@@ -741,6 +860,15 @@ const applyBatteryMetrics = (payload: any) => {
   const voltage = voltageCandidates
     .map((value) => coerceFiniteNumber(value))
     .find((value) => value !== undefined)
+  const cur = currentCandidates
+    .map((value) => coerceFiniteNumber(value))
+    .find((value) => value !== undefined)
+  const pwr = powerCandidates
+    .map((value) => coerceFiniteNumber(value))
+    .find((value) => value !== undefined)
+  const chg = chargeStateCandidates
+    .map((v) => (typeof v === 'string' ? v : null))
+    .find((v) => v !== undefined && v !== null) as string | undefined
   if ((percent === undefined || percent === null) && voltage !== undefined) {
     const estimated = estimateBatteryFromVoltage(voltage)
     if (estimated !== null) {
@@ -755,8 +883,58 @@ const applyBatteryMetrics = (payload: any) => {
     batteryVoltage.value = voltage
   }
 
+  if (typeof cur === 'number' && !Number.isNaN(cur)) {
+    batteryCurrent.value = cur
+  }
+  if (typeof pwr === 'number' && !Number.isNaN(pwr)) {
+    batteryPower.value = pwr
+  } else if (typeof voltage === 'number' && typeof cur === 'number') {
+    batteryPower.value = voltage * cur
+  }
+  if (typeof chg === 'string') {
+    batteryChargeState.value = chg
+  } else if (typeof cur === 'number') {
+    batteryChargeState.value = cur > 0.05 ? 'charging' : cur < -0.05 ? 'discharging' : 'idle'
+  }
+
   if (typeof payload === 'object') {
     applySolarMetrics(payload)
+    // Load metrics
+    const loadSrc = payload?.load ?? payload
+    const loadCurrentCandidates = [
+      loadSrc?.current,
+      loadSrc?.load_current,
+      payload?.power?.load_current,
+    ]
+    const loadPowerCandidates = [
+      loadSrc?.power,
+      loadSrc?.load_power,
+      payload?.power?.load_power,
+    ]
+    const loadStateCandidates = [
+      loadSrc?.state,
+      loadSrc?.load_state,
+    ]
+    const lcur = loadCurrentCandidates
+      .map((v) => coerceFiniteNumber(v))
+      .find((v) => v !== undefined)
+    const lpwr = loadPowerCandidates
+      .map((v) => coerceFiniteNumber(v))
+      .find((v) => v !== undefined)
+    const lst = loadStateCandidates
+      .map((v) => (typeof v === 'string' ? v : null))
+      .find((v) => v !== undefined && v !== null) as string | undefined
+    if (lcur !== undefined) loadCurrent.value = lcur
+    if (lpwr !== undefined) {
+      loadPower.value = lpwr
+    } else if (lcur !== undefined && typeof batteryVoltage.value === 'number') {
+      loadPower.value = batteryVoltage.value * lcur
+    }
+    if (lst) {
+      loadState.value = lst
+    } else if (lcur !== undefined) {
+      loadState.value = Math.abs(lcur) > 0.05 ? 'on' : 'off'
+    }
   }
 }
 
@@ -1916,6 +2094,7 @@ onMounted(async () => {
 .power-metrics .metric-value {
   color: #ffff00;
   font-weight: 600;
+  font-size: 1.25rem;
 }
 
 .status-label {
@@ -1986,6 +2165,7 @@ onMounted(async () => {
 .gps-metric .metric-value {
   color: #ffff00;
   font-weight: 600;
+  font-size: 1.1rem;
 }
 
 /* Control Panel */
@@ -2146,7 +2326,7 @@ onMounted(async () => {
 }
 
 .metric-value {
-  font-size: 2.8rem;
+  font-size: 2rem;
   font-weight: 900;
   color: #00ffff;
   font-family: 'Orbitron', 'Courier New', monospace;
@@ -2476,7 +2656,7 @@ onMounted(async () => {
   }
   
   .metric-value {
-    font-size: 2rem;
+    font-size: 1.6rem;
   }
   
   .retro-header {
@@ -2499,7 +2679,7 @@ onMounted(async () => {
   }
   
   .metric-value {
-    font-size: 1.8rem;
+    font-size: 1.4rem;
   }
   
   .progress-label {

@@ -93,12 +93,29 @@ def _run_coro_sync(coro):
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
-        return loop.run_until_complete(coro)
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            # If run_until_complete failed or exited early, ensure the created
+            # coroutine is cleaned up to avoid "coroutine was never awaited" warnings.
+            with suppress(Exception):
+                if hasattr(coro, "close"):
+                    coro.close()
     finally:
+        # Gracefully shut down async generators; protect against races where the
+        # loop may already be closed by ensuring the coroutine is also closed
+        # if run_until_complete cannot execute.
         with suppress(Exception):
-            loop.run_until_complete(loop.shutdown_asyncgens())
+            shutdown_coro = loop.shutdown_asyncgens()
+            try:
+                loop.run_until_complete(shutdown_coro)
+            finally:
+                with suppress(Exception):
+                    if hasattr(shutdown_coro, "close"):
+                        shutdown_coro.close()
         asyncio.set_event_loop(None)
-        loop.close()
+        with suppress(Exception):
+            loop.close()
 
 
 def _default_gps_lookup(timeout: float = 2.5) -> Optional[Tuple[float, float]]:

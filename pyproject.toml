@@ -29,7 +29,9 @@ dependencies = [
     "shapely>=2.0.4",
     "timezonefinder>=6.2.0",
     # Numerics for orientation math and latency aggregation without pulling accelerator deps
-    "numpy>=1.26.4,<2.0"
+    "numpy>=1.26.4,<2.0",
+    # Load .env for runtime secrets (e.g., NTRIP_*)
+    "python-dotenv>=1.0.1",
 ]
 
 # Optional extras for hardware backends (install with: pip install .[hardware])

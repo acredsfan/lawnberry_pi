@@ -41,6 +41,46 @@ Before configuration, gather the following from your NTRIP service provider:
 - **Password**: Your account password (if required)
 - **Approximate Position**: Your mower's operating location (latitude, longitude, altitude)
 
+### Finding NTRIP Services Near You
+
+**New to NTRIP?** Start by checking these resources in order:
+
+1. **State/Regional DOT Networks (USA)** - Many states offer **FREE** NTRIP access:
+   - Search: "[Your State] DOT RTK network" or "[Your State] CORS network"
+   - Examples:
+     - **California**: Caltrans CRTN (California Real Time Network)
+     - **Florida**: FDOT CORS Network
+     - **Texas**: TxDOT RTN
+     - **Ohio**: ODOT CORS
+     - **Michigan**: MiRTN (Michigan Reference Network)
+   - Coverage: Usually excellent in urban/suburban areas
+   - Cost: **FREE** for most state networks
+   - Registration: May require account creation
+
+2. **RTK2Go Community Network** - Worldwide free base stations:
+   - Website: http://rtk2go.com/
+   - Coverage: Community-contributed, quality varies
+   - Best for: Rural areas, testing, backup service
+   - Cost: **FREE**
+   - No registration required
+
+3. **NGS CORS Network (USA)** - NOAA's national network:
+   - Website: https://geodesy.noaa.gov/CORS/
+   - Coverage: Nationwide but stations may be far apart
+   - Cost: **FREE**
+   - Best for: Areas without state network
+
+4. **Commercial Services** - Consistent quality, paid subscription:
+   - Best for: Professional use, areas with poor free coverage
+   - See [NTRIP Caster Services](#ntrip-caster-services) section below
+
+**Coverage Check Tool:**
+```bash
+# Check what's available near your location
+# Visit: http://monitor.use-snip.com/
+# Shows all NTRIP casters worldwide with coverage maps
+```
+
 ### System Requirements
 
 **Recommended Tools:**
@@ -131,9 +171,91 @@ The Raspberry Pi connects to the NTRIP caster and forwards correction data to th
 3. **Get Mountpoint List**:
    - Click "Get Mountpoint" button
    - Wait for the list to populate (may take 10-30 seconds)
-   - Select your nearest mountpoint based on location
+   - You'll see a list with columns: Mountpoint, Identifier, Format, Details
 
-4. **Configure Client Options**:
+4. **Choose the Right Mountpoint** (Important!):
+   
+   **Selection Criteria:**
+   
+   a. **Distance** - Closest is best
+      - Ideal: < 10 km (6 miles)
+      - Acceptable: < 20 km (12 miles)
+      - Difficult: > 30 km (18 miles)
+      - Beyond 50 km: Poor reliability
+   
+   b. **Message Format** - Look for these in the "Format" column:
+      - **RTCM 3.x** ✅ **BEST CHOICE** - Modern standard, works with ZED-F9P
+      - **CMR/CMR+** ⚠️ Trimble proprietary - avoid unless using Trimble base
+      - **RTCM 2.x** ❌ Legacy format - avoid if possible
+   
+   c. **Correction Type:**
+      - **VRS (Virtual Reference Station)** ✅ **RECOMMENDED**
+        - Generates corrections for your exact location
+        - Best accuracy over wide areas
+        - Requires sending GGA position to server
+        - Look for: "VRS", "VIRTUAL", "NEAREST" in mountpoint name
+      
+      - **Single Base Station** ✅ Good if close
+        - Fixed physical reference station
+        - Simple and reliable
+        - Accuracy decreases with distance
+        - Look for: Station names, coordinates in description
+      
+      - **MAC (Master Auxiliary Concept)** ✅ Advanced VRS
+        - Multiple stations create network solution
+        - Excellent accuracy
+        - Requires stable connection
+   
+   d. **RTCM Message Types** - Check mountpoint details:
+      - **Essential Messages** (ZED-F9P requires these):
+        - **1005** - Station coordinates
+        - **1077** - GPS MSM7 (high-resolution GPS)
+        - **1087** - GLONASS MSM7
+        - **1097** - Galileo MSM7 (if available)
+        - **1127** - BeiDou MSM7 (if available)
+      
+      - **Good Combination:**
+        - `1005, 1077, 1087, 1097` = GPS + GLONASS + Galileo ✅
+        - `1005, 1074, 1084, 1094` = Older format (still works)
+      
+      - **Avoid:**
+        - Mountpoints with only 1004, 1012 (legacy, less accurate)
+   
+   e. **Satellite Constellations** - More is better:
+      - **GPS** - Always included ✅
+      - **GLONASS** - Russian, adds satellites ✅ Recommended
+      - **Galileo** - European, high accuracy ✅ Recommended if available
+      - **BeiDou** - Chinese, good in Asia/Oceania ✅ Use if available
+      - **QZSS** - Japanese regional, use if in Asia-Pacific
+      
+      **Best Practice:** Enable all available constellations (GPS+GLO+GAL+BDS)
+      - More satellites = faster RTK lock
+      - Better performance in obstructed areas
+      - ZED-F9P supports all major constellations
+   
+   **Example Good Mountpoint:**
+   ```
+   Mountpoint: SJSU_VRS
+   Format: RTCM 3.2
+   Messages: 1005, 1077, 1087, 1097, 1127, 1230
+   Constellations: GPS, GLONASS, Galileo, BeiDou
+   Type: VRS
+   Network: California CORS
+   ✅ Excellent choice - Modern format, all constellations, VRS
+   ```
+   
+   **Example Poor Mountpoint:**
+   ```
+   Mountpoint: OLD_BASE
+   Format: RTCM 2.3
+   Messages: 1004, 1012
+   Constellations: GPS only
+   Type: Single base
+   Distance: 45 km
+   ❌ Avoid - Old format, GPS only, far away
+   ```
+
+5. **Configure Client Options**:
    ```
    ☑ Send GGA Position
    GGA Interval: 10 seconds (recommended)
@@ -172,6 +294,41 @@ The Raspberry Pi connects to the NTRIP caster and forwards correction data to th
 4. **Verify Save**:
    - Disconnect and reconnect the GPS
    - Reopen u-center and check that NTRIP still connects automatically
+
+### Step 3b: Configure Satellite Constellations (Optional but Recommended)
+
+Enable all satellite constellations for best performance:
+
+1. **Open Configuration View** (F9)
+2. **Navigate to GNSS Configuration**:
+   ```
+   CFG → CFG-SIGNAL
+   ```
+
+3. **Enable All Constellations**:
+   ```
+   ☑ GPS L1C/A (Always enabled)
+   ☑ GPS L2C
+   ☑ GLONASS L1OF
+   ☑ GLONASS L2OF
+   ☑ Galileo E1
+   ☑ Galileo E5b
+   ☑ BeiDou B1I
+   ☑ BeiDou B2I
+   ☐ QZSS (Enable only if in Asia-Pacific region)
+   ☐ SBAS (Disable - not needed with RTK)
+   ```
+
+4. **Save Configuration** (as in Step 3)
+
+**Why Enable Multiple Constellations?**
+- GPS alone: ~8-12 visible satellites
+- GPS + GLONASS + Galileo + BeiDou: **20-30 visible satellites**
+- Faster RTK lock (2-3 minutes → 30-60 seconds)
+- Better performance near trees/buildings
+- More reliable fix in challenging conditions
+
+**Note:** Your NTRIP mountpoint must support these constellations (check messages 1077, 1087, 1097, 1127)
 
 ### Step 4: Connect GPS to Raspberry Pi
 
@@ -586,40 +743,307 @@ max_usb_current=1
 
 ### Regional Services
 
-Many countries have national RTK networks:
-- **USA:** State DOT networks (varies by state)
-- **Europe:** Various national networks (e.g., SmartNet, SAPOS)
-- **Australia:** CORS Network
-- **Japan:** GEONET
+#### United States - State DOT Networks (FREE)
 
-Check with your local surveying or mapping agencies for public or commercial NTRIP services.
+Most states offer free RTK networks. Here's how to find yours:
+
+**How to Access:**
+1. Search: "[Your State] DOT CORS" or "[Your State] RTK network"
+2. Register for a free account (usually required)
+3. Get NTRIP credentials from your account dashboard
+
+**State Network Directory:**
+
+| State | Network Name | Website Search Term | Typical Coverage |
+|-------|--------------|---------------------|------------------|
+| California | Caltrans CRTN | "Caltrans Real Time Network" | Excellent |
+| Florida | FDOT CORS | "FDOT CORS Network" | Excellent |
+| Texas | TxDOT RTN | "TxDOT RTK Network" | Good |
+| Ohio | ODOT CORS | "ODOT CORS Network" | Excellent |
+| Michigan | MiRTN | "Michigan Reference Network" | Good |
+| Washington | WSDOT RTK | "WSDOT RTK Network" | Good |
+| New York | NYSNet | "NYS DOT CORS" | Good |
+| Illinois | IDOT CORS | "Illinois DOT CORS" | Good |
+| Pennsylvania | PennDOT RTK | "PennDOT RTK Network" | Fair |
+| North Carolina | NCDOT CORS | "NC DOT CORS" | Good |
+
+**Not Listed?** Search: "[Your State] Department of Transportation CORS Network"
+
+**Typical Credentials Format:**
+```
+Host: [state].cors.network (varies by state)
+Port: 2101
+Username: your_registered_email
+Password: provided_after_registration
+Mountpoints: Listed in your account
+```
+
+#### International Networks
+
+**Europe:**
+- **Germany:** SAPOS (Commercial, €5-15/month)
+- **UK:** Ordnance Survey Net RTK (Commercial)
+- **France:** Orphéon/Teria (Commercial)
+- **Spain:** ERGNSS (Some regions free)
+- **Belgium:** FloodGNSS (Free for Flanders)
+
+**Asia-Pacific:**
+- **Australia:** CORS Network (Free, by state)
+- **Japan:** GEONET (Free)
+- **New Zealand:** PositioNZ (Free)
+- **South Korea:** NTRIP.KR (Free)
+
+**Check your country's national survey or mapping agency for local NTRIP services.**
 
 ### Running Your Own Base Station
 
-For maximum reliability and coverage, you can set up your own base station:
+For maximum reliability and coverage, you can set up your own base station. This is especially useful for:
+- Large properties (> 5 acres)
+- Remote areas with no nearby NTRIP services
+- Professional/commercial operations
+- When you want guaranteed 24/7 availability
 
-**Hardware Required:**
-- Second ZED-F9P or similar RTK-capable receiver
-- Fixed antenna mount with known precise position
-- Raspberry Pi or similar computer
-- Internet connection
+#### Cost Analysis
 
-**Software:**
-- **RTKLIB** (Open source)
-- **SNIP Caster** (Commercial, easy setup)
-- **RTKBase** (Open source, Pi-friendly)
+**Initial Investment: $400-800**
 
-**Benefits:**
-- ✅ No ongoing subscription costs
-- ✅ Maximum availability and reliability
-- ✅ Custom coverage for your property
-- ✅ No dependency on third-party services
+| Component | Budget Option | Premium Option |
+|-----------|---------------|----------------|
+| RTK GPS Receiver | SparkFun ZED-F9P ($275) | u-blox C099-F9P ($400) |
+| GPS Antenna | Surveying antenna ($80) | Geodetic antenna ($200) |
+| Antenna Mount | DIY/tripod ($20) | Survey monument ($100) |
+| Base Computer | Raspberry Pi 4 ($75) | Raspberry Pi 5 ($100) |
+| Network | Existing WiFi ($0) | LTE modem ($50) |
+| **Total** | **~$450** | **~$850** |
 
-**Considerations:**
-- Initial hardware investment (~$300-600)
-- Requires precise antenna position determination
-- Network setup and maintenance
-- 24/7 uptime requirement
+**Ongoing Costs:**
+- Power: ~$5/year (5W continuous)
+- Internet: Use existing connection ($0)
+- Maintenance: Minimal
+
+**vs. Commercial NTRIP:**
+- Emlid Caster: $10-20/month = $120-240/year
+- Trimble RTX: $600-2000/year
+- **Break-even:** 2-4 years with your own base station
+
+#### Hardware Setup Guide
+
+**1. Equipment Selection:**
+
+**GPS Receiver (Base Station):**
+- **SparkFun GPS-RTK-SMA Breakout - ZED-F9P** ($275) ✅ Recommended
+  - Same as your rover (easier setup)
+  - Multi-band (L1/L2), multi-constellation
+  - USB interface for Pi
+- **Alternative:** Any RTK-capable receiver (must output RTCM3)
+
+**GPS Antenna (Critical!):**
+- **Surveying-grade antenna required** ($80-200)
+  - Multi-band (L1/L2) capable
+  - Good multipath rejection
+  - Weatherproof
+- **Recommended:**
+  - SparkFun GNSS Multi-Band L1/L2 Surveying Antenna ($100)
+  - Tallysman TW3710 (~$150)
+  - ⚠️ Don't use cheap patch antennas - poor base performance
+
+**Antenna Mount:**
+- **Requirements:**
+  - Stable, doesn't move/vibrate
+  - Clear 360° sky view (no obstructions > 15° elevation)
+  - Secure against weather/theft
+- **Options:**
+  - DIY: PVC pipe cemented in ground + antenna adapter
+  - Survey tripod: Portable but less stable
+  - Roof mount: Good if clear view
+  - Survey monument: Professional ($100-200)
+
+**Base Computer:**
+- **Raspberry Pi 4 or 5** (2GB+ RAM sufficient) ✅
+- Alternative: Any Linux PC, NUC, or existing server
+- Requirements: USB port, network connection, 24/7 power
+
+**2. Antenna Position Determination (Critical!):**
+
+Your base station needs to know its **exact** position (within ~1cm):
+
+**Option A: Professional Survey (Most Accurate)**
+- Hire local surveyor to establish point
+- Cost: $200-500 (one-time)
+- Accuracy: ~1cm
+- Gets you:
+  - Latitude (decimal degrees, 8+ decimals)
+  - Longitude (decimal degrees, 8+ decimals)
+  - Ellipsoidal height (meters)
+  - Coordinate system (usually WGS84)
+
+**Option B: OPUS Service (Free, USA only)**
+- National Geodetic Survey's Online Positioning User Service
+- Website: https://geodesy.noaa.gov/OPUS/
+- Process:
+  1. Collect 4-24 hours of GPS data from your antenna
+  2. Upload raw data to OPUS
+  3. Receive precise coordinates via email (accuracy: ~2cm)
+- Requirements: GPS receiver that logs raw data (ZED-F9P can do this)
+- Cost: **FREE**
+
+**Option C: Long-term Averaging (Least Accurate)**
+- Let GPS receiver average position over 48+ hours
+- Accuracy: ~10-30cm (acceptable for hobby use)
+- Not recommended for professional applications
+
+**3. Software Installation - RTKBase (Recommended)**
+
+RTKBase is an open-source, easy-to-use base station software:
+
+**Installation Steps:**
+```bash
+# On your base station Raspberry Pi
+
+# 1. Install RTKBase
+wget https://raw.githubusercontent.com/Stefal/rtkbase/master/tools/install.sh -O install.sh
+sudo bash install.sh --all
+
+# 2. During installation, you'll be prompted for:
+#    - GPS receiver port (e.g., /dev/ttyACM0)
+#    - Antenna position (lat/lon/height from OPUS or survey)
+#    - NTRIP caster settings (to share your corrections)
+
+# 3. Access web interface
+http://<base-pi-ip>:80
+
+# 4. Configure:
+#    - Set antenna position (Settings → Base Position)
+#    - Enable NTRIP server (Settings → Services)
+#    - Create mountpoint name (e.g., MY_BASE_01)
+```
+
+**Post-Installation Configuration:**
+1. **Set Static Position:**
+   - Web interface → Settings → Base Position
+   - Enter coordinates from OPUS or surveyor
+   - Mode: "Static" (not "Average")
+
+2. **Configure RTCM Messages:**
+   - Enable: 1005, 1077, 1087, 1097, 1127, 1230
+   - Output rate: 1Hz (every 1 second)
+
+3. **Setup NTRIP Caster** (so your rover can connect):
+   - Local mode: Rover connects directly to base Pi
+   - Public mode: Share on RTK2Go for community
+   - Private server: Run your own caster
+
+**4. Alternative Software Options:**
+
+**RTKLIB (Free, Advanced Users):**
+- More complex setup
+- Maximum flexibility
+- Command-line based
+- Guide: https://rtklibexplorer.wordpress.com/
+
+**SNIP Lite (Commercial, $59 one-time):**
+- Windows-based
+- Easy GUI configuration
+- Built-in NTRIP caster
+- Good for PC-based stations
+- Website: https://www.use-snip.com/
+
+#### Connecting Your Rover to Your Base
+
+**Option 1: Direct Connection (Local Network)**
+```yaml
+# In /home/pi/lawnberry/.env on your rover
+NTRIP_HOST=192.168.1.100  # Your base station's IP
+NTRIP_PORT=2101
+NTRIP_MOUNTPOINT=MY_BASE_01
+# No username/password needed on local network
+```
+
+**Option 2: Share via RTK2Go (Internet Access)**
+- Configure RTKBase to forward to rtk2go.com
+- Your rover connects via rtk2go.com
+- Useful if rover uses cellular internet
+
+**Option 3: VPN Connection**
+- Setup Tailscale or Wireguard VPN
+- Connect rover to base from anywhere
+- More complex but very flexible
+
+#### Base Station Best Practices
+
+**✅ DO:**
+- Place antenna with 360° clear sky view
+- Use high-quality surveying antenna
+- Get precise position (OPUS or professional survey)
+- Secure antenna against movement/theft
+- Provide UPS backup power for 24/7 operation
+- Monitor base health with web interface
+- Keep base software updated
+
+**❌ DON'T:**
+- Place antenna near metal structures (multipath)
+- Use consumer-grade patch antennas
+- Guess antenna position (use OPUS or survey)
+- Mount on structure that moves/vibrates
+- Expose computer to weather
+- Forget to configure static position (not averaging mode)
+
+#### Maintenance
+
+**Weekly:**
+- Check base station web interface
+- Verify NTRIP stream is active
+- Check satellite count (should see 20+)
+
+**Monthly:**
+- Check for software updates
+- Verify antenna mount is stable
+- Review correction data quality
+
+**Annually:**
+- Clean antenna (dust/debris affects signal)
+- Check all cable connections
+- Verify position hasn't drifted (re-run OPUS)
+
+#### Troubleshooting Your Base
+
+**Poor Correction Quality:**
+- Check antenna has clear view (use satellite view tools)
+- Verify antenna position is accurate
+- Ensure antenna cable is < 10m (signal loss in long cables)
+- Check for nearby RF interference
+
+**Rover Can't Connect:**
+- Verify base NTRIP server is running
+- Check firewall allows port 2101
+- Test with local connection first
+- Verify mountpoint name matches
+
+**Position Drift:**
+- Base must use **static** position, not averaging
+- Re-verify antenna position with OPUS
+- Check antenna mount hasn't moved
+
+#### Is Your Own Base Station Worth It?
+
+**✅ Good Reasons to Build Your Own:**
+- No NTRIP service within 20km
+- Property > 10 acres (base covers entire area)
+- Professional use (need guaranteed uptime)
+- Like DIY projects and learning
+- Want to contribute to RTK2Go community
+- Long-term cost savings (> 2 years)
+
+**❌ Stick with Public NTRIP If:**
+- Good free DOT network available nearby (< 10km)
+- Small property (< 1 acre)
+- Casual/hobby use only
+- Don't want maintenance responsibility
+- Can't establish precise antenna position
+- No suitable antenna location with clear view
+
+**Conclusion:**
+Building your own base station is a rewarding project that provides maximum control and long-term cost savings, but requires initial investment, technical setup, and ongoing maintenance. For most users, free state DOT networks offer the best value and easiest setup.
 
 ## Known Issues
 

@@ -31,6 +31,11 @@ npm run dev -- --host 0.0.0.0 --port 3001
 - ✅ **Real-time Telemetry**: Live GPS, battery, IMU data at 5Hz via WebSocket
 - ✅ **Production Ready**: Complete system validated on Raspberry Pi hardware
 
+### Mission Planner
+- ✅ Interactive Mission Planner UI is available under the "Mission Planner" navigation item.
+- Click on the map to add waypoints, reorder them in the sidebar, set blade and speed per waypoint, then Create and Start the mission.
+- Mission status and completion percentage are shown live; you can Pause, Resume, or Abort at any time.
+
 ### Documentation
 - Setup Guide: `docs/installation-setup-guide.md`
 - GPS RTK Configuration: `docs/gps-ntrip-setup.md` (centimeter-level accuracy)

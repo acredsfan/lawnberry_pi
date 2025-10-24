@@ -532,30 +532,31 @@ class PowerSensorInterface:
             ina.get("solar_voltage") if ina else None,
             min_abs=0.05,
         )
+        # Capture per-source solar current/power to avoid cross-source derivations
+        victron_solar_current = (
+            victron.get("solar_current_amps") if victron else None
+        )
+        ina_solar_current = (
+            ina.get("solar_current_amps") if ina else None
+        )
         solar_current_sources: list[Any] = []
-        if prefer_solar:
-            solar_current_sources.append(victron.get("solar_current_amps") if victron else None)
-        solar_current_sources.append(ina.get("solar_current_amps") if ina else None)
-        if not prefer_solar:
-            solar_current_sources.append(victron.get("solar_current_amps") if victron else None)
+        # Prefer Victron for PV-side semantics when present
+        solar_current_sources.append(victron_solar_current)
+        solar_current_sources.append(ina_solar_current)
         solar_current = cls._pick(*solar_current_sources)
 
+        victron_solar_power = (
+            victron.get("solar_power_w") if victron else None
+        ) if victron else None
+        if victron_solar_power is None and victron:
+            victron_solar_power = victron.get("solar_power")
+        ina_solar_power = (
+            ina.get("solar_power_w") if ina else None
+        )
         solar_power_sources: list[Any] = []
-        if prefer_solar:
-            solar_power_sources.extend(
-                [
-                    victron.get("solar_power_w") if victron else None,
-                    victron.get("solar_power") if victron else None,
-                ]
-            )
-        solar_power_sources.append(ina.get("solar_power_w") if ina else None)
-        if not prefer_solar:
-            solar_power_sources.extend(
-                [
-                    victron.get("solar_power_w") if victron else None,
-                    victron.get("solar_power") if victron else None,
-                ]
-            )
+        # Prefer Victron for PV-side power as well
+        solar_power_sources.append(victron_solar_power)
+        solar_power_sources.append(ina_solar_power)
         solar_power = cls._pick(*solar_power_sources)
 
         battery_power_sources: list[Any] = []
@@ -578,9 +579,39 @@ class PowerSensorInterface:
 
         if battery_power is None and battery_voltage is not None and battery_current is not None:
             battery_power = round(battery_voltage * battery_current, 3)
-
+        # Prefer computing missing solar metrics only when both operands come from the same source
         if solar_power is None and solar_voltage is not None and solar_current is not None:
-            solar_power = round(solar_voltage * solar_current, 3)
+            # Derive power only when voltage/current share origin
+            same_origin = False
+            try:
+                same_origin = (
+                    # Both from Victron
+                    (victron is not None and victron.get("solar_voltage") is not None and victron_solar_current is not None)
+                    # Or both from INA
+                    or (victron is None and ina is not None and ina.get("solar_voltage") is not None and ina_solar_current is not None)
+                )
+            except Exception:
+                same_origin = False
+            if same_origin:
+                solar_power = round(solar_voltage * solar_current, 3)
+
+        if (
+            solar_voltage is None
+            and solar_power is not None
+            and solar_current is not None
+            and abs(solar_current) > 1e-6
+        ):
+            # Derive voltage from power/current only when both came from Victron or both from INA
+            derived = None
+            try:
+                if victron_solar_power is not None and victron_solar_current is not None:
+                    derived = float(victron_solar_power) / float(victron_solar_current)
+                elif ina_solar_power is not None and ina_solar_current is not None and abs(float(ina_solar_current)) > 1e-6:
+                    derived = float(ina_solar_power) / float(ina_solar_current)
+            except Exception:
+                derived = None
+            if derived is not None:
+                solar_voltage = round(derived, 3)
 
         load_current_sources: list[Any] = []
         if prefer_load:
@@ -590,6 +621,14 @@ class PowerSensorInterface:
             load_current_sources.append(victron.get("load_current_amps") if victron else None)
         load_current = cls._pick(*load_current_sources)
 
+        # Daily solar yield (Wh) when available from Victron
+        solar_yield_today_wh = None
+        try:
+            if victron and isinstance(victron, dict):
+                solar_yield_today_wh = cls._pick(victron.get("solar_yield_today_wh"))
+        except Exception:
+            solar_yield_today_wh = None
+
         reading = PowerReading(
             battery_voltage=battery_voltage,
             battery_current=battery_current,
@@ -597,6 +636,7 @@ class PowerSensorInterface:
             solar_voltage=solar_voltage,
             solar_current=solar_current,
             solar_power=solar_power,
+            solar_yield_today_wh=solar_yield_today_wh,
             load_current=load_current,
         )
 

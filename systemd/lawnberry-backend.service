@@ -16,6 +16,9 @@ Environment=LAWNBERRY_CONFIG_DIR=/home/pi/lawnberry/config
 Environment=LAWNBERRY_LOG_DIR=/home/pi/lawnberry/logs
 Environment=LAWNBERRY_DATA_DIR=/home/pi/lawnberry/data
 Environment=SIM_MODE=0
+Environment=PYTHONUNBUFFERED=1
+# Load runtime secrets and configuration (e.g., NTRIP_*) from .env if present
+EnvironmentFile=-/home/pi/lawnberry/.env
 
 # Main service command
 ExecStart=/home/pi/lawnberry/.venv/bin/uvicorn backend.src.main:app --host 0.0.0.0 --port 8081 --workers 1
@@ -40,6 +43,7 @@ ReadWritePaths=/home/pi/lawnberry/logs /home/pi/lawnberry/data /home/pi/lawnberr
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
+UMask=007
 
 # Hardware access (required for GPIO, I2C, SPI)
 SupplementaryGroups=gpio i2c spi dialout
