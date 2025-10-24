@@ -274,6 +274,14 @@ class GPSDriver(HardwareDriver):
                     break
 
             if got_lat and got_lon:
+                # If we have an RTK status but no explicit accuracy from GST/EHP,
+                # provide a reasonable heuristic so the UI reflects the improved fix.
+                # Typical 1-sigma horiz. accuracy: RTK_FIXED ~2-3cm, RTK_FLOAT ~10-30cm.
+                if acc is None and rtk_status:
+                    if rtk_status == "RTK_FIXED":
+                        acc = 0.03  # 3 cm heuristic
+                    elif rtk_status == "RTK_FLOAT":
+                        acc = 0.20  # 20 cm heuristic
                 reading = GpsReading(
                     latitude=lat,
                     longitude=lon,

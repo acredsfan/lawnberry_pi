@@ -803,7 +803,9 @@ class SensorManager:
                 altitude_m=gps_reading.altitude or 0.0,
                 speed_mps=0.0,
                 heading_deg=0.0,
-                hdop=gps_reading.accuracy or 99.9,
+                # Use true HDOP from the receiver if available; do NOT substitute
+                # the estimated accuracy here. The UI displays both Accuracy and HDOP.
+                hdop=gps_reading.hdop or 99.9,
                 satellites=gps_reading.satellites or 0,
                 fix_type=self._map_rtk_fix_type(gps_reading),
                 rtk_status_message=self._get_rtk_status_message(gps_reading)

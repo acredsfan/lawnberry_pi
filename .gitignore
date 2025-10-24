@@ -374,6 +374,7 @@ Thumbs.db
 .env.local
 .env.*.local
 config/secrets.json
+config/maps_settings.json
 config/*.key
 config/*.pem
 
