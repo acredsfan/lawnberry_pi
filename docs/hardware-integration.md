@@ -70,7 +70,36 @@ Verification steps:
 ### GPS
 - Preferred: USB (ZED-F9P RTK) → /dev/ttyACM*
 - Alternative: UART0 for NEO-8M → /dev/serial0 at 115200 baud
- - NTRIP corrections: Typically configured directly on the ZED-F9P via u-center; the Pi does not need to run an NTRIP client if the receiver is pre-configured.
+
+#### RTK Positioning with NTRIP Corrections
+
+For centimeter-level accuracy, configure RTK corrections via NTRIP. **See the comprehensive guide:**
+- **[GPS RTK with NTRIP Configuration Guide](gps-ntrip-setup.md)** - Complete step-by-step instructions
+
+**Quick Setup Summary:**
+
+Two methods are supported:
+
+1. **Method 1: Direct GPS Configuration** (Recommended)
+   - Configure NTRIP in the ZED-F9P using u-blox u-center (Windows)
+   - GPS connects directly to NTRIP caster
+   - More reliable, no Pi dependency
+   - Set `gps_ntrip_enabled: true` in `config/hardware.yaml`
+
+2. **Method 2: Pi-Forwarded NTRIP**
+   - Pi connects to NTRIP caster and forwards corrections to GPS
+   - Set `gps_ntrip_enabled: true` in `config/hardware.yaml`
+   - Configure `.env` with: `NTRIP_HOST`, `NTRIP_PORT`, `NTRIP_MOUNTPOINT`, `NTRIP_USERNAME`, `NTRIP_PASSWORD`, `NTRIP_SERIAL_DEVICE`
+   - Restart backend: `sudo systemctl restart lawnberry-backend`
+
+**Verification:**
+```bash
+# Check GPS status
+curl http://localhost:8081/api/v2/sensors/health | jq '.gps'
+
+# Look for fix_type: "RTK_FIXED" (best) or "RTK_FLOAT" (processing)
+# Target accuracy: < 0.05 meters (5cm)
+```
 
 ### Drive Controller: RoboHAT RP2040 → Cytron MDDRC10 (preferred)
 - Serial link: /dev/serial0 or /dev/ttyACM0

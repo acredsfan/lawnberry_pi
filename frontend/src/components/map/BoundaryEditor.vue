@@ -381,6 +381,11 @@ const useGoogleMutant = computed(() => shouldUseGoogleProvider(
   typeof window !== 'undefined' ? window.location : null
 ));
 let googleBaseLayer: any = null;
+let googleLayerHandlers: {
+  tileerror?: (e: any) => void;
+  loading?: () => void;
+  load?: () => void;
+} = {};
 const googleLayerActive = ref(false);
 
 // Reactive key to force tile layer re-rendering when style changes
@@ -413,17 +418,39 @@ async function ensureBaseLayer() {
 
   // Always remove existing Google base layer first to ensure clean switching
   if (googleBaseLayer) {
-    try { 
-      map.removeLayer(googleBaseLayer); 
+    try {
+      if (typeof googleBaseLayer.off === 'function') {
+        if (googleLayerHandlers.tileerror) {
+          googleBaseLayer.off('tileerror', googleLayerHandlers.tileerror);
+        }
+        if (googleLayerHandlers.loading) {
+          googleBaseLayer.off('loading', googleLayerHandlers.loading);
+        }
+        if (googleLayerHandlers.load) {
+          googleBaseLayer.off('load', googleLayerHandlers.load);
+        }
+      }
+
+      const layer = googleBaseLayer;
+      const hasLeafletId = typeof (layer as any)._leaflet_id !== 'undefined';
+      const mapHasLayer = typeof (map as any).hasLayer === 'function' ? (map as any).hasLayer(layer) : false;
+      if (hasLeafletId && typeof map.removeLayer === 'function' && mapHasLayer) {
+        map.removeLayer(layer);
+      } else if (typeof layer.remove === 'function') {
+        layer.remove();
+      }
     } catch (e) {
       console.debug('Error removing Google layer:', e);
     }
+    googleLayerHandlers = {};
     googleBaseLayer = null;
+    googleLayerActive.value = false;
   }
 
   // If not using Google, set inactive and return
   if (!useGoogleMutant.value) {
     googleLayerActive.value = false;
+    googleLayerHandlers = {};
     // Set loaded state for OSM tiles (they'll trigger their own events)
     setTimeout(() => {
       if (tileLoadingState.value === 'loading') {
@@ -461,22 +488,31 @@ async function ensureBaseLayer() {
     googleBaseLayer = Lref.gridLayer.googleMutant({ type: gmType });
     
     // Add error handling for Google Maps tiles
-    googleBaseLayer.on('tileerror', (e: any) => {
+    const handleTileError = (e: any) => {
       console.warn('Google Maps tile error:', e);
       tileLoadingState.value = 'error';
       tileErrorMessage.value = 'Google Maps imagery failed to load. Check your API key and internet connection.';
       toast.show('Google Maps tiles failed to load', 'error', 4000);
-    });
-    
-    googleBaseLayer.on('loading', () => {
+    };
+
+    const handleLoading = () => {
       tileLoadingState.value = 'loading';
       tileErrorMessage.value = null;
-    });
-    
-    googleBaseLayer.on('load', () => {
+    };
+
+    const handleLoad = () => {
       tileLoadingState.value = 'loaded';
       tileErrorMessage.value = null;
-    });
+    };
+
+    googleBaseLayer.on('tileerror', handleTileError);
+    googleBaseLayer.on('loading', handleLoading);
+    googleBaseLayer.on('load', handleLoad);
+    googleLayerHandlers = {
+      tileerror: handleTileError,
+      loading: handleLoading,
+      load: handleLoad
+    };
     
     googleBaseLayer.addTo(map);
     googleLayerActive.value = true;
@@ -485,6 +521,7 @@ async function ensureBaseLayer() {
     googleLayerActive.value = false;
     tileErrorMessage.value = 'Failed to initialize Google Maps. Check your API key.';
     toast.show('Google Maps initialization failed', 'error', 4000);
+    googleLayerHandlers = {};
   }
 }
 

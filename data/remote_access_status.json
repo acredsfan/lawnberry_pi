@@ -3,10 +3,10 @@
   "configured_provider": "disabled",
   "enabled": false,
   "fallback_provider": null,
-  "health": "unknown",
-  "last_checked": "2025-10-22T20:05:50.398467+00:00",
+  "health": "disabled",
+  "last_checked": "2025-10-24T13:08:18.062421+00:00",
   "last_error": null,
-  "message": "idle",
+  "message": "remote access disabled",
   "provider": "disabled",
   "url": null,
   "version": 1

@@ -14,7 +14,30 @@ from backend.src.models.auth_security_config import (
     SecurityLevel,
     TOTPConfig,
 )
-from backend.src.services.auth_service import AuthenticationError, auth_service
+from backend.src.services.auth_service import AuthenticationError, PasswordManager, auth_service
+
+
+class TestPasswordManager:
+    """Unit tests for the password hashing helper."""
+
+    def test_hash_and_verify_short_secret(self):
+        manager = PasswordManager()
+        secret = "operator123"
+        hashed = manager.hash_password(secret)
+
+        assert isinstance(hashed, str)
+        assert hashed.startswith("$2b$")
+        assert manager.verify_password(secret, hashed)
+        assert not manager.verify_password("operator124", hashed)
+
+    def test_hash_and_verify_long_secret(self):
+        manager = PasswordManager()
+        secret = "long-secret-" + "x" * 200
+        hashed = manager.hash_password(secret)
+
+        assert manager.verify_password(secret, hashed)
+        assert not manager.verify_password(secret[:-1], hashed)
+
 
 
 class TestAuthSecurityLevels:

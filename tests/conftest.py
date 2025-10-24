@@ -1,5 +1,6 @@
 """Global test configuration for LawnBerry Pi v2."""
 import asyncio
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -31,10 +32,28 @@ if str(ROOT) not in sys.path:
 
 # Make optional dependency stubs importable in all tests (bcrypt, pyotp, google, psutil)
 compat_stubs = ROOT / "backend" / "src" / "compat_stubs"
-if compat_stubs.exists():
-    p = str(compat_stubs)
-    if p not in sys.path:
-        sys.path.insert(0, p)
+
+
+def _ensure_optional_dependency(module_name: str) -> None:
+    if module_name in sys.modules:
+        return
+    try:
+        importlib.import_module(module_name)
+        return
+    except ImportError:
+        if compat_stubs.exists():
+            stub_path = str(compat_stubs)
+            if stub_path not in sys.path:
+                sys.path.insert(0, stub_path)
+            importlib.import_module(module_name)
+
+
+for optional_module in ("bcrypt", "pyotp", "google", "jwt", "psutil", "timezonefinder"):
+    try:
+        _ensure_optional_dependency(optional_module)
+    except ImportError:
+        # Allow missing optional dependencies when no stub is present.
+        pass
 
 # Ensure SIM_MODE=1 for all tests unless explicitly overridden
 os.environ.setdefault("SIM_MODE", "1")

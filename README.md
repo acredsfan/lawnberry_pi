@@ -33,6 +33,9 @@ npm run dev -- --host 0.0.0.0 --port 3001
 
 ### Documentation
 - Setup Guide: `docs/installation-setup-guide.md`
+- GPS RTK Configuration: `docs/gps-ntrip-setup.md` (centimeter-level accuracy)
+- Hardware Integration: `docs/hardware-integration.md`
+- Operations Guide: `docs/OPERATIONS.md`
 - Contributing Guide: `CONTRIBUTING.md` (includes TODO policy)
 - Feature Specifications: `specs/004-lawnberry-pi-v2/`
 - System Architecture: See `memory/agent_journal.md` for technical details

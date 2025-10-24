@@ -45,14 +45,13 @@
           <div class="form-group">
             <label for="timezone">Timezone</label>
             <select v-model="systemSettings.timezone" id="timezone" class="form-control">
-              <option value="UTC">UTC</option>
-              <option value="US/Eastern">US/Eastern</option>
-              <option value="US/Central">US/Central</option>
-              <option value="US/Mountain">US/Mountain</option>
-              <option value="US/Pacific">US/Pacific</option>
-              <option value="Europe/London">Europe/London</option>
-              <option value="Europe/Paris">Europe/Paris</option>
+              <option v-for="tz in timezoneOptions" :key="tz" :value="tz">
+                {{ formatTimezoneLabel(tz) }}
+              </option>
             </select>
+            <small v-if="detectedTimezoneNote" class="form-text text-muted">
+              {{ detectedTimezoneNote }}
+            </small>
           </div>
 
           <div class="form-group">
@@ -379,7 +378,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useApiService } from '@/services/api'
 import { useToastStore } from '@/stores/toast'
 import { usePreferencesStore } from '@/stores/preferences'
@@ -416,6 +415,82 @@ const systemSettings = ref({
     map_provider: 'google'
   }
 })
+
+const timezoneOptions = ref<string[]>([
+  'UTC',
+  'Etc/GMT',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Asia/Tokyo',
+  'Australia/Sydney'
+])
+
+const detectedTimezoneSource = ref<string | null>(null)
+const timezoneAppliedAutomatically = ref(false)
+let suppressTimezoneWatch = false
+
+function ensureTimezoneOption(tz: string | null | undefined) {
+  if (!tz) {
+    return
+  }
+  const normalized = String(tz).trim()
+  if (!normalized) {
+    return
+  }
+  if (!timezoneOptions.value.includes(normalized)) {
+    const unique = new Set(timezoneOptions.value)
+    unique.add(normalized)
+    timezoneOptions.value = Array.from(unique).sort((a, b) => {
+      if (a === 'UTC') return -1
+      if (b === 'UTC') return 1
+      return a.localeCompare(b)
+    })
+  }
+}
+
+function formatTimezoneLabel(tz: string): string {
+  return tz.replace(/_/g, ' ')
+}
+
+const detectedTimezoneNote = computed(() => {
+  if (!timezoneAppliedAutomatically.value || !detectedTimezoneSource.value) {
+    return ''
+  }
+  switch (detectedTimezoneSource.value) {
+    case 'gps':
+      return 'Detected automatically from mower GPS fix.'
+    case 'system':
+      return 'Detected from mower operating system timezone.'
+    default:
+      return 'Detected automatically.'
+  }
+})
+
+const browserTimezone = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch (error) {
+    console.debug('Unable to resolve browser timezone', error)
+    return undefined
+  }
+})()
+
+if (browserTimezone) {
+  ensureTimezoneOption(browserTimezone)
+}
+
+function applyDetectedTimezone(tz: string, source?: string) {
+  suppressTimezoneWatch = true
+  timezoneAppliedAutomatically.value = true
+  detectedTimezoneSource.value = source ?? null
+  systemSettings.value.timezone = tz
+  ensureTimezoneOption(tz)
+}
 
 const securitySettings = ref({
   auth_level: 'password',
@@ -457,6 +532,21 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => systemSettings.value.timezone,
+  (value, oldValue) => {
+    ensureTimezoneOption(value)
+    if (suppressTimezoneWatch) {
+      suppressTimezoneWatch = false
+      return
+    }
+    if (oldValue !== undefined && value !== oldValue) {
+      timezoneAppliedAutomatically.value = false
+    }
+  },
+  { immediate: true }
+)
+
 // Load settings
 async function loadAllSettings() {
   try {
@@ -469,6 +559,9 @@ async function loadAllSettings() {
     ])
     
     const systemData = system.data || {}
+    const timezoneFromApi = typeof systemData.timezone === 'string' ? systemData.timezone : undefined
+    const timezoneSourceFromApi = typeof systemData.timezone_source === 'string' ? systemData.timezone_source : undefined
+
     systemSettings.value = {
       ...systemSettings.value,
       ...systemData,
@@ -477,15 +570,50 @@ async function loadAllSettings() {
         ...(systemData.ui || {})
       }
     }
+    ensureTimezoneOption(systemSettings.value.timezone)
+
+    if (timezoneFromApi && timezoneSourceFromApi && timezoneSourceFromApi !== 'manual' && timezoneSourceFromApi !== 'default') {
+      applyDetectedTimezone(timezoneFromApi, timezoneSourceFromApi)
+    } else if (timezoneSourceFromApi === 'manual') {
+      detectedTimezoneSource.value = null
+      timezoneAppliedAutomatically.value = false
+    }
     securitySettings.value = { ...securitySettings.value, ...security.data }
     remoteSettings.value = { ...remoteSettings.value, ...remote.data }
     mapsSettings.value = { ...mapsSettings.value, ...maps.data }
     gpsSettings.value = { ...gpsSettings.value, ...gps.data }
+    // Auto-detect timezone from mower if unset or left at default
+    const needsAutoDetect = (!systemSettings.value.timezone || systemSettings.value.timezone.toUpperCase() === 'UTC') && (!timezoneSourceFromApi || timezoneSourceFromApi === 'default')
+    if (needsAutoDetect) {
+      await maybeApplyDetectedTimezone()
+    }
     toast.show('Settings loaded', 'info', 2000)
   } catch (error) {
     console.error('Failed to load settings:', error)
     showMessage('Failed to load settings', false)
     toast.show('Failed to load settings', 'error', 4000)
+  }
+}
+
+async function maybeApplyDetectedTimezone() {
+  try {
+    const currentTz = String(systemSettings.value.timezone || '').trim()
+    if (currentTz) {
+      ensureTimezoneOption(currentTz)
+    }
+    // Treat 'UTC' and empty as needing detection
+    if (!currentTz || currentTz.toUpperCase() === 'UTC') {
+      const resp = await api.get('/api/v2/system/timezone')
+      const tz: string | undefined = resp?.data?.timezone
+      const source: string | undefined = resp?.data?.source
+      if (tz && typeof tz === 'string' && tz.includes('/')) {
+        applyDetectedTimezone(tz, source)
+        return
+      }
+    }
+  } catch (e) {
+    // Non-fatal: keep default
+    console.debug('Timezone auto-detect failed; leaving default', e)
   }
 }
 

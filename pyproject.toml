@@ -27,6 +27,7 @@ dependencies = [
     "pyserial>=3.5",
     # Geometry validation for map overlap checks (libgeos available via Pi OS repos)
     "shapely>=2.0.4",
+    "timezonefinder>=6.2.0",
     # Numerics for orientation math and latency aggregation without pulling accelerator deps
     "numpy>=1.26.4,<2.0"
 ]

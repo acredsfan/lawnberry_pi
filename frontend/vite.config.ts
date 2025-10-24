@@ -17,12 +17,7 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:8081',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '/api/v2')
-      },
-      '/ws': {
-        target: 'ws://127.0.0.1:8081',
-        ws: true,
-        changeOrigin: true,
+        ws: true // Enable WebSocket proxying
       },
     },
   },

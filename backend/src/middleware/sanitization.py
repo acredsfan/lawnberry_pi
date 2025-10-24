@@ -12,7 +12,7 @@ from typing import Any, Dict, Iterable, Set
 
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 
 SENSITIVE_KEYS: Set[str] = {
@@ -70,13 +70,22 @@ class SanitizationMiddleware(BaseHTTPMiddleware):
                 try:
                     parsed = json.loads(raw.decode("utf-8") if raw else "null")
                     redacted = _redact(parsed)
-                    new_body = json.dumps(redacted).encode("utf-8")
-                    # Build a fresh Response to avoid iterator reuse issues
-                    new_resp = Response(
-                        content=new_body,
+                    headers = dict(response.headers)
+                    for key in [
+                        "content-length",
+                        "Content-Length",
+                        "transfer-encoding",
+                        "Transfer-Encoding",
+                        "content-type",
+                        "Content-Type",
+                    ]:
+                        headers.pop(key, None)
+                    # Build a fresh JSON response so content-length is recalculated.
+                    new_resp = JSONResponse(
+                        content=redacted,
                         status_code=response.status_code,
-                        headers=dict(response.headers),
-                        media_type="application/json",
+                        headers=headers,
+                        media_type=response.media_type or "application/json",
                         background=getattr(response, "background", None),
                     )
                     return new_resp

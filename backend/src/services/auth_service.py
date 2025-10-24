@@ -9,6 +9,7 @@ higher-level auth API. The facade methods adapt to the underlying
 AuthService implementation where possible.
 """
 
+import hashlib
 import logging
 import os
 import secrets
@@ -20,7 +21,6 @@ from typing import Any, Dict, Optional, Tuple
 import bcrypt
 import jwt
 import pyotp
-from passlib.context import CryptContext
 
 from ..models import (
     UserSession, SecurityContext, UserRole, AuthenticationMethod,
@@ -44,16 +44,31 @@ class AuthResult:
 
 
 class PasswordManager:
-    """Password hashing powered by passlib's CryptContext."""
+    """Lightweight bcrypt password manager with long-password support."""
 
-    def __init__(self) -> None:
-        self._context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    def __init__(self, rounds: int = 12) -> None:
+        self._rounds = rounds
+
+    @staticmethod
+    def _prepare_secret(password: str) -> bytes:
+        data = password.encode("utf-8")
+        if len(data) <= 72:
+            return data
+        return hashlib.sha256(data).digest()
 
     def hash_password(self, password: str) -> str:
-        return self._context.hash(password)
+        secret = self._prepare_secret(password)
+        salt = bcrypt.gensalt(rounds=self._rounds)
+        hashed = bcrypt.hashpw(secret, salt)
+        return hashed.decode("utf-8")
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        return self._context.verify(plain_password, hashed_password)
+        secret = self._prepare_secret(plain_password)
+        hashed_bytes = hashed_password.encode("utf-8") if isinstance(hashed_password, str) else hashed_password
+        try:
+            return bcrypt.checkpw(secret, hashed_bytes)
+        except ValueError:
+            return False
 
 
 class JWTManager:
@@ -155,7 +170,7 @@ class AuthService:
         # Managers
         self.password_manager = PasswordManager()
         self.jwt_manager = JWTManager()
-        self.rate_limiter = RateLimiter(failure_limit=3, lockout_seconds=60)
+        self.rate_limiter = RateLimiter(failure_limit=5, lockout_seconds=30)
 
         # Single shared operator credential (per constitutional requirement)
         default_secret = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL", operator_credential)
@@ -243,6 +258,9 @@ class AuthService:
                 status_code=401,
                 retry_after=retry_after,
             )
+
+        # Successful credential validation clears any accumulated failure state
+        self.rate_limiter.reset(key)
 
         session = UserSession.create_operator_session(client_ip, user_agent)
         session.security_context.authentication_method = AuthenticationMethod.SHARED_CREDENTIAL

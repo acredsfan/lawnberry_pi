@@ -140,7 +140,10 @@ For best orientation accuracy, calibrate the IMU after installation:
 
 ## GPS Setup
 - Preferred: ZED-F9P via USB; alternative: Neo-8M via UART
-- NTRIP corrections: Typically enabled directly on the ZED-F9P via u-center. The Pi does not need to manage NTRIP if the receiver is pre-configured.
+- NTRIP corrections:
+  - If the rover already receives corrections directly (configured in u-center), no further changes are needed on the Pi.
+  - When letting the Pi forward RTCM data, ensure `gps_ntrip_enabled: true` in `config/hardware.yaml` and update the `.env` file with the required `NTRIP_*` caster settings (host, mountpoint, credentials, serial device).
+  - Restart the backend service after modifying `.env` so the connection is re-established.
 - Validate GPS health via GET /api/v2/sensors/health and /api/v2/fusion/state
 
 ## Geofence Definition

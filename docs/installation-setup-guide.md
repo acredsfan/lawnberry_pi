@@ -212,9 +212,14 @@ curl http://localhost:8081/health
 # Open browser to http://<pi-ip>:3000
 ```
 
-### 3. Hardware Calibration
+3. **Hardware Calibration**
 
-1. **GPS Calibration**
+1. **GPS Calibration & RTK Configuration**
+   
+   For high-precision RTK GPS with NTRIP corrections, see the comprehensive guide:
+   - **[GPS RTK with NTRIP Configuration Guide](gps-ntrip-setup.md)** - Complete instructions for cm-level accuracy
+   
+   Basic GPS testing:
    ```bash
    # Test GPS acquisition
    lawnberry-pi calibrate gps --test-acquisition
@@ -245,6 +250,7 @@ curl http://localhost:8081/health
 
 For detailed configuration of advanced features, see the dedicated guides:
 
+- **[GPS RTK with NTRIP Configuration](gps-ntrip-setup.md)** - RTK GPS with centimeter-level accuracy
 - **[Remote Access Setup](remote-access-setup.md)** - Cloudflare tunnels, ngrok, custom domains
 - **[Authentication Configuration](authentication-config.md)** - Multi-factor auth, OAuth integration
 - **[Maps API Setup](maps-api-setup.md)** - Google Maps, OpenStreetMap configuration

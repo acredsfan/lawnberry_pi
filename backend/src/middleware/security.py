@@ -122,33 +122,49 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                     headers={"Retry-After": str(retry_after)},
                 )
 
-            attempts = self._attempts.setdefault(client_token, deque())
-            cutoff = now - self._window
-            while attempts and attempts[0] < cutoff:
-                attempts.popleft()
+            attempts = self._attempts.get(client_token)
+            if attempts is not None:
+                cutoff = now - self._window
+                while attempts and attempts[0] < cutoff:
+                    attempts.popleft()
 
-            if len(attempts) >= self._max_attempts:
-                oldest = attempts[0]
-                retry_after = int(max(1, self._window - (now - oldest)))
-                return JSONResponse(
-                    status_code=429,
-                    content={"detail": "Too many authentication attempts"},
-                    headers={"Retry-After": str(retry_after)},
-                )
-
-            attempts.append(now)
+                if not attempts:
+                    self._attempts.pop(client_token, None)
+                elif len(attempts) >= self._max_attempts:
+                    oldest = attempts[0]
+                    retry_after = int(max(1, self._window - (now - oldest)))
+                    return JSONResponse(
+                        status_code=429,
+                        content={"detail": "Too many authentication attempts"},
+                        headers={"Retry-After": str(retry_after)},
+                    )
         return None
 
     async def _postprocess_rate_limit(self, client_token: str, status_code: int) -> None:
+        now = time.time()
         async with self._lock:
+            attempts = self._attempts.get(client_token)
+            if attempts is not None:
+                cutoff = now - self._window
+                while attempts and attempts[0] < cutoff:
+                    attempts.popleft()
+                if not attempts:
+                    self._attempts.pop(client_token, None)
+                    attempts = None
+
             if status_code == 401:
+                if attempts is None:
+                    attempts = self._attempts.setdefault(client_token, deque())
+                attempts.append(now)
                 failures = self._failures.get(client_token, 0) + 1
                 self._failures[client_token] = failures
                 if failures >= self._lockout_failures:
-                    self._lockout_until[client_token] = time.time() + self._lockout_seconds
+                    self._lockout_until[client_token] = now + self._lockout_seconds
             elif status_code < 400:
-                # Successful authentication resets failure counter
+                # Successful authentication resets counters and lockout timers
                 self._failures.pop(client_token, None)
+                self._lockout_until.pop(client_token, None)
+                self._attempts.pop(client_token, None)
 
     def _validate_request_content(self, request: Request) -> Optional[Response]:
         content_type = request.headers.get("Content-Type", "").lower()
@@ -186,10 +202,10 @@ def register_security_middleware(app: FastAPI, *, allowed_origins: Iterable[str]
     origins = list(allowed_origins or _default_allowed_origins())
     app.add_middleware(
         SecurityMiddleware,
-        rate_limit_window_seconds=int(os.getenv("AUTH_RATE_LIMIT_WINDOW", "60")),
-        rate_limit_max_attempts=int(os.getenv("AUTH_RATE_LIMIT_MAX_ATTEMPTS", "3")),
-        lockout_failures=int(os.getenv("AUTH_LOCKOUT_FAILURES", "3")),
-        lockout_seconds=int(os.getenv("AUTH_LOCKOUT_SECONDS", "60")),
+        rate_limit_window_seconds=int(os.getenv("AUTH_RATE_LIMIT_WINDOW", "45")),
+        rate_limit_max_attempts=int(os.getenv("AUTH_RATE_LIMIT_MAX_ATTEMPTS", "6")),
+        lockout_failures=int(os.getenv("AUTH_LOCKOUT_FAILURES", "5")),
+        lockout_seconds=int(os.getenv("AUTH_LOCKOUT_SECONDS", "30")),
     )
     app.add_middleware(
         CORSMiddleware,

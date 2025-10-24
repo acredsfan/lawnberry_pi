@@ -32,11 +32,27 @@ const missionName = ref('');
 
 onMounted(() => {
   if (mapContainer.value) {
-    map = L.map(mapContainer.value).setView([51.505, -0.09], 13); // Default view
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
+    map = L.map(mapContainer.value, {
+      maxZoom: 22, // Allow deeper zoom
+    }).setView([51.505, -0.09], 13); // Default view
+
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, // Standard OSM max zoom
       attribution: '© OpenStreetMap contributors',
-    }).addTo(map);
+    });
+
+    const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 22, // Allow deeper zoom for satellite
+      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+    });
+
+    const baseMaps = {
+      "OpenStreetMap": osmLayer,
+      "Satellite": satelliteLayer
+    };
+
+    satelliteLayer.addTo(map); // Default to satellite view
+    L.control.layers(baseMaps).addTo(map);
 
     map.on('click', (e: L.LeafletMouseEvent) => {
       missionStore.addWaypoint(e.latlng.lat, e.latlng.lng);
