@@ -58,6 +58,8 @@ class GPSDriver(HardwareDriver):
         # Real hardware handles (lazy)
         self._serial = None
         self._first_read_done = False
+        # Last observed NMEA sentences (for diagnostics)
+        self._last_nmea: dict[str, str] = {}
         # Cached baudrates to try for different modules
         self._baud_candidates = [self.cfg.baudrate]
         if self.cfg.mode in (GpsMode.F9P_USB, GpsMode.F9P_UART):
@@ -220,6 +222,7 @@ class GPSDriver(HardwareDriver):
             deadline = time.time() + (1.5 if not self._first_read_done else 0.75)
             got_lat = got_lon = False
             acc: Optional[float] = None
+            acc_source: Optional[str] = None  # 'gst' | 'hdop'
             hdop_val: Optional[float] = None
             sats: Optional[int] = None
             alt: Optional[float] = None
@@ -235,6 +238,10 @@ class GPSDriver(HardwareDriver):
                     continue
                 raw = raw.strip()
                 if raw.startswith(("$GPGGA", "$GNGGA")):
+                    try:
+                        self._last_nmea["GGA"] = raw
+                    except Exception:
+                        pass
                     gga = self._parse_gga(raw)
                     if gga:
                         lat, lon, alt_gga, sats_gga, hdop, fix_quality = gga
@@ -247,13 +254,22 @@ class GPSDriver(HardwareDriver):
                         # Approximate accuracy from HDOP (rough scale)
                         if hdop is not None:
                             hdop_val = hdop
-                            hdop_based = max(0.5, hdop * 1.0)
+                            # HDOP is a dilution-of-precision multiplier, not an accuracy by itself.
+                            # Historically we used "max(0.5, hdop)" which masked RTK improvements
+                            # (HDOP ~0.5) even when the fix was RTK_FIXED. Keep an HDOP-derived fallback
+                            # but allow heuristics/real accuracy sources (GST/UBX) to override it later.
+                            hdop_based = max(0.2, hdop * 1.0)
                             if acc is None or hdop_based < acc:
                                 acc = hdop_based
+                                acc_source = "hdop"
                         status = self._map_fix_quality(fix_quality)
                         if status is not None:
                             rtk_status = status
                 elif raw.startswith(("$GPRMC", "$GNRMC")):
+                    try:
+                        self._last_nmea["RMC"] = raw
+                    except Exception:
+                        pass
                     rmc = self._parse_rmc(raw)
                     if rmc:
                         lat_r, lon_r, spd_knots, course = rmc
@@ -265,10 +281,15 @@ class GPSDriver(HardwareDriver):
                         if course is not None:
                             hdg = course
                 elif raw.startswith(("$GPGST", "$GNGST")):
+                    try:
+                        self._last_nmea["GST"] = raw
+                    except Exception:
+                        pass
                     gst_accuracy = self._parse_gst(raw)
                     if gst_accuracy is not None:
                         if acc is None or gst_accuracy < acc:
                             acc = max(0.005, gst_accuracy)
+                            acc_source = "gst"
 
                 if got_lat and got_lon:
                     break
@@ -277,11 +298,21 @@ class GPSDriver(HardwareDriver):
                 # If we have an RTK status but no explicit accuracy from GST/EHP,
                 # provide a reasonable heuristic so the UI reflects the improved fix.
                 # Typical 1-sigma horiz. accuracy: RTK_FIXED ~2-3cm, RTK_FLOAT ~10-30cm.
-                if acc is None and rtk_status:
+                # If our current accuracy is only HDOP-derived (or missing), tighten it using
+                # RTK heuristics. Never loosen values coming from GST.
+                if rtk_status:
                     if rtk_status == "RTK_FIXED":
-                        acc = 0.03  # 3 cm heuristic
+                        heuristic = 0.03  # 3 cm
                     elif rtk_status == "RTK_FLOAT":
-                        acc = 0.20  # 20 cm heuristic
+                        heuristic = 0.20  # 20 cm
+                    else:
+                        heuristic = None
+                    if heuristic is not None:
+                        if acc is None:
+                            acc = heuristic
+                            acc_source = "heuristic"
+                        elif acc_source != "gst":
+                            acc = min(acc, heuristic)
                 reading = GpsReading(
                     latitude=lat,
                     longitude=lon,
@@ -311,6 +342,13 @@ class GPSDriver(HardwareDriver):
         except Exception:
             # On errors, keep last reading and mark running
             return self._last_read
+
+    def get_last_nmea(self) -> dict[str, str]:
+        """Return a shallow copy of last seen NMEA sentences for diagnostics."""
+        try:
+            return dict(self._last_nmea)
+        except Exception:
+            return {}
 
     @staticmethod
     def _parse_nmea_coord(val: str, hemi: str) -> Optional[float]:

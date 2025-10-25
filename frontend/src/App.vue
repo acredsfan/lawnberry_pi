@@ -186,13 +186,16 @@ onMounted(async () => {
 }
 
 .navbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  justify-content: space-between;
-  padding: 1rem 2rem;
+  padding: 0.5rem 1rem; /* tighter padding to fit more links */
   max-width: 1400px;
   margin: 0 auto;
   position: relative;
+  /* Ensure navbar content stays above dropdown overlays from user menu */
+  z-index: 1200;
+  gap: 0.75rem; /* reduce gaps between columns */
 }
 
 .nav-brand {
@@ -202,7 +205,7 @@ onMounted(async () => {
 }
 
 .logo {
-  height: 50px;
+  height: 40px; /* smaller logo */
   width: auto;
   filter: drop-shadow(0 0 10px #00ffff);
   animation: logoGlow 2s ease-in-out infinite alternate;
@@ -215,10 +218,10 @@ onMounted(async () => {
 
 .retro-title {
   margin: 0;
-  font-size: 1.8rem;
+  font-size: 1.4rem; /* reduce title size */
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 3px;
+  letter-spacing: 2px; /* tighter */
   background: linear-gradient(45deg, #00ffff, #ff00ff, #00ffff);
   background-size: 200% 200%;
   -webkit-background-clip: text;
@@ -234,22 +237,31 @@ onMounted(async () => {
 
 .nav-links {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.25rem; /* smaller gap between links */
+  justify-content: center;
+  min-width: 0;
+  /* Allow nav links to render above overlapping dropdowns */
+  position: relative;
+  z-index: 1300;
+  /* Prevent overlap with the user column by constraining the center area */
+  overflow: hidden;
 }
 
 .nav-link {
   color: #00ffff;
   text-decoration: none;
-  padding: 0.8rem 1.5rem;
+  padding: 0.45rem 0.9rem; /* tighter padding */
   border: 1px solid transparent;
   border-radius: 0;
   transition: all 0.3s ease;
   text-transform: uppercase;
   font-weight: 600;
-  letter-spacing: 1px;
+  font-size: 0.9rem; /* smaller font */
+  letter-spacing: 0.7px; /* tighter tracking */
   position: relative;
+  white-space: nowrap; /* prevent wrapping inside a link */
   background: rgba(0, 255, 255, 0.05);
-  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%); /* subtler tilt */
 }
 
 .nav-link::before {
@@ -279,28 +291,33 @@ onMounted(async () => {
 
 .nav-user {
   position: relative;
+  margin-left: 0.5rem;
+  /* Keep user dropdown below the main nav links to avoid covering Settings */
+  z-index: 1100;
 }
 
 .theme-toggle {
-  margin-right: .5rem;
+  margin-right: .25rem; /* reduce spacing */
   color: #00ffff;
   background: rgba(0,255,255,0.08);
   border: 1px solid rgba(0,255,255,0.3);
-  padding: .5rem .75rem;
+  padding: .4rem .6rem; /* smaller button */
   cursor: pointer;
+  font-size: 0.9rem;
 }
 
 .login-link {
   color: #00ffff;
   text-decoration: none;
-  padding: 0.8rem 1.5rem;
+  padding: 0.5rem 0.9rem; /* tighter */
   border: 2px solid #00ffff;
   background: rgba(0, 255, 255, 0.1);
   transition: all 0.3s ease;
   text-transform: uppercase;
   font-weight: 600;
-  letter-spacing: 1px;
-  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  font-size: 0.9rem;
+  letter-spacing: 0.7px;
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
 }
 
 .login-link:hover {
@@ -386,20 +403,21 @@ onMounted(async () => {
 
 @media (max-width: 768px) {
   .navbar {
+    display: flex;
     flex-direction: column;
-    gap: 1rem;
-    padding: 1rem;
+    gap: 0.75rem;
+    padding: 0.75rem;
   }
   
   .nav-links {
-    gap: 0.5rem;
+    gap: 0.35rem;
     flex-wrap: wrap;
     justify-content: center;
   }
   
   .nav-link {
-    padding: 0.6rem 1rem;
-    font-size: 0.9rem;
+    padding: 0.45rem 0.8rem;
+    font-size: 0.85rem;
   }
   
   .app-main {
@@ -413,9 +431,20 @@ onMounted(async () => {
   }
   
   .retro-title {
-    font-size: 1.4rem;
-    letter-spacing: 2px;
+    font-size: 1.2rem;
+    letter-spacing: 1.5px;
   }
+}
+
+/* Slightly tighten sizes on medium screens where overflow happens */
+@media (max-width: 1200px) and (min-width: 769px) {
+  .nav-link {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.9rem;
+  }
+  .nav-links { gap: 0.25rem; }
+  .retro-title { font-size: 1.3rem; letter-spacing: 2px; }
+  .logo { height: 36px; }
 }
 
 /* Global retro scrollbar */

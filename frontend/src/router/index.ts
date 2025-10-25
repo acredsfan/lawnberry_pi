@@ -11,6 +11,12 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/rtk',
+      name: 'RtkDiagnostics',
+      component: () => import('@/views/RtkDiagnosticsView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/control',
       name: 'Control',
       component: () => import('@/views/ControlView.vue'),

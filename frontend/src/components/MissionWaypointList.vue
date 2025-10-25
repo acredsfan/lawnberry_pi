@@ -1,7 +1,7 @@
 <template>
   <div class="waypoint-list">
     <h2>Waypoints</h2>
-    <draggable v-model="localWaypoints" item-key="id" @end="onDragEnd">
+    <Draggable v-model="localWaypoints" item-key="id" @end="onDragEnd">
       <template #item="{ element: waypoint, index }">
         <li class="waypoint-item">
           <span>Waypoint {{ index + 1 }}: ({{ waypoint.lat.toFixed(4) }}, {{ waypoint.lon.toFixed(4) }})</span>
@@ -12,7 +12,7 @@
           </div>
         </li>
       </template>
-    </draggable>
+    </Draggable>
     <div v-if="missionStore.waypoints.length === 0">
       <p>Click on the map to add waypoints.</p>
     </div>
@@ -23,7 +23,7 @@
 import { ref, watch } from 'vue';
 import { useMissionStore } from '@/stores/mission';
 import type { Waypoint } from '@/stores/mission';
-import draggable from 'vuedraggable';
+import { VueDraggableNext as Draggable } from 'vue-draggable-next';
 
 const missionStore = useMissionStore();
 const localWaypoints = ref([...missionStore.waypoints]);

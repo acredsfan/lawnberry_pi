@@ -47,6 +47,13 @@ class NtripForwarder:
         self._stop_event = asyncio.Event()
         self._serial = None
         self._serial_lock = asyncio.Lock()
+        # Throughput accounting for observability
+        self._bytes_forwarded: int = 0
+        self._last_log_ts: float | None = None
+        self._total_bytes_forwarded: int = 0
+        self._started_monotonic: float | None = None
+        self._last_forward_monotonic: float | None = None
+        self._connected: bool = False
 
     @classmethod
     def from_environment(cls, gps_mode: GpsMode | None = None) -> Optional["NtripForwarder"]:
@@ -55,7 +62,12 @@ class NtripForwarder:
         if not host or not mountpoint:
             return None
 
-        port = int(os.getenv("NTRIP_PORT", "2101"))
+        # Robust numeric parsing with sensible defaults
+        _port_raw = os.getenv("NTRIP_PORT", "2101")
+        try:
+            port = int(str(_port_raw).strip() or "2101")
+        except Exception:
+            port = 2101
         username = os.getenv("NTRIP_USERNAME")
         password = os.getenv("NTRIP_PASSWORD")
         serial_device = (
@@ -64,13 +76,21 @@ class NtripForwarder:
             or "/dev/ttyAMA0"
         )
         default_baud = 115200 if gps_mode in {GpsMode.F9P_USB, GpsMode.F9P_UART} else 9600
-        baudrate = int(os.getenv("NTRIP_SERIAL_BAUD", str(default_baud)))
+        _baud_raw = os.getenv("NTRIP_SERIAL_BAUD", str(default_baud))
+        try:
+            baudrate = int(str(_baud_raw).strip() or str(default_baud))
+        except Exception:
+            baudrate = default_baud
 
         gga_sentence = os.getenv("NTRIP_STATIC_GGA")
         if not gga_sentence:
             gga_sentence = cls._build_gga_from_env()
         gga_bytes = gga_sentence.encode("ascii") + b"\r\n" if gga_sentence else None
-        gga_interval = float(os.getenv("NTRIP_GGA_INTERVAL", "10"))
+        _gga_int_raw = os.getenv("NTRIP_GGA_INTERVAL", "10")
+        try:
+            gga_interval = float(str(_gga_int_raw).strip() or "10")
+        except Exception:
+            gga_interval = 10.0
 
         settings = NtripSettings(
             host=host,
@@ -101,10 +121,17 @@ class NtripForwarder:
         lat_ddmm, lat_hemi = NtripForwarder._decimal_to_ddmm(lat, is_lat=True)
         lon_ddmm, lon_hemi = NtripForwarder._decimal_to_ddmm(lon, is_lat=False)
         alt_field = f"{alt:.1f}"
+        # Timestamp (UTC hhmmss) improves caster acceptance vs. 000000
+        try:
+            import datetime as _dt
+            ts = _dt.datetime.utcnow()
+            time_str = f"{ts.hour:02d}{ts.minute:02d}{ts.second:02d}"
+        except Exception:
+            time_str = "000000"
         # Simple fixed GGA payload with quality=1 and 12 satellites
         fields = [
             "$GPGGA",
-            "000000",
+            time_str,
             lat_ddmm,
             lat_hemi,
             lon_ddmm,
@@ -145,6 +172,10 @@ class NtripForwarder:
         if serial is None:
             raise RuntimeError("pyserial is required for NTRIP forwarding but is not installed")
         self._stop_event.clear()
+        try:
+            self._started_monotonic = asyncio.get_running_loop().time()
+        except Exception:
+            self._started_monotonic = None
         self._task = asyncio.create_task(self._run(), name="ntrip-forwarder")
         logger.info(
             "Started NTRIP forwarder to %s:%s mountpoint %s → %s",
@@ -203,12 +234,31 @@ class NtripForwarder:
             gga_task = asyncio.create_task(self._send_gga(writer))
 
         try:
+            self._connected = True
             while not self._stop_event.is_set():
                 chunk = await reader.read(4096)
                 if not chunk:
                     break
                 await self._write_serial(chunk)
+                # Update throughput and emit periodic log entries
+                self._bytes_forwarded += len(chunk)
+                self._total_bytes_forwarded += len(chunk)
+                now = asyncio.get_running_loop().time()
+                self._last_forward_monotonic = now
+                if self._last_log_ts is None:
+                    self._last_log_ts = now
+                elif (now - self._last_log_ts) >= 10.0:
+                    kb = self._bytes_forwarded / 1024.0
+                    logger.info(
+                        "NTRIP forwarded %.1f KB of RTCM in last %.0f s to %s",
+                        kb,
+                        now - self._last_log_ts,
+                        self._settings.serial_device,
+                    )
+                    self._bytes_forwarded = 0
+                    self._last_log_ts = now
         finally:
+            self._connected = False
             if gga_task is not None:
                 gga_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -278,3 +328,37 @@ class NtripForwarder:
             raise
         except Exception as exc:
             logger.debug("GGA send loop ended: %s", exc)
+
+    # ------------------------ Public Introspection ------------------------
+    def get_stats(self) -> dict:
+        """Return runtime stats for diagnostics without exposing internals."""
+        try:
+            now = asyncio.get_running_loop().time()
+        except Exception:
+            now = None
+        window_secs = (now - self._last_log_ts) if (now is not None and self._last_log_ts is not None) else None
+        rate_bps = None
+        if window_secs and window_secs > 0:
+            try:
+                rate_bps = float(self._bytes_forwarded) / float(window_secs)
+            except Exception:
+                rate_bps = None
+        uptime_s = (now - self._started_monotonic) if (now is not None and self._started_monotonic is not None) else None
+        last_fwd_age_s = (now - self._last_forward_monotonic) if (now is not None and self._last_forward_monotonic is not None) else None
+        return {
+            "enabled": True,
+            "connected": bool(self._connected),
+            "host": self._settings.host,
+            "port": self._settings.port,
+            "mountpoint": self._settings.mountpoint,
+            "serial_device": self._settings.serial_device,
+            "baudrate": self._settings.baudrate,
+            "gga_configured": bool(self._settings.gga_sentence),
+            "gga_interval_s": self._settings.gga_interval,
+            "total_bytes_forwarded": self._total_bytes_forwarded,
+            "bytes_forwarded_current_window": self._bytes_forwarded,
+            "current_window_seconds": window_secs,
+            "approx_rate_bps": rate_bps,
+            "uptime_s": uptime_s,
+            "last_forward_age_s": last_fwd_age_s,
+        }

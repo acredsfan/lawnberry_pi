@@ -370,6 +370,19 @@
       </div>
     </div>
     
+    <!-- Diagnostics Tab -->
+    <div v-if="activeTab === 'diagnostics'" class="settings-section" :id="'panel-diagnostics'" role="tabpanel" aria-labelledby="diagnostics">
+      <div class="card">
+        <div class="card-header">
+          <h3>Runtime Diagnostics</h3>
+        </div>
+        <div class="card-body">
+          <p class="form-text">NTRIP and GPS RTK visibility. For full-page view, <router-link to="/rtk">open RTK Diagnostics</router-link>.</p>
+          <RtkDiagnosticsPanel />
+        </div>
+      </div>
+    </div>
+
     <!-- Status indicator -->
     <div v-if="saveMessage" class="alert" :class="saveSuccess ? 'alert-success' : 'alert-danger'" role="status" aria-live="polite">
       {{ saveMessage }}
@@ -382,6 +395,7 @@ import { ref, onMounted, watch, computed } from 'vue'
 import { useApiService } from '@/services/api'
 import { useToastStore } from '@/stores/toast'
 import { usePreferencesStore } from '@/stores/preferences'
+import RtkDiagnosticsPanel from '@/components/RtkDiagnosticsPanel.vue'
 
 const api = useApiService()
 const toast = useToastStore()
@@ -400,7 +414,8 @@ const tabs = [
   { id: 'security', label: 'Security' },
   { id: 'remote', label: 'Remote Access' },
   { id: 'maps', label: 'Maps' },
-  { id: 'gps', label: 'GPS Policy' }
+  { id: 'gps', label: 'GPS Policy' },
+  { id: 'diagnostics', label: 'Diagnostics' }
 ]
 
 // Settings objects

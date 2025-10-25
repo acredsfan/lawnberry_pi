@@ -251,7 +251,7 @@ export const settingsApi = {
 // Telemetry API endpoints
 export const telemetryApi = {
   getCurrent: async () => {
-    const response = await apiClient.get('/dashboard/telemetry')
+    const response = await apiClient.get('/dashboard/telemetry', { timeout: 30000 }) // Increased timeout for potentially slow hardware response
     return response.data
   },
 

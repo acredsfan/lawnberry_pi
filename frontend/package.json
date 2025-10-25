@@ -37,7 +37,7 @@
     "vue": "^3.4.0",
     "vue-chartjs": "^5.3.0",
     "vue-router": "^4.3.0",
-    "vuedraggable": "^2.24.3"
+    "vue-draggable-next": "^2.2.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

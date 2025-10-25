@@ -41,6 +41,7 @@ from ..core.persistence import persistence
 from ..services.hw_selftest import run_selftest
 from ..services.weather_service import weather_service
 from ..services.timezone_service import detect_system_timezone
+from ..models.hardware_config import HardwareConfig
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1019,6 +1020,12 @@ class GPSSummary(BaseModel):
     last_reading: dict[str, Any] | None = None
 
 
+class RtkDiagnosticsResponse(BaseModel):
+    ntrip: dict[str, Any]
+    gps: dict[str, Any]
+    hardware: dict[str, Any]
+
+
 class IMUSummary(BaseModel):
     initialized: bool | None = None
     running: bool | None = None
@@ -1185,6 +1192,81 @@ async def get_gps_status() -> GPSSummary:
         )
     except Exception:
         return GPSSummary()
+
+
+@router.get("/sensors/gps/rtk/diagnostics", response_model=RtkDiagnosticsResponse)
+async def get_rtk_diagnostics() -> RtkDiagnosticsResponse:
+    """Return combined RTK/NTRIP diagnostics without stealing the serial port.
+
+    - Exposes current GPS reading and mode
+    - Reports NTRIP forwarder runtime stats when configured
+    - Includes minimal hardware GPS flags from app state
+    """
+    # Prepare GPS details
+    gps_block: dict[str, Any] = {
+        "mode": None,
+        "reading": None,
+        "last_hdop": None,
+        "rtk_status": None,
+        "satellites": None,
+        "nmea": None,
+    }
+    try:
+        # Always use the hub's helper to ensure consistent init and side-effects
+        # (notably: this starts the NTRIP forwarder when hardware config enables it)
+        sm = await websocket_hub._ensure_sensor_manager()
+        gps = getattr(sm, "gps", None)
+        if gps is not None:
+            # Non-intrusive: reuse driver's serial handle via SensorManager
+            reading = await gps.read_gps()
+            gps_block["mode"] = str(getattr(gps, "gps_mode", None)) if gps else None
+            if reading is not None:
+                try:
+                    gps_block["reading"] = reading.model_dump()
+                except Exception:
+                    gps_block["reading"] = {
+                        "latitude": getattr(reading, "latitude", None),
+                        "longitude": getattr(reading, "longitude", None),
+                        "altitude": getattr(reading, "altitude", None),
+                        "accuracy": getattr(reading, "accuracy", None),
+                        "hdop": getattr(reading, "hdop", None),
+                        "satellites": getattr(reading, "satellites", None),
+                        "rtk_status": getattr(reading, "rtk_status", None),
+                    }
+                gps_block["last_hdop"] = gps_block["reading"].get("hdop") if isinstance(gps_block["reading"], dict) else None
+                gps_block["rtk_status"] = gps_block["reading"].get("rtk_status") if isinstance(gps_block["reading"], dict) else None
+                gps_block["satellites"] = gps_block["reading"].get("satellites") if isinstance(gps_block["reading"], dict) else None
+            # Attach last observed NMEA sentences for diagnostics when available
+            try:
+                getter = getattr(getattr(sm, "gps", None), "get_last_nmea", None)
+                if callable(getter):
+                    gps_block["nmea"] = getter()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # NTRIP stats when available
+    ntrip_block: dict[str, Any] = {"enabled": False}
+    try:
+        if websocket_hub._ntrip_forwarder is not None:
+            ntrip_block = websocket_hub._ntrip_forwarder.get_stats()
+    except Exception:
+        pass
+
+    # Hardware flags from app state
+    hw_block: dict[str, Any] = {}
+    try:
+        hwc = getattr(websocket_hub._app_state, "hardware_config", None)
+        if hwc is not None:
+            hw_block = {
+                "gps_type": str(getattr(hwc, "gps_type", None)),
+                "gps_ntrip_enabled": bool(getattr(hwc, "gps_ntrip_enabled", False)),
+            }
+    except Exception:
+        hw_block = {}
+
+    return RtkDiagnosticsResponse(ntrip=ntrip_block, gps=gps_block, hardware=hw_block)
 
 
 @router.get("/sensors/imu/status", response_model=IMUSummary)

@@ -610,3 +610,10 @@ lawnberry-pi config restore --maps-only --file maps-backup.json
 4. **Network Security**: Use HTTPS for all map requests
 
 For additional help with maps configuration, check the troubleshooting logs or run the built-in diagnostics tools.
+
+## Security and secrets handling
+
+- Do not commit API keys to the repository. The file `config/maps_settings.json` is now git-ignored and will be created/updated at runtime via the REST API (`PUT /api/v2/settings/maps`) or the UI Settings page.
+- Use the UI or API to set `google_api_key`; it will be stored locally on the device only. For CI/dev samples, see `config/maps_settings.example.json`.
+- The secrets store `config/secrets.json` is also git-ignored; the backend will auto-generate `JWT_SECRET` if missing. An example structure is provided in `config/secrets.example.json`.
+- A pre-commit secret scan runs automatically when you install repo hooks (`./scripts/install-hooks.sh`) to prevent accidental leaks (Google keys, GitHub tokens, private keys, etc.).

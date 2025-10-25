@@ -67,7 +67,7 @@ export const useMissionStore = defineStore('mission', () => {
   const startCurrentMission = async () => {
     if (!currentMission.value) return;
     try {
-      await apiService.post(`/api/v2/missions/${currentMission.value.id}/start`);
+      await apiService.post(`/api/v2/missions/${currentMission.value.id}/start`, {});
       missionStatus.value = 'running';
       startStatusPolling();
     } catch (error) {
@@ -78,7 +78,7 @@ export const useMissionStore = defineStore('mission', () => {
   const pauseCurrentMission = async () => {
     if (!currentMission.value) return;
     try {
-      await apiService.post(`/api/v2/missions/${currentMission.value.id}/pause`);
+      await apiService.post(`/api/v2/missions/${currentMission.value.id}/pause`, {});
       missionStatus.value = 'paused';
       stopStatusPolling();
     } catch (error) {
@@ -89,7 +89,7 @@ export const useMissionStore = defineStore('mission', () => {
   const resumeCurrentMission = async () => {
     if (!currentMission.value) return;
     try {
-      await apiService.post(`/api/v2/missions/${currentMission.value.id}/resume`);
+      await apiService.post(`/api/v2/missions/${currentMission.value.id}/resume`, {});
       missionStatus.value = 'running';
       startStatusPolling();
     } catch (error) {
@@ -100,7 +100,7 @@ export const useMissionStore = defineStore('mission', () => {
   const abortCurrentMission = async () => {
     if (!currentMission.value) return;
     try {
-      await apiService.post(`/api/v2/missions/${currentMission.value.id}/abort`);
+      await apiService.post(`/api/v2/missions/${currentMission.value.id}/abort`, {});
       missionStatus.value = 'aborted';
       stopStatusPolling();
       currentMission.value = null;
