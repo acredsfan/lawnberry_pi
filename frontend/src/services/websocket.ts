@@ -127,7 +127,13 @@ export class WebSocketService {
   private emitToListeners(topic: string, data: any) {
     const topicListeners = this.listeners.get(topic)
     if (topicListeners) {
-      topicListeners.forEach(callback => callback(data))
+      topicListeners.forEach((callback) => {
+        try {
+          callback(data)
+        } catch (err) {
+          console.error(`WebSocket listener for topic "${topic}" failed:`, err)
+        }
+      })
     }
   }
 

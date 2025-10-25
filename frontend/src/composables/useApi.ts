@@ -316,11 +316,11 @@ export const aiApi = {
 export const maintenanceApi = {
   runImuCalibration: async () => {
     try {
-      const response = await apiClient.post('/maintenance/imu/calibrate')
+      const response = await apiClient.post('/maintenance/imu/calibrate', {})
       return response.data
     } catch (error: any) {
       if (shouldAttemptFallback(error)) {
-        const response = await apiClient.post('/maintenance/imu/calibrate', undefined, { baseURL: FALLBACK_API_BASE })
+        const response = await apiClient.post('/maintenance/imu/calibrate', {}, { baseURL: FALLBACK_API_BASE })
         return response.data
       }
       if (error?.response?.status === 404) {

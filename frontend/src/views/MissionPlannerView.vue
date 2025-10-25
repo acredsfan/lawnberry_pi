@@ -41,6 +41,7 @@ import { getOsmTileLayer, shouldUseGoogleProvider } from '@/utils/mapProviders';
 const missionStore = useMissionStore();
 const mapStore = useMapStore();
 const api = useApiService();
+const telemetrySocket = useWebSocket('telemetry');
 const mapContainer = ref<HTMLElement | null>(null);
 let map: L.Map | null = null;
 let overlayGroup: L.LayerGroup | null = null;
@@ -53,9 +54,17 @@ const gpsAccuracyMeters = ref<number | null>(null);
 let accuracyCircle: L.Polygon | null = null;
 const providerBadge = ref('');
 const missionName = ref('');
+const mapReady = ref(false);
+let pendingCenter: { lat: number; lon: number; minZoom: number } | null = null;
+let pendingCenterTimer: number | null = null;
+let navigationHandler: ((payload: any) => void) | null = null;
+let mapReadyHandler: (() => void) | null = null;
+let componentDestroyed = false;
 
 onMounted(async () => {
+  componentDestroyed = false;
   if (!mapContainer.value) return;
+
   // Ensure Leaflet default marker icons resolve under bundler
   try {
     (L.Icon.Default as any).mergeOptions({
@@ -64,23 +73,38 @@ onMounted(async () => {
       shadowUrl: markerShadow,
     });
   } catch {}
+
   // Ensure configuration for initial center
   if (!mapStore.configuration) {
     try { await mapStore.loadConfiguration('default'); } catch {}
   }
+
   map = L.map(mapContainer.value, { maxZoom: 22 });
   overlayGroup = L.layerGroup().addTo(map);
+  mapReady.value = false;
+
+  mapReadyHandler = () => {
+    if (componentDestroyed) return;
+    mapReady.value = true;
+    if (pendingCenter) {
+      const pending = pendingCenter;
+      pendingCenter = null;
+      centerMap(pending.lat, pending.lon, pending.minZoom);
+    }
+  };
+  map.on('load', mapReadyHandler);
+  map.whenReady(mapReadyHandler);
 
   // Initialize center from config or home marker
   const center = mapStore.configuration?.center_point;
   const homeRef = (mapStore as any).homeMarker; // computed ref
   const home = homeRef && 'value' in homeRef ? homeRef.value : null;
   if (center) {
-    map.setView([center.latitude, center.longitude], mapStore.configuration?.zoom_level || 18);
+    centerMap(center.latitude, center.longitude, mapStore.configuration?.zoom_level || 18);
   } else if (home) {
-    map.setView([home.position.latitude, home.position.longitude], 18);
+    centerMap(home.position.latitude, home.position.longitude, 18);
   } else {
-    map.setView([37.7749, -122.4194], 15);
+    centerMap(37.7749, -122.4194, 15);
   }
 
   // Load maps settings from backend
@@ -96,30 +120,65 @@ onMounted(async () => {
 
   // Telemetry subscription for live mower position
   try {
-    const { connect, subscribe } = useWebSocket('telemetry');
-    await connect();
-    subscribe('telemetry.navigation', (payload: any) => {
+    await telemetrySocket.connect();
+    navigationHandler = (payload: any) => {
+      if (componentDestroyed) return;
       const pos = payload?.position;
       const lat = Number(pos?.latitude);
       const lon = Number(pos?.longitude);
       if (Number.isFinite(lat) && Number.isFinite(lon)) {
         mowerLatLng.value = [lat, lon];
-        gpsAccuracyMeters.value = Number.isFinite(Number(pos?.accuracy)) ? Number(pos?.accuracy) : null;
+        const accuracy = Number(pos?.accuracy);
+        gpsAccuracyMeters.value = Number.isFinite(accuracy) ? accuracy : null;
         updateMowerOverlay();
         if (followMower.value) {
-          map!.setView([lat, lon], Math.max(map!.getZoom(), 18));
+          centerMap(lat, lon, 18);
         }
       }
-    });
-  } catch {}
+    };
+    telemetrySocket.subscribe('telemetry.navigation', navigationHandler);
+  } catch (error) {
+    console.warn('Failed to initialize telemetry socket for mission planner:', error);
+  }
 
   renderWaypoints();
 });
 
 onUnmounted(() => {
-  if (map) {
-    map.remove();
+  componentDestroyed = true;
+  if (pendingCenterTimer) {
+    window.clearTimeout(pendingCenterTimer);
+    pendingCenterTimer = null;
   }
+  pendingCenter = null;
+
+  if (navigationHandler) {
+    telemetrySocket.unsubscribe('telemetry.navigation', navigationHandler);
+    navigationHandler = null;
+  }
+  telemetrySocket.disconnect();
+
+  if (mapReadyHandler && map) {
+    map.off('load', mapReadyHandler);
+  }
+  mapReadyHandler = null;
+  mapReady.value = false;
+
+  if (overlayGroup) {
+    try {
+      overlayGroup.clearLayers();
+    } catch {}
+  }
+  accuracyCircle = null;
+
+  if (map) {
+    try {
+      map.remove();
+    } catch {}
+    map = null;
+  }
+  overlayGroup = null;
+  baseTileLayer = null;
   googleHandlers = {};
   googleLayer = null;
 });
@@ -169,6 +228,56 @@ function updateMowerOverlay() {
       accuracyCircle = circle as any;
       circle.addTo(overlayGroup!);
     }
+  }
+}
+
+function schedulePendingCenterRetry() {
+  if (componentDestroyed) return;
+  if (pendingCenterTimer) return;
+  pendingCenterTimer = window.setTimeout(() => {
+    pendingCenterTimer = null;
+    if (componentDestroyed) return;
+    if (pendingCenter) {
+      const { lat, lon, minZoom } = pendingCenter;
+      pendingCenter = null;
+      centerMap(lat, lon, minZoom);
+    }
+  }, 120);
+}
+
+function centerMap(lat: number, lon: number, minZoom = 18) {
+  const target = { lat, lon, minZoom };
+  if (!map) {
+    pendingCenter = target;
+    schedulePendingCenterRetry();
+    return;
+  }
+  if (!mapReady.value) {
+    pendingCenter = target;
+    schedulePendingCenterRetry();
+    return;
+  }
+  const leafMap = map as any;
+  const mapPane = (leafMap && leafMap._mapPane) as HTMLElement | undefined;
+  const panePosition = mapPane ? (mapPane as any)._leaflet_pos : undefined;
+  if (!mapPane || panePosition == null) {
+    pendingCenter = target;
+    schedulePendingCenterRetry();
+    return;
+  }
+  try {
+    const currentZoom = typeof map.getZoom === 'function' ? map.getZoom() : minZoom;
+    const targetZoom = Math.max(currentZoom ?? minZoom, minZoom);
+    map.setView([lat, lon], targetZoom);
+    pendingCenter = null;
+    if (pendingCenterTimer) {
+      window.clearTimeout(pendingCenterTimer);
+      pendingCenterTimer = null;
+    }
+  } catch (error) {
+    pendingCenter = target;
+    schedulePendingCenterRetry();
+    console.warn('Failed to update map center; retry scheduled.', error);
   }
 }
 
@@ -234,8 +343,8 @@ function loadScriptOnce(src: string) {
 }
 
 function recenterToMower() {
-  if (map && mowerLatLng.value) {
-    map.setView(mowerLatLng.value, Math.max(map.getZoom(), 18));
+  if (mowerLatLng.value) {
+    centerMap(mowerLatLng.value[0], mowerLatLng.value[1], 18);
   }
 }
 

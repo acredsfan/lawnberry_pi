@@ -60,6 +60,8 @@ Environment variables (set in `.env`):
 - POST http://127.0.0.1:8081/api/v2/control/emergency_clear → clear E-stop with confirmation
 - GET http://127.0.0.1:8081/api/v2/hardware/robohat → RoboHAT status
 
+The Web UI now exposes a virtual joystick for manual drive control. Drag in any direction to stream drive vectors (linear/forward on the Y axis, angular/turn rate on the X axis). The slider underneath scales max velocity (10–100%). Releasing the joystick or pressing **Stop Motors** immediately sends a zero-vector command and clears the motion queue; the backend rate limiter has dedicated bursts for these endpoints to prevent inadvertent HTTP 429 responses during manual driving sessions.
+
 ## AI
 - GET http://127.0.0.1:8081/api/v2/ai/datasets
 - POST http://127.0.0.1:8081/api/v2/ai/datasets/{datasetId}/export

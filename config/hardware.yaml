@@ -1,6 +1,6 @@
 # LawnBerry hardware configuration (example)
 # See specs and docs for details. This file declares which hardware modules
-# are present. For SIM_MODE=1, this file may be left minimal.
+# are present. For SIM_MODE: 0, this file may be left minimal.
 
 # Flat form (direct to HardwareConfig) or nested form (compatibility) supported.
 # Example nested form used by tests:

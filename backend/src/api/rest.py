@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response, Streami
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timedelta, timezone
 import math
-from typing import Optional, Any, Dict, Mapping
+from typing import Optional, Any, Dict, Mapping, Tuple
 import inspect
 from pathlib import Path
 import os
@@ -18,6 +18,8 @@ from email.utils import format_datetime, parsedate_to_datetime
 import uuid
 import io
 import ipaddress
+import bcrypt
+import pyotp
 from ..models.auth_security_config import AuthSecurityConfig, SecurityLevel, TOTPConfig, GoogleAuthConfig
 from ..models.user_session import UserSession
 from ..models.remote_access_config import RemoteAccessConfig
@@ -945,6 +947,90 @@ def _store_manual_session(seed: str, expires_at: datetime, principal: Optional[s
     }
     _manual_control_sessions[seed] = entry
     return entry
+
+
+def _resolve_manual_session(session_id: Optional[str]) -> dict[str, Any]:
+    token = (session_id or "").strip()
+    if not token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Manual control session required")
+
+    now = datetime.now(timezone.utc)
+    matched_entry: dict[str, Any] | None = None
+    expired: list[str] = []
+    for seed, entry in _manual_control_sessions.items():
+        expires_at: datetime = entry.get("expires_at", now)
+        if expires_at <= now:
+            expired.append(seed)
+            continue
+        if entry.get("session_id") == token:
+            matched_entry = entry
+            break
+
+    for seed in expired:
+        _manual_control_sessions.pop(seed, None)
+
+    if matched_entry is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Manual control session invalid or expired")
+
+    return matched_entry
+
+
+def _manual_unlock_principal(request: Request, method: str) -> str:
+    host = None
+    try:
+        client = getattr(request, "client", None)
+        if client is not None:
+            host = getattr(client, "host", None)
+    except Exception:
+        host = None
+    host_str = str(host).strip() if host else ""
+    return f"{method}:{host_str}" if host_str else method
+
+
+def _validate_manual_password(password: Optional[str]) -> str:
+    pwd = (password or "").strip()
+    required = bool(_security_settings.password_required() or _security_settings.password_hash or os.getenv("MANUAL_CONTROL_PASSWORD"))
+    if required and not pwd:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Password required for manual unlock")
+    if not pwd:
+        return pwd
+    if _security_settings.password_hash:
+        try:
+            if not bcrypt.checkpw(pwd.encode("utf-8"), _security_settings.password_hash.encode("utf-8")):
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
+        except ValueError as exc:
+            logger.error("Invalid password hash configuration: %s", exc)
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Password configuration invalid") from exc
+    else:
+        fallback = os.getenv("MANUAL_CONTROL_PASSWORD")
+        if fallback and pwd != fallback:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
+    return pwd
+
+
+def _verify_totp_code(code: Optional[str]) -> Tuple[bool, bool]:
+    config = _security_settings.totp_config
+    if not config or not getattr(config, "enabled", True):
+        raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, detail="TOTP authentication not configured")
+    normalized = (code or "").strip()
+    if not normalized:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="TOTP code required")
+    backup_codes = list(getattr(config, "backup_codes", []) or [])
+    if normalized in backup_codes:
+        try:
+            backup_codes.remove(normalized)
+            config.backup_codes = backup_codes  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        return True, True
+    try:
+        totp = pyotp.TOTP(config.secret, digits=config.digits, interval=config.period)
+    except Exception as exc:  # pragma: no cover - misconfiguration
+        logger.error("Invalid TOTP configuration: %s", exc)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid TOTP configuration") from exc
+    if not totp.verify(normalized, valid_window=1):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid TOTP code")
+    return True, False
 
 
 def _extract_cloudflare_identity(request: Request) -> tuple[Optional[str], Dict[str, Any], Optional[str]]:
@@ -2430,7 +2516,17 @@ async def manual_unlock_status(request: Request):
 
 @router.post("/control/manual-unlock", response_model=ManualUnlockResponse)
 async def manual_unlock(request: Request, body: ManualUnlockRequest):
-    method = (body.method or "").lower()
+    method = (body.method or "").strip().lower()
+    security_level = getattr(_security_settings, "security_level", SecurityLevel.PASSWORD)
+    if not method:
+        if security_level == SecurityLevel.TUNNEL_AUTH:
+            method = "cloudflare"
+        elif security_level == SecurityLevel.GOOGLE_OAUTH:
+            method = "google"
+        elif security_level == SecurityLevel.TOTP:
+            method = "totp"
+        else:
+            method = "password"
     if method in {"cloudflare", "cloudflare_tunnel_auth", "tunnel"}:
         token, payload, principal = _extract_cloudflare_identity(request)
         if not token:
@@ -2450,10 +2546,48 @@ async def manual_unlock(request: Request, body: ManualUnlockRequest):
             source="cloudflare_access",
         )
 
-    if method in {"password", "password_only", "totp", "google", "google_auth"}:
+    if method in {"password", "password_only"}:
+        password = _validate_manual_password(body.password)
+        principal = _manual_unlock_principal(request, "password")
+        timeout_minutes = getattr(_security_settings, "session_timeout_minutes", 60)
+        expires_at = _manual_session_expiry(timeout_minutes)
+        seed_material = f"password:{principal}:{password}"
+        seed = f"password:{hashlib.sha256(seed_material.encode('utf-8')).hexdigest()}"
+        session_entry = _store_manual_session(seed, expires_at, principal)
+        logger.info("manual_control.unlock", extra={"method": "password", "principal": principal})
+        return ManualUnlockResponse(
+            authorized=True,
+            session_id=session_entry["session_id"],
+            expires_at=session_entry["expires_at"].isoformat(),
+            principal=principal,
+            source="password",
+        )
+
+    if method in {"totp", "password_totp"}:
+        totp_ok, backup_used = _verify_totp_code(body.totp_code)
+        password = _validate_manual_password(body.password)
+        principal = _manual_unlock_principal(request, "totp")
+        timeout_minutes = getattr(_security_settings, "session_timeout_minutes", 60)
+        expires_at = _manual_session_expiry(timeout_minutes)
+        seed_material = f"totp:{principal}:{body.totp_code or ''}:{password}:{'backup' if backup_used else 'primary'}"
+        seed = f"totp:{hashlib.sha256(seed_material.encode('utf-8')).hexdigest()}"
+        session_entry = _store_manual_session(seed, expires_at, principal)
+        logger.info(
+            "manual_control.unlock",
+            extra={"method": "totp", "principal": principal, "backup_used": backup_used, "verified": totp_ok},
+        )
+        return ManualUnlockResponse(
+            authorized=True,
+            session_id=session_entry["session_id"],
+            expires_at=session_entry["expires_at"].isoformat(),
+            principal=principal,
+            source="totp_backup" if backup_used else "totp",
+        )
+
+    if method in {"google", "google_auth"}:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Manual unlock method is not implemented on the backend",
+            detail="Google-based manual unlock is not implemented",
         )
 
     raise HTTPException(
@@ -2526,11 +2660,24 @@ async def control_drive_v2(cmd: dict, request: Request):
             cmd_details = cmd if isinstance(cmd, dict) else cmd.model_dump()
         except Exception:
             cmd_details = {}
+        if isinstance(cmd_details, dict) and "session_id" in cmd_details:
+            cmd_details = dict(cmd_details)
+            cmd_details["session_id"] = "***"
         persistence.add_audit_log(
             "control.drive.blocked",
             details={"reason": "emergency_stop_active", "command": cmd_details}
         )
         return JSONResponse(status_code=403, content={"detail": "Emergency stop active - drive commands blocked"})
+
+    session_context = _resolve_manual_session(cmd.get("session_id"))
+
+    try:
+        duration_ms = int(cmd.get("duration_ms", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="duration_ms must be an integer")
+
+    if duration_ms < 0 or duration_ms > 5000:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="duration_ms must be between 0 and 5000 milliseconds")
 
     # Extract vector and convert to differential speeds (arcade)
     # Contract-style payload
@@ -2597,6 +2744,13 @@ async def control_drive_v2(cmd: dict, request: Request):
         details_cmd = cmd if isinstance(cmd, dict) else cmd.model_dump()
     except Exception:
         details_cmd = {}
+    if isinstance(details_cmd, dict):
+        details_cmd = dict(details_cmd)
+        if "session_id" in details_cmd:
+            details_cmd["session_id"] = "***"
+        principal = session_context.get("principal")
+        if principal and "principal" not in details_cmd:
+            details_cmd["principal"] = principal
     persistence.add_audit_log("control.drive.v2", details={"command": details_cmd, "response": response.model_dump()})
     
     return response
@@ -2648,6 +2802,8 @@ async def control_blade_v2(cmd: dict, request: Request):
             persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
             return JSONResponse(status_code=200, content=body)
 
+    session_context = _resolve_manual_session(cmd.get("session_id"))
+
     # Basic control path when explicitly authorized or legacy payloads handled above.
     try:
         desired = None
@@ -2661,7 +2817,12 @@ async def control_blade_v2(cmd: dict, request: Request):
             await bs.initialize()
             ok = await bs.set_active(desired)
             body = {"accepted": ok, "audit_id": audit_id, "result": "accepted" if ok else "rejected", "timestamp": timestamp.isoformat()}
-            persistence.add_audit_log("control.blade.v2", details={"command": cmd, "response": body})
+            log_command = cmd if not isinstance(cmd, dict) else {**cmd}
+            if isinstance(log_command, dict) and "session_id" in log_command:
+                log_command["session_id"] = "***"
+            if isinstance(log_command, dict) and session_context.get("principal"):
+                log_command.setdefault("principal", session_context.get("principal"))
+            persistence.add_audit_log("control.blade.v2", details={"command": log_command, "response": body})
             return JSONResponse(status_code=200 if ok else 409, content=body)
     except Exception:
         pass
@@ -2680,6 +2841,12 @@ async def control_blade_v2(cmd: dict, request: Request):
         cmd_details = cmd if isinstance(cmd, dict) else cmd.model_dump()
     except Exception:
         cmd_details = {}
+    if isinstance(cmd_details, dict):
+        cmd_details = dict(cmd_details)
+        if "session_id" in cmd_details:
+            cmd_details["session_id"] = "***"
+        if session_context and session_context.get("principal"):
+            cmd_details.setdefault("principal", session_context.get("principal"))
     persistence.add_audit_log("control.blade.blocked", details={"command": cmd_details, "response": payload})
     return JSONResponse(status_code=423, content=payload)
 
@@ -2691,6 +2858,12 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
     
     audit_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc)
+
+    payload = body or {}
+    is_legacy = isinstance(payload, dict) and payload.get("command")
+    session_context = None
+    if not is_legacy:
+        session_context = _resolve_manual_session(payload.get("session_id"))
     
     # Set emergency state
     _safety_state["emergency_stop_active"] = True
@@ -2714,7 +2887,7 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
         await robohat.emergency_stop()
     
     # If legacy payload with command field was sent, return 200 with integration-expected shape
-    if isinstance(body, dict) and body.get("command"):
+    if is_legacy:
         legacy_payload = {
             "status": "EMERGENCY_STOP_ACTIVE",
             "motors_stopped": True,
@@ -2745,9 +2918,12 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
     )
     
     # Audit the emergency stop
+    audit_details: dict[str, Any] = {"response": response.model_dump()}
+    if session_context and session_context.get("principal"):
+        audit_details["principal"] = session_context["principal"]
     persistence.add_audit_log(
         "control.emergency.triggered",
-        details={"response": response.model_dump()}
+        details=audit_details
     )
     
     return response

@@ -1,20 +1,36 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useControlStore } from '@/stores/control'
 import * as api from '@/services/api'
-import { useWebSocket } from '@/services/websocket'
 
-// Mock the API service
-vi.mock('@/services/api')
+function getControlWsEntry() {
+  const instances = (globalThis as any).__wsMockInstances as Array<{
+    type: string
+    handlers?: { onMessage?: (msg: any) => void }
+    instance: any
+    topicCallbacks: any
+  }>
+  for (let i = instances.length - 1; i >= 0; i -= 1) {
+    const candidate = instances[i]
+    if (candidate.type === 'control') {
+      return candidate
+    }
+  }
+  throw new Error('Control WebSocket mock was not initialized')
+}
 
-// Mock the WebSocket service
-vi.mock('@/services/websocket', () => ({
-  useWebSocket: vi.fn(() => ({
-    subscribe: vi.fn(),
-    unsubscribe: vi.fn(),
-    isConnected: { value: true },
-  })),
-}))
+function createStoreWithWs() {
+  const store = useControlStore()
+  const wsEntry = getControlWsEntry()
+  wsEntry.instance.subscribe.mockClear()
+  wsEntry.instance.unsubscribe.mockClear()
+  wsEntry.instance.connect.mockClear()
+  wsEntry.instance.disconnect.mockClear()
+  wsEntry.instance.dispatchTestMessage?.mockClear?.()
+  wsEntry.topicCallbacks.clear()
+  store.initWebSocket()
+  return { store, wsEntry }
+}
 
 describe('Control Store', () => {
   beforeEach(() => {
@@ -22,9 +38,14 @@ describe('Control Store', () => {
     vi.clearAllMocks()
   })
 
+  afterEach(() => {
+    const instances = (globalThis as any).__wsMockInstances as Array<any>
+    instances.length = 0
+  })
+
   describe('initialization', () => {
     it('initializes with correct default state', () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
 
       expect(store.lockoutActive).toBe(false)
       expect(store.lockoutReason).toBe('')
@@ -38,7 +59,7 @@ describe('Control Store', () => {
 
   describe('submitCommand', () => {
     it('submits command successfully when not locked out', async () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
       const mockResponse = {
         command_id: 'cmd123',
         status: 'accepted',
@@ -55,7 +76,7 @@ describe('Control Store', () => {
     })
 
     it('prevents command submission during lockout', async () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
       store.lockoutActive = true
       store.lockoutReason = 'Emergency stop activated'
 
@@ -67,7 +88,7 @@ describe('Control Store', () => {
     })
 
     it('handles command submission errors', async () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
       const error = new Error('Communication failure')
 
       vi.mocked(api.sendControlCommand).mockRejectedValue(error)
@@ -77,7 +98,7 @@ describe('Control Store', () => {
     })
 
     it('sets commandInProgress flag during submission', async () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
       let progressDuringCall = false
 
       vi.mocked(api.sendControlCommand).mockImplementation(async () => {
@@ -98,7 +119,7 @@ describe('Control Store', () => {
 
   describe('fetchRoboHATStatus', () => {
     it('fetches and stores RoboHAT status', async () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
       const mockStatus = {
         connected: true,
         firmware_version: 'v1.2.3',
@@ -118,7 +139,7 @@ describe('Control Store', () => {
     })
 
     it('handles status fetch errors gracefully', async () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
       const error = new Error('Connection timeout')
 
       vi.mocked(api.getRoboHATStatus).mockRejectedValue(error)
@@ -130,62 +151,30 @@ describe('Control Store', () => {
 
   describe('WebSocket integration', () => {
     it('subscribes to control WebSocket on initialization', () => {
-      const mockSubscribe = vi.fn()
-      vi.mocked(useWebSocket).mockReturnValue({
-        subscribe: mockSubscribe,
-        unsubscribe: vi.fn(),
-        isConnected: { value: true },
-      })
+      const { store, wsEntry } = createStoreWithWs()
 
-      const store = useControlStore()
-      store.initWebSocket()
-
-      expect(mockSubscribe).toHaveBeenCalledWith('control', expect.any(Function))
+      expect(wsEntry.instance.subscribe).toHaveBeenCalledWith('control', expect.any(Function))
     })
 
     it('handles command echo messages from WebSocket', () => {
-      const store = useControlStore()
-      const mockCallback = vi.fn()
-
-      vi.mocked(useWebSocket).mockReturnValue({
-        subscribe: (topic: string, callback: (data: any) => void) => {
-          mockCallback.mockImplementation(callback)
-          return vi.fn()
-        },
-        unsubscribe: vi.fn(),
-        isConnected: { value: true },
-      })
-
-      store.initWebSocket()
-
+      const { store, wsEntry } = createStoreWithWs()
       const echoMessage = {
         type: 'command_echo',
-        command_id: 'cmd123',
-        command: 'FORWARD',
-        status: 'executed',
-        timestamp: new Date().toISOString(),
+        payload: {
+          command_id: 'cmd123',
+          command: 'FORWARD',
+          status: 'executed',
+          timestamp: new Date().toISOString(),
+        },
       }
 
-      mockCallback(echoMessage)
+      wsEntry.handlers?.onMessage?.(echoMessage)
 
-      expect(store.lastCommandEcho).toEqual(echoMessage)
+      expect(store.lastCommandEcho).toEqual(echoMessage.payload)
     })
 
     it('handles lockout messages from WebSocket', () => {
-      const store = useControlStore()
-      const mockCallback = vi.fn()
-
-      vi.mocked(useWebSocket).mockReturnValue({
-        subscribe: (topic: string, callback: (data: any) => void) => {
-          mockCallback.mockImplementation(callback)
-          return vi.fn()
-        },
-        unsubscribe: vi.fn(),
-        isConnected: { value: true },
-      })
-
-      store.initWebSocket()
-
+      const { store, wsEntry } = createStoreWithWs()
       const lockoutMessage = {
         type: 'lockout',
         active: true,
@@ -194,7 +183,7 @@ describe('Control Store', () => {
         remediation_link: '/docs/troubleshooting#low-battery',
       }
 
-      mockCallback(lockoutMessage)
+      wsEntry.handlers?.onMessage?.(lockoutMessage)
 
       expect(store.lockoutActive).toBe(true)
       expect(store.lockoutReason).toBe('Low battery')
@@ -203,34 +192,20 @@ describe('Control Store', () => {
     })
 
     it('clears lockout when receiving unlock message', () => {
-      const store = useControlStore()
+      const { store, wsEntry } = createStoreWithWs()
       store.lockoutActive = true
       store.lockoutReason = 'Test lockout'
       store.lockoutUntil = new Date().toISOString()
       store.remediationLink = '/docs/test'
 
-      const mockCallback = vi.fn()
-
-      vi.mocked(useWebSocket).mockReturnValue({
-        subscribe: (topic: string, callback: (data: any) => void) => {
-          mockCallback.mockImplementation(callback)
-          return vi.fn()
-        },
-        unsubscribe: vi.fn(),
-        isConnected: { value: true },
-      })
-
-      store.initWebSocket()
-
       const unlockMessage = {
-        type: 'lockout',
-        active: false,
+        type: 'unlock',
         reason: '',
         until: null,
         remediation_link: '',
       }
 
-      mockCallback(unlockMessage)
+      wsEntry.handlers?.onMessage?.(unlockMessage)
 
       expect(store.lockoutActive).toBe(false)
       expect(store.lockoutReason).toBe('')
@@ -241,21 +216,21 @@ describe('Control Store', () => {
 
   describe('computed properties', () => {
     it('canSubmitCommand returns false during lockout', () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
       store.lockoutActive = true
 
       expect(store.canSubmitCommand).toBe(false)
     })
 
     it('canSubmitCommand returns false during command in progress', () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
       store.commandInProgress = true
 
       expect(store.canSubmitCommand).toBe(false)
     })
 
     it('canSubmitCommand returns true when available', () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
       store.lockoutActive = false
       store.commandInProgress = false
 
@@ -263,7 +238,7 @@ describe('Control Store', () => {
     })
 
     it('lockoutTimeRemaining calculates remaining time correctly', () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
       const futureTime = new Date(Date.now() + 5000)
       store.lockoutUntil = futureTime.toISOString()
 
@@ -274,7 +249,7 @@ describe('Control Store', () => {
     })
 
     it('lockoutTimeRemaining returns 0 when no lockout', () => {
-      const store = useControlStore()
+      const { store } = createStoreWithWs()
       store.lockoutUntil = null
 
       expect(store.lockoutTimeRemaining).toBe(0)
@@ -283,19 +258,15 @@ describe('Control Store', () => {
 
   describe('cleanup', () => {
     it('unsubscribes from WebSocket on cleanup', () => {
-      const mockUnsubscribe = vi.fn()
+      const { store, wsEntry } = createStoreWithWs()
+      const callbacks = wsEntry.topicCallbacks.get('control') as any[] | undefined
+      expect(callbacks).toBeDefined()
+      expect((callbacks?.length ?? 0)).toBeGreaterThan(0)
+      const unsubscribeSpy = callbacks![0]?.unsubscribe
 
-      vi.mocked(useWebSocket).mockReturnValue({
-        subscribe: vi.fn(() => mockUnsubscribe),
-        unsubscribe: vi.fn(),
-        isConnected: { value: true },
-      })
-
-      const store = useControlStore()
-      store.initWebSocket()
       store.cleanup()
 
-      expect(mockUnsubscribe).toHaveBeenCalled()
+      expect(unsubscribeSpy).toHaveBeenCalled()
     })
   })
 })

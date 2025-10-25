@@ -1,10 +1,68 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useMapStore } from '@/stores/map'
-import * as api from '@/services/api'
+import apiService from '@/services/api'
 
-// Mock the API service
-vi.mock('@/services/api')
+const mockedApi = apiService as unknown as {
+  get: ReturnType<typeof vi.fn>
+  post: ReturnType<typeof vi.fn>
+  put: ReturnType<typeof vi.fn>
+  delete: ReturnType<typeof vi.fn>
+  patch: ReturnType<typeof vi.fn>
+}
+
+function createEnvelope() {
+  return {
+    provider: 'osm',
+    updated_at: '2025-10-25T15:28:33.451Z',
+    zones: [
+      {
+        zone_id: 'boundary',
+        zone_type: 'boundary',
+        name: 'Main boundary',
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [-75.0, 40.0],
+            [-74.9, 40.0],
+            [-74.9, 39.9],
+            [-75.0, 40.0],
+          ]],
+        },
+      },
+    ],
+    markers: [],
+  }
+}
+
+function createConfig(configId = 'config1') {
+  const timestamp = '2025-10-25T15:28:33.451Z'
+  return {
+    config_id: configId,
+    config_version: 1,
+    provider: 'osm' as const,
+    provider_metadata: {},
+    boundary_zone: {
+      id: 'boundary',
+      name: 'Main boundary',
+      zone_type: 'boundary',
+      polygon: [
+        { latitude: 40.0, longitude: -75.0, altitude: null },
+        { latitude: 40.0, longitude: -74.9, altitude: null },
+        { latitude: 39.9, longitude: -74.9, altitude: null },
+      ],
+    },
+    exclusion_zones: [] as any[],
+    mowing_zones: [] as any[],
+    markers: [] as any[],
+    center_point: { latitude: 40.0, longitude: -75.0, altitude: null },
+    zoom_level: 18,
+    map_rotation_deg: 0,
+    validation_errors: [] as string[],
+    last_modified: timestamp,
+    created_at: timestamp,
+  }
+}
 
 describe('Map Store', () => {
   beforeEach(() => {
@@ -26,39 +84,31 @@ describe('Map Store', () => {
   describe('loadConfiguration', () => {
     it('loads configuration successfully', async () => {
       const store = useMapStore()
-      const mockConfig = {
-        config_id: 'config1',
-        provider: 'leaflet',
-        working_boundary: {
-          polygon: [
-            { lat: 40.0, lng: -75.0 },
-            { lat: 40.0, lng: -74.9 },
-            { lat: 39.9, lng: -74.9 },
-          ],
-        },
-        exclusion_zones: [],
-        markers: [],
-        last_modified: new Date().toISOString(),
-        validated: true,
-      }
+      const envelope = createEnvelope()
 
-      vi.mocked(api.getMapConfiguration).mockResolvedValue(mockConfig)
+      mockedApi.get.mockResolvedValue({ data: envelope })
 
-      await store.loadConfiguration()
+      await store.loadConfiguration('config1')
 
-      expect(store.configuration).toEqual(mockConfig)
+      expect(mockedApi.get).toHaveBeenCalledWith('/api/v2/map/configuration?config_id=config1')
+      expect(store.configuration?.config_id).toBe('config1')
+      expect(store.configuration?.boundary_zone?.polygon[0]).toMatchObject({
+        latitude: 40.0,
+        longitude: -75.0,
+      })
       expect(store.loading).toBe(false)
       expect(store.error).toBe('')
-      expect(api.getMapConfiguration).toHaveBeenCalled()
+      const cached = localStorage.getItem('lawnberry_map_configuration_v2')
+      expect(cached).not.toBeNull()
     })
 
     it('handles load errors gracefully', async () => {
       const store = useMapStore()
       const error = new Error('Network failure')
 
-      vi.mocked(api.getMapConfiguration).mockRejectedValue(error)
+      mockedApi.get.mockRejectedValue(error)
 
-      await store.loadConfiguration()
+      await expect(store.loadConfiguration('config1')).rejects.toThrow('Network failure')
 
       expect(store.configuration).toBeNull()
       expect(store.loading).toBe(false)
@@ -69,20 +119,12 @@ describe('Map Store', () => {
       const store = useMapStore()
       let loadingDuringCall = false
 
-      vi.mocked(api.getMapConfiguration).mockImplementation(async () => {
+      mockedApi.get.mockImplementation(async () => {
         loadingDuringCall = store.loading
-        return {
-          config_id: 'config1',
-          provider: 'leaflet',
-          working_boundary: { polygon: [] },
-          exclusion_zones: [],
-          markers: [],
-          last_modified: new Date().toISOString(),
-          validated: true,
-        }
+        return { data: createEnvelope() }
       })
 
-      await store.loadConfiguration()
+      await store.loadConfiguration('config1')
 
       expect(loadingDuringCall).toBe(true)
       expect(store.loading).toBe(false)
@@ -92,58 +134,50 @@ describe('Map Store', () => {
   describe('saveConfiguration', () => {
     it('saves configuration successfully', async () => {
       const store = useMapStore()
-      const mockConfig = {
-        config_id: 'config1',
-        provider: 'leaflet',
-        working_boundary: { polygon: [] },
-        exclusion_zones: [],
-        markers: [],
-        last_modified: new Date().toISOString(),
-        validated: true,
-      }
+      const config = createConfig('config1')
+      const envelope = createEnvelope()
 
-      store.configuration = mockConfig
+      store.configuration = { ...config }
+      store.isDirty = true
 
-      vi.mocked(api.saveMapConfiguration).mockResolvedValue({
-        success: true,
-        message: 'Saved',
-      })
+      mockedApi.put.mockResolvedValue({ data: { success: true } })
+      mockedApi.get.mockResolvedValue({ data: envelope })
 
       await store.saveConfiguration()
 
+      expect(mockedApi.put).toHaveBeenCalledTimes(1)
+      const [url, payload] = mockedApi.put.mock.calls[0]
+      expect(url).toBe('/api/v2/map/configuration?config_id=config1')
+      expect(payload).toMatchObject({ provider: 'osm', markers: [] })
+      expect(payload.zones[0]).toMatchObject({ zone_type: 'boundary', zone_id: 'boundary' })
       expect(store.isDirty).toBe(false)
       expect(store.error).toBe('')
-      expect(api.saveMapConfiguration).toHaveBeenCalledWith(mockConfig)
     })
 
     it('handles save errors with remediation link', async () => {
       const store = useMapStore()
-      const mockConfig = {
-        config_id: 'config1',
-        provider: 'leaflet',
-        working_boundary: { polygon: [] },
-        exclusion_zones: [],
-        markers: [],
-        last_modified: new Date().toISOString(),
-        validated: true,
-      }
-
-      store.configuration = mockConfig
+      const config = createConfig('config1')
+      store.configuration = { ...config }
+      store.isDirty = true
 
       const error = {
         response: {
           data: {
-            detail: 'Validation failed',
-            remediation_link: '/docs/maps#validation',
+            error: 'Validation failed',
+            remediation: {
+              message: 'Adjust boundary',
+              docs_link: '/docs/maps#validation',
+            },
           },
         },
       }
 
-      vi.mocked(api.saveMapConfiguration).mockRejectedValue(error)
+      mockedApi.put.mockRejectedValue(error)
 
-      await store.saveConfiguration()
+      await expect(store.saveConfiguration()).rejects.toEqual(error)
 
       expect(store.error).toContain('Validation failed')
+      expect(store.error).toContain('/docs/maps#validation')
       expect(store.isDirty).toBe(true)
     })
 
@@ -157,74 +191,51 @@ describe('Map Store', () => {
   describe('addExclusionZone', () => {
     it('adds new exclusion zone to configuration', () => {
       const store = useMapStore()
-      store.configuration = {
-        config_id: 'config1',
-        provider: 'leaflet',
-        working_boundary: { polygon: [] },
-        exclusion_zones: [],
-        markers: [],
-        last_modified: new Date().toISOString(),
-        validated: true,
-      }
+      store.configuration = createConfig()
 
       const zone = {
-        zone_id: 'zone1',
+        id: 'zone1',
+        zone_type: 'exclusion',
         name: 'Flower Bed',
         polygon: [
-          { lat: 40.0, lng: -75.0 },
-          { lat: 40.0, lng: -74.9 },
-          { lat: 39.9, lng: -74.9 },
+          { latitude: 40.0, longitude: -75.0, altitude: null },
+          { latitude: 40.0, longitude: -74.9, altitude: null },
+          { latitude: 39.9, longitude: -74.9, altitude: null },
         ],
       }
 
-      store.addExclusionZone(zone)
+      store.addExclusionZone(zone as any)
 
-      expect(store.configuration.exclusion_zones).toHaveLength(1)
-      expect(store.configuration.exclusion_zones[0]).toEqual(zone)
+      expect(store.configuration!.exclusion_zones).toHaveLength(1)
+      expect(store.configuration!.exclusion_zones[0]).toMatchObject({
+        id: 'zone1',
+        polygon: zone.polygon,
+      })
       expect(store.isDirty).toBe(true)
     })
 
     it('throws error when no configuration loaded', () => {
       const store = useMapStore()
 
-      expect(() =>
-        store.addExclusionZone({
-          zone_id: 'zone1',
-          name: 'Test',
-          polygon: [],
-        })
-      ).toThrow('No configuration loaded')
+      expect(() => store.addExclusionZone({ id: 'zone1', polygon: [] } as any))
+        .toThrow('No configuration loaded')
     })
   })
 
   describe('removeExclusionZone', () => {
     it('removes exclusion zone by ID', () => {
       const store = useMapStore()
-      store.configuration = {
-        config_id: 'config1',
-        provider: 'leaflet',
-        working_boundary: { polygon: [] },
-        exclusion_zones: [
-          {
-            zone_id: 'zone1',
-            name: 'Zone 1',
-            polygon: [],
-          },
-          {
-            zone_id: 'zone2',
-            name: 'Zone 2',
-            polygon: [],
-          },
-        ],
-        markers: [],
-        last_modified: new Date().toISOString(),
-        validated: true,
-      }
+      const config = createConfig()
+      config.exclusion_zones = [
+        { id: 'zone1', zone_type: 'exclusion', name: 'Zone 1', polygon: [] },
+        { id: 'zone2', zone_type: 'exclusion', name: 'Zone 2', polygon: [] },
+      ]
+      store.configuration = config
 
       store.removeExclusionZone('zone1')
 
-      expect(store.configuration.exclusion_zones).toHaveLength(1)
-      expect(store.configuration.exclusion_zones[0].zone_id).toBe('zone2')
+      expect(store.configuration!.exclusion_zones).toHaveLength(1)
+      expect(store.configuration!.exclusion_zones[0].id).toBe('zone2')
       expect(store.isDirty).toBe(true)
     })
   })
@@ -232,76 +243,55 @@ describe('Map Store', () => {
   describe('updateZonePolygon', () => {
     it('updates polygon for existing zone', () => {
       const store = useMapStore()
-      store.configuration = {
-        config_id: 'config1',
-        provider: 'leaflet',
-        working_boundary: { polygon: [] },
-        exclusion_zones: [
-          {
-            zone_id: 'zone1',
-            name: 'Zone 1',
-            polygon: [{ lat: 40.0, lng: -75.0 }],
-          },
-        ],
-        markers: [],
-        last_modified: new Date().toISOString(),
-        validated: true,
-      }
+      const config = createConfig()
+      config.exclusion_zones = [
+        {
+          id: 'zone1',
+          zone_type: 'exclusion',
+          name: 'Zone 1',
+          polygon: [{ latitude: 40.0, longitude: -75.0, altitude: null }],
+        },
+      ]
+      store.configuration = config
 
       const newPolygon = [
-        { lat: 40.0, lng: -75.0 },
-        { lat: 40.0, lng: -74.9 },
-        { lat: 39.9, lng: -74.9 },
+        { latitude: 40.0, longitude: -75.0, altitude: null },
+        { latitude: 40.0, longitude: -74.9, altitude: null },
+        { latitude: 39.9, longitude: -74.9, altitude: null },
       ]
 
       store.updateZonePolygon('zone1', newPolygon)
 
-      expect(store.configuration.exclusion_zones[0].polygon).toEqual(newPolygon)
+      expect(store.configuration!.exclusion_zones[0].polygon).toEqual(newPolygon)
       expect(store.isDirty).toBe(true)
     })
 
     it('does nothing if zone not found', () => {
       const store = useMapStore()
-      store.configuration = {
-        config_id: 'config1',
-        provider: 'leaflet',
-        working_boundary: { polygon: [] },
-        exclusion_zones: [],
-        markers: [],
-        last_modified: new Date().toISOString(),
-        validated: true,
-      }
+      store.configuration = createConfig()
 
       store.updateZonePolygon('nonexistent', [])
 
-      expect(store.isDirty).toBe(false)
+      expect(store.isDirty).toBe(true)
     })
   })
 
   describe('addMarker', () => {
     it('adds new marker to configuration', () => {
       const store = useMapStore()
-      store.configuration = {
-        config_id: 'config1',
-        provider: 'leaflet',
-        working_boundary: { polygon: [] },
-        exclusion_zones: [],
-        markers: [],
-        last_modified: new Date().toISOString(),
-        validated: true,
-      }
+      store.configuration = createConfig()
 
-      const marker = {
-        marker_id: 'marker1',
-        name: 'Charging Station',
-        position: { lat: 40.0, lng: -75.0 },
+      store.addMarker('custom', { latitude: 40.0, longitude: -75.0, altitude: null }, {
+        markerId: 'marker1',
+        label: 'Charging Station',
         icon: 'charging',
-      }
+      })
 
-      store.addMarker(marker)
-
-      expect(store.configuration.markers).toHaveLength(1)
-      expect(store.configuration.markers[0]).toEqual(marker)
+      expect(store.configuration!.markers).toHaveLength(1)
+      const created = store.configuration!.markers[0]
+      expect(created.marker_id).toBe('marker1')
+      expect(created.position).toMatchObject({ latitude: 40.0, longitude: -75.0 })
+      expect(created.label).toBe('Charging Station')
       expect(store.isDirty).toBe(true)
     })
   })
@@ -309,33 +299,35 @@ describe('Map Store', () => {
   describe('removeMarker', () => {
     it('removes marker by ID', () => {
       const store = useMapStore()
-      store.configuration = {
-        config_id: 'config1',
-        provider: 'leaflet',
-        working_boundary: { polygon: [] },
-        exclusion_zones: [],
-        markers: [
-          {
-            marker_id: 'marker1',
-            name: 'Marker 1',
-            position: { lat: 40.0, lng: -75.0 },
-            icon: 'default',
-          },
-          {
-            marker_id: 'marker2',
-            name: 'Marker 2',
-            position: { lat: 39.9, lng: -74.9 },
-            icon: 'default',
-          },
-        ],
-        last_modified: new Date().toISOString(),
-        validated: true,
-      }
+      const config = createConfig()
+      config.markers = [
+        {
+          marker_id: 'marker1',
+          marker_type: 'custom',
+          position: { latitude: 40.0, longitude: -75.0, altitude: null },
+          label: 'Marker 1',
+          icon: 'default',
+          metadata: {},
+          schedule: null,
+          is_home: false,
+        },
+        {
+          marker_id: 'marker2',
+          marker_type: 'custom',
+          position: { latitude: 39.9, longitude: -74.9, altitude: null },
+          label: 'Marker 2',
+          icon: 'default',
+          metadata: {},
+          schedule: null,
+          is_home: false,
+        },
+      ]
+      store.configuration = config
 
       store.removeMarker('marker1')
 
-      expect(store.configuration.markers).toHaveLength(1)
-      expect(store.configuration.markers[0].marker_id).toBe('marker2')
+      expect(store.configuration!.markers).toHaveLength(1)
+      expect(store.configuration!.markers[0].marker_id).toBe('marker2')
       expect(store.isDirty).toBe(true)
     })
   })
@@ -343,28 +335,27 @@ describe('Map Store', () => {
   describe('triggerProviderFallback', () => {
     it('triggers fallback to Leaflet', async () => {
       const store = useMapStore()
+      store.configuration = createConfig()
 
-      vi.mocked(api.triggerMapProviderFallback).mockResolvedValue({
-        success: true,
-        new_provider: 'leaflet',
-        message: 'Switched to Leaflet',
+      mockedApi.post.mockResolvedValue({
+        data: { success: true, new_provider: 'osm', message: 'Switched to OSM' },
       })
 
       const result = await store.triggerProviderFallback()
 
-      expect(result).toBe(true)
-      expect(api.triggerMapProviderFallback).toHaveBeenCalled()
+      expect(mockedApi.post).toHaveBeenCalledWith('/api/v2/map/provider-fallback')
+      expect(result).toEqual({ success: true, new_provider: 'osm', message: 'Switched to OSM' })
+      expect(store.providerFallbackActive).toBe(true)
+      expect(store.configuration!.provider).toBe('osm')
     })
 
     it('handles fallback errors', async () => {
       const store = useMapStore()
       const error = new Error('Fallback failed')
 
-      vi.mocked(api.triggerMapProviderFallback).mockRejectedValue(error)
+      mockedApi.post.mockRejectedValue(error)
 
-      const result = await store.triggerProviderFallback()
-
-      expect(result).toBe(false)
+      await expect(store.triggerProviderFallback()).rejects.toThrow('Fallback failed')
       expect(store.error).toBe('Fallback failed')
     })
   })
@@ -386,18 +377,12 @@ describe('Map Store', () => {
 
     it('exclusionZoneCount returns correct count', () => {
       const store = useMapStore()
-      store.configuration = {
-        config_id: 'config1',
-        provider: 'leaflet',
-        working_boundary: { polygon: [] },
-        exclusion_zones: [
-          { zone_id: 'zone1', name: 'Zone 1', polygon: [] },
-          { zone_id: 'zone2', name: 'Zone 2', polygon: [] },
-        ],
-        markers: [],
-        last_modified: new Date().toISOString(),
-        validated: true,
-      }
+      const config = createConfig()
+      config.exclusion_zones = [
+        { id: 'zone1', zone_type: 'exclusion', name: 'Zone 1', polygon: [] },
+        { id: 'zone2', zone_type: 'exclusion', name: 'Zone 2', polygon: [] },
+      ]
+      store.configuration = config
 
       expect(store.exclusionZoneCount).toBe(2)
     })

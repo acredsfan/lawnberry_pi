@@ -163,58 +163,33 @@
           <h3>Movement Controls</h3>
         </div>
         <div class="card-body">
-          <div class="movement-grid">
-            <!-- Forward -->
-            <button 
-              class="movement-btn movement-forward"
-              :disabled="!canMove"
-              @mousedown="startMovement('forward')"
-              @mouseup="stopMovement"
-              @mouseleave="stopMovement"
-            >
-              ⬆️ Forward
-            </button>
-
-            <!-- Turn Left -->
-            <button 
-              class="movement-btn movement-left"
-              :disabled="!canMove"
-              @mousedown="startMovement('left')"
-              @mouseup="stopMovement"
-              @mouseleave="stopMovement"
-            >
-              ⬅️ Left
-            </button>
-
-            <!-- Stop -->
-            <button 
-              class="movement-btn movement-stop"
-              @click="stopMovement"
-            >
-              🛑 STOP
-            </button>
-
-            <!-- Turn Right -->
-            <button 
-              class="movement-btn movement-right"
-              :disabled="!canMove"
-              @mousedown="startMovement('right')"
-              @mouseup="stopMovement"
-              @mouseleave="stopMovement"
-            >
-              ➡️ Right
-            </button>
-
-            <!-- Backward -->
-            <button 
-              class="movement-btn movement-backward"
-              :disabled="!canMove"
-              @mousedown="startMovement('backward')"
-              @mouseup="stopMovement"
-              @mouseleave="stopMovement"
-            >
-              ⬇️ Backward
-            </button>
+          <div class="movement-layout">
+            <div class="joystick-column">
+              <VirtualJoystick
+                ref="joystickRef"
+                class="joystick-component"
+                :disabled="!canMove"
+                :dead-zone="0.12"
+                @change="handleJoystickChange"
+                @end="handleJoystickEnd"
+              />
+              <small class="joystick-hint">Drag to drive • Release or tap stop to halt</small>
+            </div>
+            <div class="movement-actions">
+              <button
+                class="btn btn-danger stop-button"
+                :disabled="!isControlUnlocked"
+                @click="handleStopButton"
+              >
+                🛑 Stop Motors
+              </button>
+              <div class="movement-readout">
+                <span>Linear: {{ formatCommandValue(activeDriveVector.linear) }}</span>
+                <span>Angular: {{ formatCommandValue(activeDriveVector.angular) }}</span>
+              </div>
+              <div v-if="joystickEngaged" class="movement-status active">Joystick engaged</div>
+              <div v-else class="movement-status">Joystick idle</div>
+            </div>
           </div>
 
           <div class="speed-control">
@@ -317,6 +292,7 @@ import { useControlStore } from '@/stores/control'
 import { useApiService } from '@/services/api'
 import { useToastStore } from '@/stores/toast'
 import { usePreferencesStore } from '@/stores/preferences'
+import VirtualJoystick from '@/components/ui/VirtualJoystick.vue'
 
 interface ManualControlSecurityConfig {
   auth_level: 'password' | 'totp' | 'google' | 'cloudflare'
@@ -345,6 +321,10 @@ interface CameraStatusSummary {
   fps: number | null
   client_count: number | null
 }
+
+const MOVEMENT_DURATION_MS = 250
+const MOVEMENT_REPEAT_INTERVAL_MS = 200
+const JOYSTICK_REASON = 'manual-joystick'
 
 const control = useControlStore()
 const api = useApiService()
@@ -416,6 +396,19 @@ const cameraFetchInFlight = ref(false)
 let cameraFrameTimer: number | undefined
 let cameraStatusTimer: number | undefined
 let cameraStartRequested = false
+
+interface JoystickHandle {
+  reset: () => void
+  setVector: (vector: { x: number; y: number }) => void
+}
+
+const joystickRef = ref<JoystickHandle | null>(null)
+const lastJoystickVector = ref({ x: 0, y: 0 })
+const joystickEngaged = ref(false)
+const activeDriveVector = ref({ linear: 0, angular: 0 })
+let movementRepeatTimer: number | undefined
+let driveCommandChain: Promise<void> = Promise.resolve()
+let currentDriveReason = JOYSTICK_REASON
 
 // Derived state
 const canAuthenticate = computed(() => {
@@ -840,7 +833,9 @@ async function authenticateControl() {
 }
 
 function lockControl() {
+  void stopMovement(true)
   isControlUnlocked.value = false
+  joystickRef.value?.reset()
   session.value = null
   sessionTimeRemaining.value = 0
   if (sessionTimer) {
@@ -884,59 +879,126 @@ function setPerforming(flag: boolean) {
   performing.value = flag
 }
 
-async function sendDriveCommand(direction: string) {
-  if (!canMove.value) return
-  setPerforming(true)
-  try {
-    const speedFactor = speedLevel.value / 100
-    const vector = (() => {
-      switch (direction) {
-        case 'forward':
-          return { linear: speedFactor, angular: 0 }
-        case 'backward':
-          return { linear: -speedFactor, angular: 0 }
-        case 'left':
-          return { linear: speedFactor * 0.6, angular: -speedFactor }
-        case 'right':
-          return { linear: speedFactor * 0.6, angular: speedFactor }
-        default:
-          return { linear: 0, angular: 0 }
+function clearMovementTimer() {
+  if (movementRepeatTimer) {
+    window.clearTimeout(movementRepeatTimer)
+    movementRepeatTimer = undefined
+  }
+}
+
+function scheduleMovementTick() {
+  clearMovementTimer()
+  if (!joystickEngaged.value) {
+    return
+  }
+  movementRepeatTimer = window.setTimeout(() => {
+    if (!joystickEngaged.value) {
+      return
+    }
+    const vector = { ...activeDriveVector.value }
+    queueDriveCommand(vector, currentDriveReason)
+    scheduleMovementTick()
+  }, MOVEMENT_REPEAT_INTERVAL_MS)
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function queueDriveCommand(vector: { linear: number; angular: number }, reason = JOYSTICK_REASON, durationMs = MOVEMENT_DURATION_MS) {
+  if (!isControlUnlocked.value || lockout.value) {
+    return driveCommandChain
+  }
+  const payload = {
+    session_id: ensureSession().session_id,
+    vector,
+    duration_ms: durationMs,
+    reason
+  }
+
+  driveCommandChain = driveCommandChain
+    .catch(() => {
+      // Swallow previous errors to keep the chain alive.
+    })
+    .then(async () => {
+      try {
+        await control.submitCommand('drive', payload)
+        const linear = Math.abs(vector.linear ?? 0)
+        const angular = Math.abs(vector.angular ?? 0)
+        currentSpeed.value = Math.max(linear, angular)
+      } catch (error) {
+        showStatus('Failed to send drive command', false)
       }
-    })()
-    await control.submitCommand('drive', {
-      session_id: ensureSession().session_id,
-      vector,
-      duration_ms: 200,
-      reason: `manual-${direction}`
     })
-    currentSpeed.value = Math.abs(vector.linear ?? 0)
-  } catch (error) {
-    showStatus('Failed to send drive command', false)
-  } finally {
-    setPerforming(false)
-  }
+
+  return driveCommandChain
 }
 
-async function startMovement(direction: 'forward' | 'left' | 'right' | 'backward') {
-  await sendDriveCommand(direction)
+function computeDriveVectorFromJoystick(vector: { x: number; y: number }) {
+  const speedFactor = clamp(speedLevel.value / 100, 0, 1)
+  const linear = clamp(vector.y * speedFactor, -1, 1)
+  const angular = clamp(vector.x * speedFactor, -1, 1)
+  return { linear, angular }
 }
 
-async function stopMovement() {
-  if (!isControlUnlocked.value) return
-  setPerforming(true)
-  try {
-    await control.submitCommand('drive', {
-      session_id: ensureSession().session_id,
-      vector: { linear: 0, angular: 0 },
-      duration_ms: 0,
-      reason: 'manual-stop'
-    })
-  } catch (error) {
-    showStatus('Failed to stop movement', false)
-  } finally {
+function handleJoystickChange(vector: { x: number; y: number; magnitude: number; active: boolean }) {
+  lastJoystickVector.value = { x: vector.x, y: vector.y }
+  if (!isControlUnlocked.value) {
+    joystickEngaged.value = false
+    activeDriveVector.value = { linear: 0, angular: 0 }
     currentSpeed.value = 0
-    setPerforming(false)
+    return
   }
+
+  const driveVector = computeDriveVectorFromJoystick(vector)
+  activeDriveVector.value = driveVector
+  const engaged = vector.active && (Math.abs(driveVector.linear) > 0.01 || Math.abs(driveVector.angular) > 0.01)
+
+  if (engaged) {
+    joystickEngaged.value = true
+    currentDriveReason = JOYSTICK_REASON
+    clearMovementTimer()
+    queueDriveCommand({ ...driveVector }, currentDriveReason)
+    scheduleMovementTick()
+  } else if (joystickEngaged.value) {
+    joystickEngaged.value = false
+    void stopMovement(true)
+  } else {
+    currentSpeed.value = 0
+  }
+}
+
+function handleJoystickEnd() {
+  if (!joystickEngaged.value) {
+    return
+  }
+  joystickEngaged.value = false
+  void stopMovement(true)
+}
+
+function handleStopButton() {
+  joystickRef.value?.reset()
+  lastJoystickVector.value = { x: 0, y: 0 }
+  joystickEngaged.value = false
+  activeDriveVector.value = { linear: 0, angular: 0 }
+  void stopMovement(true)
+}
+
+function formatCommandValue(value: number) {
+  if (!Number.isFinite(value)) {
+    return '0.00'
+  }
+  return value.toFixed(2)
+}
+
+async function stopMovement(sendStopCommand = true) {
+  clearMovementTimer()
+  joystickEngaged.value = false
+  activeDriveVector.value = { linear: 0, angular: 0 }
+  if (sendStopCommand && isControlUnlocked.value) {
+    await queueDriveCommand({ linear: 0, angular: 0 }, 'manual-stop', 0)
+  }
+  currentSpeed.value = 0
 }
 
 async function emergencyStop() {
@@ -1004,6 +1066,10 @@ watch(isControlUnlocked, (unlocked) => {
     })
   } else {
     stopCameraFeed()
+    joystickRef.value?.reset()
+    lastJoystickVector.value = { x: 0, y: 0 }
+    joystickEngaged.value = false
+    activeDriveVector.value = { linear: 0, angular: 0 }
   }
 })
 
@@ -1027,10 +1093,21 @@ watch(lastEcho, (payload) => {
   }
 })
 
-watch(speedLevel, (value) => {
-  if (!isControlUnlocked.value) return
-  // Approximate display speed in m/s for the UI
-  currentSpeed.value = Number((value / 100 * 1.2).toFixed(2))
+watch(speedLevel, () => {
+  if (!isControlUnlocked.value) {
+    currentSpeed.value = 0
+    return
+  }
+  if (!joystickEngaged.value) {
+    currentSpeed.value = 0
+    return
+  }
+  const driveVector = computeDriveVectorFromJoystick(lastJoystickVector.value)
+  activeDriveVector.value = driveVector
+  currentSpeed.value = Math.abs(driveVector.linear)
+  clearMovementTimer()
+  queueDriveCommand({ ...driveVector }, JOYSTICK_REASON)
+  scheduleMovementTick()
 })
 
 let telemetryInterval: number | undefined
@@ -1050,6 +1127,7 @@ onUnmounted(() => {
     window.clearInterval(sessionTimer)
     sessionTimer = undefined
   }
+  void stopMovement(true)
   stopCameraFeed()
 })
 </script>
@@ -1292,61 +1370,59 @@ onUnmounted(() => {
   color: var(--text-muted);
 }
 
-.movement-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  grid-template-rows: 1fr 1fr 1fr;
+.movement-layout {
+  display: flex;
+  gap: 2rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.joystick-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.joystick-component {
+  width: 220px;
+  height: 220px;
+  touch-action: none;
+}
+
+.joystick-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.movement-actions {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
-  max-width: 300px;
-  margin: 0 auto 2rem;
+  min-width: 200px;
 }
 
-.movement-btn {
-  padding: 1rem;
-  border: 2px solid var(--primary-light);
-  border-radius: 8px;
-  background: var(--primary-dark);
-  color: var(--text-color);
+.stop-button {
+  align-self: flex-start;
+  padding: 0.85rem 1.5rem;
+}
+
+.movement-readout {
+  display: flex;
+  gap: 1.5rem;
+  font-family: 'Roboto Mono', 'Fira Code', monospace;
   font-size: 1rem;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  user-select: none;
+  color: var(--text-muted);
 }
 
-.movement-forward {
-  grid-column: 2;
-  grid-row: 1;
+.movement-status {
+  font-weight: 600;
+  color: var(--text-muted);
 }
 
-.movement-left {
-  grid-column: 1;
-  grid-row: 2;
-}
-
-.movement-stop {
-  grid-column: 2;
-  grid-row: 2;
-  background: #ff4343;
-  color: white;
-}
-
-.movement-right {
-  grid-column: 3;
-  grid-row: 2;
-}
-
-.movement-backward {
-  grid-column: 2;
-  grid-row: 3;
-}
-
-.movement-btn:hover:not(:disabled) {
-  border-color: var(--accent-green);
-  background: rgba(0, 255, 146, 0.1);
-}
-
-.movement-btn:active {
-  transform: scale(0.95);
+.movement-status.active {
+  color: var(--accent-green);
 }
 
 .speed-control {
@@ -1492,8 +1568,9 @@ onUnmounted(() => {
     text-align: center;
   }
   
-  .movement-grid {
-    max-width: 250px;
+  .movement-layout {
+    flex-direction: column;
+    align-items: center;
   }
   
   .mowing-controls, .system-controls {

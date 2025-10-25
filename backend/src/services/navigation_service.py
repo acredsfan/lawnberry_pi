@@ -217,6 +217,7 @@ class NavigationService:
                 status = mission_service.mission_statuses.get(mission_id)
                 if not status or status.status != "running":
                     logger.info("Waypoint navigation interrupted.")
+                    self.nav_service.set_speed(0, 0)
                     return
 
             distance_to_target = self.path_planner.calculate_distance(
@@ -226,14 +227,51 @@ class NavigationService:
 
             if distance_to_target <= self.waypoint_tolerance:
                 logger.info(f"Waypoint reached: {waypoint.lat}, {waypoint.lon}")
+                self.nav_service.set_speed(0, 0) # Stop at waypoint
                 if self.navigation_state.advance_waypoint():
                     logger.info(f"Advanced to next waypoint index: {self.navigation_state.current_waypoint_index}")
                 else:
                     logger.info("Final waypoint in path reached.")
                 break
+
+            # Calculate heading and apply motor commands
+            heading_to_target = self.path_planner.calculate_bearing(
+                self.navigation_state.current_position,
+                target_pos
+            )
+            
+            current_heading = self.navigation_state.heading
+            if current_heading is None:
+                logger.warning("No heading data, cannot navigate.")
+                await asyncio.sleep(1)
+                continue
+
+            heading_error = (heading_to_target - current_heading + 180) % 360 - 180
+            
+            # Proportional controller for turning
+            turn_effort = max(-1.0, min(1.0, heading_error / 45.0)) # Normalize error to [-1, 1] over a 90 degree arc
+            
+            # Set speed
+            forward_speed = self.cruise_speed
+            if abs(heading_error) > 30:
+                forward_speed *= 0.5 # Slow down for sharp turns
+            
+            left_speed = forward_speed * (1 - turn_effort)
+            right_speed = forward_speed * (1 + turn_effort)
+            
+            # Clamp speeds
+            left_speed = max(-self.max_speed, min(self.max_speed, left_speed))
+            right_speed = max(-self.max_speed, min(self.max_speed, right_speed))
+
+            try:
+                self.set_speed(left_speed, right_speed)
+            except Exception as e:
+                logger.error(f"Failed to set motor speed: {e}")
+                self.set_speed(0, 0)
+                return
             
             # Simulation of movement
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.2) # Control loop at 5Hz
     
     async def update_navigation_state(self, sensor_data: SensorData) -> NavigationState:
         """Update navigation state with sensor fusion"""

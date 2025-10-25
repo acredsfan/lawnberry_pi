@@ -131,6 +131,16 @@ def register_global_rate_limiter(app: FastAPI) -> None:
             except Exception:
                 continue
 
+    # Ensure manual control endpoints are permissive enough for continuous joystick inputs.
+    manual_overrides = [
+        ("/api/v2/control/drive", 30.0, 90),
+        ("/api/v2/control/blade", 8.0, 20),
+        ("/api/v2/control/emergency", 5.0, 12),
+    ]
+    for prefix, rate_override, burst_override in manual_overrides:
+        if not any(existing_prefix == prefix for existing_prefix, *_ in overrides):
+            overrides.append((prefix, rate_override, burst_override))
+
     app.add_middleware(
         GlobalRateLimiter,
         refill_rate_per_sec=rate,
