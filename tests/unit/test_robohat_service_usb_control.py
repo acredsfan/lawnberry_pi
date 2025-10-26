@@ -1,7 +1,10 @@
+import json
 import time
+import types
 
 import pytest
 
+from backend.src.services import robohat_service as robohat_module
 from backend.src.services.robohat_service import RoboHATService
 
 
@@ -199,3 +202,74 @@ async def test_maintain_usb_control_waits_for_pending_ack(monkeypatch):
     monkeypatch.setattr(svc, "_set_rc_enabled", fail_set_rc)
 
     await svc._maintain_usb_control()
+
+
+def test_candidate_serial_ports_prioritize_env_and_settings(monkeypatch, tmp_path):
+    env_port = "/dev/env-robohat"
+    profile_port = "/dev/profile-robohat"
+    monkeypatch.setenv("ROBOHAT_PORT", env_port)
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "default.json").write_text(
+        json.dumps({"hardware": {"robohat_port": profile_port}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LAWN_SETTINGS_DIR", str(config_dir))
+
+    class DummyPort:
+        def __init__(self, device: str, description: str = "", manufacturer: str = "", product: str = "", vid: int | None = None):
+            self.device = device
+            self.description = description
+            self.manufacturer = manufacturer
+            self.product = product
+            self.vid = vid
+
+    fake_ports = [
+        DummyPort(
+            "/dev/match0",
+            description="CircuitPython RoboHAT",
+            manufacturer="LawnBerry",
+            vid=0x2E8A,
+        ),
+        DummyPort(
+            "/dev/other",
+            description="u-blox GNSS",
+            manufacturer="u-blox",
+            vid=0x1546,
+        ),
+    ]
+
+    monkeypatch.setattr(robohat_module, "list_ports", types.SimpleNamespace(comports=lambda: fake_ports))
+    monkeypatch.setattr(robohat_module.glob, "glob", lambda pattern: [])
+    monkeypatch.setattr(robohat_module.os.path, "exists", lambda _path: True)
+
+    candidates = robohat_module._candidate_serial_ports()
+
+    assert candidates[0] == env_port
+    assert profile_port in candidates
+    assert "/dev/match0" in candidates
+
+
+@pytest.mark.asyncio
+async def test_initialize_robohat_service_attempts_candidates(monkeypatch):
+    attempts: list[str] = []
+
+    async def fake_initialize(self):  # noqa: ANN001
+        attempts.append(self.serial_port)
+        if self.serial_port == "/dev/ttyACM1":
+            self.status.serial_connected = True
+            self.running = True
+            return True
+        return False
+
+    monkeypatch.setattr(robohat_module, "_candidate_serial_ports", lambda explicit=None: ["/dev/ttyACM0", "/dev/ttyACM1"])
+    monkeypatch.setattr(robohat_module.RoboHATService, "initialize", fake_initialize)
+    monkeypatch.setattr(robohat_module, "robohat_service", None)
+
+    ok = await robohat_module.initialize_robohat_service()
+
+    assert ok is True
+    assert attempts == ["/dev/ttyACM0", "/dev/ttyACM1"]
+    assert robohat_module.robohat_service is not None
+    assert robohat_module.robohat_service.serial_port == "/dev/ttyACM1"
