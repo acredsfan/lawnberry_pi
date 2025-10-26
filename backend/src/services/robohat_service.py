@@ -11,14 +11,21 @@ performing the minimal blocking serial I/O in tiny, protected critical sections.
 """
 
 import asyncio
+import glob
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, Iterable, Optional
 
 import serial
+try:  # Best-effort optional import for USB device enumeration.
+    from serial.tools import list_ports  # type: ignore
+except Exception:  # pragma: no cover - serial.tools may be unavailable in CI
+    list_ports = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -519,14 +526,181 @@ def get_robohat_service() -> Optional[RoboHATService]:
     return robohat_service
 
 
-async def initialize_robohat_service(serial_port: str = "/dev/ttyACM0", baud_rate: int = 115200) -> bool:
-    """Initialize global RoboHAT service"""
+_ROBOHAT_PORT_ENV_VARS: tuple[str, ...] = (
+    "ROBOHAT_SERIAL_PORT",
+    "ROBOHAT_PORT",
+    "LAWN_ROBOHAT_PORT",
+)
+_ROBOHAT_KEYWORDS: tuple[str, ...] = (
+    "robohat",
+    "rp2040",
+    "circuitpython",
+    "cytron",
+    "lawnberry",
+)
+_RP2040_VENDOR_IDS: set[int] = {0x2E8A}  # Raspberry Pi RP2040 VID
+
+
+def _settings_profile_paths() -> Iterable[Path]:
+    """Candidate settings profile files that may contain RoboHAT overrides."""
+
+    env_dir = os.getenv("LAWN_SETTINGS_DIR") or os.getenv("LAWN_CONFIG_DIR")
+    if env_dir:
+        base = Path(env_dir)
+        yield base / "default.json"
+        yield base / "settings.json"
+
+    system_base = Path("/home/pi/lawnberry/config")
+    yield system_base / "default.json"
+    yield system_base / "settings.json"
+
+    project_base = Path(os.getcwd()) / "config"
+    yield project_base / "default.json"
+    yield project_base / "settings.json"
+
+
+def _read_profile_robohat_port() -> Optional[str]:
+    """Extract RoboHAT serial port override from persisted settings if present."""
+
+    for path in _settings_profile_paths():
+        try:
+            if not path.exists():
+                continue
+            data = json.loads(path.read_text(encoding="utf-8"))
+            hardware = data.get("hardware") if isinstance(data, dict) else None
+            port = hardware.get("robohat_port") if isinstance(hardware, dict) else None
+            if isinstance(port, str) and port.strip():
+                return port.strip()
+        except Exception:  # pragma: no cover - permissive best-effort parsing
+            continue
+    return None
+
+
+def _serial_by_id_candidates() -> list[str]:
+    patterns = (
+        "/dev/serial/by-id/*RoboHAT*",
+        "/dev/serial/by-id/*Robo_HAT*",
+        "/dev/serial/by-id/*RP2040*",
+        "/dev/serial/by-id/*CircuitPython*",
+        "/dev/serial/by-id/*Pico*",
+    )
+    candidates: list[str] = []
+    for pattern in patterns:
+        for path in sorted(glob.glob(pattern)):
+            if os.path.exists(path):
+                candidates.append(path)
+    return candidates
+
+
+def _list_ports_candidates() -> list[str]:
+    """Return serial devices that resemble the RoboHAT firmware."""
+
+    if list_ports is None:  # pragma: no cover - serial.tools optional in CI
+        return []
+
+    matches: list[str] = []
+    try:
+        for info in list_ports.comports():  # type: ignore[attr-defined]
+            desc_parts = [
+                getattr(info, "device", ""),
+                getattr(info, "description", ""),
+                getattr(info, "manufacturer", ""),
+                getattr(info, "product", ""),
+            ]
+            descriptor = " ".join(str(p or "") for p in desc_parts).lower()
+            vid = getattr(info, "vid", None)
+            if any(keyword in descriptor for keyword in _ROBOHAT_KEYWORDS):
+                matches.append(info.device)
+            elif isinstance(vid, int) and vid in _RP2040_VENDOR_IDS:
+                matches.append(info.device)
+    except Exception:  # pragma: no cover - enumeration issues should not abort startup
+        return []
+    return matches
+
+
+def _candidate_serial_ports(explicit: Optional[str] = None) -> list[str]:
+    """Build an ordered list of serial ports to try for RoboHAT."""
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+
+    def add(port: Optional[str], *, require_exists: bool = False) -> None:
+        if port is None:
+            return
+        value = str(port).strip()
+        if not value or value in seen:
+            return
+        if require_exists and value.startswith("/dev/") and not os.path.exists(value):
+            return
+        seen.add(value)
+        ordered.append(value)
+
+    add(explicit)
+
+    for env_var in _ROBOHAT_PORT_ENV_VARS:
+        add(os.getenv(env_var))
+
+    add(_read_profile_robohat_port())
+
+    for path in _serial_by_id_candidates():
+        add(path, require_exists=True)
+
+    for path in _list_ports_candidates():
+        add(path, require_exists=True)
+
+    for path in sorted(glob.glob("/dev/ttyACM*")):
+        add(path, require_exists=True)
+    for path in sorted(glob.glob("/dev/ttyUSB*")):
+        add(path, require_exists=True)
+
+    # Always include the historic default as a last resort.
+    add("/dev/ttyACM0")
+
+    return ordered
+
+
+async def initialize_robohat_service(serial_port: Optional[str] = None, baud_rate: int = 115200) -> bool:
+    """Initialize global RoboHAT service, probing common serial ports when needed."""
     global robohat_service
-    
-    if robohat_service is None:
-        robohat_service = RoboHATService(serial_port, baud_rate)
-    
-    return await robohat_service.initialize()
+
+    if (
+        robohat_service
+        and robohat_service.running
+        and robohat_service.status.serial_connected
+        and (serial_port is None or robohat_service.serial_port == serial_port)
+    ):
+        return True
+
+    if robohat_service and robohat_service.running:
+        try:
+            await robohat_service.shutdown()
+        except Exception:  # pragma: no cover - shutdown best-effort
+            pass
+        robohat_service = None
+
+    candidates = _candidate_serial_ports(serial_port)
+    if not candidates:
+        candidates = [serial_port or "/dev/ttyACM0"]
+
+    last_attempt: Optional[RoboHATService] = None
+    for candidate in candidates:
+        svc = RoboHATService(candidate, baud_rate)
+        ok = await svc.initialize()
+        last_attempt = svc
+        if ok:
+            robohat_service = svc
+            logger.info("RoboHAT service initialized on %s", candidate)
+            return True
+        logger.warning(
+            "RoboHAT initialization failed on %s: %s",
+            candidate,
+            svc.status.last_error or "unknown_error",
+        )
+
+    robohat_service = last_attempt
+    if candidates:
+        logger.error("Unable to initialize RoboHAT service; attempted ports: %s", ", ".join(candidates))
+    return False
 
 
 async def shutdown_robohat_service():
