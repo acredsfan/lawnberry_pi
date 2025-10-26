@@ -7,6 +7,16 @@ This release replaces version 1 with a unified v2 backend and frontend, contract
 - Hardened backend authentication by switching to a direct bcrypt-based password manager that safely handles operator credentials longer than 72 bytes.
 - Secrets manager now self-generates a persistent `JWT_SECRET` when missing, avoiding startup failures on fresh installs.
 
+## Enhancements (2025-10-25)
+
+- Manual control camera feed now streams via `/api/v2/camera/stream.mjpeg` with automatic snapshot fallback, reducing perceived latency on the WebUI.
+- Drive commands carry the operator speed slider as `max_speed_limit`, ensuring forward throttle reaches the RoboHAT controller while preserving safety clamps.
+- Motor safety logging correctly reports safety violations instead of raising attribute errors, improving diagnostics when commands are rejected.
+- Camera API endpoints now include dedicated rate-limit allowances and the WebUI identifies itself via `X-Client-Id`, eliminating `429 Too Many Requests` errors during streaming fallback.
+- WebUI detects unavailable MJPEG streams, switches to snapshot mode automatically, and suppresses repetitive console errors for smoother diagnostics.
+- MJPEG snapshot fallback now auto-retries the primary stream after short cooldowns, so camera feeds recover without manual refreshes.
+- Joystick drive commands are coalesced and dispatched at a higher cadence, cutting manual control input lag while staying within rate limits.
+
 ## Highlights
 
 - Hardware telemetry behind SIM_MODE (T102, T110)

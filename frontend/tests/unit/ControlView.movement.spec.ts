@@ -80,42 +80,51 @@ function createMockControlStore() {
   }
 }
 
-async function mountControlView() {
+interface MountOptions {
+  unlock?: boolean
+  keepCameraFeed?: boolean
+}
+
+async function mountControlView(options: MountOptions = {}) {
+  const { unlock = true, keepCameraFeed = false } = options
   const wrapper = mount(ControlView)
   await flushPromises()
   wrapper.vm.session = { session_id: 'session-1' }
-  wrapper.vm.isControlUnlocked = true
-  await flushPromises()
-  // Camera feed introduces timers that are unnecessary for unit tests; stop it immediately.
-  wrapper.vm.stopCameraFeed()
-  await flushPromises()
+  if (unlock) {
+    wrapper.vm.isControlUnlocked = true
+    await flushPromises()
+  }
+  if (!keepCameraFeed) {
+    wrapper.vm.stopCameraFeed()
+    await flushPromises()
+  }
   return wrapper
 }
 
-describe('ControlView manual movement loop', () => {
-  beforeEach(() => {
-    controlStoreContainer.current = createMockControlStore()
-    toastStore.show.mockReset()
-    vi.useFakeTimers()
-    apiClient.get.mockReset()
-    apiClient.post.mockReset()
-    apiClient.get.mockImplementation((url: string) => {
-      if (url.startsWith('/api/v2/camera')) {
-        return Promise.resolve({ data: {} })
-      }
-      if (url === '/api/v2/settings/security') {
-        return Promise.resolve({ data: { security_level: 'password', session_timeout_minutes: 15 } })
-      }
+beforeEach(() => {
+  controlStoreContainer.current = createMockControlStore()
+  toastStore.show.mockReset()
+  vi.useFakeTimers()
+  apiClient.get.mockReset()
+  apiClient.post.mockReset()
+  apiClient.get.mockImplementation((url: string) => {
+    if (url.startsWith('/api/v2/camera')) {
       return Promise.resolve({ data: {} })
-    })
-    apiClient.post.mockResolvedValue({ data: {} })
+    }
+    if (url === '/api/v2/settings/security') {
+      return Promise.resolve({ data: { security_level: 'password', session_timeout_minutes: 15 } })
+    }
+    return Promise.resolve({ data: {} })
   })
+  apiClient.post.mockResolvedValue({ data: {} })
+})
 
-  afterEach(() => {
-    vi.useRealTimers()
-    controlStoreContainer.current = null
-  })
+afterEach(() => {
+  vi.useRealTimers()
+  controlStoreContainer.current = null
+})
 
+describe('ControlView manual movement loop', () => {
   it('streams drive commands while a direction control is held', async () => {
     const wrapper = await mountControlView()
     const store = controlStoreContainer.current
@@ -126,8 +135,9 @@ describe('ControlView manual movement loop', () => {
     expect(store.submitCommand).toHaveBeenCalledTimes(1)
     const initialCall = store.submitCommand.mock.calls.at(0)
     expect(initialCall?.[1]?.reason).toBe('manual-joystick')
+    expect(initialCall?.[1]?.max_speed_limit).toBeCloseTo(0.5, 2)
 
-    await vi.advanceTimersByTimeAsync(220)
+    await vi.advanceTimersByTimeAsync(140)
     await flushPromises()
     expect(store.submitCommand).toHaveBeenCalledTimes(2)
 
@@ -139,7 +149,7 @@ describe('ControlView manual movement loop', () => {
 
     const lastCall = store.submitCommand.mock.calls.at(-1)!
     expect(lastCall[0]).toBe('drive')
-    expect(lastCall[1]).toMatchObject({ vector: { linear: 0, angular: 0 }, reason: 'manual-stop' })
+    expect(lastCall[1]).toMatchObject({ vector: { linear: 0, angular: 0 }, reason: 'manual-stop', max_speed_limit: 0.5 })
 
     wrapper.unmount()
   })
@@ -148,7 +158,6 @@ describe('ControlView manual movement loop', () => {
     const wrapper = await mountControlView()
     const store = controlStoreContainer.current
     const joystick = wrapper.findComponent({ name: 'VirtualJoystickStub' })
-
     joystick.vm.triggerChange({ x: 0, y: 1, magnitude: 1, active: true })
     await flushPromises()
     store.submitCommand.mockClear()
@@ -160,9 +169,36 @@ describe('ControlView manual movement loop', () => {
     expect(store.submitCommand).toHaveBeenCalled()
     const stopCall = store.submitCommand.mock.calls.at(-1)!
     expect(stopCall[0]).toBe('drive')
-    expect(stopCall[1]).toMatchObject({ vector: { linear: 0, angular: 0 }, reason: 'manual-stop' })
+    expect(stopCall[1]).toMatchObject({ vector: { linear: 0, angular: 0 }, reason: 'manual-stop', max_speed_limit: 0.5 })
 
     joystick.vm.triggerEnd()
+    wrapper.unmount()
+  })
+})
+
+describe('ControlView camera stream recovery', () => {
+  it('retries MJPEG streaming after entering snapshot fallback', async () => {
+    const wrapper = await mountControlView({ unlock: false, keepCameraFeed: true })
+    const vm = wrapper.vm as any
+
+    vm.cameraStreamFailureCount = 1
+    vm.cameraStreamUnavailable = false
+    vm.cameraStreamUrl = '/api/v2/camera/stream.mjpeg?client=test'
+
+    vm.handleCameraStreamError()
+    await flushPromises()
+
+    expect(vm.cameraStreamUnavailable).toBe(true)
+    vm.cameraInfo.active = true
+
+    await vm.attemptCameraStreamRecovery()
+    await flushPromises()
+
+    expect(vm.cameraStreamUnavailable).toBe(false)
+    expect(vm.cameraStreamUrl).toMatch(/\/api\/v2\/camera\/stream\.mjpeg/)
+    expect(vm.cameraStreamFailureCount).toBe(0)
+
+    vm.stopCameraFeed()
     wrapper.unmount()
   })
 })

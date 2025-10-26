@@ -311,7 +311,10 @@ class MotorService:
         
         # Check safety conditions
         if not self.safety_system.check_safety_conditions(self.motor_control, sensor_data or {}):
-            logger.warning(f"Drive command blocked by safety: {self.safety_violations}")
+            logger.warning(
+                "Drive command blocked by safety: %s",
+                self.safety_system.safety_violations,
+            )
             self.motor_control.emergency_stop()
             return False
         

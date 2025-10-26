@@ -117,7 +117,7 @@ def register_global_rate_limiter(app: FastAPI) -> None:
     burst = int(os.getenv("GLOBAL_RATE_LIMIT_BURST", "20"))
     # Exempt core health/docs and low-risk settings endpoints by default to avoid
     # test flakiness and allow bursty UI saves; can be overridden via env.
-    exempt_default = "/health,/metrics,/docs,/openapi.json,/api/v2/settings/maps"
+    exempt_default = "/health,/metrics,/docs,/openapi.json,/api/v2/settings/maps,/api/v2/camera/stream.mjpeg"
     exempt = os.getenv("GLOBAL_RATE_LIMIT_EXEMPT", exempt_default).split(",")
     override_str = os.getenv("GLOBAL_RATE_LIMIT_OVERRIDES", "")
     overrides: list[tuple[str, float, int]] = []
@@ -138,6 +138,18 @@ def register_global_rate_limiter(app: FastAPI) -> None:
         ("/api/v2/control/emergency", 5.0, 12),
     ]
     for prefix, rate_override, burst_override in manual_overrides:
+        if not any(existing_prefix == prefix for existing_prefix, *_ in overrides):
+            overrides.append((prefix, rate_override, burst_override))
+
+    camera_overrides = [
+        ("/api/v2/camera/status", 12.0, 36),
+        ("/api/v2/camera/frame", 12.0, 36),
+        ("/api/v2/camera/start", 4.0, 12),
+        ("/api/v2/camera/stop", 4.0, 12),
+        ("/api/v2/camera/configuration", 4.0, 12),
+        ("/api/v2/camera/statistics", 4.0, 12),
+    ]
+    for prefix, rate_override, burst_override in camera_overrides:
         if not any(existing_prefix == prefix for existing_prefix, *_ in overrides):
             overrides.append((prefix, rate_override, burst_override))
 

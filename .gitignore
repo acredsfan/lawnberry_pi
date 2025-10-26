@@ -442,3 +442,4 @@ frontend/tests/unit/test_satellite_settings_persistence.spec.ts
 tests/integration/test_satellite_settings_api.py
 tests/unit/test_manual_control_unlock.py
 data/remote_access_status.json
+console_output.md

@@ -39,6 +39,7 @@ from ..services.calibration_service import (
     DriveControllerUnavailableError,
 )
 from ..services.ntrip_client import NtripForwarder
+from ..services.camera_stream_service import camera_service
 from ..core.persistence import persistence
 from ..services.hw_selftest import run_selftest
 from ..services.weather_service import weather_service
@@ -2683,6 +2684,11 @@ async def control_drive_v2(cmd: dict, request: Request):
     # Contract-style payload
     throttle = float(cmd.get("vector", {}).get("linear", 0.0))
     turn = float(cmd.get("vector", {}).get("angular", 0.0))
+    try:
+        speed_limit = float(cmd.get("max_speed_limit", 0.8))
+    except (TypeError, ValueError):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="max_speed_limit must be numeric")
+    speed_limit = max(0.0, min(1.0, speed_limit))
     
     # Send command to RoboHAT
 
@@ -2695,9 +2701,8 @@ async def control_drive_v2(cmd: dict, request: Request):
         right_speed = throttle + turn
         
         # Clamp to max speed limit
-        max_speed_limit = 0.8
-        left_speed = max(-max_speed_limit, min(max_speed_limit, left_speed))
-        right_speed = max(-max_speed_limit, min(max_speed_limit, right_speed))
+        left_speed = max(-speed_limit, min(speed_limit, left_speed))
+        right_speed = max(-speed_limit, min(speed_limit, right_speed))
         
         # Send to RoboHAT
         success = await robohat.send_motor_command(left_speed, right_speed)
@@ -2718,6 +2723,7 @@ async def control_drive_v2(cmd: dict, request: Request):
                 "component_id": "drive_left",
                 "status": "healthy" if success else "warning",
                 "latency_ms": round(watchdog_latency, 2),
+                "speed_limit": speed_limit,
             },
             timestamp=timestamp.isoformat()
         )
@@ -2735,6 +2741,7 @@ async def control_drive_v2(cmd: dict, request: Request):
                 "component_id": "drive_left",
                 "status": "warning",
                 "latency_ms": 0.0,
+                "speed_limit": speed_limit,
             },
             timestamp=timestamp.isoformat()
         )
@@ -2751,6 +2758,7 @@ async def control_drive_v2(cmd: dict, request: Request):
         principal = session_context.get("principal")
         if principal and "principal" not in details_cmd:
             details_cmd["principal"] = principal
+        details_cmd["max_speed_limit"] = speed_limit
     persistence.add_audit_log("control.drive.v2", details={"command": details_cmd, "response": response.model_dump()})
     
     return response
@@ -4576,146 +4584,197 @@ def weather_planning_advice(latitude: float | None = None, longitude: float | No
 
 # ------------------------ Camera Control ------------------------
 
-from ..services.camera_stream_service import camera_service
-from ..models.camera_stream import CameraStream, CameraConfiguration, CameraFrame
+
+class CameraStatusEnvelope(BaseModel):
+    status: str
+    data: dict[str, Any] | None = None
+    error: Optional[str] = None
 
 
-@router.get("/camera/status")
+def _camera_status_payload() -> dict[str, Any]:
+    stream = camera_service.stream
+    stats = stream.statistics
+    last_frame_time = stream.last_frame_time.isoformat() if stream.last_frame_time else None
+    mode_value = getattr(stream.mode, "value", str(stream.mode)) if stream.mode is not None else "offline"
+    return {
+        "is_active": stream.is_active,
+        "mode": mode_value,
+        "healthy": stream.is_healthy(),
+        "hardware_available": getattr(camera_service, "hardware_available", False),
+        "simulated": bool(getattr(camera_service, "sim_mode", False)),
+        "client_count": stream.client_count,
+        "configuration": stream.configuration.model_dump(mode="json"),
+        "resolution": {
+            "width": stream.configuration.width,
+            "height": stream.configuration.height,
+        },
+        "statistics": {
+            "current_fps": stats.current_fps,
+            "average_fps": stats.average_fps,
+            "target_fps": stats.target_fps,
+            "frames_captured": stats.frames_captured,
+            "frames_dropped": stats.frames_dropped,
+            "bytes_transmitted": stats.bytes_transmitted,
+        },
+        "last_frame_time": last_frame_time,
+        "error": stream.error_message,
+    }
+
+
+@router.get("/camera/status", response_model=CameraStatusEnvelope)
 async def camera_status():
-    """Get camera stream status and statistics."""
+    payload = _camera_status_payload()
+    return CameraStatusEnvelope(status="success", data=payload)
+
+
+@router.post("/camera/start", response_model=CameraStatusEnvelope)
+async def camera_start() -> CameraStatusEnvelope:
     try:
-        if camera_service.stream:
-            return {
-                "status": "success",
-                "data": camera_service.stream.model_dump()
-            }
-        else:
-            return {
-                "status": "error",
-                "error": "Camera service not initialized"
-            }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+        if not camera_service.running:
+            initialized = await camera_service.initialize()
+            if not initialized:
+                return CameraStatusEnvelope(status="error", error="Camera service failed to initialize")
+        started = await camera_service.start_streaming()
+        if not started and not camera_service.stream.is_active:
+            return CameraStatusEnvelope(status="error", error="Unable to start camera stream")
+    except Exception as exc:
+        logger.exception("camera.start.failed")
+        return CameraStatusEnvelope(status="error", error=str(exc))
+    return CameraStatusEnvelope(status="success", data=_camera_status_payload())
+
+
+@router.post("/camera/stop", response_model=CameraStatusEnvelope)
+async def camera_stop() -> CameraStatusEnvelope:
+    try:
+        await camera_service.stop_streaming()
+    except Exception as exc:
+        logger.exception("camera.stop.failed")
+        return CameraStatusEnvelope(status="error", error=str(exc))
+    return CameraStatusEnvelope(status="success", data=_camera_status_payload())
 
 
 @router.get("/camera/frame")
-async def camera_current_frame():
-    """Get the current camera frame."""
+async def camera_frame():
     try:
         frame = await camera_service.get_current_frame()
-        if frame:
-            return {
-                "status": "success",
-                "data": frame.model_dump()
-            }
-        else:
-            return {
-                "status": "error",
-                "error": "No frame available"
-            }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+    except Exception as exc:
+        logger.exception("camera.frame.fetch_failed")
+        return JSONResponse(status_code=500, content={"status": "error", "error": str(exc)})
+
+    if not frame:
+        return {"status": "error", "error": "No frame available"}
+
+    payload = frame.model_dump(mode="json")
+    if not payload.get("data"):
+        raw = frame.get_frame_data()
+        if raw is None:
+            return {"status": "error", "error": "Frame data unavailable"}
+        payload["data"] = base64.b64encode(raw).decode("ascii")
+
+    return {"status": "success", "data": payload}
 
 
-@router.post("/camera/start")
-async def camera_start_streaming():
-    """Start camera streaming."""
-    try:
-        success = await camera_service.start_streaming()
-        return {
-            "status": "success" if success else "error",
-            "message": "Streaming started" if success else "Failed to start streaming"
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+@router.get("/camera/stream.mjpeg")
+async def camera_stream(request: Request):
+    if not camera_service.running:
+        initialized = await camera_service.initialize()
+        if not initialized:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Camera service unavailable")
 
+    if not camera_service.stream.is_active:
+        await camera_service.start_streaming()
 
-@router.post("/camera/stop")
-async def camera_stop_streaming():
-    """Stop camera streaming."""
-    try:
-        await camera_service.stop_streaming()
-        return {
-            "status": "success",
-            "message": "Streaming stopped"
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+    frame_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=3)
+    stop_flag = False
+
+    def _enqueue_frame(frame):
+        nonlocal stop_flag
+        if stop_flag:
+            return
+        try:
+            data = frame.get_frame_data()
+        except Exception:
+            return
+        if not data:
+            return
+        try:
+            while frame_queue.full():
+                frame_queue.get_nowait()
+            frame_queue.put_nowait(data)
+        except asyncio.QueueFull:
+            pass
+        except Exception:
+            logger.debug("camera.stream.enqueue_failed", exc_info=True)
+
+    camera_service.add_frame_callback(_enqueue_frame)
+
+    async def _stream_generator():
+        nonlocal stop_flag
+        boundary = b"--frame\r\n"
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    frame_bytes = await asyncio.wait_for(frame_queue.get(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    continue
+                headers = (
+                    b"Content-Type: image/jpeg\r\n"
+                    + f"Content-Length: {len(frame_bytes)}\r\n\r\n".encode("ascii")
+                )
+                yield boundary + headers + frame_bytes + b"\r\n"
+        finally:
+            stop_flag = True
+            camera_service.remove_frame_callback(_enqueue_frame)
+
+    headers = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+    return StreamingResponse(
+        _stream_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers=headers,
+    )
 
 
 @router.get("/camera/configuration")
 async def camera_get_configuration():
-    """Get camera configuration."""
     try:
-        return {
-            "status": "success",
-            "data": camera_service.stream.configuration.model_dump()
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+        return {"status": "success", "data": camera_service.stream.configuration.model_dump(mode="json")}
+    except Exception as exc:
+        logger.exception("camera.config.fetch_failed")
+        return {"status": "error", "error": str(exc)}
 
 
 @router.post("/camera/configuration")
-async def camera_update_configuration(config: dict):
-    """Update camera configuration."""
+async def camera_update_configuration(config: dict[str, Any]):
     try:
         success = await camera_service.update_configuration(config)
-        return {
-            "status": "success" if success else "error",
-            "message": "Configuration updated" if success else "Configuration update failed"
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+        if not success:
+            return {"status": "error", "error": "Configuration update failed"}
+    except Exception as exc:
+        logger.exception("camera.config.update_failed")
+        return {"status": "error", "error": str(exc)}
+    return {"status": "success", "data": camera_service.stream.configuration.model_dump(mode="json")}
 
 
 @router.get("/camera/statistics")
 async def camera_get_statistics():
-    """Get camera streaming statistics."""
     try:
         stats = await camera_service.get_stream_statistics()
-        return {
-            "status": "success",
-            "data": stats.model_dump()
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+        return {"status": "success", "data": stats.model_dump(mode="json")}
+    except Exception as exc:
+        logger.exception("camera.stats.fetch_failed")
+        return {"status": "error", "error": str(exc)}
 
 
 @router.post("/camera/statistics/reset")
 async def camera_reset_statistics():
-    """Reset camera statistics."""
     try:
         await camera_service.reset_statistics()
-        return {
-            "status": "success",
-            "message": "Statistics reset"
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+    except Exception as exc:
+        logger.exception("camera.stats.reset_failed")
+        return {"status": "error", "error": str(exc)}
+    return {"status": "success", "message": "Statistics reset"}
 
 
 # ------------------------ Docs Hub ------------------------

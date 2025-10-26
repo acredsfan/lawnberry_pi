@@ -6,7 +6,7 @@ Camera frame data and streaming metadata
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict, PrivateAttr
 import base64
 
 
@@ -87,17 +87,28 @@ class CameraFrame(BaseModel):
     stored_to_disk: bool = False
     file_path: Optional[str] = None
     checksum: Optional[str] = None
+
+    _raw_cache: Optional[bytes] = PrivateAttr(default=None)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     
     
     def set_frame_data(self, frame_bytes: bytes):
         """Set frame data from raw bytes"""
+        self._raw_cache = bytes(frame_bytes)
         self.data = base64.b64encode(frame_bytes).decode('utf-8')
         self.metadata.size_bytes = len(frame_bytes)
     
     def get_frame_data(self) -> Optional[bytes]:
         """Get frame data as raw bytes"""
+        if self._raw_cache is not None:
+            return self._raw_cache
         if self.data:
-            return base64.b64decode(self.data)
+            try:
+                raw = base64.b64decode(self.data)
+            except Exception:
+                return None
+            self._raw_cache = raw
+            return raw
         return None
 
 
