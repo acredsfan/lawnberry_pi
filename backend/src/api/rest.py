@@ -2714,7 +2714,7 @@ async def control_drive_v2(cmd: dict, request: Request):
             accepted=success,
             audit_id=audit_id,
             result="accepted" if success else "rejected",
-            status_reason=None if success else "robohat_communication_failed",
+            status_reason=None if success else (robohat.status.last_error or "robohat_communication_failed"),
             watchdog_echo=robohat.status.last_watchdog_echo,
             watchdog_latency_ms=watchdog_latency,
             safety_checks=["emergency_stop_check", "command_validation"],

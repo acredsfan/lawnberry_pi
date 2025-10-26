@@ -524,14 +524,32 @@ class CameraStreamService:
                 quality_key = None
         return quality_map.get(quality_key, 80)
 
-    def _encode_numpy_frame_to_jpeg(self, frame: Any) -> Optional[bytes]:
-        """Encode an RGB numpy frame to JPEG, preferring OpenCV."""
+    def _encode_numpy_frame_to_jpeg(self, frame: Any, *, color_space: Optional[str] = None) -> Optional[bytes]:
+        """Encode a numpy frame to JPEG, respecting the declared colour space."""
         quality = self._resolve_jpeg_quality()
+
+        space = (color_space or "").upper()
+        if not space and hasattr(frame, "ndim"):
+            try:
+                if frame.ndim == 2:
+                    space = "GRAY"
+                elif frame.ndim >= 3 and frame.shape[2] == 4:
+                    space = "RGBA"
+                else:
+                    space = "RGB"
+            except Exception:
+                space = "RGB"
+        if not space:
+            space = "RGB"
 
         if OPENCV_AVAILABLE:
             try:
-                if frame.ndim >= 3 and frame.shape[2] == 3:
+                if space == "RGB":
                     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                elif space == "RGBA":
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                elif space == "BGRA":
+                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
                 else:
                     frame_bgr = frame
                 success, buffer = cv2.imencode(
@@ -545,7 +563,19 @@ class CameraStreamService:
         try:
             from PIL import Image
 
-            image = Image.fromarray(frame)
+            if space == "BGR":
+                frame = frame[:, :, ::-1]
+                mode = "RGB"
+            elif space == "BGRA":
+                frame = frame[:, :, [2, 1, 0, 3]]
+                mode = "RGBA"
+            elif space == "GRAY":
+                mode = "L"
+            elif space == "RGBA":
+                mode = "RGBA"
+            else:
+                mode = "RGB"
+            image = Image.fromarray(frame, mode=mode)
             buffer = io.BytesIO()
             image.save(buffer, format="JPEG", quality=quality)
             return buffer.getvalue()
@@ -562,7 +592,7 @@ class CameraStreamService:
                     return None
 
                 height, width = frame.shape[:2]
-                encoded = self._encode_numpy_frame_to_jpeg(frame)
+                encoded = self._encode_numpy_frame_to_jpeg(frame, color_space="RGB")
                 if encoded:
                     return encoded, (width, height)
 

@@ -108,6 +108,16 @@
         </div>
       </div>
 
+      <div class="controller-health">
+        <div class="controller-chip" :class="`controller-chip--${motorControllerState.severity}`">
+          <span class="controller-chip__label">Motor controller</span>
+          <span class="controller-chip__value">{{ motorControllerState.label }}</span>
+        </div>
+        <p v-if="motorControllerState.message" class="controller-chip__message">
+          {{ motorControllerState.message }}
+        </p>
+      </div>
+
       <!-- Emergency Stop -->
       <div class="emergency-section">
         <button 
@@ -325,6 +335,14 @@ interface CameraStatusSummary {
   client_count: number | null
 }
 
+interface MotorControllerState {
+  ready: boolean
+  serialConnected: boolean
+  severity: 'success' | 'warning' | 'danger' | 'info'
+  label: string
+  message: string | null
+}
+
 const MOVEMENT_DURATION_MS = 160
 const MOVEMENT_REPEAT_INTERVAL_MS = 120
 const CAMERA_RETRY_COOLDOWN_MS = 5000
@@ -442,6 +460,9 @@ let driveDispatchPromise: Promise<void> | null = null
 let driveCommandActive = false
 let pendingDrivePayload: DriveCommandPayload | null = null
 
+const previousMotorReady = ref<boolean | null>(null)
+const previousSerialConnected = ref<boolean | null>(null)
+
 // Derived state
 const canAuthenticate = computed(() => {
   switch (securityConfig.value.auth_level) {
@@ -458,8 +479,12 @@ const canAuthenticate = computed(() => {
   }
 })
 
+const robohatStatus = computed(() => control.robohatStatus as Record<string, any> | null)
+
+const motorControllerState = computed<MotorControllerState>(() => describeMotorController(robohatStatus.value))
+
 const canMove = computed(() =>
-  isControlUnlocked.value && !performing.value && !lockout.value
+  isControlUnlocked.value && !performing.value && !lockout.value && motorControllerState.value.serialConnected
 )
 
 const canSubmitBlade = computed(() =>
@@ -546,6 +571,78 @@ function formatTimeRemaining(seconds: number) {
     return `${secs}s`
   }
   return `${mins}m ${secs.toString().padStart(2, '0')}s`
+}
+
+function describeMotorError(code: string | null | undefined): string | null {
+  if (!code) return null
+  switch (code) {
+    case 'usb_control_unavailable':
+      return 'Waiting for RoboHAT to hand over USB control. Ensure the RC override is off.'
+    case 'pwm_send_failed':
+      return 'Motor PWM command failed to reach the controller. Check USB and power.'
+    case 'blade_command_failed':
+      return 'Blade command failed to reach the controller.'
+    case 'emergency_stop_failed':
+      return 'Emergency stop command did not acknowledge. Reissue if mower keeps moving.'
+    case 'clear_emergency_failed':
+      return 'Emergency clear command did not acknowledge. Verify controller connection.'
+    default:
+      return code.replace(/_/g, ' ')
+  }
+}
+
+function describeMotorController(status: Record<string, any> | null | undefined): MotorControllerState {
+  if (!status) {
+    return {
+      ready: false,
+      serialConnected: true,
+      severity: 'info',
+      label: 'Awaiting status',
+      message: 'No RoboHAT telemetry received yet.'
+    }
+  }
+
+  const serialConnected = status.serial_connected === undefined ? true : Boolean(status.serial_connected)
+  if (!serialConnected) {
+    return {
+      ready: false,
+      serialConnected,
+      severity: 'danger',
+      label: 'Disconnected',
+      message: 'Motor controller USB link not detected. Check cabling and power.'
+    }
+  }
+
+  const errorMessage = describeMotorError(status.last_error)
+  if (status.motor_controller_ok) {
+    return {
+      ready: true,
+      serialConnected,
+      severity: 'success',
+      label: 'Ready',
+      message: status.last_watchdog_echo ? `Echo: ${status.last_watchdog_echo}` : null
+    }
+  }
+
+  if (errorMessage) {
+    const severity = status.last_error === 'usb_control_unavailable' ? 'warning' : 'danger'
+    const label = status.last_error === 'usb_control_unavailable' ? 'Handshake pending' : 'Action required'
+    return {
+      ready: false,
+      serialConnected,
+      severity,
+      label,
+      message: errorMessage
+    }
+  }
+
+  return {
+    ready: false,
+    serialConnected,
+    severity: 'info',
+    label: 'Standby',
+    message: 'Waiting for first motor command acknowledgement.'
+  }
 }
 
 function formatCameraFps(value?: number | null) {
@@ -1112,6 +1209,19 @@ function queueDriveCommand(vector: { linear: number; angular: number }, reason =
     return driveDispatchPromise ?? Promise.resolve()
   }
 
+  if (!motorControllerState.value.serialConnected) {
+    showStatus('Motor controller offline – command not sent', false, 6000)
+    return driveDispatchPromise ?? Promise.resolve()
+  }
+
+  if (
+    !motorControllerState.value.ready &&
+    motorControllerState.value.message &&
+    statusMessage.value !== motorControllerState.value.message
+  ) {
+    showStatus(motorControllerState.value.message, false, 5000)
+  }
+
   pendingDrivePayload = buildDrivePayload(vector, reason, durationMs)
 
   const immediate = options.immediate === true
@@ -1267,6 +1377,33 @@ async function resumeSystem() {
 }
 
 // Reactive updates from store events
+watch(motorControllerState, (state) => {
+  if (previousSerialConnected.value !== null && state.serialConnected !== previousSerialConnected.value) {
+    if (!state.serialConnected) {
+      toast.show('Motor controller disconnected', 'error', 4000)
+      showStatus(state.message || 'Motor controller disconnected', false, 6000)
+    } else {
+      toast.show('Motor controller connected', 'success', 2500)
+      showStatus('Motor controller connected', true, 3000)
+    }
+  }
+
+  if (previousMotorReady.value !== null && state.ready !== previousMotorReady.value) {
+    if (state.ready) {
+      toast.show('Motor controller ready', 'success', 2500)
+      showStatus('Motor controller ready', true, 2500)
+    } else if (state.serialConnected) {
+      toast.show(state.message || 'Motor controller not ready', 'warning', 4000)
+      if (state.message) {
+        showStatus(state.message, false, 6000)
+      }
+    }
+  }
+
+  previousSerialConnected.value = state.serialConnected
+  previousMotorReady.value = state.ready
+}, { immediate: true })
+
 watch(lockout, (value) => {
   if (value) {
     lockControl()
@@ -1395,6 +1532,61 @@ onUnmounted(() => {
 
 .card-body {
   padding: 1.5rem;
+}
+
+.controller-health {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.controller-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--primary-light);
+  background: rgba(255, 255, 255, 0.04);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.controller-chip__label {
+  font-size: 0.7rem;
+  opacity: 0.75;
+}
+
+.controller-chip__value {
+  font-size: 0.9rem;
+}
+
+.controller-chip--success {
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+.controller-chip--warning {
+  border-color: #f6c75f;
+  color: #f6c75f;
+}
+
+.controller-chip--danger {
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+}
+
+.controller-chip--info {
+  border-color: #7bc4ff;
+  color: #7bc4ff;
+}
+
+.controller-chip__message {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .security-info {

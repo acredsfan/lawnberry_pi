@@ -17,6 +17,19 @@ This release replaces version 1 with a unified v2 backend and frontend, contract
 - MJPEG snapshot fallback now auto-retries the primary stream after short cooldowns, so camera feeds recover without manual refreshes.
 - Joystick drive commands are coalesced and dispatched at a higher cadence, cutting manual control input lag while staying within rate limits.
 
+## Fixes (2025-10-26)
+
+- RoboHAT USB watchdog now detects firmware timeouts and reasserts `rc=disable`, ensuring manual joystick drive commands continue to reach the motor controller after idle periods.
+- Added backend unit coverage for RoboHAT USB control keep-alive logic to prevent regressions in manual movement.
+- RoboHAT PWM handshake now waits for explicit firmware acknowledgement before issuing keep-alives or drive commands, eliminating `[USB] Invalid command: pwm` spam and restoring manual joystick responsiveness.
+
+## Fixes (2025-10-27)
+
+- Manual drive endpoints retry RoboHAT USB takeover with adaptive timeouts and surface firmware errors in responses, eliminating silent command drops when RC passthrough lingers.
+- Control WebUI now highlights motor-controller health, blocks dispatch when the USB link is offline, and raises toasts when the controller disconnects or recovers.
+- Camera JPEG encoder respects explicit colour-space hints from PiCamera2 frames, preventing the magenta tint seen in MJPEG streams after the migration to RGB888 capture.
+- Added regression tests for RoboHAT USB acquisition retries, manual unlock TOTP window tolerance, and camera colour encoding to prevent future regressions.
+
 ## Highlights
 
 - Hardware telemetry behind SIM_MODE (T102, T110)

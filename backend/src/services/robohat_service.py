@@ -83,6 +83,9 @@ class RoboHATService:
         self.read_task: Optional[asyncio.Task] = None
         self._serial_lock = asyncio.Lock()
         self._rc_enabled = True
+        self._usb_control_requested = False
+        self._pending_rc_state: Optional[bool] = None
+        self._pending_rc_since: float = 0.0
         self._last_status_at: float = 0.0
         
     async def initialize(self) -> bool:
@@ -105,7 +108,7 @@ class RoboHATService:
             self._drain_serial_buffer()
 
             # Place the firmware in USB (backend) control mode
-            await self._set_rc_enabled(False)
+            await self._set_rc_enabled(False, force=True)
 
             self.status.serial_connected = True
             self.running = True
@@ -161,16 +164,46 @@ class RoboHATService:
             # Non-fatal – buffer draining is best effort
             pass
 
-    async def _set_rc_enabled(self, enabled: bool) -> None:
+    def _mark_rc_state(self, enabled: bool) -> None:
+        """Track the latest RC enable/disable state acknowledgement from firmware."""
+        self._rc_enabled = enabled
+        if self._pending_rc_state is not None:
+            if self._pending_rc_state == enabled:
+                self._pending_rc_state = None
+                self._pending_rc_since = 0.0
+                if enabled:
+                    # An explicit enable acknowledgement corresponds to a backend request
+                    self._usb_control_requested = False
+            else:
+                logger.warning(
+                    "RoboHAT reported RC %s while backend awaited %s",
+                    "enabled" if enabled else "disabled",
+                    "enabled" if self._pending_rc_state else "disabled",
+                )
+                self._pending_rc_state = None
+                self._pending_rc_since = 0.0
+
+    async def _set_rc_enabled(self, enabled: bool, *, force: bool = False) -> None:
         """Toggle RC passthrough on the firmware so USB commands take over."""
-        # Avoid redundant writes so we do not spam the firmware
-        if enabled == self._rc_enabled:
+        if not self.serial_conn or not self.serial_conn.is_open:
             return
+
+        # Record our desired control mode so the watchdog maintains it.
+        self._usb_control_requested = not enabled
+
+        if not force:
+            if self._pending_rc_state is not None and self._pending_rc_state == enabled:
+                return
+            if self._pending_rc_state is None and self._rc_enabled == enabled:
+                return
+
         cmd = "rc=enable" if enabled else "rc=disable"
         if await self._send_line(cmd):
-            # Give firmware a beat to react and emit its acknowledgement
-            await asyncio.sleep(0.1)
-            self._rc_enabled = enabled
+            self._pending_rc_state = enabled
+            self._pending_rc_since = time.monotonic()
+        else:
+            self._pending_rc_state = None
+            self._pending_rc_since = 0.0
     
     async def _watchdog_loop(self):
         """Periodic watchdog ping loop"""
@@ -178,8 +211,7 @@ class RoboHATService:
             try:
                 # When USB control is active, periodically refresh the neutral
                 # PWM command so the firmware keeps RC disabled.
-                if not self._rc_enabled:
-                    await self._send_line("pwm,1500,1500")
+                await self._maintain_usb_control()
 
                 await asyncio.sleep(1.0)
 
@@ -198,6 +230,67 @@ class RoboHATService:
                 logger.error(f"Watchdog loop error: {e}")
                 self.status.watchdog_active = False
                 await asyncio.sleep(1.0)
+
+    async def _maintain_usb_control(self) -> None:
+        """Keep RoboHAT in USB control mode and feed neutral PWM when active."""
+        if not self.serial_conn or not self.serial_conn.is_open:
+            return
+
+        if not self._usb_control_requested:
+            return
+
+        if self._rc_enabled:
+            await self._set_rc_enabled(False)
+            return
+
+        if self._pending_rc_state is not None:
+            if (time.monotonic() - self._pending_rc_since) > 1.0:
+                logger.warning("RoboHAT RC disable acknowledgement still pending; retrying command")
+                await self._set_rc_enabled(False, force=True)
+            return
+
+        await self._send_line("pwm,1500,1500")
+
+    async def _wait_for_usb_control(self, timeout: float = 0.75) -> bool:
+        """Block until the firmware confirms USB control or timeout expires."""
+        if not self.serial_conn or not self.serial_conn.is_open:
+            return False
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not self._rc_enabled and self._pending_rc_state is None:
+                return True
+            await asyncio.sleep(0.02)
+
+        logger.warning("Timed out waiting for RoboHAT to acknowledge USB control")
+        return False
+
+    async def _ensure_usb_control(self, *, timeout: float = 0.75, retries: int = 1) -> bool:
+        """Ensure RoboHAT is in USB control mode, retrying if acknowledgements lag."""
+        if not self.serial_conn or not self.serial_conn.is_open or not self.running:
+            return False
+
+        attempts = max(1, retries + 1)
+        for attempt in range(attempts):
+            try:
+                await self._set_rc_enabled(False, force=attempt > 0)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning(
+                    "Attempt %d/%d to disable RC control failed: %s",
+                    attempt + 1,
+                    attempts,
+                    exc,
+                )
+            adjusted_timeout = timeout + 0.1 * attempt
+            if await self._wait_for_usb_control(timeout=adjusted_timeout):
+                self.status.last_error = None
+                return True
+            await asyncio.sleep(0.05)
+
+        logger.warning("Unable to obtain RoboHAT USB control after %d attempts", attempts)
+        self.status.motor_controller_ok = False
+        self.status.last_error = "usb_control_unavailable"
+        return False
     
     async def _read_loop(self):
         """Continuous read loop for RoboHAT messages"""
@@ -238,20 +331,20 @@ class RoboHATService:
                 self.status.uptime_seconds = int(payload["uptime_seconds"])
             rc_enabled = bool(payload.get("rc_enabled", self._rc_enabled))
             if rc_enabled != self._rc_enabled:
-                self._rc_enabled = rc_enabled
+                self._mark_rc_state(rc_enabled)
             self.status.motor_controller_ok = not rc_enabled
             self.status.encoder_feedback_ok = payload.get("encoder") is not None
             self.status.last_watchdog_echo = "status"
             return
 
-        if "rc enabled" in line_lower:
-            self._rc_enabled = True
+        if "rc enabled" in line_lower or "timeout" in line_lower and "rc mode" in line_lower:
+            self._mark_rc_state(True)
             self._last_status_at = time.monotonic()
             logger.info("RoboHAT reported RC mode active")
             return
 
         if "rc disabled" in line_lower:
-            self._rc_enabled = False
+            self._mark_rc_state(False)
             self._last_status_at = time.monotonic()
             logger.info("RoboHAT reported USB control active")
             return
@@ -264,7 +357,10 @@ class RoboHATService:
 
         if line_lower.startswith("[usb] invalid"):
             # The backend attempted an unsupported command earlier. Count it once.
+            if "pwm" in line_lower:
+                self._mark_rc_state(True)
             logger.warning("RoboHAT rejected command: %s", line)
+            self.status.motor_controller_ok = False
             self.status.error_count += 1
             self.status.last_error = line
             return
@@ -288,8 +384,8 @@ class RoboHATService:
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
             return False
 
-        # Ensure USB control is active before sending PWM updates
-        await self._set_rc_enabled(False)
+        if not await self._ensure_usb_control(timeout=0.9, retries=2):
+            return False
 
         steer_us, throttle_us = self._mix_arcade_to_pwm(left_speed, right_speed)
         ok = await self._send_line(f"pwm,{steer_us},{throttle_us}")
@@ -297,8 +393,10 @@ class RoboHATService:
         if ok:
             self.status.motor_controller_ok = True
             self.status.last_watchdog_echo = f"pwm:{steer_us}/{throttle_us}"
+            self.status.last_error = None
         else:
             self.status.motor_controller_ok = False
+            self.status.last_error = "pwm_send_failed"
         return ok
     
     async def send_blade_command(self, active: bool, speed: float = 1.0) -> bool:
@@ -306,13 +404,17 @@ class RoboHATService:
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
             return False
 
-        await self._set_rc_enabled(False)
+        if not await self._ensure_usb_control(timeout=0.9, retries=2):
+            return False
         command = "blade=on" if active and speed > 0 else "blade=off"
         ok = await self._send_line(command)
         if ok and not active:
             self.status.last_watchdog_echo = "blade:off"
         elif ok:
             self.status.last_watchdog_echo = "blade:on"
+            self.status.last_error = None
+        else:
+            self.status.last_error = "blade_command_failed"
         return ok
     
     async def emergency_stop(self) -> bool:
@@ -321,11 +423,15 @@ class RoboHATService:
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
             return False
 
-        await self._set_rc_enabled(False)
+        usb_ready = await self._ensure_usb_control(timeout=0.6, retries=2)
+        if not usb_ready:
+            logger.warning("Emergency stop proceeding without USB control acknowledgement")
         ok = await self._send_line("pwm,1500,1500")
         ok = await self._send_line("blade=off") and ok
         self.status.motor_controller_ok = False
         self.status.last_watchdog_echo = "emergency_stop"
+        if not ok:
+            self.status.last_error = "emergency_stop_failed"
         return ok
     
     async def clear_emergency(self) -> bool:
@@ -334,8 +440,14 @@ class RoboHATService:
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
             return False
 
-        await self._set_rc_enabled(False)
-        return await self._send_line("rc=disable")
+        if not await self._ensure_usb_control(timeout=0.9, retries=2):
+            return False
+        ok = await self._send_line("rc=disable")
+        if not ok:
+            self.status.last_error = "clear_emergency_failed"
+        else:
+            self.status.last_error = None
+        return ok
     
     def get_status(self) -> RoboHATStatus:
         """Get current RoboHAT status"""
