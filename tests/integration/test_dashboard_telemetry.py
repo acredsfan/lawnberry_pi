@@ -499,7 +499,7 @@ async def test_evidence_capture_for_verification():
             await asyncio.sleep(0.2)
         
         # Save evidence to artifacts directory
-        artifacts_dir = Path("/home/pi/lawnberry/verification_artifacts/001-integrate-hardware-and")
+        artifacts_dir = Path("./verification_artifacts/001-integrate-hardware-and")
         artifacts_dir.mkdir(parents=True, exist_ok=True)
         
         evidence_file = artifacts_dir / "telemetry_integration_evidence.json"

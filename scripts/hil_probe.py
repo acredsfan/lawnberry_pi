@@ -65,7 +65,7 @@ def main() -> int:
     parser.add_argument(
         "--out",
         type=str,
-        default=f"/home/pi/lawnberry/logs/hil_{int(time.time())}.csv",
+        default=f"./logs/hil_{int(time.time())}.csv",
         help="Output CSV path",
     )
     parser.add_argument(

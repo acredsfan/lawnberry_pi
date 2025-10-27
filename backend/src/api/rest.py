@@ -3606,7 +3606,7 @@ async def download_docs_bundle():
     """Download documentation bundle (tarball)"""
     from fastapi.responses import FileResponse
     
-    bundle_dir = Path("/home/pi/lawnberry/verification_artifacts/docs-bundle")
+    bundle_dir = Path("./verification_artifacts/docs-bundle")
     bundle_path = bundle_dir / "docs-bundle.tar.gz"
     
     if not bundle_path.exists():
@@ -3626,7 +3626,7 @@ async def download_docs_bundle():
 async def generate_docs_bundle(format: str = "tarball"):
     """Regenerate documentation bundle"""
     try:
-        script_path = Path("/home/pi/lawnberry/scripts/generate_docs_bundle.py")
+        script_path = Path("./scripts/generate_docs_bundle.py")
         result = subprocess.run(
             [sys.executable, str(script_path), "--format", format],
             capture_output=True,
@@ -3813,7 +3813,7 @@ async def create_verification_artifact(artifact_data: dict):
 async def post_diagnostics_log_bundle(body: dict | None = None):
     """Generate a diagnostics log bundle tar.gz and return its metadata.
 
-    Minimal implementation using in-memory generator, saving to /home/pi/lawnberry/logs/bundles.
+    Minimal implementation using in-memory generator, saving to ./logs/bundles.
     """
     try:
         from ..tools.log_bundle_generator import generate_log_bundle
@@ -3824,7 +3824,7 @@ async def post_diagnostics_log_bundle(body: dict | None = None):
             except Exception:
                 time_range = None
         bundle_id, tar_bytes, size_bytes, included = generate_log_bundle(time_range)
-        out_dir = Path("/home/pi/lawnberry/logs/bundles")
+        out_dir = Path("./logs/bundles")
         out_dir.mkdir(parents=True, exist_ok=True)
         file_path = out_dir / f"bundle_{bundle_id}.tar.gz"
         file_path.write_bytes(tar_bytes)
@@ -4381,7 +4381,7 @@ def put_settings_remote_access(update: dict):
 
 """Maps settings (provider toggle, API key management, style) with persistence"""
 
-MAPS_CONFIG_PATH = Path("/home/pi/lawnberry/config/maps_settings.json")
+MAPS_CONFIG_PATH = Path("./config/maps_settings.json")
 
 def _maps_defaults() -> dict:
     return {

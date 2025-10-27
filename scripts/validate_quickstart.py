@@ -28,7 +28,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 
-ARTIFACT_DIR = Path("/home/pi/lawnberry/verification_artifacts/002-complete-engineering-plan")
+ARTIFACT_DIR = Path("./verification_artifacts/002-complete-engineering-plan")
 ARTIFACT_FILE = ARTIFACT_DIR / "quickstart_validation.json"
 
 

@@ -145,7 +145,7 @@ class PersistenceLayer:
         )
     ]
     
-    def __init__(self, db_path: str = "/home/pi/lawnberry/data/lawnberry.db"):
+    def __init__(self, db_path: str = "data/lawnberry.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_database()

@@ -13,7 +13,7 @@ The automated backup includes:
 - Metadata: system info and systemd statuses
 - Manifest: `MANIFEST.json` listing files with sizes and SHA256 checksums
 
-Backups are stored under `/home/pi/lawnberry/backups/` as compressed archives named `lawnberry-backup-YYYYmmdd_HHMMSS.tar.gz` with a companion `.sha256` file.
+Backups are stored under `./backups/` as compressed archives named `lawnberry-backup-YYYYmmdd_HHMMSS.tar.gz` with a companion `.sha256` file.
 
 Retention keeps the last 14 days by default. Adjust via `BACKUP_RETENTION_DAYS` when running the backup.
 
@@ -38,18 +38,18 @@ journalctl -u lawnberry-backup.service -e
 ## Run a manual backup
 
 ```bash
-/home/pi/lawnberry/scripts/backup_system.sh
+./scripts/backup_system.sh
 ```
 
 Optional environment variables:
 
-- `BACKUP_ROOT_DIR` — target directory (default: `/home/pi/lawnberry/backups`)
+- `BACKUP_ROOT_DIR` — target directory (default: `./backups`)
 - `BACKUP_RETENTION_DAYS` — retention in days (default: `14`)
 
 ## Verify a backup
 
 ```bash
-cd /home/pi/lawnberry/backups
+cd ./backups
 sha256sum -c lawnberry-backup-YYYYmmdd_HHMMSS.tar.gz.sha256
 ```
 
@@ -68,15 +68,15 @@ WARNING: Restoring will overwrite configuration and database. Prefer running thi
 
 ```bash
 # Dry run (shows actions only)
-DRY_RUN=1 /home/pi/lawnberry/scripts/restore_system.sh /home/pi/lawnberry/backups/lawnberry-backup-YYYYmmdd_HHMMSS.tar.gz
+DRY_RUN=1 ./scripts/restore_system.sh ./backups/lawnberry-backup-YYYYmmdd_HHMMSS.tar.gz
 
 # Execute restore
-/home/pi/lawnberry/scripts/restore_system.sh /home/pi/lawnberry/backups/lawnberry-backup-YYYYmmdd_HHMMSS.tar.gz
+./scripts/restore_system.sh ./backups/lawnberry-backup-YYYYmmdd_HHMMSS.tar.gz
 ```
 
 By default, the script will stop and start LawnBerry services via systemd. To skip service control (e.g., inside a container), set `SKIP_SYSTEMCTL=1`.
 
-During restore, the current state is saved at `/home/pi/lawnberry/backups/restore-pre-<timestamp>/` for safety.
+During restore, the current state is saved at `./backups/restore-pre-<timestamp>/` for safety.
 
 ## Security considerations
 
@@ -96,4 +96,4 @@ journalctl -u lawnberry-backup.service -e
 
 ---
 
-For production deployments, consider syncing `/home/pi/lawnberry/backups/` to an external storage or NAS with `rsync` or `rclone` and encrypting archives at rest.
+For production deployments, consider syncing `./backups/` to an external storage or NAS with `rsync` or `rclone` and encrypting archives at rest.

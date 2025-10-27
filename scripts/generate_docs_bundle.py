@@ -26,7 +26,7 @@ class DocumentationBundleGenerator:
     
     FRESHNESS_THRESHOLD_DAYS = 90
     
-    def __init__(self, project_root: Path = Path("/home/pi/lawnberry")):
+    def __init__(self, project_root: Path = Path(".")):
         self.project_root = project_root
         self.docs_dir = project_root / "docs"
         self.output_dir = project_root / "verification_artifacts" / "docs-bundle"
@@ -231,7 +231,7 @@ def main():
     parser.add_argument(
         "--project-root",
         type=Path,
-        default=Path("/home/pi/lawnberry"),
+        default=Path("."),
         help="Project root directory"
     )
     parser.add_argument(

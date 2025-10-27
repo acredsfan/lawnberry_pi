@@ -3,12 +3,12 @@ Description=LawnBerry Pi certificate renewal and validation
 Documentation=README.md
 Wants=network-online.target
 After=network-online.target
-ConditionPathExists=/home/pi/lawnberry/scripts/renew_certificates.sh
+ConditionPathExists=./scripts/renew_certificates.sh
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/pi/lawnberry
-ExecStart=/usr/bin/env bash -lc 'bash /home/pi/lawnberry/scripts/renew_certificates.sh'
+WorkingDirectory=.
+ExecStart=/usr/bin/env bash -lc 'bash ./scripts/renew_certificates.sh'
 User=root
 Group=root
 Nice=10

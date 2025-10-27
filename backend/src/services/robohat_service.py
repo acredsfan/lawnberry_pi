@@ -550,7 +550,7 @@ def _settings_profile_paths() -> Iterable[Path]:
         yield base / "default.json"
         yield base / "settings.json"
 
-    system_base = Path("/home/pi/lawnberry/config")
+    system_base = Path("./config")
     yield system_base / "default.json"
     yield system_base / "settings.json"
 

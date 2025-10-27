@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
-DEFAULT_CACHE_FILE = Path("/home/pi/lawnberry/data/weather_cache.json")
+DEFAULT_CACHE_FILE = Path("./data/weather_cache.json")
 SIX_HOURS_S = 6 * 60 * 60
 
 

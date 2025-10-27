@@ -18,14 +18,14 @@ def test_collect_system_metrics_handles_missing_f_available(monkeypatch):
     )
 
     def fake_statvfs(path: str):
-        assert path == "/home/pi/lawnberry"
+        assert path == "."
         return fake_stat
 
     real_exists = Path.exists
 
     def fake_exists(self: Path) -> bool:
         path_str = str(self)
-        if path_str == "/home/pi/lawnberry":
+        if path_str == ".":
             return True
         if path_str == "/proc/meminfo":
             return False

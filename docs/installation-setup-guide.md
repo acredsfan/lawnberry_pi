@@ -154,7 +154,7 @@ HTTPS is configured automatically during setup with a self-signed certificate, a
    - The site becomes reachable at `https://<pi-ip>/` immediately (your browser will warn about the self-signed certificate until a valid one is installed).
 
 2) Zero-touch Let’s Encrypt (recommended):
-   - Edit `/home/pi/lawnberry/.env` and set:
+   - Edit `./.env` and set:
      - `LB_DOMAIN=your.domain`
      - `LETSENCRYPT_EMAIL=you@domain.com`
      - Optional: `ALT_DOMAINS=www.your.domain,api.your.domain`
@@ -358,19 +358,19 @@ For detailed configuration of advanced features, see the dedicated guides:
 ```bash
 # Create backup of v1 system
 sudo systemctl stop lawnberry-v1
-cp -r /home/pi/lawnberry-v1/data /home/pi/lawnberry-v1-backup/
+cp -r .-v1/data .-v1-backup/
 ```
 
 ### Import Configuration
 ```bash
 # Import v1 settings to v2
-lawnberry-pi migrate from-v1 --config-path /home/pi/lawnberry-v1/config.json
+lawnberry-pi migrate from-v1 --config-path .-v1/config.json
 
 # Import zone definitions
-lawnberry-pi migrate zones --from-v1-db /home/pi/lawnberry-v1/data/zones.db
+lawnberry-pi migrate zones --from-v1-db .-v1/data/zones.db
 
 # Import job history (optional)
-lawnberry-pi migrate jobs --from-v1-db /home/pi/lawnberry-v1/data/jobs.db
+lawnberry-pi migrate jobs --from-v1-db .-v1/data/jobs.db
 ```
 
 ### Verification
@@ -395,7 +395,7 @@ After completing the basic setup:
 
 ## Support & Resources
 
-- **Documentation**: `/home/pi/lawnberry/docs/`
+- **Documentation**: `./docs/`
 - **Configuration**: `lawnberry-pi config --help`
 - **Logs**: `sudo journalctl -u lawnberry-backend -f`
 - **Web Interface**: `http://<pi-ip>:3000`

@@ -39,7 +39,7 @@ if ! id -u lawnberry >/dev/null 2>&1; then
 fi
 
 echo "[+] Setting file permissions"
-BASE_DIR="/home/pi/lawnberry"
+BASE_DIR="."
 LOG_DIR="${BASE_DIR}/logs"
 CONFIG_DIR="${BASE_DIR}/config"
 

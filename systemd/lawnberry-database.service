@@ -11,24 +11,24 @@ User=pi
 Group=pi
 
 # Database initialization and migration
-WorkingDirectory=/home/pi/lawnberry
-Environment=PYTHONPATH=/home/pi/lawnberry
-ExecStart=/bin/bash -lc 'mkdir -p /home/pi/lawnberry/data /home/pi/lawnberry/logs /home/pi/lawnberry/config && \
-    /home/pi/lawnberry/.venv/bin/python /home/pi/lawnberry/scripts/init_database.py'
+WorkingDirectory=.
+Environment=PYTHONPATH=.
+ExecStart=/bin/bash -lc 'mkdir -p ./data ./logs ./config && \
+    ./.venv/bin/python ./scripts/init_database.py'
 
 # Permissions and directory setup
-ExecStartPre=/bin/mkdir -p /home/pi/lawnberry/data
-ExecStartPre=/bin/mkdir -p /home/pi/lawnberry/logs  
-ExecStartPre=/bin/mkdir -p /home/pi/lawnberry/config
+ExecStartPre=/bin/mkdir -p ./data
+ExecStartPre=/bin/mkdir -p ./logs
+ExecStartPre=/bin/mkdir -p ./config
 PermissionsStartOnly=true
-ExecStartPre=/bin/chown -R pi:pi /home/pi/lawnberry
+ExecStartPre=/bin/chown -R pi:pi .
 
 # Security
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
 ProtectSystem=strict
-ReadWritePaths=/home/pi/lawnberry
+ReadWritePaths=.
 
 # Logging
 StandardOutput=journal

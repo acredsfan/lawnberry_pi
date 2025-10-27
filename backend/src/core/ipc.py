@@ -217,7 +217,7 @@ class IPCSocket:
 class IPCCoordinator:
     """Central coordinator for IPC communication between services."""
     
-    def __init__(self, service_name: str, ipc_dir: str = "/home/pi/lawnberry/run/ipc"):
+    def __init__(self, service_name: str, ipc_dir: str = "./run/ipc"):
         self.service_name = service_name
         self.ipc_dir = Path(ipc_dir)
         self.ipc_dir.mkdir(parents=True, exist_ok=True)

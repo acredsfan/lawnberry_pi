@@ -55,10 +55,10 @@ class HealthService:
     def __init__(
         self,
         *,
-        hardware_config_path: Path = Path("/home/pi/lawnberry/config/hardware.yaml"),
-        system_config_path: Path = Path("/home/pi/lawnberry/config/default.json"),
-        remote_access_status_path: Path = Path("/home/pi/lawnberry/data/remote_access_status.json"),
-        database_path: Path = Path("/home/pi/lawnberry/data/lawnberry.db"),
+        hardware_config_path: Path = Path("./config/hardware.yaml"),
+        system_config_path: Path = Path("./config/default.json"),
+        remote_access_status_path: Path = Path("./data/remote_access_status.json"),
+        database_path: Path = Path("./data/lawnberry.db"),
         error_window_seconds: int = 300,
         degrade_error_rate_threshold: float = 0.5,
         critical_error_rate_threshold: float = 2.0,
@@ -376,7 +376,7 @@ class HealthService:
             getattr(
                 observability.config,
                 "log_file_path",
-                "/home/pi/lawnberry/logs/lawnberry.log",
+                "./logs/lawnberry.log",
             )
         )
         target_dir = log_file.parent

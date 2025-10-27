@@ -36,16 +36,13 @@ test.describe('Manual control access', () => {
 
     await expect(page.getByRole('heading', { name: 'Movement Controls' })).toBeVisible()
 
-    const forwardButton = page.getByRole('button', { name: /Forward/ })
-    await forwardButton.dispatchEvent('mousedown')
+    const joystick = page.getByRole('slider', { name: /joystick/i })
+    await joystick.dispatchEvent('mousedown', { clientX: 110, clientY: 0 })
 
-    const statusAlert = page.locator('.alert').first()
-    await expect(statusAlert).toContainText('SAFETY_LOCKOUT')
-
+    await expect.poll(() => backend.driveCommands.length).toBe(1)
     const lockoutActive = await page.evaluate(() => {
       return Boolean((window as any).__APP_TEST_HOOKS__?.controlStore?.lockout)
     })
     expect(lockoutActive).toBe(true)
-    await expect.poll(() => backend.driveCommands.length).toBe(1)
   })
 })

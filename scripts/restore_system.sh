@@ -14,7 +14,7 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 WORK_DIR="$REPO_ROOT/backups/.restore-$TIMESTAMP"
 PRE_BACKUP_DIR="$REPO_ROOT/backups/restore-pre-$TIMESTAMP"
 
-DB_DST="/home/pi/lawnberry/data/lawnberry.db"
+DB_DST="./data/lawnberry.db"
 
 log() { echo "[$(date -Is)] $*"; }
 fail() { echo "[$(date -Is)] ERROR: $*" >&2; exit 1; }

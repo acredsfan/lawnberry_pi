@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class SettingsService:
     """Service for managing settings profiles and configuration persistence"""
     
-    def __init__(self, persistence=None, config_dir: Path = Path("/home/pi/lawnberry/config")):
+    def __init__(self, persistence=None, config_dir: Path = Path("./config")):
         # Default to module-level persistence if not provided (tests patch this symbol)
         self.persistence = persistence if persistence is not None else globals().get("persistence")
         self.config_dir = config_dir
