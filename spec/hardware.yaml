@@ -41,7 +41,8 @@ ai_acceleration:
     runtimes: ["tflite", "opencv-dnn"]
 
 vision:
-  camera: { model: "Pi Camera v2", modes: ["1920x1080@30fps"], notes: "Camera-stream service owns the device; other components consume frames via IPC, never by re-opening the camera." }
+  camera: { model: "Pi Camera v2", modes: ["1920x1080@30fps"], notes: "Camera-stream service owns the device;
+  other components consume frames via IPC, never by re-opening the camera." }
 
 power:
   battery:

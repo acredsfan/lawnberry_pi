@@ -18,7 +18,7 @@ TARGET_FILES=(
 echo "This will rewrite history and remove the following paths from ALL commits:"
 printf '  - %s\n' "${TARGET_FILES[@]}"
 
-echo "\nPress Ctrl+C to abort, or Enter to continue..."
+printf "\nPress Ctrl+C to abort, or Enter to continue..."
 read -r _
 
 # Prefer git filter-repo if available
@@ -33,7 +33,7 @@ else
     git filter-branch --force --index-filter \
       'git rm --cached --ignore-unmatch .env config/secrets.json config/maps_settings.json' \
       --prune-empty --tag-name-filter cat -- --all
-    echo "\nNow force-push all branches and tags:"
+    printf "\nNow force-push all branches and tags:"
     echo "  git push --force --all"
     echo "  git push --force --tags"
     exit 0
@@ -45,6 +45,6 @@ fi
   exit 1
 }
 
-echo "\nHistory rewritten. Force-push to remote to complete the purge:"
+printf "\nHistory rewritten. Force-push to remote to complete the purge:"
 echo "  git push --force --all"
 echo "  git push --force --tags"

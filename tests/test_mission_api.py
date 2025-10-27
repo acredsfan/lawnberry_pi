@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
-from your_main_app import app  # Make sure to import your FastAPI app instance
-from ..src.services.mission_service import get_mission_service, MissionService
-from ..src.models.mission import Mission, MissionWaypoint
+from backend.src.main import app
+from backend.src.services.mission_service import get_mission_service, MissionService
+from backend.src.models.mission import Mission, MissionWaypoint
 from unittest.mock import AsyncMock
 
 # Mock MissionService for testing

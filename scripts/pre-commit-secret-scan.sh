@@ -6,7 +6,6 @@ set -euo pipefail
 
 # Colors
 RED='\033[0;31m'
-GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
@@ -34,7 +33,7 @@ while IFS= read -r file; do
   fi
   if git show :"$file" | grep -E -n "$PATTERN" >/tmp/secret-scan.out 2>/dev/null; then
     echo -e "${RED}❌ Potential secret detected in staged file:${NC} $file"
-    cat /tmp/secret-scan.out | sed -E 's/(AIza[0-9A-Za-z\-_]{35}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{10})/***REDACTED***/g' | sed 's/^/  > /'
+    sed -E 's/(AIza[0-9A-Za-z\-_]{35}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{10})/***REDACTED***/g' /tmp/secret-scan.out | sed 's/^/  > /'
     FOUND=1
   fi
   rm -f /tmp/secret-scan.out || true

@@ -159,7 +159,7 @@ echo "[setup] Complete. You can now run the backend."
 
 # Load .env if present to discover TLS configuration
 if [[ -f "$ROOT_DIR/.env" ]]; then
-  # shellcheck disable=SC1090
+  # shellcheck source=.env
   source "$ROOT_DIR/.env"
 fi
 
@@ -177,7 +177,7 @@ ensure_nginx_https() {
     sudo apt-get update -y && sudo apt-get install -y nginx
   fi
   echo "[setup][https] Ensuring self-signed HTTPS baseline (nginx + redirect + ACME webroot)"
-  sudo FRONTEND_PORT=${FRONTEND_PORT:-3000} BACKEND_PORT=${BACKEND_PORT:-8081} bash "$ROOT_DIR/scripts/setup_https.sh"
+  sudo FRONTEND_PORT="${FRONTEND_PORT:-3000}" BACKEND_PORT="${BACKEND_PORT:-8081}" bash "$ROOT_DIR/scripts/setup_https.sh"
 }
 
 maybe_setup_lets_encrypt() {

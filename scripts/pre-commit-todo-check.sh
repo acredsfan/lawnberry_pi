@@ -21,18 +21,18 @@ for FILE in $STAGED_FILES; do
     # Search for TODO/FIXME/XXX/HACK in staged file
     TODOS=$(grep -n "TODO\|FIXME\|XXX\|HACK" "$FILE" 2>/dev/null || true)
     
-    if [ ! -z "$TODOS" ]; then
+    if [ -n "$TODOS" ]; then
       # Check if TODOs follow proper format: TODO(vX): ... - Issue #N
       INVALID=$(echo "$TODOS" | grep -E "TODO|FIXME|XXX|HACK" | grep -v -E "TODO\(v[0-9]+\):.*Issue #[0-9]+" || true)
       
-      if [ ! -z "$INVALID" ]; then
+      if [ -n "$INVALID" ]; then
         INVALID_TODOS="$INVALID_TODOS\n$FILE:\n$INVALID\n"
       fi
     fi
   fi
 done
 
-if [ ! -z "$INVALID_TODOS" ]; then
+if [ -n "$INVALID_TODOS" ]; then
   echo "❌ Commit rejected: Found improperly formatted TODOs"
   echo ""
   echo -e "$INVALID_TODOS"

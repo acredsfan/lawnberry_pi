@@ -7,8 +7,8 @@ Wants=network-online.target
 Type=oneshot
 User=root
 Group=root
-WorkingDirectory=.
-ExecStart=/bin/bash -lc "PY='./.venv/bin/python'; if [ ! -x \"$PY\" ]; then PY='python3'; fi; cd . && \"$PY\" -m backend.src.cli.acme_renew"
+WorkingDirectory=/apps/lawnberry-pi
+ExecStart=/bin/bash -lc "PY='./.venv/bin/python'; if [ ! -x \"$PY\" ]; then PY='python3'; fi; cd /apps/lawnberry-pi && \"$PY\" -m backend.src.cli.acme_renew"
 
 # Logging
 StandardOutput=journal

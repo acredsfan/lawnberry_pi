@@ -8,10 +8,10 @@ Requires=lawnberry-database.service
 Type=simple
 User=pi
 Group=pi
-WorkingDirectory=.
-Environment=PYTHONPATH=.
+WorkingDirectory=/apps/lawnberry-pi
+Environment=PYTHONPATH=/apps/lawnberry-pi
 Environment=LAWNBERRY_ENV=production
-Environment=LAWNBERRY_CONFIG_DIR=./config
+Environment=LAWNBERRY_CONFIG_DIR=/apps/lawnberry-pi/config
 
 # Sensor manager service (placeholder - will be implemented in integration phase)
 ExecStart=/bin/bash -c 'echo "Sensor manager service placeholder - starting..." && sleep infinity'
@@ -26,7 +26,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
 ProtectSystem=strict
-ReadWritePaths=./logs ./data ./config
+ReadWritePaths=/apps/lawnberry-pi/logs /apps/lawnberry-pi/data /apps/lawnberry-pi/config
 
 # Hardware access for sensors
 SupplementaryGroups=gpio i2c spi dialout

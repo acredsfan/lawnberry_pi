@@ -110,24 +110,26 @@ make_manifest() {
   local manifest="$WORK_DIR/MANIFEST.json"
   local tmpfile="$WORK_DIR/.manifest.tmp"
   : > "$tmpfile"
-  echo '{' >>"$tmpfile"
-  echo '  "timestamp": '"$TIMESTAMP"',' >>"$tmpfile"
-  echo '  "files": {' >>"$tmpfile"
-  # List files and compute sha256
-  local first=1
-  while IFS= read -r -d '' f; do
-    local rel=${f#"$SNAPSHOT_DIR/"}
-    local size
-    size=$(stat -c%s "$f")
-    local sha
-    sha=$(sha256sum "$f" | awk '{print $1}')
-    if [ $first -eq 0 ]; then echo ',' >>"$tmpfile"; fi
-    first=0
-    printf '    "%s": {"size": %s, "sha256": "%s"}' "$rel" "$size" "$sha" >>"$tmpfile"
-  done < <(find "$SNAPSHOT_DIR" -type f -print0 | sort -z)
-  echo '' >>"$tmpfile"
-  echo '  }' >>"$tmpfile"
-  echo '}' >>"$tmpfile"
+  {
+    echo '{'
+    echo '  "timestamp": '"$TIMESTAMP"','
+    echo '  "files": {'
+    # List files and compute sha256
+    local first=1
+    while IFS= read -r -d '' f; do
+      local rel=${f#"$SNAPSHOT_DIR/"}
+      local size
+      size=$(stat -c%s "$f")
+      local sha
+      sha=$(sha256sum "$f" | awk '{print $1}')
+      if [ $first -eq 0 ]; then echo ','; fi
+      first=0
+      printf '    "%s": {"size": %s, "sha256": "%s"}' "$rel" "$size" "$sha"
+    done < <(find "$SNAPSHOT_DIR" -type f -print0 | sort -z)
+    echo
+    echo '  }'
+    echo '}'
+  } >>"$tmpfile"
   mv "$tmpfile" "$manifest"
 }
 
