@@ -9,19 +9,19 @@ Requires=lawnberry-database.service
 Type=exec
 User=pi
 Group=pi
-WorkingDirectory=.
-Environment=PYTHONPATH=.
+WorkingDirectory=/apps/lawnberry-pi
+Environment=PYTHONPATH=/apps/lawnberry-pi
 Environment=LAWNBERRY_ENV=production
-Environment=LAWNBERRY_CONFIG_DIR=./config
-Environment=LAWNBERRY_LOG_DIR=./logs
-Environment=LAWNBERRY_DATA_DIR=./data
+Environment=LAWNBERRY_CONFIG_DIR=/apps/lawnberry-pi/config
+Environment=LAWNBERRY_LOG_DIR=/apps/lawnberry-pi/logs
+Environment=LAWNBERRY_DATA_DIR=/apps/lawnberry-pi/data
 Environment=SIM_MODE=0
 Environment=PYTHONUNBUFFERED=1
 # Load runtime secrets and configuration (e.g., NTRIP_*) from .env if present
-EnvironmentFile=-./.env
+EnvironmentFile=-/apps/lawnberry-pi/.env
 
 # Main service command
-ExecStart=./.venv/bin/uvicorn backend.src.main:app --host 0.0.0.0 --port 8081 --workers 1
+ExecStart=/apps/lawnberry-pi/.venv/bin/uvicorn backend.src.main:app --host 0.0.0.0 --port 8081 --workers 1
 
 # Health checks and monitoring
 ExecReload=/bin/kill -HUP $MAINPID
@@ -39,7 +39,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
 ProtectSystem=strict
-ReadWritePaths=./logs ./data ./config
+ReadWritePaths=/apps/lawnberry-pi/logs /apps/lawnberry-pi/data /apps/lawnberry-pi/config
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

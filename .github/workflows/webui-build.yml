@@ -3,12 +3,23 @@ on: [pull_request]
 jobs:
   build-ui:
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: frontend } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 'lts/*', cache: 'npm', cache-dependency-path: 'frontend/package-lock.json' }
-      - run: npm ci
-      - run: npm run build
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Playwright dependencies
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Start backend server and run e2e tests
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uvicorn backend/src/main:app --host 0.0.0.0 --port 8000 &
+          cd frontend
+          npm run test:e2e

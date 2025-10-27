@@ -55,7 +55,7 @@ fi
 if [[ -f /etc/nginx/nginx.conf ]] && grep -q "server_name _;" /etc/nginx/nginx.conf; then
   echo "Updating server_name to $DOMAIN in nginx.conf"
   sudo sed -i "0,/server_name _;/s//server_name $DOMAIN;/" /etc/nginx/nginx.conf || true
-  sudo nginx -t && sudo systemctl reload nginx || true
+  if sudo nginx -t; then sudo systemctl reload nginx; fi
 fi
 
 # Also update server_name in lawnberry site files if present
@@ -129,15 +129,15 @@ server {
 
     location /.well-known/acme-challenge/ {
         root ${WEBROOT};
-        try_files $uri =404;
+        try_files \$uri =404;
     }
 
     location / {
-        return 301 https://$host$request_uri;
+        return 301 https://\$host\$request_uri;
     }
 }
 ACME
-  sudo nginx -t && sudo systemctl reload nginx
+  if sudo nginx -t; then sudo systemctl reload nginx; fi
 
   sudo certbot certonly \
     --webroot -w "$WEBROOT" \
@@ -155,7 +155,7 @@ fi
 # Update SSL cert paths wherever self-signed was configured
 ts=$(date +%s)
 if [[ -f /etc/nginx/nginx.conf ]]; then
-  sudo cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak.$ts
+  sudo cp /etc/nginx/nginx.conf "/etc/nginx/nginx.conf.bak.$ts"
   if grep -q "/etc/lawnberry/certs/selfsigned/fullchain.pem" /etc/nginx/nginx.conf; then
     sudo sed -i "s#ssl_certificate\s\+/etc/lawnberry/certs/selfsigned/fullchain.pem;#ssl_certificate     $LE_PATH/fullchain.pem;#" /etc/nginx/nginx.conf || true
   fi
@@ -182,7 +182,7 @@ sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh >/dev/null <<'HOO
 #!/usr/bin/env bash
 set -euo pipefail
 if command -v nginx >/dev/null 2>&1; then
-  nginx -t && systemctl reload nginx || true
+  if nginx -t; then systemctl reload nginx; fi
 fi
 HOOK
 sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
@@ -290,7 +290,7 @@ APIEOF
   if [[ -L /etc/nginx/sites-enabled/lawnberry-https ]]; then
     sudo rm -f /etc/nginx/sites-enabled/lawnberry-https
   fi
-  sudo nginx -t && sudo systemctl reload nginx
+  if sudo nginx -t; then sudo systemctl reload nginx; fi
 else
   echo "No API_DOMAIN provided/detected; keeping single HTTPS server (UI + /api proxy)."
 fi
@@ -330,7 +330,7 @@ for site in /etc/nginx/sites-available/*; do
   fi
 done
 
-sudo nginx -t && sudo systemctl reload nginx
+if sudo nginx -t; then sudo systemctl reload nginx; fi
 
 # Optional: verify renew pipeline
 echo "Running certbot renew --dry-run to verify auto-renew works..."

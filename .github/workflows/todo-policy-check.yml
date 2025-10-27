@@ -39,7 +39,8 @@ jobs:
         echo ""
         
         # Check if all TODOs follow the proper format: TODO(vX): ... - Issue #N
-        INVALID_TODOS=$(echo "$RESULTS" | grep -E "TODO|FIXME|XXX|HACK" | grep -v -E "TODO\(v[0-9]+\):.*Issue #[0-9]+" || true)
+        INVALID_TODOS=$(echo "$RESULTS" | grep -E "TODO|FIXME|XXX|HACK" \
+        | grep -v -E "TODO\(v[0-9]+\):.*Issue #[0-9]+" || true)
         
         if [ ! -z "$INVALID_TODOS" ]; then
           echo "❌ Found improperly formatted TODOs:"

@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
-from your_main_app import app  # Make sure to import your FastAPI app instance
-from ..src.services.mission_service import get_mission_service, MissionService
-from ..src.models.mission import Mission, MissionWaypoint
+from backend.src.main import app
+from backend.src.services.mission_service import get_mission_service, MissionService
+from backend.src.models.mission import Mission, MissionWaypoint
 from unittest.mock import AsyncMock
 
 # Mock MissionService for testing
@@ -38,7 +38,7 @@ def test_create_mission(client, mock_mission_service):
     mock_mission_service.create_mission.assert_called_once()
 
 def test_start_mission(client, mock_mission_service):
-    response = client.post("/api/v2/missions/test_mission/start")
+    response = client.post("/api/v2/missions/test_mission/start", json={})
     assert response.status_code == 200
     mock_mission_service.start_mission.assert_called_once_with("test_mission")
 

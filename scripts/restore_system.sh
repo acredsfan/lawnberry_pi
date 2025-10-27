@@ -18,7 +18,7 @@ DB_DST="./data/lawnberry.db"
 
 log() { echo "[$(date -Is)] $*"; }
 fail() { echo "[$(date -Is)] ERROR: $*" >&2; exit 1; }
-run() { if [ "$DRY_RUN" = "1" ]; then echo "+ $*"; else eval "$@"; fi }
+run() { if [ "$DRY_RUN" = "1" ]; then echo "+ $*"; else "$@"; fi }
 
 usage() {
   cat <<EOF
