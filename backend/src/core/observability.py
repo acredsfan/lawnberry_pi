@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover - fallback when psutil is missing
 from .context import get_correlation_id
 from .logging import apply_privacy_filter
 
-DEFAULT_LOG_CONFIG_PATH = Path("/home/pi/lawnberry/config/logging.yaml")
+DEFAULT_LOG_CONFIG_PATH = Path("config/logging.yaml")
 
 
 @dataclass
@@ -41,7 +41,7 @@ class LogConfig:
     log_format: str = "structured"  # "structured" or "plain"
     log_to_file: bool = True
     log_to_console: bool = True
-    log_file_path: str = "/home/pi/lawnberry/logs/lawnberry.log"
+    log_file_path: str = "logs/lawnberry.log"
     max_file_size_mb: int = 10
     backup_count: int = 5
     enable_metrics: bool = True
@@ -214,7 +214,7 @@ class MetricsCollector:
                     load1, _, _ = os.getloadavg()
                     cpu_count = os.cpu_count() or 1
                     cpu_usage = min(100.0, (load1 / cpu_count) * 100)
-                stat = os.statvfs("/home/pi/lawnberry")
+                stat = os.statvfs(".")
                 total = stat.f_blocks * stat.f_frsize
                 free = stat.f_bavail * stat.f_frsize
                 used = total - free

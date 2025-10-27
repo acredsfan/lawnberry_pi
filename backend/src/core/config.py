@@ -71,7 +71,7 @@ class HardwareConfig:
 class ConfigurationManager:
     """Thread-safe configuration management with atomic writes."""
     
-    def __init__(self, config_dir: str = "/home/pi/lawnberry/config"):
+    def __init__(self, config_dir: str = "./config"):
         self.config_dir = Path(config_dir)
         self.config_dir.mkdir(parents=True, exist_ok=True)
         

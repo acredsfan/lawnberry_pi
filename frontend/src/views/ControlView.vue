@@ -291,6 +291,9 @@
     </div>
 
     <!-- Status Messages -->
+    <div v-if="lockout" class="alert alert-danger">
+      {{ lockoutReason }}
+    </div>
     <div v-if="statusMessage" class="alert" :class="statusSuccess ? 'alert-success' : 'alert-danger'">
       {{ statusMessage }}
     </div>

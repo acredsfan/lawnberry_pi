@@ -34,7 +34,7 @@ class SecretRecord:
 class SecretsManager:
     def __init__(self, store_path: Optional[str] = None) -> None:
         # Default to project config directory
-        default_path = "/home/pi/lawnberry/config/secrets.json"
+        default_path = "./config/secrets.json"
         self._path = Path(store_path or os.getenv("LAWN_SECRETS_PATH", default_path))
         self._cache: Dict[str, SecretRecord] = {}
         self._loaded = False

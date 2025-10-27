@@ -8,13 +8,13 @@ Wants=lawnberry-backend.service
 Type=simple
 User=pi
 Group=pi
-WorkingDirectory=/home/pi/lawnberry
-Environment=PYTHONPATH=/home/pi/lawnberry
+WorkingDirectory=.
+Environment=PYTHONPATH=.
 
 # Health monitoring script
 ExecStart=/bin/bash -c 'while true; do \
-    echo "$(date): Health check - Backend API, Database, Sensors" >> /home/pi/lawnberry/logs/health.log; \
-    curl -f http://localhost:8081/health >/dev/null 2>&1 || echo "$(date): Backend API health check failed" >> /home/pi/lawnberry/logs/health.log; \
+    echo "$(date): Health check - Backend API, Database, Sensors" >> ./logs/health.log; \
+    curl -f http://localhost:8081/health >/dev/null 2>&1 || echo "$(date): Backend API health check failed" >> ./logs/health.log; \
     sleep 30; \
 done'
 
@@ -27,7 +27,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
 ProtectSystem=strict
-ReadWritePaths=/home/pi/lawnberry/logs
+ReadWritePaths=./logs
 
 # Resource limits
 LimitNOFILE=64

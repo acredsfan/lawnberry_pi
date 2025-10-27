@@ -90,7 +90,7 @@ Date: 2025-10-03
 - Added example config files: `config/hardware.yaml`, `config/limits.yaml`.
 - Added unit test `tests/unit/test_config_loader.py` covering minimal load path.
 - Updated `pyproject.toml` to include `PyYAML` dependency.
-- Marked T003 complete in `/home/pi/lawnberry/specs/002-complete-engineering-plan/tasks.md`.
+- Marked T003 complete in `./specs/002-complete-engineering-plan/tasks.md`.
 
 Validation:
 - Unit test passes; related contract test `test_driver_registry.py` remains skipped in SIM_MODE.
@@ -233,7 +233,7 @@ Notes:
    - Offline toggle and provider attribution section.
    - Simple tile preview for a given lat/lon/zoom without adding heavy map libs.
 - Added unit tests `frontend/tests/unit/useOfflineMaps.spec.ts` to verify defaults, toggling, and URL format without keys.
-- Marked T098 complete in `/home/pi/lawnberry/specs/004-lawnberry-pi-v2/tasks.md`.
+- Marked T098 complete in `./specs/004-lawnberry-pi-v2/tasks.md`.
 
 ### Validation
 - Frontend tests: PASS (8/8), including offline maps tests.
@@ -275,7 +275,7 @@ Notes / Next Steps:
    - Allow dashboard when authenticated.
    - Redirect `/login` to `/` when already authenticated.
 - Reused the router guard behavior consistent with `src/router/index.ts` in test harness.
-- Marked T097 completed in `/home/pi/lawnberry/specs/004-lawnberry-pi-v2/tasks.md`.
+- Marked T097 completed in `./specs/004-lawnberry-pi-v2/tasks.md`.
 
 ### Validation
 - Frontend tests: PASS (7/7). Backend tests remained green previously; no backend changes made.
@@ -294,7 +294,7 @@ Notes / Next Steps:
 - Added weather API client to `frontend/src/composables/useApi.ts` with `getCurrent()` and `getPlanningAdvice()` methods.
 - Implemented weather panel and planning advice UI in `frontend/src/views/PlanningView.vue` with loading/error states and responsive styling.
 - Created unit tests `frontend/tests/unit/weatherApi.spec.ts` with an axios mock; configured `vitest.config.ts` alias to resolve `@` properly.
-- Marked T084 as completed in `/home/pi/lawnberry/specs/004-lawnberry-pi-v2/tasks.md`.
+- Marked T084 as completed in `./specs/004-lawnberry-pi-v2/tasks.md`.
 
 ### Validation
 - Frontend tests: PASS (7/7) including new weatherApi tests; known benign Vue warning remains in WS resilience test.
@@ -390,7 +390,7 @@ Notes / Next Steps:
 
 ## Session 2025-09-26 - Upstream Tasks Sync
 
-Synchronized upstream tasks file at `/home/pi/lawnberry/specs/004-lawnberry-pi-v2/tasks.md`:
+Synchronized upstream tasks file at `./specs/004-lawnberry-pi-v2/tasks.md`:
 - Marked T095 (Docs drift detection CI) as completed
 - Marked T096 (Systemd health probes + tests) as completed
 
@@ -501,7 +501,7 @@ No code changes in this step; aligns upstream task tracking with implemented fea
 - Verified scripts execute and test passes on ARM64.
 
 ### Notes
-- Defaults to `/home/pi/lawnberry/data` and `/home/pi/lawnberry/backups`; customizable via flags.
+- Defaults to `./data` and `./backups`; customizable via flags.
 - No external dependencies beyond tar.
 
 ---
@@ -639,7 +639,7 @@ Notes:
 - Environment: Executed on Raspberry Pi OS Bookworm (ARM64), no non-ARM64 deps added.
 
 ### Tasks Updated
-- Marked T093 as completed in `/home/pi/lawnberry/specs/004-lawnberry-pi-v2/tasks.md`.
+- Marked T093 as completed in `./specs/004-lawnberry-pi-v2/tasks.md`.
 
 ### PR & Commit
 - Commit: "feat(frontend): WS auto-reconnect with backoff and resubscribe; add resilience test (fix lint issues)"  
@@ -707,7 +707,7 @@ Ensure consistent, Pi-compatible execution with clear commit and review flows, i
 **Objective**: Generate executable tasks.md from Phase 1 design docs following TDD and constitutional rules.
 
 ### Inputs
-- Feature directory (from prerequisites): `/home/pi/lawnberry/specs/004-lawnberry-pi-v2`
+- Feature directory (from prerequisites): `./specs/004-lawnberry-pi-v2`
 - Available docs: `plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`
 - Tasks template: `.specify/templates/tasks-template.md`
 
@@ -722,7 +722,7 @@ Ensure consistent, Pi-compatible execution with clear commit and review flows, i
    - Add performance tests task and align constitutional checks.
 
 ### Output Artifacts
-- Updated: `/home/pi/lawnberry/specs/004-lawnberry-pi-v2/tasks.md`
+- Updated: `./specs/004-lawnberry-pi-v2/tasks.md`
 
 ### Notes
 - Tests are placed before implementation (contract + integration first).
@@ -1347,7 +1347,7 @@ From external tasks.md analysis, the following tasks are effectively complete:
 
 ### Actions Taken
 1. Ran prerequisites script to resolve feature directory and docs:
-   - FEATURE_DIR: `/home/pi/lawnberry/specs/004-lawnberry-pi-v2` (external to workspace; acknowledged for provenance)
+   - FEATURE_DIR: `./specs/004-lawnberry-pi-v2` (external to workspace; acknowledged for provenance)
    - AVAILABLE_DOCS: research.md, data-model.md, contracts/, quickstart.md, tasks.md
 2. Verified backend entrypoint mounts router at `/api/v2`.
 3. Executed backend contract tests: all passing.
@@ -1704,7 +1704,7 @@ Validation:
 
 Platform Notes:
 - No network calls by default; offline/SIM friendly and ARM64-safe
-- Cache persisted to `/home/pi/lawnberry/data/weather_cache.json` with atomic replacement
+- Cache persisted to `./data/weather_cache.json` with atomic replacement
 
 Quality Gates (scoped):
 - Build: PASS

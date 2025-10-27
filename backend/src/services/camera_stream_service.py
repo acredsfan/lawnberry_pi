@@ -87,7 +87,7 @@ class CameraStreamService:
         self.hardware_available = False
         
         # Frame storage
-        self.storage_dir = Path("/var/lib/lawnberry/camera")
+        self.storage_dir = Path("data/camera")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
         try:

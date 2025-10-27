@@ -136,7 +136,7 @@ def _active_cert_info() -> CertInfo:
 
     # 2) Try Let's Encrypt live directory
     env = {**os.environ}
-    env.update(_read_env_file(Path("/home/pi/lawnberry/.env")))
+    env.update(_read_env_file(Path("./.env")))
     domain_hint = env.get("LB_DOMAIN") or env.get("DOMAIN")
     le_path, domain = _detect_le_cert_path(domain_hint)
     if le_path:

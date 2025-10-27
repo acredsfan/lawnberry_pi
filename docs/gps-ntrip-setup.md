@@ -336,7 +336,7 @@ Enable all satellite constellations for best performance:
 2. **Connect to Raspberry Pi** via USB
 3. **Configure LawnBerry Pi**:
 
-Edit `/home/pi/lawnberry/config/hardware.yaml`:
+Edit `./config/hardware.yaml`:
 ```yaml
 gps:
   type: ZED-F9P
@@ -355,7 +355,7 @@ The GPS will automatically connect to the NTRIP caster when powered on, and Lawn
 
 ### Step 1: Create .env File
 
-Create or edit `/home/pi/lawnberry/.env` with your NTRIP credentials:
+Create or edit `./.env` with your NTRIP credentials:
 
 ```bash
 # NTRIP Caster Configuration
@@ -388,7 +388,7 @@ NTRIP_GGA_INTERVAL=10
 
 ### Step 2: Enable NTRIP in Hardware Configuration
 
-Edit `/home/pi/lawnberry/config/hardware.yaml`:
+Edit `./config/hardware.yaml`:
 
 ```yaml
 gps:
@@ -419,10 +419,10 @@ Ensure the `.env` file is secure (contains credentials):
 
 ```bash
 # Set restrictive permissions
-chmod 600 /home/pi/lawnberry/.env
+chmod 600 ./.env
 
 # Verify ownership
-ls -l /home/pi/lawnberry/.env
+ls -l ./.env
 # Should show: -rw------- 1 pi pi
 ```
 
@@ -556,7 +556,7 @@ sudo usermod -a -G dialout pi
 **Solutions:**
 ```bash
 # 1. Verify credentials in .env file
-cat /home/pi/lawnberry/.env | grep NTRIP
+cat ./.env | grep NTRIP
 
 # 2. Test caster connection manually
 telnet rtk2go.com 2101
@@ -952,7 +952,7 @@ http://<base-pi-ip>:80
 
 **Option 1: Direct Connection (Local Network)**
 ```yaml
-# In /home/pi/lawnberry/.env on your rover
+# In ./.env on your rover
 NTRIP_HOST=192.168.1.100  # Your base station's IP
 NTRIP_PORT=2101
 NTRIP_MOUNTPOINT=MY_BASE_01

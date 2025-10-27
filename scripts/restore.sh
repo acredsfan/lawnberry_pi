@@ -4,10 +4,10 @@ set -euo pipefail
 # LawnBerry Pi v2 restore script
 # Usage: restore.sh --archive FILE [--target DIR]
 # Defaults:
-#   TARGET: /home/pi/lawnberry/data
+#   TARGET: ./data
 
 ARCHIVE=""
-TARGET="/home/pi/lawnberry/data"
+TARGET="./data"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

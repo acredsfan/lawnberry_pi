@@ -4,12 +4,12 @@ set -euo pipefail
 # LawnBerry Pi v2 backup script
 # Usage: backup.sh [--src DIR] [--dest DIR] [--name NAME]
 # Defaults:
-#   SRC:  /home/pi/lawnberry/data
-#   DEST: /home/pi/lawnberry/backups
+#   SRC:  ./data
+#   DEST: ./backups
 #   NAME: lawnberry-YYYYmmdd-HHMMSS.tar.gz
 
-SRC="/home/pi/lawnberry/data"
-DEST="/home/pi/lawnberry/backups"
+SRC="./data"
+DEST="./backups"
 NAME=""
 
 while [[ $# -gt 0 ]]; do

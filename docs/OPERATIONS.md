@@ -112,7 +112,7 @@ curl -X POST http://127.0.0.1:8081/api/v2/telemetry/export \
 ## Offline Documentation
 Generate offline documentation bundle:
 ```bash
-cd /home/pi/lawnberry
+cd .
 python scripts/generate_docs_bundle.py
 # Output: verification_artifacts/docs-bundle/lawnberry-docs-{timestamp}.tar.gz
 ```
@@ -178,7 +178,7 @@ Create verification artifacts to record validation evidence:
 ```bash
 curl -X POST http://127.0.0.1:8081/api/v2/verification-artifacts \
   -H "Content-Type: application/json" \
-  -d '{"type":"quickstart","location":"/home/pi/lawnberry/verification_artifacts","summary":"Quickstart passed","linked_requirements":["FR-001","FR-047"],"created_by":"operator"}'
+  -d '{"type":"quickstart","location":"./verification_artifacts","summary":"Quickstart passed","linked_requirements":["FR-001","FR-047"],"created_by":"operator"}'
 ```
 
 ## Settings Management

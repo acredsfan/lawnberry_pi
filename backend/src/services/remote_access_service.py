@@ -23,8 +23,8 @@ from ..core.observability import observability
 
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = Path(os.getenv("REMOTE_ACCESS_CONFIG_PATH", "/home/pi/lawnberry/config/remote_access.json"))
-STATUS_PATH = Path(os.getenv("REMOTE_ACCESS_STATUS_PATH", "/home/pi/lawnberry/data/remote_access_status.json"))
+CONFIG_PATH = Path(os.getenv("REMOTE_ACCESS_CONFIG_PATH", "./config/remote_access.json"))
+STATUS_PATH = Path(os.getenv("REMOTE_ACCESS_STATUS_PATH", "./data/remote_access_status.json"))
 NGROK_CONFIG_DIR = Path(os.getenv("NGROK_CONFIG_DIR", str(Path.home() / ".config" / "ngrok")))
 NGROK_CONFIG_FILE = NGROK_CONFIG_DIR / "lawnberry.yml"
 DEFAULT_NGROK_API_PORT = int(os.getenv("NGROK_API_PORT", "4040"))

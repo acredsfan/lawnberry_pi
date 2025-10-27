@@ -1,2 +1,2 @@
-Warning: Plan template not found at /home/pi/lawnberry/.specify/templates/plan-template.md
-{"FEATURE_SPEC":"/home/pi/lawnberry/specs/005-complete-the-rebuild/spec.md","IMPL_PLAN":"/home/pi/lawnberry/specs/005-complete-the-rebuild/plan.md","SPECS_DIR":"/home/pi/lawnberry/specs/005-complete-the-rebuild","BRANCH":"005-complete-the-rebuild","HAS_GIT":"true"}
+Warning: Plan template not found at ./.specify/templates/plan-template.md
+{"FEATURE_SPEC":"./specs/005-complete-the-rebuild/spec.md","IMPL_PLAN":"./specs/005-complete-the-rebuild/plan.md","SPECS_DIR":"./specs/005-complete-the-rebuild","BRANCH":"005-complete-the-rebuild","HAS_GIT":"true"}

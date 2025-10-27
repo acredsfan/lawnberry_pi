@@ -24,7 +24,7 @@ ARCHIVE_NAME="lawnberry-backup-$TIMESTAMP.tar.gz"
 ARCHIVE_PATH="$BACKUP_ROOT_DIR/$ARCHIVE_NAME"
 SHA_PATH="$ARCHIVE_PATH.sha256"
 
-DB_PATH="/home/pi/lawnberry/data/lawnberry.db"
+DB_PATH="./data/lawnberry.db"
 
 log() { echo "[$(date -Is)] $*"; }
 fail() { echo "[$(date -Is)] ERROR: $*" >&2; exit 1; }

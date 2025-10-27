@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 
 DEFAULT_LOG_DIRS = [
-    Path("/home/pi/lawnberry/logs"),
+    Path("./logs"),
 ]
 
 def generate_log_bundle(time_range_minutes: int | None = None) -> tuple[str, bytes, int, list[str]]:
