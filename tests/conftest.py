@@ -76,6 +76,16 @@ def setup_test_environment():
     os.environ.setdefault("DB_PATH", ":memory:")
     # Reduce log noise in tests
     os.environ.setdefault("LOG_LEVEL", "WARNING")
+
+    # Make rate limiters permissive for testing
+    os.environ["GLOBAL_RATE_LIMIT_RATE"] = "1000"
+    os.environ["GLOBAL_RATE_LIMIT_BURST"] = "10000"
+    os.environ["AUTH_RATE_LIMIT_WINDOW"] = "60"
+    os.environ["AUTH_RATE_LIMIT_MAX_ATTEMPTS"] = "1000"
+    os.environ["AUTH_LOCKOUT_FAILURES"] = "1000"
+    os.environ["AUTH_LOCKOUT_SECONDS"] = "0"
+
+    print("CONFTEST: Set rate limiting environment variables")
     
     yield
     

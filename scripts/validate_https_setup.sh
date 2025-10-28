@@ -39,7 +39,7 @@ if ! command -v nginx >/dev/null 2>&1; then
 fi
 
 echo "[validate] Ensuring baseline HTTPS config via setup_https.sh (idempotent)"
-sudo FRONTEND_PORT=${FRONTEND_PORT:-3000} BACKEND_PORT=${BACKEND_PORT:-8081} bash "$REPO_ROOT/scripts/setup_https.sh"
+sudo FRONTEND_PORT="${FRONTEND_PORT:-3000}" BACKEND_PORT="${BACKEND_PORT:-8081}" bash "$REPO_ROOT/scripts/setup_https.sh"
 
 echo "[validate] Checking nginx configuration syntax"
 sudo nginx -t >/dev/null

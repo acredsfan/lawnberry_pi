@@ -54,6 +54,7 @@ include = ["backend*"]
 testpaths = ["tests"]
 addopts = "-q"
 asyncio_mode = "auto"
+pythonpath = ["."]
 
 [tool.black]
 target-version = ["py311"]

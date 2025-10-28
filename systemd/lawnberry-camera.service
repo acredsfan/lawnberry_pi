@@ -8,9 +8,9 @@ PartOf=lawnberry-backend.service
 Type=simple
 User=pi
 Group=video
-WorkingDirectory=.
+WorkingDirectory=/apps/lawnberry-pi
 Environment=SIM_MODE=0
-ExecStart=/bin/bash -lc "PY='./.venv/bin/python'; if [ ! -x \"$PY\" ]; then PY='python3'; fi; cd . && \"$PY\" -m backend.src.services.camera_stream_service"
+ExecStart=/bin/bash -lc "PY='./.venv/bin/python'; if [ ! -x \"$PY\" ]; then PY='python3'; fi; cd /apps/lawnberry-pi && \"$PY\" -m backend.src.services.camera_stream_service"
 Restart=always
 RestartSec=5
 KillSignal=SIGTERM
@@ -24,7 +24,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
 ProtectSystem=strict
-ReadWritePaths=. /var/lib/lawnberry /tmp
+ReadWritePaths=/apps/lawnberry-pi /var/lib/lawnberry /tmp
 
 # Logging
 StandardOutput=journal

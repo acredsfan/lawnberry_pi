@@ -7,11 +7,11 @@ Wants=network-online.target lawnberry-backend.service
 Type=simple
 User=pi
 Group=pi
-WorkingDirectory=./frontend
+WorkingDirectory=/apps/lawnberry-pi/frontend
 Environment=NODE_ENV=production
 Environment=PORT=3000
 Environment=BACKEND_URL=http://127.0.0.1:8081
-ExecStart=/usr/bin/node ./frontend/server.mjs
+ExecStart=/usr/bin/node /apps/lawnberry-pi/frontend/server.mjs
 Restart=always
 RestartSec=5
 KillSignal=SIGTERM
@@ -22,7 +22,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
 ProtectSystem=strict
-ReadWritePaths=./frontend
+ReadWritePaths=/apps/lawnberry-pi/frontend
 
 # Logging
 StandardOutput=journal

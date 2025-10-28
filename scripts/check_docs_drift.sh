@@ -25,7 +25,7 @@ else
   RANGE="$BASE_REF..$HEAD_REF"
 fi
 
-CHANGED_FILES=$(git diff --name-only $RANGE | tr '\n' '\n')
+CHANGED_FILES=$(git diff --name-only "$RANGE" | tr '\n' '\n')
 
 # No changes (shouldn't happen in CI) => succeed
 if [[ -z "$CHANGED_FILES" ]]; then

@@ -15,7 +15,7 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
 # Load .env if present
 if [[ -f "$REPO_ROOT/.env" ]]; then
-  # shellcheck disable=SC1090
+  # shellcheck source=.env
   source "$REPO_ROOT/.env"
 fi
 
@@ -40,7 +40,7 @@ if [[ -n "$DOMAIN" && -d "/etc/letsencrypt/live/$DOMAIN" ]]; then
   LE_PATH="/etc/letsencrypt/live/$DOMAIN"
 else
   # Pick the first live directory if domain not specified
-  FIRST_LIVE=$(ls -1d /etc/letsencrypt/live/* 2>/dev/null | head -n 1 || true)
+  FIRST_LIVE=$(find /etc/letsencrypt/live -mindepth 1 -maxdepth 1 -type d | head -n 1 || true)
   if [[ -n "$FIRST_LIVE" ]]; then
     LE_PATH="$FIRST_LIVE"
   fi
@@ -69,7 +69,7 @@ switch_nginx_to_self_signed(){
       sed -i "s#ssl_certificate_key\s\+/etc/letsencrypt/live/[^;]*/privkey.pem;#ssl_certificate_key $SELF_DIR/privkey.pem;#" "$f" || true
     fi
   done
-  nginx -t && systemctl reload nginx || true
+  if nginx -t; then systemctl reload nginx; fi
 }
 
 check_cert_expiry(){
@@ -97,7 +97,7 @@ renew(){
     return 1
   fi
   if nginx -t; then
-    systemctl reload nginx || true
+    systemctl reload nginx
   fi
 }
 
@@ -128,7 +128,7 @@ main(){
   # Validate again with 7-day window
   if check_cert_expiry "$pem" $((7*24*3600)); then
     log_info "Certificate is valid for at least 7 more days; keeping Let's Encrypt configuration"
-    nginx -t && systemctl reload nginx || true
+    if nginx -t; then systemctl reload nginx; fi
     exit 0
   else
     log_warn "Certificate still expiring soon (<7 days) or invalid after renewal"
