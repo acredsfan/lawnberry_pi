@@ -94,6 +94,9 @@ class RoboHATService:
         self._pending_rc_state: Optional[bool] = None
         self._pending_rc_since: float = 0.0
         self._last_status_at: float = 0.0
+        # Track last PWM sent so we can refresh it to avoid firmware USB timeout
+        self._last_pwm: tuple[int, int] = (1500, 1500)
+        self._last_pwm_at: float = 0.0
         
     async def initialize(self) -> bool:
         """Initialize RoboHAT serial connection"""
@@ -255,8 +258,13 @@ class RoboHATService:
                 logger.warning("RoboHAT RC disable acknowledgement still pending; retrying command")
                 await self._set_rc_enabled(False, force=True)
             return
-
-        await self._send_line("pwm,1500,1500")
+        # Refresh the last commanded PWM periodically to prevent the firmware
+        # from timing out back to RC mode (SERIAL_TIMEOUT ≈ 2s on firmware).
+        now = time.monotonic()
+        if (now - max(self._last_status_at, self._last_pwm_at)) >= 0.9:
+            steer_us, thr_us = self._last_pwm
+            await self._send_line(f"pwm,{steer_us},{thr_us}")
+            self._last_pwm_at = now
 
     async def _wait_for_usb_control(self, timeout: float = 0.75) -> bool:
         """Block until the firmware confirms USB control or timeout expires."""
@@ -401,6 +409,10 @@ class RoboHATService:
             self.status.motor_controller_ok = True
             self.status.last_watchdog_echo = f"pwm:{steer_us}/{throttle_us}"
             self.status.last_error = None
+            # Record last PWM so watchdog can refresh the same command and
+            # prevent firmware USB timeout during longer manoeuvres.
+            self._last_pwm = (steer_us, throttle_us)
+            self._last_pwm_at = time.monotonic()
         else:
             self.status.motor_controller_ok = False
             self.status.last_error = "pwm_send_failed"
@@ -434,6 +446,9 @@ class RoboHATService:
         if not usb_ready:
             logger.warning("Emergency stop proceeding without USB control acknowledgement")
         ok = await self._send_line("pwm,1500,1500")
+        # Record neutral PWM as last command to maintain safe stop if needed
+        self._last_pwm = (1500, 1500)
+        self._last_pwm_at = time.monotonic()
         ok = await self._send_line("blade=off") and ok
         self.status.motor_controller_ok = False
         self.status.last_watchdog_echo = "emergency_stop"
