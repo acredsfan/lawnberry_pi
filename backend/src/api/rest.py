@@ -1709,22 +1709,57 @@ async def _require_session(request: Request) -> UserSession:
 
 
 async def _authorize_websocket(websocket: WebSocket) -> UserSession:
+    """Authorize websocket connections.
+
+    Priority:
+    1) Authorization: Bearer <token>
+    2) Query param: access_token/token/auth_token
+    3) Cloudflare Access assertion headers (when present)
+    4) Local development (localhost/127.0.0.1) and SIM_MODE
+    """
+    # 1) Standard Bearer header
     token = _extract_bearer_token(websocket.headers.get("Authorization"))
+
+    # 2) Query param fallbacks used by browsers that cannot set custom headers in WS
     if not token:
+        try:
+            qp = getattr(websocket, "query_params", None)
+            if qp is not None:
+                getter = getattr(qp, "get", None)
+                if callable(getter):
+                    token = getter("access_token") or getter("token") or getter("auth_token")
+        except Exception:
+            token = None
+
+    if token:
+        session = await _auth_service.verify_token(token)
+        if not session:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return session
+
+    # 3) Cloudflare Access: trust Access assertion when Zero Trust policy already enforced at edge
+    try:
+        cf_assert = websocket.headers.get("CF-Access-Jwt-Assertion") or websocket.headers.get("cf-access-jwt-assertion")
+    except Exception:
+        cf_assert = None
+    if cf_assert:
+        # Create an operator session bound to the connecting IP as a best-effort identity
         client = websocket.client
-        if client is not None:
-            host = (client[0] if isinstance(client, (list, tuple)) else getattr(client, "host", None)) or ""
-        else:
-            host = websocket.headers.get("host", "")
-        host_lower = str(host).lower()
-        if host_lower.startswith("127.") or host_lower in {"::1", "localhost", "testserver", "testclient"} or os.getenv("SIM_MODE", "0") == "1":
-            session = UserSession.create_operator_session(client_ip=host_lower or None, user_agent=websocket.headers.get("User-Agent"))
-            return session
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    session = await _auth_service.verify_token(token)
-    if not session:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    return session
+        client_ip = (client[0] if isinstance(client, (list, tuple)) else getattr(client, "host", None)) if client is not None else None
+        return UserSession.create_operator_session(client_ip=str(client_ip) if client_ip else None, user_agent=websocket.headers.get("User-Agent"))
+
+    # 4) Local dev and SIM_MODE safe path
+    client = websocket.client
+    if client is not None:
+        host = (client[0] if isinstance(client, (list, tuple)) else getattr(client, "host", None)) or ""
+    else:
+        host = websocket.headers.get("host", "")
+    host_lower = str(host).lower()
+    if host_lower.startswith("127.") or host_lower in {"::1", "localhost", "testserver", "testclient"} or os.getenv("SIM_MODE", "0") == "1":
+        session = UserSession.create_operator_session(client_ip=host_lower or None, user_agent=websocket.headers.get("User-Agent"))
+        return session
+
+    raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @router.post("/auth/login", response_model=AuthResponse)

@@ -51,6 +51,16 @@ export const useMissionStore = defineStore('mission', () => {
     waypoints.value = newOrder;
   };
 
+  const removeLastWaypoint = () => {
+    if (waypoints.value.length > 0) {
+      waypoints.value = waypoints.value.slice(0, -1);
+    }
+  };
+
+  const clearWaypoints = () => {
+    waypoints.value = [];
+  };
+
   const createMission = async (name: string) => {
     try {
       const response = await apiService.post<Mission>('/api/v2/missions/create', {
@@ -145,6 +155,8 @@ export const useMissionStore = defineStore('mission', () => {
     removeWaypoint,
     updateWaypoint,
     reorderWaypoints,
+    removeLastWaypoint,
+    clearWaypoints,
     createMission,
     startCurrentMission,
     pauseCurrentMission,

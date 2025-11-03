@@ -594,6 +594,16 @@ Notes:
 - If you prefer direct backend access too, add a second public hostname mapping `lawnberry-backend.yourdomain.com` → `http://localhost:8081`.
 - Cloudflare tunnels created via token (no local config.yml) manage hostnames from the dashboard; local `/etc/cloudflared/config.yml` may not exist.
 
+4. **WebSocket 401 Unauthorized (remote access)**:
+
+When accessing the UI through a tunnel/proxy, browsers cannot set custom headers on WebSocket upgrades. The backend now supports passing the session token via query params. Ensure:
+
+- You are logged in to the UI (a valid token is stored in localStorage).
+- The frontend will automatically append `?access_token=<token>` to the telemetry/control WS URLs.
+- If using Cloudflare Access, the `CF-Access-Jwt-Assertion` header is accepted for WS authorization when Access policy already authenticated the user.
+
+If you still see WS failures, live telemetry will fall back to REST polling. Check the browser console network tab for 401/403 responses on `/api/v2/ws/telemetry` or `/ws/telemetry` and adjust Access policies accordingly.
+
 ### Debug Commands
 
 ```bash

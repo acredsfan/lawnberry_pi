@@ -15,17 +15,30 @@ export class WebSocketService {
   private reconnectDelay = 1000
   private subscriptions = new Set<string>()
   private listeners = new Map<string, Array<(data: any) => void>>()
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  private lastPongAt = 0
 
   private urlCandidates: string[]
   private urlIndex = 0
 
   constructor(private url: string) {
-    // Build fallback candidates: primary /api/v2/ws/telemetry, then /ws
+    // Build fallback candidates:
+    // - primary (e.g., /api/v2/ws/telemetry)
+    // - legacy without /api/v2 prefix but preserving channel (e.g., /ws/telemetry)
     try {
       const u = new URL(url)
-      const alt = `${u.protocol}//${u.host}/ws`
-      this.urlCandidates = [url]
-      if (alt !== url) this.urlCandidates.push(alt)
+      const path = u.pathname
+      let altPath = path
+      // Replace only the "/api/v2/ws/" prefix while preserving trailing channel
+      if (path.startsWith('/api/v2/ws/')) {
+        altPath = path.replace(/^\/api\/v2\/ws\//, '/ws/')
+      } else if (path === '/api/v2/ws') {
+        altPath = '/ws'
+      }
+      const primary = `${u.protocol}//${u.host}${path}`
+      const alt = `${u.protocol}//${u.host}${altPath}`
+      this.urlCandidates = [primary]
+      if (alt !== primary) this.urlCandidates.push(alt)
     } catch {
       // Fallback if URL parsing fails
       this.urlCandidates = [url]
@@ -52,6 +65,9 @@ export class WebSocketService {
           })
             // Optional: set default cadence
             this.setCadence(5)
+
+            // Start heartbeat to keep proxies/tunnels alive (Cloudflare, etc.)
+            this.startHeartbeat()
           
           resolve()
           }
@@ -67,11 +83,24 @@ export class WebSocketService {
         
           this.ws.onclose = () => {
             console.log('WebSocket disconnected')
+            this.stopHeartbeat()
             this.handleReconnect()
           }
         
           this.ws.onerror = (error) => {
-            console.error('WebSocket error:', error)
+            // Reduce console noise by rate-limiting error logs
+            try {
+              ;(window as any).__ws_last_err ||= 0
+              const now = Date.now()
+              if (now - (window as any).__ws_last_err > 15000) {
+                console.error('WebSocket error:', error)
+                ;(window as any).__ws_last_err = now
+              }
+            } catch {
+              // Fallback if window guard fails
+              console.error('WebSocket error:', error)
+            }
+            this.stopHeartbeat()
             // Try alternate candidate once before giving up initial connect
             if (this.urlCandidates.length > 1 && this.urlIndex < this.urlCandidates.length - 1) {
               this.urlIndex++
@@ -117,7 +146,7 @@ export class WebSocketService {
         console.error('Subscription error:', message)
         break
       case 'pong':
-        console.log('Received pong')
+        this.lastPongAt = Date.now()
         break
       default:
         console.log('Unhandled message:', message)
@@ -138,19 +167,31 @@ export class WebSocketService {
   }
 
   private handleReconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+    if (this.maxReconnectAttempts >= 0 && this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.warn('Max reconnection attempts reached — switching to fallback polling only')
+      return
+    }
+    if (this.maxReconnectAttempts < 0 || this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++
       const backoff = this.reconnectDelay * this.reconnectAttempts
       const jitter = Math.floor(Math.random() * 250)
-      console.log(`Attempting to reconnect... (${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${backoff + jitter}ms`)
+      // Throttle reconnection log chatter
+      try {
+        ;(window as any).__ws_last_reconnect_log ||= 0
+        const now = Date.now()
+        if (now - (window as any).__ws_last_reconnect_log > 10000) {
+          console.log(`Attempting to reconnect... (#${this.reconnectAttempts}) in ${backoff + jitter}ms`)
+          ;(window as any).__ws_last_reconnect_log = now
+        }
+      } catch {
+        // best-effort
+      }
 
       // Only rotate if previous attempt failed immediately (onerror). If connection existed, keep same index.
 
       setTimeout(() => {
         this.connect().catch(() => {/* handled inside connect */})
       }, backoff + jitter)
-    } else {
-      console.error('Max reconnection attempts reached')
     }
   }
 
@@ -240,6 +281,7 @@ export class WebSocketService {
       this.ws.close()
       this.ws = null
     }
+    this.stopHeartbeat()
     this.subscriptions.clear()
     this.listeners.clear()
     this.reconnectAttempts = 0
@@ -247,6 +289,34 @@ export class WebSocketService {
 
   get isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
+  }
+
+  private startHeartbeat() {
+    this.lastPongAt = Date.now()
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+    // Send an application-level ping every 25s
+    this.heartbeatTimer = setInterval(() => {
+      try {
+        this.ping()
+        // If we haven't seen a pong in 60s, force a reconnect
+        if (Date.now() - this.lastPongAt > 60_000) {
+          console.warn('WebSocket heartbeat stale; forcing reconnect')
+          this.ws?.close()
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 25_000)
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
   }
 
   dispatchTestMessage(message: WebSocketMessage) {
@@ -268,6 +338,17 @@ export function useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handle
     wsUrl = `${protocol}//${host}/api/v2/ws/telemetry`
   } else {
     wsUrl = `${protocol}//${host}/api/v2/ws/control`
+  }
+  // Attach access token for authenticated websocket upgrade when required by server
+  try {
+    const token = localStorage.getItem('auth_token')
+    if (token) {
+      const url = new URL(wsUrl)
+      url.searchParams.set('access_token', token)
+      wsUrl = url.toString()
+    }
+  } catch {
+    // ignore
   }
   const wsService = new WebSocketService(wsUrl)
 

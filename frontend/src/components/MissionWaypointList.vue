@@ -1,6 +1,12 @@
 <template>
   <div class="waypoint-list">
-    <h2>Waypoints</h2>
+    <div class="header-row">
+      <h2>Waypoints</h2>
+      <div class="list-actions" v-if="missionStore.waypoints.length">
+        <button class="btn btn-xs" @click="undoLast">Undo last</button>
+        <button class="btn btn-xs btn-danger" @click="clearAll">Clear all</button>
+      </div>
+    </div>
     <Draggable v-model="localWaypoints" item-key="id" @end="onDragEnd">
       <template #item="{ element: waypoint, index }">
         <li class="waypoint-item">
@@ -43,6 +49,16 @@ const updateWaypoint = (waypoint: Waypoint) => {
 const onDragEnd = () => {
   missionStore.reorderWaypoints(localWaypoints.value);
 };
+
+function clearAll() {
+  if (missionStore.waypoints.length && confirm('Clear all waypoints?')) {
+    missionStore.clearWaypoints();
+  }
+}
+
+function undoLast() {
+  missionStore.removeLastWaypoint();
+}
 </script>
 
 <style scoped>
@@ -63,4 +79,14 @@ const onDragEnd = () => {
   gap: 1rem;
   align-items: center;
 }
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .5rem;
+}
+.btn { padding: .25rem .5rem; border: 1px solid var(--primary-light); background: var(--primary-dark); color: var(--text-color); border-radius: 4px; cursor: pointer; }
+.btn-xs { font-size: .75rem; }
+.btn-danger { background: #5a1a1a; border-color: #a33; color: #fff; }
+.list-actions { display: flex; gap: .5rem; }
 </style>

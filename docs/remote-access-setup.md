@@ -467,6 +467,29 @@ lawnberry-pi security status --check-all
    curl http://localhost:8081/api/v1/status
    ```
 
+3. **WebSockets not connecting (Mission Planner telemetry frozen)**:
+    - Symptoms: Browser console shows repeated `WebSocket connection failed` for `/api/v2/ws/telemetry` or `/ws/telemetry`.
+    - Causes: Cloudflare Tunnel not permitting WebSockets, Zero Trust policy blocking upgrade requests, or missing auth on WS.
+    - Fixes:
+      1) Enable WebSockets in Cloudflare:
+          - Dashboard → Network → WebSockets = ON.
+          - If using Zero Trust Tunnel, ensure the application policy allows WS upgrade (no block rules on `Upgrade: websocket`).
+      2) Tunnel config for WS passthrough:
+          - In `~/.cloudflared/config.yml`, do NOT set `http2Origin: true` for the origin serving WS.
+          - Ensure the ingress service uses plain HTTP to localhost (e.g., `service: http://localhost:8081`). Cloudflared upgrades to WSS for you.
+      3) Idle timeout/heartbeats:
+          - Cloudflare can idle-close long-lived WS. The frontend sends application pings every 25s; set Cloudflare idle timeout ≥ 60s.
+      4) Authentication for WS:
+          - The backend now accepts an `access_token` query param on the WS URL. Make sure you are logged in via the UI; the browser will attach your token automatically.
+          - If you enforce Cloudflare Access, the backend also accepts the `CF-Access-Jwt-Assertion` on WS upgrades.
+      5) Alternate path:
+          - Both `/api/v2/ws/telemetry` and legacy `/ws/telemetry` are supported. If one path is blocked by a rule, try the other.
+    - Validation:
+      ```bash
+      # Test WS upgrade from the Pi (optional)
+      websocat ws://localhost:8081/api/v2/ws/telemetry
+      ```
+
 #### ngrok Issues
 
 1. **Tunnel disconnecting**:
