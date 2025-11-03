@@ -613,6 +613,14 @@ class WebSocketHub:
                         self._gps_warm_done = True
 
                 data = await manager.read_all_sensors()
+                try:
+                    # Feed fresh sensor data into NavigationService for closed-loop control
+                    from ..services.navigation_service import NavigationService as _NavSvc  # local import to avoid cycles
+                    nav = _NavSvc.get_instance()
+                    await nav.update_navigation_state(data)
+                except Exception as exc:
+                    # Non-fatal: navigation state updates should not break telemetry
+                    logger.debug("Navigation state update failed: %s", exc)
             except Exception as exc:
                 logger.warning("SensorManager telemetry read failed: %s", exc)
             else:
@@ -1863,6 +1871,8 @@ class MowerStatus(BaseModel):
 def dashboard_status():
     # Placeholder data; will be wired to services later
     return MowerStatus()
+
+
 
 
 # ----------------------- System / Timezone -----------------------

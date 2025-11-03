@@ -6,7 +6,8 @@ Path planning, navigation, and sensor fusion with safety constraints
 import asyncio
 import logging
 import math
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Tuple, Dict, Any
 
 from ..models import (
@@ -14,6 +15,7 @@ from ..models import (
     NavigationMode, PathStatus, SensorData
 )
 from ..nav.path_planner import PathPlanner
+from .robohat_service import get_robohat_service
 
 logger = logging.getLogger(__name__)
 
@@ -200,11 +202,15 @@ class NavigationService:
         target_pos = Position(latitude=waypoint.lat, longitude=waypoint.lon)
         logger.info(f"Navigating to waypoint: {target_pos.latitude}, {target_pos.longitude}")
 
-        # Here you would set motor commands based on heading to target
-        # e.g., self.motor_service.set_speed_and_direction(...)
-        
-        # Placeholder for blade control
-        # e.g., self.blade_service.set_blade_on(waypoint.blade_on)
+        # Engage/disengage blade for this leg when hardware is available
+        try:
+            if os.getenv("SIM_MODE", "0") == "0":
+                robohat = get_robohat_service()
+                if robohat is not None and robohat.running and robohat.status.serial_connected:
+                    await robohat.send_blade_command(bool(waypoint.blade_on))
+        except Exception:
+            # Blade command failures should not abort navigation
+            logger.warning("Blade command failed or unavailable; continuing movement")
 
         while True:
             if not self.navigation_state.current_position:
@@ -217,7 +223,7 @@ class NavigationService:
                 status = mission_service.mission_statuses.get(mission_id)
                 if not status or status.status != "running":
                     logger.info("Waypoint navigation interrupted.")
-                    self.nav_service.set_speed(0, 0)
+                    await self.set_speed(0.0, 0.0)
                     return
 
             distance_to_target = self.path_planner.calculate_distance(
@@ -227,7 +233,7 @@ class NavigationService:
 
             if distance_to_target <= self.waypoint_tolerance:
                 logger.info(f"Waypoint reached: {waypoint.lat}, {waypoint.lon}")
-                self.nav_service.set_speed(0, 0) # Stop at waypoint
+                await self.set_speed(0.0, 0.0)  # Stop at waypoint
                 if self.navigation_state.advance_waypoint():
                     logger.info(f"Advanced to next waypoint index: {self.navigation_state.current_waypoint_index}")
                 else:
@@ -251,8 +257,15 @@ class NavigationService:
             # Proportional controller for turning
             turn_effort = max(-1.0, min(1.0, heading_error / 45.0)) # Normalize error to [-1, 1] over a 90 degree arc
             
-            # Set speed
-            forward_speed = self.cruise_speed
+            # Set speed (scale by waypoint speed preference when provided)
+            base_speed = self.cruise_speed
+            try:
+                if hasattr(waypoint, "speed") and isinstance(waypoint.speed, int):
+                    base_speed = max(0.1, min(self.max_speed, (waypoint.speed / 100.0) * self.max_speed))
+            except Exception:
+                base_speed = self.cruise_speed
+
+            forward_speed = base_speed
             if abs(heading_error) > 30:
                 forward_speed *= 0.5 # Slow down for sharp turns
             
@@ -264,14 +277,56 @@ class NavigationService:
             right_speed = max(-self.max_speed, min(self.max_speed, right_speed))
 
             try:
-                self.set_speed(left_speed, right_speed)
+                await self.set_speed(left_speed, right_speed)
             except Exception as e:
                 logger.error(f"Failed to set motor speed: {e}")
-                self.set_speed(0, 0)
+                try:
+                    await self.set_speed(0.0, 0.0)
+                except Exception:
+                    pass
                 return
             
             # Simulation of movement
             await asyncio.sleep(0.2) # Control loop at 5Hz
+
+    async def set_speed(self, left_speed: float, right_speed: float) -> None:
+        """Drive command helper integrating with the RoboHAT controller.
+
+        - Accepts normalized wheel speeds in m/s-like units scaled to [-1, 1].
+        - In SIM_MODE, updates state without touching hardware.
+        """
+        # Clamp inputs for safety
+        ls = max(-self.max_speed, min(self.max_speed, float(left_speed)))
+        rs = max(-self.max_speed, min(self.max_speed, float(right_speed)))
+
+        # Update desired velocity estimate (magnitude)
+        try:
+            self.navigation_state.target_velocity = float(max(abs(ls), abs(rs)))
+        except Exception:
+            self.navigation_state.target_velocity = None
+
+        # SIM_MODE: don't touch hardware
+        if os.getenv("SIM_MODE", "0") == "1":
+            # Roughly reflect commanded speed in reported velocity for UI
+            try:
+                self.navigation_state.velocity = float((abs(ls) + abs(rs)) / 2.0)
+            except Exception:
+                pass
+            return
+
+        robohat = get_robohat_service()
+        if robohat is None or not robohat.running or not robohat.status.serial_connected:
+            raise RuntimeError("RoboHAT controller unavailable")
+
+        # Normalize to [-1, 1] before mixing to PWM on RoboHAT layer
+        def _normalize(v: float) -> float:
+            if self.max_speed <= 0:
+                return 0.0
+            return max(-1.0, min(1.0, v / self.max_speed))
+
+        accepted = await robohat.send_motor_command(_normalize(ls), _normalize(rs))
+        if not accepted:
+            raise RuntimeError("Motor command not accepted by controller")
     
     async def update_navigation_state(self, sensor_data: SensorData) -> NavigationState:
         """Update navigation state with sensor fusion"""
@@ -415,8 +470,7 @@ class NavigationService:
         # Estimate completion time
         estimated_time_seconds = total_distance / self.cruise_speed
         self.navigation_state.estimated_completion_time = (
-            datetime.now(timezone.utc) + 
-            datetime.timedelta(seconds=estimated_time_seconds)
+            datetime.now(timezone.utc) + timedelta(seconds=estimated_time_seconds)
         )
     
     async def start_autonomous_navigation(self) -> bool:
@@ -476,6 +530,12 @@ class NavigationService:
         if self.navigation_state.path_status == PathStatus.EXECUTING:
             self.navigation_state.path_status = PathStatus.INTERRUPTED
         
+        # Actively command a stop to the controller for safety
+        try:
+            await self.set_speed(0.0, 0.0)
+        except Exception:
+            pass
+
         logger.info("Navigation stopped")
         return True
     
@@ -485,6 +545,15 @@ class NavigationService:
         self.navigation_state.target_velocity = 0.0
         self.navigation_state.path_status = PathStatus.INTERRUPTED
         
+        # Try to invoke controller-level emergency stop when available
+        try:
+            if os.getenv("SIM_MODE", "0") == "0":
+                robohat = get_robohat_service()
+                if robohat is not None:
+                    await robohat.emergency_stop()
+        except Exception:
+            pass
+
         logger.critical("Emergency stop activated")
         return True
     

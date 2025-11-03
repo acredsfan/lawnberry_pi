@@ -1,6 +1,7 @@
 import asyncio
 from typing import Dict, List
 from ..models.mission import Mission, MissionWaypoint, MissionStatus
+from ..models import NavigationMode
 from ..services.navigation_service import NavigationService
 from fastapi import Depends
 import datetime
@@ -63,7 +64,7 @@ class MissionService:
         self.mission_statuses[mission_id].status = "paused"
         if mission_id in self.mission_tasks:
             # Pausing is handled by the navigation service by changing the mode
-            self.nav_service.navigation_state.navigation_mode = "IDLE"
+            self.nav_service.navigation_state.navigation_mode = NavigationMode.PAUSED
 
 
     async def resume_mission(self, mission_id: str):
@@ -72,7 +73,7 @@ class MissionService:
         self.mission_statuses[mission_id].status = "running"
         
         # The navigation service's execute_mission loop will continue
-        self.nav_service.navigation_state.navigation_mode = "AUTO"
+        self.nav_service.navigation_state.navigation_mode = NavigationMode.AUTO
         
         # Re-create a task to continue the mission from where it left off.
         # The state is maintained in navigation_service.
@@ -89,7 +90,7 @@ class MissionService:
         if mission_id in self.mission_tasks:
             self.mission_tasks[mission_id].cancel()
             del self.mission_tasks[mission_id]
-        self.nav_service.stop_navigation()
+        await self.nav_service.stop_navigation()
 
     async def get_mission_status(self, mission_id: str) -> MissionStatus:
         if mission_id not in self.mission_statuses:
