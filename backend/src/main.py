@@ -9,7 +9,11 @@ from .api.metrics import router as metrics_router
 from .api.motors import router as motors_router
 from .api.navigation import router as navigation_router
 from .api.rest import router as rest_router, legacy_router as rest_legacy_router
-from .api.rest import websocket_hub
+from .services.websocket_hub import websocket_hub
+from .api.routers import auth as auth_router
+from .api.routers import telemetry as telemetry_router
+from .api.routers import sensors as sensors_router
+from .api.routers import maintenance as maintenance_router
 from .api.rest_v1 import router as rest_v1_router
 from .api.safety import router as safety_router
 from .api.status import router as status_router
@@ -154,6 +158,10 @@ register_correlation_middleware(app)
 register_sanitization_middleware(app)
 
 app.include_router(rest_router, prefix="/api/v2")
+app.include_router(auth_router.router, prefix="/api/v2")
+app.include_router(telemetry_router.router, prefix="/api/v2")
+app.include_router(sensors_router.router, prefix="/api/v2")
+app.include_router(maintenance_router.router, prefix="/api/v2")
 app.include_router(rest_legacy_router)
 app.include_router(metrics_router)
 app.include_router(status_router)
