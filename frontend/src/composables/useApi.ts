@@ -316,11 +316,16 @@ export const aiApi = {
 export const maintenanceApi = {
   runImuCalibration: async () => {
     try {
-      const response = await apiClient.post('/maintenance/imu/calibrate', {})
+      // Calibration routine takes ~18–20s on hardware; override default 10s timeout
+      const response = await apiClient.post('/maintenance/imu/calibrate', {}, { timeout: 30000 })
       return response.data
     } catch (error: any) {
       if (shouldAttemptFallback(error)) {
-        const response = await apiClient.post('/maintenance/imu/calibrate', {}, { baseURL: FALLBACK_API_BASE })
+        const response = await apiClient.post(
+          '/maintenance/imu/calibrate',
+          {},
+          { baseURL: FALLBACK_API_BASE, timeout: 30000 },
+        )
         return response.data
       }
       if (error?.response?.status === 404) {
