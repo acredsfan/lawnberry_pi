@@ -13,9 +13,9 @@ import io
 import time
 import os
 
-from ..services.websocket_hub import websocket_hub
-from ..api.routers.auth import _authorize_websocket, _extract_bearer_token
-from ..services.persistence import persistence
+from ...services.websocket_hub import websocket_hub
+from .auth import _authorize_websocket, _extract_bearer_token
+from ...core.persistence import persistence
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -353,243 +353,26 @@ async def dashboard_telemetry():
     """Get real-time telemetry from hardware sensors with RTK/IMU orientation states"""
     start_time = time.perf_counter()
     
-    # Get hardware telemetry data from the WebSocket hub
-    telemetry_data = await websocket_hub._generate_telemetry()
+    # Get hardware telemetry data from the TelemetryService
+    from ...services.telemetry_service import telemetry_service
+    
+    sim_mode = os.getenv("SIM_MODE", "0") != "0"
+    telemetry_data = await telemetry_service.get_telemetry(sim_mode=sim_mode)
     
     latency_ms = (time.perf_counter() - start_time) * 1000
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    
-    def _coerce_float(value: object) -> float | None:
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    def _extract_power_payload(raw_power: object, default_battery: dict[str, Any] | None = None) -> dict[str, Any]:
-        payload = raw_power if isinstance(raw_power, dict) else {}
-        battery_voltage = _coerce_float(
-            payload.get("battery_voltage")
-            or payload.get("pack_voltage")
-            or (default_battery or {}).get("voltage")
-        )
-        battery_current = _coerce_float(
-            payload.get("battery_current")
-            or payload.get("battery_current_amps")
-            or payload.get("current")
-        )
-        battery_power = _coerce_float(
-            payload.get("battery_power")
-            or payload.get("battery_power_w")
-        )
-        if battery_power is None and battery_voltage is not None and battery_current is not None:
-            battery_power = battery_voltage * battery_current
-        solar_voltage = _coerce_float(payload.get("solar_voltage") or payload.get("solar_input_voltage"))
-        solar_current = _coerce_float(
-            payload.get("solar_current")
-            or payload.get("solar_current_amps")
-            or payload.get("solar_input_current")
-        )
-        solar_power = _coerce_float(
-            payload.get("solar_power")
-            or payload.get("solar_power_w")
-        )
-        if solar_power is None and solar_voltage is not None and solar_current is not None:
-            solar_power = solar_voltage * solar_current
-        # Normalize sign for display semantics (ensure non-negative)
-        if isinstance(solar_voltage, (int, float)):
-            solar_voltage = abs(float(solar_voltage))
-        if isinstance(solar_current, (int, float)):
-            solar_current = abs(float(solar_current))
-        if isinstance(solar_power, (int, float)):
-            solar_power = abs(float(solar_power))
-
-        # Daily solar yield in Wh (convert from kWh if value appears small)
-        solar_yield_today_wh = _coerce_float(
-            payload.get("solar_yield_today_wh")
-            or payload.get("yield_today_wh")
-            or payload.get("yield_today")
-        )
-        if isinstance(solar_yield_today_wh, (int, float)):
-            if solar_yield_today_wh <= 10.0:
-                solar_yield_today_wh = solar_yield_today_wh * 1000.0
-
-        # Load metrics (external_device_load is Victron's load current)
-        load_current = _coerce_float(
-            payload.get("load_current")
-            or payload.get("load_current_amps")
-            or payload.get("external_device_load")
-        )
-        load_power = _coerce_float(payload.get("load_power"))
-        if load_power is None and load_current is not None and battery_voltage is not None:
-            try:
-                load_power = float(battery_voltage) * float(load_current)
-            except Exception:
-                load_power = None
-        load_state = payload.get("load_state") if isinstance(payload.get("load_state"), str) else None
-        if load_state is None and isinstance(load_current, (int, float)):
-            load_state = "on" if abs(load_current) > 0.05 else "off"
-        timestamp = payload.get("timestamp")
-        return {
-            "battery_voltage": battery_voltage,
-            "battery_current": battery_current,
-            "battery_power": battery_power,
-            "solar_voltage": solar_voltage,
-            "solar_current": solar_current,
-            "solar_power": solar_power,
-            "solar_yield_today_wh": solar_yield_today_wh,
-            "load_current": load_current,
-            "load_power": load_power,
-            "load_state": load_state,
-            "timestamp": timestamp,
-            "battery": {
-                "voltage": battery_voltage,
-                "current": battery_current,
-                "power": battery_power,
-                "soc_percent": _coerce_float(payload.get("battery_percentage") or payload.get("battery_soc_percent")),
-            },
-            "solar": {
-                "voltage": solar_voltage,
-                "current": solar_current,
-                "power": solar_power,
-            },
-        }
-
-    # Extract and map hardware data to dashboard format
-    if "source" in telemetry_data and telemetry_data["source"] in {"hardware", "hardware_simulated"}:
-        # Use real hardware data
-        battery_data = telemetry_data.get("battery", {})
-        position_data = telemetry_data.get("position", {})
-        imu_data = telemetry_data.get("imu", {})
-        tof_data = telemetry_data.get("tof", {}) if isinstance(telemetry_data, dict) else {}
-        power_data = telemetry_data.get("power", {}) if isinstance(telemetry_data, dict) else {}
-        
-        # RTK status and fallback messaging
-        rtk_status = position_data.get("rtk_status", "unknown")
-        rtk_fallback_message = None
-        if rtk_status in ["no_fix", "gps_fix"]:
-            rtk_fallback_message = "RTK corrections unavailable - using standard GPS. See docs/hardware-overview.md for troubleshooting."
-        
-        # IMU calibration status
-        imu_calibration = imu_data.get("calibration", 0)
-        orientation_health = "healthy" if imu_calibration >= 2 else "degraded"
-        orientation_message = None
-        if imu_calibration < 2:
-            orientation_message = "IMU calibration incomplete - orientation data may be inaccurate. See docs/hardware-feature-matrix.md."
-        
-        env = telemetry_data.get("environmental", {}) if isinstance(telemetry_data, dict) else {}
-        power_payload = _extract_power_payload(power_data, default_battery=battery_data)
-
-        result = {
-            "timestamp": now,
-            "latency_ms": round(latency_ms, 2),
-            "source": telemetry_data.get("source", "hardware"),
-            "simulated": telemetry_data.get("simulated", False),
-            "battery": {
-                "percentage": battery_data.get("percentage", 0.0),
-                "voltage": battery_data.get("voltage", None),
-            },
-            "power": power_payload,
-            "temperatures": {
-                "cpu": None,  # Add CPU temperature monitoring if available
-                "ambient": env.get("temperature_c"),
-            },
-            "position": {
-                "latitude": position_data.get("latitude", None),
-                "longitude": position_data.get("longitude", None),
-                "altitude": position_data.get("altitude", None),
-                "accuracy": position_data.get("accuracy", None),
-                "gps_mode": position_data.get("gps_mode", None),
-                "rtk_status": rtk_status,
-                "rtk_fallback_message": rtk_fallback_message,
-            },
-            "imu": {
-                "roll": imu_data.get("roll", None),
-                "pitch": imu_data.get("pitch", None),
-                "yaw": imu_data.get("yaw", None),
-                "calibration": imu_calibration,
-                "orientation_health": orientation_health,
-                "orientation_message": orientation_message,
-            },
-            "tof": {
-                "left": {
-                    "distance_mm": tof_data.get("left", {}).get("distance_mm"),
-                    "range_status": tof_data.get("left", {}).get("range_status"),
-                    "signal_strength": tof_data.get("left", {}).get("signal_strength"),
-                },
-                "right": {
-                    "distance_mm": tof_data.get("right", {}).get("distance_mm"),
-                    "range_status": tof_data.get("right", {}).get("range_status"),
-                    "signal_strength": tof_data.get("right", {}).get("signal_strength"),
-                },
-            },
-        }
-    else:
-        # Fallback to simulated/default values
-        env = telemetry_data.get("environmental", {}) if isinstance(telemetry_data, dict) else {}
-        tof_data = telemetry_data.get("tof", {}) if isinstance(telemetry_data, dict) else {}
-        power_data = telemetry_data.get("power", {}) if isinstance(telemetry_data, dict) else {}
-        fallback_battery = telemetry_data.get("battery", {}) if isinstance(telemetry_data, dict) else {}
-        power_payload = _extract_power_payload(power_data, default_battery=fallback_battery)
-
-        result = {
-            "timestamp": now,
-            "latency_ms": round(latency_ms, 2),
-            "source": telemetry_data.get("source", "simulated"),
-            "simulated": telemetry_data.get("simulated", telemetry_data.get("source", "simulated") != "hardware"),
-            "battery": {
-                "percentage": telemetry_data.get("battery", {}).get("percentage", 85.2),
-                "voltage": telemetry_data.get("battery", {}).get("voltage", 12.6),
-            },
-            "power": power_payload,
-            "temperatures": {
-                "cpu": None,
-                "ambient": env.get("temperature_c"),
-            },
-            "position": {
-                "latitude": telemetry_data.get("position", {}).get("latitude", None),
-                "longitude": telemetry_data.get("position", {}).get("longitude", None),
-                "altitude": None,
-                "accuracy": None,
-                "gps_mode": None,
-                "rtk_status": "simulated",
-                "rtk_fallback_message": None,
-            },
-            "imu": {
-                "roll": None,
-                "pitch": None,
-                "yaw": None,
-                "calibration": 0,
-                "orientation_health": "unknown",
-                "orientation_message": None,
-            },
-            "tof": {
-                "left": {
-                    "distance_mm": tof_data.get("left", {}).get("distance_mm"),
-                    "range_status": tof_data.get("left", {}).get("range_status"),
-                    "signal_strength": tof_data.get("left", {}).get("signal_strength"),
-                },
-                "right": {
-                    "distance_mm": tof_data.get("right", {}).get("distance_mm"),
-                    "range_status": tof_data.get("right", {}).get("range_status"),
-                    "signal_strength": tof_data.get("right", {}).get("signal_strength"),
-                },
-            },
-        }
     
     # Add remediation metadata if latency exceeds thresholds
     if latency_ms > 350:  # Pi 4B threshold
-        result["remediation"] = {
+        telemetry_data["remediation"] = {
             "type": "latency_exceeded",
             "message": "Dashboard telemetry latency exceeds 350ms threshold for Pi 4B",
             "docs_link": "docs/OPERATIONS.md#telemetry-latency-troubleshooting"
         }
     elif latency_ms > 250:  # Pi 5 threshold
-        result["remediation"] = {
+        telemetry_data["remediation"] = {
             "type": "latency_warning",
             "message": "Dashboard telemetry latency exceeds 250ms target for Pi 5",
             "docs_link": "docs/OPERATIONS.md#performance-optimization"
         }
     
-    return result
+    return telemetry_data

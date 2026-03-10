@@ -5,11 +5,11 @@ import time
 import logging
 from datetime import datetime, timezone
 
-from ..services.hw_selftest import run_selftest
-from ..services.timezone_service import detect_system_timezone
-from ..core.persistence import persistence
-from ..services.websocket_hub import websocket_hub
-from ..services.calibration_service import (
+from ...services.hw_selftest import run_selftest
+from ...services.timezone_service import detect_system_timezone
+from ...core.persistence import persistence
+from ...services.websocket_hub import websocket_hub
+from ...services.calibration_service import (
     imu_calibration_service,
     CalibrationInProgressError,
     DriveControllerUnavailableError,

@@ -1,0 +1,118 @@
+from fastapi import APIRouter, HTTPException, Response, Query
+from fastapi.responses import StreamingResponse
+from typing import Optional
+import logging
+
+from ...services.camera_stream_service import camera_service
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+@router.get("/camera/status")
+async def get_camera_status():
+    """Get camera service status."""
+    try:
+        stats = await camera_service.get_stream_statistics()
+        return {
+            "initialized": camera_service.running,  # Use 'running' instead of 'initialized'
+            "streaming": camera_service.stream.is_active if hasattr(camera_service.stream, 'is_active') else False,
+            "sim_mode": camera_service.sim_mode,
+            "statistics": {
+                "frames_captured": getattr(stats, 'frames_captured', 0),
+                "frames_processed": getattr(stats, 'frames_processed', 0),
+                "fps": getattr(stats, 'fps', 0),
+            } if stats else {},
+        }
+    except Exception as e:
+        logger.error(f"Failed to get camera status: {e}")
+        return {
+            "initialized": False,
+            "streaming": False,
+            "sim_mode": True,
+            "statistics": {},
+        }
+
+@router.post("/camera/start")
+async def start_camera(payload: Optional[dict] = None):
+    """Start camera streaming."""
+    try:
+        if not camera_service.running:
+            await camera_service.initialize()
+        
+        if not camera_service.stream.is_active:
+            await camera_service.start_streaming()
+        
+        return {"status": "started", "streaming": camera_service.stream.is_active}
+    except Exception as e:
+        logger.error(f"Failed to start camera: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/camera/stop")
+async def stop_camera(payload: Optional[dict] = None):
+    """Stop camera streaming."""
+    try:
+        if camera_service.stream.is_active:
+            camera_service.stop_streaming()
+        return {"status": "stopped", "streaming": camera_service.stream.is_active}
+    except Exception as e:
+        logger.error(f"Failed to stop camera: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/camera/frame")
+async def get_current_frame():
+    """Get the most recent camera frame as JPEG."""
+    try:
+        frame = await camera_service.get_current_frame()
+        if frame is None:
+            raise HTTPException(status_code=404, detail="No frame available")
+        
+        return Response(
+            content=frame.data,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get current frame: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/camera/stream.mjpeg")
+async def stream_mjpeg(
+    client: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None),
+    ts: Optional[str] = Query(None),
+):
+    """Stream camera frames as Motion JPEG."""
+    
+    async def generate_mjpeg():
+        """Generate MJPEG stream."""
+        import asyncio
+        
+        boundary = "frame"
+        
+        while True:
+            try:
+                frame = await camera_service.get_current_frame()
+                if frame is not None:
+                    yield (
+                        b'--' + boundary.encode() + b'\r\n'
+                        b'Content-Type: image/jpeg\r\n\r\n' + frame.data + b'\r\n'
+                    )
+                await asyncio.sleep(1.0 / 10)  # ~10 FPS
+            except Exception as e:
+                logger.error(f"Error in MJPEG stream: {e}")
+                break
+    
+    try:
+        return StreamingResponse(
+            generate_mjpeg(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+    except Exception as e:
+        logger.error(f"Failed to start MJPEG stream: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

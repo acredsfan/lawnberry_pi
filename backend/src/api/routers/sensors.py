@@ -6,8 +6,8 @@ import time
 import os
 import logging
 
-from ..core.globals import _debug_overrides
-from ..services.websocket_hub import websocket_hub
+from ...core.globals import _debug_overrides
+from ...services.websocket_hub import websocket_hub
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

@@ -1,9 +1,9 @@
 {
   "test_name": "test_evidence_capture_for_verification",
-  "timestamp": 1761595335.6417484,
+  "timestamp": 1764799131.5923367,
   "samples": [
     {
-      "sample_id": 1,
+      "sample_id": 0,
       "item_count": 1,
       "latency_summary": {
         "avg": 0.0,
@@ -12,7 +12,7 @@
       }
     },
     {
-      "sample_id": 4,
+      "sample_id": 3,
       "item_count": 1,
       "latency_summary": {
         "avg": 0.0,

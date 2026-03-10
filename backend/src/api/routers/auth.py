@@ -11,10 +11,10 @@ import logging
 import bcrypt
 import pyotp
 
-from ..models.auth_security_config import AuthSecurityConfig, SecurityLevel
-from ..models.user_session import UserSession
-from ..services.auth_service import AuthenticationError, primary_auth_service
-from ..core.globals import _manual_control_sessions, _security_settings, _security_last_modified
+from ...models.auth_security_config import AuthSecurityConfig, SecurityLevel
+from ...models.user_session import UserSession
+from ...services.auth_service import AuthenticationError, primary_auth_service
+from ...core.globals import _manual_control_sessions, _security_settings, _security_last_modified
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -403,6 +403,38 @@ async def manual_unlock_status(request: Request):
 
 @router.post("/control/manual-unlock", response_model=ManualUnlockResponse)
 async def manual_unlock(request: Request, body: ManualUnlockRequest):
+    # First, check if user is already authenticated via Bearer token
+    # If they are, we can skip password verification
+    auth_header = request.headers.get("Authorization")
+    bearer_token = _extract_bearer_token(auth_header)
+    
+    if bearer_token:
+        # User is already logged in, verify their session and grant manual control
+        try:
+            session = await primary_auth_service.verify_token(bearer_token)
+            if session:
+                # Create manual control session based on existing auth
+                timeout_minutes = getattr(_security_settings, "session_timeout_minutes", 60)
+                expires_at = _manual_session_expiry(timeout_minutes)
+                
+                # Use the bearer token as the seed for manual session
+                principal = getattr(session, 'username', 'authenticated_user')
+                seed = f"bearer:{hashlib.sha256(bearer_token.encode('utf-8')).hexdigest()}"
+                session_entry = _store_manual_session(seed, expires_at, principal)
+                
+                logger.info("manual_control.unlock", extra={"method": "bearer_token", "principal": principal})
+                return ManualUnlockResponse(
+                    authorized=True,
+                    session_id=session_entry["session_id"],
+                    expires_at=session_entry["expires_at"].isoformat(),
+                    principal=principal,
+                    source="bearer_token",
+                )
+        except Exception as e:
+            logger.warning(f"Bearer token verification failed: {e}")
+            # Fall through to traditional auth methods
+    
+    # If no valid bearer token, proceed with traditional manual unlock methods
     method = (body.method or "").strip().lower()
     security_level = getattr(_security_settings, "security_level", SecurityLevel.PASSWORD)
     if not method:

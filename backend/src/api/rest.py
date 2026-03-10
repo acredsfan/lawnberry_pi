@@ -14,7 +14,7 @@ from email.utils import format_datetime, parsedate_to_datetime
 from ..core.persistence import persistence
 from ..core.globals import (
     _blade_state, _safety_state, _emergency_until, _client_emergency, 
-    _legacy_motors_active, _manual_control_sessions
+    _legacy_motors_active, _manual_control_sessions, _security_settings
 )
 from .routers import telemetry
 from .routers.auth import _resolve_manual_session
