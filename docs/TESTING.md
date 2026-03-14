@@ -60,9 +60,9 @@ Update one of the following to satisfy the guard:
 Run the backend and call the hardware self-test endpoint:
 
 ```bash
-uvicorn backend.src.main:app --host 0.0.0.0 --port 8001
+SIM_MODE=0 uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
 # Then from another shell on the Pi:
-curl http://localhost:8001/api/v2/system/selftest | jq
+curl http://localhost:8081/api/v2/system/selftest | jq
 ```
 
 Enable the hardware self-test integration test:
@@ -72,6 +72,7 @@ RUN_HW_TESTS=1 pytest -q tests/integration/test_hardware_selftest.py
 ```
 
 Notes:
+- Use `SIM_MODE=0` for on-device hardware validation so the backend initializes real hardware paths instead of staying simulation-safe.
 - The self-test is safe on systems without hardware: it catches missing devices and returns a report.
 - For I2C/serial access, ensure the user is in groups `i2c` and `dialout`.
 

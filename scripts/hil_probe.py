@@ -77,7 +77,7 @@ def main() -> int:
     parser.add_argument(
         "--base-url",
         type=str,
-        default=os.getenv("LAWNBERRY_API_URL", "http://127.0.0.1:8000"),
+        default=os.getenv("LAWNBERRY_API_URL", "http://127.0.0.1:8081"),
         help="API base URL",
     )
     args = parser.parse_args()

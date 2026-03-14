@@ -4,6 +4,8 @@
 
 Target platform: Raspberry Pi OS Lite Bookworm (64-bit) on Raspberry Pi 5 (16 GB) with Python 3.11.x, with graceful degradation validated on Raspberry Pi 4B (4–8 GB).
 
+Returning to the project after time away? Start with `docs/developer-toolkit.md` for the maintainer-first architecture map, workflow guide, and immediate focus areas.
+
 ## 🚀 Quick Start
 
 The LawnBerry Pi v2 system is now fully operational with hardware integration and real-time telemetry streaming.
@@ -18,12 +20,14 @@ The LawnBerry Pi v2 system is now fully operational with hardware integration an
 ```bash
 # Backend (Terminal 1)
 cd backend
-python -m uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn src.main:app --host 0.0.0.0 --port 8081 --reload
 
 # Frontend (Terminal 2)  
 cd frontend
-npm run dev -- --host 0.0.0.0 --port 3001
+npm run dev -- --host 0.0.0.0 --port 3000
 ```
+
+These are the local development defaults. On-device/systemd deployments use the same backend/frontend ports (`8081` and `3000`), while Playwright preview-based E2E runs use port `4173`.
 
 ### System Status
 - ✅ **Hardware Integration**: Real sensor data streaming from Pi hardware
@@ -37,6 +41,7 @@ npm run dev -- --host 0.0.0.0 --port 3001
 - Mission status and completion percentage are shown live; you can Pause, Resume, or Abort at any time.
 
 ### Documentation
+- Developer Toolkit: `docs/developer-toolkit.md` — best starting point for returning maintainers and developers
 - Setup Guide: `docs/installation-setup-guide.md`
 - GPS RTK Configuration: `docs/gps-ntrip-setup.md` (centimeter-level accuracy)
 - Hardware Integration: `docs/hardware-integration.md`
@@ -47,9 +52,9 @@ npm run dev -- --host 0.0.0.0 --port 3001
 - Testing: `tests/` (unit, integration, contract tests)
 
 ### Access Points
-- **Frontend**: http://192.168.50.215:3001 (or your Pi's IP)
-- **Backend API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs (Swagger UI)
-- **WebSocket**: ws://localhost:8000/api/v2/ws/telemetry
+- **Frontend**: http://192.168.50.215:3000 (or your Pi's IP)
+- **Backend API**: http://localhost:8081
+- **API Docs**: http://localhost:8081/docs (Swagger UI)
+- **WebSocket**: ws://localhost:8081/api/v2/ws/telemetry
 
 The system provides a complete real-time dashboard for autonomous lawn mowing operations with professional-grade user experience and full hardware integration.

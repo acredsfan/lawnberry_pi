@@ -30,7 +30,7 @@ async def _get_client(base_url: str, app=None):
 
 async def safety_status(app=None, base_url: str | None = None) -> dict[str, Any]:
     """Fetch safety status via API. Uses RoboHAT status endpoint for safety_state."""
-    base_url = base_url or os.getenv("LAWNBERRY_API_URL", "http://localhost:8000")
+    base_url = base_url or os.getenv("LAWNBERRY_API_URL", "http://localhost:8081")
     async with await _get_client(base_url, app) as client:
         resp = await client.get("/api/v2/hardware/robohat")
         if resp.status_code >= 400:
@@ -45,7 +45,7 @@ async def safety_status(app=None, base_url: str | None = None) -> dict[str, Any]
 
 async def clear_estop(app=None, force: bool = False, base_url: str | None = None) -> dict[str, Any]:
     """Clear E-stop via API with confirmation flag."""
-    base_url = base_url or os.getenv("LAWNBERRY_API_URL", "http://localhost:8000")
+    base_url = base_url or os.getenv("LAWNBERRY_API_URL", "http://localhost:8081")
     async with await _get_client(base_url, app) as client:
         payload = {"confirmation": bool(force)}
         resp = await client.post("/api/v2/control/emergency_clear", json=payload)
@@ -60,7 +60,7 @@ def build_app():  # pragma: no cover - only used when typer available
     app = typer.Typer(help="LawnBerry safety commands")
 
     @app.command("status")
-    def cmd_status(base_url: str = typer.Option("http://localhost:8000", help="API base URL")):
+    def cmd_status(base_url: str = typer.Option("http://localhost:8081", help="API base URL")):
         from backend.src.main import app as fastapi_app
         res = _run(safety_status(app=fastapi_app, base_url=base_url))
         if not res.get("ok"):
@@ -71,7 +71,7 @@ def build_app():  # pragma: no cover - only used when typer available
     @app.command("clear-estop")
     def cmd_clear_estop(
         force: bool = typer.Option(False, "--force", help="Required to clear E-stop"),
-        base_url: str = typer.Option("http://localhost:8000", help="API base URL"),
+        base_url: str = typer.Option("http://localhost:8081", help="API base URL"),
     ):
         if not force:
             typer.echo("Refusing to clear E-stop without --force")

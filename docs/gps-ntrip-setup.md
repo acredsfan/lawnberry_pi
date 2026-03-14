@@ -515,7 +515,7 @@ done > gps_test.csv
 
 1. **Open LawnBerry Dashboard**:
    ```
-   http://<pi-ip>:3001
+   http://<pi-ip>:3000
    ```
 
 2. **Check GPS Widget**:

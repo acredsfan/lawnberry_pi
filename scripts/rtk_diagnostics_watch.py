@@ -3,7 +3,7 @@
 Poll the LawnBerry RTK diagnostics endpoint and print live NTRIP/GPS status.
 
 Usage:
-  python scripts/rtk_diagnostics_watch.py [--url http://127.0.0.1:8000] [--seconds 30] [--interval 2]
+    python scripts/rtk_diagnostics_watch.py [--url http://127.0.0.1:8081] [--seconds 30] [--interval 2]
 
 Shows whether NTRIP is connected, bytes forwarded and rate, and current GPS RTK status.
 """
@@ -37,7 +37,7 @@ def fetch(url: str) -> Dict[str, Any] | None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default="http://127.0.0.1:8000", help="Backend base URL")
+    ap.add_argument("--url", default="http://127.0.0.1:8081", help="Backend base URL")
     ap.add_argument("--seconds", type=int, default=30, help="Total duration to watch")
     ap.add_argument("--interval", type=float, default=2.0, help="Polling interval seconds")
     args = ap.parse_args()

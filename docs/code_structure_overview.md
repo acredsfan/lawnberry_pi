@@ -1,6 +1,6 @@
 # Lawnberry code structure overview
 
-Generated on 2025-11-03. This document summarizes code files, their purpose, subsystem category, and callable interfaces (public functions and exported APIs). Grouped by subsystem for quick orientation.
+Generated on 2026-03-10. This document summarizes code files, their purpose, subsystem category, and callable interfaces (public functions and exported APIs). Grouped by subsystem for quick orientation.
 
 Tip: Use your editor’s outline and the section links below to jump to an area of interest.
 
@@ -54,9 +54,9 @@ Tip: Use your editor’s outline and the section links below to jump to an area 
 | Path | Purpose | Subsystem | Callable interfaces |
 |---|---|---|---|
 | `backend/src/cli/acme_renew.py` | Renew ACME certificates on demand (batch/cron usage). | Security/infra | `main() -> int`. |
-| `backend/src/cli/control_commands.py` | Send drive/blade/emergency control commands to the backend. | Hardware control | `main()` (Typer/argparse entry). |
+| `backend/src/cli/control_commands.py` | Send drive/blade/emergency control commands to the backend. | Hardware control | `drive(throttle, turn, duration_ms=500, app=None, base_url=None)`, `blade(active, app=None, base_url=None)`, `emergency_stop(app=None, base_url=None)`, `main()` (Typer entry; default API URL `http://localhost:8081`). |
 | `backend/src/cli/remote_access_daemon.py` | Run/coordinate remote access status updates. | Remote access | `_config_digest(cfg) -> str`, `_request_shutdown() -> None` (internals). |
-| `backend/src/cli/safety_commands.py` | Safety status and commands (HTTP API wrapper). | Safety | `build_app()`, `cmd_status(base_url='http://localhost:8000')`, `main()`. |
+| `backend/src/cli/safety_commands.py` | Safety status and commands (HTTP API wrapper). | Safety | `safety_status(app=None, base_url=None)`, `clear_estop(app=None, force=False, base_url=None)`, `build_app()`, `main()` (Typer entry; default API URL `http://localhost:8081`). |
 | `backend/src/cli/secrets_cli.py` | Secrets management helpers. | Security | `main(argv: list[str] | None = None) -> int`. |
 | `backend/src/cli/sensor_commands.py` | Sensor snapshot and formatting utilities. | Sensors | `_format_table(snapshot) -> str` (internal), CLI task(s). |
 
@@ -93,6 +93,7 @@ Many Bash and Python scripts automate setup, backups, diagnostics, and validatio
 | `scripts/renew_certificates.sh` | Renew/issue certificates; fallback to self‑signed and nginx reconfig. | Security/infra | Shell functions: `generate_self_signed`, `switch_nginx_to_self_signed`, `check_cert_expiry`, `renew`, `main`. |
 | `scripts/rebuild_frontend_and_restart_backend.sh` | Rebuild UI and restart backend services. | DevOps | Shell functions: `require_command`, `info`, `error`. |
 | `scripts/validate_https_setup.sh` | Validate HTTPS setup and dependencies. | Security/infra | Shell function: `need_cmd`. |
+| `scripts/hooks/consistency_guard.py` | Multi-event workspace hook helper that requests approval for hook-policy edits, reminds the agent about structure-doc sync after file changes, and blocks session stop when structural updates are undocumented. | DevOps/tooling | `main() -> int`. Internal helpers: `_run_git(*args)`, `_get_changed_paths()`, `_matches_any(path, prefixes)`, `_normalize_repo_path(raw_path)`, `_extract_patch_paths(patch_text)`, `_extract_tool_paths(tool_name, tool_input)`, `_build_validation_steps(changed_paths)`, `_build_changed_preview(paths, *, limit=5)`, `_handle_pre_tool_use(payload)`, `_handle_post_tool_use(payload, changed_paths)`, `_handle_stop(payload, changed_paths)`, `_dispatch_hook(payload, changed_paths)`, `_emit(payload, *, exit_code=0)`. |
 | `scripts/generate_docs_bundle.py` | Bundle docs for distribution. | Docs | Module CLI (see source). |
 | `scripts/rtk_diagnostics_watch.py` | Continuously monitor RTK status/output. | Navigation/GPS | Module CLI (see source). |
 | Other helpers under `.specify/scripts/bash/` | Internal feature plan tooling for agent context updates. | Meta/tooling | Many small shell functions; see sources. |

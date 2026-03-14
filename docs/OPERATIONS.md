@@ -7,6 +7,17 @@ This document summarizes common operational procedures and API references releva
 - Web UI (Vite dev): port 3000 (proxy to /api → /api/v2)
 - WebSocket: ws://127.0.0.1:8081/api/v2/ws/telemetry
 
+## Startup behavior
+
+Use these runtime defaults consistently when starting or validating the stack:
+
+- **Local backend development**: run Uvicorn on port `8081`
+- **Local frontend development**: run Vite on port `3000`
+- **Deployed/systemd runtime**: backend remains on `8081`, frontend remains on `3000`
+- **Playwright preview/E2E**: Vite preview runs on port `4173` by design
+
+This means `8081`/`3000` are the canonical backend/frontend ports for both local development and deployed operation. The preview server on `4173` is intentional and only used for preview/E2E flows.
+
 ## TLS/HTTPS Operations
 
 TLS is managed automatically:
@@ -288,7 +299,7 @@ pytest tests/unit/ -v
 pytest tests/contract/test_rest_api_telemetry.py -vv
 
 # Frontend tests
-cd frontend && npm run test:unit
+cd frontend && npm test
 ```
 
 #### Performance Failures
@@ -320,7 +331,7 @@ npm ci
 npm run build
 
 # Run tests
-npm run test:unit
+npm test
 ```
 
 ### Local Pre-Commit Validation
@@ -336,7 +347,7 @@ SIM_MODE=1 pytest tests/
 
 # Frontend checks
 cd frontend
-npm run test:unit
+npm test
 npm run build
 
 # Performance validation

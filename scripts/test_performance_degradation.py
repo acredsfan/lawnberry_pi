@@ -22,7 +22,7 @@ import time
 
 import httpx
 
-BASE = "http://127.0.0.1:8001"
+BASE = "http://127.0.0.1:8081"
 
 def detect_platform():
     """Detect Raspberry Pi platform (simplified detection)"""

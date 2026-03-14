@@ -19,7 +19,7 @@ async def _get_client(base_url: str, app=None):
 
 
 async def drive(throttle: float, turn: float, duration_ms: int = 500, app=None, base_url: Optional[str] = None):
-    base_url = base_url or os.getenv("LAWNBERRY_API_URL", "http://localhost:8000")
+    base_url = base_url or os.getenv("LAWNBERRY_API_URL", "http://localhost:8081")
     payload = {
         "session_id": "cli",
         "vector": {"linear": float(throttle), "angular": float(turn)},
@@ -31,7 +31,7 @@ async def drive(throttle: float, turn: float, duration_ms: int = 500, app=None, 
 
 
 async def blade(active: bool, app=None, base_url: Optional[str] = None):
-    base_url = base_url or os.getenv("LAWNBERRY_API_URL", "http://localhost:8000")
+    base_url = base_url or os.getenv("LAWNBERRY_API_URL", "http://localhost:8081")
     # Legacy-friendly payload to accommodate current endpoint behavior
     payload = {"active": bool(active)}
     async with await _get_client(base_url, app) as client:
@@ -40,7 +40,7 @@ async def blade(active: bool, app=None, base_url: Optional[str] = None):
 
 
 async def emergency_stop(app=None, base_url: Optional[str] = None):
-    base_url = base_url or os.getenv("LAWNBERRY_API_URL", "http://localhost:8000")
+    base_url = base_url or os.getenv("LAWNBERRY_API_URL", "http://localhost:8081")
     async with await _get_client(base_url, app) as client:
         r = await client.post("/api/v2/control/emergency-stop")
         return {"status_code": r.status_code, "body": r.json() if r.text else {}}
@@ -57,7 +57,7 @@ def main():  # pragma: no cover - runtime CLI
         throttle: float = typer.Argument(0.0),
         turn: float = typer.Argument(0.0),
         duration_ms: int = typer.Option(500, help="Command duration in ms"),
-        base_url: str = typer.Option("http://localhost:8000", help="API base URL"),
+        base_url: str = typer.Option("http://localhost:8081", help="API base URL"),
     ):
         from backend.src.main import app as fastapi_app
         res = asyncio.run(drive(throttle, turn, duration_ms, app=fastapi_app, base_url=base_url))
@@ -66,7 +66,7 @@ def main():  # pragma: no cover - runtime CLI
     @app.command()
     def blade_cmd(
         active: bool = typer.Argument(False),
-        base_url: str = typer.Option("http://localhost:8000", help="API base URL"),
+        base_url: str = typer.Option("http://localhost:8081", help="API base URL"),
     ):
         from backend.src.main import app as fastapi_app
         res = asyncio.run(blade(active, app=fastapi_app, base_url=base_url))
@@ -74,7 +74,7 @@ def main():  # pragma: no cover - runtime CLI
 
     @app.command(name="emergency")
     def emergency_cmd(
-        base_url: str = typer.Option("http://localhost:8000", help="API base URL"),
+        base_url: str = typer.Option("http://localhost:8081", help="API base URL"),
     ):
         from backend.src.main import app as fastapi_app
         res = asyncio.run(emergency_stop(app=fastapi_app, base_url=base_url))
