@@ -49,6 +49,7 @@ initialization. On a non-Pi machine this usually degrades gracefully, but it is 
 
 ### Documentation
 - Developer Toolkit: `docs/developer-toolkit.md` — best starting point for returning maintainers and developers
+- Copilot Customizations Guide: `docs/copilot-customizations-guide.md` — prompts, skills, agents, chat modes, hooks, and how to use them
 - Simulation vs Hardware Modes: `docs/simulation-vs-hardware-modes.md` — explains `SIM_MODE=1`, `SIM_MODE=0`, and what unset `SIM_MODE` actually does
 - Setup Guide: `docs/installation-setup-guide.md`
 - GPS RTK Configuration: `docs/gps-ntrip-setup.md` (centimeter-level accuracy)

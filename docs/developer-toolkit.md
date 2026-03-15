@@ -42,6 +42,7 @@ Use this order if you need to get mentally back in the saddle quickly:
 8. `docs/hallucination-audit.md` — documented cleanup list for stale or unsupported hardware mentions
 9. `CONTRIBUTING.md` — coding standards, TODO policy, PR expectations
 10. `.github/copilot-instructions.md` — local agent/documentation rules, especially around architecture docs
+11. `docs/copilot-customizations-guide.md` — prompt, skill, agent, chat-mode, and hook reference for this repo's Copilot workflows
 
 ## Mental model of the system
 
@@ -531,6 +532,7 @@ Use these when you need detail instead of orientation:
 - `docs/gps-ntrip-setup.md`
 - `docs/RELEASE_NOTES.md`
 - `docs/code_structure_overview.md`
+- `docs/copilot-customizations-guide.md`
 - `docs/constitution.md`
 - `docs/privacy.md`
 - `CONTRIBUTING.md`
