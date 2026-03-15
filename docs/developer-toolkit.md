@@ -452,6 +452,74 @@ has now been completed. The highest-value follow-up work is:
 
 That keeps the next work focused on runtime credibility rather than reopening already-completed contract cleanup.
 
+## Next 2 weeks: practical maintainer plan
+
+This is the recommended short-horizon plan if you want a focused two-week push that improves real-world reliability without
+spraying effort across too many subsystems at once.
+
+### Week 1 — navigation/runtime credibility
+
+1. **Navigation feedback audit**
+	- trace where mission progress currently assumes movement succeeded versus where encoder/GPS/controller feedback actually confirms it
+	- inventory any places where navigation can advance state after a command without enough evidence
+	- output: a short defect list tied to concrete files and tests
+
+2. **Stop/fault behavior hardening**
+	- make sure controller failures, obstacle holds, and interrupted navigation paths fail closed
+	- verify that pause/abort/interrupt states always drive a clean stop path
+	- output: tighter runtime behavior in `backend/src/services/navigation_service.py` and any adjacent control-service seams
+
+3. **Regression coverage for navigation edge cases**
+	- add or tighten tests around interrupted waypoint traversal, lost-position handling, obstacle gating, and command-delivery failures
+	- prioritize service-level and contract-level coverage over broad end-to-end speculation
+	- output: stronger backend regression slice for navigation safety behavior
+
+4. **Runtime verification pass**
+	- run the targeted backend test slice for navigation, mission execution, and safety-sensitive flows
+	- update docs only if behavior or limitations changed materially
+	- output: a known-good validation set for the week-1 hardening work
+
+### Week 2 — mission durability and AI quality
+
+1. **Mission persistence design + first implementation**
+	- move mission state beyond in-memory-only orchestration
+	- define what should survive restart: mission metadata, lifecycle state, current waypoint index, and abort/failure detail
+	- output: first persistence-backed mission recovery path, even if conservative
+
+2. **Mission restart/recovery semantics**
+	- decide what happens on backend restart when a mission was previously running or paused
+	- fail safe by default; prefer resumable paused state over pretending active motion is still valid
+	- output: explicit recovery rules plus tests
+
+3. **AI model-quality pass behind the existing contract**
+	- keep the new backend AI API stable while improving the configured model artifact or inference rules
+	- avoid broad API churn; improve detection quality inside the existing backend seam
+	- output: better results from `backend/src/services/ai_service.py` without reopening the contract
+
+4. **Docs and maintainer sync**
+	- refresh `docs/developer-toolkit.md`, `docs/RELEASE_NOTES.md`, and `docs/code_structure_overview.md` if callable interfaces or subsystem maturity changed
+	- record any newly discovered limitations honestly so future work does not rebuild on stale assumptions
+	- output: docs that match the implementation, not the wish list
+
+### Suggested daily cadence
+
+- **Day 1–2:** navigation feedback audit + issue list
+- **Day 3–4:** stop/fault hardening changes
+- **Day 5:** navigation regression validation and doc sync
+- **Day 6–7:** mission persistence design + first storage integration
+- **Day 8:** mission recovery semantics + tests
+- **Day 9:** AI model-quality improvement behind current API
+- **Day 10:** cleanup, docs sync, broader validation pass, and backlog reshaping
+
+### Definition of success for this two-week pass
+
+At the end of the two weeks, you should be able to say all of the following with a straight face:
+
+- navigation failure and interruption behavior is more deterministic than it is today
+- mission state no longer disappears instantly on restart
+- AI is still conservative, but the backend contract is real and the baseline results are better than the first-pass heuristic
+- maintainer docs and structure docs still match the code
+
 ## Deep references
 
 Use these when you need detail instead of orientation:
@@ -477,3 +545,27 @@ LawnBerry Pi already has a serious amount of infrastructure in place. The fastes
 - one clear understanding of which subsystems are stable and which are still scaffolding
 
 Once those are cleaned up, the project becomes much easier to extend safely.
+
+## High-level next steps
+
+After the two-week plan above, the strategic next wave should be:
+
+1. **Field-trustworthy autonomy**
+	- reduce the gap between simulated success and hardware-confirmed behavior
+	- improve sensor fusion, motion verification, and obstacle response quality
+
+2. **Persistent operator workflows**
+	- make missions, calibration state, and operational context survive restarts in a safe and inspectable way
+	- improve recoverability over cleverness
+
+3. **Better onboard perception without contract churn**
+	- continue improving AI quality behind the now-stable backend surface
+	- add accelerators later only if they improve reliability rather than just complexity
+
+4. **Frontend/operator clarity**
+	- reflect real backend lifecycle, fault, and AI status cleanly in the UI
+	- reduce ambiguity for the person driving or debugging the mower
+
+5. **Hardware-safe validation discipline**
+	- keep building targeted regression coverage around the most safety-sensitive flows
+	- favor repeatable SIM-safe validation before touching live hardware
