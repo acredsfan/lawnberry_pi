@@ -15,12 +15,34 @@ pip install -e .
 Run the full test suite:
 
 ```bash
-pytest -q
+SIM_MODE=1 pytest -q
 ```
 
 - Contract tests validate the FastAPI REST + WebSocket API.
 - Integration tests include backups/migration and more.
 - Placeholder integration tests (future work) are skipped by default.
+
+## 1a) Simulation mode vs hardware mode
+
+Use simulation mode for laptops, CI, and general backend development:
+
+```bash
+SIM_MODE=1 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+```
+
+Use hardware mode only when validating on the Raspberry Pi or attached bench hardware:
+
+```bash
+SIM_MODE=0 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+```
+
+Important behavior note:
+
+- `SIM_MODE=1` is the pure simulation path
+- `SIM_MODE=0` attempts real hardware initialization
+- leaving `SIM_MODE` unset currently behaves like hardware mode because startup checks `os.getenv("SIM_MODE", "0")`
+
+See `docs/simulation-vs-hardware-modes.md` for the full explanation.
 
 Run placeholder integration tests explicitly:
 
@@ -73,6 +95,7 @@ RUN_HW_TESTS=1 pytest -q tests/integration/test_hardware_selftest.py
 
 Notes:
 - Use `SIM_MODE=0` for on-device hardware validation so the backend initializes real hardware paths instead of staying simulation-safe.
+- Use `SIM_MODE=1` for local development and CI if you want to avoid hardware-init warnings entirely.
 - The self-test is safe on systems without hardware: it catches missing devices and returns a report.
 - For I2C/serial access, ensure the user is in groups `i2c` and `dialout`.
 

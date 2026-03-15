@@ -33,9 +33,10 @@ This release replaces version 1 with a unified v2 backend and frontend, contract
 ## Highlights
 
 - Hardware telemetry behind SIM_MODE (T102, T110)
-  - Default simulation mode (SIM_MODE=1) keeps CI/dev safe
-  - Set `SIM_MODE=0` on the Pi to lazily initialize sensors via SensorManager and publish hardware-backed telemetry over WebSocket
-  - Graceful fallback to simulated data on hardware errors
+  - `SIM_MODE=1` is the pure simulation path used for CI/dev safety
+  - `SIM_MODE=0` on the Pi initializes sensors lazily via SensorManager and publishes hardware-backed telemetry over WebSocket
+  - Leaving `SIM_MODE` unset currently behaves like hardware mode because startup checks `os.getenv("SIM_MODE", "0")`
+  - Hardware mode still uses graceful fallback when individual devices fail
 
 - Docs Hub polish (T099)
   - Backend serves markdown/text with `ETag`, `Last-Modified`, and `Cache-Control`

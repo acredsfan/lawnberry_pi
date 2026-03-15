@@ -18,9 +18,13 @@ The LawnBerry Pi v2 system is now fully operational with hardware integration an
 
 ### Getting Started
 ```bash
-# Backend (Terminal 1)
+# Backend (Terminal 1, laptop / simulation mode)
 cd backend
-python -m uvicorn src.main:app --host 0.0.0.0 --port 8081 --reload
+SIM_MODE=1 python -m uvicorn src.main:app --host 0.0.0.0 --port 8081 --reload
+
+# Backend (Terminal 1, on-device / hardware mode)
+cd backend
+SIM_MODE=0 python -m uvicorn src.main:app --host 0.0.0.0 --port 8081 --reload
 
 # Frontend (Terminal 2)  
 cd frontend
@@ -28,6 +32,9 @@ npm run dev -- --host 0.0.0.0 --port 3000
 ```
 
 These are the local development defaults. On-device/systemd deployments use the same backend/frontend ports (`8081` and `3000`), while Playwright preview-based E2E runs use port `4173`.
+
+Important: if you do **not** set `SIM_MODE`, the backend currently behaves like hardware mode and will attempt device
+initialization. On a non-Pi machine this usually degrades gracefully, but it is noisier than running pure simulation.
 
 ### System Status
 - ✅ **Hardware Integration**: Real sensor data streaming from Pi hardware
@@ -42,6 +49,7 @@ These are the local development defaults. On-device/systemd deployments use the 
 
 ### Documentation
 - Developer Toolkit: `docs/developer-toolkit.md` — best starting point for returning maintainers and developers
+- Simulation vs Hardware Modes: `docs/simulation-vs-hardware-modes.md` — explains `SIM_MODE=1`, `SIM_MODE=0`, and what unset `SIM_MODE` actually does
 - Setup Guide: `docs/installation-setup-guide.md`
 - GPS RTK Configuration: `docs/gps-ntrip-setup.md` (centimeter-level accuracy)
 - Hardware Integration: `docs/hardware-integration.md`

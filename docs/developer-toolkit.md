@@ -162,8 +162,12 @@ Useful backend workflow:
 Important points:
 
 - hardware libraries are optional and imported lazily where possible
-- `SIM_MODE=1` is the safe/dev default pattern across docs and release notes
+- `SIM_MODE=1` is the recommended pure-simulation path for local development and CI
+- `SIM_MODE=0` enables real hardware initialization on the Pi
+- leaving `SIM_MODE` unset currently behaves like hardware mode because startup checks `os.getenv("SIM_MODE", "0")`
 - `.env` is used for runtime secrets such as NTRIP configuration and TLS-related settings
+
+For the full mode model, read `docs/simulation-vs-hardware-modes.md`.
 
 ### Frontend
 
@@ -220,12 +224,38 @@ Use `spec/hardware.yaml` as the source of truth for supported baseline hardware.
 - Coral USB accelerator, optional Hailo with caveats
 - INA3221 and optional Victron BLE-backed power monitoring
 
+Treat `spec/hardware.yaml` as the final word on what is actually in baseline. If another doc mentions LiDAR,
+secondary USB cameras, RC receivers, cellular hardware, or other exotic add-ons, assume that content is stale unless
+the spec has been updated too.
+
 ### Real-hardware gotchas
 
 - `SIM_MODE=0` is required for real hardware behavior
+- `SIM_MODE=1` is the only pure simulation path; unset `SIM_MODE` currently still attempts hardware init
 - I2C/UART/GPIO expectations are documented in `docs/hardware-integration.md`
 - some startup behavior is intentionally best-effort so CI and dev environments do not explode theatrically
 - camera ownership is centralized; do not casually create new components that re-open the camera device directly
+
+## Subsystem maturity snapshot
+
+This is the practical “how real is this?” map for returning maintainers. These labels are based on the current code and test
+coverage, not on roadmap intent.
+
+| Subsystem | Current maturity | What is real today | Main gaps / cautions |
+| --- | --- | --- | --- |
+| RoboHAT USB control bridge | **Stable enough for active maintenance** | `backend/src/services/robohat_service.py` now speaks the RP2040 text protocol, probes serial ports, maintains USB control, and has focused unit coverage in `tests/unit/test_robohat_service_usb_control.py`. | Still hardware-sensitive by nature; treat serial timing, RC takeover, and emergency-stop behavior as regression-sensitive. |
+| Camera streaming | **Beta / partial but real** | `backend/src/services/camera_stream_service.py` supports PiCamera2/OpenCV selection, simulation fallback, IPC streaming, client backpressure handling, and has targeted tests in `tests/unit/test_camera_stream_service.py`. | The streaming path is real, but AI-on-frame processing is still placeholder logic and camera ownership assumptions are strict. |
+| Navigation | **Partial implementation** | `backend/src/services/navigation_service.py` has path planning hooks, waypoint driving, return-home behavior, weather gating, and contract coverage such as `tests/contract/test_waypoint_navigation.py`. | Obstacle handling is simplistic, dead reckoning still uses placeholder distance estimates, and some mission movement logic still depends on optimistic state updates rather than hardened field feedback. |
+| Mission orchestration | **Scaffold / thin orchestration layer** | `backend/src/services/mission_service.py` can create, start, pause, resume, abort, and report missions, and the API surface is smoke-tested in `tests/test_mission_api.py`. | Missions are in-memory only, geofence validation is still a TODO, and current tests mostly validate endpoint wiring and mocks rather than real mission execution guarantees. |
+| Motor service abstraction | **Legacy / partial abstraction** | `backend/src/services/motor_service.py` models safety checks, controller selection, timeout behavior, and emergency-stop flow. | The concrete controller implementations are still placeholder-heavy; the more credible live control path today is the RoboHAT bridge rather than this abstraction layer. |
+| AI service | **Placeholder-only** | `backend/src/services/ai_service.py` detects accelerator availability and exposes status, while AI dataset endpoints have contract coverage in `tests/contract/test_rest_api_ai.py`. | There is no real inference pipeline here yet; this is status plumbing and API surface, not production-grade onboard AI. |
+
+Practical rule of thumb:
+
+- build confidently on the RoboHAT USB-control and camera-streaming paths, but keep tests close
+- treat navigation as usable but not fully hardened
+- treat mission orchestration and AI as areas that still need contract work before layering on new behavior
+- do not assume `MotorService` is the dominant runtime path without checking the current startup wiring first
 
 ## Important files by task
 
@@ -280,11 +310,13 @@ Use `spec/hardware.yaml` as the source of truth for supported baseline hardware.
 
 ## Immediate focus
 
+The first cleanup passes on ports, hardware-scope docs, and SIM-vs-hardware onboarding are now in much better shape.
 These are the areas that deserve attention before major new feature work.
 
-### 1. Reconcile port and runtime drift
+### 1. Keep the runtime contract honest
 
-**Why it matters:** onboarding, dev startup, frontend proxying, testing, and systemd/service expectations currently point at different ports.
+**Why it matters:** the main port/startup drift has been cleaned up, but this is the sort of issue that quietly comes back if docs,
+systemd units, Vite config, and scripts drift apart again.
 
 **Evidence:**
 
@@ -294,15 +326,16 @@ These are the areas that deserve attention before major new feature work.
 - `frontend/vite.config.ts`
 - `frontend/server.mjs`
 
-**What to do first:**
+**What to do next:**
 
-- choose the canonical backend port for local dev vs on-device service
-- update Vite proxy settings and README/testing docs to match
-- document any intentional distinction between dev, preview, and deployed ports
+- treat `8081` / `3000` / `4173` as the current contract unless you deliberately change it everywhere
+- verify docs and scripts whenever startup behavior changes
+- keep `backend/src/main.py` and service units as the primary runtime truth
 
-### 2. Clean up hardware/documentation drift
+### 2. Keep hardware scope grounded in the spec
 
-**Why it matters:** hardware docs should not imply support for devices or configurations outside the supported baseline.
+**Why it matters:** the hardware docs are much closer to reality now, but this repo has a history of speculative hardware prose
+getting ahead of the actual supported baseline.
 
 **Evidence:**
 
@@ -311,15 +344,16 @@ These are the areas that deserve attention before major new feature work.
 - `docs/installation-setup-guide.md`
 - `docs/hardware-feature-matrix.md`
 
-**What to do first:**
+**What to do next:**
 
-- use `docs/hallucination-audit.md` as the cleanup checklist
-- align setup docs to `spec/hardware.yaml`
-- clearly mark future ideas as future ideas, not current support
+- treat `spec/hardware.yaml` as the source of truth before editing prose docs
+- clearly separate supported fallbacks from future experiments
+- keep unsupported hardware mentions explicitly labeled as non-baseline
 
-### 3. Tighten SIM-mode versus hardware-mode onboarding
+### 3. Keep simulation and hardware workflows explicit
 
-**Why it matters:** this repo is safe by default partly because hardware initialization is guarded, but that also makes it easy to misunderstand what “working locally” means.
+**Why it matters:** the mode model is documented much more clearly now, but developers can still accidentally assume that
+“backend starts” means “hardware path is validated.” It very much does not.
 
 **Evidence:**
 
@@ -328,11 +362,11 @@ These are the areas that deserve attention before major new feature work.
 - `docs/RELEASE_NOTES.md`
 - `docs/hardware-integration.md`
 
-**What to do first:**
+**What to do next:**
 
-- document one explicit developer path for simulation
-- document one explicit maintainer path for on-device hardware validation
-- make the required environment variables and expected device interfaces obvious
+- keep `SIM_MODE=1` as the default recommendation for laptops and CI
+- document on-device validation as a separate maintainer workflow, not “just run the app”
+- check `.env`, serial devices, and I2C/UART expectations before declaring hardware regressions
 
 ### 4. Protect regression-sensitive manual control and camera paths
 
@@ -364,9 +398,9 @@ These are the areas that deserve attention before major new feature work.
 
 **What to do first:**
 
-- label partial services clearly in docs
-- decide whether each is actively in-progress, deferred, or stable-enough
+- keep the maturity labels in this handbook updated as code changes land
 - avoid building new features on top of placeholder behavior without first tightening the contract
+- use matching tests as part of the definition of “stable enough,” not just the existence of a service file
 
 ### 6. Keep tightening frontend typing and deep-path tests
 
@@ -410,11 +444,11 @@ If you are getting back into the codebase after a break, this is the shortest sa
 
 If you want the highest return on effort, do the next three passes in this order:
 
-1. **Port/docs reconciliation pass**
-2. **Hardware-scope documentation cleanup pass**
-3. **SIM vs hardware workflow clarity pass**
+1. **Manual-control and camera regression hardening pass**
+2. **Mission/navigation contract hardening pass**
+3. **AI surface decision pass** — either implement a real inference path or keep it explicitly experimental
 
-That sequence will make every later change easier to reason about.
+That sequence keeps the highest-risk runtime paths safe while also reducing the temptation to build on scaffolding.
 
 ## Deep references
 

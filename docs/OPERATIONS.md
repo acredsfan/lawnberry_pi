@@ -18,6 +18,28 @@ Use these runtime defaults consistently when starting or validating the stack:
 
 This means `8081`/`3000` are the canonical backend/frontend ports for both local development and deployed operation. The preview server on `4173` is intentional and only used for preview/E2E flows.
 
+## Simulation vs hardware mode
+
+The backend has two meaningful startup modes:
+
+- **`SIM_MODE=1`**: pure simulation mode; skip hardware access entirely
+- **`SIM_MODE=0`**: hardware mode; attempt real hardware initialization and degrade gracefully if individual devices fail
+
+Important nuance: leaving `SIM_MODE` unset currently behaves like hardware mode because `backend/src/main.py` checks
+`os.getenv("SIM_MODE", "0")`.
+
+Recommended commands:
+
+```bash
+# Laptop / CI / simulation-safe local dev
+SIM_MODE=1 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+
+# Raspberry Pi / hardware validation
+SIM_MODE=0 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+```
+
+If you want a clean local-development experience without serial/GPIO warnings, always set `SIM_MODE=1` explicitly.
+
 ## TLS/HTTPS Operations
 
 TLS is managed automatically:
@@ -149,7 +171,7 @@ By default, blade engagement is locked out until safety preconditions are satisf
 For best orientation accuracy, calibrate the IMU after installation:
 - Warm up system for 2 minutes
 - Perform figure-eight motions and gentle tilts on all axes
-- In simulation (SIM_MODE=1), calibration is bypassed; in hardware mode, verify orientation health in /api/v2/dashboard/telemetry
+- In simulation (`SIM_MODE=1`), calibration is bypassed; in hardware mode (`SIM_MODE=0`), verify orientation health in `/api/v2/dashboard/telemetry`
 
 ## GPS Setup
 - Preferred: ZED-F9P via USB; alternative: Neo-8M via UART

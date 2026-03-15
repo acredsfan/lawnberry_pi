@@ -1,556 +1,183 @@
-# LawnBerryPi Hardware Feature Matrix
-
-**Version:** 1.0  
-**Purpose:** Comprehensive hardware configuration guide and capability matrix  
-**Last Updated:** December 2024
-
-## Overview
-
-This document provides a complete matrix of hardware components, their capabilities, configuration options, and compatibility information. Use this guide to understand what features are available with different hardware configurations and plan system deployments.
-
----
-
-## Core Processing Platform
-
-### Raspberry Pi 4 Model B Configuration
-
-| Component | Specification | Status | Notes |
-|-----------|---------------|--------|-------|
-| **CPU** | ARM Cortex-A72 Quad-core 1.5GHz | ✅ Implemented | Sufficient for all processing needs |
-| **RAM** | 8GB LPDDR4 | ✅ Implemented | Supports advanced computer vision |
-| **Storage** | MicroSD 64GB+ Class 10 | ✅ Implemented | High-speed card recommended |
-| **GPIO** | 40-pin header | ✅ Fully Utilized | Pin mapping 100% compliant |
-| **Camera Interface** | CSI connector | ✅ Implemented | 1920x1080@30fps capability |
-| **USB Ports** | 4x USB 3.0 | ✅ Utilized | GPS, TPU, external devices |
-| **Network** | Gigabit Ethernet + WiFi | ✅ Implemented | Dual connectivity options |
-
-**Performance Capabilities:**
-- Concurrent processing of 11 microservices
-- Real-time computer vision at 30fps
-- WebSocket streaming to multiple clients
-- Complex mowing pattern calculations
-- Sensor fusion processing at 100Hz
-
----
-
-## Navigation and Positioning Systems
-
-### GPS/GNSS Configuration
-
-| Component | Model | Interface | Status | Accuracy | Features |
-|-----------|-------|-----------|--------|----------|----------|
-| **Primary GPS** | SparkFun GPS-RTK-SMA | USB (/dev/ttyACM0) | ✅ Implemented | <10cm RTK | Real-time corrections |
-| **RTK Corrections** | Ohio DOT Network | Internet | ✅ Active | <2cm | Professional grade |
-| **Backup GPS** | Pi Hat GPS (optional) | GPIO UART | ⚠️ Optional | 3-5m | Fallback capability |
-
-**GPS Feature Matrix:**
-- ✅ Real-time positioning
-- ✅ RTK correction integration  
-- ✅ Multi-constellation support (GPS, GLONASS, Galileo)
-- ✅ Autonomous fix acquisition
-- ✅ Position accuracy monitoring
-- ⚠️ Backup GPS configuration (optional)
-
-### Inertial Measurement Unit (IMU)
-
-| Component | Model | Interface | Status | Capabilities |
-|-----------|-------|-----------|--------|--------------|
-| **IMU** | BNO085 9-DOF | UART (/dev/ttyAMA4) | ✅ Implemented | Full orientation |
-| **Accelerometer** | Built-in 3-axis | Hardware | ✅ Active | ±16g range |
-| **Gyroscope** | Built-in 3-axis | Hardware | ✅ Active | ±2000°/s |
-| **Magnetometer** | Built-in 3-axis | Hardware | ✅ Active | Compass heading |
-
-**IMU Capabilities:**
-- ✅ Tilt and slope detection
-- ✅ Collision impact detection
-- ✅ Heading determination
-- ✅ Motion detection
-- ✅ Stability monitoring
-- ✅ Drop detection
-
----
-
-## Sensor Systems
-
-### Obstacle Detection Sensors
-
-| Sensor Type | Model | Interface | Range | Status | Use Case |
-|-------------|-------|-----------|-------|--------|----------|
-| **ToF Left** | VL53L0X | I2C (0x29) | 30-2000mm | ✅ Implemented | Left side obstacles |
-| **ToF Right** | VL53L0X | I2C (0x30) | 30-2000mm | ✅ Implemented | Right side obstacles |
-| **Camera Vision** | Pi Camera v2 | CSI | Visual range | ✅ Implemented | Object recognition |
-| **Ultrasonic** | — | — | — | ❌ Not in Baseline | Removed (use ToF sensors) |
-
-**Sensor Fusion Matrix:**
-- ✅ Multi-sensor obstacle detection
-- ✅ Cross-validation between sensors
-- ✅ Confidence scoring
-- ✅ Real-time processing
-- ✅ Environmental adaptation
-
-### Environmental Monitoring
-
-| Parameter | Sensor | Interface | Range | Status | Purpose |
-|-----------|--------|-----------|-------|--------|---------|
-| **Temperature** | BME280 | I2C (0x76) | -40°C to +85°C | ✅ Implemented | Operating limits |
-| **Humidity** | BME280 | I2C (0x76) | 0-100% RH | ✅ Implemented | Moisture detection |
-| **Pressure** | BME280 | I2C (0x76) | 300-1100 hPa | ✅ Implemented | Weather prediction |
-| **Light Level** | Optional sensor | I2C/ADC | Variable | ⚠️ Optional | Dawn/dusk detection |
-
----
-
-## Vision and AI Systems
-
-### Camera Configuration
-
-| Component | Specification | Status | Capabilities |
-|-----------|---------------|--------|--------------|
-| **Camera Module** | Pi Camera v2 8MP | ✅ Implemented | 1920x1080@30fps |
-| **Lens** | Fixed focus | ✅ Standard | 62.2° field of view |
-| **Night Vision** | Optional IR camera | ⚠️ Optional | Low-light operation |
-| **Pan/Tilt** | Optional servo mount | ⚠️ Optional | 360° coverage |
-
-**Vision Processing Capabilities:**
-- ✅ Real-time object detection
-- ✅ Obstacle identification
-- ✅ Edge detection for boundaries
-- ✅ Color-based grass detection
-- ⚠️ Advanced AI with TPU (optional)
-
-### AI Acceleration (Optional)
-
-| Component | Model | Interface | Status | Performance Gain |
-|-----------|-------|-----------|--------|------------------|
-| **Google Coral TPU** | USB Accelerator | USB 3.0 | ❌ Not Implemented | 10-100x AI speedup |
-| **Neural Compute Stick** | Intel Movidius | USB 3.0 | ❌ Not in Baseline | Not supported |
-| **Jetson Nano** | NVIDIA | GPIO/USB | ❌ Not in Baseline | Not supported |
-
-**AI Enhancement Matrix:**
-- ❌ TPU-accelerated object detection
-- ❌ Advanced computer vision models  
-- ❌ Real-time semantic segmentation
-- ❌ Custom lawn-specific AI models
-- ✅ CPU-based OpenCV processing (current)
-
----
-
-## Power Management System
-
-### Battery Configuration
-
-| Component | Specification | Status | Capabilities |
-|-----------|---------------|--------|--------------|
-| **Primary Battery** | 30Ah LiFePO4 12V | ✅ Implemented | 8-12 hours operation |
-| **Chemistry** | Lithium Iron Phosphate | ✅ Confirmed | Safe, long-life |
-| **BMS** | Built-in protection | ✅ Active | Overcurrent, thermal |
-| **Backup Battery** | Optional 12V SLA | ⚠️ Optional | Emergency power |
-
-**Battery Management Features:**
-- ✅ Real-time voltage/current monitoring
-- ✅ State of charge calculation
-- ✅ Health monitoring
-- ✅ Temperature protection
-- ✅ Low voltage cutoff
-- ⚠️ Automatic shutdown (requires RP2040 enhancement)
-
-### Solar Charging System
-
-| Component | Specification | Status | Performance |
-|-----------|---------------|--------|-------------|
-| **Solar Panel** | 30W Monocrystalline | ✅ Implemented | Peak 30W output |
-| **Charge Controller** | 20A MPPT | ✅ Implemented | 95%+ efficiency |
-| **Mounting** | Adjustable tilt | ✅ Physical | Seasonal optimization |
-| **Tracking** | Optional sun tracking | ❌ Not Implemented | 20-30% gain potential |
-
-**Solar Capabilities:**
-- ✅ Maximum Power Point Tracking
-- ✅ Battery protection during charging
-- ✅ Efficiency monitoring
-- ✅ Weather-based optimization
-- ❌ Automatic sun tracking (future enhancement)
-
-### Power Monitoring
-
-| Channel | Monitor Point | Sensor | Status | Purpose |
-|---------|---------------|--------|--------|---------|
-| **Channel 1** | Solar Input | INA3221 | ✅ Active | Generation monitoring |
-| **Channel 2** | Reserved | INA3221 | ⚠️ Available | Future expansion |
-| **Channel 3** | Battery Bank | INA3221 | ✅ Active | Consumption monitoring |
-
----
-
-## Motor and Drive Systems
-
-### Drive Motors
-
-| Component | Specification | Status | Control Method |
-|-----------|---------------|--------|----------------|
-| **Left Motor** | 12V Worm Gear DC | ✅ Implemented | PWM via RoboHAT → MDDRC10 |
-| **Right Motor** | 12V Worm Gear DC | ✅ Implemented | PWM via RoboHAT → MDDRC10 |
-| **Motor Driver (Drive)** | Cytron MDDRC10 | ✅ Implemented | Dual H-bridge (via RoboHAT) |
-| **Encoders** | Hall Effect | ✅ Implemented | Speed feedback |
-
-**Drive Capabilities:**
-- ✅ Variable speed control (0-100%)
-- ✅ Precise directional control
-- ✅ Speed feedback monitoring
-- ✅ Stall detection
-- ✅ Emergency stop capability
-
-### Cutting System
-
-| Component | Specification | Status | Safety Features |
-|-----------|---------------|--------|-----------------|
-| **Blade Motor** | 997 DC Motor | ✅ Implemented | High-speed cutting |
-| **Blade Driver** | IBT-4 H-Bridge | ✅ Implemented | Bidirectional control (GPIO24/25) |
-| **Safety Switch** | Tilt cutoff | ✅ Implemented | Auto-disable on tilt |
-| **Blade Guard** | Physical protection | ✅ Required | User safety |
-
----
-
-## Communication Systems
-
-### Primary Communication
-
-| Interface | Protocol | Status | Usage |
-|-----------|----------|--------|-------|
-| **WiFi** | 802.11n/ac | ✅ Implemented | Primary connectivity |
-| **Ethernet** | Gigabit | ✅ Available | Backup/setup |
-| **Bluetooth** | 5.0 | ⚠️ Available | Optional RC/maintenance |
-
-### Internal Communication
-
-| Interface | Protocol | Devices | Status |
-|-----------|----------|---------|--------|
-| **I2C Bus** | 400kHz | Sensors, Display | ✅ Implemented |
-| **UART** | Various baud | GPS, IMU | ✅ Implemented |
-| **USB** | USB 3.0 | GPS, TPU | ✅ Implemented |
-| **GPIO** | Digital I/O | Motors, switches | ✅ Implemented |
-
----
-
-## Display and User Interface
-
-### On-Board Display
-
-| Component | Specification | Status | Capabilities |
-|-----------|---------------|--------|--------------|
-| **OLED Display** | SSD1306 128x64 | ✅ Implemented | Status information |
-| **Interface** | I2C (0x3c) | ✅ Active | Real-time updates |
-| **Backlight** | None (OLED) | ✅ Self-lit | Day/night readable |
-
-**Display Information:**
-- ✅ System status
-- ✅ Battery level
-- ✅ GPS status
-- ✅ Current operation mode
-- ✅ Error messages
-- ✅ Network connectivity
-
-### Remote Interface
-
-| Interface | Type | Status | Capabilities |
-|-----------|------|--------|--------------|
-| **Web UI** | Responsive web app | ✅ Implemented | Full system control |
-| **Mobile App** | Progressive web app | ✅ Available | Touch-optimized |
-| **API Access** | REST + WebSocket | ✅ Implemented | Developer integration |
-
----
-
-## Optional and Future Hardware
-
-### Remote Control (Optional)
-
-| Component | Interface | Status | Capabilities |
-|-----------|-----------|--------|--------------|
-| **RC Receiver** | PPM/PWM | ❌ Not in Baseline | Not implemented |
-| **Emergency Remote** | 2.4GHz | ⚠️ Optional | Safety backup |
-| **Range** | 100-500m | ⚠️ Dependent | Line of sight |
-
-### Advanced Sensors (Optional)
-
-| Sensor Type | Purpose | Interface | Status |
-|-------------|---------|-----------|--------|
-| **LiDAR** | 360° obstacle detection | USB/Serial | ❌ Not in Baseline |
-| **Radar** | Weather-resistant detection | GPIO/SPI | ⚠️ Compatible |
-| **Ground sensors** | Soil moisture, pH | I2C/ADC | ⚠️ Expandable |
-| **Weather station** | Local micro-climate | I2C/1-Wire | ⚠️ Compatible |
-
----
-
-## Hardware Configuration Matrix
-
-### Standard Configuration (Current Implementation)
-
-| System | Components | Status | Capability Level |
-|--------|------------|--------|------------------|
-| **Processing** | Pi 4B 8GB | ✅ Complete | Professional |
-| **Navigation** | RTK GPS + IMU | ✅ Complete | Sub-centimeter |
-| **Sensors** | ToF + Camera + Environmental | ✅ Complete | Comprehensive |
-| **Power** | 30Ah LiFePO4 + 30W Solar | ✅ Complete | Full-day operation |
-| **Communication** | WiFi + I2C + UART | ✅ Complete | Fully connected |
-| **Safety** | Multi-sensor fusion | ✅ Complete | Professional grade |
-
-### Enhanced Configuration (With Optional Components)
-
-| System | Additional Components | Status | Capability Gain |
-|--------|----------------------|--------|-----------------|
-| **AI Processing** | Google Coral TPU | ❌ Available | 10x vision performance |
-| **Remote Control** | RC receiver system | ❌ Not in Baseline | Not implemented |
-| **Advanced Sensors** | Additional ToF only | ⚠️ Compatible | Per spec |
-| **Power Expansion** | Backup battery | ⚠️ Compatible | Extended operation |
-| **Weather Station** | Local sensors | ⚠️ Compatible | Micro-climate data |
-
-### Minimal Configuration (Cost-Optimized)
-
-| System | Reduced Components | Impact | Cost Savings |
-|--------|-------------------|--------|--------------|
-| **Processing** | Pi 4B 8GB | Moderate | 20% reduction |
-| **GPS** | Standard GPS (no RTK) | Reduced accuracy | 40% GPS cost |
-| **Sensors** | Single ToF sensor | Reduced safety | 30% sensor cost |
-| **Power** | Smaller battery/panel | Shorter operation | 25% power cost |
-
----
-
-## Pin Usage and Expansion Capabilities
-
-### GPIO Pin Allocation
-
-| Physical Pin | GPIO | Function | Device | Status |
-|--------------|------|----------|--------|--------|
-| 15 | 22 | Output | Left ToF Shutdown | ✅ Used |
-| 16 | 23 | Output | Right ToF Shutdown | ✅ Used |
-| 18 | 24 | Output | Blade Controller IN1 | ✅ Used |
-| 22 | 25 | Output | Blade Controller IN2 | ✅ Used |
-| 31 | 6 | Input | Left ToF Interrupt | ✅ Used |
-| 32 | 12 | Input | Right ToF Interrupt | ✅ Used |
-| 19 | 10 | - | **Available** | ⚠️ Free |
-| 23 | 11 | - | **Available** | ⚠️ Free |
-| 26 | 7 | - | **Available** | ⚠️ Free |
-| 29 | 5 | - | **Available** | ⚠️ Free |
-
-### I2C Device Addresses
-
-| Address | Device | Status | Notes |
-|---------|--------|--------|-------|
-| 0x29 | Left ToF Sensor | ✅ Used | Default address |
-| 0x30 | Right ToF Sensor | ✅ Used | Reprogrammed address |
-| 0x3c | OLED Display | ✅ Used | Standard SSD1306 |
-| 0x40 | Power Monitor | ✅ Used | INA3221 |
-| 0x76 | Environmental Sensor | ✅ Used | BME280 |
-| 0x48 | **Available** | ⚠️ Free | ADC expansion |
-| 0x50-0x57 | **Available** | ⚠️ Free | EEPROM range |
-
-### Expansion Capabilities
-
-**Available Interfaces:**
-- 5x GPIO pins available for expansion
-- 3x I2C addresses available  
-- 2x USB 3.0 ports available
-- SPI interface available
-- Additional UART via GPIO
-
-**Potential Expansions:**
-- Additional ToF sensors (front/rear)
-- Soil moisture sensors
-- Weather station integration
-- Advanced lighting systems
-- Security cameras
-- Emergency beacons
-
----
-
-## Installation and Configuration Guide
-
-### Hardware Setup Sequence
-
-1. **Core Assembly:**
-   - Mount Raspberry Pi and RoboHAT
-   - Install sensors per pin mapping
-   - Connect power distribution
-
-2. **Sensor Installation:**
-   - Mount ToF sensors at front corners
-   - Install IMU with proper orientation
-   - Mount camera with clear field of view
-   - Install environmental sensor
-
-3. **Power System:**
-   - Install battery in weatherproof enclosure
-   - Mount solar panel with optimal exposure
-   - Connect charge controller and monitoring
-
-4. **Verification:**
-   - Test all sensor connections
-   - Verify power system operation
-   - Confirm GPIO pin assignments
-   - Validate communication interfaces
-
-### Configuration Requirements
-
-**Software Configuration:**
-- Hardware configuration in `config/hardware.yaml`
-- Pin mapping verification required
-- Sensor calibration recommended
-- Power thresholds adjustment
-
-**Hardware Configuration:**
-- GPS antenna positioning for sky view
-- Camera angle and focus adjustment
-- Solar panel optimal positioning
-- Sensor mounting and protection
-
----
-
-## Troubleshooting Matrix
-
-### Common Hardware Issues
-
-| Symptom | Possible Cause | Hardware Check | Solution |
-|---------|----------------|----------------|----------|
-| **No GPS fix** | Antenna obstruction | Sky view clearance | Relocate antenna |
-| **ToF sensor errors** | Dirty sensor face | Visual inspection | Clean sensor lens |
-| **Power issues** | Connection problems | Voltage measurements | Check all connections |
-| **Camera not working** | Cable/connection | CSI cable check | Reseat camera cable |
-| **I2C device missing** | Address conflict | I2C scan | Check address assignment |
-
-### Diagnostic Tools
-
-**Hardware Tests:**
-- GPIO test scripts
-- I2C device scanning
-- Sensor individual testing
-- Power system monitoring
-- Communication verification
-
-**Built-in Diagnostics:**
-- System health dashboard
-- Sensor status monitoring
-- Power consumption tracking
-- Error logging and analysis
-
----
-
-## Maintenance Schedule
-
-### Hardware Maintenance Matrix
-
-| Component | Frequency | Maintenance Task | Tools Required |
-|-----------|-----------|------------------|----------------|
-| **Camera** | Weekly | Clean lens | Soft cloth |
-| **ToF Sensors** | Weekly | Clean sensor face | Cotton swabs |
-| **Solar Panel** | Monthly | Clean surface | Water, soft brush |
-| **Connections** | Monthly | Inspect and tighten | Screwdrivers |
-| **Battery** | Quarterly | Performance test | Multimeter |
-| **Mechanical** | Seasonally | Lubricate, inspect | Lubricants |
-
-### Replacement Schedule
-
-| Component | Expected Life | Replacement Indicator |
-|-----------|---------------|----------------------|
-| **MicroSD Card** | 2-3 years | Performance degradation |
-| **Battery** | 5-8 years | Capacity < 80% |
-| **Camera** | 3-5 years | Image quality decline |
-| **Sensors** | 5-10 years | Accuracy drift |
-| **Motors** | 3-5 years | Performance issues |
-
----
-
-## Specifications Summary
-
-### System Capabilities Matrix
-
-| Capability | Current Implementation | Optional Enhancement | Future Potential |
-|------------|----------------------|---------------------|------------------|
-| **Positioning Accuracy** | <10cm RTK | <2cm with base station | mm-level precision |
-| **Obstacle Detection** | 0.03-2m ToF + vision | — | — |
-| **Operation Time** | 8-12 hours | 16+ hours with backup | 24/7 with tracking |
-| **AI Processing** | CPU OpenCV | TPU acceleration | Edge AI integration |
-| **Connectivity** | WiFi primary | — | — |
-| **Weather Resistance** | IP54 rating | IP67 upgrade | Extreme weather |
-
-**Performance Benchmarks:**
-- Sensor processing: 100Hz update rate
-- Vision processing: 30fps real-time
-- Navigation accuracy: Sub-centimeter positioning
-- Power efficiency: 45-60W typical consumption
-- Communication latency: <50ms local network
-- Safety response time: <100ms emergency stop
-
----
-
-## Software Integration Features (V2 API)
-
-### Backend Services
-
-| Service | Purpose | Status | Key Features |
-|---------|---------|--------|--------------|
-| **TelemetryHub** | Real-time data aggregation | ✅ Implemented | WebSocket streaming, persistence, export |
-| **SensorManager** | Hardware sensor coordination | ✅ Implemented | Multi-sensor fusion, calibration |
-| **RoboHATService** | Serial bridge to RP2040 | ✅ Implemented | Command translation, status monitoring |
-| **MotorService** | Motor control coordination | ✅ Implemented | Safety interlocks, speed control |
-| **MapsService** | Map provider management | ✅ Implemented | GeoJSON validation, fallback support |
-| **SettingsService** | Configuration management | ✅ Implemented | Profile versioning, validation |
-
-### Frontend Components
-
-| Component | Purpose | Status | Capabilities |
-|-----------|---------|--------|--------------|
-| **SystemStore** | Telemetry state management | ✅ Implemented | Real-time updates, error handling |
-| **ControlStore** | Control command management | ✅ Implemented | Lockout handling, command queuing |
-| **MapStore** | Map configuration state | ✅ Implemented | Boundary editing, marker management |
-| **DashboardView** | System overview UI | ✅ Implemented | Telemetry display, status cards |
-| **ControlView** | Motor control interface | ✅ Implemented | Command buttons, safety indicators |
-| **MapView** | Interactive map UI | ✅ Implemented | Boundary editor, zone management |
-| **SettingsView** | Configuration UI | ✅ Implemented | Profile management, validation |
-| **DocsHubView** | Documentation browser | ✅ Implemented | Offline bundle support |
-
-### API Endpoints (V2)
-
-| Endpoint Category | Count | Status | Features |
-|------------------|-------|--------|----------|
-| **Telemetry** | 3 | ✅ Complete | Stream, export, subscribe |
-| **Control** | 4 | ✅ Complete | Drive, blade, stop, status |
-| **Maps** | 4 | ✅ Complete | Configuration CRUD, fallback |
-| **Settings** | 2 | ✅ Complete | Profile GET/PUT, validation |
-| **Documentation** | 2 | ✅ Complete | Bundle generation, artifacts |
-| **Planning** | 3 | ✅ Complete | Job management, scheduling |
-| **AI** | 2 | ✅ Complete | Dataset management, export |
-
-### WebSocket Topics
-
-| Topic | Purpose | Update Rate | Status |
-|-------|---------|-------------|--------|
-| **telemetry** | Sensor data streaming | 1-10Hz | ✅ Active |
-| **control** | Command echoes, lockouts | On event | ✅ Active |
-| **maps** | Map updates | On change | ✅ Active |
-| **ai** | Processing results | On completion | ✅ Active |
-
-### Data Models
-
-| Model Category | Models | Status | Validation |
-|----------------|--------|--------|------------|
-| **Telemetry** | 8 models | ✅ Complete | Pydantic v2 |
-| **Control** | 4 models | ✅ Complete | Pydantic v2 |
-| **Maps** | 5 models | ✅ Complete | GeoJSON + Shapely |
-| **Settings** | 9 models | ✅ Complete | Branding checksums |
-| **Planning** | 3 models | ✅ Complete | Pydantic v2 |
-
-### Constitutional Compliance
-
-| Requirement | Implementation | Status | Validation Method |
-|-------------|----------------|--------|-------------------|
-| **Latency Targets** | ≤250ms (Pi 5), ≤350ms (Pi 4B) | ✅ Enforced | Performance tests |
-| **Audit Logging** | All state changes logged | ✅ Implemented | Audit trail verification |
-| **Remediation Links** | All errors include docs links | ✅ Implemented | Error response inspection |
-| **Branding Validation** | Checksum verification | ✅ Implemented | Settings validation |
-| **SIM Mode Coverage** | All hardware operations | ✅ Implemented | Test suite verification |
-| **Offline Documentation** | Bundle generation | ✅ Implemented | Archive creation script |
-
----
-
-**Document Version:** 2.0  
-**Last Updated:** October 2025  
-**Next Review:** January 2026
-
-This hardware feature matrix provides comprehensive information for planning, deploying, and maintaining LawnBerryPi systems across different hardware configurations and use cases. For V2 API details and operational procedures, see [OPERATIONS.md](OPERATIONS.md).
+# LawnBerry Pi Hardware Feature Matrix
+
+**Version:** 2.0  
+**Purpose:** Supported hardware baseline, compatible fallbacks, and clearly labeled optional paths  
+**Last Updated:** March 2026
+
+This matrix is intentionally grounded in `spec/hardware.yaml` and `docs/hardware-integration.md`.
+If this file conflicts with those sources, the spec and integration guide win.
+
+## Baseline platform
+
+### Supported Raspberry Pi models
+
+| Platform | Status | Notes |
+|---|---|---|
+| **Raspberry Pi 5 (4–16GB)** | ✅ Primary baseline | Preferred deployment target for LawnBerry Pi v2. |
+| **Raspberry Pi 4B (4–8GB)** | ✅ Supported fallback | Supported with pin/UART differences called out in `docs/hardware-integration.md`. |
+
+### Platform characteristics
+
+| Area | Baseline | Notes |
+|---|---|---|
+| OS | Raspberry Pi OS Bookworm (64-bit) | Current supported OS family. |
+| Python | 3.11.x | Matches backend runtime target. |
+| Storage | 32GB+ microSD recommended | Higher-capacity/high-endurance media strongly preferred for logs and updates. |
+| Network | WiFi primary, Ethernet bench-only, Bluetooth optional | Matches `spec/hardware.yaml`. |
+
+## Navigation and positioning
+
+| Component | Interface | Status | Notes |
+|---|---|---|---|
+| **SparkFun GPS-RTK-SMA (u-blox ZED-F9P)** | USB | ✅ Preferred baseline | RTK-capable GPS path for high-accuracy positioning. |
+| **NTRIP corrections** | Network | ✅ Supported | Configuration documented in `docs/gps-ntrip-setup.md`; provider is user-configured, not fixed to a single caster. |
+| **u-blox NEO-8M** | UART | ✅ Supported fallback | Lower-accuracy fallback path when RTK hardware is unavailable. |
+| **u-blox NEO-9M** | Varies | ⚠️ Doc-only recommendation | Mentioned as a possible future/alternate purchase choice, but not part of the canonical baseline. |
+
+### GPS expectations
+
+| Mode | Typical accuracy | Status |
+|---|---|---|
+| Standard GPS fallback | 3–5 m | ✅ Supported |
+| RTK with corrections | 2–10 cm | ✅ Supported |
+
+## Orientation and environmental sensing
+
+| Component | Interface | Status | Notes |
+|---|---|---|---|
+| **BNO085 IMU** | UART4 | ✅ Baseline | Primary IMU/heading source. |
+| **BNO055** | Varies | ⚠️ Backup-only mention | Keep as a possible backup only if you verify code support first. |
+| **MPU-9250** | Varies | ⚠️ Backup-only mention | Same rule as BNO055: verify code support before use. |
+| **LSM9DS1** | Varies | ❌ Not in baseline | Removed from active recommendations. |
+| **BME280** | I2C `0x76` | ✅ Baseline | Environmental monitoring. |
+
+## Obstacle sensing and local display
+
+| Component | Interface | Status | Notes |
+|---|---|---|---|
+| **VL53L0X Left** | I2C `0x29` | ✅ Baseline | Left obstacle sensing. |
+| **VL53L0X Right** | I2C `0x30` | ✅ Baseline | Right obstacle sensing. |
+| **ToF shutdown pins (GPIO 22/23)** | GPIO | ✅ Optional within baseline | Supported optional wiring for power/address sequencing. |
+| **ToF interrupt pins (GPIO 6/12)** | GPIO | ✅ Optional within baseline | Supported optional wiring. |
+| **SSD1306 OLED 128x64** | I2C `0x3C` | ✅ Baseline | On-device status display. |
+| **Ultrasonic sensors** | — | ❌ Not in baseline | Removed; not part of supported hardware. |
+
+## Vision and AI acceleration
+
+| Component | Interface | Status | Notes |
+|---|---|---|---|
+| **Pi Camera v2** | CSI | ✅ Baseline | Canonical camera device. Camera-stream service owns the device and exposes frames via IPC. |
+| **Pi Camera v3 as primary** | CSI | ❌ Not in baseline | Not documented as the supported baseline camera. |
+| **Secondary USB cameras** | USB | ❌ Not in baseline | Remove from active setup guidance unless spec changes. |
+| **Google Coral USB Accelerator** | USB | ⚠️ Hardware present / software support limited | Listed in the hardware baseline; treat as available hardware with implementation status that must be validated feature-by-feature. |
+| **Hailo-8 AI Hat** | HAT | ⚠️ Optional with caveat | Optional in spec, with explicit conflict note around concurrent RoboHAT use. |
+| **CPU inference (TFLite / OpenCV-DNN)** | CPU | ✅ Available | Current safe fallback path for vision/AI experimentation. |
+| **Jetson / Movidius / other accelerators** | — | ❌ Not supported | Not part of the supported LawnBerry v2 baseline. |
+
+## Power system
+
+| Component | Status | Notes |
+|---|---|---|
+| **30Ah LiFePO4 12V battery** | ✅ Baseline | Canonical battery chemistry and capacity. |
+| **30W solar panel** | ✅ Baseline | Baseline solar input. |
+| **15A MPPT controller** | ✅ Baseline | Baseline solar charge controller. |
+| **INA3221 power monitor** | ✅ Baseline | Channel mapping: battery / unused / solar input. |
+| **Victron SmartSolar BLE telemetry** | ✅ Optional within baseline | Optional supplement or preferred telemetry source when configured. |
+| **Backup SLA battery** | ❌ Not in baseline | Not part of the supported hardware baseline. |
+
+### Runtime expectations
+
+| Metric | Baseline guidance | Notes |
+|---|---|---|
+| Typical runtime | 4–8 hours | Use conservative field guidance as default. |
+| Best-case runtime | up to ~12 hours | Treat as best-case, terrain and solar dependent, not the default expectation. |
+
+## Drive and cutting system
+
+| Component | Status | Notes |
+|---|---|---|
+| **RoboHAT RP2040 → Cytron MDDRC10** | ✅ Preferred baseline | Primary drive-control path. |
+| **L298N dual H-bridge** | ✅ Supported fallback | Lower-capability fallback path for drive control. |
+| **Hall effect encoders** | ✅ Baseline | Four magnets per wheel per spec. |
+| **997 DC blade motor** | ✅ Baseline | Current cutting motor. |
+| **IBT-4 blade driver** | ✅ Baseline | GPIO 24 / 25 control path. |
+| **BTS7960** | ❌ Not in baseline | Removed from recommendations. |
+
+## Supported communication and buses
+
+| Bus / interface | Status | Notes |
+|---|---|---|
+| **I2C bus 1** | ✅ Baseline | Primary bus for ToF, BME280, INA3221, OLED. |
+| **UART4** | ✅ Baseline | BNO085 on Pi 5; Pi 4B alternate pins documented in integration guide. |
+| **USB** | ✅ Baseline | GPS, Coral, high-gain WiFi adapter. |
+| **GPIO** | ✅ Baseline | Blade control, optional ToF shutdown/interrupt, safety integration. |
+
+## Configuration tiers
+
+### Current supported baseline
+
+| Area | Components | Status |
+|---|---|---|
+| Compute | Pi 5 primary / Pi 4B fallback | ✅ Supported |
+| Navigation | ZED-F9P + NTRIP preferred, NEO-8M fallback | ✅ Supported |
+| Sensors | Dual VL53L0X + BME280 + BNO085 + INA3221 + OLED | ✅ Supported |
+| Vision | Pi Camera v2 | ✅ Supported |
+| Drive | RoboHAT → Cytron MDDRC10 preferred, L298N fallback | ✅ Supported |
+| Cutting | 997 motor + IBT-4 | ✅ Supported |
+
+### Optional but still in scope
+
+| Area | Component | Status | Notes |
+|---|---|---|---|
+| Power telemetry | Victron SmartSolar BLE | ✅ Optional | Supplement or preferred source over INA3221 when configured. |
+| AI acceleration | Coral USB | ⚠️ Optional | Hardware is in baseline; validate software path before relying on it in production. |
+| AI acceleration | Hailo-8 | ⚠️ Optional | Optional with explicit RoboHAT conflict caveat. |
+
+### Out of scope for the supported baseline
+
+| Item | Status | Guidance |
+|---|---|---|
+| LiDAR | ❌ Not in baseline | Future idea only; not supported today. |
+| RC receiver manual override | ❌ Not in baseline | Would require safety and control-model redesign. |
+| Cellular modem | ❌ Not in baseline | Remove from active setup guidance. |
+| Weather-station hardware | ❌ Not in baseline | Not part of the current supported hardware list. |
+| Night-vision / pan-tilt camera rigs | ❌ Not in baseline | Future-only concepts, not active support. |
+| Perimeter-wire sensors | ❌ Not in baseline | Not part of current hardware architecture. |
+
+## Pin and address summary
+
+### GPIO usage from the canonical spec
+
+| Physical pin | GPIO / UART | Role |
+|---|---|---|
+| 15 | GPIO 22 | ToF left shutdown |
+| 16 | GPIO 23 | ToF right shutdown |
+| 18 | GPIO 24 | Blade IN1 |
+| 22 | GPIO 25 | Blade IN2 |
+| 31 | GPIO 6 | ToF left interrupt |
+| 32 | GPIO 12 | ToF right interrupt |
+| 33 | RXD4 / Pi 4B alt GPIO 21 | BNO085 RX |
+| 32 | TXD4 / Pi 4B alt GPIO 24 | BNO085 TX |
+
+### I2C addresses
+
+| Address | Device |
+|---|---|
+| `0x29` | VL53L0X left |
+| `0x30` | VL53L0X right |
+| `0x3C` | SSD1306 OLED |
+| `0x40` | INA3221 |
+| `0x76` | BME280 |
+
+## Deployment guidance
+
+- For exact wiring, UART overlays, and environment overrides, use `docs/hardware-integration.md`.
+- For returning-maintainer context, use `docs/developer-toolkit.md`.
+- For items not listed here, assume they are unsupported unless they are first added to `spec/hardware.yaml`.
+
+## References
+
+- `spec/hardware.yaml`
+- `docs/hardware-integration.md`
+- `docs/hardware-overview.md`
+- `docs/hallucination-audit.md`

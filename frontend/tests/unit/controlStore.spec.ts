@@ -87,6 +87,23 @@ describe('Control Store', () => {
       expect(api.sendControlCommand).not.toHaveBeenCalled()
     })
 
+    it('preserves remediation links from blocked responses', async () => {
+      const { store } = createStoreWithWs()
+      const blockedResponse = {
+        result: 'blocked',
+        status_reason: 'SAFETY_LOCKOUT',
+        remediation_url: '/docs/OPERATIONS.md#blade-safety-lockout',
+      }
+
+      vi.mocked(api.sendControlCommand).mockResolvedValue(blockedResponse as any)
+
+      await store.submitCommand('blade', { action: 'enable' })
+
+      expect(store.lockoutActive).toBe(true)
+      expect(store.lockoutReason).toBe('SAFETY_LOCKOUT')
+      expect(store.remediationLink).toBe('/docs/OPERATIONS.md#blade-safety-lockout')
+    })
+
     it('handles command submission errors', async () => {
       const { store } = createStoreWithWs()
       const error = new Error('Communication failure')
@@ -95,6 +112,46 @@ describe('Control Store', () => {
 
       await expect(store.submitCommand('FORWARD', {})).rejects.toThrow('Communication failure')
       expect(store.commandInProgress).toBe(false)
+    })
+
+    it('does not activate safety lockout for generic transport errors', async () => {
+      const { store } = createStoreWithWs()
+      const error = new Error('Network timeout')
+
+      vi.mocked(api.sendControlCommand).mockRejectedValue(error)
+
+      await expect(store.submitCommand('drive', {})).rejects.toThrow('Network timeout')
+
+      expect(store.commandInProgress).toBe(false)
+      expect(store.lockoutActive).toBe(false)
+      expect(store.lockout).toBe(false)
+      expect(store.lockoutReason).toBe('')
+    })
+
+    it('activates safety lockout for explicit safety API errors', async () => {
+      const { store } = createStoreWithWs()
+      const error = {
+        message: 'Request failed with status code 423',
+        response: {
+          status: 423,
+          data: {
+            result: 'blocked',
+            status_reason: 'SAFETY_LOCKOUT',
+            remediation: {
+              docs_link: '/docs/OPERATIONS.md#blade-safety-lockout',
+            },
+          },
+        },
+      }
+
+      vi.mocked(api.sendControlCommand).mockRejectedValue(error)
+
+      await expect(store.submitCommand('blade', {})).rejects.toMatchObject(error)
+
+      expect(store.lockoutActive).toBe(true)
+      expect(store.lockout).toBe(true)
+      expect(store.lockoutReason).toBe('SAFETY_LOCKOUT')
+      expect(store.remediationLink).toBe('/docs/OPERATIONS.md#blade-safety-lockout')
     })
 
     it('sets commandInProgress flag during submission', async () => {

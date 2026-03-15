@@ -4,6 +4,26 @@ import { sendControlCommand, getRoboHATStatus } from '../services/api';
 import { useWebSocket } from '../services/websocket';
 
 export const useControlStore = defineStore('control', () => {
+  function extractRemediationLink(source: any): string {
+    if (!source) return '';
+    return source?.remediation_link || source?.remediation_url || source?.remediation?.docs_link || '';
+  }
+
+  function isSafetyLockoutError(error: any): boolean {
+    const status = error?.response?.status;
+    const data = error?.response?.data;
+    const reason = String(data?.status_reason || data?.detail || error?.message || '').toUpperCase();
+
+    return (
+      status === 403 ||
+      status === 423 ||
+      data?.result === 'blocked' ||
+      reason.includes('LOCKOUT') ||
+      reason.includes('EMERGENCY_STOP') ||
+      reason.includes('EMERGENCY STOP')
+    );
+  }
+
   // State
   const lockoutActive = ref(false);
   const lockout = ref(false);
@@ -29,7 +49,7 @@ export const useControlStore = defineStore('control', () => {
         lockoutActive.value = msg.active !== false;
         lockoutReason.value = msg.reason || 'Unknown';
         lockoutUntil.value = msg.until || null;
-        remediationLink.value = msg.remediation_link || '';
+        remediationLink.value = extractRemediationLink(msg);
       }
       if (msg.type === 'unlock') {
         lockout.value = false;
@@ -57,15 +77,20 @@ export const useControlStore = defineStore('control', () => {
         lockout.value = true;
         lockoutActive.value = true;
         lockoutReason.value = result.status_reason || 'SAFETY_LOCKOUT';
-        remediationLink.value = result.remediation_link || '';
+        remediationLink.value = extractRemediationLink(result);
       }
       return result;
     } catch (e: any) {
-      lastCommandResult.value = { result: 'error', status_reason: e?.message || 'Unknown error' };
-      lockout.value = true;
-      lockoutActive.value = true;
-      lockoutReason.value = e?.message || 'Unknown error';
-      remediationLink.value = e?.remediation_link || '';
+      const statusReason = e?.response?.data?.status_reason || e?.response?.data?.detail || e?.message || 'Unknown error';
+      lastCommandResult.value = { result: 'error', status_reason: statusReason };
+
+      if (isSafetyLockoutError(e)) {
+        lockout.value = true;
+        lockoutActive.value = true;
+        lockoutReason.value = statusReason;
+        remediationLink.value = extractRemediationLink(e?.response?.data || e);
+      }
+
       throw e;
     } finally {
       commandInProgress.value = false;
@@ -112,7 +137,7 @@ export const useControlStore = defineStore('control', () => {
         lockoutActive.value = msg.active !== false;
         lockoutReason.value = msg.reason || 'Unknown';
         lockoutUntil.value = msg.until || null;
-        remediationLink.value = msg.remediation_link || '';
+        remediationLink.value = extractRemediationLink(msg);
       }
       if (msg.type === 'unlock') {
         lockout.value = false;

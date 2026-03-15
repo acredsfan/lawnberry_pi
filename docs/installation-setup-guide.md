@@ -29,13 +29,13 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 ### Required Sensors & Hardware (reference spec/hardware.yaml)
 
 #### Navigation & Positioning
-- **GPS Module**: USB GPS receiver or GPIO-connected module
+- **GPS Module**
    - Baseline: SparkFun GPS-RTK-SMA (u-blox ZED-F9P) via USB
-   - Alternative: u-blox NEO-8M via UART
-   - Recommendation: u-blox NEO-9M (doc-only; not in baseline)
-  - Alternative: USB GPS dongles (BU-353S4, etc.)
-- **IMU/Compass**: 9-DOF IMU module (I2C)
-  - Recommended: BNO055, MPU-9250, or LSM9DS1
+   - Supported fallback: u-blox NEO-8M via UART
+   - Doc-only recommendation: u-blox NEO-9M (not part of the current baseline)
+- **IMU/Compass**
+   - Baseline: BNO085 on UART4
+   - Backup-only mentions: BNO055 or MPU-9250, but verify code support before using them
 
 #### Camera System
 - **Pi Camera Module v2** (baseline primary)
@@ -45,15 +45,19 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 - **Safety Switch**: Emergency stop button
 
 #### Motor & Power
-- **Motor Controllers**: Dual H-bridge motor drivers
-   - Drive: Cytron MDDRC10 via RoboHAT RP2040 (preferred), or L298N dual H-Bridge (fallback)
-   - Blade: IBT-4 H-Bridge
+- **Drive Controller**
+   - Preferred: Cytron MDDRC10 via RoboHAT RP2040
+   - Supported fallback: L298N dual H-bridge
+- **Blade Controller**
+   - Baseline: IBT-4 H-Bridge on GPIO 24 / 25
 - **Motors**: DC geared motors with encoders
-- **Battery**: 12V LiFePO4 or Lead-Acid battery
-- **Power Management Board**: 12V to 5V converter with monitoring
+- **Battery**: 12V 30Ah LiFePO4 baseline
+- **Power Monitoring**: INA3221 baseline, optional Victron SmartSolar BLE telemetry
 
 #### Optional Hardware
-- **Solar Panel**: 12V solar charging system
+- **Solar Panel**: 30W panel with MPPT charge controller
+- **Google Coral USB Accelerator**: physically present in the baseline hardware list, but validate software support before depending on it
+- **Hailo-8 AI Hat**: optional only, with the RoboHAT conflict caveat documented in `spec/hardware.yaml`
 
 ## Initial Setup
 
@@ -98,8 +102,8 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 ### 2. Hardware Assembly (Pi 4B/5 compatible)
 
 1. **Mount Sensors**
-   - Connect GPS module via USB or GPIO UART
-   - Wire IMU per spec (BNO085 on UART4; backups: BNO055/MPU-9250 if supported)
+   - Connect the GPS module via USB (preferred) or UART fallback
+   - Wire the IMU per spec (`BNO085` on UART4; use backup IMUs only after verifying support)
    - Install camera module (Pi Camera v2)
 
 2. **Power System**
@@ -187,14 +191,9 @@ Validate HTTPS/ACME locally (no real cert required):
 
 ### 1. Initial System Config
 ```bash
-# Start configuration wizard
-sudo lawnberry-pi config --setup-wizard
-
-# This will guide you through:
-# - Network configuration
-# - Basic authentication setup
-# - Hardware calibration
-# - Safety settings
+# Review tracked configuration first
+sed -n '1,220p' config/hardware.yaml
+sed -n '1,220p' config/default.json
 ```
 
 ### 2. Test Installation
@@ -212,7 +211,7 @@ curl http://localhost:8081/health
 # Open browser to http://<pi-ip>:3000
 ```
 
-3. **Hardware Calibration**
+3. **Hardware Verification**
 
 1. **GPS Calibration & RTK Configuration**
    
@@ -221,29 +220,22 @@ curl http://localhost:8081/health
    
    Basic GPS testing:
    ```bash
-   # Test GPS acquisition
-   lawnberry-pi calibrate gps --test-acquisition
-   
-   # Set home position
-   lawnberry-pi calibrate gps --set-home-position
+   # Check GPS health and telemetry
+   curl http://localhost:8081/api/v2/sensors/health | jq '.gps'
+   curl http://localhost:8081/api/v2/dashboard/telemetry | jq '.position'
    ```
 
 2. **IMU Calibration**
    ```bash
-   # Calibrate magnetometer (follow on-screen instructions)
-   lawnberry-pi calibrate imu --magnetometer
-   
-   # Calibrate accelerometer and gyroscope
-   lawnberry-pi calibrate imu --accel-gyro
+   # Verify IMU-related hardware appears healthy
+   curl http://localhost:8081/api/v2/sensors/health | jq '.imu'
    ```
 
 3. **Motor Calibration**
    ```bash
-   # Calibrate motor speeds and directions
-   lawnberry-pi calibrate motors --speed-test
-   
-   # Test differential steering
-   lawnberry-pi calibrate motors --steering-test
+   # Verify self-test and RoboHAT status before any live movement testing
+   curl http://localhost:8081/api/v2/system/selftest | jq
+   curl http://localhost:8081/api/v2/hardware/robohat | jq
    ```
 
 ## Advanced Features
@@ -295,7 +287,7 @@ For detailed configuration of advanced features, see the dedicated guides:
    dmesg | grep tty
    
    # Test GPS directly
-   sudo cat /dev/ttyACM0  # or /dev/ttyUSB0
+   sudo cat /dev/ttyACM0  # or another /dev/ttyACM* device exposed by the GPS
    
    # Check permissions
    sudo usermod -a -G dialout pi
@@ -318,8 +310,8 @@ For detailed configuration of advanced features, see the dedicated guides:
    # Check I2C devices
    sudo i2cdetect -y 1
    
-   # Test IMU communication
-   lawnberry-pi test imu --verbose
+   # Verify backend-reported sensor status
+   curl http://localhost:8081/api/v2/sensors/health | jq
    ```
 
 4. **Network Connectivity**

@@ -1,6 +1,8 @@
 # LawnBerryPi Hardware Overview
 
-This guide provides a comprehensive overview of the LawnBerryPi hardware components and their functions. Understanding your hardware helps with maintenance, troubleshooting, and system optimization.
+This guide provides a grounded overview of the LawnBerry Pi v2 hardware baseline and how the major components fit together.
+For canonical device lists, pins, and supported alternatives, refer first to `spec/hardware.yaml` and
+`docs/hardware-integration.md`.
 
 ## System Architecture Diagram
 
@@ -68,7 +70,7 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 
 ## Core Components
 
-### Raspberry Pi 5 (16GB RAM)
+### Raspberry Pi 5 (primary deployment target)
 **Function**: Main computing platform running all software systems
 **Specifications**:
 - Broadcom BCM2712 quad-core Arm Cortex A76 processor @ 2.4GHz
@@ -76,6 +78,8 @@ This guide provides a comprehensive overview of the LawnBerryPi hardware compone
 - WiFi 802.11ac and Gigabit Ethernet
 - Multiple I2C, SPI, UART, and GPIO interfaces
 - 2 × 4-lane MIPI camera/display transceivers
+
+Raspberry Pi 4B (4–8GB) remains a supported fallback platform, but Pi 5 is the primary target.
 
 **Key Responsibilities**:
 - Web interface hosting and API services
@@ -119,7 +123,7 @@ The RoboHAT provides a serial API specifically for drive motor control. The back
 - u-blox ZED-F9P GNSS receiver
 - Multi-constellation support (GPS, GLONASS, Galileo, BeiDou)
 - RTK corrections for centimeter-level accuracy
-- USB interface to Raspberry Pi (typically `/dev/ttyACM1`)
+- USB interface to Raspberry Pi (typically `/dev/ttyACM*`)
 - External antenna for optimal satellite reception
 
 **Accuracy Levels**:
@@ -201,7 +205,7 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 ### Solar Charging System
 **Components**:
 - **30W Solar Panel**: Monocrystalline silicon with aluminum frame
-- **15A Victron SmartSolar MPPT Charge Controller**: Maximum Power Point Tracking for efficiency
+- **15A MPPT charge controller**: Maximum Power Point Tracking for efficiency
 - **Charge regulation**: Automatic multi-stage charging profile
 
 **Charging Performance**:
@@ -219,9 +223,14 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 - I2C interface with 0x40 address
 
 **Monitoring Channels**:
-- **Channel 1**: Main battery voltage and total current
+- **Channel 1**: Battery
 - **Channel 2**: Not Used
-- **Channel 3**: Solar panel voltage and current
+- **Channel 3**: Solar input
+
+### Optional Victron SmartSolar BLE telemetry
+Some deployments also use Victron SmartSolar BLE telemetry as an optional supplement or preferred source for battery and
+solar data. When configured, the backend can prefer Victron values and fall back to INA3221 readings if Victron data
+is temporarily unavailable.
 
 ## Motor and Drive Systems
 
@@ -261,6 +270,9 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 - Fixed focus lens with 62.2° field of view
 - Camera Serial Interface (CSI) connection
 
+The Pi Camera v2 is the current baseline camera. The backend camera-stream service owns the camera device and exposes
+frames to the rest of the system via IPC; other components should not re-open the device directly.
+
 **Applications**:
 - Real-time obstacle detection and identification
 - Live monitoring via web interface
@@ -270,7 +282,7 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 
 **Computer Vision Capabilities**:
 - TFlite or OpenCV integration for image processing
-- Optional Google Coral or Hailo for offloading vision
+- Optional Google Coral or Hailo hardware paths with validation caveats
 - Object detection using trained models
 - Edge detection for boundary recognition
 - Motion detection for security monitoring
@@ -324,13 +336,16 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 
 ## Expansion and Customization
 
-### Expansion Possibilities
-**Sensor Additions**:
-- Additional ToF sensors for expanded coverage (within baseline)
+### Expansion possibilities
+Only consider additions supported by the canonical spec as in-scope today. A few examples that fit the current
+architecture are:
 
-**Actuator Additions**:
-- Horn or alarm for safety alerts
-- Additional motors for specialized attachments
+- additional ToF coverage only after updating the hardware spec and integration docs
+- optional Victron SmartSolar BLE telemetry
+- optional Coral USB or Hailo acceleration with the documented software and hardware caveats
+
+Items such as LiDAR, RC receivers, perimeter-wire sensing, and secondary USB camera stacks are not part of the current
+supported baseline.
 
 ## Maintenance Access Points
 
@@ -436,8 +451,10 @@ The settings service provides profile-based configuration management:
 
 ---
 
-This hardware overview provides the foundation for understanding how your LawnBerryPi operates. For specific maintenance procedures, see the [Maintenance Guide](maintenance-guide.md). For troubleshooting hardware issues, consult the [Troubleshooting Guide](troubleshooting-guide.md).
+This hardware overview provides the foundation for understanding how your LawnBerry Pi operates.
 
-For API documentation and operational procedures, see [OPERATIONS.md](OPERATIONS.md). For hardware capabilities and configuration options, see the [Hardware Feature Matrix](hardware-feature-matrix.md).
+For exact pins, addresses, and wiring details, see [hardware-integration.md](hardware-integration.md).
+For supported hardware scope and compatibility status, see [hardware-feature-matrix.md](hardware-feature-matrix.md).
+For runtime operations and verification procedures, see [OPERATIONS.md](OPERATIONS.md) and [TESTING.md](TESTING.md).
 
 *Hardware Overview - Part of LawnBerryPi Documentation v2.0*
