@@ -88,6 +88,13 @@ Python 3.11 (backend), TypeScript + Vue 3 (frontend): Follow standard convention
 - Ensure to follow best practices for both backend and frontend development.
 - Regularly update dependencies to maintain security and performance.
 
+## Maintainer handbook usage
+
+- Treat `docs/developer-toolkit.md` as the maintainer-facing orientation document for this repository.
+- At the start of substantial maintenance, planning, roadmap, runtime-contract, hardware-scope, simulation-vs-hardware, or subsystem-maturity work, read `docs/developer-toolkit.md` and follow its guidance.
+- When changes affect runtime behavior, supported hardware scope, subsystem maturity, immediate-focus priorities, the 2-week execution plan, or high-level next steps, update `docs/developer-toolkit.md` in the same pass.
+- Do not treat `docs/developer-toolkit.md` as optional background reading; use it to keep implementation, prioritization, and documentation aligned for returning maintainers.
+
 ## Automated code structure documentation sync
 
 To keep our developer docs accurate, the Copilot Agent must automatically update `docs/code_structure_overview.md` whenever structural code changes occur (new/removed files, added/removed functions, or signature changes) in these areas:
