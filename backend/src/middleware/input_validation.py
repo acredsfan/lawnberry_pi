@@ -30,14 +30,19 @@ class InputValidationMiddleware(BaseHTTPMiddleware):
         if any(path.startswith(p) for p in self._skip):
             return await call_next(request)
 
+        allow_raw_body = path.startswith("/api/v2/ai/inference")
+
         if request.method in {"POST", "PUT", "PATCH"}:
             content_type = (request.headers.get("Content-Type") or "").lower()
-            if "application/json" not in content_type:
+            if not allow_raw_body and "application/json" not in content_type:
                 return JSONResponse(status_code=415, content={"detail": "Content-Type must be application/json"})
 
             body = await request.body()
             if len(body) > self._max_body:
                 return JSONResponse(status_code=413, content={"detail": "Payload too large"})
+
+            if allow_raw_body:
+                return await call_next(request)
 
             # Parse JSON once and replace the stream for downstream handlers
             try:

@@ -30,6 +30,8 @@ dependencies = [
     "timezonefinder>=6.2.0",
     # Numerics for orientation math and latency aggregation without pulling accelerator deps
     "numpy>=1.26.4,<2.0",
+    # Lightweight image decode/resize support for CPU inference and camera-adjacent workflows
+    "Pillow>=9.4.0",
     # Load .env for runtime secrets (e.g., NTRIP_*)
     "python-dotenv>=1.0.1",
 ]

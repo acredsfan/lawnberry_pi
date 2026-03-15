@@ -1,8 +1,15 @@
 import pytest
 from fastapi.testclient import TestClient
 from backend.src.main import app
-from backend.src.services.mission_service import get_mission_service, MissionService
-from backend.src.models.mission import Mission, MissionWaypoint
+from backend.src.services.mission_service import (
+    MissionConflictError,
+    MissionNotFoundError,
+    MissionService,
+    MissionStateError,
+    MissionValidationError,
+    get_mission_service,
+)
+from backend.src.models.mission import Mission, MissionLifecycleStatus, MissionStatus
 from unittest.mock import AsyncMock
 
 # Mock MissionService for testing
@@ -42,4 +49,71 @@ def test_start_mission(client, mock_mission_service):
     assert response.status_code == 200
     mock_mission_service.start_mission.assert_called_once_with("test_mission")
 
-# Add more tests for pause, resume, abort, status, and list endpoints...
+def test_pause_mission(client, mock_mission_service):
+    response = client.post("/api/v2/missions/test_mission/pause", json={})
+    assert response.status_code == 200
+    mock_mission_service.pause_mission.assert_called_once_with("test_mission")
+
+
+def test_resume_mission(client, mock_mission_service):
+    response = client.post("/api/v2/missions/test_mission/resume", json={})
+    assert response.status_code == 200
+    mock_mission_service.resume_mission.assert_called_once_with("test_mission")
+
+
+def test_abort_mission(client, mock_mission_service):
+    response = client.post("/api/v2/missions/test_mission/abort", json={})
+    assert response.status_code == 200
+    mock_mission_service.abort_mission.assert_called_once_with("test_mission")
+
+
+def test_get_mission_status(client, mock_mission_service):
+    mock_mission_service.get_mission_status.return_value = MissionStatus(
+        mission_id="test_mission",
+        status=MissionLifecycleStatus.RUNNING,
+        current_waypoint_index=1,
+        completion_percentage=50.0,
+        total_waypoints=2,
+    )
+
+    response = client.get("/api/v2/missions/test_mission/status")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+    assert response.json()["completion_percentage"] == 50.0
+
+
+def test_list_missions(client, mock_mission_service):
+    mock_mission_service.list_missions.return_value = [
+        Mission(id="test_mission", name="Test", waypoints=[], created_at="now")
+    ]
+
+    response = client.get("/api/v2/missions/list")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["id"] == "test_mission"
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "expected_status"),
+    [
+        (MissionValidationError("invalid mission"), 400),
+        (MissionNotFoundError("missing mission"), 404),
+        (MissionStateError("wrong state"), 409),
+        (MissionConflictError("already active"), 409),
+    ],
+)
+def test_mission_error_mapping(client, mock_mission_service, side_effect, expected_status):
+    mock_mission_service.start_mission.side_effect = side_effect
+
+    response = client.post("/api/v2/missions/test_mission/start", json={})
+
+    assert response.status_code == expected_status
+    assert response.json()["detail"] == str(side_effect)
+
+
+def test_create_mission_request_validation(client):
+    response = client.post("/api/v2/missions/create", json={"name": "", "waypoints": []})
+
+    assert response.status_code == 422

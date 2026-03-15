@@ -23,6 +23,7 @@ class ModelFormat(str, Enum):
     HAILO_HEF = "hailo_hef"  # Hailo HEF format
     ONNX = "onnx"  # ONNX format
     PYTORCH = "pytorch"  # PyTorch model
+    CUSTOM = "custom"  # JSON-configured CPU inference pipeline
 
 
 class InferenceTask(str, Enum):

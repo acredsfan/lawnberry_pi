@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from .api.dashboard import router as dashboard_router
 from .api.fusion import router as fusion_router
 from .api.health import router as health_router
+from .api.ai import router as ai_router
 from .api.metrics import router as metrics_router
 from .api.motors import router as motors_router
 from .api.navigation import router as navigation_router
@@ -25,6 +26,7 @@ from .core.config_loader import ConfigLoader
 from .nav.gps_degradation import GPSDegradationMonitor
 from .services.robohat_service import initialize_robohat_service, shutdown_robohat_service
 from .services.camera_stream_service import camera_service
+from .services.ai_service import get_ai_service
 from .middleware.correlation import register_correlation_middleware
 from .middleware.security import register_security_middleware
 from .middleware.rate_limiting import register_global_rate_limiter
@@ -121,6 +123,10 @@ async def lifespan(app: FastAPI):
         await camera_service.start_streaming()
     except Exception:
         pass
+    try:
+        await get_ai_service().initialize()
+    except Exception:
+        _log.exception("AI service initialization failed")
     await websocket_hub.start_telemetry_loop()
     yield
     # Shutdown
@@ -178,6 +184,7 @@ app.include_router(fusion_router)
 app.include_router(dashboard_router)
 app.include_router(health_router)
 app.include_router(mission_router)
+app.include_router(ai_router)
 
 app.include_router(rest_v1_router, prefix="/api/v1")
 
