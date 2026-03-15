@@ -7,6 +7,7 @@ import asyncio
 import logging
 import math
 import os
+import time
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Tuple, Dict, Any
 
@@ -134,10 +135,13 @@ class NavigationService:
         self.cruise_speed = 0.5  # m/s
         self.waypoint_tolerance = 0.5  # meters
         self.obstacle_avoidance_distance = 1.0  # meters
+        self.max_waypoint_fix_age_seconds = 2.0
+        self.max_waypoint_accuracy_m = 5.0
         
         # State tracking
         self.total_distance = 0.0
         self.last_position: Optional[Position] = None
+        self._mission_execution_active = False
         
     _instance: Optional["NavigationService"] = None
 
@@ -173,55 +177,53 @@ class NavigationService:
         
         self.navigation_state.current_waypoint_index = 0
         self.navigation_state.operation_start_time = datetime.now(timezone.utc)
+        self._mission_execution_active = True
 
-        while self.navigation_state.current_waypoint_index < len(self.navigation_state.planned_path):
-            status = mission_service.mission_statuses.get(mission.id)
-            if not status:
-                logger.warning(f"Mission {mission.id} interrupted. Status: {status.status if status else 'N/A'}")
-                self.navigation_state.path_status = PathStatus.INTERRUPTED
-                self.navigation_state.navigation_mode = NavigationMode.IDLE
-                return
-
-            if status.status == "paused":
-                self.navigation_state.navigation_mode = NavigationMode.PAUSED
-                try:
-                    await self.set_speed(0.0, 0.0)
-                except Exception:
-                    pass
-                await asyncio.sleep(0.1)
-                continue
-
-            if status.status != "running":
-                logger.warning(f"Mission {mission.id} interrupted. Status: {status.status}")
-                self.navigation_state.path_status = PathStatus.INTERRUPTED
-                self.navigation_state.navigation_mode = NavigationMode.IDLE
-                try:
-                    await self.set_speed(0.0, 0.0)
-                except Exception:
-                    pass
-                return
-
-            if self.navigation_state.navigation_mode != NavigationMode.AUTO:
-                self.navigation_state.navigation_mode = NavigationMode.AUTO
-
-            current_mission_waypoint = mission.waypoints[self.navigation_state.current_waypoint_index]
-            waypoint_reached = await self.go_to_waypoint(mission, current_mission_waypoint)
-            if not waypoint_reached:
+        try:
+            while self.navigation_state.current_waypoint_index < len(self.navigation_state.planned_path):
                 status = mission_service.mission_statuses.get(mission.id)
-                if not status or status.status != "running":
+                if not status:
+                    logger.warning(f"Mission {mission.id} interrupted. Status: {status.status if status else 'N/A'}")
                     self.navigation_state.path_status = PathStatus.INTERRUPTED
                     self.navigation_state.navigation_mode = NavigationMode.IDLE
                     return
 
-            # The go_to_waypoint method is blocking until the waypoint is reached or interrupted.
-            # The loop will then proceed to the next waypoint.
-            # We add a small sleep to prevent a tight loop if go_to_waypoint returns immediately.
-            await asyncio.sleep(0.1)
+                if status.status == "paused":
+                    self.navigation_state.navigation_mode = NavigationMode.PAUSED
+                    await self._deliver_stop_command(reason="mission pause hold")
+                    await asyncio.sleep(0.1)
+                    continue
 
-        if self.navigation_state.navigation_mode == NavigationMode.AUTO:
-            self.navigation_state.path_status = PathStatus.COMPLETED
-            self.navigation_state.navigation_mode = NavigationMode.IDLE
-            logger.info(f"Mission {mission.id} completed.")
+                if status.status != "running":
+                    logger.warning(f"Mission {mission.id} interrupted. Status: {status.status}")
+                    self.navigation_state.path_status = PathStatus.INTERRUPTED
+                    self.navigation_state.navigation_mode = NavigationMode.IDLE
+                    await self._deliver_stop_command(reason="mission interruption")
+                    return
+
+                if self.navigation_state.navigation_mode != NavigationMode.AUTO:
+                    self.navigation_state.navigation_mode = NavigationMode.AUTO
+
+                current_mission_waypoint = mission.waypoints[self.navigation_state.current_waypoint_index]
+                waypoint_reached = await self.go_to_waypoint(mission, current_mission_waypoint)
+                if not waypoint_reached:
+                    status = mission_service.mission_statuses.get(mission.id)
+                    if not status or status.status != "running":
+                        self.navigation_state.path_status = PathStatus.INTERRUPTED
+                        self.navigation_state.navigation_mode = NavigationMode.IDLE
+                        return
+
+                # The go_to_waypoint method is blocking until the waypoint is reached or interrupted.
+                # The loop will then proceed to the next waypoint.
+                # We add a small sleep to prevent a tight loop if go_to_waypoint returns immediately.
+                await asyncio.sleep(0.1)
+
+            if self.navigation_state.navigation_mode == NavigationMode.AUTO:
+                self.navigation_state.path_status = PathStatus.COMPLETED
+                self.navigation_state.navigation_mode = NavigationMode.IDLE
+                logger.info(f"Mission {mission.id} completed.")
+        finally:
+            self._mission_execution_active = False
 
     async def go_to_waypoint(self, mission: "Mission", waypoint: "MissionWaypoint") -> bool:
         """Navigate to a single waypoint and block until arrival."""
@@ -245,31 +247,28 @@ class NavigationService:
             status = mission_service.mission_statuses.get(mission.id)
             if not status:
                 logger.info("Waypoint navigation interrupted: mission status missing.")
-                try:
-                    await self.set_speed(0.0, 0.0)
-                except Exception:
-                    pass
+                await self._deliver_stop_command(reason="missing mission status")
                 return False
 
             if status.status == "paused":
                 self.navigation_state.navigation_mode = NavigationMode.PAUSED
-                try:
-                    await self.set_speed(0.0, 0.0)
-                except Exception:
-                    pass
+                await self._deliver_stop_command(reason="mission pause hold")
                 await asyncio.sleep(0.1)
                 continue
 
             if status.status != "running":
                 logger.info("Waypoint navigation interrupted.")
-                try:
-                    await self.set_speed(0.0, 0.0)
-                except Exception:
-                    pass
+                await self._deliver_stop_command(reason="mission status change")
                 return False
 
             if not self.navigation_state.current_position:
                 await asyncio.sleep(0.5)
+                continue
+
+            if not self._position_is_verified_for_waypoint():
+                self.navigation_state.target_velocity = 0.0
+                await self._deliver_stop_command(reason="position verification hold")
+                await asyncio.sleep(0.2)
                 continue
 
             distance_to_target = self.path_planner.calculate_distance(
@@ -279,7 +278,9 @@ class NavigationService:
 
             if distance_to_target <= self.waypoint_tolerance:
                 logger.info(f"Waypoint reached: {waypoint.lat}, {waypoint.lon}")
-                await self.set_speed(0.0, 0.0)  # Stop at waypoint
+                stop_confirmed = await self._deliver_stop_command(reason="waypoint arrival")
+                if not stop_confirmed:
+                    raise RuntimeError("Failed to stop safely at waypoint")
                 if self.navigation_state.advance_waypoint():
                     logger.info(f"Advanced to next waypoint index: {self.navigation_state.current_waypoint_index}")
                 else:
@@ -291,7 +292,7 @@ class NavigationService:
                 target_pos,
             ):
                 logger.warning("Obstacle detected while navigating to waypoint; holding position")
-                await self.set_speed(0.0, 0.0)
+                await self._deliver_stop_command(reason="obstacle hold")
                 await asyncio.sleep(0.2)
                 continue
 
@@ -335,10 +336,7 @@ class NavigationService:
                 await self.set_speed(left_speed, right_speed)
             except Exception as e:
                 logger.error(f"Failed to set motor speed: {e}")
-                try:
-                    await self.set_speed(0.0, 0.0)
-                except Exception:
-                    pass
+                await self._deliver_stop_command(reason="navigation command failure")
                 raise RuntimeError("Failed to deliver navigation motor command") from e
             
             # Simulation of movement
@@ -384,6 +382,67 @@ class NavigationService:
         accepted = await robohat.send_motor_command(_normalize(ls), _normalize(rs))
         if not accepted:
             raise RuntimeError("Motor command not accepted by controller")
+
+    async def _deliver_stop_command(
+        self,
+        *,
+        reason: str,
+        retries: int = 3,
+        initial_delay: float = 0.1,
+    ) -> bool:
+        """Best-effort bounded stop delivery used by hold and interruption paths."""
+        delay = max(0.0, initial_delay)
+        total_attempts = max(1, retries)
+        for attempt in range(1, total_attempts + 1):
+            try:
+                await self.set_speed(0.0, 0.0)
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "Failed to deliver %s stop command (attempt %d/%d): %s",
+                    reason,
+                    attempt,
+                    total_attempts,
+                    exc,
+                )
+                if attempt < total_attempts and delay > 0:
+                    await asyncio.sleep(delay)
+                    delay *= 2
+        logger.error("Unable to confirm %s stop command after %d attempts", reason, total_attempts)
+        return False
+
+    def _gps_fix_is_fresh(self) -> bool:
+        """Return True when the latest GPS fix is recent enough for autonomy decisions."""
+        last_fix = self.navigation_state.last_gps_fix
+        if last_fix is None:
+            return False
+        return (datetime.now(timezone.utc) - last_fix).total_seconds() <= self.max_waypoint_fix_age_seconds
+
+    def _position_is_verified_for_waypoint(self) -> bool:
+        """Return True when position data is trustworthy enough to advance a waypoint."""
+        position = self.navigation_state.current_position
+        if position is None:
+            return False
+        if self.navigation_state.dead_reckoning_active:
+            return False
+        if not self._gps_fix_is_fresh():
+            return False
+        accuracy = position.accuracy
+        if accuracy is None:
+            return False
+        return accuracy <= self.max_waypoint_accuracy_m
+
+    def _latch_global_emergency_state(self) -> None:
+        """Mirror the control API emergency latch for non-HTTP emergency paths."""
+        try:
+            from ..api import rest as rest_api
+
+            rest_api._safety_state["emergency_stop_active"] = True
+            rest_api._blade_state["active"] = False
+            rest_api._legacy_motors_active = False
+            rest_api._emergency_until = time.time() + 0.2
+        except Exception:
+            logger.debug("Unable to mirror global emergency state from navigation service", exc_info=True)
     
     async def update_navigation_state(self, sensor_data: SensorData) -> NavigationState:
         """Update navigation state with sensor fusion"""
@@ -458,6 +517,9 @@ class NavigationService:
     
     async def _update_path_execution(self):
         """Update path execution for autonomous navigation"""
+        if self._mission_execution_active:
+            return
+
         if not self.navigation_state.planned_path:
             return
         
@@ -472,6 +534,10 @@ class NavigationService:
         )
         
         if distance_to_waypoint <= self.waypoint_tolerance:
+            if not self._position_is_verified_for_waypoint():
+                self.navigation_state.target_velocity = 0.0
+                return
+
             # Advance to next waypoint
             if self.navigation_state.advance_waypoint():
                 logger.info(f"Advanced to waypoint {self.navigation_state.current_waypoint_index}")
@@ -587,32 +653,37 @@ class NavigationService:
         if self.navigation_state.path_status == PathStatus.EXECUTING:
             self.navigation_state.path_status = PathStatus.INTERRUPTED
         
-        # Actively command a stop to the controller for safety
-        try:
-            await self.set_speed(0.0, 0.0)
-        except Exception:
-            pass
-
-        logger.info("Navigation stopped")
-        return True
+        stop_confirmed = await self._deliver_stop_command(reason="navigation stop")
+        if stop_confirmed:
+            logger.info("Navigation stopped")
+        else:
+            logger.error("Navigation stop requested but controller stop could not be confirmed")
+        return stop_confirmed
     
     async def emergency_stop(self) -> bool:
         """Emergency stop navigation"""
         self.navigation_state.navigation_mode = NavigationMode.EMERGENCY_STOP
         self.navigation_state.target_velocity = 0.0
         self.navigation_state.path_status = PathStatus.INTERRUPTED
+        self._latch_global_emergency_state()
         
         # Try to invoke controller-level emergency stop when available
+        emergency_ok = True
         try:
             if os.getenv("SIM_MODE", "0") == "0":
                 robohat = get_robohat_service()
                 if robohat is not None:
-                    await robohat.emergency_stop()
+                    emergency_ok = await robohat.emergency_stop()
+                else:
+                    emergency_ok = await self._deliver_stop_command(reason="emergency stop fallback")
+            else:
+                emergency_ok = await self._deliver_stop_command(reason="simulation emergency stop")
         except Exception:
-            pass
+            logger.exception("Emergency stop delivery failed")
+            emergency_ok = False
 
         logger.critical("Emergency stop activated")
-        return True
+        return emergency_ok
     
     async def return_home(self) -> bool:
         """Navigate back to home position"""

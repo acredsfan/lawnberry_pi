@@ -30,6 +30,12 @@ This release replaces version 1 with a unified v2 backend and frontend, contract
 - Camera JPEG encoder respects explicit colour-space hints from PiCamera2 frames, preventing the magenta tint seen in MJPEG streams after the migration to RGB888 capture.
 - Added regression tests for RoboHAT USB acquisition retries, manual unlock TOTP window tolerance, and camera colour encoding to prevent future regressions.
 
+## Fixes (2026-03-15)
+
+- Navigation waypoint completion now requires a fresh, non-dead-reckoned GPS fix, preventing missions from advancing on stale or synthetic position estimates.
+- Mission pause and abort flows now retry stop delivery and escalate to emergency stop when motion cannot be halted cleanly.
+- RoboHAT emergency stop now fails closed when USB control cannot be re-acquired instead of pretending a neutral PWM command succeeded.
+
 ## Highlights
 
 - Hardware telemetry behind SIM_MODE (T102, T110)

@@ -121,13 +121,36 @@ class MissionService:
         if mission_id not in self.mission_tasks or self.mission_tasks[mission_id].done():
             raise MissionConflictError("Mission execution task is not active.")
 
+        stop_confirmed = False
+        delay = 0.1
+        for attempt in range(1, 4):
+            try:
+                await self.nav_service.set_speed(0.0, 0.0)
+                stop_confirmed = True
+                break
+            except Exception:
+                logger.warning(
+                    "Mission pause stop command could not be delivered (attempt %d/3)",
+                    attempt,
+                    exc_info=True,
+                )
+                if attempt < 3:
+                    await asyncio.sleep(delay)
+                    delay *= 2
+
+        if not stop_confirmed:
+            emergency_ok = await self.nav_service.emergency_stop()
+            status.status = MissionLifecycleStatus.FAILED
+            status.detail = (
+                "Pause requested but stop command failed; emergency stop activated"
+                if emergency_ok
+                else "Pause requested but neither stop nor emergency stop could be confirmed"
+            )
+            return
+
         status.status = MissionLifecycleStatus.PAUSED
         status.detail = None
         self.nav_service.navigation_state.navigation_mode = NavigationMode.PAUSED
-        try:
-            await self.nav_service.set_speed(0.0, 0.0)
-        except Exception:
-            logger.debug("Mission pause stop command could not be delivered", exc_info=True)
 
 
     async def resume_mission(self, mission_id: str):
@@ -148,12 +171,33 @@ class MissionService:
     async def abort_mission(self, mission_id: str):
         self._require_mission(mission_id)
         status = self._require_status(mission_id)
-        status.status = MissionLifecycleStatus.ABORTED
-        status.detail = "Mission aborted by operator"
-        task = self.mission_tasks.pop(mission_id, None)
+        final_status = MissionLifecycleStatus.ABORTED
+        detail = "Mission aborted by operator"
+        task = self.mission_tasks.get(mission_id)
+
+        stop_confirmed = await self.nav_service.stop_navigation()
+        if not stop_confirmed:
+            emergency_ok = await self.nav_service.emergency_stop()
+            if emergency_ok:
+                detail = "Mission aborted by operator after stop failure; emergency stop activated"
+            else:
+                final_status = MissionLifecycleStatus.FAILED
+                detail = "Mission abort requested, but stop and emergency stop could not be confirmed"
+
         if task and not task.done():
             task.cancel()
-        await self.nav_service.stop_navigation()
+            try:
+                await asyncio.wait_for(task, timeout=1.0)
+            except asyncio.CancelledError:
+                pass
+            except asyncio.TimeoutError:
+                logger.warning("Mission %s task did not cancel cleanly within timeout", mission_id)
+            except Exception:
+                logger.debug("Mission %s task raised during abort handling", mission_id, exc_info=True)
+
+        self.mission_tasks.pop(mission_id, None)
+        status.status = final_status
+        status.detail = detail
 
     async def get_mission_status(self, mission_id: str) -> MissionStatus:
         mission = self._require_mission(mission_id)

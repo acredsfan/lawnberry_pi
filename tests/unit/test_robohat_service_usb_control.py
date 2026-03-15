@@ -204,6 +204,32 @@ async def test_maintain_usb_control_waits_for_pending_ack(monkeypatch):
     await svc._maintain_usb_control()
 
 
+@pytest.mark.asyncio
+async def test_emergency_stop_fails_closed_without_usb_control(monkeypatch):
+    svc = RoboHATService()
+    svc.serial_conn = _StubSerial()
+    svc.running = True
+    svc._last_pwm = (1600, 1400)
+    svc._last_pwm_at = 123.0
+    svc.status.last_watchdog_echo = "previous"
+
+    async def fake_ensure_usb_control(*, timeout: float = 0.75, retries: int = 1) -> bool:  # noqa: ARG001
+        return False
+
+    async def fail_send_line(*_args, **_kwargs):
+        raise AssertionError("Emergency stop should not send commands without USB control")
+
+    monkeypatch.setattr(svc, "_ensure_usb_control", fake_ensure_usb_control)
+    monkeypatch.setattr(svc, "_send_line", fail_send_line)
+
+    ok = await svc.emergency_stop()
+
+    assert ok is False
+    assert svc._last_pwm == (1600, 1400)
+    assert svc._last_pwm_at == 123.0
+    assert svc.status.last_watchdog_echo == "previous"
+
+
 def test_candidate_serial_ports_prioritize_env_and_settings(monkeypatch, tmp_path):
     env_port = "/dev/env-robohat"
     profile_port = "/dev/profile-robohat"

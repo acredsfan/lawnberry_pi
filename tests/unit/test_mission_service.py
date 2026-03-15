@@ -21,8 +21,11 @@ class DummyNavigationService:
             safety_boundaries=[],
         )
         self.stop_calls = 0
+        self.emergency_calls = 0
         self.set_speed_calls: list[tuple[float, float]] = []
         self._mission_gate: asyncio.Event | None = None
+        self.stop_navigation_results: list[bool] = []
+        self.set_speed_failures_remaining = 0
 
     async def execute_mission(self, mission):
         if self._mission_gate is not None:
@@ -32,10 +35,20 @@ class DummyNavigationService:
     async def stop_navigation(self):
         self.stop_calls += 1
         self.navigation_state.navigation_mode = NavigationMode.IDLE
+        if self.stop_navigation_results:
+            return self.stop_navigation_results.pop(0)
         return True
 
     async def set_speed(self, left_speed: float, right_speed: float):
+        if self.set_speed_failures_remaining > 0:
+            self.set_speed_failures_remaining -= 1
+            raise RuntimeError("stop delivery failed")
         self.set_speed_calls.append((left_speed, right_speed))
+
+    async def emergency_stop(self):
+        self.emergency_calls += 1
+        self.navigation_state.navigation_mode = NavigationMode.EMERGENCY_STOP
+        return True
 
 
 @pytest.mark.asyncio
@@ -119,3 +132,46 @@ async def test_abort_cancels_task_and_stops_navigation():
     assert task.cancelled() or task.done()
     assert service.mission_statuses[mission.id].status == MissionLifecycleStatus.ABORTED
     assert nav.stop_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_pause_escalates_to_emergency_when_stop_fails():
+    nav = DummyNavigationService()
+    nav._mission_gate = asyncio.Event()
+    nav.set_speed_failures_remaining = 3
+    service = MissionService(nav)
+    mission = await service.create_mission(
+        "Pause escalation",
+        [MissionWaypoint(lat=0.1, lon=0.1, blade_on=False, speed=50)],
+    )
+
+    await service.start_mission(mission.id)
+    await asyncio.sleep(0)
+
+    await service.pause_mission(mission.id)
+
+    assert service.mission_statuses[mission.id].status == MissionLifecycleStatus.FAILED
+    assert nav.emergency_calls == 1
+    assert nav.navigation_state.navigation_mode == NavigationMode.EMERGENCY_STOP
+
+
+@pytest.mark.asyncio
+async def test_abort_escalates_to_emergency_when_stop_navigation_fails():
+    nav = DummyNavigationService()
+    nav._mission_gate = asyncio.Event()
+    nav.stop_navigation_results = [False]
+    service = MissionService(nav)
+    mission = await service.create_mission(
+        "Abort escalation",
+        [MissionWaypoint(lat=0.1, lon=0.1, blade_on=False, speed=50)],
+    )
+
+    await service.start_mission(mission.id)
+    await asyncio.sleep(0)
+
+    await service.abort_mission(mission.id)
+
+    assert service.mission_statuses[mission.id].status == MissionLifecycleStatus.ABORTED
+    assert "emergency stop activated" in (service.mission_statuses[mission.id].detail or "")
+    assert nav.stop_calls == 1
+    assert nav.emergency_calls == 1

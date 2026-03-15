@@ -444,7 +444,10 @@ class RoboHATService:
 
         usb_ready = await self._ensure_usb_control(timeout=0.6, retries=2)
         if not usb_ready:
-            logger.warning("Emergency stop proceeding without USB control acknowledgement")
+            logger.critical("Emergency stop failed closed: USB control acknowledgement unavailable")
+            self.status.motor_controller_ok = False
+            self.status.last_error = self.status.last_error or "usb_control_unavailable"
+            return False
         ok = await self._send_line("pwm,1500,1500")
         # Record neutral PWM as last command to maintain safe stop if needed
         self._last_pwm = (1500, 1500)
@@ -454,6 +457,8 @@ class RoboHATService:
         self.status.last_watchdog_echo = "emergency_stop"
         if not ok:
             self.status.last_error = "emergency_stop_failed"
+        else:
+            self.status.last_error = None
         return ok
     
     async def clear_emergency(self) -> bool:
