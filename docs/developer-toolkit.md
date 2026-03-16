@@ -246,8 +246,8 @@ coverage, not on roadmap intent.
 | --- | --- | --- | --- |
 | RoboHAT USB control bridge | **Stable enough for active maintenance** | `backend/src/services/robohat_service.py` now speaks the RP2040 text protocol, probes serial ports, maintains USB control, and has focused unit coverage in `tests/unit/test_robohat_service_usb_control.py`. | Still hardware-sensitive by nature; treat serial timing, RC takeover, and emergency-stop behavior as regression-sensitive. |
 | Camera streaming | **Beta / partial but real** | `backend/src/services/camera_stream_service.py` supports PiCamera2/OpenCV selection, simulation fallback, IPC streaming, client backpressure handling, and has targeted tests in `tests/unit/test_camera_stream_service.py`. | The streaming path is real, but camera ownership assumptions are still strict and per-frame AI hooks are intentionally conservative. |
-| Navigation | **Partial implementation** | `backend/src/services/navigation_service.py` has path planning hooks, waypoint driving, return-home behavior, weather gating, and contract coverage such as `tests/contract/test_waypoint_navigation.py`. | Obstacle handling is simplistic, dead reckoning still uses placeholder distance estimates, and some mission movement logic still depends on optimistic state updates rather than hardened field feedback. |
-| Mission orchestration | **Beta / persistence-backed recovery started** | `backend/src/services/mission_service.py` now validates mission payloads, enforces lifecycle transitions, persists mission metadata and lifecycle state in SQLite, recovers missions on startup, and has service/API coverage in `tests/test_mission_api.py`, `tests/unit/test_mission_service.py`, `tests/unit/test_mission_persistence.py`, and `tests/unit/test_navigation_service.py`. | Recovery is intentionally conservative: running missions come back paused, no active task is recreated automatically, and live autonomy quality still depends on the underlying navigation/control loop rather than field telemetry reconciliation. |
+| Navigation | **Partial implementation with recent safety hardening** | `backend/src/services/navigation_service.py` has path planning hooks, waypoint driving, return-home behavior, weather gating, and contract coverage such as `tests/contract/test_waypoint_navigation.py`. Waypoint completion now requires a fresh, non-dead-reckoned GPS fix instead of advancing on stale synthetic position data. | Obstacle handling is still simplistic, dead reckoning still uses placeholder distance estimates rather than field-grade odometry feedback, and interrupted traversal / re-lock behavior still needs more real-world validation. |
+| Mission orchestration | **Beta / persistence-backed and conservative by design** | `backend/src/services/mission_service.py` now validates mission payloads, enforces lifecycle transitions, persists mission metadata and lifecycle state in SQLite, recovers missions on startup, and has service/API coverage in `tests/test_mission_api.py`, `tests/unit/test_mission_service.py`, `tests/unit/test_mission_persistence.py`, and `tests/unit/test_navigation_service.py`. Pause/abort flows now retry stop delivery and escalate to emergency stop if motion cannot be halted cleanly. | Recovery is intentionally conservative: running missions come back paused, no active task is recreated automatically, and resume UX / live field reconciliation still need more operator-facing polish. |
 | Motor service abstraction | **Legacy / partial abstraction** | `backend/src/services/motor_service.py` models safety checks, controller selection, timeout behavior, and emergency-stop flow. | The concrete controller implementations are still placeholder-heavy; the more credible live control path today is the RoboHAT bridge rather than this abstraction layer. |
 | AI service | **Experimental but real** | `backend/src/services/ai_service.py` now loads a local JSON model definition, runs CPU inference on uploaded images or the latest camera frame, tracks recent results/performance, and is covered by `tests/test_ai_api.py` and `tests/unit/test_ai_service.py`. | This is a conservative first-pass inference pipeline, not production-grade perception; it is CPU-only, model quality is only as good as the configured rules/artifact, and accelerator-specific runtimes remain future work. |
 
@@ -312,8 +312,8 @@ Practical rule of thumb:
 
 ## Immediate focus
 
-The first cleanup passes on ports, hardware-scope docs, and SIM-vs-hardware onboarding are now in much better shape.
-These are the areas that deserve attention before major new feature work.
+The biggest runtime-contract and doc-cleanup passes have landed. Treat the items below as the current
+maintenance guardrails plus the remaining high-value gaps before broad new feature work.
 
 ### 1. Keep the runtime contract honest
 
@@ -328,7 +328,7 @@ systemd units, Vite config, and scripts drift apart again.
 - `frontend/vite.config.ts`
 - `frontend/server.mjs`
 
-**What to do next:**
+**What to do now:**
 
 - treat `8081` / `3000` / `4173` as the current contract unless you deliberately change it everywhere
 - verify docs and scripts whenever startup behavior changes
@@ -346,7 +346,7 @@ getting ahead of the actual supported baseline.
 - `docs/installation-setup-guide.md`
 - `docs/hardware-feature-matrix.md`
 
-**What to do next:**
+**What to do now:**
 
 - treat `spec/hardware.yaml` as the source of truth before editing prose docs
 - clearly separate supported fallbacks from future experiments
@@ -364,7 +364,7 @@ getting ahead of the actual supported baseline.
 - `docs/RELEASE_NOTES.md`
 - `docs/hardware-integration.md`
 
-**What to do next:**
+**What to do now:**
 
 - keep `SIM_MODE=1` as the default recommendation for laptops and CI
 - document on-device validation as a separate maintainer workflow, not “just run the app”
@@ -372,7 +372,8 @@ getting ahead of the actual supported baseline.
 
 ### 4. Protect regression-sensitive manual control and camera paths
 
-**Why it matters:** recent release notes show a lot of work in RoboHAT USB handshake behavior, camera stream fallback, and joystick responsiveness.
+**Why it matters:** recent release notes show a lot of work in RoboHAT USB handshake behavior, camera stream fallback, joystick responsiveness,
+and emergency-stop fail-closed behavior. Those paths are much healthier now, but they are still some of the easiest places to reintroduce field regressions.
 
 **Evidence:**
 
@@ -403,10 +404,12 @@ getting ahead of the actual supported baseline.
 - keep the maturity labels in this handbook updated as code changes land
 - avoid building new features on top of placeholder behavior without first tightening the contract
 - use matching tests as part of the definition of “stable enough,” not just the existence of a service file
+- remember the current practical status: navigation is safer than it was before the March 2026 hardening pass, mission recovery is real but intentionally conservative, and AI is still experimental rather than field-proven
 
 ### 6. Keep tightening frontend typing and deep-path tests
 
-**Why it matters:** the frontend test posture is decent, but complex stateful flows still benefit from stronger typing and more targeted coverage.
+**Why it matters:** the frontend test posture is decent, but complex stateful flows still benefit from stronger typing, better recovery/fault surfacing,
+and more targeted coverage around operator-critical transitions.
 
 **Evidence:**
 
@@ -421,6 +424,7 @@ getting ahead of the actual supported baseline.
 - prioritize control/auth/map/mission flows that combine API, WebSocket, and local state
 - reduce `any` usage where practical
 - keep Playwright mock-backed scenarios aligned with real API behavior
+- make mission recovery, lockout/fault reasons, and camera fallback behavior more obvious to operators before treating the UI as “done enough”
 
 ## Practical re-entry checklist
 
@@ -445,81 +449,89 @@ If you are getting back into the codebase after a break, this is the shortest sa
 ## Recommended next cleanup sequence
 
 The previous three-pass recommendation (manual-control/camera hardening, then mission/navigation contracts, then AI surface work)
-has now been completed. The highest-value follow-up work is:
+has effectively rolled forward. The navigation and mission-recovery parts landed meaningful work in March 2026, so the next
+high-value sequence should focus on what remains instead of restating already-completed hardening as future work.
 
-1. **Navigation field-hardening pass** — continue replacing optimistic motion assumptions with tighter feedback and obstacle validation.
-2. **Mission recovery completion pass** — build on the new persistence-backed mission state with clearer operator resume UX, restart validation, and fault-state surfacing.
-3. **AI model-quality pass** — swap or extend the baseline CPU model artifact with a better detector while preserving the same backend contract.
+1. **AI model-quality pass**
+	- keep the backend AI contract stable while improving the configured model artifact or inference rules
+	- validate against real captured frames, not just synthetic or happy-path samples
+	- treat accelerator-specific runtimes as optional follow-on work unless they improve reliability as well as speed
 
-That keeps the next work focused on runtime credibility rather than reopening already-completed contract cleanup.
+2. **Field validation and operator-feedback pass**
+	- validate navigation, pause/abort, emergency-stop, and mission-recovery behavior on real hardware instead of assuming SIM success proves field readiness
+	- capture where waypoint progress, obstacle response, or stop behavior still feel optimistic under real GPS/controller conditions
+	- fold findings back into targeted backend hardening rather than broad speculative refactors
+
+3. **Frontend operator clarity and regression-tightening pass**
+	- make mission recovery, control lockouts, controller disconnects, and camera fallback states easier to understand from the UI
+	- reduce `any` usage in high-traffic composables and stores where typing helps prevent state drift
+	- add or tighten focused E2E coverage for mission pause/resume, camera fallback, and other operator-visible failure paths
+
+That keeps the next work focused on field credibility and operator clarity rather than reopening already-completed runtime-contract cleanup.
 
 ## Next 2 weeks: practical maintainer plan
 
-This is the recommended short-horizon plan if you want a focused two-week push that improves real-world reliability without
-spraying effort across too many subsystems at once.
+The previous two-week plan largely landed in the March 2026 hardening pass. Use the next two weeks for field-trustworthiness work,
+AI quality improvement, and operator-facing clarity instead of replaying the already-completed mission persistence / stop-path work.
 
-### Week 1 — navigation/runtime credibility
+### Week 1 — field validation and operator feedback
 
-1. **Navigation feedback audit**
-	- trace where mission progress currently assumes movement succeeded versus where encoder/GPS/controller feedback actually confirms it
-	- inventory any places where navigation can advance state after a command without enough evidence
-	- output: a short defect list tied to concrete files and tests
+1. **Run a hardware-backed validation slice**
+	- validate waypoint completion, pause/resume, abort, and emergency-stop behavior on the mower instead of only in simulation
+	- explicitly compare live behavior against the March 2026 expectations: fresh GPS gating, conservative mission recovery, and fail-closed stop behavior
+	- output: a short findings list tied to concrete files, logs, and tests
 
-2. **Stop/fault behavior hardening**
-	- make sure controller failures, obstacle holds, and interrupted navigation paths fail closed
-	- verify that pause/abort/interrupt states always drive a clean stop path
-	- output: tighter runtime behavior in `backend/src/services/navigation_service.py` and any adjacent control-service seams
+2. **Audit operator-visible failure reporting**
+	- verify that control lockouts, controller disconnects, mission recovery state, and camera fallback behavior are obvious from the UI
+	- note any places where the backend has the right state but the frontend does not surface it clearly enough
+	- output: a prioritized UI/documentation gap list, not just a bug pile
 
-3. **Regression coverage for navigation edge cases**
-	- add or tighten tests around interrupted waypoint traversal, lost-position handling, obstacle gating, and command-delivery failures
-	- prioritize service-level and contract-level coverage over broad end-to-end speculation
-	- output: stronger backend regression slice for navigation safety behavior
+3. **Fix only the highest-confidence field issues**
+	- prioritize deterministic safety or operator-clarity gaps over speculative cleanup
+	- prefer targeted hardening and targeted tests to broad subsystem rewrites
+	- output: a small, credible set of improvements that are actually field-informed
 
-4. **Runtime verification pass**
-	- run the targeted backend test slice for navigation, mission execution, and safety-sensitive flows
-	- update docs only if behavior or limitations changed materially
-	- output: a known-good validation set for the week-1 hardening work
+4. **Re-run focused validation after each change**
+	- run the smallest meaningful backend/frontend slice after fixes land
+	- update maintainer docs immediately if field behavior or subsystem limitations changed materially
+	- output: a known-good validation set for the field-informed week-1 work
 
-### Week 2 — mission durability and AI quality
+### Week 2 — AI quality and frontend polish
 
-1. **Mission persistence design + first implementation**
-	- move mission state beyond in-memory-only orchestration
-	- define what should survive restart: mission metadata, lifecycle state, current waypoint index, and abort/failure detail
-	- output: first persistence-backed mission recovery path, even if conservative
+1. **Improve AI quality behind the existing contract**
+	- swap or extend the baseline CPU model artifact or inference rules without reopening the API contract
+	- evaluate against a small real-image set that is representative of current mower use, not just synthetic examples
+	- output: better baseline detections with the same backend surface area
 
-2. **Mission restart/recovery semantics**
-	- decide what happens on backend restart when a mission was previously running or paused
-	- fail safe by default; prefer resumable paused state over pretending active motion is still valid
-	- output: explicit recovery rules plus tests
+2. **Tighten frontend operator-critical flows**
+	- reduce `any` usage in `frontend/src/composables/` and the highest-traffic stores where better typing reduces state ambiguity
+	- add or tighten coverage for mission recovery visibility, camera fallback, and control-path regressions
+	- output: a smaller but safer operator UI surface
 
-3. **AI model-quality pass behind the existing contract**
-	- keep the new backend AI API stable while improving the configured model artifact or inference rules
-	- avoid broad API churn; improve detection quality inside the existing backend seam
-	- output: better results from `backend/src/services/ai_service.py` without reopening the contract
-
-4. **Docs and maintainer sync**
-	- refresh `docs/developer-toolkit.md`, `docs/RELEASE_NOTES.md`, and `docs/code_structure_overview.md` if callable interfaces or subsystem maturity changed
-	- record any newly discovered limitations honestly so future work does not rebuild on stale assumptions
-	- output: docs that match the implementation, not the wish list
+3. **Sync docs with what the field pass actually taught us**
+	- update `docs/developer-toolkit.md`, `docs/RELEASE_NOTES.md`, and operator-facing docs if the field behavior or practical limitations changed
+	- record limitations honestly so the next maintainer does not rebuild on wishful thinking
+	- output: docs that reflect observed reality, not just design intent
 
 ### Suggested daily cadence
 
-- **Day 1–2:** navigation feedback audit + issue list
-- **Day 3–4:** stop/fault hardening changes
-- **Day 5:** navigation regression validation and doc sync
-- **Day 6–7:** mission persistence design + first storage integration
-- **Day 8:** mission recovery semantics + tests
-- **Day 9:** AI model-quality improvement behind current API
-- **Day 10:** cleanup, docs sync, broader validation pass, and backlog reshaping
+- **Day 1–2:** hardware-backed validation slice + findings log
+- **Day 3–4:** highest-confidence safety / operator-clarity fixes
+- **Day 5:** focused regression validation and doc sync
+- **Day 6–7:** AI model-quality iteration behind the existing contract
+- **Day 8:** frontend typing / recovery-visibility / camera-fallback tightening
+- **Day 9:** targeted E2E or contract regression additions
+- **Day 10:** cleanup, docs sync, backlog reshape based on field evidence
 
 ### Definition of success for this two-week pass
 
 At the end of the two weeks, you should be able to say all of the following with a straight face:
 
-- navigation failure and interruption behavior is more deterministic than it is today
-- mission state no longer disappears instantly on restart
-- AI is still conservative, but the backend contract is real and the baseline results are better than the first-pass heuristic
-- maintainer docs and structure docs still match the code
+- the field-validation pass found the next real problems instead of re-solving already-landed March 2026 work
+- navigation, mission stop behavior, and recovery semantics feel at least as trustworthy on hardware as they do in simulation
+- AI is still conservative, but the baseline results are better without reopening the backend contract
+- operator-facing fault and recovery states are easier to interpret in the UI and docs
+- maintainer docs still match the implementation and the currently believed limitations
 
 ## Deep references
 
