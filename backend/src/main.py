@@ -27,6 +27,8 @@ from .nav.gps_degradation import GPSDegradationMonitor
 from .services.robohat_service import initialize_robohat_service, shutdown_robohat_service
 from .services.camera_stream_service import camera_service
 from .services.ai_service import get_ai_service
+from .services.mission_service import get_mission_service
+from .services.navigation_service import NavigationService
 from .middleware.correlation import register_correlation_middleware
 from .middleware.security import register_security_middleware
 from .middleware.rate_limiting import register_global_rate_limiter
@@ -118,6 +120,11 @@ async def lifespan(app: FastAPI):
         await initialize_robohat_service()
     except Exception:
         pass
+    try:
+        mission_service = get_mission_service(NavigationService.get_instance())
+        await mission_service.recover_persisted_missions()
+    except Exception:
+        _log.exception("Mission recovery failed during startup")
     try:
         await camera_service.initialize()
         await camera_service.start_streaming()

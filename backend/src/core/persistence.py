@@ -27,7 +27,7 @@ class Migration:
 class PersistenceLayer:
     """SQLite-based persistence layer for LawnBerry Pi v2."""
     
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
     
     MIGRATIONS = [
         Migration(
@@ -141,6 +141,34 @@ class PersistenceLayer:
             );
 
             INSERT OR REPLACE INTO schema_version (version) VALUES (4);
+            """
+        ),
+        Migration(
+            version=5,
+            description="Add mission persistence tables",
+            sql="""
+            CREATE TABLE IF NOT EXISTS missions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                waypoints_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS mission_execution_state (
+                mission_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                current_waypoint_index INTEGER DEFAULT 0,
+                completion_percentage REAL DEFAULT 0,
+                total_waypoints INTEGER DEFAULT 0,
+                detail TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_mission_execution_status
+                ON mission_execution_state(status);
+
+            INSERT OR REPLACE INTO schema_version (version) VALUES (5);
             """
         )
     ]

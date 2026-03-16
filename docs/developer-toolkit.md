@@ -247,7 +247,7 @@ coverage, not on roadmap intent.
 | RoboHAT USB control bridge | **Stable enough for active maintenance** | `backend/src/services/robohat_service.py` now speaks the RP2040 text protocol, probes serial ports, maintains USB control, and has focused unit coverage in `tests/unit/test_robohat_service_usb_control.py`. | Still hardware-sensitive by nature; treat serial timing, RC takeover, and emergency-stop behavior as regression-sensitive. |
 | Camera streaming | **Beta / partial but real** | `backend/src/services/camera_stream_service.py` supports PiCamera2/OpenCV selection, simulation fallback, IPC streaming, client backpressure handling, and has targeted tests in `tests/unit/test_camera_stream_service.py`. | The streaming path is real, but camera ownership assumptions are still strict and per-frame AI hooks are intentionally conservative. |
 | Navigation | **Partial implementation** | `backend/src/services/navigation_service.py` has path planning hooks, waypoint driving, return-home behavior, weather gating, and contract coverage such as `tests/contract/test_waypoint_navigation.py`. | Obstacle handling is simplistic, dead reckoning still uses placeholder distance estimates, and some mission movement logic still depends on optimistic state updates rather than hardened field feedback. |
-| Mission orchestration | **Beta / contract-hardened** | `backend/src/services/mission_service.py` now validates mission payloads, enforces lifecycle transitions, applies geofence rejection, and has service/API coverage in `tests/test_mission_api.py`, `tests/unit/test_mission_service.py`, and `tests/unit/test_navigation_service.py`. | Missions are still in-memory only, and live autonomy quality still depends on the underlying navigation/control loop rather than persistence or field telemetry reconciliation. |
+| Mission orchestration | **Beta / persistence-backed recovery started** | `backend/src/services/mission_service.py` now validates mission payloads, enforces lifecycle transitions, persists mission metadata and lifecycle state in SQLite, recovers missions on startup, and has service/API coverage in `tests/test_mission_api.py`, `tests/unit/test_mission_service.py`, `tests/unit/test_mission_persistence.py`, and `tests/unit/test_navigation_service.py`. | Recovery is intentionally conservative: running missions come back paused, no active task is recreated automatically, and live autonomy quality still depends on the underlying navigation/control loop rather than field telemetry reconciliation. |
 | Motor service abstraction | **Legacy / partial abstraction** | `backend/src/services/motor_service.py` models safety checks, controller selection, timeout behavior, and emergency-stop flow. | The concrete controller implementations are still placeholder-heavy; the more credible live control path today is the RoboHAT bridge rather than this abstraction layer. |
 | AI service | **Experimental but real** | `backend/src/services/ai_service.py` now loads a local JSON model definition, runs CPU inference on uploaded images or the latest camera frame, tracks recent results/performance, and is covered by `tests/test_ai_api.py` and `tests/unit/test_ai_service.py`. | This is a conservative first-pass inference pipeline, not production-grade perception; it is CPU-only, model quality is only as good as the configured rules/artifact, and accelerator-specific runtimes remain future work. |
 
@@ -255,7 +255,7 @@ Practical rule of thumb:
 
 - build confidently on the RoboHAT USB-control and camera-streaming paths, but keep tests close
 - treat navigation as usable but not fully hardened
-- treat mission orchestration as credible enough for continued contract work, but still not persistent or field-proven
+- treat mission orchestration as persistence-backed but still conservative and not yet field-proven
 - treat AI as experimentally real: safe to extend carefully, unsafe to oversell
 - do not assume `MotorService` is the dominant runtime path without checking the current startup wiring first
 
@@ -447,9 +447,9 @@ If you are getting back into the codebase after a break, this is the shortest sa
 The previous three-pass recommendation (manual-control/camera hardening, then mission/navigation contracts, then AI surface work)
 has now been completed. The highest-value follow-up work is:
 
-1. **Navigation field-hardening pass** — replace optimistic motion assumptions with tighter feedback and obstacle validation.
-2. **AI model-quality pass** — swap or extend the baseline CPU model artifact with a better detector while preserving the same backend contract.
-3. **Mission persistence / recovery pass** — move mission state beyond in-memory orchestration so pause/resume survives process restarts.
+1. **Navigation field-hardening pass** — continue replacing optimistic motion assumptions with tighter feedback and obstacle validation.
+2. **Mission recovery completion pass** — build on the new persistence-backed mission state with clearer operator resume UX, restart validation, and fault-state surfacing.
+3. **AI model-quality pass** — swap or extend the baseline CPU model artifact with a better detector while preserving the same backend contract.
 
 That keeps the next work focused on runtime credibility rather than reopening already-completed contract cleanup.
 

@@ -174,8 +174,11 @@ class NavigationService:
             )
             for wp in mission.waypoints
         ]
-        
-        self.navigation_state.current_waypoint_index = 0
+
+        status = mission_service.mission_statuses.get(mission.id)
+        requested_index = status.current_waypoint_index if status else 0
+        max_index = max(0, len(self.navigation_state.planned_path) - 1)
+        self.navigation_state.current_waypoint_index = max(0, min(requested_index or 0, max_index))
         self.navigation_state.operation_start_time = datetime.now(timezone.utc)
         self._mission_execution_active = True
 
@@ -212,6 +215,8 @@ class NavigationService:
                         self.navigation_state.path_status = PathStatus.INTERRUPTED
                         self.navigation_state.navigation_mode = NavigationMode.IDLE
                         return
+                else:
+                    mission_service._sync_status_with_navigation(mission.id)
 
                 # The go_to_waypoint method is blocking until the waypoint is reached or interrupted.
                 # The loop will then proceed to the next waypoint.

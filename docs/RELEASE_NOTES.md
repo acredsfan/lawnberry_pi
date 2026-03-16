@@ -35,6 +35,7 @@ This release replaces version 1 with a unified v2 backend and frontend, contract
 - Navigation waypoint completion now requires a fresh, non-dead-reckoned GPS fix, preventing missions from advancing on stale or synthetic position estimates.
 - Mission pause and abort flows now retry stop delivery and escalate to emergency stop when motion cannot be halted cleanly.
 - RoboHAT emergency stop now fails closed when USB control cannot be re-acquired instead of pretending a neutral PWM command succeeded.
+- Mission metadata and lifecycle state now persist in SQLite, and startup recovery restores missions conservatively by recovering prior running state as paused instead of auto-resuming motion.
 
 ## Highlights
 

@@ -1,11 +1,13 @@
 import asyncio
 import datetime
+import json
 import logging
 from typing import Dict, List
 
 from fastapi import Depends
 
-from ..models import NavigationMode
+from ..core.persistence import persistence
+from ..models import NavigationMode, PathStatus
 from ..models.mission import (
     Mission,
     MissionLifecycleStatus,
@@ -46,6 +48,191 @@ class MissionService:
         self.mission_statuses: Dict[str, MissionStatus] = {}
         self.mission_tasks: Dict[str, asyncio.Task] = {}
 
+    def _clamp_waypoint_index(self, mission: Mission, current_waypoint_index: int | None) -> int:
+        if not mission.waypoints:
+            return 0
+        if current_waypoint_index is None:
+            return 0
+        return max(0, min(int(current_waypoint_index), len(mission.waypoints) - 1))
+
+    def _persist_mission(self, mission: Mission) -> None:
+        with persistence.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO missions (id, name, waypoints_json, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    mission.id,
+                    mission.name,
+                    json.dumps([waypoint.model_dump() for waypoint in mission.waypoints]),
+                    mission.created_at,
+                ),
+            )
+            conn.commit()
+
+    def _persist_mission_status(self, mission_id: str) -> None:
+        status = self.mission_statuses.get(mission_id)
+        mission = self.missions.get(mission_id)
+        if status is None or mission is None:
+            return
+
+        clamped_index = self._clamp_waypoint_index(mission, status.current_waypoint_index)
+        status.current_waypoint_index = clamped_index
+        status.total_waypoints = len(mission.waypoints)
+        status.completion_percentage = self._calculate_completion_percentage(mission, clamped_index)
+
+        with persistence.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO mission_execution_state (
+                    mission_id,
+                    status,
+                    current_waypoint_index,
+                    completion_percentage,
+                    total_waypoints,
+                    detail,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    mission_id,
+                    status.status.value if hasattr(status.status, "value") else status.status,
+                    clamped_index,
+                    status.completion_percentage,
+                    status.total_waypoints,
+                    status.detail,
+                    datetime.datetime.now(datetime.timezone.utc),
+                ),
+            )
+            conn.commit()
+
+    def _sync_status_with_navigation(self, mission_id: str) -> None:
+        mission = self.missions.get(mission_id)
+        status = self.mission_statuses.get(mission_id)
+        if mission is None or status is None:
+            return
+
+        nav_state = self.nav_service.navigation_state
+        if nav_state.planned_path:
+            status.current_waypoint_index = self._clamp_waypoint_index(
+                mission,
+                nav_state.current_waypoint_index,
+            )
+            status.completion_percentage = self._calculate_completion_percentage(
+                mission,
+                status.current_waypoint_index,
+            )
+        elif status.current_waypoint_index is None:
+            status.current_waypoint_index = 0
+            status.completion_percentage = 0.0
+
+        self._persist_mission_status(mission_id)
+
+    async def recover_persisted_missions(self) -> None:
+        recovered_missions: Dict[str, Mission] = {}
+        persisted_states: Dict[str, dict] = {}
+
+        with persistence.get_connection() as conn:
+            mission_rows = conn.execute(
+                "SELECT id, name, waypoints_json, created_at FROM missions ORDER BY created_at"
+            ).fetchall()
+            state_rows = conn.execute(
+                """
+                SELECT mission_id, status, current_waypoint_index, completion_percentage,
+                       total_waypoints, detail
+                FROM mission_execution_state
+                """
+            ).fetchall()
+
+        for row in mission_rows:
+            mission = Mission.model_validate(
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "waypoints": json.loads(row["waypoints_json"]),
+                    "created_at": row["created_at"],
+                }
+            )
+            recovered_missions[mission.id] = mission
+
+        for row in state_rows:
+            persisted_states[row["mission_id"]] = dict(row)
+
+        self.missions = recovered_missions
+        self.mission_statuses = {}
+        self.mission_tasks = {}
+
+        active_like_states = {
+            mission_id
+            for mission_id, row in persisted_states.items()
+            if row.get("status") in {
+                MissionLifecycleStatus.RUNNING.value,
+                MissionLifecycleStatus.PAUSED.value,
+            }
+        }
+
+        stop_confirmed = True
+        emergency_ok = False
+        if active_like_states:
+            stop_confirmed = await self.nav_service.stop_navigation()
+            if not stop_confirmed:
+                emergency_ok = await self.nav_service.emergency_stop()
+
+        self.nav_service.navigation_state.navigation_mode = NavigationMode.IDLE
+        self.nav_service.navigation_state.target_velocity = 0.0
+        self.nav_service.navigation_state.velocity = 0.0
+        self.nav_service.navigation_state.planned_path = []
+        self.nav_service.navigation_state.current_waypoint_index = 0
+        self.nav_service.navigation_state.path_status = PathStatus.INTERRUPTED
+
+        for mission_id, mission in self.missions.items():
+            persisted = persisted_states.get(mission_id)
+            if persisted is None:
+                status = self._build_status(mission_id, MissionLifecycleStatus.IDLE)
+                self.mission_statuses[mission_id] = status
+                self._persist_mission_status(mission_id)
+                continue
+
+            raw_status = persisted.get("status", MissionLifecycleStatus.IDLE.value)
+            try:
+                lifecycle_status = MissionLifecycleStatus(raw_status)
+            except ValueError:
+                lifecycle_status = MissionLifecycleStatus.FAILED
+
+            clamped_index = self._clamp_waypoint_index(mission, persisted.get("current_waypoint_index"))
+            detail = persisted.get("detail")
+
+            if lifecycle_status == MissionLifecycleStatus.RUNNING:
+                if stop_confirmed:
+                    lifecycle_status = MissionLifecycleStatus.PAUSED
+                    detail = "Recovered after backend restart; explicit operator resume required"
+                else:
+                    lifecycle_status = MissionLifecycleStatus.FAILED
+                    detail = (
+                        "Recovered after backend restart but stop could not be confirmed; emergency stop activated"
+                        if emergency_ok
+                        else "Recovered after backend restart but neither stop nor emergency stop could be confirmed"
+                    )
+            elif lifecycle_status == MissionLifecycleStatus.PAUSED and not stop_confirmed:
+                lifecycle_status = MissionLifecycleStatus.FAILED
+                detail = (
+                    "Recovered paused mission but stop could not be confirmed; emergency stop activated"
+                    if emergency_ok
+                    else "Recovered paused mission but neither stop nor emergency stop could be confirmed"
+                )
+
+            status = MissionStatus(
+                mission_id=mission_id,
+                status=lifecycle_status,
+                current_waypoint_index=clamped_index,
+                completion_percentage=self._calculate_completion_percentage(mission, clamped_index),
+                total_waypoints=len(mission.waypoints),
+                detail=detail,
+            )
+            self.mission_statuses[mission_id] = status
+            self._persist_mission_status(mission_id)
+
     async def create_mission(self, name: str, waypoints: List[MissionWaypoint]) -> Mission:
         clean_name = (name or "").strip()
         if not clean_name:
@@ -65,6 +252,8 @@ class MissionService:
         )
         self.missions[mission.id] = mission
         self.mission_statuses[mission.id] = self._build_status(mission.id, MissionLifecycleStatus.IDLE)
+        self._persist_mission(mission)
+        self._persist_mission_status(mission.id)
         return mission
 
     async def start_mission(self, mission_id: str):
@@ -84,6 +273,7 @@ class MissionService:
 
         task = asyncio.create_task(self.nav_service.execute_mission(mission))
         self.mission_tasks[mission_id] = task
+        self._persist_mission_status(mission_id)
 
         # Monitor task completion
         task.add_done_callback(self._mission_completed_callback(mission_id))
@@ -98,16 +288,19 @@ class MissionService:
                     status.current_waypoint_index = max(0, status.total_waypoints - 1) if status.total_waypoints else 0
                     status.completion_percentage = 100
                     status.detail = None
+                    self._persist_mission_status(mission_id)
             except asyncio.CancelledError:
                 status = self.mission_statuses.get(mission_id)
                 if status:
                     status.status = MissionLifecycleStatus.ABORTED
                     status.detail = "Mission execution cancelled"
+                    self._persist_mission_status(mission_id)
             except Exception as e:
                 status = self.mission_statuses.get(mission_id)
                 if status:
                     status.status = MissionLifecycleStatus.FAILED
                     status.detail = str(e)
+                    self._persist_mission_status(mission_id)
                 logger.exception("Mission %s failed", mission_id)
             finally:
                 self.mission_tasks.pop(mission_id, None)
@@ -146,26 +339,39 @@ class MissionService:
                 if emergency_ok
                 else "Pause requested but neither stop nor emergency stop could be confirmed"
             )
+            self._persist_mission_status(mission_id)
             return
 
         status.status = MissionLifecycleStatus.PAUSED
         status.detail = None
+        status.current_waypoint_index = self._clamp_waypoint_index(
+            self._require_mission(mission_id),
+            self.nav_service.navigation_state.current_waypoint_index,
+        )
         self.nav_service.navigation_state.navigation_mode = NavigationMode.PAUSED
+        self._persist_mission_status(mission_id)
 
 
     async def resume_mission(self, mission_id: str):
-        self._require_mission(mission_id)
+        mission = self._require_mission(mission_id)
         status = self._require_status(mission_id)
         if status.status != MissionLifecycleStatus.PAUSED:
             raise MissionStateError("Mission is not paused.")
 
         active_task = self.mission_tasks.get(mission_id)
         if active_task is None or active_task.done():
-            raise MissionConflictError("Mission task is not active; restart the mission instead.")
+            task = asyncio.create_task(self.nav_service.execute_mission(mission))
+            self.mission_tasks[mission_id] = task
+            task.add_done_callback(self._mission_completed_callback(mission_id))
+        else:
+            task = active_task
 
         status.status = MissionLifecycleStatus.RUNNING
         status.detail = None
+        status.current_waypoint_index = self._clamp_waypoint_index(mission, status.current_waypoint_index)
+        self.nav_service.navigation_state.current_waypoint_index = status.current_waypoint_index
         self.nav_service.navigation_state.navigation_mode = NavigationMode.AUTO
+        self._persist_mission_status(mission_id)
 
 
     async def abort_mission(self, mission_id: str):
@@ -198,6 +404,7 @@ class MissionService:
         self.mission_tasks.pop(mission_id, None)
         status.status = final_status
         status.detail = detail
+        self._persist_mission_status(mission_id)
 
     async def get_mission_status(self, mission_id: str) -> MissionStatus:
         mission = self._require_mission(mission_id)
@@ -210,7 +417,10 @@ class MissionService:
                 max_index = max(0, len(mission.waypoints) - 1)
                 status.current_waypoint_index = min(nav_state.current_waypoint_index, max_index)
             else:
-                status.current_waypoint_index = 0
+                status.current_waypoint_index = self._clamp_waypoint_index(
+                    mission,
+                    status.current_waypoint_index,
+                )
             status.completion_percentage = self._calculate_completion_percentage(
                 mission,
                 status.current_waypoint_index,
@@ -222,6 +432,7 @@ class MissionService:
             status.current_waypoint_index = 0
             status.completion_percentage = 0
 
+        self._persist_mission_status(mission_id)
         return status
 
     async def list_missions(self) -> List[Mission]:

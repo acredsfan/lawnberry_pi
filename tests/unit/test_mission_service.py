@@ -99,17 +99,25 @@ async def test_pause_and_resume_reuse_existing_task():
 
 
 @pytest.mark.asyncio
-async def test_resume_requires_active_task():
+async def test_resume_recreates_task_when_paused_mission_was_recovered():
     nav = DummyNavigationService()
+    nav._mission_gate = asyncio.Event()
     service = MissionService(nav)
     mission = await service.create_mission(
         "Paused mission",
         [MissionWaypoint(lat=0.1, lon=0.1, blade_on=False, speed=50)],
     )
     service.mission_statuses[mission.id].status = MissionLifecycleStatus.PAUSED
+    service.mission_statuses[mission.id].current_waypoint_index = 0
 
-    with pytest.raises(MissionConflictError, match="task is not active"):
-        await service.resume_mission(mission.id)
+    await service.resume_mission(mission.id)
+
+    assert mission.id in service.mission_tasks
+    assert not service.mission_tasks[mission.id].done()
+    assert service.mission_statuses[mission.id].status == MissionLifecycleStatus.RUNNING
+
+    nav._mission_gate.set()
+    await asyncio.wait_for(service.mission_tasks[mission.id], timeout=1.0)
 
 
 @pytest.mark.asyncio
