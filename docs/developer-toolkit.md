@@ -22,6 +22,7 @@ The codebase is substantial and already covers the major product surfaces:
 
 - FastAPI backend with domain routers and real-time telemetry
 - Vue 3 + Pinia frontend with authenticated views and Playwright/Vitest coverage
+- recent operator-clarity hardening in the frontend for mission recovery detail, control lockout severity, and camera fallback visibility
 - documented hardware baseline in `spec/hardware.yaml`
 - safety, health, telemetry, settings, and mapping subsystems
 - Raspberry Pi operational support: systemd units, HTTPS/TLS automation, backups, diagnostics, validation scripts
@@ -425,6 +426,8 @@ and more targeted coverage around operator-critical transitions.
 - reduce `any` usage where practical
 - keep Playwright mock-backed scenarios aligned with real API behavior
 - make mission recovery, lockout/fault reasons, and camera fallback behavior more obvious to operators before treating the UI as “done enough”
+- current March 2026 kickoff work already surfaces recovered-paused mission detail plus richer control lockout/camera fallback status in the UI; next tighten E2E coverage and field validation rather than redoing the same UX pass
+- the follow-on March 2026 slice also aligned the manual-control camera fallback code with the real backend camera contract and added focused Playwright coverage for safety lockouts, snapshot fallback, and recovered mission visibility
 
 ## Practical re-entry checklist
 
@@ -466,6 +469,8 @@ high-value sequence should focus on what remains instead of restating already-co
 	- make mission recovery, control lockouts, controller disconnects, and camera fallback states easier to understand from the UI
 	- reduce `any` usage in high-traffic composables and stores where typing helps prevent state drift
 	- add or tighten focused E2E coverage for mission pause/resume, camera fallback, and other operator-visible failure paths
+	- note: the initial March 2026 slice landed typed mission/control store metadata plus clearer mission recovery, lockout, and camera-fallback UI messaging; keep building from that instead of restarting discovery
+	- note: focused Playwright coverage now exists for blocked manual-control lockouts, forced snapshot fallback, and recovered-paused mission visibility; remaining work should prioritize broader recovery/controller-disconnect coverage and real-hardware confirmation
 
 That keeps the next work focused on field credibility and operator clarity rather than reopening already-completed runtime-contract cleanup.
 

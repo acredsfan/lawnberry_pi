@@ -69,6 +69,8 @@ Tip: Use your editor’s outline and the section links below to jump to an area 
 | `frontend/src/services/api.ts` | HTTP API client with auth and client‑id headers; specific control and map endpoints. | Frontend API | `sendControlCommand(command: string, payload: any = {})`, `getRoboHATStatus()`, `getMapConfiguration(configId: string = 'default')`, `saveMapConfiguration(configId: string, config: any)`, `triggerMapProviderFallback()`, `useApiService()`. |
 | `frontend/src/services/auth.ts` | Auth helpers (token, login/logout) backed by Pinia store. | Frontend auth | Exported functions from file (see source). |
 | `frontend/src/services/websocket.ts` | WebSocket management for telemetry/control with typed handlers. | Frontend realtime | `useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handlers?: { onMessage?: (msg: any) => void })`. |
+| `frontend/src/stores/control.ts` | Pinia setup store for manual control command dispatch, RoboHAT status/health state, safety lockout handling, and control WebSocket lifecycle. | Frontend state/control | Interfaces: `ControlCommandResult`, `RoboHATStatus`, `LockoutDisplay`. Store: `useControlStore()` exposing computed `lockoutDisplay`, `submitCommand(command: string, payload: Record<string, unknown> = {})`, `fetchRoboHATStatus()`, `initWebSocket()`, `cleanup()`. |
+| `frontend/src/stores/mission.ts` | Pinia setup store for mission planning/execution state, lifecycle actions, and mission-status polling with waypoint progress metadata. | Frontend state/missions | Types/interfaces: `MissionLifecycleStatus`, `MissionStatusResponse`. Store: `useMissionStore()` exposing status metadata `currentWaypointIndex`, `totalWaypoints`, `statusDetail`, computed `isRecoveredPause`, and `pollMissionStatus()`. |
 | `frontend/src/composables/useApi.ts` | Vue composable wrapping API client. | Frontend API | Default/ named exports (see source). |
 | `frontend/src/composables/useWebSocket.ts` | Thin composable for WebSocket URL selection. | Frontend realtime | `useWebSocket(url = '/ws')`. |
 | `frontend/src/composables/useOfflineMaps.ts` | Manage offline map tiles caching and usage. | Frontend mapping | `useOfflineMaps()`. |
@@ -77,7 +79,7 @@ Tip: Use your editor’s outline and the section links below to jump to an area 
 
 ## Frontend views and router
 
-These are Vue components and routing; they provide UI and don’t expose reusable function APIs.
+These are Vue components and routing; they provide UI and don’t expose reusable function APIs. Notable UI-only behavior includes `frontend/src/views/ControlView.vue` surfacing camera stream fallback plus richer lockout/controller-health detail while tolerating both wrapped and flat camera API payloads, and `frontend/src/views/MissionPlannerView.vue` surfacing recovered-paused mission detail and waypoint progress. The E2E harness in `frontend/src/main.ts` now exposes the mission store alongside auth/map/control stores for regression scenarios.
 
 - Views: `frontend/src/views/*.vue` (DashboardView, ControlView, MapsView, MissionPlannerView, PlanningView, TelemetryView, RtkDiagnosticsView, AIView, SettingsView, DocsHubView, LoginView)
 - App shell: `frontend/src/App.vue`

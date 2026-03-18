@@ -246,6 +246,21 @@ describe('Control Store', () => {
       expect(store.lockoutReason).toBe('Low battery')
       expect(store.lockoutUntil).toBe(lockoutMessage.until)
       expect(store.remediationLink).toBe('/docs/troubleshooting#low-battery')
+      expect(store.lockoutDisplay.label).toBe('Low battery lockout')
+      expect(store.lockoutDisplay.severity).toBe('warning')
+    })
+
+    it('maps emergency-stop lockouts to a danger severity display', () => {
+      const { store, wsEntry } = createStoreWithWs()
+
+      wsEntry.handlers?.onMessage?.({
+        type: 'lockout',
+        active: true,
+        reason: 'EMERGENCY_STOP_ACTIVE',
+      })
+
+      expect(store.lockoutDisplay.label).toBe('Emergency stop active')
+      expect(store.lockoutDisplay.severity).toBe('danger')
     })
 
     it('clears lockout when receiving unlock message', () => {

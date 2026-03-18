@@ -3,16 +3,122 @@ import { ref, computed } from 'vue';
 import { sendControlCommand, getRoboHATStatus } from '../services/api';
 import { useWebSocket } from '../services/websocket';
 
+type ControlPayload = Record<string, unknown>;
+type ControlEchoPayload = Record<string, unknown>;
+
+export interface ControlCommandResult extends ControlPayload {
+  result?: string;
+  status?: string;
+  command_id?: string;
+  status_reason?: string;
+  timestamp?: string;
+}
+
+export interface RoboHATStatus extends ControlPayload {
+  serial_connected?: boolean;
+  motor_controller_ok?: boolean;
+  last_error?: string | null;
+  last_watchdog_echo?: string | null;
+  telemetry_source?: string;
+  safety_state?: string;
+  velocity?: {
+    linear?: {
+      x?: number | null;
+    };
+  };
+  camera?: {
+    active?: boolean;
+    mode?: string;
+    fps?: number | null;
+    client_count?: number | null;
+    last_frame?: string | null;
+  };
+}
+
+export interface LockoutDisplay {
+  code: string;
+  label: string;
+  message: string;
+  severity: 'danger' | 'warning' | 'info';
+}
+
+interface ControlSocketMessage extends ControlPayload {
+  type?: string;
+  payload?: ControlEchoPayload;
+  active?: boolean;
+  reason?: string;
+  until?: string | null;
+}
+
+function normalizeLockoutReason(reason: unknown): string {
+  return String(reason || 'unknown')
+    .trim()
+    .replace(/[\s-]+/g, '_')
+    .toUpperCase();
+}
+
+function describeLockoutReason(reason: unknown): LockoutDisplay {
+  const code = normalizeLockoutReason(reason);
+
+  switch (code) {
+    case 'EMERGENCY_STOP':
+    case 'EMERGENCY_STOP_ACTIVE':
+    case 'EMERGENCY_STOP_TRIGGERED':
+      return {
+        code,
+        label: 'Emergency stop active',
+        message: 'Motion commands stay blocked until the emergency stop is cleared and the mower is safe to resume.',
+        severity: 'danger',
+      };
+    case 'LOW_BATTERY':
+    case 'LOW_BATTERY_LOCKOUT':
+      return {
+        code,
+        label: 'Low battery lockout',
+        message: 'Drive and blade commands are paused to protect the mower. Recharge or inspect power before resuming.',
+        severity: 'warning',
+      };
+    case 'TILT_SENSOR_LOCKOUT':
+      return {
+        code,
+        label: 'Tilt safety lockout',
+        message: 'The mower reported a tilt condition. Stabilize the chassis and verify the area is safe before retrying.',
+        severity: 'danger',
+      };
+    case 'SAFETY_LOCKOUT':
+      return {
+        code,
+        label: 'Safety lockout',
+        message: 'A safety interlock is blocking commands. Review the remediation steps before attempting another action.',
+        severity: 'warning',
+      };
+    default:
+      return {
+        code,
+        label: 'Control lockout',
+        message: 'Manual control is temporarily blocked. Review controller status and recent safety messages before retrying.',
+        severity: 'info',
+      };
+  }
+}
+
 export const useControlStore = defineStore('control', () => {
-  function extractRemediationLink(source: any): string {
+  function extractRemediationLink(source: ControlPayload | null | undefined): string {
     if (!source) return '';
     return source?.remediation_link || source?.remediation_url || source?.remediation?.docs_link || '';
   }
 
-  function isSafetyLockoutError(error: any): boolean {
-    const status = error?.response?.status;
-    const data = error?.response?.data;
-    const reason = String(data?.status_reason || data?.detail || error?.message || '').toUpperCase();
+  function isSafetyLockoutError(error: unknown): boolean {
+    const payload = error as {
+      message?: string;
+      response?: {
+        status?: number;
+        data?: ControlPayload;
+      };
+    };
+    const status = payload?.response?.status;
+    const data = payload?.response?.data;
+    const reason = String(data?.status_reason || data?.detail || payload?.message || '').toUpperCase();
 
     return (
       status === 403 ||
@@ -24,71 +130,85 @@ export const useControlStore = defineStore('control', () => {
     );
   }
 
-  // State
   const lockoutActive = ref(false);
   const lockout = ref(false);
   const lockoutReason = ref('');
   const lockoutUntil = ref(null as string | null);
-  const lastEcho = ref(null as null | Record<string, any>);
-  const lastCommandEcho = ref(null as null | Record<string, any>);
-  const lastCommandResult = ref(null as null | { result: string; status_reason?: string });
+  const lastEcho = ref<ControlEchoPayload | null>(null);
+  const lastCommandEcho = ref<ControlEchoPayload | null>(null);
+  const lastCommandResult = ref<ControlCommandResult | null>(null);
   const remediationLink = ref('');
   const isLoading = ref(false);
   const commandInProgress = ref(false);
-  const robohatStatus = ref(null as null | Record<string, any>);
+  const robohatStatus = ref<RoboHATStatus | null>(null);
 
-  // WebSocket integration for echo/lockout
+  function applyLockoutState(source: ControlPayload | null | undefined, reason: string, until?: string | null) {
+    lockout.value = true;
+    lockoutActive.value = true;
+    lockoutReason.value = reason || 'Unknown';
+    lockoutUntil.value = until ?? null;
+    remediationLink.value = extractRemediationLink(source);
+  }
+
+  function clearLockoutState() {
+    lockout.value = false;
+    lockoutActive.value = false;
+    lockoutReason.value = '';
+    lockoutUntil.value = null;
+    remediationLink.value = '';
+  }
+
+  function handleControlMessage(msg: ControlSocketMessage) {
+    if (msg.type === 'echo' || msg.type === 'command_echo') {
+      lastEcho.value = msg.payload || msg;
+      lastCommandEcho.value = msg.payload || msg;
+    }
+    if (msg.type === 'lockout') {
+      applyLockoutState(msg, msg.reason || 'Unknown', msg.until ?? null);
+    }
+    if (msg.type === 'unlock') {
+      clearLockoutState();
+    }
+  }
+
   const ws = useWebSocket('control', {
-    onMessage: (msg: any) => {
-      if (msg.type === 'echo' || msg.type === 'command_echo') {
-        lastEcho.value = msg.payload || msg;
-        lastCommandEcho.value = msg.payload || msg;
-      }
-      if (msg.type === 'lockout') {
-        lockout.value = true;
-        lockoutActive.value = msg.active !== false;
-        lockoutReason.value = msg.reason || 'Unknown';
-        lockoutUntil.value = msg.until || null;
-        remediationLink.value = extractRemediationLink(msg);
-      }
-      if (msg.type === 'unlock') {
-        lockout.value = false;
-        lockoutActive.value = false;
-        lockoutReason.value = '';
-        lockoutUntil.value = null;
-        remediationLink.value = '';
-      }
+    onMessage: (msg: ControlSocketMessage) => {
+      handleControlMessage(msg);
     }
   });
 
-  // Actions
-  async function submitCommand(command: string, payload: any = {}) {
+  async function submitCommand(command: string, payload: ControlPayload = {}) {
     if (lockoutActive.value) {
       throw new Error(`Control locked out: ${lockoutReason.value}`);
     }
-    
+
     commandInProgress.value = true;
     isLoading.value = true;
     try {
-      const result = await sendControlCommand(command, payload);
+      const result = await sendControlCommand(command, payload) as ControlCommandResult;
       lastCommandResult.value = result;
       lastCommandEcho.value = result;
       if (result.result === 'blocked') {
-        lockout.value = true;
-        lockoutActive.value = true;
-        lockoutReason.value = result.status_reason || 'SAFETY_LOCKOUT';
-        remediationLink.value = extractRemediationLink(result);
+        applyLockoutState(result, result.status_reason || 'SAFETY_LOCKOUT');
       }
       return result;
-    } catch (e: any) {
-      const statusReason = e?.response?.data?.status_reason || e?.response?.data?.detail || e?.message || 'Unknown error';
+    } catch (e: unknown) {
+      const error = e as {
+        message?: string;
+        response?: {
+          data?: ControlPayload;
+        };
+      };
+      const statusReason = String(
+        error?.response?.data?.status_reason ||
+        error?.response?.data?.detail ||
+        error?.message ||
+        'Unknown error'
+      );
       lastCommandResult.value = { result: 'error', status_reason: statusReason };
 
       if (isSafetyLockoutError(e)) {
-        lockout.value = true;
-        lockoutActive.value = true;
-        lockoutReason.value = statusReason;
-        remediationLink.value = extractRemediationLink(e?.response?.data || e);
+        applyLockoutState(error?.response?.data, statusReason);
       }
 
       throw e;
@@ -100,7 +220,7 @@ export const useControlStore = defineStore('control', () => {
 
   async function fetchRoboHATStatus() {
     try {
-      const result = await getRoboHATStatus();
+      const result = await getRoboHATStatus() as RoboHATStatus;
       robohatStatus.value = result;
       return result;
     } catch (e) {
@@ -109,10 +229,11 @@ export const useControlStore = defineStore('control', () => {
     }
   }
 
-  // Computed properties
   const canSubmitCommand = computed(() => {
     return !lockoutActive.value && !commandInProgress.value;
   });
+
+  const lockoutDisplay = computed<LockoutDisplay>(() => describeLockoutReason(lockoutReason.value));
 
   const lockoutTimeRemaining = computed(() => {
     if (!lockoutUntil.value) return 0;
@@ -121,31 +242,11 @@ export const useControlStore = defineStore('control', () => {
     return Math.max(0, until - now);
   });
 
-  // WebSocket management functions
   let unsubscribeFunction: (() => void) | null = null;
-  
+
   function initWebSocket() {
-    // Subscribe and store the unsubscribe function
-    unsubscribeFunction = ws.subscribe ? ws.subscribe('control', (msg: any) => {
-      // Handle messages manually for testing
-      if (msg.type === 'echo' || msg.type === 'command_echo') {
-        lastEcho.value = msg.payload || msg;
-        lastCommandEcho.value = msg.payload || msg;
-      }
-      if (msg.type === 'lockout') {
-        lockout.value = true;
-        lockoutActive.value = msg.active !== false;
-        lockoutReason.value = msg.reason || 'Unknown';
-        lockoutUntil.value = msg.until || null;
-        remediationLink.value = extractRemediationLink(msg);
-      }
-      if (msg.type === 'unlock') {
-        lockout.value = false;
-        lockoutActive.value = false;
-        lockoutReason.value = '';
-        lockoutUntil.value = null;
-        remediationLink.value = '';
-      }
+    unsubscribeFunction = ws.subscribe ? ws.subscribe('control', (msg: ControlSocketMessage) => {
+      handleControlMessage(msg);
     }) : null;
   }
 
@@ -157,7 +258,6 @@ export const useControlStore = defineStore('control', () => {
   }
 
   return {
-    // State
     lockout,
     lockoutActive,
     lockoutReason,
@@ -169,12 +269,9 @@ export const useControlStore = defineStore('control', () => {
     isLoading,
     commandInProgress,
     robohatStatus,
-    
-    // Computed
     canSubmitCommand,
+    lockoutDisplay,
     lockoutTimeRemaining,
-    
-    // Actions
     submitCommand,
     fetchRoboHATStatus,
     initWebSocket,

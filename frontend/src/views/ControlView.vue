@@ -155,14 +155,15 @@
                 Retry
               </button>
             </div>
-            <div class="camera-badge">
-              {{ cameraInfo.mode ? cameraInfo.mode.toUpperCase() : 'OFFLINE' }}
+            <div class="camera-badge" :class="`camera-badge--${cameraModeBadge.tone}`">
+              {{ cameraModeBadge.label }}
             </div>
           </div>
           <div class="camera-meta">
             <span :class="{ 'camera-meta-active': cameraInfo.active }">
               {{ cameraIsStreaming ? 'Streaming' : (cameraInfo.active ? 'Snapshots' : 'Idle') }}
             </span>
+            <span v-if="cameraStreamUnavailable" class="camera-meta-warning">Primary MJPEG stream unavailable</span>
             <span>FPS: {{ formatCameraFps(cameraInfo.fps) }}</span>
             <span>Last frame: {{ formatCameraTimestamp(cameraLastFrame) }}</span>
             <span>Clients: {{ cameraInfo.client_count ?? '0' }}</span>
@@ -291,8 +292,16 @@
     </div>
 
     <!-- Status Messages -->
-    <div v-if="lockout" class="alert alert-danger">
-      {{ lockoutReason }}
+    <div v-if="lockout" class="alert" :class="`alert-${lockoutDisplay.severity}`">
+      <div class="alert-lockout__header">
+        <strong>{{ lockoutDisplay.label }}</strong>
+        <span class="alert-lockout__code">{{ lockoutDisplay.code }}</span>
+      </div>
+      <p class="alert-lockout__reason">{{ lockoutReason }}</p>
+      <p>{{ lockoutDisplay.message }}</p>
+      <a v-if="remediationLink" class="alert-lockout__link" :href="remediationLink">
+        Open remediation steps
+      </a>
     </div>
     <div v-if="statusMessage" class="alert" :class="statusSuccess ? 'alert-success' : 'alert-danger'">
       {{ statusMessage }}
@@ -304,7 +313,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import axios, { type AxiosError } from 'axios'
 import { storeToRefs } from 'pinia'
-import { useControlStore } from '@/stores/control'
+import { useControlStore, type LockoutDisplay, type RoboHATStatus } from '@/stores/control'
 import { useApiService } from '@/services/api'
 import { useToastStore } from '@/stores/toast'
 import { usePreferencesStore } from '@/stores/preferences'
@@ -366,6 +375,7 @@ const remediationLink = computed(() => control.remediationLink)
 const lastEcho = computed(() => control.lastEcho)
 const isLoading = computed(() => control.isLoading)
 const lastCommandResult = computed(() => control.lastCommandResult)
+const lockoutDisplay = computed<LockoutDisplay>(() => control.lockoutDisplay)
 
 // Manual control security configuration and authentication state
 const securityConfig = ref<ManualControlSecurityConfig>({
@@ -431,6 +441,7 @@ const cameraStreamClientId = (() => {
   }
   return `client-${Math.random().toString(36).slice(2)}`
 })()
+let cameraFrameObjectUrl: string | null = null
 let cameraFrameTimer: number | undefined
 let cameraStatusTimer: number | undefined
 let cameraRetryTimer: number | undefined
@@ -482,7 +493,7 @@ const canAuthenticate = computed(() => {
   }
 })
 
-const robohatStatus = computed(() => control.robohatStatus as Record<string, any> | null)
+const robohatStatus = computed(() => control.robohatStatus as RoboHATStatus | null)
 
 const motorControllerState = computed<MotorControllerState>(() => describeMotorController(robohatStatus.value))
 
@@ -496,6 +507,33 @@ const canSubmitBlade = computed(() =>
 
 const cameraDisplaySource = computed(() => cameraStreamUrl.value ?? cameraFrameUrl.value)
 const cameraIsStreaming = computed(() => Boolean(cameraStreamUrl.value))
+const cameraModeBadge = computed(() => {
+  if (cameraStreamUnavailable.value) {
+    return {
+      label: 'SNAPSHOT FALLBACK',
+      tone: 'warning' as const
+    }
+  }
+
+  if (cameraIsStreaming.value) {
+    return {
+      label: 'STREAMING',
+      tone: 'success' as const
+    }
+  }
+
+  if (cameraInfo.active) {
+    return {
+      label: 'SNAPSHOTS',
+      tone: 'info' as const
+    }
+  }
+
+  return {
+    label: cameraInfo.mode ? cameraInfo.mode.toUpperCase() : 'OFFLINE',
+    tone: 'muted' as const
+  }
+})
 
 // Helpers
 function mapSecurityLevel(value: unknown): ManualControlSecurityConfig['auth_level'] {
@@ -594,7 +632,7 @@ function describeMotorError(code: string | null | undefined): string | null {
   }
 }
 
-function describeMotorController(status: Record<string, any> | null | undefined): MotorControllerState {
+function describeMotorController(status: RoboHATStatus | null | undefined): MotorControllerState {
   if (!status) {
     return {
       ready: false,
@@ -677,6 +715,10 @@ function showStatus(message: string, success: boolean, timeout = 4000) {
 }
 
 function resetCameraState() {
+  if (cameraFrameObjectUrl) {
+    URL.revokeObjectURL(cameraFrameObjectUrl)
+    cameraFrameObjectUrl = null
+  }
   cameraStreamUrl.value = null
   cameraFrameUrl.value = null
   cameraStatusMessage.value = 'Initializing camera…'
@@ -691,6 +733,38 @@ function resetCameraState() {
     fps: null,
     client_count: null
   })
+}
+
+function normalizeCameraStatusPayload(payload: Record<string, any> | null | undefined) {
+  if (!payload) {
+    return null
+  }
+
+  const data = payload?.status === 'success' && payload?.data ? payload.data : payload
+  if (!data || typeof data !== 'object') {
+    return null
+  }
+
+  const statistics = data.statistics ?? {}
+  const fpsCandidate = statistics.current_fps ?? statistics.fps ?? data.fps ?? null
+  const lastFrameCandidate = data.last_frame_time ?? data.last_frame ?? data.capture_ts ?? null
+  const active = Boolean(data.is_active ?? data.active ?? data.streaming)
+
+  return {
+    active,
+    mode: data.mode ?? (data.sim_mode ? 'simulation' : (active ? 'streaming' : 'offline')),
+    fps: typeof fpsCandidate === 'number' ? Number(fpsCandidate) : null,
+    client_count: typeof data.client_count === 'number' ? Number(data.client_count) : null,
+    last_frame_time: typeof lastFrameCandidate === 'string' ? lastFrameCandidate : null,
+  }
+}
+
+function applyCameraFrameUrl(nextUrl: string | null, { revokeExisting = true }: { revokeExisting?: boolean } = {}) {
+  if (revokeExisting && cameraFrameObjectUrl) {
+    URL.revokeObjectURL(cameraFrameObjectUrl)
+    cameraFrameObjectUrl = null
+  }
+  cameraFrameUrl.value = nextUrl
 }
 
 function buildCameraStreamUrl(forceRefresh = false) {
@@ -824,15 +898,12 @@ function updateSessionTimer(expiresAt?: string) {
 async function fetchCameraStatus() {
   try {
     const response = await api.get('/api/v2/camera/status')
-    const payload = response.data
-    if (payload?.status === 'success' && payload.data) {
-      const data = payload.data
+    const data = normalizeCameraStatusPayload(response.data)
+    if (data) {
       Object.assign(cameraInfo, {
-        active: Boolean(data.is_active),
+        active: Boolean(data.active),
         mode: data.mode || 'offline',
-        fps: typeof data.statistics?.current_fps === 'number'
-          ? Number(data.statistics.current_fps)
-          : null,
+        fps: typeof data.fps === 'number' ? Number(data.fps) : null,
         client_count: typeof data.client_count === 'number'
           ? Number(data.client_count)
           : null
@@ -857,6 +928,7 @@ async function fetchCameraStatus() {
       }
       return data
     }
+    const payload = response.data
     if (payload?.error) {
       cameraError.value = payload.error
       cameraStatusMessage.value = payload.error
@@ -875,10 +947,7 @@ async function fetchCameraStatus() {
 
 async function ensureCameraStreaming() {
   const status = await fetchCameraStatus()
-  if (status?.is_active) {
-    if (cameraStreamUnavailable.value) {
-      return false
-    }
+  if (status?.active) {
     return true
   }
 
@@ -912,15 +981,42 @@ async function fetchCameraFrame() {
 
   cameraFetchInFlight.value = true
   try {
-    const response = await api.get('/api/v2/camera/frame')
-    const payload = response.data
+    const response = await api.get('/api/v2/camera/frame', {
+      responseType: 'blob',
+      headers: {
+        'Cache-Control': 'no-cache',
+        'X-Client-Id': cameraStreamClientId,
+      },
+    })
+    const contentType = String(response.headers?.['content-type'] || response.data?.type || '')
+
+    if (response.data instanceof Blob && contentType.startsWith('image/')) {
+      if (cameraFrameObjectUrl) {
+        URL.revokeObjectURL(cameraFrameObjectUrl)
+        cameraFrameObjectUrl = null
+      }
+      const objectUrl = URL.createObjectURL(response.data)
+      cameraFrameObjectUrl = objectUrl
+      cameraFrameUrl.value = objectUrl
+      cameraStatusMessage.value = 'Snapshots…'
+      cameraError.value = null
+      cameraLastFrame.value = new Date().toISOString()
+      return
+    }
+
+    let payload: any = response.data
+    if (response.data instanceof Blob) {
+      const text = await response.data.text()
+      payload = text ? JSON.parse(text) : null
+    }
+
     if (payload?.status === 'success' && payload.data) {
       const frame = payload.data
       const format = typeof frame?.metadata?.format === 'string'
         ? String(frame.metadata.format).toLowerCase()
         : 'jpeg'
       if (frame?.data) {
-        cameraFrameUrl.value = `data:image/${format};base64,${frame.data}`
+        applyCameraFrameUrl(`data:image/${format};base64,${frame.data}`)
         cameraStatusMessage.value = 'Snapshots…'
         cameraError.value = null
       } else {
@@ -928,6 +1024,13 @@ async function fetchCameraFrame() {
       }
       if (frame?.metadata?.timestamp) {
         cameraLastFrame.value = frame.metadata.timestamp
+      }
+    } else if (typeof payload?.frame_url === 'string') {
+      applyCameraFrameUrl(payload.frame_url)
+      cameraStatusMessage.value = 'Snapshots…'
+      cameraError.value = null
+      if (typeof payload?.capture_ts === 'string') {
+        cameraLastFrame.value = payload.capture_ts
       }
     } else if (payload?.error === 'No frame available') {
       cameraStatusMessage.value = 'Camera warming up…'
@@ -965,8 +1068,8 @@ async function startCameraFeed(forceReconnect = false) {
     refreshCameraStream(true, true)
     clearSnapshotTimer()
   } else {
-    startSnapshotFallback(cameraError.value || 'Camera warming up…')
     cameraStreamUnavailable.value = true
+    startSnapshotFallback(cameraError.value || 'Camera warming up…')
     scheduleCameraStreamRetry()
   }
 
@@ -986,7 +1089,7 @@ function stopCameraFeed() {
   cameraFetchInFlight.value = false
   cameraStreamUrl.value = null
   cameraStreamFailureCount.value = 0
-  cameraFrameUrl.value = null
+  applyCameraFrameUrl(null)
   cameraLastFrame.value = null
   cameraError.value = null
   cameraStatusMessage.value = 'Camera paused'
@@ -1900,6 +2003,22 @@ onUnmounted(() => {
   letter-spacing: 0.05em;
 }
 
+.camera-badge--success {
+  background: rgba(0, 128, 0, 0.75);
+}
+
+.camera-badge--warning {
+  background: rgba(208, 132, 16, 0.88);
+}
+
+.camera-badge--info {
+  background: rgba(0, 102, 153, 0.82);
+}
+
+.camera-badge--muted {
+  background: rgba(0, 0, 0, 0.65);
+}
+
 .camera-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1911,6 +2030,11 @@ onUnmounted(() => {
 
 .camera-meta-active {
   color: var(--accent-green);
+}
+
+.camera-meta-warning {
+  color: #f6c75f;
+  font-weight: 600;
 }
 
 .telemetry-grid {
@@ -1974,6 +2098,43 @@ onUnmounted(() => {
   background: rgba(255, 67, 67, 0.1);
   border: 1px solid #ff4343;
   color: #ff4343;
+}
+
+.alert-warning {
+  background: rgba(246, 199, 95, 0.12);
+  border: 1px solid #f6c75f;
+  color: #f6c75f;
+}
+
+.alert-info {
+  background: rgba(123, 196, 255, 0.12);
+  border: 1px solid #7bc4ff;
+  color: #7bc4ff;
+}
+
+.alert-lockout__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.alert-lockout__code {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
+}
+
+.alert-lockout__reason {
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+}
+
+.alert-lockout__link {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
 }
 
 @media (max-width: 768px) {

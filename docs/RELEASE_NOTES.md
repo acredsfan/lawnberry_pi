@@ -37,6 +37,15 @@ This release replaces version 1 with a unified v2 backend and frontend, contract
 - RoboHAT emergency stop now fails closed when USB control cannot be re-acquired instead of pretending a neutral PWM command succeeded.
 - Mission metadata and lifecycle state now persist in SQLite, and startup recovery restores missions conservatively by recovering prior running state as paused instead of auto-resuming motion.
 
+## Enhancements (2026-03-16)
+
+- Control WebUI now classifies lockout severity and shows clearer remediation-oriented messaging for emergency-stop, low-battery, and generic safety lockouts.
+- Manual control camera status now distinguishes live streaming from snapshot fallback so operators can see when MJPEG recovery is still in progress.
+- Mission Planner now surfaces recovered-paused mission detail and waypoint progress from the backend status contract instead of showing only a bare paused/running string.
+- Frontend mission/control stores now use tighter status typing and regression coverage around control lockouts, camera fallback, and recovered mission visibility.
+- Manual control camera fallback now tolerates both flat backend camera status payloads and raw frame responses, reducing drift between the frontend fallback path and the current FastAPI camera endpoints.
+- Added focused Playwright coverage for blocked manual-control lockouts, deterministic snapshot fallback, and recovered-paused mission visibility.
+
 ## Highlights
 
 - Hardware telemetry behind SIM_MODE (T102, T110)

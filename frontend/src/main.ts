@@ -7,6 +7,7 @@ import './assets/theme.css'
 import { useAuthStore } from './stores/auth'
 import { useMapStore } from './stores/map'
 import { useControlStore } from './stores/control'
+import { useMissionStore } from './stores/mission'
 import { usePreferencesStore } from './stores/preferences'
 
 const app = createApp(App)
@@ -31,6 +32,9 @@ if (typeof window !== 'undefined') {
 			get controlStore() {
 				return useControlStore()
 			},
+			get missionStore() {
+				return useMissionStore()
+			},
 			get preferencesStore() {
 				return usePreferencesStore()
 			},
@@ -38,6 +42,15 @@ if (typeof window !== 'undefined') {
 				useAuthStore().$reset()
 				useMapStore().$reset()
 				useControlStore().$reset()
+				useMissionStore().$patch({
+					waypoints: [],
+					currentMission: null,
+					missionStatus: 'idle',
+					progress: 0,
+					currentWaypointIndex: null,
+					totalWaypoints: 0,
+					statusDetail: null,
+				})
 				usePreferencesStore().$reset?.()
 				window.localStorage.clear()
 				window.sessionStorage?.clear?.()

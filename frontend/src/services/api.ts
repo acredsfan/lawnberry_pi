@@ -40,7 +40,7 @@ export async function triggerMapProviderFallback() {
   return response.data
 }
 import axios from 'axios'
-import type { AxiosInstance, AxiosResponse } from 'axios'
+import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 import { useAuthStore } from '@/stores/auth'
 
 const CLIENT_ID_STORAGE_KEY = 'lawnberry-client-id'
@@ -114,8 +114,8 @@ class ApiService {
     )
   }
 
-  async get<T = any>(url: string): Promise<AxiosResponse<T>> {
-    return this.client.get<T>(url)
+  async get<T = any>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.get<T>(url, config)
   }
 
   async post<T = any>(url: string, data?: any): Promise<AxiosResponse<T>> {

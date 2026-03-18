@@ -181,6 +181,28 @@ describe('ControlView camera stream recovery', () => {
     const wrapper = await mountControlView({ unlock: false, keepCameraFeed: true })
     const vm = wrapper.vm as any
 
+    apiClient.get.mockImplementation((url: string) => {
+      if (url === '/api/v2/camera/status') {
+        return Promise.resolve({
+          data: {
+            initialized: true,
+            streaming: true,
+            sim_mode: false,
+            statistics: { fps: 12 },
+          },
+        })
+      }
+      if (url === '/api/v2/camera/frame') {
+        return Promise.resolve({
+          data: {
+            frame_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB',
+            capture_ts: new Date().toISOString(),
+          },
+        })
+      }
+      return Promise.resolve({ data: {} })
+    })
+
     vm.cameraStreamFailureCount = 1
     vm.cameraStreamUnavailable = false
     vm.cameraStreamUrl = '/api/v2/camera/stream.mjpeg?client=test'
@@ -189,6 +211,7 @@ describe('ControlView camera stream recovery', () => {
     await flushPromises()
 
     expect(vm.cameraStreamUnavailable).toBe(true)
+    expect(vm.cameraModeBadge.label).toBe('SNAPSHOT FALLBACK')
     vm.cameraInfo.active = true
 
     await vm.attemptCameraStreamRecovery()

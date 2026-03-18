@@ -1,14 +1,13 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import apiService from '@/services/api';
 
-// Define the types right in the store file for simplicity
 export interface Waypoint {
   id: string;
   lat: number;
   lon: number;
   blade_on: boolean;
-  speed: number; // 0-100%
+  speed: number;
 }
 
 export interface Mission {
@@ -18,16 +17,41 @@ export interface Mission {
   created_at: string;
 }
 
+export type MissionLifecycleStatus = 'idle' | 'running' | 'paused' | 'completed' | 'aborted' | 'failed';
+
+export interface MissionStatusResponse {
+  mission_id: string;
+  status: MissionLifecycleStatus;
+  current_waypoint_index: number | null;
+  completion_percentage: number;
+  total_waypoints: number;
+  detail?: string | null;
+}
+
 export const useMissionStore = defineStore('mission', () => {
   const waypoints = ref<Waypoint[]>([]);
   const currentMission = ref<Mission | null>(null);
-  const missionStatus = ref(''); // e.g., 'idle', 'running', 'paused'
-  const progress = ref(0); // 0-100%
-  let statusPollInterval: any = null;
+  const missionStatus = ref<MissionLifecycleStatus>('idle');
+  const progress = ref(0);
+  const currentWaypointIndex = ref<number | null>(null);
+  const totalWaypoints = ref(0);
+  const statusDetail = ref<string | null>(null);
+  const isRecoveredPause = computed(() => {
+    return missionStatus.value === 'paused' && /recover/i.test(statusDetail.value ?? '');
+  });
+  let statusPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  const applyMissionStatus = (status: MissionStatusResponse) => {
+    missionStatus.value = status.status;
+    progress.value = status.completion_percentage;
+    currentWaypointIndex.value = status.current_waypoint_index;
+    totalWaypoints.value = status.total_waypoints;
+    statusDetail.value = status.detail ?? null;
+  };
 
   const addWaypoint = (lat: number, lon: number) => {
     const newWaypoint: Waypoint = {
-      id: new Date().toISOString(), // simple unique id
+      id: new Date().toISOString(),
       lat,
       lon,
       blade_on: false,
@@ -39,7 +63,7 @@ export const useMissionStore = defineStore('mission', () => {
   const removeWaypoint = (id: string) => {
     waypoints.value = waypoints.value.filter(wp => wp.id !== id);
   };
-  
+
   const updateWaypoint = (updatedWaypoint: Waypoint) => {
     const index = waypoints.value.findIndex(wp => wp.id === updatedWaypoint.id);
     if (index !== -1) {
@@ -67,8 +91,12 @@ export const useMissionStore = defineStore('mission', () => {
         name,
         waypoints: waypoints.value,
       });
-      currentMission.value = response.data as any;
+      currentMission.value = response.data;
       missionStatus.value = 'idle';
+      progress.value = 0;
+      currentWaypointIndex.value = 0;
+      totalWaypoints.value = response.data.waypoints.length;
+      statusDetail.value = null;
     } catch (error) {
       console.error('Error creating mission:', error);
     }
@@ -79,6 +107,7 @@ export const useMissionStore = defineStore('mission', () => {
     try {
       await apiService.post(`/api/v2/missions/${currentMission.value.id}/start`, {});
       missionStatus.value = 'running';
+      statusDetail.value = null;
       startStatusPolling();
     } catch (error) {
       console.error('Error starting mission:', error);
@@ -90,6 +119,7 @@ export const useMissionStore = defineStore('mission', () => {
     try {
       await apiService.post(`/api/v2/missions/${currentMission.value.id}/pause`, {});
       missionStatus.value = 'paused';
+      statusDetail.value = 'Paused by operator';
       stopStatusPolling();
     } catch (error) {
       console.error('Error pausing mission:', error);
@@ -101,6 +131,7 @@ export const useMissionStore = defineStore('mission', () => {
     try {
       await apiService.post(`/api/v2/missions/${currentMission.value.id}/resume`, {});
       missionStatus.value = 'running';
+      statusDetail.value = null;
       startStatusPolling();
     } catch (error) {
       console.error('Error resuming mission:', error);
@@ -112,20 +143,20 @@ export const useMissionStore = defineStore('mission', () => {
     try {
       await apiService.post(`/api/v2/missions/${currentMission.value.id}/abort`, {});
       missionStatus.value = 'aborted';
+      statusDetail.value = 'Mission aborted by operator';
       stopStatusPolling();
       currentMission.value = null;
     } catch (error) {
       console.error('Error aborting mission:', error);
     }
   };
-  
+
   const pollMissionStatus = async () => {
     if (!currentMission.value) return;
     try {
-      const response = await apiService.get(`/api/v2/missions/${currentMission.value.id}/status`);
-      const status: any = response.data;
-      missionStatus.value = status.status;
-      progress.value = status.completion_percentage;
+      const response = await apiService.get<MissionStatusResponse>(`/api/v2/missions/${currentMission.value.id}/status`);
+      const status = response.data;
+      applyMissionStatus(status);
       if (status.status === 'completed' || status.status === 'aborted' || status.status === 'failed') {
         stopStatusPolling();
       }
@@ -151,6 +182,10 @@ export const useMissionStore = defineStore('mission', () => {
     currentMission,
     missionStatus,
     progress,
+    currentWaypointIndex,
+    totalWaypoints,
+    statusDetail,
+    isRecoveredPause,
     addWaypoint,
     removeWaypoint,
     updateWaypoint,
@@ -162,5 +197,6 @@ export const useMissionStore = defineStore('mission', () => {
     pauseCurrentMission,
     resumeCurrentMission,
     abortCurrentMission,
+    pollMissionStatus,
   };
 });

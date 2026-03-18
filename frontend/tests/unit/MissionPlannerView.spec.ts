@@ -77,6 +77,14 @@ vi.mock('@/components/MissionWaypointList.vue', () => ({
   },
 }))
 
+vi.mock('@/components/mission/MissionMap.vue', () => ({
+  default: {
+    name: 'MissionMap',
+    props: ['waypoints', 'mowerPosition', 'followMower'],
+    template: '<div class="mission-map-stub" />',
+  },
+}))
+
 const mockedApi = apiService as unknown as {
   get: ReturnType<typeof vi.fn>
   post: ReturnType<typeof vi.fn>
@@ -141,5 +149,30 @@ describe('MissionPlannerView.vue', () => {
     await createButton.trigger('click')
 
     expect(createMissionSpy).toHaveBeenCalledWith('Test Mission')
+  })
+
+  it('shows recovered paused mission detail when the backend status includes recovery context', async () => {
+    const missionStore = useMissionStore()
+    missionStore.currentMission = {
+      id: 'mission-1',
+      name: 'Recovery Test',
+      waypoints: [
+        { id: 'wp-1', lat: 51.5, lon: -0.09, blade_on: false, speed: 50 },
+        { id: 'wp-2', lat: 51.5005, lon: -0.091, blade_on: false, speed: 50 },
+      ],
+      created_at: '2026-03-16T00:00:00Z',
+    } as any
+    missionStore.missionStatus = 'paused'
+    missionStore.progress = 50
+    missionStore.currentWaypointIndex = 1
+    missionStore.totalWaypoints = 2
+    missionStore.statusDetail = 'Recovered after backend restart; explicit operator resume required'
+
+    const wrapper = mount(MissionPlannerView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Paused (recovered)')
+    expect(wrapper.text()).toContain('Recovered after backend restart; explicit operator resume required')
+    expect(wrapper.text()).toContain('Waypoint: 2 of 2')
   })
 })
