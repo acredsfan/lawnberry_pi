@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { ref, defineComponent, h } from 'vue'
+import { ref, defineComponent, h, reactive, nextTick } from 'vue'
 import ControlView from '@/views/ControlView.vue'
 import apiClient from '@/services/api'
 
@@ -62,7 +62,7 @@ vi.mock('@/stores/preferences', () => {
 })
 
 function createMockControlStore() {
-  return {
+  const store = reactive({
     lockout: false,
     lockoutReason: '',
     lockoutUntil: null,
@@ -72,12 +72,14 @@ function createMockControlStore() {
     remediationLink: '',
     isLoading: false,
     commandInProgress: false,
-    robohatStatus: null,
+    robohatStatus: { telemetry_source: 'simulated' },
     submitCommand: vi.fn().mockResolvedValue({ result: 'accepted' }),
-    fetchRoboHATStatus: vi.fn().mockResolvedValue({ telemetry_source: 'simulated' }),
+    fetchRoboHATStatus: vi.fn().mockImplementation(async () => store.robohatStatus),
     initWebSocket: vi.fn(),
     cleanup: vi.fn(),
-  }
+  })
+
+  return store
 }
 
 interface MountOptions {
@@ -172,6 +174,67 @@ describe('ControlView manual movement loop', () => {
     expect(stopCall[1]).toMatchObject({ vector: { linear: 0, angular: 0 }, reason: 'manual-stop', max_speed_limit: 0.5 })
 
     joystick.vm.triggerEnd()
+    wrapper.unmount()
+  })
+
+  it('surfaces controller disconnects and blocks movement until the controller recovers', async () => {
+    const store = controlStoreContainer.current
+    store.robohatStatus = {
+      telemetry_source: 'hardware',
+      serial_connected: true,
+      motor_controller_ok: true,
+      last_watchdog_echo: 'rc=disable',
+    }
+
+    const wrapper = await mountControlView()
+    const joystick = wrapper.findComponent({ name: 'VirtualJoystickStub' })
+
+    expect(wrapper.find('.controller-chip__value').text()).toBe('Ready')
+
+    store.submitCommand.mockClear()
+    toastStore.show.mockClear()
+
+    store.robohatStatus = {
+      ...store.robohatStatus,
+      serial_connected: false,
+      motor_controller_ok: false,
+      last_watchdog_echo: null,
+    }
+    await nextTick()
+    await flushPromises()
+
+    expect(wrapper.find('.controller-chip__value').text()).toBe('Disconnected')
+    expect(wrapper.text()).toContain('Motor controller USB link not detected. Check cabling and power.')
+    expect(toastStore.show).toHaveBeenCalledWith('Motor controller disconnected', 'error', 4000)
+
+    joystick.vm.triggerChange({ x: 0, y: 1, magnitude: 1, active: true })
+    await flushPromises()
+
+    expect(store.submitCommand).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Motor controller offline – command not sent')
+
+    toastStore.show.mockClear()
+
+    store.robohatStatus = {
+      telemetry_source: 'hardware',
+      serial_connected: true,
+      motor_controller_ok: true,
+      last_watchdog_echo: 'rc=disable',
+    }
+    await nextTick()
+    await flushPromises()
+
+    expect(wrapper.find('.controller-chip__value').text()).toBe('Ready')
+    expect(toastStore.show.mock.calls).toContainEqual(['Motor controller connected', 'success', 2500])
+    expect(toastStore.show.mock.calls).toContainEqual(['Motor controller ready', 'success', 2500])
+
+    joystick.vm.triggerChange({ x: 0, y: 1, magnitude: 1, active: true })
+    await flushPromises()
+
+    expect(store.submitCommand).toHaveBeenCalledTimes(1)
+
+    joystick.vm.triggerEnd()
+    await flushPromises()
     wrapper.unmount()
   })
 })
