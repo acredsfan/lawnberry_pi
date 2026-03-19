@@ -144,3 +144,31 @@ async def test_get_map_configuration_reports_provider_fallback_reason():
         fallback = payload.get("fallback")
         assert fallback and fallback.get("active") is True
         assert fallback.get("reason") == "GOOGLE_MAPS_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_post_map_provider_fallback_switches_provider_to_osm():
+    """POST /api/v2/map/provider-fallback should persist an OSM fallback for the active config."""
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        put_response = await client.put(
+            "/api/v2/map/configuration",
+            json={
+                "zones": [],
+                "provider": "google-maps",
+                "updated_by": "contract-test",
+            },
+        )
+        assert put_response.status_code == 200, put_response.text
+
+        response = await client.post("/api/v2/map/provider-fallback", json={})
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload.get("success") is True
+        assert payload.get("provider") == "osm"
+
+        get_response = await client.get("/api/v2/map/configuration")
+        assert get_response.status_code == 200
+        assert get_response.json().get("provider") == "osm"

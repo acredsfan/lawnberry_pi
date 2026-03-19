@@ -84,6 +84,7 @@ Environment variables (set in `.env`):
 - GET/PUT http://127.0.0.1:8081/api/v2/map/locations
 - GET/PUT http://127.0.0.1:8081/api/v2/map/configuration → map configuration CRUD
 - POST http://127.0.0.1:8081/api/v2/map/provider-fallback → trigger provider fallback
+- GET http://127.0.0.1:8081/api/v2/nav/coverage-plan?config_id=default&spacing_m=0.6 → generated coverage preview polyline
 - GET/POST/DELETE http://127.0.0.1:8081/api/v2/planning/jobs
 
 ## Control

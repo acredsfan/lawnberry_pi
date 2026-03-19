@@ -57,6 +57,12 @@ for optional_module in ("bcrypt", "pyotp", "google", "jwt", "psutil", "timezonef
 
 # Ensure SIM_MODE=1 for all tests unless explicitly overridden
 os.environ.setdefault("SIM_MODE", "1")
+os.environ.setdefault("GLOBAL_RATE_LIMIT_RATE", "1000")
+os.environ.setdefault("GLOBAL_RATE_LIMIT_BURST", "10000")
+os.environ.setdefault("AUTH_RATE_LIMIT_WINDOW", "60")
+os.environ.setdefault("AUTH_RATE_LIMIT_MAX_ATTEMPTS", "1000")
+os.environ.setdefault("AUTH_LOCKOUT_FAILURES", "1000")
+os.environ.setdefault("AUTH_LOCKOUT_SECONDS", "0")
 
 
 @pytest.fixture(scope="session")
@@ -103,3 +109,19 @@ async def test_client():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+
+@pytest.fixture(autouse=True)
+def isolate_ui_settings_storage(tmp_path, monkeypatch):
+    """Keep UI settings reads/writes inside a temporary test directory.
+
+    This prevents settings-related API tests from creating or mutating the
+    repository's runtime artifact at ``data/ui_settings.json``.
+    """
+
+    from backend.src.api.routers import settings as settings_router
+
+    data_dir = tmp_path / "data"
+    ui_settings_file = data_dir / "ui_settings.json"
+    monkeypatch.setattr(settings_router, "DATA_DIR", data_dir)
+    monkeypatch.setattr(settings_router, "UI_SETTINGS_FILE", ui_settings_file)

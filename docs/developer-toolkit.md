@@ -428,6 +428,7 @@ and more targeted coverage around operator-critical transitions.
 - make mission recovery, lockout/fault reasons, and camera fallback behavior more obvious to operators before treating the UI as “done enough”
 - current March 2026 kickoff work already surfaces recovered-paused mission detail plus richer control lockout/camera fallback status in the UI; next tighten E2E coverage and field validation rather than redoing the same UX pass
 - the follow-on March 2026 slice also aligned the manual-control camera fallback code with the real backend camera contract and added focused Playwright coverage for safety lockouts, snapshot fallback, and recovered mission visibility
+- the follow-on control-contract cleanup also restored real `/api/v2/control/start|pause|resume|stop|return-home|status` behavior for operator views, replacing placeholder/manual-drift paths in the UI with backend-backed navigation actions
 
 ## Practical re-entry checklist
 

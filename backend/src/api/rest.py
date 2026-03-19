@@ -28,6 +28,9 @@ legacy_router = APIRouter()
 legacy_router.add_websocket_route("/ws/telemetry", telemetry.ws_telemetry)
 legacy_router.add_websocket_route("/ws/control", telemetry.ws_control)
 
+_planning_jobs_store: list[dict[str, Any]] = []
+_planning_job_counter = 0
+
 # ----------------------- Map Zones -----------------------
 
 class Point(BaseModel):
@@ -127,6 +130,342 @@ def put_map_locations(locations: MapLocations):
     _locations_last_modified = datetime.now(timezone.utc)
     return _locations_store
 
+
+@router.get("/planning/jobs")
+async def list_planning_jobs():
+    return [dict(job) for job in _planning_jobs_store]
+
+
+@router.post("/planning/jobs")
+async def create_planning_job(payload: dict[str, Any]):
+    global _planning_job_counter
+    _planning_job_counter += 1
+    job = {
+        "id": f"planning-{_planning_job_counter:04d}",
+        "name": str(payload.get("name") or f"Planning Job {_planning_job_counter}"),
+        "schedule": payload.get("schedule"),
+        "zones": list(payload.get("zones") or []),
+        "priority": int(payload.get("priority") or 1),
+        "enabled": bool(payload.get("enabled", True)),
+    }
+    _planning_jobs_store.append(job)
+    return JSONResponse(status_code=201, content=job)
+
+
+@router.delete("/planning/jobs/{job_id}")
+async def delete_planning_job(job_id: str):
+    for index, job in enumerate(_planning_jobs_store):
+        if job.get("id") == job_id:
+            _planning_jobs_store.pop(index)
+            return JSONResponse(status_code=204, content=None)
+    raise HTTPException(status_code=404, detail="Planning job not found")
+
+
+def _normalize_map_provider(provider: Any) -> str:
+    normalized = str(provider or "osm").strip().lower().replace("_", "-")
+    if normalized in {"google", "google-maps"}:
+        return "google-maps"
+    return "osm"
+
+
+def _map_provider_from_settings() -> str:
+    try:
+        from .routers.settings import _load_ui_settings, _normalize_maps_section
+
+        sections = _load_ui_settings()
+        maps_settings = _normalize_maps_section(sections.get("maps", {}))
+        return "google-maps" if maps_settings.get("provider") == "google" else "osm"
+    except Exception:
+        return "osm"
+
+
+def _default_map_configuration_envelope(config_id: str) -> dict[str, Any]:
+    timestamp = datetime.now(timezone.utc).isoformat()
+    return {
+        "config_id": config_id,
+        "zones": [],
+        "markers": [],
+        "provider": _map_provider_from_settings(),
+        "updated_at": timestamp,
+        "updated_by": "system",
+    }
+
+
+async def _load_map_configuration_envelope(config_id: str) -> dict[str, Any]:
+    default_envelope = _default_map_configuration_envelope(config_id)
+    raw = await persistence.load_map_configuration(config_id)
+    if not raw:
+        return default_envelope
+
+    try:
+        payload = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        logger.warning("Stored map configuration %s is not valid JSON; using defaults", config_id)
+        return default_envelope
+
+    if not isinstance(payload, dict):
+        return default_envelope
+
+    envelope = {**default_envelope, **payload}
+    envelope["config_id"] = config_id
+    envelope["zones"] = envelope.get("zones") if isinstance(envelope.get("zones"), list) else []
+    markers = envelope.get("markers")
+    envelope["markers"] = markers if isinstance(markers, (list, dict)) else []
+    envelope["provider"] = _normalize_map_provider(envelope.get("provider"))
+    envelope["updated_at"] = str(envelope.get("updated_at") or default_envelope["updated_at"])
+    envelope["updated_by"] = str(envelope.get("updated_by") or "system")
+    return envelope
+
+
+async def _save_map_configuration_envelope(
+    config_id: str,
+    envelope: dict[str, Any],
+    *,
+    updated_by: str | None = None,
+) -> dict[str, Any]:
+    saved = {
+        **_default_map_configuration_envelope(config_id),
+        **envelope,
+    }
+    saved["config_id"] = config_id
+    saved["zones"] = saved.get("zones") if isinstance(saved.get("zones"), list) else []
+    markers = saved.get("markers")
+    saved["markers"] = markers if isinstance(markers, (list, dict)) else []
+    saved["provider"] = _normalize_map_provider(saved.get("provider"))
+    saved["updated_at"] = datetime.now(timezone.utc).isoformat()
+    saved["updated_by"] = updated_by or str(saved.get("updated_by") or "system")
+    await persistence.save_map_configuration(config_id, json.dumps(saved))
+    return saved
+
+
+def _geometry_conflicts(
+    zones: list[dict[str, Any]],
+    *,
+    zone_types: set[str] | None = None,
+) -> list[str]:
+    boundary_polygons: list[tuple[str, list[tuple[float, float]]]] = []
+    for zone in zones:
+        if not isinstance(zone, dict):
+            continue
+        current_zone_type = str(zone.get("zone_type") or "")
+        if zone_types is not None and current_zone_type not in zone_types:
+            continue
+        geometry = zone.get("geometry") if isinstance(zone.get("geometry"), dict) else {}
+        if geometry.get("type") != "Polygon":
+            continue
+        coordinates = geometry.get("coordinates")
+        if not isinstance(coordinates, list) or not coordinates or not isinstance(coordinates[0], list):
+            continue
+        ring: list[tuple[float, float]] = []
+        for point in coordinates[0]:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                ring.append((float(point[0]), float(point[1])))
+            except (TypeError, ValueError):
+                continue
+        if len(ring) >= 3:
+            boundary_polygons.append((str(zone.get("zone_id") or zone.get("id") or current_zone_type or "boundary"), ring))
+
+    if len(boundary_polygons) < 2:
+        return []
+
+    conflicts: set[str] = set()
+    try:
+        from shapely.geometry import Polygon  # type: ignore
+
+        polygons: list[tuple[str, Any]] = []
+        for zone_id, ring in boundary_polygons:
+            poly = Polygon(ring)
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if poly.is_empty:
+                continue
+            polygons.append((zone_id, poly))
+
+        for index, (zone_id, polygon) in enumerate(polygons):
+            for other_zone_id, other_polygon in polygons[index + 1 :]:
+                if polygon.intersects(other_polygon) and not polygon.touches(other_polygon):
+                    conflicts.add(zone_id)
+                    conflicts.add(other_zone_id)
+    except Exception:
+        def _bbox(ring: list[tuple[float, float]]) -> tuple[float, float, float, float]:
+            xs = [point[0] for point in ring]
+            ys = [point[1] for point in ring]
+            return min(xs), min(ys), max(xs), max(ys)
+
+        def _bbox_overlaps(
+            first: tuple[float, float, float, float],
+            second: tuple[float, float, float, float],
+        ) -> bool:
+            return not (
+                first[2] <= second[0]
+                or second[2] <= first[0]
+                or first[3] <= second[1]
+                or second[3] <= first[1]
+            )
+
+        polygons = [(zone_id, _bbox(ring)) for zone_id, ring in boundary_polygons]
+        for index, (zone_id, bbox) in enumerate(polygons):
+            for other_zone_id, other_bbox in polygons[index + 1 :]:
+                if _bbox_overlaps(bbox, other_bbox):
+                    conflicts.add(zone_id)
+                    conflicts.add(other_zone_id)
+
+    return sorted(conflicts)
+
+
+def _legacy_polygon_zones(entries: Any, *, zone_type: str) -> list[dict[str, Any]]:
+    if not isinstance(entries, list):
+        return []
+
+    zones: list[dict[str, Any]] = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        coordinates = entry.get("coordinates")
+        if not isinstance(coordinates, list):
+            continue
+        ring: list[list[float]] = []
+        for point in coordinates:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                lat = float(point[0])
+                lng = float(point[1])
+            except (TypeError, ValueError):
+                continue
+            ring.append([lng, lat])
+        if len(ring) < 3:
+            continue
+        if ring[0] != ring[-1]:
+            ring.append(ring[0])
+        zone_id = str(entry.get("zone_id") or entry.get("name") or entry.get("zone_type") or f"{zone_type}-{index + 1}")
+        zones.append(
+            {
+                "zone_id": zone_id,
+                "zone_type": zone_type,
+                "name": entry.get("name") or zone_id,
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [ring],
+                },
+            }
+        )
+    return zones
+
+
+def _persist_map_provider_setting(provider: str) -> None:
+    try:
+        from .routers.settings import _load_ui_settings, _save_ui_settings
+
+        sections = _load_ui_settings()
+        maps_settings = dict(sections.get("maps", {}))
+        maps_settings["provider"] = "google" if provider == "google-maps" else "osm"
+        sections["maps"] = maps_settings
+        _save_ui_settings(sections)
+    except Exception as exc:
+        logger.warning("Failed to persist maps provider setting: %s", exc)
+
+
+@router.get("/map/configuration")
+async def get_map_configuration(
+    config_id: str = Query("default"),
+    simulate_fallback: str | None = Query(default=None),
+):
+    envelope = await _load_map_configuration_envelope(config_id)
+    provider = envelope["provider"]
+    fallback_active = False
+    fallback_reason = None
+    if simulate_fallback:
+        provider = "osm"
+        fallback_active = True
+        fallback_reason = str(simulate_fallback).upper()
+
+    return {
+        **envelope,
+        "provider": provider,
+        "fallback": {
+            "active": fallback_active,
+            "reason": fallback_reason,
+            "provider": provider,
+        },
+    }
+
+
+@router.put("/map/configuration")
+async def put_map_configuration(
+    envelope: dict[str, Any],
+    config_id: str = Query("default"),
+):
+    zones = envelope.get("zones")
+    if zones is not None and not isinstance(zones, list):
+        raise HTTPException(status_code=422, detail="zones must be a list")
+
+    markers = envelope.get("markers")
+    if markers is not None and not isinstance(markers, (list, dict)):
+        raise HTTPException(status_code=422, detail="markers must be a list or object")
+
+    legacy_boundaries = _legacy_polygon_zones(envelope.get("boundaries"), zone_type="boundary")
+    legacy_exclusions = _legacy_polygon_zones(envelope.get("exclusion_zones"), zone_type="exclusion")
+    zone_list = zones if isinstance(zones, list) else [*legacy_boundaries, *legacy_exclusions]
+
+    conflicts = _geometry_conflicts(
+        zone_list,
+        zone_types={"boundary"} if isinstance(zones, list) else {"boundary", "exclusion"},
+    )
+    if conflicts:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error_code": "GEOMETRY_OVERLAP",
+                "detail": "Geometry overlap conflict detected",
+                "message": "Overlapping boundary polygons detected",
+                "conflicts": conflicts,
+            },
+        )
+
+    saved = await _save_map_configuration_envelope(
+        config_id,
+        {**envelope, "zones": zone_list, "markers": markers if markers is not None else envelope.get("markers", [])},
+        updated_by=str(envelope.get("updated_by") or "api"),
+    )
+    _persist_map_provider_setting(saved["provider"])
+    return {
+        "status": "accepted",
+        "config_id": config_id,
+        "updated_at": saved["updated_at"],
+        "updated_by": saved["updated_by"],
+    }
+
+
+@router.post("/map/provider-fallback")
+async def trigger_map_provider_fallback(config_id: str = Query("default")):
+    from ..services.maps_service import maps_service
+
+    envelope = await _load_map_configuration_envelope(config_id)
+    envelope["provider"] = "osm"
+    saved = await _save_map_configuration_envelope(
+        config_id,
+        envelope,
+        updated_by="provider-fallback",
+    )
+    _persist_map_provider_setting("osm")
+    try:
+        maps_service.configure("osm")
+    except Exception:
+        logger.debug("Maps service provider fallback sync skipped", exc_info=True)
+    return {
+        "success": True,
+        "provider": "osm",
+        "updated_at": saved["updated_at"],
+        "fallback": {
+            "active": True,
+            "reason": "MANUAL_PROVIDER_FALLBACK",
+            "provider": "osm",
+        },
+    }
+
 # ------------------------ Control V2 Endpoints ------------------------
 
 class ControlCommandV2(BaseModel):
@@ -198,6 +537,32 @@ def _client_emergency_active(request: Request | None) -> bool:
         return False
     except Exception:
         return False
+
+
+def _enum_value(value: Any) -> Any:
+    return value.value if hasattr(value, "value") else value
+
+
+def _control_navigation_snapshot(nav_service: Any) -> dict[str, Any]:
+    state = getattr(nav_service, "navigation_state", None)
+    planned_path = getattr(state, "planned_path", None) if state is not None else None
+    return {
+        "mode": _enum_value(getattr(state, "navigation_mode", None)) if state is not None else None,
+        "path_status": _enum_value(getattr(state, "path_status", None)) if state is not None else None,
+        "current_waypoint_index": getattr(state, "current_waypoint_index", None) if state is not None else None,
+        "waypoints_total": len(planned_path) if isinstance(planned_path, list) else 0,
+        "emergency_stop_active": bool(_safety_state.get("emergency_stop_active", False)),
+    }
+
+
+def _navigation_error_response(nav_service: Any, *, status_label: str, detail: str) -> JSONResponse:
+    payload = {
+        "ok": False,
+        "status": status_label,
+        "detail": detail,
+        **_control_navigation_snapshot(nav_service),
+    }
+    return JSONResponse(status_code=409, content=payload)
 
 # Import helper from auth router for session resolution
 from .routers.auth import _resolve_manual_session
@@ -618,3 +983,121 @@ async def control_emergency_stop_alias(request: Request = None):
         }
     }
     return JSONResponse(status_code=200, content=payload)
+
+
+@router.post("/control/start")
+async def control_start_navigation():
+    """Start autonomous navigation using the active planned path."""
+    from ..services.navigation_service import NavigationService
+
+    nav_service = NavigationService.get_instance()
+    started = await nav_service.start_autonomous_navigation()
+    if not started:
+        return _navigation_error_response(
+            nav_service,
+            status_label="not_ready",
+            detail="Navigation could not start with the current path and position state.",
+        )
+
+    return {
+        "ok": True,
+        "status": "running",
+        **_control_navigation_snapshot(nav_service),
+    }
+
+
+@router.post("/control/pause")
+async def control_pause_navigation():
+    """Pause autonomous navigation while preserving the current path."""
+    from ..services.navigation_service import NavigationService
+
+    nav_service = NavigationService.get_instance()
+    paused = await nav_service.pause_navigation()
+    if not paused:
+        return _navigation_error_response(
+            nav_service,
+            status_label="pause_failed",
+            detail="Navigation could not be paused cleanly.",
+        )
+
+    return {
+        "ok": True,
+        "status": "paused",
+        **_control_navigation_snapshot(nav_service),
+    }
+
+
+@router.post("/control/resume")
+async def control_resume_navigation():
+    """Resume navigation after a pause."""
+    from ..services.navigation_service import NavigationService
+
+    nav_service = NavigationService.get_instance()
+    resumed = await nav_service.resume_navigation()
+    if not resumed:
+        return _navigation_error_response(
+            nav_service,
+            status_label="resume_failed",
+            detail="Navigation could not resume from the current state.",
+        )
+
+    return {
+        "ok": True,
+        "status": "running",
+        **_control_navigation_snapshot(nav_service),
+    }
+
+
+@router.post("/control/stop")
+async def control_stop_navigation():
+    """Stop navigation and place the system back in idle."""
+    from ..services.navigation_service import NavigationService
+
+    nav_service = NavigationService.get_instance()
+    stopped = await nav_service.stop_navigation()
+    if not stopped:
+        return _navigation_error_response(
+            nav_service,
+            status_label="stop_failed",
+            detail="Navigation stop was requested but controller stop could not be confirmed.",
+        )
+
+    return {
+        "ok": True,
+        "status": "stopped",
+        **_control_navigation_snapshot(nav_service),
+    }
+
+
+@router.post("/control/return-home")
+async def control_return_home():
+    """Start a return-to-home navigation sequence when home and position are available."""
+    from ..services.navigation_service import NavigationService
+
+    nav_service = NavigationService.get_instance()
+    accepted = await nav_service.return_home()
+    if not accepted:
+        return _navigation_error_response(
+            nav_service,
+            status_label="return_home_unavailable",
+            detail="Return-to-home is unavailable until home and current position are configured.",
+        )
+
+    return {
+        "ok": True,
+        "status": "returning_home",
+        **_control_navigation_snapshot(nav_service),
+    }
+
+
+@router.get("/control/status")
+async def control_navigation_status():
+    """Expose navigation control state for operator dashboards."""
+    from ..services.navigation_service import NavigationService
+
+    nav_service = NavigationService.get_instance()
+    return {
+        "ok": True,
+        "status": "emergency_stop" if _safety_state.get("emergency_stop_active") else "ready",
+        **_control_navigation_snapshot(nav_service),
+    }

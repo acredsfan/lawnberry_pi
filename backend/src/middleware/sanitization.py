@@ -41,6 +41,9 @@ class SanitizationMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: FastAPI, *, max_process_bytes: int = 256_000) -> None:
         super().__init__(app)
         self._max = max(1024, int(max_process_bytes))
+        self._skip_response_redaction = (
+            "/api/v2/settings/maps",
+        )
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
@@ -48,6 +51,9 @@ class SanitizationMiddleware(BaseHTTPMiddleware):
         # Apply security headers if missing
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
+
+        if any(request.url.path.startswith(prefix) for prefix in self._skip_response_redaction):
+            return response
 
         # Redact JSON bodies up to a reasonable size to avoid overhead
         ctype = (response.headers.get("Content-Type") or "").lower()

@@ -57,6 +57,9 @@ testpaths = ["tests"]
 addopts = "-q"
 asyncio_mode = "auto"
 pythonpath = ["."]
+markers = [
+    "integration: marks tests that exercise broader cross-component or persistence-backed behavior",
+]
 
 [tool.black]
 target-version = ["py311"]

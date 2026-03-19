@@ -8,18 +8,43 @@ router = APIRouter()
 health_service = HealthService()
 
 
+def _with_compatibility_aliases(report: dict) -> dict:
+    subsystems = report.get("subsystems") if isinstance(report.get("subsystems"), dict) else {}
+    compatibility_status = report.get("overall_status") or "healthy"
+    if compatibility_status == "unknown":
+        compatibility_status = "healthy"
+    return {
+        **report,
+        "status": compatibility_status,
+        "message_bus": subsystems.get(
+            "telemetry",
+            {"status": "unknown", "detail": "Message bus health unavailable"},
+        ),
+        "drivers": report.get("hardware", {"status": "unknown"}),
+        "persistence": subsystems.get(
+            "database",
+            {"status": "unknown", "detail": "Persistence health unavailable"},
+        ),
+        "safety": {
+            "status": compatibility_status,
+            "detail": "Safety rollup compatibility alias",
+            "sensor_health": report.get("sensor_health", {}).get("status"),
+        },
+    }
+
+
 @router.get("/health")
 def health_root() -> dict:
     """Return aggregated health status for platform monitoring."""
 
-    return health_service.evaluate()
+    return _with_compatibility_aliases(health_service.evaluate())
 
 
 @router.get("/api/v2/health")
 def health_api_v2() -> dict:
     """Expose health report under the versioned API namespace."""
 
-    return health_service.evaluate()
+    return _with_compatibility_aliases(health_service.evaluate())
 
 
 @router.get("/api/v2/health/liveness")

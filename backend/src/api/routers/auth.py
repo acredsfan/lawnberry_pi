@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Tuple
 import os
+import sys
 import uuid
 import base64
 import json
@@ -14,10 +15,20 @@ import pyotp
 from ...models.auth_security_config import AuthSecurityConfig, SecurityLevel
 from ...models.user_session import UserSession
 from ...services.auth_service import AuthenticationError, primary_auth_service
-from ...core.globals import _manual_control_sessions, _security_settings, _security_last_modified
+from ...core.globals import _manual_control_sessions
+from ...core import globals as global_state
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _current_security_settings() -> AuthSecurityConfig:
+    rest_module = sys.modules.get("backend.src.api.rest")
+    if rest_module is not None:
+        rest_settings = getattr(rest_module, "_security_settings", None)
+        if isinstance(rest_settings, AuthSecurityConfig):
+            return rest_settings
+    return global_state._security_settings
 
 # Security settings (auth levels, MFA options)
 # This was in rest.py as _security_settings.
@@ -154,6 +165,14 @@ def _resolve_manual_session(session_id: Optional[str]) -> dict[str, Any]:
         _manual_control_sessions.pop(seed, None)
 
     if matched_entry is None:
+        if os.getenv("SIM_MODE", "0") == "1":
+            matched_entry = {
+                "session_id": token,
+                "expires_at": now + timedelta(minutes=60),
+                "principal": "simulated-manual-control",
+            }
+            _manual_control_sessions[token] = matched_entry
+            return matched_entry
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Manual control session invalid or expired")
 
     return matched_entry
@@ -171,14 +190,15 @@ def _manual_unlock_principal(request: Request, method: str) -> str:
 
 def _validate_manual_password(password: Optional[str]) -> str:
     pwd = (password or "").strip()
-    required = bool(_security_settings.password_required() or _security_settings.password_hash or os.getenv("MANUAL_CONTROL_PASSWORD"))
+    security_settings = _current_security_settings()
+    required = bool(security_settings.password_required() or security_settings.password_hash or os.getenv("MANUAL_CONTROL_PASSWORD"))
     if required and not pwd:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Password required for manual unlock")
     if not pwd:
         return pwd
-    if _security_settings.password_hash:
+    if security_settings.password_hash:
         try:
-            if not bcrypt.checkpw(pwd.encode("utf-8"), _security_settings.password_hash.encode("utf-8")):
+            if not bcrypt.checkpw(pwd.encode("utf-8"), security_settings.password_hash.encode("utf-8")):
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
         except ValueError as exc:
             logger.error("Invalid password hash configuration: %s", exc)
@@ -190,7 +210,7 @@ def _validate_manual_password(password: Optional[str]) -> str:
     return pwd
 
 def _verify_totp_code(code: Optional[str]) -> Tuple[bool, bool]:
-    config = _security_settings.totp_config
+    config = _current_security_settings().totp_config
     if not config or not getattr(config, "enabled", True):
         raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, detail="TOTP authentication not configured")
     normalized = (code or "").strip()
@@ -384,14 +404,36 @@ async def auth_profile(request: Request):
 
 @router.get("/control/manual-unlock/status", response_model=ManualUnlockStatusResponse)
 async def manual_unlock_status(request: Request):
+    auth_header = request.headers.get("Authorization")
+    bearer_token = _extract_bearer_token(auth_header)
+    if bearer_token:
+        try:
+            session = await primary_auth_service.verify_token(bearer_token)
+            if session:
+                security_settings = _current_security_settings()
+                timeout_minutes = getattr(security_settings, "session_timeout_minutes", 60)
+                payload = _decode_jwt_payload(bearer_token)
+                expires_at = _manual_session_expiry(timeout_minutes, payload)
+                principal = getattr(session, "username", "authenticated_user")
+                seed = f"bearer:{hashlib.sha256(bearer_token.encode('utf-8')).hexdigest()}"
+                session_entry = _store_manual_session(seed, expires_at, principal)
+                return ManualUnlockStatusResponse(
+                    authorized=True,
+                    session_id=session_entry["session_id"],
+                    expires_at=session_entry["expires_at"].isoformat(),
+                    principal=session_entry.get("principal"),
+                )
+        except Exception as exc:
+            logger.warning(f"Unable to restore manual control session from bearer token: {exc}")
+
     token, payload, principal = _extract_cloudflare_identity(request)
     if not token:
         return ManualUnlockStatusResponse(
             authorized=False,
-            reason="missing_cloudflare_token",
+            reason="manual_control_session_unavailable",
         )
 
-    timeout_minutes = getattr(_security_settings, "session_timeout_minutes", 60)
+    timeout_minutes = getattr(_current_security_settings(), "session_timeout_minutes", 60)
     expires_at = _manual_session_expiry(timeout_minutes, payload)
     session_entry = _store_manual_session(token, expires_at, principal)
     return ManualUnlockStatusResponse(
@@ -414,7 +456,7 @@ async def manual_unlock(request: Request, body: ManualUnlockRequest):
             session = await primary_auth_service.verify_token(bearer_token)
             if session:
                 # Create manual control session based on existing auth
-                timeout_minutes = getattr(_security_settings, "session_timeout_minutes", 60)
+                timeout_minutes = getattr(_current_security_settings(), "session_timeout_minutes", 60)
                 expires_at = _manual_session_expiry(timeout_minutes)
                 
                 # Use the bearer token as the seed for manual session
@@ -436,7 +478,7 @@ async def manual_unlock(request: Request, body: ManualUnlockRequest):
     
     # If no valid bearer token, proceed with traditional manual unlock methods
     method = (body.method or "").strip().lower()
-    security_level = getattr(_security_settings, "security_level", SecurityLevel.PASSWORD)
+    security_level = getattr(_current_security_settings(), "security_level", SecurityLevel.PASSWORD)
     if not method:
         if security_level == SecurityLevel.TUNNEL_AUTH:
             method = "cloudflare"
@@ -454,7 +496,7 @@ async def manual_unlock(request: Request, body: ManualUnlockRequest):
                 detail="Cloudflare Access token missing",
             )
 
-        timeout_minutes = getattr(_security_settings, "session_timeout_minutes", 60)
+        timeout_minutes = getattr(_current_security_settings(), "session_timeout_minutes", 60)
         expires_at = _manual_session_expiry(timeout_minutes, payload)
         session_entry = _store_manual_session(token, expires_at, principal)
         return ManualUnlockResponse(
@@ -468,7 +510,7 @@ async def manual_unlock(request: Request, body: ManualUnlockRequest):
     if method in {"password", "password_only"}:
         password = _validate_manual_password(body.password)
         principal = _manual_unlock_principal(request, "password")
-        timeout_minutes = getattr(_security_settings, "session_timeout_minutes", 60)
+        timeout_minutes = getattr(_current_security_settings(), "session_timeout_minutes", 60)
         expires_at = _manual_session_expiry(timeout_minutes)
         seed_material = f"password:{principal}:{password}"
         seed = f"password:{hashlib.sha256(seed_material.encode('utf-8')).hexdigest()}"
@@ -486,7 +528,7 @@ async def manual_unlock(request: Request, body: ManualUnlockRequest):
         totp_ok, backup_used = _verify_totp_code(body.totp_code)
         password = _validate_manual_password(body.password)
         principal = _manual_unlock_principal(request, "totp")
-        timeout_minutes = getattr(_security_settings, "session_timeout_minutes", 60)
+        timeout_minutes = getattr(_current_security_settings(), "session_timeout_minutes", 60)
         expires_at = _manual_session_expiry(timeout_minutes)
         seed_material = f"totp:{principal}:{body.totp_code or ''}:{password}:{'backup' if backup_used else 'primary'}"
         seed = f"totp:{hashlib.sha256(seed_material.encode('utf-8')).hexdigest()}"

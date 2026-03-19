@@ -36,7 +36,7 @@ export async function saveMapConfiguration(configId: string, config: any) {
 }
 
 export async function triggerMapProviderFallback() {
-  const response = await apiService.post('/api/v2/map/provider-fallback')
+  const response = await apiService.post('/api/v2/map/provider-fallback', {})
   return response.data
 }
 import axios from 'axios'

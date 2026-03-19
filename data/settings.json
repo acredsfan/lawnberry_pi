@@ -1,0 +1,7 @@
+{
+  "language": "en",
+  "map_provider": "osm",
+  "notifications_enabled": true,
+  "theme": "dark",
+  "units": "metric"
+}

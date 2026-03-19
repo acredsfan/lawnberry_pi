@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .api.dashboard import router as dashboard_router
+from .api.docs import router as docs_router
 from .api.fusion import router as fusion_router
 from .api.health import router as health_router
 from .api.ai import router as ai_router
@@ -192,6 +193,7 @@ app.include_router(dashboard_router)
 app.include_router(health_router)
 app.include_router(mission_router)
 app.include_router(ai_router)
+app.include_router(docs_router)
 
 app.include_router(rest_v1_router, prefix="/api/v1")
 

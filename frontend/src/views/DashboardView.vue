@@ -343,6 +343,7 @@ let calibrationPollHandle: number | null = null
 const recentEvents = ref([
   { id: Date.now(), timestamp: new Date(), message: 'System initializing...', level: 'info' },
 ])
+const lastRealtimeUpdateAt = ref(0)
 
 // Computed properties for styling and display
 const systemStatusClass = computed(() => {
@@ -1324,11 +1325,73 @@ const loadWeatherData = async () => {
 
 let telemetrySubscriptionsRegistered = false
 
+function applyRealtimeTelemetrySnapshot(telemetry: any) {
+  if (!telemetry || typeof telemetry !== 'object') {
+    return
+  }
+
+  lastRealtimeUpdateAt.value = Date.now()
+  applyBatteryMetrics(telemetry)
+  applyTofMetrics(telemetry)
+
+  const lat = telemetry.position?.latitude
+  const lon = telemetry.position?.longitude
+  if (typeof lat === 'number' && typeof lon === 'number') {
+    gpsLatitude.value = lat.toFixed(6)
+    gpsLongitude.value = lon.toFixed(6)
+    gpsAccuracy.value = typeof telemetry.position?.accuracy === 'number' ? telemetry.position.accuracy : null
+    gpsHdop.value = typeof telemetry.position?.hdop === 'number' ? telemetry.position.hdop : null
+    gpsSatellites.value = typeof telemetry.position?.satellites === 'number' ? telemetry.position.satellites : null
+    gpsRtkStatus.value = telemetry.position?.rtk_status ?? null
+    gpsStatus.value = gpsAccuracySummary.value
+  }
+
+  const realtimeSpeed = typeof telemetry.position?.speed === 'number'
+    ? telemetry.position.speed
+    : typeof telemetry.speed_mps === 'number'
+      ? telemetry.speed_mps
+      : null
+  if (realtimeSpeed !== null) {
+    speedTrend.value = speed.value > 0.1 ? ((realtimeSpeed - speed.value) / speed.value) * 100 : 0
+    speed.value = realtimeSpeed
+  }
+
+  if (telemetry.environmental) {
+    const env = telemetry.environmental
+    temperature.value = typeof env.temperature_c === 'number' ? env.temperature_c : temperature.value
+    humidity.value = typeof env.humidity_percent === 'number' ? env.humidity_percent : humidity.value
+    pressure.value = typeof env.pressure_hpa === 'number' ? env.pressure_hpa : pressure.value
+    altitude.value = typeof env.altitude_m === 'number' ? env.altitude_m : altitude.value
+    environmentalSource.value = 'hardware'
+  }
+
+  if (telemetry.imu) {
+    imuCalibrationScore.value = telemetry.imu.calibration ?? imuCalibrationScore.value
+    imuCalibrationStatus.value = telemetry.imu.calibration_status ?? imuCalibrationStatus.value
+  }
+
+  if (telemetry.motor_status) {
+    currentMode.value = String(telemetry.motor_status).toUpperCase()
+  }
+
+  if (telemetry.safety_state) {
+    const safety = String(telemetry.safety_state).toLowerCase()
+    if (safety === 'nominal' || safety === 'safe') {
+      systemStatus.value = 'Active'
+    } else if (safety === 'emergency_stop') {
+      systemStatus.value = 'Emergency Stop'
+    } else {
+      systemStatus.value = 'Warning'
+    }
+  }
+}
+
 function registerTelemetrySubscriptions() {
   if (telemetrySubscriptionsRegistered) return
   telemetrySubscriptionsRegistered = true
 
   subscribe('telemetry.power', (data) => {
+    lastRealtimeUpdateAt.value = Date.now()
     applyBatteryMetrics(data)
     const solarText = solarPowerDisplay.value === '--'
       ? 'SOLAR --'
@@ -1337,6 +1400,7 @@ function registerTelemetrySubscriptions() {
   })
 
   subscribe('telemetry.navigation', (data) => {
+    lastRealtimeUpdateAt.value = Date.now()
     const lat = data.position?.latitude
     const lon = data.position?.longitude
     if (typeof lat === 'number' && typeof lon === 'number') {
@@ -1377,6 +1441,7 @@ function registerTelemetrySubscriptions() {
   })
 
   subscribe('telemetry.system', (data) => {
+    lastRealtimeUpdateAt.value = Date.now()
     if (data.uptime_seconds) {
       const uptimeSeconds = data.uptime_seconds
       const hours = Math.floor(uptimeSeconds / 3600)
@@ -1396,6 +1461,7 @@ function registerTelemetrySubscriptions() {
   })
 
   subscribe('telemetry.weather', (data) => {
+    lastRealtimeUpdateAt.value = Date.now()
     if (data.temperature_c !== undefined) {
       temperature.value = data.temperature_c
       environmentalSource.value = 'weather'
@@ -1406,6 +1472,7 @@ function registerTelemetrySubscriptions() {
   })
 
   subscribe('telemetry.environmental', (data) => {
+    lastRealtimeUpdateAt.value = Date.now()
     const env = data.environmental || {}
     if (env.temperature_c !== undefined) {
       temperature.value = env.temperature_c
@@ -1423,10 +1490,12 @@ function registerTelemetrySubscriptions() {
   })
 
   subscribe('telemetry.tof', (data) => {
+    lastRealtimeUpdateAt.value = Date.now()
     applyTofMetrics(data)
   })
 
   subscribe('telemetry.sensors', (data) => {
+    lastRealtimeUpdateAt.value = Date.now()
     if (data.imu) {
       imuCalibrationScore.value = data.imu.calibration ?? imuCalibrationScore.value
       imuCalibrationStatus.value = data.imu.calibration_status ?? imuCalibrationStatus.value
@@ -1437,6 +1506,7 @@ function registerTelemetrySubscriptions() {
   })
 
   subscribe('jobs.progress', (data) => {
+    lastRealtimeUpdateAt.value = Date.now()
     if (data.progress_percent !== undefined) {
       progress.value = data.progress_percent
     }
@@ -1447,6 +1517,10 @@ function registerTelemetrySubscriptions() {
         addLogEntry(`Job status: ${status}`, 'info')
       }
     }
+  })
+
+  subscribe('telemetry/updates', (data) => {
+    applyRealtimeTelemetrySnapshot(data)
   })
 
   if (typeof window !== 'undefined') {
@@ -1519,7 +1593,8 @@ onMounted(async () => {
   
   // Set up periodic data refresh for fallback
   const refreshInterval = setInterval(async () => {
-    if (!connected.value) {
+    const realtimeStale = Date.now() - lastRealtimeUpdateAt.value > 5000
+    if (!connected.value || realtimeStale) {
       await Promise.all([
         loadUnitPreference(),
         loadSystemStatus(),
@@ -1542,6 +1617,7 @@ onMounted(async () => {
     unsubscribe('telemetry.tof')
     unsubscribe('telemetry.sensors')
     unsubscribe('jobs.progress')
+    unsubscribe('telemetry/updates')
     telemetrySubscriptionsRegistered = false
     if (typeof window !== 'undefined') {
       const hooks = (window as any).__APP_TEST_HOOKS__

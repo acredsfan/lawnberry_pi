@@ -343,7 +343,7 @@ describe('Map Store', () => {
 
       const result = await store.triggerProviderFallback()
 
-      expect(mockedApi.post).toHaveBeenCalledWith('/api/v2/map/provider-fallback')
+      expect(mockedApi.post).toHaveBeenCalledWith('/api/v2/map/provider-fallback', {})
       expect(result).toEqual({ success: true, new_provider: 'osm', message: 'Switched to OSM' })
       expect(store.providerFallbackActive).toBe(true)
       expect(store.configuration!.provider).toBe('osm')

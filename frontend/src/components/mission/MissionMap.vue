@@ -78,6 +78,7 @@ const props = defineProps<{
   waypoints: Waypoint[];
   mowerPosition: { lat: number; lon: number; accuracy: number } | null;
   followMower: boolean;
+  mapSettings?: { provider: 'google' | 'osm' | 'none'; style: 'standard' | 'satellite' | 'hybrid' | 'terrain'; google_api_key: string } | null;
 }>();
 
 // Emits
@@ -146,7 +147,7 @@ async function initializeBaseLayer() {
   if (!map) return;
 
   // Fetch latest map display settings (provider/style/api key)
-  const settings = await loadMapsSettings();
+  const settings = props.mapSettings ?? await loadMapsSettings();
   const apiKey = settings.google_api_key || '';
   const usingGoogle = shouldUseGoogleProvider(settings.provider, apiKey, window.location);
 
@@ -242,6 +243,17 @@ watch(mowerLatLng, (newPosition) => {
     center.value = [newPosition[0], newPosition[1]];
   }
 });
+
+watch(
+  () => props.mapSettings,
+  async (next, previous) => {
+    if (!map || !next) return;
+    if (JSON.stringify(next) === JSON.stringify(previous)) return;
+    await nextTick();
+    await initializeBaseLayer();
+  },
+  { deep: true }
+);
 
 // --- Public API ---
 function recenter(lat: number, lon: number, z?: number) {

@@ -13,10 +13,18 @@ async def get_camera_status():
     """Get camera service status."""
     try:
         stats = await camera_service.get_stream_statistics()
+        last_frame_time = getattr(camera_service.stream, 'last_frame_time', None)
+        mode = getattr(camera_service.stream, 'mode', None)
+        client_count = getattr(camera_service.stream, 'client_count', 0)
+        is_active = bool(getattr(camera_service.stream, 'is_active', False))
         return {
             "initialized": camera_service.running,  # Use 'running' instead of 'initialized'
-            "streaming": camera_service.stream.is_active if hasattr(camera_service.stream, 'is_active') else False,
+            "streaming": is_active,
+            "active": is_active,
+            "mode": str(getattr(mode, 'value', mode or ('simulation' if camera_service.sim_mode else 'offline'))),
             "sim_mode": camera_service.sim_mode,
+            "client_count": client_count,
+            "last_frame_time": last_frame_time.isoformat() if hasattr(last_frame_time, 'isoformat') else last_frame_time,
             "statistics": {
                 "frames_captured": getattr(stats, 'frames_captured', 0),
                 "frames_processed": getattr(stats, 'frames_processed', 0),
@@ -28,7 +36,11 @@ async def get_camera_status():
         return {
             "initialized": False,
             "streaming": False,
+            "active": False,
+            "mode": "offline",
             "sim_mode": True,
+            "client_count": 0,
+            "last_frame_time": None,
             "statistics": {},
         }
 
@@ -109,6 +121,10 @@ async def stream_mjpeg(
                 break
     
     try:
+        if not camera_service.running:
+            await camera_service.initialize()
+        if not getattr(camera_service.stream, 'is_active', False):
+            await camera_service.start_streaming()
         return StreamingResponse(
             generate_mjpeg(),
             media_type="multipart/x-mixed-replace; boundary=frame",

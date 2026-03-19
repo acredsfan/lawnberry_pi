@@ -1,11 +1,14 @@
 """Contract tests for manual control REST endpoints."""
 
 import uuid
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from backend.src.main import app
+from backend.src.models import NavigationMode, PathStatus
+from backend.src.services.navigation_service import NavigationService
 
 BASE_URL = "http://test"
 
@@ -101,3 +104,78 @@ async def test_post_emergency_stop_acknowledges_and_audits():
         assert payload.get("audit_id")
     snapshot = payload.get("telemetry_snapshot")
     assert snapshot and snapshot.get("status") == "fault"
+
+
+@pytest.mark.asyncio
+async def test_control_navigation_endpoints_surface_runtime_state(monkeypatch):
+    """Control navigation endpoints should expose coherent operator-facing state."""
+
+    class _FakeNavService:
+        def __init__(self):
+            self.navigation_state = SimpleNamespace(
+                navigation_mode=NavigationMode.IDLE,
+                path_status=PathStatus.PLANNED,
+                current_waypoint_index=0,
+                planned_path=[object(), object()],
+            )
+
+        async def start_autonomous_navigation(self):
+            self.navigation_state.navigation_mode = NavigationMode.AUTO
+            self.navigation_state.path_status = PathStatus.EXECUTING
+            return True
+
+        async def pause_navigation(self):
+            self.navigation_state.navigation_mode = NavigationMode.PAUSED
+            return True
+
+        async def resume_navigation(self):
+            self.navigation_state.navigation_mode = NavigationMode.AUTO
+            self.navigation_state.path_status = PathStatus.EXECUTING
+            return True
+
+        async def stop_navigation(self):
+            self.navigation_state.navigation_mode = NavigationMode.IDLE
+            self.navigation_state.path_status = PathStatus.INTERRUPTED
+            return True
+
+        async def return_home(self):
+            self.navigation_state.navigation_mode = NavigationMode.RETURN_HOME
+            self.navigation_state.path_status = PathStatus.EXECUTING
+            return True
+
+    fake_nav = _FakeNavService()
+    monkeypatch.setattr(NavigationService, "get_instance", classmethod(lambda cls, weather=None: fake_nav))
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        start = await client.post("/api/v2/control/start", json={})
+        assert start.status_code == 200, start.text
+        assert start.json()["status"] == "running"
+        assert start.json()["mode"] == "auto"
+
+        pause = await client.post("/api/v2/control/pause", json={})
+        assert pause.status_code == 200, pause.text
+        assert pause.json()["status"] == "paused"
+        assert pause.json()["mode"] == "paused"
+
+        resume = await client.post("/api/v2/control/resume", json={})
+        assert resume.status_code == 200, resume.text
+        assert resume.json()["status"] == "running"
+        assert resume.json()["mode"] == "auto"
+
+        return_home = await client.post("/api/v2/control/return-home", json={})
+        assert return_home.status_code == 200, return_home.text
+        assert return_home.json()["status"] == "returning_home"
+        assert return_home.json()["mode"] == "return_home"
+
+        stop = await client.post("/api/v2/control/stop", json={})
+        assert stop.status_code == 200, stop.text
+        assert stop.json()["status"] == "stopped"
+        assert stop.json()["mode"] == "idle"
+
+        status_response = await client.get("/api/v2/control/status")
+        assert status_response.status_code == 200, status_response.text
+        payload = status_response.json()
+        assert payload["ok"] is True
+        assert payload["mode"] == "idle"
+        assert payload["waypoints_total"] == 2

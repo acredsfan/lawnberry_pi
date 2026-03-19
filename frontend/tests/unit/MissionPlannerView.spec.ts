@@ -88,6 +88,7 @@ vi.mock('@/components/mission/MissionMap.vue', () => ({
 const mockedApi = apiService as unknown as {
   get: ReturnType<typeof vi.fn>
   post: ReturnType<typeof vi.fn>
+  put: ReturnType<typeof vi.fn>
 }
 
 function primeMapStore() {
@@ -128,6 +129,7 @@ describe('MissionPlannerView.vue', () => {
     })
 
     mockedApi.post.mockResolvedValue({ data: {} })
+    mockedApi.put.mockResolvedValue({ data: {} })
   })
 
   it('renders the mission planner view', async () => {
@@ -174,5 +176,19 @@ describe('MissionPlannerView.vue', () => {
     expect(wrapper.text()).toContain('Paused (recovered)')
     expect(wrapper.text()).toContain('Recovered after backend restart; explicit operator resume required')
     expect(wrapper.text()).toContain('Waypoint: 2 of 2')
+  })
+
+  it('persists the selected mission planner map style through the maps settings endpoint', async () => {
+    const wrapper = mount(MissionPlannerView)
+    await flushPromises()
+
+    const styleSelect = wrapper.find('select')
+    await styleSelect.setValue('satellite')
+    await flushPromises()
+
+    expect(mockedApi.put).toHaveBeenCalledWith('/api/v2/settings/maps', expect.objectContaining({
+      provider: 'osm',
+      style: 'satellite',
+    }))
   })
 })

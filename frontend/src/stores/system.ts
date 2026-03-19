@@ -25,7 +25,7 @@ export const useSystemStore = defineStore('system', () => {
   const powerMetrics = ref<PowerMetrics | null>(null)
   const hardwareStreams = ref<HardwareTelemetryStream[]>([])
 
-  const { connect, disconnect, connected } = useWebSocket()
+  const { connect, disconnect, connected, subscribe, unsubscribe } = useWebSocket()
 
   const isOnline = computed(() => connectionStatus.value === 'connected')
   const isSystemHealthy = computed(() => status.value === 'active')
@@ -38,6 +38,10 @@ export const useSystemStore = defineStore('system', () => {
       // Connect to WebSocket for real-time updates
       await connect()
       connectionStatus.value = connected.value ? 'connected' : 'disconnected'
+      if (connected.value) {
+        subscribe('telemetry.system', updateSystemStatus)
+        subscribe('telemetry/updates', updateSystemStatus)
+      }
       
     } catch (err: any) {
       error.value = err.message || 'System initialization failed'
@@ -48,17 +52,34 @@ export const useSystemStore = defineStore('system', () => {
   }
 
   const updateSystemStatus = (data: any) => {
-    if (data.type === 'system_status') {
+    if (data?.event === 'telemetry.data' && data?.data) {
+      updateSystemStatus(data.data)
+      return
+    }
+
+    if (data?.type === 'system_status') {
       status.value = data.status
-    } else if (data.type === 'telemetry') {
+    } else if (data?.type === 'telemetry') {
       telemetryData.value = data
       // Update system status based on telemetry health
       const isHealthy = data.sensors?.health || data.motors?.health || data.navigation?.health
       status.value = isHealthy ? 'active' : 'warning'
+    } else if (data?.safety_state || data?.position || data?.battery || data?.environmental || data?.power) {
+      telemetryData.value = data
+      const safety = String(data.safety_state || '').toLowerCase()
+      if (safety === 'nominal' || safety === 'safe' || safety === 'active') {
+        status.value = 'active'
+      } else if (safety === 'emergency_stop') {
+        status.value = 'error'
+      } else if (safety) {
+        status.value = 'warning'
+      }
     }
   }
 
   const shutdown = async () => {
+    unsubscribe('telemetry.system')
+    unsubscribe('telemetry/updates')
     await disconnect()
     connectionStatus.value = 'disconnected'
     status.value = 'unknown'
@@ -75,12 +96,21 @@ export const useSystemStore = defineStore('system', () => {
       
       const response = await apiService.getTelemetryStream(params)
       const data = response.data
-      
-      hardwareStreams.value = data.streams || []
+      const streamItems = Array.isArray(data.streams)
+        ? data.streams
+        : Array.isArray(data.items)
+          ? data.items
+          : []
+
+      hardwareStreams.value = streamItems.map((item: any) => ({
+        ...item,
+        power_data: item.power_data || item.metadata?.power_data || item.power || item.metadata?.power,
+      }))
       
       // Update latency badge
-      if (data.latency_stats) {
-        const avgLatency = data.latency_stats.avg_latency_ms
+      const latencyStats = data.latency_stats || data.latency_summary_ms
+      if (latencyStats) {
+        const avgLatency = latencyStats.avg_latency_ms ?? latencyStats.avg ?? 0
         const device = avgLatency <= 250 ? 'pi5' : 'pi4'
         const targetMs = device === 'pi5' ? 250 : 350
         

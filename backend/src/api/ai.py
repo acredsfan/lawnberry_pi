@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from ..models import InferenceResult, InferenceTask
 from ..services.ai_service import (
@@ -17,6 +20,25 @@ from ..services.ai_service import (
 
 router = APIRouter()
 
+_AI_DATASETS = {
+    "obstacle-detection": {
+        "dataset_id": "obstacle-detection",
+        "name": "Obstacle Detection",
+        "annotation_count": 0,
+    },
+    "grass-detection": {
+        "dataset_id": "grass-detection",
+        "name": "Grass Detection",
+        "annotation_count": 0,
+    },
+}
+
+
+class DatasetExportRequest(BaseModel):
+    format: str
+    include_unlabeled: bool = False
+    min_confidence: float = 0.5
+
 
 def _raise_ai_http_error(exc: Exception) -> None:
     if isinstance(exc, AIInferenceInputError):
@@ -28,6 +50,34 @@ def _raise_ai_http_error(exc: Exception) -> None:
     if isinstance(exc, AIServiceError):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     raise HTTPException(status_code=500, detail="AI inference failed") from exc
+
+
+@router.get("/api/v2/ai/datasets")
+async def list_ai_datasets():
+    """Return the currently known AI datasets for operator/export workflows."""
+    return list(_AI_DATASETS.values())
+
+
+@router.post("/api/v2/ai/datasets/{dataset_id}/export")
+async def export_ai_dataset(dataset_id: str, payload: DatasetExportRequest):
+    """Start a lightweight dataset export job for the requested dataset."""
+    dataset = _AI_DATASETS.get(dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    export_format = str(payload.format or "").strip().upper()
+    if export_format not in {"COCO", "YOLO"}:
+        raise HTTPException(status_code=422, detail="format must be COCO or YOLO")
+    return JSONResponse(
+        status_code=202,
+        content={
+            "export_id": str(uuid.uuid4()),
+            "dataset_id": dataset_id,
+            "status": "started",
+            "format": export_format,
+            "include_unlabeled": payload.include_unlabeled,
+            "min_confidence": payload.min_confidence,
+        },
+    )
 
 
 @router.get("/api/v2/ai/status")

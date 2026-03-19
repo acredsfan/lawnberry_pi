@@ -146,3 +146,35 @@ async def test_update_path_execution_requires_verified_position_for_arrival():
 
     assert nav.navigation_state.current_waypoint_index == 0
     assert nav.navigation_state.target_velocity == 0.0
+
+
+@pytest.mark.asyncio
+async def test_pause_navigation_stops_motion_and_sets_paused_mode(monkeypatch):
+    nav = NavigationService()
+    nav.navigation_state.navigation_mode = NavigationMode.AUTO
+    nav.navigation_state.path_status = PathStatus.EXECUTING
+
+    stop_commands: list[tuple[float, float]] = []
+
+    async def fake_set_speed(left_speed: float, right_speed: float):
+        stop_commands.append((left_speed, right_speed))
+
+    monkeypatch.setattr(nav, "set_speed", fake_set_speed)
+
+    assert await nav.pause_navigation() is True
+    assert nav.navigation_state.navigation_mode == NavigationMode.PAUSED
+    assert nav.navigation_state.target_velocity == 0.0
+    assert stop_commands == [(0.0, 0.0)]
+
+
+@pytest.mark.asyncio
+async def test_resume_navigation_requires_paused_state_and_path():
+    nav = NavigationService()
+    nav.navigation_state.navigation_mode = NavigationMode.PAUSED
+    nav.navigation_state.path_status = PathStatus.INTERRUPTED
+    nav.navigation_state.current_position = Position(latitude=1.0, longitude=1.0, accuracy=1.0)
+    nav.navigation_state.planned_path = [Waypoint(position=Position(latitude=2.0, longitude=2.0))]
+
+    assert await nav.resume_navigation() is True
+    assert nav.navigation_state.navigation_mode == NavigationMode.AUTO
+    assert nav.navigation_state.path_status == PathStatus.EXECUTING

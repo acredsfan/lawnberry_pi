@@ -649,6 +649,54 @@ class NavigationService:
         
         logger.info("Started autonomous navigation")
         return True
+
+    async def pause_navigation(self) -> bool:
+        """Pause active navigation without discarding the current path."""
+        if self.navigation_state.navigation_mode == NavigationMode.EMERGENCY_STOP:
+            logger.error("Cannot pause navigation while emergency stop is active")
+            return False
+
+        if self.navigation_state.navigation_mode == NavigationMode.PAUSED:
+            return True
+
+        self.navigation_state.target_velocity = 0.0
+        stop_confirmed = await self._deliver_stop_command(reason="navigation pause")
+        if not stop_confirmed:
+            logger.error("Navigation pause requested but controller stop could not be confirmed")
+            return False
+
+        self.navigation_state.navigation_mode = NavigationMode.PAUSED
+        if self.navigation_state.path_status == PathStatus.PLANNING:
+            self.navigation_state.path_status = PathStatus.INTERRUPTED
+
+        logger.info("Navigation paused")
+        return True
+
+    async def resume_navigation(self) -> bool:
+        """Resume navigation after an explicit pause."""
+        if self.navigation_state.navigation_mode == NavigationMode.EMERGENCY_STOP:
+            logger.error("Cannot resume navigation while emergency stop is active")
+            return False
+
+        if self.navigation_state.navigation_mode != NavigationMode.PAUSED:
+            logger.error("Cannot resume navigation: system is not paused")
+            return False
+
+        if not self.navigation_state.planned_path:
+            logger.error("Cannot resume navigation: no planned path")
+            return False
+
+        if not self.navigation_state.current_position:
+            logger.error("Cannot resume navigation: no current position")
+            return False
+
+        self.navigation_state.navigation_mode = NavigationMode.AUTO
+        self.navigation_state.path_status = PathStatus.EXECUTING
+        if self.navigation_state.operation_start_time is None:
+            self.navigation_state.operation_start_time = datetime.now(timezone.utc)
+
+        logger.info("Navigation resumed")
+        return True
     
     async def stop_navigation(self) -> bool:
         """Stop navigation and return to idle"""

@@ -314,7 +314,7 @@ export const useMapStore = defineStore('map', () => {
     isLoading.value = true;
     error.value = '';
     try {
-      const response = await apiService.post('/api/v2/map/provider-fallback');
+      const response = await apiService.post('/api/v2/map/provider-fallback', {});
       if (response && response.data && response.data.success) {
         providerFallbackActive.value = true;
         if (configuration.value) {
@@ -750,6 +750,33 @@ export const useMapStore = defineStore('map', () => {
             is_home: isHome,
           };
           pushMarker(marker);
+        } catch {}
+      }
+    } else if (env.markers && typeof env.markers === 'object') {
+      for (const [markerKey, rawMarker] of Object.entries(env.markers as Record<string, any>)) {
+        try {
+          const marker = rawMarker || {};
+          const rawType = String(marker.type || marker.marker_type || markerKey);
+          const mt = (['home', 'am_sun', 'pm_sun', 'custom'].includes(rawType) ? rawType : 'custom') as MapMarker['marker_type'];
+          const latNum = Number(marker.lat ?? marker.latitude ?? marker.position?.latitude);
+          const lonNum = Number(marker.lng ?? marker.longitude ?? marker.position?.longitude);
+          if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
+            continue;
+          }
+          pushMarker({
+            marker_id: String(marker.marker_id || markerKey),
+            marker_type: mt,
+            position: {
+              latitude: latNum,
+              longitude: lonNum,
+              altitude: marker.altitude !== undefined ? Number(marker.altitude) : null,
+            },
+            label: marker.label ?? marker.name ?? null,
+            icon: marker.icon ?? null,
+            metadata: marker.metadata && typeof marker.metadata === 'object' ? { ...marker.metadata } : {},
+            schedule: scheduleFromPayload(marker.schedule),
+            is_home: Boolean(marker.is_home || mt === 'home'),
+          });
         } catch {}
       }
     }

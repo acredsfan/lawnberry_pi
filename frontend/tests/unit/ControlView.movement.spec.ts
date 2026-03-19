@@ -240,6 +240,30 @@ describe('ControlView manual movement loop', () => {
 })
 
 describe('ControlView camera stream recovery', () => {
+  it('restores manual control from an existing authenticated session without prompting for password again', async () => {
+    apiClient.get.mockImplementation((url: string) => {
+      if (url === '/api/v2/settings/security') {
+        return Promise.resolve({ data: { security_level: 'password', session_timeout_minutes: 15 } })
+      }
+      if (url === '/api/v2/control/manual-unlock/status') {
+        return Promise.resolve({ data: { authorized: true, session_id: 'restored-session', expires_at: new Date(Date.now() + 60_000).toISOString(), source: 'bearer_token' } })
+      }
+      if (url.startsWith('/api/v2/camera')) {
+        return Promise.resolve({ data: {} })
+      }
+      return Promise.resolve({ data: {} })
+    })
+
+    const wrapper = mount(ControlView)
+    await flushPromises()
+
+    expect(wrapper.vm.isControlUnlocked).toBe(true)
+    expect(wrapper.vm.session).toMatchObject({ session_id: 'restored-session' })
+    expect(wrapper.find('.control-interface').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
   it('retries MJPEG streaming after entering snapshot fallback', async () => {
     const wrapper = await mountControlView({ unlock: false, keepCameraFeed: true })
     const vm = wrapper.vm as any
@@ -285,6 +309,43 @@ describe('ControlView camera stream recovery', () => {
     expect(vm.cameraStreamFailureCount).toBe(0)
 
     vm.stopCameraFeed()
+    wrapper.unmount()
+  })
+
+  it('replaces placeholder system controls with real backend control actions', async () => {
+    const wrapper = await mountControlView()
+
+    apiClient.post.mockImplementation((url: string) => {
+      if (url === '/api/v2/control/pause') {
+        return Promise.resolve({ data: { status: 'paused' } })
+      }
+      if (url === '/api/v2/control/resume') {
+        return Promise.resolve({ data: { status: 'running' } })
+      }
+      if (url === '/api/v2/control/return-home') {
+        return Promise.resolve({ data: { status: 'returning_home' } })
+      }
+      return Promise.resolve({ data: {} })
+    })
+
+    const buttons = wrapper.findAll('.system-controls .btn')
+    expect(buttons).toHaveLength(3)
+
+    await buttons[0].trigger('click')
+    await flushPromises()
+    expect(apiClient.post).toHaveBeenCalledWith('/api/v2/control/return-home', {})
+    expect(wrapper.text()).toContain('Return-to-base sequence started')
+
+    await buttons[1].trigger('click')
+    await flushPromises()
+    expect(apiClient.post).toHaveBeenCalledWith('/api/v2/control/pause', {})
+    expect(wrapper.text()).toContain('System paused')
+
+    await buttons[2].trigger('click')
+    await flushPromises()
+    expect(apiClient.post).toHaveBeenCalledWith('/api/v2/control/resume', {})
+    expect(wrapper.text()).toContain('System resumed')
+
     wrapper.unmount()
   })
 })

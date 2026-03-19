@@ -15,6 +15,7 @@ export class WebSocketService {
   private reconnectDelay = 1000
   private subscriptions = new Set<string>()
   private listeners = new Map<string, Array<(data: any) => void>>()
+  private connectionListeners = new Set<(connected: boolean) => void>()
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private lastPongAt = 0
 
@@ -46,7 +47,26 @@ export class WebSocketService {
   }
 
   connect(): Promise<void> {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.notifyConnectionState(true)
+      return Promise.resolve()
+    }
+
     return new Promise((resolve, reject) => {
+      let settled = false
+
+      const resolveOnce = () => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+
+      const rejectOnce = (error: Error) => {
+        if (settled) return
+        settled = true
+        reject(error)
+      }
+
       const tryConnect = () => {
         const target = this.urlCandidates[this.urlIndex] || this.urlCandidates[0]
         try {
@@ -68,8 +88,9 @@ export class WebSocketService {
 
             // Start heartbeat to keep proxies/tunnels alive (Cloudflare, etc.)
             this.startHeartbeat()
+            this.notifyConnectionState(true)
           
-          resolve()
+          resolveOnce()
           }
         
           this.ws.onmessage = (event) => {
@@ -84,6 +105,11 @@ export class WebSocketService {
           this.ws.onclose = () => {
             console.log('WebSocket disconnected')
             this.stopHeartbeat()
+            this.notifyConnectionState(false)
+            if (!settled) {
+              rejectOnce(new Error('WebSocket connection closed before opening'))
+              return
+            }
             this.handleReconnect()
           }
         
@@ -101,15 +127,27 @@ export class WebSocketService {
               console.error('WebSocket error:', error)
             }
             this.stopHeartbeat()
+            this.notifyConnectionState(false)
             // Try alternate candidate once before giving up initial connect
             if (this.urlCandidates.length > 1 && this.urlIndex < this.urlCandidates.length - 1) {
+              const failedSocket = this.ws
+              if (failedSocket) {
+                failedSocket.onopen = null
+                failedSocket.onmessage = null
+                failedSocket.onclose = null
+                failedSocket.onerror = null
+                try {
+                  failedSocket.close()
+                } catch {
+                  // ignore close failures while probing alternates
+                }
+              }
               this.urlIndex++
               tryConnect()
             } else {
               // Allow reconnect loop to proceed
               this.handleReconnect()
-              // Resolve after scheduling reconnect to avoid unhandled rejections in callers
-              resolve()
+              rejectOnce(new Error('WebSocket connection failed'))
             }
           }
         } catch (error) {
@@ -119,7 +157,8 @@ export class WebSocketService {
             tryConnect()
           } else {
             this.handleReconnect()
-            resolve()
+            this.notifyConnectionState(false)
+            rejectOnce(error instanceof Error ? error : new Error('WebSocket connection failed'))
           }
         }
       }
@@ -282,6 +321,7 @@ export class WebSocketService {
       this.ws = null
     }
     this.stopHeartbeat()
+    this.notifyConnectionState(false)
     this.subscriptions.clear()
     this.listeners.clear()
     this.reconnectAttempts = 0
@@ -319,6 +359,24 @@ export class WebSocketService {
     }
   }
 
+  private notifyConnectionState(connected: boolean) {
+    this.connectionListeners.forEach((listener) => {
+      try {
+        listener(connected)
+      } catch (error) {
+        console.error('WebSocket connection listener failed:', error)
+      }
+    })
+  }
+
+  onConnectionStateChange(callback: (connected: boolean) => void) {
+    this.connectionListeners.add(callback)
+    callback(this.isConnected)
+    return () => {
+      this.connectionListeners.delete(callback)
+    }
+  }
+
   dispatchTestMessage(message: WebSocketMessage) {
     this.handleMessage(message)
   }
@@ -352,15 +410,21 @@ export function useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handle
   }
   const wsService = new WebSocketService(wsUrl)
 
-  const connected = ref(false)
+  const connected = ref(wsService.isConnected)
   const connecting = ref(false)
+  const unsubscribeState = wsService.onConnectionStateChange((state) => {
+    connected.value = state
+    if (!state) {
+      connecting.value = false
+    }
+  })
 
   const connect = async () => {
     if (!wsService.isConnected && !connecting.value) {
       connecting.value = true
       try {
         await wsService.connect()
-        connected.value = true
+        connected.value = wsService.isConnected
       } catch (error) {
         console.error('Failed to connect to WebSocket:', error)
         connected.value = false
@@ -394,7 +458,7 @@ export function useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handle
   }
 
   onUnmounted(() => {
-    // No disconnect here; service may be shared
+    unsubscribeState()
   })
 
   return {

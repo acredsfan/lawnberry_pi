@@ -39,6 +39,16 @@
 
             <!-- TOTP Verification -->
             <div v-else-if="securityConfig.auth_level === 'totp'" class="auth-method">
+              <label for="control-auth-password">Confirm Password</label>
+              <input
+                id="control-auth-password"
+                v-model="authForm.password"
+                type="password"
+                class="form-control"
+                placeholder="Enter your password"
+                @keyup.enter="authenticateControl"
+              >
+
               <label for="control-auth-totp">Enter TOTP Code</label>
               <input 
                 id="control-auth-totp"
@@ -538,16 +548,20 @@ const cameraModeBadge = computed(() => {
 // Helpers
 function mapSecurityLevel(value: unknown): ManualControlSecurityConfig['auth_level'] {
   if (typeof value === 'string') {
-    switch (value) {
+    switch (value.trim().toLowerCase()) {
+      case 'basic':
       case 'password_only':
       case 'password':
         return 'password'
+      case 'totp_required':
       case 'password_totp':
       case 'totp':
         return 'totp'
+      case 'google_oauth':
       case 'google_auth':
       case 'google':
         return 'google'
+      case 'tunnel_auth':
       case 'cloudflare_tunnel_auth':
       case 'tunnel':
       case 'cloudflare':
@@ -712,6 +726,17 @@ function showStatus(message: string, success: boolean, timeout = 4000) {
       statusMessage.value = ''
     }, timeout)
   }
+}
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (axios.isAxiosError(error)) {
+    const data = error.response?.data as { detail?: string; message?: string } | undefined
+    return data?.detail || data?.message || error.message || fallback
+  }
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return fallback
 }
 
 function resetCameraState() {
@@ -893,6 +918,22 @@ function updateSessionTimer(expiresAt?: string) {
 
   tick()
   sessionTimer = window.setInterval(tick, 1000)
+}
+
+function applyAuthorizedSession(data: Record<string, any> | null | undefined, options: { silent?: boolean } = {}) {
+  const payload = data ?? {}
+  session.value = {
+    session_id: payload.session_id || `session-${Date.now().toString(36)}`,
+    expires_at: payload.expires_at
+  }
+  updateSessionTimer(payload.expires_at)
+  isControlUnlocked.value = true
+  authError.value = ''
+  if (!options.silent) {
+    const message = payload.source === 'bearer_token' ? 'Manual control unlocked from active session' : 'Manual control unlocked'
+    toast.show(message, 'success', 2500)
+    showStatus(message, true)
+  }
 }
 
 async function fetchCameraStatus() {
@@ -1120,12 +1161,30 @@ async function loadSecurityConfig() {
       auto_lock_manual_control: Boolean(data.auto_lock_manual_control ?? securityConfig.value.auto_lock_manual_control)
     }
 
-    if (securityConfig.value.auth_level === 'cloudflare' && !cloudflareAutoVerificationAttempted) {
-      cloudflareAutoVerificationAttempted = true
-      await verifyCloudflareAuth()
-    }
   } catch (error) {
     console.warn('Failed to load security configuration, using defaults.', error)
+  }
+}
+
+async function restoreExistingControlSession() {
+  if (isControlUnlocked.value) {
+    return
+  }
+
+  try {
+    const response = await api.get('/api/v2/control/manual-unlock/status')
+    const data = response.data ?? {}
+    if (data?.authorized) {
+      applyAuthorizedSession(data, { silent: true })
+    }
+  } catch (error) {
+    if (securityConfig.value.auth_level === 'cloudflare' && !cloudflareAutoVerificationAttempted) {
+      console.warn('Automatic Cloudflare/manual session restore failed.', error)
+    }
+  } finally {
+    if (securityConfig.value.auth_level === 'cloudflare') {
+      cloudflareAutoVerificationAttempted = true
+    }
   }
 }
 
@@ -1197,15 +1256,7 @@ async function authenticateControl() {
 
   try {
     const response = await api.post('/api/v2/control/manual-unlock', payload)
-    const data = response.data ?? {}
-    session.value = {
-      session_id: data.session_id || `session-${Date.now().toString(36)}`,
-      expires_at: data.expires_at
-    }
-    updateSessionTimer(data.expires_at)
-    isControlUnlocked.value = true
-    toast.show('Manual control unlocked', 'success', 2500)
-    showStatus('Manual control unlocked', true)
+    applyAuthorizedSession(response.data)
   } catch (error) {
     const axiosError = error as AxiosError
     const status = axiosError.response?.status
@@ -1229,6 +1280,8 @@ async function authenticateControl() {
 function lockControl() {
   void stopMovement(true)
   isControlUnlocked.value = false
+  authForm.password = ''
+  authForm.totpCode = ''
   joystickRef.value?.reset()
   session.value = null
   sessionTimeRemaining.value = 0
@@ -1245,12 +1298,7 @@ async function verifyCloudflareAuth() {
     const response = await api.get('/api/v2/control/manual-unlock/status')
     const data = response.data ?? {}
     if (data?.authorized) {
-      session.value = {
-        session_id: data.session_id || `session-${Date.now().toString(36)}`,
-        expires_at: data.expires_at
-      }
-      updateSessionTimer(data.expires_at)
-      isControlUnlocked.value = true
+      applyAuthorizedSession(data, { silent: true })
       showStatus('Cloudflare Access verified', true)
       toast.show('Cloudflare Access verified', 'success', 2500)
     } else {
@@ -1471,15 +1519,52 @@ async function toggleMowing() {
 }
 
 async function returnToBase() {
-  showStatus('Return to base command queued (placeholder)', true)
+  setPerforming(true)
+  try {
+    await stopMovement(true)
+    const response = await api.post('/api/v2/control/return-home', {})
+    const status = response.data?.status
+    if (status === 'returning_home') {
+      showStatus('Return-to-base sequence started', true)
+    } else {
+      showStatus('Return-to-base command accepted', true)
+    }
+  } catch (error) {
+    showStatus(getApiErrorMessage(error, 'Return-to-base unavailable'), false, 6000)
+  } finally {
+    setPerforming(false)
+  }
 }
 
 async function pauseSystem() {
-  showStatus('System paused (placeholder)', true)
+  setPerforming(true)
+  try {
+    await stopMovement(true)
+    const response = await api.post('/api/v2/control/pause', {})
+    if (response.data?.status === 'paused') {
+      systemStatus.value = 'paused'
+    }
+    showStatus('System paused', true)
+  } catch (error) {
+    showStatus(getApiErrorMessage(error, 'Failed to pause system'), false, 6000)
+  } finally {
+    setPerforming(false)
+  }
 }
 
 async function resumeSystem() {
-  showStatus('System resume command queued (placeholder)', true)
+  setPerforming(true)
+  try {
+    const response = await api.post('/api/v2/control/resume', {})
+    if (response.data?.status === 'running') {
+      systemStatus.value = 'running'
+    }
+    showStatus('System resumed', true)
+  } catch (error) {
+    showStatus(getApiErrorMessage(error, 'Failed to resume system'), false, 6000)
+  } finally {
+    setPerforming(false)
+  }
 }
 
 // Reactive updates from store events
@@ -1573,6 +1658,7 @@ let telemetryInterval: number | undefined
 
 onMounted(async () => {
   await loadSecurityConfig()
+  await restoreExistingControlSession()
   await refreshTelemetry()
   telemetryInterval = window.setInterval(refreshTelemetry, 5000)
 })

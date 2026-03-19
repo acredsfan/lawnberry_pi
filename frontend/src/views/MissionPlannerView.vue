@@ -3,6 +3,15 @@
     <h1>Mission Planner</h1>
     <div class="map-toolbar">
       <label class="follow-toggle"><input type="checkbox" v-model="followMower" /> Follow mower</label>
+      <label class="map-style-toggle">
+        Map style
+        <select v-model="mapStyle" @change="handleMapStyleChange">
+          <option value="standard">Standard</option>
+          <option value="satellite">Satellite</option>
+          <option value="hybrid">Hybrid</option>
+          <option value="terrain">Terrain</option>
+        </select>
+      </label>
       <button class="btn" @click="recenterToMower" :disabled="!mowerLatLng">🎯 Recenter</button>
       <button class="btn" @click="undoLastWaypoint" :disabled="missionStore.waypoints.length === 0">↩️ Undo last</button>
       <button class="btn btn-danger" @click="clearAllWaypoints" :disabled="missionStore.waypoints.length === 0">🗑️ Clear all</button>
@@ -13,6 +22,7 @@
         :waypoints="missionStore.waypoints"
         :mowerPosition="mowerPosition"
         :followMower="followMower"
+        :mapSettings="mapDisplaySettings"
         @add-waypoint="handleAddWaypoint"
         @update-waypoint="handleUpdateWaypoint"
         @remove-waypoint="handleRemoveWaypoint"
@@ -66,6 +76,12 @@ const followMower = ref(true);
 const mowerLatLng = ref<[number, number] | null>(null);
 const gpsAccuracyMeters = ref<number | null>(null);
 const missionName = ref('');
+const mapStyle = ref<'standard' | 'satellite' | 'hybrid' | 'terrain'>('standard');
+const mapDisplaySettings = ref<{ provider: 'google' | 'osm' | 'none'; style: 'standard' | 'satellite' | 'hybrid' | 'terrain'; google_api_key: string }>({
+  provider: 'osm',
+  style: 'standard',
+  google_api_key: '',
+});
 const restPollTimer = ref<number | null>(null);
 const lastWsUpdateAt = ref<number>(0);
 
@@ -74,6 +90,19 @@ let componentDestroyed = false;
 
 onMounted(async () => {
   componentDestroyed = false;
+
+  try {
+    const response = await api.get('/api/v2/settings/maps');
+    const payload = response?.data && typeof response.data === 'object' ? response.data : {};
+    mapDisplaySettings.value = {
+      provider: payload.provider === 'google' || payload.provider === 'none' ? payload.provider : 'osm',
+      style: ['standard', 'satellite', 'hybrid', 'terrain'].includes(String(payload.style)) ? payload.style : 'standard',
+      google_api_key: typeof payload.google_api_key === 'string' ? payload.google_api_key : '',
+    };
+    mapStyle.value = mapDisplaySettings.value.style;
+  } catch (error) {
+    console.warn('Failed to load mission planner map display settings:', error);
+  }
 
   // Ensure configuration for initial center
   if (!mapStore.configuration) {
@@ -162,6 +191,19 @@ function handleRemoveWaypoint(id: string) {
 function recenterToMower() {
   if (mowerLatLng.value && missionMapRef.value) {
     missionMapRef.value.recenter(mowerLatLng.value[0], mowerLatLng.value[1], 18);
+  }
+}
+
+async function handleMapStyleChange() {
+  const nextSettings = {
+    ...mapDisplaySettings.value,
+    style: mapStyle.value,
+  };
+  mapDisplaySettings.value = nextSettings;
+  try {
+    await api.put('/api/v2/settings/maps', nextSettings);
+  } catch (error) {
+    console.warn('Failed to persist mission planner map style preference:', error);
   }
 }
 
@@ -279,6 +321,14 @@ const missionWaypointProgress = computed(() => {
   font-weight: 600;
 }
 .map-toolbar { display:flex; gap:1rem; align-items:center; }
+.map-style-toggle { display:flex; align-items:center; gap:.5rem; }
+.map-style-toggle select {
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+}
 .provider-badge { font-size:.85rem; opacity:.75; }
 .follow-toggle { display:flex; align-items:center; gap:.4rem; }
 
