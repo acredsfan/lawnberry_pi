@@ -60,9 +60,9 @@ os.environ.setdefault("SIM_MODE", "1")
 os.environ.setdefault("GLOBAL_RATE_LIMIT_RATE", "1000")
 os.environ.setdefault("GLOBAL_RATE_LIMIT_BURST", "10000")
 os.environ.setdefault("AUTH_RATE_LIMIT_WINDOW", "60")
-os.environ.setdefault("AUTH_RATE_LIMIT_MAX_ATTEMPTS", "1000")
-os.environ.setdefault("AUTH_LOCKOUT_FAILURES", "1000")
-os.environ.setdefault("AUTH_LOCKOUT_SECONDS", "0")
+os.environ.setdefault("AUTH_RATE_LIMIT_MAX_ATTEMPTS", "3")
+os.environ.setdefault("AUTH_LOCKOUT_FAILURES", "3")
+os.environ.setdefault("AUTH_LOCKOUT_SECONDS", "30")
 
 
 @pytest.fixture(scope="session")
@@ -87,9 +87,9 @@ def setup_test_environment():
     os.environ["GLOBAL_RATE_LIMIT_RATE"] = "1000"
     os.environ["GLOBAL_RATE_LIMIT_BURST"] = "10000"
     os.environ["AUTH_RATE_LIMIT_WINDOW"] = "60"
-    os.environ["AUTH_RATE_LIMIT_MAX_ATTEMPTS"] = "1000"
-    os.environ["AUTH_LOCKOUT_FAILURES"] = "1000"
-    os.environ["AUTH_LOCKOUT_SECONDS"] = "0"
+    os.environ["AUTH_RATE_LIMIT_MAX_ATTEMPTS"] = "3"
+    os.environ["AUTH_LOCKOUT_FAILURES"] = "3"
+    os.environ["AUTH_LOCKOUT_SECONDS"] = "30"
 
     print("CONFTEST: Set rate limiting environment variables")
     
@@ -122,6 +122,8 @@ def isolate_ui_settings_storage(tmp_path, monkeypatch):
     from backend.src.api.routers import settings as settings_router
 
     data_dir = tmp_path / "data"
+    settings_file = data_dir / "settings.json"
     ui_settings_file = data_dir / "ui_settings.json"
     monkeypatch.setattr(settings_router, "DATA_DIR", data_dir)
+    monkeypatch.setattr(settings_router, "SETTINGS_FILE", settings_file)
     monkeypatch.setattr(settings_router, "UI_SETTINGS_FILE", ui_settings_file)

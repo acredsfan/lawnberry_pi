@@ -46,6 +46,13 @@ This release replaces version 1 with a unified v2 backend and frontend, contract
 - Manual control camera fallback now tolerates both flat backend camera status payloads and raw frame responses, reducing drift between the frontend fallback path and the current FastAPI camera endpoints.
 - Added focused Playwright coverage for blocked manual-control lockouts, deterministic snapshot fallback, and recovered-paused mission visibility.
 
+## Fixes (2026-03-19)
+
+- FastAPI camera snapshot and MJPEG endpoints now emit raw JPEG bytes instead of leaking Base64 frame strings with an `image/jpeg` content type, restoring both live camera streaming and snapshot fallback on `/control`.
+- The deployed frontend server now skips HTTP compression for `/api/v2/camera/frame` and `/api/v2/camera/stream.mjpeg`, preventing multipart MJPEG responses from being buffered into a black or stalled camera pane.
+- RoboHAT status handling now marks the controller ready as soon as the firmware acknowledges `rc=disable`, clears stale `usb_control_unavailable` warnings on real takeover, and accepts the firmware's Python-dict `[STATUS]` payloads during diagnostics.
+- Added focused backend regression coverage for camera byte delivery and RoboHAT USB-control readiness parsing.
+
 ## Highlights
 
 - Hardware telemetry behind SIM_MODE (T102, T110)

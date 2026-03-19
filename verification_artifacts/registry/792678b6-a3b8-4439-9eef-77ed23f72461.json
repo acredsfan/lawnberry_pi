@@ -1,0 +1,15 @@
+{
+  "artifact_id": "792678b6-a3b8-4439-9eef-77ed23f72461",
+  "created_at": "2026-03-19T15:37:29.634922+00:00",
+  "created_by": "contract-test",
+  "linked_requirements": [
+    "FR-001",
+    "FR-016"
+  ],
+  "location": "verification_artifacts/telemetry/pi5-run.json",
+  "metadata": {
+    "latency_ms_p95": 240.0
+  },
+  "summary": "Pi5 telemetry evidence run",
+  "type": "telemetry_log"
+}

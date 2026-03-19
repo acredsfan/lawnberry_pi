@@ -33,11 +33,10 @@ class InputValidationMiddleware(BaseHTTPMiddleware):
         allow_raw_body = path.startswith("/api/v2/ai/inference")
 
         if request.method in {"POST", "PUT", "PATCH"}:
-            content_type = (request.headers.get("Content-Type") or "").lower()
-            if not allow_raw_body and "application/json" not in content_type:
-                return JSONResponse(status_code=415, content={"detail": "Content-Type must be application/json"})
-
             body = await request.body()
+            content_type = (request.headers.get("Content-Type") or "").lower()
+            if not allow_raw_body and body and "application/json" not in content_type:
+                return JSONResponse(status_code=415, content={"detail": "Content-Type must be application/json"})
             if len(body) > self._max_body:
                 return JSONResponse(status_code=413, content={"detail": "Payload too large"})
 

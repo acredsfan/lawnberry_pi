@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ...core.globals import _security_last_modified, _security_settings
+from ...core.persistence import persistence
 from ...models.auth_security_config import SecurityLevel
 from ...services.settings_service import SettingsService
 
@@ -121,6 +122,192 @@ def _default_legacy_settings() -> dict[str, Any]:
         "notifications_enabled": True,
         "map_provider": "osm",
     }
+
+
+def _compare_semver(left: str, right: str) -> int:
+    def _parts(value: str) -> tuple[int, int, int]:
+        try:
+            major, minor, patch = str(value).split(".")
+            return int(major), int(minor), int(patch)
+        except Exception:
+            return 0, 0, 0
+
+    left_parts = _parts(left)
+    right_parts = _parts(right)
+    if left_parts < right_parts:
+        return -1
+    if left_parts > right_parts:
+        return 1
+    return 0
+
+
+def _compute_branding_checksum() -> str:
+    branding_dir = Path(os.getcwd()) / "branding"
+    hasher = sha256()
+    try:
+        files = sorted(path for path in branding_dir.rglob("*") if path.is_file())
+    except Exception:
+        files = []
+    for path in files:
+        try:
+            hasher.update(path.relative_to(branding_dir).as_posix().encode("utf-8"))
+            hasher.update(path.read_bytes())
+        except Exception:
+            continue
+    return hasher.hexdigest()
+
+
+def _sync_legacy_settings_to_sections(legacy_payload: dict[str, Any]) -> None:
+    sections = _load_ui_settings()
+    system = {**sections.get("system", {})}
+    system_ui = {**system.get("ui", {})}
+    maps = {**sections.get("maps", {})}
+    unit_system = _normalize_unit_system(legacy_payload.get("units"))
+    system_ui["unit_system"] = unit_system
+    system_ui["theme"] = legacy_payload["theme"]
+    system_ui["language"] = legacy_payload["language"]
+    system_ui["notifications_enabled"] = legacy_payload["notifications_enabled"]
+    system["ui"] = system_ui
+    system["unit_system"] = unit_system
+    maps["provider"] = legacy_payload["map_provider"]
+    sections["system"] = SystemSectionResponse.model_validate(system).model_dump()
+    sections["maps"] = _normalize_maps_section({**sections.get("maps", {}), **maps})
+    _save_ui_settings(sections)
+
+
+def _profile_payload() -> dict[str, Any]:
+    service_profile = _settings_service().load_profile()
+    legacy = _load_legacy_settings()
+    stored: dict[str, Any] = {}
+    try:
+        if SETTINGS_FILE.exists():
+            raw = json.loads(SETTINGS_FILE.read_text())
+            if isinstance(raw, dict):
+                stored = raw
+    except Exception as exc:
+        logger.warning("Failed to load settings profile payload: %s", exc)
+
+    unit_system = _normalize_unit_system(
+        stored.get("unit_system") or legacy.get("units") or service_profile.system.unit_system,
+        default=service_profile.system.unit_system,
+    )
+    branding_checksum = str(
+        stored.get("branding_checksum")
+        or getattr(service_profile.system, "branding_checksum", None)
+        or _compute_branding_checksum()
+    )
+    payload = {
+        "profile_version": str(stored.get("profile_version") or "1.0.0"),
+        "hardware": service_profile.hardware.model_dump(),
+        "network": service_profile.network.model_dump(),
+        "telemetry": service_profile.telemetry.model_dump(),
+        "control": service_profile.control.model_dump(),
+        "maps": service_profile.maps.model_dump(),
+        "camera": service_profile.camera.model_dump(),
+        "ai": service_profile.ai.model_dump(),
+        "system": {
+            **service_profile.system.model_dump(),
+            "unit_system": unit_system,
+        },
+        "simulation_mode": bool(stored.get("simulation_mode", service_profile.hardware.sim_mode)),
+        "ai_acceleration": str(stored.get("ai_acceleration") or "cpu_only"),
+        "branding_checksum": branding_checksum,
+        "updated_at": str(stored.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+        "theme": legacy.get("theme", "dark"),
+        "units": unit_system,
+        "unit_system": unit_system,
+        "language": legacy.get("language", "en"),
+        "notifications_enabled": bool(legacy.get("notifications_enabled", True)),
+        "map_provider": legacy.get("map_provider", "osm"),
+    }
+    return payload
+
+
+def _save_profile_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        return payload
+    except Exception as exc:
+        logger.error("Failed to save settings profile payload: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to save settings") from exc
+
+
+def _sync_profile_update(settings: dict[str, Any], current_payload: dict[str, Any]) -> dict[str, Any]:
+    current_version = str(current_payload.get("profile_version") or "1.0.0")
+    requested_version = str(settings.get("profile_version") or current_version)
+    if _compare_semver(requested_version, current_version) < 0:
+        return {
+            "error": JSONResponse(
+                status_code=409,
+                content={
+                    "error_code": "PROFILE_VERSION_CONFLICT",
+                    "current_version": current_version,
+                    "detail": "Submitted profile_version is older than the active profile.",
+                },
+            )
+        }
+
+    telemetry_payload = settings.get("telemetry") if isinstance(settings.get("telemetry"), dict) else {}
+    latency_targets = telemetry_payload.get("latency_targets")
+    if isinstance(latency_targets, dict):
+        pi5 = latency_targets.get("pi5_ms")
+        pi4 = latency_targets.get("pi4b_ms")
+        if (pi5 is not None and float(pi5) > 250) or (pi4 is not None and float(pi4) > 350):
+            return {
+                "error": JSONResponse(
+                    status_code=422,
+                    content={
+                        "error_code": "LATENCY_GUARDRAIL_EXCEEDED",
+                        "detail": "Latency targets exceed supported constitutional guardrails.",
+                    },
+                )
+            }
+
+    branding_checksum = settings.get("branding_checksum")
+    if branding_checksum is not None:
+        normalized_checksum = str(branding_checksum).strip().lower()
+        if len(normalized_checksum) != 64:
+            return {
+                "error": JSONResponse(
+                    status_code=422,
+                    content={
+                        "error_code": "BRANDING_ASSET_MISMATCH",
+                        "detail": "branding_checksum must be a 64-character SHA-256 value.",
+                        "remediation_url": "/docs/OPERATIONS.md#branding-assets",
+                    },
+                )
+            }
+    else:
+        normalized_checksum = current_payload.get("branding_checksum") or _compute_branding_checksum()
+
+    service_profile = _settings_service().load_profile()
+    if "cadence_hz" in telemetry_payload:
+        service_profile.telemetry.cadence_hz = int(telemetry_payload["cadence_hz"])
+    if isinstance(latency_targets, dict):
+        service_profile.telemetry.latency_targets = latency_targets
+    if "simulation_mode" in settings:
+        service_profile.hardware.sim_mode = bool(settings["simulation_mode"])
+    _settings_service().save_profile(service_profile)
+
+    legacy_patch = {
+        key: settings[key]
+        for key in ("theme", "units", "language", "notifications_enabled", "map_provider")
+        if key in settings
+    }
+    if legacy_patch:
+        legacy_payload = _save_legacy_settings(legacy_patch)
+    else:
+        legacy_payload = _load_legacy_settings()
+    _sync_legacy_settings_to_sections(legacy_payload)
+
+    updated_payload = _profile_payload()
+    updated_payload["profile_version"] = requested_version
+    updated_payload["branding_checksum"] = normalized_checksum
+    updated_payload["simulation_mode"] = bool(settings.get("simulation_mode", updated_payload.get("simulation_mode")))
+    updated_payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save_profile_payload(updated_payload)
+    return {"payload": updated_payload}
 
 
 def _load_legacy_settings() -> dict[str, Any]:
@@ -265,7 +452,13 @@ def _security_section_payload(stored: dict[str, Any] | None = None) -> dict[str,
     auto_lock_manual_control = bool(section.get("auto_lock_manual_control", True))
     security_level = _auth_level_to_security_level(auth_level)
 
-    return SecuritySettingsResponse(
+    level_map = {
+        "password": "password_only",
+        "totp": "password_totp",
+        "google": "google_auth",
+        "cloudflare": "cloudflare_tunnel_auth",
+    }
+    payload = SecuritySettingsResponse(
         auth_level=auth_level,
         session_timeout_minutes=session_timeout,
         require_https=require_https,
@@ -275,6 +468,12 @@ def _security_section_payload(stored: dict[str, Any] | None = None) -> dict[str,
         cloudflare_access_enabled=security_level == SecurityLevel.TUNNEL_AUTH,
         security_level=security_level.name,
     ).model_dump()
+    payload["level"] = level_map.get(auth_level, "password_only")
+    if "totp_digits" in section:
+        payload["totp_digits"] = section["totp_digits"]
+    if "google_client_id" in section:
+        payload["google_client_id"] = section["google_client_id"]
+    return payload
 
 
 def _normalize_remote_section(payload: dict[str, Any]) -> dict[str, Any]:
@@ -335,30 +534,20 @@ def _settings_service() -> SettingsService:
 
 @router.get("/settings")
 async def get_settings():
-    """Get lightweight user settings compatibility payload."""
-    return _load_legacy_settings()
+    """Get canonical settings profile payload with compatibility fields."""
+    payload = _profile_payload()
+    _save_profile_payload(payload)
+    return payload
 
 
 @router.put("/settings")
 async def update_settings(settings: dict[str, Any]):
-    """Update lightweight user settings compatibility payload."""
-    legacy_payload = _save_legacy_settings(settings)
-    sections = _load_ui_settings()
-    system = {**sections.get("system", {})}
-    system_ui = {**system.get("ui", {})}
-    maps = {**sections.get("maps", {})}
-    unit_system = _normalize_unit_system(legacy_payload.get("units"))
-    system_ui["unit_system"] = unit_system
-    system_ui["theme"] = legacy_payload["theme"]
-    system_ui["language"] = legacy_payload["language"]
-    system_ui["notifications_enabled"] = legacy_payload["notifications_enabled"]
-    system["ui"] = system_ui
-    system["unit_system"] = unit_system
-    maps["provider"] = legacy_payload["map_provider"]
-    sections["system"] = SystemSectionResponse.model_validate(system).model_dump()
-    sections["maps"] = _normalize_maps_section({**sections.get("maps", {}), **maps})
-    _save_ui_settings(sections)
-    return legacy_payload
+    """Update canonical settings profile, accepting legacy compatibility fields too."""
+    current_payload = _profile_payload()
+    profile_result = _sync_profile_update(settings, current_payload)
+    if "error" in profile_result:
+        return profile_result["error"]
+    return profile_result["payload"]
 
 
 @router.get("/settings/system")
@@ -389,6 +578,7 @@ async def update_system_settings(settings: dict[str, Any]):
     validated = SystemSectionResponse.model_validate(merged).model_dump()
     sections["system"] = validated
     _save_ui_settings(sections)
+    persistence.add_audit_log("settings.update", details={"scope": "system", "settings": settings})
     return validated
 
 
@@ -405,7 +595,7 @@ async def update_security_settings(settings: dict[str, Any]):
     sections = _load_ui_settings()
     current = {**sections.get("security", {})}
     merged = {**current, **settings}
-    auth_level = _coerce_auth_level(merged.get("auth_level") or merged.get("security_level"))
+    auth_level = _coerce_auth_level(settings.get("level") or settings.get("security_level") or settings.get("auth_level") or merged.get("auth_level"))
     session_timeout = int(merged.get("session_timeout_minutes") or getattr(_security_settings, "session_timeout_minutes", 60) or 60)
     if session_timeout < 5 or session_timeout > 1440:
         raise HTTPException(status_code=422, detail="session_timeout_minutes must be between 5 and 1440")
@@ -420,6 +610,8 @@ async def update_security_settings(settings: dict[str, Any]):
         "session_timeout_minutes": session_timeout,
         "require_https": bool(merged.get("require_https", False)),
         "auto_lock_manual_control": bool(merged.get("auto_lock_manual_control", True)),
+        "totp_digits": merged.get("totp_digits"),
+        "google_client_id": merged.get("google_client_id"),
     }
     _save_ui_settings(sections)
     return _security_section_payload(sections["security"])

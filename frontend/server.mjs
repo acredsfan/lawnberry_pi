@@ -17,9 +17,16 @@ const app = express()
 const PORT = process.env.PORT || 3000
 const BACKEND_URL = process.env.BACKEND_URL || 'http://127.0.0.1:8081'
 
+function shouldCompress(req, res) {
+  if (req.path === '/api/v2/camera/stream.mjpeg' || req.path === '/api/v2/camera/frame') {
+    return false
+  }
+  return compression.filter(req, res)
+}
+
 // Logging & compression
 app.use(morgan('combined'))
-app.use(compression())
+app.use(compression({ filter: shouldCompress }))
 
 // Serve branding assets (e.g., LawnBerryPi_Pin.png) so they are available to the UI
 const brandingDir = path.resolve(__dirname, '../branding')

@@ -25,10 +25,12 @@ async def get_camera_status():
             "sim_mode": camera_service.sim_mode,
             "client_count": client_count,
             "last_frame_time": last_frame_time.isoformat() if hasattr(last_frame_time, 'isoformat') else last_frame_time,
+            "fps": getattr(stats, 'current_fps', getattr(stats, 'fps', 0)),
             "statistics": {
                 "frames_captured": getattr(stats, 'frames_captured', 0),
                 "frames_processed": getattr(stats, 'frames_processed', 0),
-                "fps": getattr(stats, 'fps', 0),
+                "fps": getattr(stats, 'current_fps', getattr(stats, 'fps', 0)),
+                "average_fps": getattr(stats, 'average_fps', 0),
             } if stats else {},
         }
     except Exception as e:
@@ -77,9 +79,13 @@ async def get_current_frame():
         frame = await camera_service.get_current_frame()
         if frame is None:
             raise HTTPException(status_code=404, detail="No frame available")
+
+        frame_bytes = frame.get_frame_data() if hasattr(frame, "get_frame_data") else None
+        if not frame_bytes:
+            raise HTTPException(status_code=404, detail="No frame bytes available")
         
         return Response(
-            content=frame.data,
+            content=frame_bytes,
             media_type="image/jpeg",
             headers={
                 "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -111,9 +117,15 @@ async def stream_mjpeg(
             try:
                 frame = await camera_service.get_current_frame()
                 if frame is not None:
+                    frame_bytes = frame.get_frame_data() if hasattr(frame, "get_frame_data") else None
+                    if not frame_bytes:
+                        await asyncio.sleep(0.05)
+                        continue
                     yield (
                         b'--' + boundary.encode() + b'\r\n'
-                        b'Content-Type: image/jpeg\r\n\r\n' + frame.data + b'\r\n'
+                        b'Content-Type: image/jpeg\r\n'
+                        + f'Content-Length: {len(frame_bytes)}\r\n\r\n'.encode()
+                        + frame_bytes + b'\r\n'
                     )
                 await asyncio.sleep(1.0 / 10)  # ~10 FPS
             except Exception as e:
@@ -128,6 +140,12 @@ async def stream_mjpeg(
         return StreamingResponse(
             generate_mjpeg(),
             media_type="multipart/x-mixed-replace; boundary=frame",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "X-Accel-Buffering": "no",
+            },
         )
     except Exception as e:
         logger.error(f"Failed to start MJPEG stream: {e}")

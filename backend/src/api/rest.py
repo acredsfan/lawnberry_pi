@@ -19,6 +19,7 @@ from ..core.globals import (
 from .routers import telemetry
 from .routers.auth import _resolve_manual_session
 from ..services.websocket_hub import websocket_hub
+from ..services.timezone_service import detect_system_timezone
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -27,9 +28,49 @@ legacy_router = APIRouter()
 # Legacy WebSocket paths
 legacy_router.add_websocket_route("/ws/telemetry", telemetry.ws_telemetry)
 legacy_router.add_websocket_route("/ws/control", telemetry.ws_control)
+legacy_router.add_api_route("/ws/telemetry", telemetry.websocket_telemetry_handshake, methods=["GET"])
+legacy_router.add_api_route("/ws/control", telemetry.websocket_control_handshake, methods=["GET"])
 
 _planning_jobs_store: list[dict[str, Any]] = []
 _planning_job_counter = 0
+
+
+class SystemSettings(BaseModel):
+    timezone: str = "UTC"
+    timezone_source: str = "default"
+
+
+_system_settings = SystemSettings()
+_settings_last_modified: datetime = datetime.now(timezone.utc)
+
+
+def _docs_root():
+    from pathlib import Path
+    import os
+
+    return Path(os.getcwd()) / "docs"
+
+
+def _require_bearer_auth(request: Request) -> None:
+    telemetry._require_bearer_auth(request)
+
+
+def get_settings_system(request: Request):
+    global _system_settings
+    try:
+        timezone_info = detect_system_timezone()
+        _system_settings.timezone = timezone_info.timezone
+        _system_settings.timezone_source = timezone_info.source
+    except Exception:
+        pass
+
+    return JSONResponse(
+        content=_system_settings.model_dump(mode="json"),
+        headers={
+            "Last-Modified": format_datetime(_settings_last_modified),
+            "Cache-Control": "public, max-age=30",
+        },
+    )
 
 # ----------------------- Map Zones -----------------------
 
@@ -982,6 +1023,11 @@ async def control_emergency_stop_alias(request: Request = None):
             "docs_link": "/docs/OPERATIONS.md#emergency-stop-recovery"
         }
     }
+    persistence.add_audit_log(
+        "control.emergency_stop",
+        client_id=request.headers.get("X-Client-Id") if request is not None else None,
+        details=payload,
+    )
     return JSONResponse(status_code=200, content=payload)
 
 

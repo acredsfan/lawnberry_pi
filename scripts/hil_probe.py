@@ -13,6 +13,7 @@ Guard rails:
 
 import argparse
 import csv
+import math
 import os
 import sys
 import time
@@ -99,12 +100,14 @@ def main() -> int:
     with open(args.out, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
-        t_end = time.time() + max(1, int(args.duration))
-        while time.time() < t_end:
+        duration = max(0.1, float(args.duration))
+        interval = max(0.05, float(args.interval))
+        samples = max(1, math.ceil(duration / interval) + 1)
+        for _ in range(samples):
             row = probe_once(client, args.base_url)
             writer.writerow(row)
             f.flush()
-            time.sleep(max(0.05, float(args.interval)))
+            time.sleep(interval)
 
     print(f"Wrote {args.out}")
     return 0

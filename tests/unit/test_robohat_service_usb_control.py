@@ -14,6 +14,37 @@ class _StubSerial:
         self.in_waiting = 0
 
 
+class _ResponsiveSerial(_StubSerial):
+    def __init__(self, lines: list[str]):
+        super().__init__()
+        self._lines = [line.encode("utf-8") + b"\n" for line in lines]
+        self.writes: list[bytes] = []
+        self.write_timeout = 1.0
+
+    @property
+    def in_waiting(self):
+        return int(bool(self._lines))
+
+    @in_waiting.setter
+    def in_waiting(self, _value):
+        return None
+
+    def write(self, payload: bytes):
+        self.writes.append(payload)
+        return len(payload)
+
+    def flush(self):
+        return None
+
+    def readline(self):
+        if self._lines:
+            return self._lines.pop(0)
+        return b""
+
+    def close(self):
+        self.is_open = False
+
+
 @pytest.mark.asyncio
 async def test_send_motor_command_forces_rc_disable(monkeypatch):
     svc = RoboHATService()
@@ -113,6 +144,33 @@ async def test_process_line_timeout_marks_rc_enabled():
 
 
 @pytest.mark.asyncio
+async def test_process_line_rc_disabled_marks_controller_ready():
+    svc = RoboHATService()
+    svc._rc_enabled = True
+    svc.status.last_error = "usb_control_unavailable"
+
+    svc._process_line("[USB] RC disabled – USB control")
+
+    assert svc._rc_enabled is False
+    assert svc.status.motor_controller_ok is True
+    assert svc.status.last_watchdog_echo == "rc_disable_ack"
+    assert svc.status.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_process_line_status_payload_accepts_python_dict_repr():
+    svc = RoboHATService()
+    svc._rc_enabled = False
+
+    svc._process_line("[STATUS] {'rc_enabled': False, 'encoder': 42, 'uptime_seconds': 12}")
+
+    assert svc.status.motor_controller_ok is True
+    assert svc.status.encoder_feedback_ok is True
+    assert svc.status.uptime_seconds == 12
+    assert svc.status.last_error is None
+
+
+@pytest.mark.asyncio
 async def test_process_line_invalid_pwm_marks_rc_enabled():
     svc = RoboHATService()
     svc._rc_enabled = False
@@ -144,6 +202,26 @@ async def test_maintain_usb_control_reacquires_control(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_maintain_usb_control_retries_stale_pending_disable(monkeypatch):
+    svc = RoboHATService()
+    svc.serial_conn = _StubSerial()
+    svc._usb_control_requested = True
+    svc._rc_enabled = True
+    svc._pending_rc_state = False
+    svc._pending_rc_since = time.monotonic() - 2.0
+    calls: list[tuple[bool, bool]] = []
+
+    async def fake_set_rc(enabled: bool, *, force: bool = False) -> None:
+        calls.append((enabled, force))
+
+    monkeypatch.setattr(svc, "_set_rc_enabled", fake_set_rc)
+
+    await svc._maintain_usb_control()
+
+    assert calls == [(False, True)]
+
+
+@pytest.mark.asyncio
 async def test_maintain_usb_control_sends_keepalive(monkeypatch):
     svc = RoboHATService()
     svc.serial_conn = _StubSerial()
@@ -161,6 +239,29 @@ async def test_maintain_usb_control_sends_keepalive(monkeypatch):
     await svc._maintain_usb_control()
 
     assert sent == ["pwm,1500,1500"]
+
+
+@pytest.mark.asyncio
+async def test_probe_firmware_response_accepts_robohat_lines():
+    svc = RoboHATService()
+    svc.serial_conn = _ResponsiveSerial(["[USB] RC disabled – USB control"])
+
+    ok = await svc._probe_firmware_response(timeout=0.1)
+
+    assert ok is True
+    assert svc.status.motor_controller_ok is True
+    assert svc.status.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_probe_firmware_response_rejects_silent_device():
+    svc = RoboHATService()
+    svc.serial_conn = _ResponsiveSerial([])
+
+    ok = await svc._probe_firmware_response(timeout=0.05)
+
+    assert ok is False
+    assert svc.status.last_error == "robohat_unresponsive"
 
 
 @pytest.mark.asyncio

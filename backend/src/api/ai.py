@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from ..models import InferenceResult, InferenceTask
+from ..core.persistence import persistence
 from ..services.ai_service import (
     AINoFrameAvailableError,
     AIInferenceInputError,
@@ -59,7 +60,7 @@ async def list_ai_datasets():
 
 
 @router.post("/api/v2/ai/datasets/{dataset_id}/export")
-async def export_ai_dataset(dataset_id: str, payload: DatasetExportRequest):
+async def export_ai_dataset(dataset_id: str, payload: DatasetExportRequest, request: Request):
     """Start a lightweight dataset export job for the requested dataset."""
     dataset = _AI_DATASETS.get(dataset_id)
     if dataset is None:
@@ -67,16 +68,23 @@ async def export_ai_dataset(dataset_id: str, payload: DatasetExportRequest):
     export_format = str(payload.format or "").strip().upper()
     if export_format not in {"COCO", "YOLO"}:
         raise HTTPException(status_code=422, detail="format must be COCO or YOLO")
+    response = {
+        "export_id": str(uuid.uuid4()),
+        "dataset_id": dataset_id,
+        "status": "started",
+        "format": export_format,
+        "include_unlabeled": payload.include_unlabeled,
+        "min_confidence": payload.min_confidence,
+    }
+    persistence.add_audit_log(
+        "ai.export",
+        client_id=request.headers.get("X-Client-Id"),
+        resource=dataset_id,
+        details=response,
+    )
     return JSONResponse(
         status_code=202,
-        content={
-            "export_id": str(uuid.uuid4()),
-            "dataset_id": dataset_id,
-            "status": "started",
-            "format": export_format,
-            "include_unlabeled": payload.include_unlabeled,
-            "min_confidence": payload.min_confidence,
-        },
+        content=response,
     )
 
 

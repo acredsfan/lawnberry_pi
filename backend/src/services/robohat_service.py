@@ -11,6 +11,7 @@ performing the minimal blocking serial I/O in tiny, protected critical sections.
 """
 
 import asyncio
+import ast
 import glob
 import json
 import logging
@@ -97,6 +98,52 @@ class RoboHATService:
         # Track last PWM sent so we can refresh it to avoid firmware USB timeout
         self._last_pwm: tuple[int, int] = (1500, 1500)
         self._last_pwm_at: float = 0.0
+
+    @staticmethod
+    def _is_robohat_response_line(line: str) -> bool:
+        """Return True when a serial line looks like the RoboHAT firmware."""
+        text = (line or "").strip().lower()
+        if not text:
+            return False
+        return (
+            text.startswith("[usb]")
+            or text.startswith("[status]")
+            or text.startswith("[rc]")
+            or text.startswith("▶")
+            or text.startswith("\u25b6")
+            or "robohat" in text
+        )
+
+    async def _probe_firmware_response(self, timeout: float = 2.5) -> bool:
+        """Verify the opened serial port actually speaks the RoboHAT protocol."""
+        if not self.serial_conn or not self.serial_conn.is_open:
+            return False
+
+        try:
+            await self._send_line("rc=disable")
+            await self._send_line("get_rc_status")
+        except Exception:
+            return False
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                if self.serial_conn.in_waiting:
+                    raw = await asyncio.to_thread(self.serial_conn.readline)
+                    line = raw.decode("utf-8", errors="ignore").strip()
+                    if not line:
+                        await asyncio.sleep(0.05)
+                        continue
+                    self._process_line(line)
+                    if self._is_robohat_response_line(line):
+                        return True
+                else:
+                    await asyncio.sleep(0.05)
+            except Exception:
+                await asyncio.sleep(0.05)
+
+        self.status.last_error = "robohat_unresponsive"
+        return False
         
     async def initialize(self) -> bool:
         """Initialize RoboHAT serial connection"""
@@ -117,8 +164,14 @@ class RoboHATService:
             # Flush any banner/boot messages so we begin with a clean buffer
             self._drain_serial_buffer()
 
-            # Place the firmware in USB (backend) control mode
-            await self._set_rc_enabled(False, force=True)
+            if not await self._probe_firmware_response():
+                logger.warning("Serial device %s did not respond like RoboHAT firmware", self.serial_port)
+                try:
+                    self.serial_conn.close()
+                finally:
+                    self.serial_conn = None
+                self.status.serial_connected = False
+                return False
 
             self.status.serial_connected = True
             self.running = True
@@ -250,6 +303,10 @@ class RoboHATService:
             return
 
         if self._rc_enabled:
+            if self._pending_rc_state is False and (time.monotonic() - self._pending_rc_since) > 1.0:
+                logger.warning("RoboHAT RC disable acknowledgement still pending while RC remains active; retrying command")
+                await self._set_rc_enabled(False, force=True)
+                return
             await self._set_rc_enabled(False)
             return
 
@@ -337,7 +394,11 @@ class RoboHATService:
         if line_lower.startswith("[status]"):
             try:
                 brace_index = line.index("{")
-                payload = json.loads(line[brace_index:])
+                raw_payload = line[brace_index:]
+                try:
+                    payload = json.loads(raw_payload)
+                except json.JSONDecodeError:
+                    payload = ast.literal_eval(raw_payload)
             except Exception as exc:
                 logger.warning("Failed to parse RoboHAT status payload '%s': %s", line, exc)
                 return
@@ -350,6 +411,8 @@ class RoboHATService:
             self.status.motor_controller_ok = not rc_enabled
             self.status.encoder_feedback_ok = payload.get("encoder") is not None
             self.status.last_watchdog_echo = "status"
+            if not rc_enabled:
+                self.status.last_error = None
             return
 
         if "rc enabled" in line_lower or "timeout" in line_lower and "rc mode" in line_lower:
@@ -361,6 +424,9 @@ class RoboHATService:
         if "rc disabled" in line_lower:
             self._mark_rc_state(False)
             self._last_status_at = time.monotonic()
+            self.status.motor_controller_ok = True
+            self.status.last_watchdog_echo = "rc_disable_ack"
+            self.status.last_error = None
             logger.info("RoboHAT reported USB control active")
             return
 
@@ -368,6 +434,7 @@ class RoboHATService:
             self._last_status_at = time.monotonic()
             self.status.motor_controller_ok = True
             self.status.last_watchdog_echo = "pwm_ack"
+            self.status.last_error = None
             return
 
         if line_lower.startswith("[usb] invalid"):
@@ -378,6 +445,14 @@ class RoboHATService:
             self.status.motor_controller_ok = False
             self.status.error_count += 1
             self.status.last_error = line
+            return
+
+        if line_lower.startswith("[usb]"):
+            self._last_status_at = time.monotonic()
+            self.status.motor_controller_ok = not self._rc_enabled
+            self.status.last_watchdog_echo = line.strip()
+            if not self._rc_enabled:
+                self.status.last_error = None
             return
 
         if line_lower.startswith("\u25b6") or line_lower.startswith("▶"):

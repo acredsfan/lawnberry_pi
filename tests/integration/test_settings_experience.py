@@ -26,8 +26,6 @@ async def test_settings_get_all_categories():
         if response.status_code in (404, 501, 422):
             return
         
-        # Current runtime keeps /settings as a lightweight compatibility payload;
-        # richer settings categories live under /settings/* endpoints.
         assert response.status_code == 200
         data = response.json()
         if "categories" in data:
@@ -41,7 +39,20 @@ async def test_settings_get_all_categories():
                 assert "cadence_hz" in telemetry or "settings" in telemetry
             return
 
-        for key in ("theme", "units", "language", "notifications_enabled", "map_provider"):
+        for key in (
+            "profile_version",
+            "hardware",
+            "network",
+            "telemetry",
+            "simulation_mode",
+            "ai_acceleration",
+            "branding_checksum",
+            "theme",
+            "units",
+            "language",
+            "notifications_enabled",
+            "map_provider",
+        ):
             assert key in data, f"Compatibility key {key} missing from settings payload"
 
 

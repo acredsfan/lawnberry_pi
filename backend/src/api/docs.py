@@ -10,8 +10,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -55,6 +55,16 @@ def _checksum_for_path(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
+def _docs_root() -> Path:
+    try:
+        from . import rest as rest_api
+
+        root = rest_api._docs_root()
+        return Path(root)
+    except Exception:
+        return DOCS_DIR
+
+
 def _doc_title(path: Path) -> str:
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -76,14 +86,16 @@ def _docs_offline_ready() -> bool:
 
 
 def _docs_bundle_items() -> list[dict[str, Any]]:
-    if not DOCS_DIR.exists():
+    docs_dir = _docs_root()
+    if not docs_dir.exists():
         return []
     items: list[dict[str, Any]] = []
-    for path in sorted(DOCS_DIR.glob("*.md")):
+    for path in sorted(docs_dir.rglob("*.md")):
         modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
         items.append(
             {
                 "doc_id": path.stem,
+                "path": path.relative_to(docs_dir).as_posix(),
                 "title": _doc_title(path),
                 "version": _doc_version(path),
                 "last_updated": modified.isoformat(),
@@ -101,22 +113,58 @@ def _write_artifact_record(payload: dict[str, Any]) -> None:
 
 
 @router.get("/api/v2/docs/list")
-def get_docs_list() -> dict[str, Any]:
+def get_docs_list() -> list[dict[str, Any]]:
     items = _docs_bundle_items()
-    return {
-        "items": [
-            {
-                "doc_id": item["doc_id"],
-                "title": item["title"],
-                "last_updated": item["last_updated"],
-            }
-            for item in items
-        ]
-    }
+    return [
+        {
+            "path": item["path"],
+            "doc_id": item["doc_id"],
+            "title": item["title"],
+            "last_updated": item["last_updated"],
+        }
+        for item in items
+    ]
+
+
+@router.get("/api/v2/docs/checksums")
+def get_docs_checksums() -> dict[str, Any]:
+    items = _docs_bundle_items()
+    return {"checksums": {item["path"]: item["checksum"] for item in items}}
+
+
+@router.get("/api/v2/docs/freshness")
+def get_docs_freshness() -> dict[str, Any]:
+    docs_dir = _docs_root()
+    now = datetime.now(timezone.utc)
+    docs = []
+    for path in sorted(docs_dir.rglob("*.md")):
+        modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        age_days = (now - modified).days
+        docs.append({
+            "path": path.relative_to(docs_dir).as_posix(),
+            "age_days": age_days,
+            "stale": age_days > 90,
+            "last_updated": modified.isoformat(),
+        })
+    return {"docs": docs}
 
 
 @router.get("/api/v2/docs/bundle")
 def get_docs_bundle(simulate_checksum_mismatch: str | None = Query(default=None)) -> JSONResponse:
+    docs_dir = _docs_root()
+    if docs_dir.resolve() != DOCS_DIR.resolve():
+        from .routers.telemetry import build_docs_tar_bundle
+
+        bundle_bytes = build_docs_tar_bundle(str(docs_dir))
+        return Response(
+            content=bundle_bytes,
+            media_type="application/x-tar",
+            headers={
+                "Content-Disposition": 'attachment; filename="lawnberry-docs.tar"',
+                "x-docs-offline-ready": "true",
+            },
+        )
+
     items = _docs_bundle_items()
     headers = {
         "x-docs-offline-ready": "true" if _docs_offline_ready() else "false",
@@ -165,3 +213,14 @@ def create_verification_artifact(payload: VerificationArtifactCreateRequest) -> 
     }
     _write_artifact_record(record)
     return JSONResponse(status_code=201, content=record)
+
+
+@router.get("/api/v2/docs/{doc_path:path}")
+def get_doc_contents(doc_path: str):
+    docs_dir = _docs_root().resolve()
+    candidate = (docs_dir / doc_path).resolve()
+    if docs_dir not in candidate.parents and candidate != docs_dir:
+        raise HTTPException(status_code=400, detail="Invalid documentation path")
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Documentation file not found")
+    return PlainTextResponse(candidate.read_text(encoding="utf-8"))

@@ -10,6 +10,7 @@ import base64
 import logging
 import asyncio
 import io
+import tarfile
 import time
 import os
 
@@ -84,16 +85,12 @@ def _require_bearer_auth(request: Request) -> None:
     if token:
         return
 
-    client = request.client
-    if client is not None:
-        host = (client[0] if isinstance(client, (list, tuple)) else getattr(client, "host", None)) or ""
-        host = str(host)
-    else:
-        host = request.headers.get("host", "")
-
-    host_lower = host.lower()
+    host = request.headers.get("host") or ""
+    if not host:
+        client = request.client
+        host = client.host if client is not None else ""
+    host_lower = str(host).split(":", 1)[0].lower()
     if host_lower.startswith("127.") or host_lower in {"::1", "localhost", "testserver", "testclient"}:
-        # Loopback access (tests, on-device UI) is allowed without a token.
         return
 
     logger.warning(
@@ -101,6 +98,17 @@ def _require_bearer_auth(request: Request) -> None:
         extra={"correlation_id": request.headers.get("X-Correlation-ID")},
     )
     raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def build_docs_tar_bundle(docs_dir: str) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for root, _, files in os.walk(docs_dir):
+            for filename in sorted(files):
+                full_path = os.path.join(root, filename)
+                archive.add(full_path, arcname=os.path.relpath(full_path, docs_dir))
+    buffer.seek(0)
+    return buffer.getvalue()
 
 # WebSocket Endpoints
 
@@ -373,6 +381,42 @@ async def dashboard_telemetry():
             "type": "latency_warning",
             "message": "Dashboard telemetry latency exceeds 250ms target for Pi 5",
             "docs_link": "docs/OPERATIONS.md#performance-optimization"
+        }
+
+    if "temperatures" not in telemetry_data:
+        environmental = telemetry_data.get("environmental") or {}
+        telemetry_data["temperatures"] = {
+            "ambient_c": environmental.get("temperature_c"),
+            "pressure_hpa": environmental.get("pressure_hpa"),
+        }
+    if "tof" not in telemetry_data:
+        telemetry_data["tof"] = {
+            "left": {"distance_mm": None, "range_status": None, "signal_strength": None},
+            "right": {"distance_mm": None, "range_status": None, "signal_strength": None},
+        }
+    if "power" not in telemetry_data:
+        telemetry_data["power"] = {
+            "battery_voltage": telemetry_data.get("battery", {}).get("voltage"),
+            "battery_current": None,
+            "battery_power": None,
+            "solar_voltage": None,
+            "solar_current": None,
+            "solar_power": None,
+            "solar_yield_today_wh": None,
+            "load_current": None,
+            "timestamp": telemetry_data.get("timestamp"),
+            "battery": {
+                "voltage": telemetry_data.get("battery", {}).get("voltage"),
+                "percentage": telemetry_data.get("battery", {}).get("percentage"),
+                "current": None,
+                "power": None,
+            },
+            "solar": {
+                "voltage": None,
+                "current": None,
+                "power": None,
+                "yield_today_wh": None,
+            },
         }
     
     return telemetry_data

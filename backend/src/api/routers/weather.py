@@ -42,3 +42,25 @@ async def get_planning_advice(
     except Exception as e:
         logger.error(f"Failed to get planning advice: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/weather/planning-advice")
+async def get_planning_advice_contract(
+    latitude: Optional[float] = Query(None),
+    longitude: Optional[float] = Query(None),
+):
+    """Contract-friendly planning advice payload."""
+    try:
+        current = await weather_service.get_current_async(
+            latitude=latitude,
+            longitude=longitude,
+        )
+        advice = weather_service.get_planning_advice(current)
+        return {
+            "advice": advice.get("advice", "insufficient-data"),
+            "reasons": advice.get("reasons", []),
+            "current": current,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get contract planning advice: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

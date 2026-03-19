@@ -52,11 +52,25 @@ class WebSocketHub:
 
         await websocket.accept(subprotocol=subprotocol)
         self.clients[client_id] = websocket
-        await websocket.send_text(json.dumps({
-            "event": "connection.established",
-            "client_id": client_id,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }))
+        try:
+            await websocket.send_text(json.dumps({
+                "event": "connection.established",
+                "client_id": client_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }))
+        except Exception:
+            self.disconnect(client_id)
+
+    async def broadcast(self, message: str):
+        disconnected_clients = []
+        for client_id, websocket in list(self.clients.items()):
+            try:
+                await websocket.send_text(message)
+            except Exception:
+                disconnected_clients.append(client_id)
+
+        for client_id in disconnected_clients:
+            self.disconnect(client_id)
         
     def disconnect(self, client_id: str):
         if client_id in self.clients:

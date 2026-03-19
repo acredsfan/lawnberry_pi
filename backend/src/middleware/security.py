@@ -161,13 +161,15 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 if failures >= self._lockout_failures:
                     self._lockout_until[client_token] = now + self._lockout_seconds
             elif status_code < 400:
-                # Successful authentication resets counters and lockout timers
+                # Successful authentication clears accumulated middleware counters.
                 self._failures.pop(client_token, None)
                 self._lockout_until.pop(client_token, None)
                 self._attempts.pop(client_token, None)
 
     def _validate_request_content(self, request: Request) -> Optional[Response]:
         content_type = request.headers.get("Content-Type", "").lower()
+        if request.headers.get("Content-Length") in {None, "0"} and not content_type:
+            return None
         if "application/json" not in content_type:
             return JSONResponse(status_code=415, content={"detail": "Content-Type must be application/json"})
         return None

@@ -93,8 +93,16 @@ Environment variables (set in `.env`):
 - POST http://127.0.0.1:8081/api/v2/control/emergency-stop
 - POST http://127.0.0.1:8081/api/v2/control/emergency_clear → clear E-stop with confirmation
 - GET http://127.0.0.1:8081/api/v2/hardware/robohat → RoboHAT status
+- GET http://127.0.0.1:8081/api/v2/camera/status → camera activity + FPS snapshot
+- GET http://127.0.0.1:8081/api/v2/camera/frame → latest raw JPEG snapshot
+- GET http://127.0.0.1:8081/api/v2/camera/stream.mjpeg → live MJPEG stream
 
 The Web UI now exposes a virtual joystick for manual drive control. Drag in any direction to stream drive vectors (linear/forward on the Y axis, angular/turn rate on the X axis). The slider underneath scales max velocity (10–100%). Releasing the joystick or pressing **Stop Motors** immediately sends a zero-vector command and clears the motion queue; the backend rate limiter has dedicated bursts for these endpoints to prevent inadvertent HTTP 429 responses during manual driving sessions.
+
+Operational notes:
+
+- The RoboHAT status endpoint now treats the firmware's `rc=disable` acknowledgement as controller-ready instead of leaving the UI stuck on a stale handshake-pending warning.
+- Camera snapshot and MJPEG endpoints now emit raw JPEG bytes; if the live feed regresses again, verify intermediate proxies are not recompressing or buffering `/api/v2/camera/stream.mjpeg`.
 
 ## AI
 - GET http://127.0.0.1:8081/api/v2/ai/datasets

@@ -33,18 +33,24 @@ def _with_compatibility_aliases(report: dict) -> dict:
     }
 
 
-@router.get("/health")
 def health_root() -> dict:
+    """Return the raw aggregated health status."""
+
+    return health_service.evaluate()
+
+
+@router.get("/health")
+def health_root_route() -> dict:
     """Return aggregated health status for platform monitoring."""
 
-    return _with_compatibility_aliases(health_service.evaluate())
+    return _with_compatibility_aliases(health_root())
 
 
 @router.get("/api/v2/health")
 def health_api_v2() -> dict:
     """Expose health report under the versioned API namespace."""
 
-    return _with_compatibility_aliases(health_service.evaluate())
+    return health_service.evaluate()
 
 
 @router.get("/api/v2/health/liveness")
