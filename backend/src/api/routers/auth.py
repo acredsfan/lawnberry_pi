@@ -1,11 +1,9 @@
 from fastapi import APIRouter, HTTPException, WebSocket, Request, status
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
-from collections import deque
 from typing import Optional, Dict, Any, Tuple
 import os
 import sys
-import time
 import uuid
 import base64
 import json
@@ -22,42 +20,6 @@ from ...core import globals as global_state
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-_successful_login_attempts: dict[str, deque[float]] = {}
-
-
-def _auth_success_rate_limit_window() -> int:
-    return max(1, int(os.getenv("AUTH_RATE_LIMIT_WINDOW", "60")))
-
-
-def _auth_success_rate_limit_max_attempts() -> int:
-    return max(1, int(os.getenv("AUTH_RATE_LIMIT_MAX_ATTEMPTS", "3")))
-
-
-def _enforce_success_login_rate_limit(client_identifier: str) -> None:
-    now = time.time()
-    window = _auth_success_rate_limit_window()
-    max_attempts = _auth_success_rate_limit_max_attempts()
-    attempts = _successful_login_attempts.setdefault(client_identifier, deque())
-    cutoff = now - window
-    while attempts and attempts[0] < cutoff:
-        attempts.popleft()
-    if len(attempts) >= max_attempts:
-        retry_after = int(max(1, window - (now - attempts[0])))
-        raise HTTPException(
-            status_code=429,
-            detail="Too many authentication attempts",
-            headers={"Retry-After": str(retry_after)},
-        )
-
-
-def _record_successful_login(client_identifier: str) -> None:
-    now = time.time()
-    window = _auth_success_rate_limit_window()
-    attempts = _successful_login_attempts.setdefault(client_identifier, deque())
-    cutoff = now - window
-    while attempts and attempts[0] < cutoff:
-        attempts.popleft()
-    attempts.append(now)
 
 
 def _current_security_settings() -> AuthSecurityConfig:
@@ -391,7 +353,6 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
             credential = ""
 
     client_identifier = _client_identifier(request)
-    _enforce_success_login_rate_limit(client_identifier)
 
     try:
         result = await primary_auth_service.authenticate(
@@ -402,8 +363,6 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
         )
     except AuthenticationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail, headers=exc.headers)
-
-    _record_successful_login(client_identifier)
 
     session = result.session
     user = UserOut(

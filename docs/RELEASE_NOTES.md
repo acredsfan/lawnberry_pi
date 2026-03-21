@@ -63,6 +63,8 @@ This release replaces version 1 with a unified v2 backend and frontend, contract
 - FastAPI startup now syncs the loaded hardware configuration into the shared singleton app state before telemetry initialization, so hardware-backed telemetry no longer falls back to `neo8m_uart` when the mower is actually configured for a ZED-F9P over USB.
 - WebSocket/sensor diagnostics now share the same sensor-manager and NTRIP state used by the live telemetry path, restoring accurate `/api/v2/sensors/gps/status` and RTK diagnostics after startup.
 - Added focused regression coverage for telemetry hardware-config selection and WebSocket hub app-state synchronization to prevent future GPS/RTK drift regressions.
+- Auth login no longer rate-limits repeated successful sign-ins, preventing confusing `429 Too Many Attempts` lockouts after a browser hard refresh or other forced re-authentication.
+- Frontend auth requests now include a stable `X-Client-Id`, and the auth store restores cached user state on reload so operators are less likely to get bounced back to the login screen during ordinary UI refreshes.
 
 ## Highlights
 

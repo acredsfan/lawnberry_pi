@@ -1,6 +1,6 @@
 {
-  "version": 300,
-  "last_modified": "2026-03-21 18:28:10.906575+00:00",
+  "version": 318,
+  "last_modified": "2026-03-21 18:54:44.701190+00:00",
   "hardware": {
     "sim_mode": true,
     "robohat_port": null

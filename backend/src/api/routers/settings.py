@@ -164,7 +164,10 @@ def _compute_branding_checksum() -> str:
     return hasher.hexdigest()
 
 
-def _sync_legacy_settings_to_sections(legacy_payload: dict[str, Any]) -> None:
+def _sync_legacy_settings_to_sections(
+    legacy_payload: dict[str, Any],
+    maps_patch: dict[str, Any] | None = None,
+) -> None:
     sections = _load_ui_settings()
     system = {**sections.get("system", {})}
     system_ui = {**system.get("ui", {})}
@@ -177,6 +180,8 @@ def _sync_legacy_settings_to_sections(legacy_payload: dict[str, Any]) -> None:
     system["ui"] = system_ui
     system["unit_system"] = unit_system
     maps["provider"] = legacy_payload["map_provider"]
+    if maps_patch:
+        maps.update(maps_patch)
     sections["system"] = SystemSectionResponse.model_validate(system).model_dump()
     sections["maps"] = _normalize_maps_section({**sections.get("maps", {}), **maps})
     _save_ui_settings(sections)
@@ -313,7 +318,15 @@ def _sync_profile_update(settings: dict[str, Any], current_payload: dict[str, An
         legacy_payload = _save_legacy_settings(legacy_patch)
     else:
         legacy_payload = _load_legacy_settings()
-    _sync_legacy_settings_to_sections(legacy_payload)
+    maps_patch = {
+        key: settings[key]
+        for key in ("google_api_key", "google_billing_warnings", "style", "zoom_level", "bypass_external")
+        if key in settings
+    }
+    mission_planner = settings.get("mission_planner")
+    if isinstance(mission_planner, dict):
+        maps_patch["mission_planner"] = mission_planner
+    _sync_legacy_settings_to_sections(legacy_payload, maps_patch=maps_patch)
 
     updated_payload = _profile_payload()
     updated_payload["profile_version"] = requested_version
@@ -526,6 +539,7 @@ def _normalize_maps_section(payload: dict[str, Any]) -> dict[str, Any]:
     data = dict(payload)
     if "api_key" in data and not data.get("google_api_key"):
         data["google_api_key"] = data.get("api_key")
+    google_api_key = str(data.get("google_api_key") or "").strip()
     provider = str(data.get("provider") or "osm").strip().lower()
     if provider not in {"google", "osm", "none"}:
         raise HTTPException(status_code=422, detail="provider must be one of google, osm, none")
@@ -553,9 +567,16 @@ def _normalize_maps_section(payload: dict[str, Any]) -> dict[str, Any]:
             detail="mission_planner.style must be one of standard, satellite, hybrid, terrain",
         )
 
+    if (provider == "google" or mission_planner_provider == "google") and not google_api_key:
+        raise HTTPException(
+            status_code=422,
+            detail="google_api_key is required when the main map or Mission Planner uses Google Maps",
+        )
+
     normalized = MapsSectionResponse.model_validate(
         {
             **data,
+            "google_api_key": google_api_key,
             "provider": provider,
             "style": style,
             "mission_planner": {

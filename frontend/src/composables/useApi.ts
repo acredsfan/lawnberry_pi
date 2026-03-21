@@ -2,12 +2,42 @@ import axios from 'axios'
 import type { AxiosInstance } from 'axios'
 import type { AuthResponse, RefreshResponse, LoginCredentials, User } from '@/types/auth'
 
+const CLIENT_ID_STORAGE_KEY = 'lawnberry-client-id'
+const CLIENT_ID_GLOBAL_KEY = '__LAWN_CLIENT_ID__'
+
+function getOrCreateClientId(): string {
+  const randomId = `web-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
+
+  if (typeof window !== 'undefined') {
+    try {
+      const existing = window.localStorage?.getItem(CLIENT_ID_STORAGE_KEY)
+      if (existing) {
+        return existing
+      }
+      window.localStorage?.setItem(CLIENT_ID_STORAGE_KEY, randomId)
+      return randomId
+    } catch {
+      // localStorage unavailable, fall through to in-memory global storage
+    }
+  }
+
+  const globalScope = globalThis as Record<string, unknown>
+  const existingGlobal = globalScope[CLIENT_ID_GLOBAL_KEY]
+  if (typeof existingGlobal === 'string' && existingGlobal.length > 0) {
+    return existingGlobal
+  }
+
+  globalScope[CLIENT_ID_GLOBAL_KEY] = randomId
+  return randomId
+}
+
 const PRIMARY_API_BASE = typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_API_BASE_URL
   ? (import.meta as any).env.VITE_API_BASE_URL
   : '/api/v2'
 const FALLBACK_API_BASE = typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_API_FALLBACK_BASE
   ? (import.meta as any).env.VITE_API_FALLBACK_BASE
   : '/api'
+const clientId = getOrCreateClientId()
 
 // Create axios instance with base configuration
 const apiClient: AxiosInstance = axios.create({
@@ -15,11 +45,13 @@ const apiClient: AxiosInstance = axios.create({
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
+    'X-Client-Id': clientId,
   },
 })
 
 // Request interceptor to add auth token
 apiClient.interceptors.request.use((config) => {
+  config.headers['X-Client-Id'] = config.headers['X-Client-Id'] ?? clientId
   const token = localStorage.getItem('auth_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`

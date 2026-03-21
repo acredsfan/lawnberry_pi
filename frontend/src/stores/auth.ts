@@ -3,8 +3,21 @@ import { ref, computed, watch } from 'vue'
 import type { User, LoginCredentials } from '@/types/auth'
 import { authApi } from '@/composables/useApi'
 
+function readStoredUser(): User | null {
+  try {
+    const stored = localStorage.getItem('user_data')
+    if (!stored) {
+      return null
+    }
+    return JSON.parse(stored) as User
+  } catch {
+    localStorage.removeItem('user_data')
+    return null
+  }
+}
+
 export const useAuthStore = defineStore('auth', () => {
-  const user = ref<User | null>(null)
+  const user = ref<User | null>(readStoredUser())
   const token = ref<string | null>(localStorage.getItem('auth_token'))
   const tokenExpiry = ref<number | null>(
     localStorage.getItem('token_expiry') ? 
@@ -166,11 +179,15 @@ export const useAuthStore = defineStore('auth', () => {
 
   const validateSession = async () => {
     try {
+      if (!user.value && token.value) {
+        user.value = readStoredUser()
+      }
+
       if (!token.value) {
         // Try to restore from localStorage
         const storedToken = localStorage.getItem('auth_token')
         const storedExpiry = localStorage.getItem('token_expiry')
-        const storedUser = localStorage.getItem('user_data')
+        const storedUser = readStoredUser()
         
         if (storedToken && storedExpiry && storedUser) {
           const expiryTime = parseInt(storedExpiry)
@@ -179,7 +196,7 @@ export const useAuthStore = defineStore('auth', () => {
           if (Date.now() < expiryTime) {
             token.value = storedToken
             tokenExpiry.value = expiryTime
-            user.value = JSON.parse(storedUser)
+            user.value = storedUser
             
             // Start refresh timer
             await startTokenRefreshTimer()
@@ -194,6 +211,11 @@ export const useAuthStore = defineStore('auth', () => {
         }
         
         return false
+      }
+
+      if (token.value && user.value && tokenExpiry.value && Date.now() < tokenExpiry.value) {
+        await startTokenRefreshTimer()
+        return true
       }
       
       // Validate current token with server

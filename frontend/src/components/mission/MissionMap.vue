@@ -7,7 +7,7 @@
       :max-zoom="mapMaxZoom"
       :zoom-snap="0.5"
       :zoom-delta="0.5"
-      :use-global-leaflet="false"
+      :use-global-leaflet="useGlobalLeaflet"
       style="height: 100%; width: 100%"
       @ready="onMapReady"
       @click="onMapClick"
@@ -55,6 +55,7 @@
       </l-layer-group>
     </l-map>
     <div v-if="providerBadge" class="provider-badge">{{ providerBadge }}</div>
+    <div v-if="tileErrorMessage" class="tile-error-message">{{ tileErrorMessage }}</div>
   </div>
 </template>
 
@@ -73,7 +74,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 import { useMapStore } from '@/stores/map';
-import { getOsmTileLayer, shouldUseGoogleProvider } from '@/utils/mapProviders';
+import { getOsmTileLayer, isSecureMapsContext, shouldUseGoogleProvider } from '@/utils/mapProviders';
 import type { TileLayerConfig } from '@/utils/mapProviders';
 import type { Waypoint } from '@/stores/mission';
 
@@ -111,7 +112,9 @@ const isDrawing = ref(true); // Or some other logic to control cursor
 const tileLayerConfig = ref<TileLayerConfig | null>(null);
 const tileLayerKey = ref(0);
 const providerBadge = ref('');
+const tileErrorMessage = ref<string | null>(null);
 let googleLayer: any = null;
+const useGlobalLeaflet = computed(() => props.mapSettings?.provider === 'google');
 
 // Computed properties for rendering
 const waypointLatLngs = computed(() => props.waypoints.map(wp => [wp.lat, wp.lon]));
@@ -158,6 +161,8 @@ async function initializeBaseLayer() {
   // Fetch latest map display settings (provider/style/api key)
   const settings = props.mapSettings ?? await loadMapsSettings();
   const apiKey = settings.google_api_key || '';
+  const googleRequested = settings.provider === 'google';
+  const secureContext = typeof window !== 'undefined' ? isSecureMapsContext(window.location) : false;
   const usingGoogle = shouldUseGoogleProvider(settings.provider, apiKey, window.location);
 
   // Cleanup previous Google layer if it exists
@@ -166,6 +171,7 @@ async function initializeBaseLayer() {
     googleLayer = null;
   }
   tileLayerConfig.value = null;
+  tileErrorMessage.value = null;
   mapMaxZoom.value = resolveMapMaxZoom(settings.style, usingGoogle, null);
 
   if (usingGoogle) {
@@ -175,17 +181,34 @@ async function initializeBaseLayer() {
       const style = settings.style || 'standard';
       const typeMap: Record<string, string> = { standard: 'roadmap', satellite: 'satellite', hybrid: 'hybrid', terrain: 'terrain' };
       const gmType = (typeMap[style] || 'roadmap') as any;
-      
+      const leafletRef: any = (window as any).L || L;
+
       // @ts-ignore - Leaflet.GoogleMutant is loaded globally
-      googleLayer = L.gridLayer.googleMutant({ type: gmType, maxZoom: EXTENDED_MAP_MAX_ZOOM });
+      googleLayer = leafletRef.gridLayer.googleMutant({ type: gmType, maxZoom: EXTENDED_MAP_MAX_ZOOM });
       googleLayer.addTo(map);
     } catch (error) {
       console.warn('Failed to load Google Maps, falling back to OSM.', error);
       providerBadge.value = 'OSM (fallback)';
+      tileErrorMessage.value = 'Google Maps failed to load for Mission Planner. Check the API key, allowed referrers, and internet connection.';
       const style = settings.style || 'standard';
       tileLayerConfig.value = getOsmTileLayer(style);
       mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
     }
+  } else if (googleRequested && !apiKey.trim()) {
+    providerBadge.value = 'OSM (Google key required)';
+    tileErrorMessage.value = 'Mission Planner is set to Google Maps, but no Google Maps API key is saved in Settings.';
+    const style = settings.style || 'standard';
+    tileLayerConfig.value = getOsmTileLayer(style);
+    mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
+  } else if (googleRequested && !secureContext) {
+    providerBadge.value = 'OSM (secure context required)';
+    tileErrorMessage.value = 'Google Maps needs HTTPS, localhost, or a local-network hostname to render in Mission Planner.';
+    const style = settings.style || 'standard';
+    tileLayerConfig.value = getOsmTileLayer(style);
+    mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
+  } else if (settings.provider === 'none') {
+    providerBadge.value = 'Maps disabled';
+    tileLayerConfig.value = null;
   } else {
     providerBadge.value = 'OpenStreetMap';
     const style = settings.style || 'standard';
@@ -212,15 +235,26 @@ async function loadGoogleMapsApi(apiKey: string) {
     const loader = new Loader({ apiKey, version: 'weekly' });
     await loader.load();
   }
-  if (!(L as any).gridLayer?.googleMutant) {
-    await new Promise<void>((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/leaflet.gridlayer.googlemutant@0.13.5/dist/Leaflet.GoogleMutant.js';
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Failed to load Leaflet.GoogleMutant'));
-      document.head.appendChild(script);
-    });
+  const leafletRef: any = (window as any).L || L;
+  if (!leafletRef.gridLayer?.googleMutant) {
+    await loadScriptOnce('https://unpkg.com/leaflet.gridlayer.googlemutant@0.13.5/dist/Leaflet.GoogleMutant.js');
   }
+}
+
+function loadScriptOnce(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const existing = Array.from(document.getElementsByTagName('script')).find(script => script.src === src);
+    if (existing) {
+      resolve();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.appendChild(script);
+  });
 }
 
 // Load map provider/style settings from backend (same contract as MapsView)
@@ -229,8 +263,11 @@ async function loadMapsSettings(): Promise<{ provider: 'google'|'osm'|'none'; st
     const res = await fetch('/api/v2/settings/maps', { headers: { 'Cache-Control': 'no-cache' } });
     if (res && res.ok) {
       const data = await res.json();
-      const provider = (data?.provider === 'google' || data?.provider === 'osm') ? data.provider : 'osm';
-      const style = (['standard','satellite','hybrid','terrain'].includes(String(data?.style))) ? data.style : 'standard';
+      const missionPlanner = data?.mission_planner && typeof data.mission_planner === 'object'
+        ? data.mission_planner
+        : data;
+      const provider = (missionPlanner?.provider === 'google' || missionPlanner?.provider === 'osm' || missionPlanner?.provider === 'none') ? missionPlanner.provider : 'osm';
+      const style = (['standard','satellite','hybrid','terrain'].includes(String(missionPlanner?.style))) ? missionPlanner.style : 'standard';
       const key = typeof data?.google_api_key === 'string' ? data.google_api_key : '';
       return { provider, style, google_api_key: key } as any;
     }
@@ -307,6 +344,18 @@ defineExpose({ recenter });
   border-radius: 4px;
   font-size: 0.8rem;
   z-index: 401; /* Above leaflet but below controls */
+}
+.tile-error-message {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  max-width: min(360px, calc(100% - 16px));
+  background: rgba(120, 15, 15, 0.9);
+  color: #fff;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  z-index: 401;
 }
 </style>
 

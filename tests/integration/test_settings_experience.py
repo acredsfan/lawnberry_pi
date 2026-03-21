@@ -212,6 +212,7 @@ async def test_settings_maps_supports_mission_planner_overrides():
         payload = {
             "provider": "osm",
             "style": "standard",
+            "google_api_key": "AIza-test-key",
             "mission_planner": {
                 "provider": "google",
                 "style": "hybrid",
@@ -243,6 +244,36 @@ async def test_settings_maps_supports_mission_planner_overrides():
             "provider": "google",
             "style": "hybrid",
         }
+
+
+@pytest.mark.asyncio
+async def test_settings_maps_rejects_google_mission_planner_without_api_key():
+    """
+    Test PUT /api/v2/settings/maps rejects Google Mission Planner settings when the shared API key is missing.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        headers = {"Authorization": "Bearer test-token", "Content-Type": "application/json"}
+
+        payload = {
+            "provider": "osm",
+            "style": "standard",
+            "mission_planner": {
+                "provider": "google",
+                "style": "hybrid",
+            },
+        }
+        response = await client.put(
+            "/api/v2/settings/maps",
+            json=payload,
+            headers=headers,
+        )
+
+        if response.status_code in (404, 501):
+            return
+
+        assert response.status_code == 422
+        assert "google_api_key" in response.json().get("detail", "")
 
 
 @pytest.mark.asyncio

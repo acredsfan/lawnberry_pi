@@ -36,6 +36,7 @@ def test_update_and_persist_settings(clean_settings_file):
         "language": "fr",
         "notifications_enabled": False,
         "map_provider": "google",
+        "google_api_key": "AIza-test-key",
         "simulation_mode": True,
         "telemetry": {
             "cadence_hz": 7,
@@ -118,6 +119,7 @@ def test_settings_maps_section_persists_mission_planner_overrides(clean_settings
         json={
             "provider": "osm",
             "style": "standard",
+            "google_api_key": "AIza-test-key",
             "mission_planner": {
                 "provider": "google",
                 "style": "hybrid",
@@ -146,3 +148,20 @@ def test_settings_maps_section_persists_mission_planner_overrides(clean_settings
         "provider": "google",
         "style": "hybrid",
     }
+
+
+def test_settings_maps_section_rejects_google_without_shared_api_key(clean_settings_file):
+    response = client.put(
+        "/api/v2/settings/maps",
+        json={
+            "provider": "osm",
+            "style": "standard",
+            "mission_planner": {
+                "provider": "google",
+                "style": "hybrid",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert "google_api_key" in response.json()["detail"]

@@ -115,4 +115,33 @@ describe('auth store token refresh', () => {
     expect(authApiMock.refresh).toHaveBeenCalledTimes(1)
     expect(store.token).toBe('refreshed-token')
   })
+
+  it('rehydrates the stored user when a token already exists on reload', async () => {
+    storageData = {
+      auth_token: 'persisted-token',
+      token_expiry: String(Date.now() + 60 * 60 * 1000),
+      user_data: JSON.stringify({ id: 'u1', username: 'admin', role: 'admin' }),
+    }
+
+    const store = useAuthStore()
+
+    expect(store.user).toEqual({ id: 'u1', username: 'admin', role: 'admin' })
+    expect(store.isAuthenticated).toBe(true)
+  })
+
+  it('validates from storage without calling profile when cached auth is still valid', async () => {
+    storageData = {
+      auth_token: 'persisted-token',
+      token_expiry: String(Date.now() + 60 * 60 * 1000),
+      user_data: JSON.stringify({ id: 'u1', username: 'admin', role: 'admin' }),
+    }
+
+    const store = useAuthStore()
+    authApiMock.getProfile.mockResolvedValue({ id: 'u1', username: 'admin', role: 'admin' })
+
+    const valid = await store.validateSession()
+
+    expect(valid).toBe(true)
+    expect(authApiMock.getProfile).not.toHaveBeenCalled()
+  })
 })

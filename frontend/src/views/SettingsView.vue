@@ -255,7 +255,7 @@
             </select>
           </div>
           
-          <div v-if="mapsSettings.provider === 'google'" class="maps-config">
+          <div v-if="mapsRequireGoogleApiKey" class="maps-config">
             <div class="form-group">
               <label for="google-api-key">Google Maps API Key</label>
               <input 
@@ -266,7 +266,7 @@
                 placeholder="Enter your Google Maps API key"
               >
               <small class="form-text text-muted">
-                Required for Google Maps features. Get your key at 
+                Required whenever the main map or Mission Planner uses Google Maps. Get your key at 
                 <a href="https://developers.google.com/maps" target="_blank">Google Cloud Console</a>
               </small>
             </div>
@@ -561,6 +561,10 @@ const mapsSettings = ref({
   },
 })
 
+const mapsRequireGoogleApiKey = computed(() => {
+  return mapsSettings.value.provider === 'google' || mapsSettings.value.mission_planner.provider === 'google'
+})
+
 const gpsSettings = ref({
   gps_loss_policy: 'dead_reckoning',
   dead_reckoning_duration_minutes: 2,
@@ -684,6 +688,11 @@ async function saveRemoteSettings() {
 }
 
 async function saveMapsSettings() {
+  if (mapsRequireGoogleApiKey.value && !String(mapsSettings.value.google_api_key || '').trim()) {
+    showMessage('Enter a Google Maps API key before enabling Google Maps for the main map or Mission Planner.', false)
+    toast.show('Google Maps API key required', 'error', 4000)
+    return
+  }
   await saveSettings('/api/v2/settings/maps', mapsSettings.value)
 }
 
