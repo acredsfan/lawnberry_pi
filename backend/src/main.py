@@ -37,6 +37,7 @@ from .middleware.input_validation import register_input_validation_middleware
 from .middleware.sanitization import register_sanitization_middleware
 from .middleware.api_key_auth import register_api_key_auth_middleware
 from .core.env_validation import validate_environment
+from .core.state_manager import AppState
 from .safety.safety_validator import validate_on_start
 from .safety.safety_monitor import get_safety_monitor
 from .safety.safety_triggers import set_safety_event_handler
@@ -64,6 +65,8 @@ async def lifespan(app: FastAPI):
     app.state.config_loader = loader
     app.state.hardware_config = hardware_cfg
     app.state.safety_limits = safety_limits
+    shared_state = AppState.get_instance()
+    shared_state.hardware_config = hardware_cfg
     websocket_hub.bind_app_state(app.state)
 
     # Small boot hook: ensure dual VL53L0X are addressed uniquely via XSHUT (left 0x29, right default 0x30)

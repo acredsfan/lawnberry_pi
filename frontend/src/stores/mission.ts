@@ -28,6 +28,30 @@ export interface MissionStatusResponse {
   detail?: string | null;
 }
 
+function extractMissionErrorMessage(error: unknown, fallback: string): string {
+  const message = (error as {
+    response?: {
+      data?: {
+        detail?: string;
+        message?: string;
+      };
+    };
+    message?: string;
+  })?.response?.data?.detail
+    || (error as {
+      response?: {
+        data?: {
+          detail?: string;
+          message?: string;
+        };
+      };
+      message?: string;
+    })?.response?.data?.message
+    || (error as { message?: string })?.message;
+
+  return String(message || fallback);
+}
+
 export const useMissionStore = defineStore('mission', () => {
   const waypoints = ref<Waypoint[]>([]);
   const currentMission = ref<Mission | null>(null);
@@ -97,8 +121,11 @@ export const useMissionStore = defineStore('mission', () => {
       currentWaypointIndex.value = 0;
       totalWaypoints.value = response.data.waypoints.length;
       statusDetail.value = null;
+      return response.data;
     } catch (error) {
       console.error('Error creating mission:', error);
+      statusDetail.value = extractMissionErrorMessage(error, 'Unable to create mission.');
+      throw error;
     }
   };
 
@@ -111,6 +138,8 @@ export const useMissionStore = defineStore('mission', () => {
       startStatusPolling();
     } catch (error) {
       console.error('Error starting mission:', error);
+      statusDetail.value = extractMissionErrorMessage(error, 'Unable to start mission.');
+      throw error;
     }
   };
 
@@ -123,6 +152,8 @@ export const useMissionStore = defineStore('mission', () => {
       stopStatusPolling();
     } catch (error) {
       console.error('Error pausing mission:', error);
+      statusDetail.value = extractMissionErrorMessage(error, 'Unable to pause mission.');
+      throw error;
     }
   };
 
@@ -135,6 +166,8 @@ export const useMissionStore = defineStore('mission', () => {
       startStatusPolling();
     } catch (error) {
       console.error('Error resuming mission:', error);
+      statusDetail.value = extractMissionErrorMessage(error, 'Unable to resume mission.');
+      throw error;
     }
   };
 
@@ -148,6 +181,8 @@ export const useMissionStore = defineStore('mission', () => {
       currentMission.value = null;
     } catch (error) {
       console.error('Error aborting mission:', error);
+      statusDetail.value = extractMissionErrorMessage(error, 'Unable to abort mission.');
+      throw error;
     }
   };
 

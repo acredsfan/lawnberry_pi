@@ -43,10 +43,10 @@
     "branding_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
     "log_level": "INFO",
     "remote_access": false,
-    "unit_system": "metric"
+    "unit_system": "imperial"
   },
   "telemetry": {
-    "cadence_hz": 7,
+    "cadence_hz": 3,
     "latency_targets": {
       "pi4b_ms": 340,
       "pi5_ms": 240
@@ -56,7 +56,7 @@
     "stream_enabled": true
   },
   "theme": "dark",
-  "unit_system": "metric",
-  "units": "metric",
+  "unit_system": "imperial",
+  "units": "imperial",
   "updated_at": "2026-03-19T16:56:03.077070+00:00"
 }

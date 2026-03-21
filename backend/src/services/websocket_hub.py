@@ -20,13 +20,35 @@ class WebSocketHub:
         self.telemetry_cadence_hz = 5.0
         self._telemetry_task: Optional[asyncio.Task] = None
         self.app_state = AppState.get_instance()
+        self._app_state = self.app_state
+        self._sensor_manager: Optional[Any] = None
+        self._ntrip_forwarder: Optional[Any] = None
+        self._calibration_lock = asyncio.Lock()
 
     def bind_app_state(self, state: Any) -> None:
         """Expose app.state to the hub."""
-        # In the new architecture, we use the singleton AppState, 
-        # but we keep this for compatibility if main.py calls it.
-        # We can also use it to sync the FastAPI app.state with our singleton if needed.
-        pass
+        self._app_state = self.app_state
+        hardware_config = getattr(state, "hardware_config", None)
+        if hardware_config is not None:
+            self._app_state.hardware_config = hardware_config
+        sensor_manager = getattr(state, "sensor_manager", None)
+        if sensor_manager is not None:
+            self._app_state.sensor_manager = sensor_manager
+            self._sensor_manager = sensor_manager
+        ntrip_forwarder = getattr(state, "ntrip_forwarder", None)
+        if ntrip_forwarder is not None:
+            self._app_state.ntrip_forwarder = ntrip_forwarder
+            self._ntrip_forwarder = ntrip_forwarder
+        setattr(state, "websocket_hub", self)
+
+    async def _ensure_sensor_manager(self):
+        manager = self._app_state.sensor_manager
+        if manager is None:
+            await telemetry_service.initialize_sensors()
+            manager = self._app_state.sensor_manager
+        self._sensor_manager = manager
+        self._ntrip_forwarder = getattr(self._app_state, "ntrip_forwarder", None)
+        return manager
 
     async def connect(self, websocket: WebSocket, client_id: str):
         subprotocol = None

@@ -29,6 +29,21 @@ LawnBerry Pi v2 supports multiple mapping providers with intelligent fallback an
 - **GPS Policy Management**: Configure dead reckoning and fallback behavior
 - **User-Supplied API Keys**: Bring your own credentials for full control
 
+### Mission Planner provider override
+
+The Settings screen now lets you configure `/mission-planner` separately from the main `/maps` view.
+
+- **`/maps` setting**: controls the general map experience used elsewhere in the app.
+- **Mission Planner setting**: controls the imagery/provider used when placing waypoints in `/mission-planner`.
+
+This is useful when you want to keep the everyday maps page on free OpenStreetMap tiles, but switch the mission planner to
+Google satellite or hybrid imagery for precise pin placement. The mission planner override reuses the same Google Maps API
+key and billing-warning settings, so you only manage the credential once.
+
+Operationally, a mission must still be **created** and then **started**. Creating a mission only saves the waypoint list;
+the mower will not move until the operator explicitly presses **Start Mission** and the mower satisfies live navigation
+requirements such as controller connectivity, heading data, and trustworthy GPS.
+
 ## Google Maps API Setup
 
 Google Maps provides the highest quality mapping data but requires API key setup and usage monitoring.

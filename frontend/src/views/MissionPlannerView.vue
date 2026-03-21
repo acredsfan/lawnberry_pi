@@ -31,12 +31,17 @@
     <MissionWaypointList />
     <div class="mission-controls">
       <input v-model="missionName" placeholder="Mission Name" />
-      <button @click="createMission" :disabled="!missionName || missionStore.waypoints.length === 0">Create Mission</button>
-      <button @click="startMission" :disabled="!missionStore.currentMission">Start Mission</button>
+      <button @click="createMission" :disabled="creatingMission || !missionName || missionStore.waypoints.length === 0">
+        {{ creatingMission ? 'Creating…' : 'Create Mission' }}
+      </button>
+      <button @click="startMission" :disabled="startingMission || !missionStore.currentMission">
+        {{ startingMission ? 'Starting…' : 'Start Mission' }}
+      </button>
       <button @click="pauseMission" :disabled="missionStore.missionStatus !== 'running'">Pause</button>
       <button @click="resumeMission" :disabled="missionStore.missionStatus !== 'paused'">Resume</button>
       <button @click="abortMission" :disabled="!missionStore.currentMission">Abort</button>
     </div>
+    <p v-if="missionActionHint" class="mission-action-hint">{{ missionActionHint }}</p>
     <div v-if="missionStore.currentMission" class="mission-status-panel">
       <h2>
         Mission Status:
@@ -63,11 +68,13 @@ import MissionWaypointList from '@/components/MissionWaypointList.vue';
 import MissionMap from '@/components/mission/MissionMap.vue';
 import { useMissionStore, type MissionLifecycleStatus, type Waypoint } from '@/stores/mission';
 import { useMapStore } from '@/stores/map';
+import { useToastStore } from '@/stores/toast';
 import { useApiService } from '@/services/api';
 import { useWebSocket } from '@/services/websocket';
 
 const missionStore = useMissionStore();
 const mapStore = useMapStore();
+const toast = useToastStore();
 const api = useApiService();
 const telemetrySocket = useWebSocket('telemetry');
 
@@ -77,6 +84,9 @@ const mowerLatLng = ref<[number, number] | null>(null);
 const gpsAccuracyMeters = ref<number | null>(null);
 const missionName = ref('');
 const mapStyle = ref<'standard' | 'satellite' | 'hybrid' | 'terrain'>('standard');
+const creatingMission = ref(false);
+const startingMission = ref(false);
+const missionActionHint = ref('');
 const mapDisplaySettings = ref<{ provider: 'google' | 'osm' | 'none'; style: 'standard' | 'satellite' | 'hybrid' | 'terrain'; google_api_key: string }>({
   provider: 'osm',
   style: 'standard',
@@ -94,9 +104,12 @@ onMounted(async () => {
   try {
     const response = await api.get('/api/v2/settings/maps');
     const payload = response?.data && typeof response.data === 'object' ? response.data : {};
+    const missionPlannerSettings = payload.mission_planner && typeof payload.mission_planner === 'object'
+      ? payload.mission_planner
+      : payload;
     mapDisplaySettings.value = {
-      provider: payload.provider === 'google' || payload.provider === 'none' ? payload.provider : 'osm',
-      style: ['standard', 'satellite', 'hybrid', 'terrain'].includes(String(payload.style)) ? payload.style : 'standard',
+      provider: missionPlannerSettings.provider === 'google' || missionPlannerSettings.provider === 'none' ? missionPlannerSettings.provider : 'osm',
+      style: ['standard', 'satellite', 'hybrid', 'terrain'].includes(String(missionPlannerSettings.style)) ? missionPlannerSettings.style : 'standard',
       google_api_key: typeof payload.google_api_key === 'string' ? payload.google_api_key : '',
     };
     mapStyle.value = mapDisplaySettings.value.style;
@@ -201,15 +214,34 @@ async function handleMapStyleChange() {
   };
   mapDisplaySettings.value = nextSettings;
   try {
-    await api.put('/api/v2/settings/maps', nextSettings);
+    await api.put('/api/v2/settings/maps', {
+      mission_planner: {
+        provider: nextSettings.provider,
+        style: nextSettings.style,
+      },
+    });
   } catch (error) {
     console.warn('Failed to persist mission planner map style preference:', error);
+    toast.show('Failed to save mission planner map preference', 'warning', 4000);
   }
 }
 
-const createMission = () => {
-  if (missionName.value) {
-    missionStore.createMission(missionName.value);
+const createMission = async () => {
+  if (!missionName.value) {
+    return;
+  }
+
+  creatingMission.value = true;
+  try {
+    await missionStore.createMission(missionName.value);
+    missionActionHint.value = 'Mission created. Press Start Mission to send it to the mower.';
+    toast.show('Mission created. Press Start Mission when you are ready.', 'success', 3500);
+  } catch (error) {
+    console.error('Mission creation failed:', error);
+    missionActionHint.value = missionStore.statusDetail || 'Mission creation failed.';
+    toast.show(missionActionHint.value, 'error', 5000);
+  } finally {
+    creatingMission.value = false;
   }
 };
 
@@ -223,10 +255,53 @@ function undoLastWaypoint() {
   missionStore.removeLastWaypoint();
 }
 
-const startMission = () => missionStore.startCurrentMission();
-const pauseMission = () => missionStore.pauseCurrentMission();
-const resumeMission = () => missionStore.resumeCurrentMission();
-const abortMission = () => missionStore.abortCurrentMission();
+const startMission = async () => {
+  startingMission.value = true;
+  try {
+    await missionStore.startCurrentMission();
+    missionActionHint.value = 'Mission start accepted. Watch the status panel for progress and safety feedback.';
+    toast.show('Mission start accepted', 'success', 3000);
+  } catch (error) {
+    console.error('Mission start failed:', error);
+    missionActionHint.value = missionStore.statusDetail || 'Mission start failed.';
+    toast.show(missionActionHint.value, 'error', 5000);
+  } finally {
+    startingMission.value = false;
+  }
+};
+const pauseMission = async () => {
+  try {
+    await missionStore.pauseCurrentMission();
+    missionActionHint.value = 'Mission paused.';
+    toast.show('Mission paused', 'info', 2500);
+  } catch (error) {
+    console.error('Mission pause failed:', error);
+    missionActionHint.value = missionStore.statusDetail || 'Mission pause failed.';
+    toast.show(missionActionHint.value, 'error', 5000);
+  }
+};
+const resumeMission = async () => {
+  try {
+    await missionStore.resumeCurrentMission();
+    missionActionHint.value = 'Mission resumed.';
+    toast.show('Mission resumed', 'success', 2500);
+  } catch (error) {
+    console.error('Mission resume failed:', error);
+    missionActionHint.value = missionStore.statusDetail || 'Mission resume failed.';
+    toast.show(missionActionHint.value, 'error', 5000);
+  }
+};
+const abortMission = async () => {
+  try {
+    await missionStore.abortCurrentMission();
+    missionActionHint.value = 'Mission aborted.';
+    toast.show('Mission aborted', 'warning', 3000);
+  } catch (error) {
+    console.error('Mission abort failed:', error);
+    missionActionHint.value = missionStore.statusDetail || 'Mission abort failed.';
+    toast.show(missionActionHint.value, 'error', 5000);
+  }
+};
 
 const missionStatusLabel = computed(() => {
   switch (missionStore.missionStatus) {
@@ -319,6 +394,10 @@ const missionWaypointProgress = computed(() => {
 .mission-status-hint {
   color: #f6c75f;
   font-weight: 600;
+}
+.mission-action-hint {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.78);
 }
 .map-toolbar { display:flex; gap:1rem; align-items:center; }
 .map-style-toggle { display:flex; align-items:center; gap:.5rem; }

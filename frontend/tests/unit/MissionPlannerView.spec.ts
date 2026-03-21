@@ -6,6 +6,10 @@ import { useMapStore } from '@/stores/map';
 import apiService from '@/services/api';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const toastStore = {
+  show: vi.fn(),
+}
+
 const mapPaneStub = { _leaflet_pos: { x: 0, y: 0 } }
 
 const layerGroupInstance = {
@@ -85,6 +89,10 @@ vi.mock('@/components/mission/MissionMap.vue', () => ({
   },
 }))
 
+vi.mock('@/stores/toast', () => ({
+  useToastStore: () => toastStore,
+}))
+
 const mockedApi = apiService as unknown as {
   get: ReturnType<typeof vi.fn>
   post: ReturnType<typeof vi.fn>
@@ -120,7 +128,17 @@ describe('MissionPlannerView.vue', () => {
 
     mockedApi.get.mockImplementation((url: string) => {
       if (url.startsWith('/api/v2/settings/maps')) {
-        return Promise.resolve({ data: { provider: 'osm', style: 'standard', google_api_key: '' } })
+        return Promise.resolve({
+          data: {
+            provider: 'osm',
+            style: 'standard',
+            google_api_key: '',
+            mission_planner: {
+              provider: 'google',
+              style: 'hybrid',
+            },
+          },
+        })
       }
       if (url.startsWith('/api/v2/map/configuration')) {
         return Promise.resolve({ data: { provider: 'osm', zones: [], markers: [], updated_at: '2025-10-25T15:28:33.451Z' } })
@@ -187,8 +205,35 @@ describe('MissionPlannerView.vue', () => {
     await flushPromises()
 
     expect(mockedApi.put).toHaveBeenCalledWith('/api/v2/settings/maps', expect.objectContaining({
-      provider: 'osm',
-      style: 'satellite',
+      mission_planner: expect.objectContaining({
+        provider: 'google',
+        style: 'satellite',
+      }),
     }))
+  })
+
+  it('shows a hint after creating a mission so operators know creation does not auto-start motion', async () => {
+    const wrapper = mount(MissionPlannerView)
+    const missionStore = useMissionStore()
+    missionStore.addWaypoint(51.5, -0.09)
+    vi.spyOn(missionStore, 'createMission').mockResolvedValue({
+      id: 'mission-1',
+      name: 'Test Mission',
+      waypoints: [],
+      created_at: '2026-03-21T00:00:00Z',
+    } as any)
+
+    await flushPromises()
+    await wrapper.find('input[placeholder="Mission Name"]').setValue('Test Mission')
+    const createButton = wrapper.findAll('button').find(btn => btn.text().includes('Create Mission'))!
+    await createButton.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Mission created. Press Start Mission to send it to the mower.')
+    expect(toastStore.show).toHaveBeenCalledWith(
+      'Mission created. Press Start Mission when you are ready.',
+      'success',
+      3500,
+    )
   })
 })

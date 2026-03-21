@@ -8,6 +8,7 @@ export type TileLayerOverlay = {
   attribution?: string
   subdomains?: string | string[]
   maxZoom?: number
+  maxNativeZoom?: number
 }
 
 export type TileLayerConfig = {
@@ -15,6 +16,7 @@ export type TileLayerConfig = {
   attribution: string
   subdomains?: string | string[]
   maxZoom?: number
+  maxNativeZoom?: number
   overlay?: TileLayerOverlay
 }
 
@@ -31,16 +33,19 @@ const OSM_TILE_LAYERS: Record<string, TileLayerConfig> = {
   satellite: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
-    maxZoom: 19,
+    maxZoom: 22,
+    maxNativeZoom: 19,
   },
   hybrid: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Imagery © Esri',
-    maxZoom: 19,
+    maxZoom: 22,
+    maxNativeZoom: 19,
     overlay: {
       url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
       attribution: 'Labels © Esri',
-      maxZoom: 19,
+      maxZoom: 22,
+      maxNativeZoom: 19,
     },
   },
   terrain: {

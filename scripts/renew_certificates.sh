@@ -23,6 +23,7 @@ DOMAIN=${LB_DOMAIN:-${DOMAIN:-}}
 EMAIL=${LETSENCRYPT_EMAIL:-${EMAIL:-}}
 FRONTEND_PORT=${FRONTEND_PORT:-3000}
 BACKEND_PORT=${BACKEND_PORT:-8081}
+ALT_DOMAINS_RAW=${ALT_DOMAINS:-}
 
 LOG_TAG="lawnberry-cert"
 log_info(){ echo "[INFO] $*"; logger -t "$LOG_TAG" "$*" || true; }
@@ -49,13 +50,94 @@ fi
 SELF_DIR="/etc/lawnberry/certs/selfsigned"
 mkdir -p "$SELF_DIR"
 
+build_openssl_san_config(){
+  local cn=${DOMAIN:-lawnberry.local}
+  local hostname_short
+  local tmp
+  local index=1
+  local ip_index=1
+  local -a dns_names ipv4_addrs
+  local -A seen_dns=() seen_ip=()
+
+  hostname_short=$(hostname -s 2>/dev/null || echo lawnberry)
+  tmp=$(mktemp)
+  dns_names=("$cn" "localhost" "$hostname_short" "${hostname_short}.local" "lawnberry.local")
+
+  if [[ -n "$ALT_DOMAINS_RAW" ]]; then
+    ALT_DOMAINS_RAW=${ALT_DOMAINS_RAW//,/ }
+    for entry in $ALT_DOMAINS_RAW; do
+      [[ -n "$entry" ]] && dns_names+=("$entry")
+    done
+  fi
+
+  ipv4_addrs=("127.0.0.1")
+  while read -r ip; do
+    [[ -n "$ip" ]] && ipv4_addrs+=("$ip")
+  done < <(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)
+
+  {
+    echo "[req]"
+    echo "distinguished_name = req_distinguished_name"
+    echo "x509_extensions = v3_req"
+    echo "prompt = no"
+    echo
+    echo "[req_distinguished_name]"
+    echo "CN = $cn"
+    echo
+    echo "[v3_req]"
+    echo "basicConstraints = critical,CA:FALSE"
+    echo "keyUsage = critical,digitalSignature,keyEncipherment"
+    echo "extendedKeyUsage = serverAuth"
+    echo "subjectAltName = @alt_names"
+    echo
+    echo "[alt_names]"
+    for name in "${dns_names[@]}"; do
+      [[ -n "$name" && -z "${seen_dns[$name]:-}" ]] || continue
+      seen_dns[$name]=1
+      echo "DNS.$index = $name"
+      index=$((index + 1))
+    done
+    for ip in "${ipv4_addrs[@]}"; do
+      [[ -n "$ip" && -z "${seen_ip[$ip]:-}" ]] || continue
+      seen_ip[$ip]=1
+      echo "IP.$ip_index = $ip"
+      ip_index=$((ip_index + 1))
+    done
+  } >"$tmp"
+
+  echo "$tmp"
+}
+
+cert_has_subject_alt_name(){
+  [[ -f "$SELF_DIR/fullchain.pem" ]] || return 1
+  openssl x509 -in "$SELF_DIR/fullchain.pem" -noout -ext subjectAltName 2>/dev/null | grep -q "Subject Alternative Name"
+}
+
 generate_self_signed(){
   local cn=${DOMAIN:-lawnberry.local}
+  local san_cfg
   log_warn "Generating self-signed certificate for CN=$cn as fallback"
+  san_cfg=$(build_openssl_san_config)
+  trap 'rm -f "$san_cfg"' RETURN
   openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
     -keyout "$SELF_DIR/privkey.pem" \
     -out "$SELF_DIR/fullchain.pem" \
-    -subj "/CN=$cn"
+    -config "$san_cfg" \
+    -extensions v3_req
+  rm -f "$san_cfg"
+  trap - RETURN
+}
+
+ensure_self_signed_certificate(){
+  if [[ ! -f "$SELF_DIR/fullchain.pem" || ! -f "$SELF_DIR/privkey.pem" ]]; then
+    generate_self_signed
+    return
+  fi
+
+  if ! cert_has_subject_alt_name; then
+    log_warn "Existing self-signed certificate lacks SAN entries; regenerating fallback certificate"
+    generate_self_signed
+  fi
 }
 
 switch_nginx_to_self_signed(){
@@ -105,7 +187,7 @@ main(){
   # If no LE path exists yet, just ensure self-signed exists and exit 0
   if [[ -z "$LE_PATH" ]]; then
     log_warn "No Let's Encrypt live directory found; ensuring self-signed certificate exists"
-    [[ -f "$SELF_DIR/fullchain.pem" && -f "$SELF_DIR/privkey.pem" ]] || generate_self_signed
+    ensure_self_signed_certificate
     switch_nginx_to_self_signed
     exit 0
   fi
@@ -114,7 +196,7 @@ main(){
   local key="$LE_PATH/privkey.pem"
   if [[ ! -f "$pem" || ! -f "$key" ]]; then
     log_warn "LE files missing; falling back to self-signed"
-    generate_self_signed
+    ensure_self_signed_certificate
     switch_nginx_to_self_signed
     exit 0
   fi
@@ -132,7 +214,7 @@ main(){
     exit 0
   else
     log_warn "Certificate still expiring soon (<7 days) or invalid after renewal"
-    generate_self_signed
+    ensure_self_signed_certificate
     switch_nginx_to_self_signed
     exit 0
   fi

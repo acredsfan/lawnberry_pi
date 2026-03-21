@@ -46,6 +46,7 @@ TLS is managed automatically:
 - On first setup, nginx is installed and configured with a self-signed certificate.
 - If `LB_DOMAIN` and `LETSENCRYPT_EMAIL` are set in `.env`, the system provisions a valid Let’s Encrypt certificate and switches nginx to use it.
 - A daily renewal timer validates and renews certificates; on issues or imminent expiry, the system falls back to self-signed to maintain availability.
+- The fallback self-signed certificate now includes SAN entries for `localhost`, detected LAN IPv4 addresses, and configured domain/alt-domain values so browsers do not also fail with a hostname-mismatch error when you access the Pi by IP.
 
 Useful commands:
 ```bash
@@ -69,8 +70,12 @@ curl -s http://127.0.0.1:8081/metrics | grep lawnberry_tls_cert_
 Environment variables (set in `.env`):
 - `LB_DOMAIN` – primary domain (CN)
 - `LETSENCRYPT_EMAIL` – contact email for Let’s Encrypt
-- `ALT_DOMAINS` – optional SANs (comma-separated), e.g., `www.example.com,api.example.com`
+- `ALT_DOMAINS` – optional hostname SANs (comma-separated), e.g., `www.example.com,api.example.com`; do not put LAN/private IPs here because Let’s Encrypt will not issue IP-address certificates
 - `CLOUDFLARE_API_TOKEN` – optional, for DNS-01 (wildcards or no port 80)
+
+Practical note: a self-signed certificate is still untrusted by default, but with SANs present the browser warning should now be about trust only, not both trust and hostname mismatch.
+
+If you protect the public hostname with Cloudflare Access, HTTP-01 issuance will fail unless `/.well-known/acme-challenge/*` is excluded from the Access policy. Otherwise use DNS-01 with `CLOUDFLARE_API_TOKEN`.
 
 ## Health & Status
 - GET http://127.0.0.1:8081/health → { status: "healthy" }
@@ -102,6 +107,7 @@ The Web UI now exposes a virtual joystick for manual drive control. Drag in any 
 Operational notes:
 
 - The RoboHAT status endpoint now treats the firmware's `rc=disable` acknowledgement as controller-ready instead of leaving the UI stuck on a stale handshake-pending warning.
+- Older RoboHAT CircuitPython builds may take about three seconds to begin responding after the USB serial port opens and may emit heartbeat lines like `[RC] steer=...` instead of the newer `get_rc_status` payload. Treat that as compatible firmware, not a missing board.
 - Camera snapshot and MJPEG endpoints now emit raw JPEG bytes; if the live feed regresses again, verify intermediate proxies are not recompressing or buffering `/api/v2/camera/stream.mjpeg`.
 
 ## AI

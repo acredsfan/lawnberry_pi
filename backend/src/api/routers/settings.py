@@ -77,12 +77,19 @@ class RemoteAccessSectionResponse(BaseModel):
 
 
 class MapsSectionResponse(BaseModel):
+    class MissionPlannerMapSectionResponse(BaseModel):
+        provider: str = "osm"
+        style: str = "standard"
+
     provider: str = "osm"
     style: str = "standard"
     google_api_key: str = ""
     google_billing_warnings: bool = True
     zoom_level: int = 18
     bypass_external: bool = False
+    mission_planner: MissionPlannerMapSectionResponse = Field(
+        default_factory=MissionPlannerMapSectionResponse
+    )
 
 
 class GpsPolicySectionResponse(BaseModel):
@@ -178,6 +185,9 @@ def _sync_legacy_settings_to_sections(legacy_payload: dict[str, Any]) -> None:
 def _profile_payload() -> dict[str, Any]:
     service_profile = _settings_service().load_profile()
     legacy = _load_legacy_settings()
+    sections = _load_ui_settings()
+    system_section = sections.get("system", {}) if isinstance(sections, dict) else {}
+    system_ui = system_section.get("ui", {}) if isinstance(system_section, dict) else {}
     stored: dict[str, Any] = {}
     try:
         if SETTINGS_FILE.exists():
@@ -188,7 +198,11 @@ def _profile_payload() -> dict[str, Any]:
         logger.warning("Failed to load settings profile payload: %s", exc)
 
     unit_system = _normalize_unit_system(
-        stored.get("unit_system") or legacy.get("units") or service_profile.system.unit_system,
+        system_ui.get("unit_system")
+        or system_section.get("unit_system")
+        or stored.get("unit_system")
+        or legacy.get("units")
+        or service_profile.system.unit_system,
         default=service_profile.system.unit_system,
     )
     branding_checksum = str(
@@ -518,7 +532,39 @@ def _normalize_maps_section(payload: dict[str, Any]) -> dict[str, Any]:
     style = str(data.get("style") or "standard").strip().lower()
     if style not in {"standard", "satellite", "hybrid", "terrain"}:
         raise HTTPException(status_code=422, detail="style must be one of standard, satellite, hybrid, terrain")
-    normalized = MapsSectionResponse.model_validate({**data, "provider": provider, "style": style}).model_dump()
+
+    mission_planner_raw = data.get("mission_planner")
+    if mission_planner_raw is None:
+        mission_planner_raw = {}
+    if not isinstance(mission_planner_raw, dict):
+        raise HTTPException(status_code=422, detail="mission_planner must be an object when provided")
+
+    mission_planner_provider = str(mission_planner_raw.get("provider") or provider).strip().lower()
+    if mission_planner_provider not in {"google", "osm", "none"}:
+        raise HTTPException(
+            status_code=422,
+            detail="mission_planner.provider must be one of google, osm, none",
+        )
+
+    mission_planner_style = str(mission_planner_raw.get("style") or style).strip().lower()
+    if mission_planner_style not in {"standard", "satellite", "hybrid", "terrain"}:
+        raise HTTPException(
+            status_code=422,
+            detail="mission_planner.style must be one of standard, satellite, hybrid, terrain",
+        )
+
+    normalized = MapsSectionResponse.model_validate(
+        {
+            **data,
+            "provider": provider,
+            "style": style,
+            "mission_planner": {
+                **mission_planner_raw,
+                "provider": mission_planner_provider,
+                "style": mission_planner_style,
+            },
+        }
+    ).model_dump()
     return normalized
 
 
@@ -578,6 +624,15 @@ async def update_system_settings(settings: dict[str, Any]):
     validated = SystemSectionResponse.model_validate(merged).model_dump()
     sections["system"] = validated
     _save_ui_settings(sections)
+    current_profile = _profile_payload()
+    current_profile["system"] = {
+        **current_profile.get("system", {}),
+        "unit_system": unit_system,
+    }
+    current_profile["units"] = unit_system
+    current_profile["unit_system"] = unit_system
+    current_profile["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save_profile_payload(current_profile)
     persistence.add_audit_log("settings.update", details={"scope": "system", "settings": settings})
     return validated
 

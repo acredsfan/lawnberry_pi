@@ -19,6 +19,11 @@
         "type": "command",
         "command": "python3 ./scripts/hooks/consistency_guard.py",
         "timeout": 10
+      },
+      {
+        "type": "command",
+        "command": "python3 ./scripts/hooks/restart_runtime_services.py",
+        "timeout": 45
       }
     ]
   }

@@ -294,6 +294,33 @@
               <option value="terrain">Terrain</option>
             </select>
           </div>
+
+          <div class="maps-config">
+            <div class="form-group">
+              <label for="mission-planner-provider">Mission Planner Provider</label>
+              <select v-model="mapsSettings.mission_planner.provider" id="mission-planner-provider" class="form-control">
+                <option value="osm">OpenStreetMap (Free)</option>
+                <option value="google">Google Maps</option>
+                <option value="none">Disabled</option>
+              </select>
+              <small class="form-text text-muted">
+                Lets `/mission-planner` use its own provider without changing the main `/maps` page. Google still uses the shared API key above.
+              </small>
+            </div>
+
+            <div class="form-group">
+              <label for="mission-planner-style">Mission Planner Style</label>
+              <select v-model="mapsSettings.mission_planner.style" id="mission-planner-style" class="form-control">
+                <option value="standard">Standard</option>
+                <option value="satellite">Satellite</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="terrain">Terrain</option>
+              </select>
+              <small class="form-text text-muted">
+                Use this to keep everyday maps on OSM while reserving higher-cost Google imagery for close waypoint placement in mission planning.
+              </small>
+            </div>
+          </div>
           
           <button class="btn btn-primary" :disabled="saving" @click="saveMapsSettings" aria-label="Save maps settings">
             {{ saving ? 'Saving...' : 'Save Maps Settings' }}
@@ -527,7 +554,11 @@ const mapsSettings = ref({
   provider: 'osm',
   google_api_key: '',
   google_billing_warnings: true,
-  style: 'standard'
+  style: 'standard',
+  mission_planner: {
+    provider: 'osm',
+    style: 'standard',
+  },
 })
 
 const gpsSettings = ref({
@@ -595,7 +626,14 @@ async function loadAllSettings() {
     }
     securitySettings.value = { ...securitySettings.value, ...security.data }
     remoteSettings.value = { ...remoteSettings.value, ...remote.data }
-    mapsSettings.value = { ...mapsSettings.value, ...maps.data }
+    mapsSettings.value = {
+      ...mapsSettings.value,
+      ...maps.data,
+      mission_planner: {
+        ...mapsSettings.value.mission_planner,
+        ...(maps.data?.mission_planner || {}),
+      },
+    }
     gpsSettings.value = { ...gpsSettings.value, ...gps.data }
     // Auto-detect timezone from mower if unset or left at default
     const needsAutoDetect = (!systemSettings.value.timezone || systemSettings.value.timezone.toUpperCase() === 'UTC') && (!timezoneSourceFromApi || timezoneSourceFromApi === 'default')

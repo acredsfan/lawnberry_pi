@@ -51,7 +51,18 @@ This release replaces version 1 with a unified v2 backend and frontend, contract
 - FastAPI camera snapshot and MJPEG endpoints now emit raw JPEG bytes instead of leaking Base64 frame strings with an `image/jpeg` content type, restoring both live camera streaming and snapshot fallback on `/control`.
 - The deployed frontend server now skips HTTP compression for `/api/v2/camera/frame` and `/api/v2/camera/stream.mjpeg`, preventing multipart MJPEG responses from being buffered into a black or stalled camera pane.
 - RoboHAT status handling now marks the controller ready as soon as the firmware acknowledges `rc=disable`, clears stale `usb_control_unavailable` warnings on real takeover, and accepts the firmware's Python-dict `[STATUS]` payloads during diagnostics.
+- RoboHAT port probing now waits for CircuitPython startup after the USB CDC port opens, treats legacy `[RC] ...` heartbeats as valid firmware activity, and recognizes older `[USB] Timeout → back to RC` messages so enumerated RP2040 boards are no longer misclassified as missing or unresponsive.
+- HTTPS fallback now regenerates self-signed certificates with SAN entries for the configured hostnames plus detected LAN IPv4 addresses, fixing modern-browser hostname mismatch failures when the frontend is reached by Pi IP.
+- Let's Encrypt setup now skips IP literals in `ALT_DOMAINS` instead of passing them to certbot, preventing LAN-IP configuration drift from breaking certificate issuance for the real hostname.
+- The canonical `/api/v2/settings` payload now prefers the unit system stored by `/api/v2/settings/system`, so choosing imperial units in the Settings UI no longer snaps back to metric after refresh or app startup.
+- Documented that Cloudflare Access on the public hostname blocks HTTP-01 unless the ACME challenge path is bypassed or DNS-01 is used.
 - Added focused backend regression coverage for camera byte delivery and RoboHAT USB-control readiness parsing.
+
+## Fixes (2026-03-21)
+
+- FastAPI startup now syncs the loaded hardware configuration into the shared singleton app state before telemetry initialization, so hardware-backed telemetry no longer falls back to `neo8m_uart` when the mower is actually configured for a ZED-F9P over USB.
+- WebSocket/sensor diagnostics now share the same sensor-manager and NTRIP state used by the live telemetry path, restoring accurate `/api/v2/sensors/gps/status` and RTK diagnostics after startup.
+- Added focused regression coverage for telemetry hardware-config selection and WebSocket hub app-state synchronization to prevent future GPS/RTK drift regressions.
 
 ## Highlights
 

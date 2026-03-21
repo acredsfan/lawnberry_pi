@@ -4,6 +4,9 @@
       ref="mapRef"
       :zoom="zoom"
       :center="center"
+      :max-zoom="mapMaxZoom"
+      :zoom-snap="0.5"
+      :zoom-delta="0.5"
       :use-global-leaflet="false"
       style="height: 100%; width: 100%"
       @ready="onMapReady"
@@ -16,6 +19,7 @@
         :attribution="tileLayerConfig.attribution"
         :subdomains="tileLayerConfig.subdomains"
         :max-zoom="tileLayerConfig.maxZoom"
+        :max-native-zoom="tileLayerConfig.maxNativeZoom"
       />
       <l-layer-group ref="overlayGroupRef">
         <!-- Waypoints and Path -->
@@ -94,8 +98,13 @@ const mapRef = ref<any>(null);
 let map: L.Map | null = null;
 const overlayGroupRef = ref<any>(null);
 
+const DEFAULT_MAP_MAX_ZOOM = 19;
+const EXTENDED_MAP_MAX_ZOOM = 22;
+const TERRAIN_MAP_MAX_ZOOM = 17;
+
 const zoom = ref(18);
 const center = ref<[number, number]>([37.7749, -122.4194]);
+const mapMaxZoom = ref(DEFAULT_MAP_MAX_ZOOM);
 const isDrawing = ref(true); // Or some other logic to control cursor
 
 // Map Layers State
@@ -157,6 +166,7 @@ async function initializeBaseLayer() {
     googleLayer = null;
   }
   tileLayerConfig.value = null;
+  mapMaxZoom.value = resolveMapMaxZoom(settings.style, usingGoogle, null);
 
   if (usingGoogle) {
     providerBadge.value = 'Google Maps';
@@ -167,20 +177,33 @@ async function initializeBaseLayer() {
       const gmType = (typeMap[style] || 'roadmap') as any;
       
       // @ts-ignore - Leaflet.GoogleMutant is loaded globally
-      googleLayer = L.gridLayer.googleMutant({ type: gmType });
+      googleLayer = L.gridLayer.googleMutant({ type: gmType, maxZoom: EXTENDED_MAP_MAX_ZOOM });
       googleLayer.addTo(map);
     } catch (error) {
       console.warn('Failed to load Google Maps, falling back to OSM.', error);
       providerBadge.value = 'OSM (fallback)';
       const style = settings.style || 'standard';
       tileLayerConfig.value = getOsmTileLayer(style);
+      mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
     }
   } else {
     providerBadge.value = 'OpenStreetMap';
     const style = settings.style || 'standard';
     tileLayerConfig.value = getOsmTileLayer(style);
+    mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
   }
+  map.setMaxZoom(mapMaxZoom.value);
   tileLayerKey.value++;
+}
+
+function resolveMapMaxZoom(style: string, usingGoogle: boolean, layerConfig: TileLayerConfig | null): number {
+  if (usingGoogle) {
+    return EXTENDED_MAP_MAX_ZOOM;
+  }
+  if (style === 'terrain') {
+    return TERRAIN_MAP_MAX_ZOOM;
+  }
+  return layerConfig?.maxZoom || DEFAULT_MAP_MAX_ZOOM;
 }
 
 async function loadGoogleMapsApi(apiKey: string) {

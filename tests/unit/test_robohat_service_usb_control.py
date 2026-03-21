@@ -45,6 +45,24 @@ class _ResponsiveSerial(_StubSerial):
         self.is_open = False
 
 
+class _DelayedResponsiveSerial(_ResponsiveSerial):
+    def __init__(self, lines: list[str], ready_after_checks: int):
+        super().__init__(lines)
+        self._ready_after_checks = ready_after_checks
+        self._checks = 0
+
+    @property
+    def in_waiting(self):
+        self._checks += 1
+        if self._checks <= self._ready_after_checks:
+            return 0
+        return int(bool(self._lines))
+
+    @in_waiting.setter
+    def in_waiting(self, _value):
+        return None
+
+
 @pytest.mark.asyncio
 async def test_send_motor_command_forces_rc_disable(monkeypatch):
     svc = RoboHATService()
@@ -245,11 +263,26 @@ async def test_maintain_usb_control_sends_keepalive(monkeypatch):
 async def test_probe_firmware_response_accepts_robohat_lines():
     svc = RoboHATService()
     svc.serial_conn = _ResponsiveSerial(["[USB] RC disabled – USB control"])
+    svc._PROBE_STARTUP_SETTLE_SECONDS = 0.01
 
     ok = await svc._probe_firmware_response(timeout=0.1)
 
     assert ok is True
     assert svc.status.motor_controller_ok is True
+    assert svc.status.last_error is None
+    assert svc.serial_conn.writes == [b"rc=disable\n"]
+
+
+@pytest.mark.asyncio
+async def test_probe_firmware_response_accepts_delayed_startup_heartbeat():
+    svc = RoboHATService()
+    svc.serial_conn = _DelayedResponsiveSerial(["[RC] steer=1500 µs thr=1500 µs enc=0"], ready_after_checks=2)
+    svc._PROBE_STARTUP_SETTLE_SECONDS = 0.12
+
+    ok = await svc._probe_firmware_response(timeout=0.05)
+
+    assert ok is True
+    assert svc.status.last_watchdog_echo.startswith("[RC]")
     assert svc.status.last_error is None
 
 
@@ -257,11 +290,22 @@ async def test_probe_firmware_response_accepts_robohat_lines():
 async def test_probe_firmware_response_rejects_silent_device():
     svc = RoboHATService()
     svc.serial_conn = _ResponsiveSerial([])
+    svc._PROBE_STARTUP_SETTLE_SECONDS = 0.01
 
     ok = await svc._probe_firmware_response(timeout=0.05)
 
     assert ok is False
     assert svc.status.last_error == "robohat_unresponsive"
+
+
+@pytest.mark.asyncio
+async def test_process_line_legacy_timeout_marks_rc_enabled():
+    svc = RoboHATService()
+    svc._rc_enabled = False
+
+    svc._process_line("[USB] Timeout → back to RC")
+
+    assert svc._rc_enabled is True
 
 
 @pytest.mark.asyncio

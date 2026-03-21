@@ -191,7 +191,7 @@ The repo currently includes this hook:
 
 | Hook file | What it does |
 | --- | --- |
-| `.github/hooks/consistency-stop.json` | Enforces workflow consistency and can block incomplete finish states |
+| `.github/hooks/consistency-stop.json` | Runs the consistency guard on tool/stop events and, on task completion, triggers a best-effort backend/frontend service restart when runtime-affecting files changed |
 
 Practical takeaway: if Copilot says a hook stopped it, treat that as a guardrail, not a bug. The
 agent usually needs to complete a required step such as validation or explicit task completion.

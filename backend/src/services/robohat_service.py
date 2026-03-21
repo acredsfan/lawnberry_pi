@@ -80,6 +80,8 @@ class RoboHATStatus:
 
 class RoboHATService:
     """RoboHAT RP2040 serial bridge service"""
+
+    _PROBE_STARTUP_SETTLE_SECONDS = 3.0
     
     def __init__(self, serial_port: str = "/dev/ttyACM0", baud_rate: int = 115200):
         self.serial_port = serial_port
@@ -119,9 +121,30 @@ class RoboHATService:
         if not self.serial_conn or not self.serial_conn.is_open:
             return False
 
+        saw_robohat_line = False
+
+        # CircuitPython boards can reset when the CDC port is opened. Give the
+        # interpreter time to reach the main loop so our first probe command is
+        # not fired into the void.
+        settle_deadline = time.monotonic() + self._PROBE_STARTUP_SETTLE_SECONDS
+        while time.monotonic() < settle_deadline:
+            try:
+                if self.serial_conn.in_waiting:
+                    raw = await asyncio.to_thread(self.serial_conn.readline)
+                    line = raw.decode("utf-8", errors="ignore").strip()
+                    if not line:
+                        await asyncio.sleep(0.05)
+                        continue
+                    self._process_line(line)
+                    if self._is_robohat_response_line(line):
+                        saw_robohat_line = True
+                else:
+                    await asyncio.sleep(0.05)
+            except Exception:
+                await asyncio.sleep(0.05)
+
         try:
             await self._send_line("rc=disable")
-            await self._send_line("get_rc_status")
         except Exception:
             return False
 
@@ -136,11 +159,16 @@ class RoboHATService:
                         continue
                     self._process_line(line)
                     if self._is_robohat_response_line(line):
+                        saw_robohat_line = True
                         return True
                 else:
                     await asyncio.sleep(0.05)
             except Exception:
                 await asyncio.sleep(0.05)
+
+        if saw_robohat_line:
+            self.status.last_error = None
+            return True
 
         self.status.last_error = "robohat_unresponsive"
         return False
@@ -159,7 +187,7 @@ class RoboHATService:
             )
             
             # Wait for connection to stabilize
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(self._PROBE_STARTUP_SETTLE_SECONDS)
 
             # Flush any banner/boot messages so we begin with a clean buffer
             self._drain_serial_buffer()
@@ -415,7 +443,7 @@ class RoboHATService:
                 self.status.last_error = None
             return
 
-        if "rc enabled" in line_lower or "timeout" in line_lower and "rc mode" in line_lower:
+        if "rc enabled" in line_lower or "back to rc" in line_lower or "timeout" in line_lower and "rc mode" in line_lower:
             self._mark_rc_state(True)
             self._last_status_at = time.monotonic()
             logger.info("RoboHAT reported RC mode active")

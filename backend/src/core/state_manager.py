@@ -11,6 +11,7 @@ class AppState:
     debug_overrides: Dict[str, Any] = field(default_factory=dict)
     hardware_config: Optional[Any] = None
     sensor_manager: Optional[Any] = None
+    ntrip_forwarder: Optional[Any] = None
     
     # Singleton instance
     _instance: Optional['AppState'] = None

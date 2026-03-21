@@ -61,6 +61,7 @@ class TelemetryService:
         manager = SensorManager(gps_mode=gps_mode, tof_config=tof_cfg, power_config=power_cfg)
         await manager.initialize()
         self.app_state.sensor_manager = manager
+        self.app_state.ntrip_forwarder = None
         
         # TODO: Handle NTRIP forwarder if needed, or keep it separate.
         # For now, let's assume NTRIP is handled by the manager or a separate service, 
@@ -71,8 +72,7 @@ class TelemetryService:
              if forwarder:
                  try:
                      await forwarder.start()
-                     # Store forwarder somewhere? 
-                     # self.app_state.ntrip_forwarder = forwarder # Maybe add to AppState if needed
+                     self.app_state.ntrip_forwarder = forwarder
                  except Exception as e:
                      logger.error(f"Failed to start NTRIP: {e}")
 

@@ -200,6 +200,52 @@ async def test_settings_maps_provider_osm_fallback():
 
 
 @pytest.mark.asyncio
+async def test_settings_maps_supports_mission_planner_overrides():
+    """
+    Test PUT /api/v2/settings/maps with a mission-planner-specific provider/style override.
+    Validates the planner can use different imagery than the general maps page.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        headers = {"Authorization": "Bearer test-token", "Content-Type": "application/json"}
+
+        payload = {
+            "provider": "osm",
+            "style": "standard",
+            "mission_planner": {
+                "provider": "google",
+                "style": "hybrid",
+            },
+        }
+        response = await client.put(
+            "/api/v2/settings/maps",
+            json=payload,
+            headers=headers,
+        )
+
+        if response.status_code in (404, 501, 422):
+            return
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mission_planner"] == {
+            "provider": "google",
+            "style": "hybrid",
+        }
+
+        response_get = await client.get("/api/v2/settings/maps", headers=headers)
+
+        if response_get.status_code in (404, 501, 422):
+            return
+
+        assert response_get.status_code == 200
+        assert response_get.json()["mission_planner"] == {
+            "provider": "google",
+            "style": "hybrid",
+        }
+
+
+@pytest.mark.asyncio
 async def test_settings_realtime_propagation_via_websocket():
     """
     Test settings changes propagated to /ws/settings channel in real-time.

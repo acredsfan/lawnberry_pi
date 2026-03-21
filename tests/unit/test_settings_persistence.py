@@ -1,6 +1,7 @@
 import pytest
 import os
 import json
+from pathlib import Path
 from fastapi.testclient import TestClient
 from backend.src.api.routers import settings as settings_router
 from backend.src.main import app
@@ -8,13 +9,16 @@ from backend.src.main import app
 client = TestClient(app)
 
 @pytest.fixture
-def clean_settings_file():
-    settings_file = settings_router.SETTINGS_FILE
-    if os.path.exists(settings_file):
-        os.remove(settings_file)
+def clean_settings_file(tmp_path, monkeypatch):
+    settings_file = tmp_path / "settings.json"
+    ui_settings_file = tmp_path / "ui_settings.json"
+    monkeypatch.setattr(settings_router, "DATA_DIR", Path(tmp_path))
+    monkeypatch.setattr(settings_router, "SETTINGS_FILE", settings_file)
+    monkeypatch.setattr(settings_router, "UI_SETTINGS_FILE", ui_settings_file)
     yield
-    if os.path.exists(settings_file):
-        os.remove(settings_file)
+    for path in (settings_file, ui_settings_file):
+        if os.path.exists(path):
+            os.remove(path)
 
 def test_get_default_settings(clean_settings_file):
     response = client.get("/api/v2/settings")
@@ -67,3 +71,78 @@ def test_update_and_persist_settings(clean_settings_file):
     assert refreshed["theme"] == "light"
     assert refreshed["units"] == "imperial"
     assert refreshed["telemetry"]["cadence_hz"] == 7
+
+
+def test_get_settings_prefers_ui_unit_system(clean_settings_file):
+    settings_router.SETTINGS_FILE.write_text(
+        json.dumps(
+            {
+                "theme": "dark",
+                "units": "metric",
+                "unit_system": "metric",
+                "language": "en",
+                "notifications_enabled": True,
+                "map_provider": "osm",
+            }
+        )
+    )
+    settings_router.UI_SETTINGS_FILE.write_text(
+        json.dumps(
+            {
+                "system": {
+                    "unit_system": "imperial",
+                    "ui": {
+                        "unit_system": "imperial",
+                    },
+                }
+            }
+        )
+    )
+
+    response = client.get("/api/v2/settings")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["units"] == "imperial"
+    assert data["unit_system"] == "imperial"
+    assert data["system"]["unit_system"] == "imperial"
+
+    saved_data = json.loads(settings_router.SETTINGS_FILE.read_text())
+    assert saved_data["units"] == "imperial"
+    assert saved_data["unit_system"] == "imperial"
+
+
+def test_settings_maps_section_persists_mission_planner_overrides(clean_settings_file):
+    response = client.put(
+        "/api/v2/settings/maps",
+        json={
+            "provider": "osm",
+            "style": "standard",
+            "mission_planner": {
+                "provider": "google",
+                "style": "hybrid",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "osm"
+    assert payload["style"] == "standard"
+    assert payload["mission_planner"] == {
+        "provider": "google",
+        "style": "hybrid",
+    }
+
+    stored_sections = json.loads(settings_router.UI_SETTINGS_FILE.read_text())
+    assert stored_sections["maps"]["mission_planner"] == {
+        "provider": "google",
+        "style": "hybrid",
+    }
+
+    response_get = client.get("/api/v2/settings/maps")
+    assert response_get.status_code == 200
+    assert response_get.json()["mission_planner"] == {
+        "provider": "google",
+        "style": "hybrid",
+    }

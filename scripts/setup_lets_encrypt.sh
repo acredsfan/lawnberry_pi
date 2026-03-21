@@ -29,6 +29,35 @@ FRONTEND_PORT=${FRONTEND_PORT:-3000}
 BACKEND_PORT=${BACKEND_PORT:-8081}
 WEBROOT=${WEBROOT:-/var/www}
 
+is_ip_literal() {
+  local value=${1:-}
+  [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ "$value" == *:* ]]
+}
+
+sanitize_alt_domains() {
+  local raw=${1:-}
+  local sanitized=()
+  local seen=" "
+
+  raw=${raw//,/ }
+  for d in $raw; do
+    [[ -n "$d" ]] || continue
+    if is_ip_literal "$d"; then
+      echo "Warning: Skipping ALT_DOMAINS entry '$d' because Let's Encrypt does not issue certificates for IP literals." >&2
+      continue
+    fi
+    if [[ "$seen" == *" $d "* ]]; then
+      continue
+    fi
+    sanitized+=("$d")
+    seen+="$d "
+  done
+
+  printf '%s\n' "${sanitized[*]}"
+}
+
+ALT_DOMAINS_RAW=$(sanitize_alt_domains "$ALT_DOMAINS_RAW")
+
 if [[ -z "$DOMAIN" || -z "$EMAIL" ]]; then
   echo "Error: DOMAIN and EMAIL are required."
   echo "Example: sudo DOMAIN=example.com EMAIL=you@example.com $0"

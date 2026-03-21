@@ -105,17 +105,12 @@ async def get_sensors_health() -> SensorHealthResponse:
     initialized = False
 
     try:
-        if websocket_hub._sensor_manager is None:
-            from ..services.sensor_manager import SensorManager  # type: ignore
-            websocket_hub._sensor_manager = SensorManager()
-            await websocket_hub._sensor_manager.initialize()
-
-        sm = websocket_hub._sensor_manager
+        sm = await websocket_hub._ensure_sensor_manager()
         initialized = getattr(sm, "initialized", False)
         status = await sm.get_sensor_status()
         # Map to simple response
         # Map statuses to strings and apply fault injection overrides
-        from ..testing.fault_injector import enabled, any_enabled  # lightweight
+        from ...testing.fault_injector import enabled, any_enabled  # lightweight
         def _as_str(v: object) -> str:
             try:
                 s = str(v)
@@ -170,11 +165,7 @@ async def get_tof_status() -> ToFStatusResponse:
     left_probe: ToFProbe | None = None
     right_probe: ToFProbe | None = None
     try:
-        if websocket_hub._sensor_manager is None:
-            from ..services.sensor_manager import SensorManager  # type: ignore
-            websocket_hub._sensor_manager = SensorManager()
-            await websocket_hub._sensor_manager.initialize()
-        sm = websocket_hub._sensor_manager
+        sm = await websocket_hub._ensure_sensor_manager()
         tof = getattr(sm, "tof", None)
         left = getattr(tof, "_left", None)
         right = getattr(tof, "_right", None)
@@ -215,11 +206,7 @@ async def get_tof_status() -> ToFStatusResponse:
 async def get_gps_status() -> GPSSummary:
     sim_mode = os.getenv("SIM_MODE", "0") != "0"
     try:
-        if websocket_hub._sensor_manager is None:
-            from ..services.sensor_manager import SensorManager  # type: ignore
-            websocket_hub._sensor_manager = SensorManager()
-            await websocket_hub._sensor_manager.initialize()
-        sm = websocket_hub._sensor_manager
+        sm = await websocket_hub._ensure_sensor_manager()
         gps = getattr(sm, "gps", None)
         if gps is None:
             return GPSSummary()
@@ -320,11 +307,7 @@ async def get_rtk_diagnostics() -> RtkDiagnosticsResponse:
 @router.get("/sensors/imu/status", response_model=IMUSummary)
 async def get_imu_status() -> IMUSummary:
     try:
-        if websocket_hub._sensor_manager is None:
-            from ..services.sensor_manager import SensorManager  # type: ignore
-            websocket_hub._sensor_manager = SensorManager()
-            await websocket_hub._sensor_manager.initialize()
-        sm = websocket_hub._sensor_manager
+        sm = await websocket_hub._ensure_sensor_manager()
         imu = getattr(sm, "imu", None)
         if imu is None:
             return IMUSummary()
@@ -342,11 +325,7 @@ async def get_imu_status() -> IMUSummary:
 @router.get("/sensors/environmental/status", response_model=EnvSummary)
 async def get_env_status() -> EnvSummary:
     try:
-        if websocket_hub._sensor_manager is None:
-            from ..services.sensor_manager import SensorManager  # type: ignore
-            websocket_hub._sensor_manager = SensorManager()
-            await websocket_hub._sensor_manager.initialize()
-        sm = websocket_hub._sensor_manager
+        sm = await websocket_hub._ensure_sensor_manager()
         env = getattr(sm, "environmental", None)
         if env is None:
             return EnvSummary()
@@ -373,11 +352,7 @@ async def get_env_status() -> EnvSummary:
 @router.get("/sensors/power/status", response_model=PowerSummary)
 async def get_power_status() -> PowerSummary:
     try:
-        if websocket_hub._sensor_manager is None:
-            from ..services.sensor_manager import SensorManager  # type: ignore
-            websocket_hub._sensor_manager = SensorManager()
-            await websocket_hub._sensor_manager.initialize()
-        sm = websocket_hub._sensor_manager
+        sm = await websocket_hub._ensure_sensor_manager()
         p = getattr(sm, "power", None)
         if p is None:
             return PowerSummary()
