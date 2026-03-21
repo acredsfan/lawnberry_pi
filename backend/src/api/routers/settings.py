@@ -99,6 +99,11 @@ class GpsPolicySectionResponse(BaseModel):
     accuracy_threshold_meters: int = 3
 
 
+def _looks_like_google_oauth_client_id(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    return normalized.endswith(".apps.googleusercontent.com")
+
+
 def _default_sections() -> dict[str, Any]:
     system = SystemSectionResponse().model_dump()
     return {
@@ -573,6 +578,12 @@ def _normalize_maps_section(payload: dict[str, Any]) -> dict[str, Any]:
             detail="google_api_key is required when the main map or Mission Planner uses Google Maps",
         )
 
+    if _looks_like_google_oauth_client_id(google_api_key):
+        raise HTTPException(
+            status_code=422,
+            detail="google_api_key must be a Google Maps API key, not a Google OAuth client ID",
+        )
+
     normalized = MapsSectionResponse.model_validate(
         {
             **data,
@@ -590,7 +601,42 @@ def _normalize_maps_section(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _maps_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    normalized = _normalize_maps_section(payload)
+    data = dict(payload or {})
+    if "api_key" in data and not data.get("google_api_key"):
+        data["google_api_key"] = data.get("api_key")
+
+    provider = str(data.get("provider") or "osm").strip().lower()
+    if provider not in {"google", "osm", "none"}:
+        provider = "osm"
+
+    style = str(data.get("style") or "standard").strip().lower()
+    if style not in {"standard", "satellite", "hybrid", "terrain"}:
+        style = "standard"
+
+    mission_planner_raw = data.get("mission_planner") if isinstance(data.get("mission_planner"), dict) else {}
+    mission_planner_provider = str(mission_planner_raw.get("provider") or provider).strip().lower()
+    if mission_planner_provider not in {"google", "osm", "none"}:
+        mission_planner_provider = provider
+
+    mission_planner_style = str(mission_planner_raw.get("style") or style).strip().lower()
+    if mission_planner_style not in {"standard", "satellite", "hybrid", "terrain"}:
+        mission_planner_style = style
+
+    google_api_key = str(data.get("google_api_key") or "").strip()
+    normalized = MapsSectionResponse.model_validate(
+        {
+            **data,
+            "provider": provider,
+            "style": style,
+            "google_api_key": google_api_key,
+            "mission_planner": {
+                **mission_planner_raw,
+                "provider": mission_planner_provider,
+                "style": mission_planner_style,
+            },
+        }
+    ).model_dump()
+    normalized["google_api_key_invalid"] = _looks_like_google_oauth_client_id(google_api_key)
     normalized["api_key"] = normalized.get("google_api_key", "")
     return normalized
 

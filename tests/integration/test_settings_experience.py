@@ -277,6 +277,66 @@ async def test_settings_maps_rejects_google_mission_planner_without_api_key():
 
 
 @pytest.mark.asyncio
+async def test_settings_maps_rejects_google_oauth_client_id_value():
+    """
+    Test PUT /api/v2/settings/maps rejects a Google OAuth client ID in place of a Maps API key.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        headers = {"Authorization": "Bearer test-token", "Content-Type": "application/json"}
+
+        payload = {
+            "provider": "google",
+            "style": "satellite",
+            "google_api_key": "1234567890-example.apps.googleusercontent.com",
+        }
+        response = await client.put(
+            "/api/v2/settings/maps",
+            json=payload,
+            headers=headers,
+        )
+
+        if response.status_code in (404, 501):
+            return
+
+        assert response.status_code == 422
+        assert "oauth client id" in response.json().get("detail", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_settings_maps_get_returns_invalid_key_flag_for_saved_oauth_client_id():
+    """
+    Test GET /api/v2/settings/maps remains readable when an old invalid Google credential is stored.
+    """
+    transport = ASGITransport(app=app)
+    from backend.src.api.routers import settings as settings_router
+
+    original_sections = settings_router._load_ui_settings()
+    mutated_sections = {**original_sections}
+    mutated_sections["maps"] = {
+        **original_sections.get("maps", {}),
+        "provider": "google",
+        "style": "satellite",
+        "google_api_key": "1234567890-example.apps.googleusercontent.com",
+        "mission_planner": {
+            "provider": "google",
+            "style": "hybrid",
+        },
+    }
+    settings_router._save_ui_settings(mutated_sections)
+
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            headers = {"Authorization": "Bearer test-token"}
+            response = await client.get("/api/v2/settings/maps", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json().get("google_api_key_invalid") is True
+    finally:
+        settings_router._save_ui_settings(original_sections)
+
+
+@pytest.mark.asyncio
 async def test_settings_realtime_propagation_via_websocket():
     """
     Test settings changes propagated to /ws/settings channel in real-time.

@@ -121,6 +121,10 @@ const waypointLatLngs = computed(() => props.waypoints.map(wp => [wp.lat, wp.lon
 const mowerLatLng = computed(() => (props.mowerPosition ? [props.mowerPosition.lat, props.mowerPosition.lon] : null));
 const accuracyRadius = computed(() => props.mowerPosition?.accuracy || 0);
 
+function looksLikeGoogleOAuthClientId(value: string): boolean {
+  return String(value || '').trim().toLowerCase().endsWith('.apps.googleusercontent.com');
+}
+
 function waypointIcon(index: number) {
   return L.divIcon({
     html: `<div class='wp-pin'><span>${index}</span></div>`,
@@ -194,6 +198,12 @@ async function initializeBaseLayer() {
       tileLayerConfig.value = getOsmTileLayer(style);
       mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
     }
+  } else if (googleRequested && looksLikeGoogleOAuthClientId(apiKey)) {
+    providerBadge.value = 'OSM (invalid Google key)';
+    tileErrorMessage.value = 'Mission Planner has a Google OAuth client ID saved, not a Google Maps API key. Update Settings with a Maps JavaScript API key.';
+    const style = settings.style || 'standard';
+    tileLayerConfig.value = getOsmTileLayer(style);
+    mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
   } else if (googleRequested && !apiKey.trim()) {
     providerBadge.value = 'OSM (Google key required)';
     tileErrorMessage.value = 'Mission Planner is set to Google Maps, but no Google Maps API key is saved in Settings.';

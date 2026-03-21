@@ -565,6 +565,10 @@ const mapsRequireGoogleApiKey = computed(() => {
   return mapsSettings.value.provider === 'google' || mapsSettings.value.mission_planner.provider === 'google'
 })
 
+function looksLikeGoogleOAuthClientId(value: string): boolean {
+  return String(value || '').trim().toLowerCase().endsWith('.apps.googleusercontent.com')
+}
+
 const gpsSettings = ref({
   gps_loss_policy: 'dead_reckoning',
   dead_reckoning_duration_minutes: 2,
@@ -688,9 +692,15 @@ async function saveRemoteSettings() {
 }
 
 async function saveMapsSettings() {
-  if (mapsRequireGoogleApiKey.value && !String(mapsSettings.value.google_api_key || '').trim()) {
+  const googleApiKey = String(mapsSettings.value.google_api_key || '').trim()
+  if (mapsRequireGoogleApiKey.value && !googleApiKey) {
     showMessage('Enter a Google Maps API key before enabling Google Maps for the main map or Mission Planner.', false)
     toast.show('Google Maps API key required', 'error', 4000)
+    return
+  }
+  if (mapsRequireGoogleApiKey.value && looksLikeGoogleOAuthClientId(googleApiKey)) {
+    showMessage('Enter a Google Maps API key, not a Google OAuth client ID.', false)
+    toast.show('Google Maps API key is invalid', 'error', 4500)
     return
   }
   await saveSettings('/api/v2/settings/maps', mapsSettings.value)

@@ -165,3 +165,46 @@ def test_settings_maps_section_rejects_google_without_shared_api_key(clean_setti
 
     assert response.status_code == 422
     assert "google_api_key" in response.json()["detail"]
+
+
+def test_settings_maps_section_rejects_google_oauth_client_id(clean_settings_file):
+    response = client.put(
+        "/api/v2/settings/maps",
+        json={
+            "provider": "google",
+            "style": "satellite",
+            "google_api_key": "1234567890-example.apps.googleusercontent.com",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "oauth client id" in response.json()["detail"].lower()
+
+
+def test_settings_maps_get_tolerates_saved_invalid_google_key(clean_settings_file):
+    settings_router.UI_SETTINGS_FILE.write_text(
+        json.dumps(
+            {
+                "maps": {
+                    "provider": "google",
+                    "style": "satellite",
+                    "google_api_key": "1234567890-example.apps.googleusercontent.com",
+                    "mission_planner": {
+                        "provider": "google",
+                        "style": "hybrid",
+                    },
+                }
+            }
+        )
+    )
+
+    response = client.get("/api/v2/settings/maps")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["google_api_key_invalid"] is True
+    assert payload["provider"] == "google"
+    assert payload["mission_planner"] == {
+        "provider": "google",
+        "style": "hybrid",
+    }

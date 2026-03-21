@@ -7,10 +7,10 @@
   },
   "maps": {
     "bypass_external": false,
-    "google_api_key": "561311580840-4v4qeg6ojmtpg59pa8brq2bbhbva5nae.apps.googleusercontent.com",
+    "google_api_key": "AIzaSyCYhsfmsbSCKir75tH6rqM6YjB_dNFsfb8",
     "google_billing_warnings": true,
     "mission_planner": {
-      "provider": "osm",
+      "provider": "google",
       "style": "satellite"
     },
     "provider": "google",
@@ -51,5 +51,5 @@
     },
     "unit_system": "imperial"
   },
-  "updated_at": "2026-03-21T18:39:35.134418+00:00"
+  "updated_at": "2026-03-21T19:48:54.163064+00:00"
 }

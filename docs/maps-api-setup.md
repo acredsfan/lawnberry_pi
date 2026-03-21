@@ -39,7 +39,8 @@ The Settings screen now lets you configure `/mission-planner` separately from th
 This is useful when you want to keep the everyday maps page on free OpenStreetMap tiles, but switch the mission planner to
 Google satellite or hybrid imagery for precise pin placement. The mission planner override reuses the same Google Maps API
 key and billing-warning settings, so you only manage the credential once. If either the main map or Mission Planner is set
-to Google Maps, the shared Google API key must be filled in before the settings can be saved.
+to Google Maps, the shared Google API key must be filled in before the settings can be saved. The app also rejects Google
+OAuth client IDs (values ending in `.apps.googleusercontent.com`) because they are not valid Google Maps API keys.
 
 Operationally, a mission must still be **created** and then **started**. Creating a mission only saves the waypoint list;
 the mower will not move until the operator explicitly presses **Start Mission** and the mower satisfies live navigation
