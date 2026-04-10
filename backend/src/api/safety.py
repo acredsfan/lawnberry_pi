@@ -6,7 +6,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 # Reuse safety/blade state used by existing v2 control endpoints
-from .rest import _blade_state, _safety_state  # minimal coupling to keep behavior consistent
+from . import rest as rest_api
+from .rest import _blade_state, _client_emergency, _safety_state  # minimal coupling to keep behavior consistent
 
 router = APIRouter()
 
@@ -37,6 +38,8 @@ async def clear_emergency_stop(payload: EmergencyClearRequest):
     # Clear local safety state and ensure blade remains off
     _safety_state["emergency_stop_active"] = False
     _blade_state["active"] = False
+    rest_api._emergency_until = 0.0
+    _client_emergency.clear()
 
     # Inform RoboHAT firmware if available
     try:

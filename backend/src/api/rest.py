@@ -532,9 +532,29 @@ class ControlResponseV2(BaseModel):
 
 def _emergency_active() -> bool:
     try:
+        if bool(_safety_state.get("emergency_stop_active", False)):
+            return True
         return time.time() < _emergency_until
     except Exception:
         return False
+
+
+def _latch_emergency_state(request: Request | None = None) -> None:
+    """Latch emergency state until explicitly cleared by /control/emergency_clear."""
+    _safety_state["emergency_stop_active"] = True
+    _blade_state["active"] = False
+
+    global _legacy_motors_active
+    _legacy_motors_active = False
+
+    global _emergency_until
+    _emergency_until = time.time() + 0.2
+
+    try:
+        if request is not None:
+            _client_emergency[_client_key(request)] = time.time() + 0.3
+    except Exception:
+        pass
 
 def _client_key(request: Request) -> str:
     auth = request.headers.get("authorization") or request.headers.get("Authorization")
@@ -862,17 +882,17 @@ async def control_blade_v2(cmd: dict, request: Request):
                 body = {"detail": "safety_interlock: emergency_stop_active - blade commands blocked"}
                 persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
                 return JSONResponse(status_code=403, content=body)
-            # If no auth header provided, allow enabling for audit test flow
-            if not auth_header:
-                body = {"blade_status": "ENABLED"}
-                persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
-                return JSONResponse(status_code=200, content=body)
             # Safety interlock: reject with 403 if motors active; otherwise accept
             global _legacy_motors_active
             if _legacy_motors_active:
                 body = {"detail": "Safety interlock: motors_active"}
                 persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
                 return JSONResponse(status_code=403, content=body)
+            # If no auth header provided, allow enabling for audit test flow only when motors are stopped
+            if not auth_header:
+                body = {"blade_status": "ENABLED"}
+                persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
+                return JSONResponse(status_code=200, content=body)
             body = {"blade_status": "ENABLED"}
             persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
             return JSONResponse(status_code=200, content=body)
@@ -945,26 +965,14 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
     if not is_legacy:
         session_context = _resolve_manual_session(payload.get("session_id"))
     
-    # Set emergency state
-    _safety_state["emergency_stop_active"] = True
-    _blade_state["active"] = False
-    global _legacy_motors_active
-    _legacy_motors_active = False
-    # Arm short-lived emergency TTL to block follow-up commands across both modes
-    global _emergency_until
-    # Block control commands for a short window after emergency to ensure deterministic tests
-    _emergency_until = time.time() + 0.2
-    # Mark this client as in-emergency for a short TTL
-    try:
-        if request is not None:
-            _client_emergency[_client_key(request)] = time.time() + 0.3
-    except Exception:
-        pass
+    # Set emergency state (latched until explicit clear)
+    _latch_emergency_state(request)
     
     # Send emergency stop to RoboHAT
     robohat = get_robohat_service()
+    emergency_confirmed = True
     if robohat and robohat.status.serial_connected:
-        await robohat.emergency_stop()
+        emergency_confirmed = await robohat.emergency_stop()
     
     # If legacy payload with command field was sent, return 200 with integration-expected shape
     if is_legacy:
@@ -979,10 +987,10 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
         return JSONResponse(status_code=200, content=legacy_payload)
 
     response = ControlResponseV2(
-        accepted=True,
+        accepted=emergency_confirmed,
         audit_id=audit_id,
-        result="accepted",
-        status_reason="EMERGENCY_STOP_TRIGGERED",
+        result="accepted" if emergency_confirmed else "rejected",
+        status_reason="EMERGENCY_STOP_TRIGGERED" if emergency_confirmed else "EMERGENCY_STOP_DELIVERY_FAILED",
         safety_checks=["immediate_stop"],
         active_interlocks=["emergency_stop_override"],
         remediation={
@@ -1012,8 +1020,15 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
 async def control_emergency_stop_alias(request: Request = None):
     """Integration-friendly alias that always returns 200 and a simple flag."""
     # Trigger emergency state
-    _safety_state["emergency_stop_active"] = True
-    _blade_state["active"] = False
+    _latch_emergency_state(request)
+    try:
+        from ..services.robohat_service import get_robohat_service
+
+        robohat = get_robohat_service()
+        if robohat and robohat.status.serial_connected:
+            await robohat.emergency_stop()
+    except Exception:
+        logger.debug("Emergency-stop alias hardware dispatch failed", exc_info=True)
     payload = {
         "emergency_stop_active": True,
         "motors_stopped": True,
@@ -1037,6 +1052,12 @@ async def control_start_navigation():
     from ..services.navigation_service import NavigationService
 
     nav_service = NavigationService.get_instance()
+    if _emergency_active():
+        return _navigation_error_response(
+            nav_service,
+            status_label="emergency_stop_active",
+            detail="Navigation start is blocked while emergency stop is active.",
+        )
     started = await nav_service.start_autonomous_navigation()
     if not started:
         return _navigation_error_response(
@@ -1079,6 +1100,12 @@ async def control_resume_navigation():
     from ..services.navigation_service import NavigationService
 
     nav_service = NavigationService.get_instance()
+    if _emergency_active():
+        return _navigation_error_response(
+            nav_service,
+            status_label="emergency_stop_active",
+            detail="Navigation resume is blocked while emergency stop is active.",
+        )
     resumed = await nav_service.resume_navigation()
     if not resumed:
         return _navigation_error_response(
@@ -1121,6 +1148,12 @@ async def control_return_home():
     from ..services.navigation_service import NavigationService
 
     nav_service = NavigationService.get_instance()
+    if _emergency_active():
+        return _navigation_error_response(
+            nav_service,
+            status_label="emergency_stop_active",
+            detail="Return-home is blocked while emergency stop is active.",
+        )
     accepted = await nav_service.return_home()
     if not accepted:
         return _navigation_error_response(

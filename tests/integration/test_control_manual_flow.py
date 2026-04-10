@@ -329,3 +329,57 @@ async def test_control_emergency_clear_requires_explicit_confirmation():
         assert response_with_confirm.status_code == 200
         data_with_confirm = response_with_confirm.json()
         assert data_with_confirm["status"] == "EMERGENCY_CLEARED"
+
+
+@pytest.mark.asyncio
+async def test_emergency_lockout_stays_active_until_explicit_clear():
+    """Emergency stop must remain latched until /control/emergency_clear confirms reset."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        headers = {"Authorization": "Bearer test-token", "Content-Type": "application/json"}
+
+        emergency_response = await client.post(
+            "/api/v2/control/emergency",
+            json={"command": "emergency_stop", "timestamp": datetime.utcnow().isoformat() + "Z"},
+            headers=headers,
+        )
+        if emergency_response.status_code in (404, 501, 422):
+            return
+
+        # Wait well past the short legacy TTL to prove the lockout is latched.
+        import asyncio as _asyncio
+        await _asyncio.sleep(0.5)
+
+        blocked_drive = await client.post(
+            "/api/v2/control/drive",
+            json={
+                "command": "drive",
+                "throttle": 0.2,
+                "turn": 0.0,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+            },
+            headers=headers,
+        )
+        if blocked_drive.status_code not in (404, 501, 422):
+            assert blocked_drive.status_code == 403
+
+        clear_response = await client.post(
+            "/api/v2/control/emergency_clear",
+            json={"confirmation": True, "timestamp": datetime.utcnow().isoformat() + "Z"},
+            headers=headers,
+        )
+        if clear_response.status_code not in (404, 501, 422):
+            assert clear_response.status_code == 200
+
+        allowed_drive = await client.post(
+            "/api/v2/control/drive",
+            json={
+                "command": "drive",
+                "throttle": 0.2,
+                "turn": 0.0,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+            },
+            headers=headers,
+        )
+        if allowed_drive.status_code not in (404, 501, 422):
+            assert allowed_drive.status_code == 200

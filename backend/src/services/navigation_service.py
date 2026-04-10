@@ -137,6 +137,7 @@ class NavigationService:
         self.obstacle_avoidance_distance = 1.0  # meters
         self.max_waypoint_fix_age_seconds = 2.0
         self.max_waypoint_accuracy_m = 5.0
+        self.position_verification_timeout_seconds = 30.0
         
         # State tracking
         self.total_distance = 0.0
@@ -248,6 +249,8 @@ class NavigationService:
             # Blade command failures should not abort navigation
             logger.warning("Blade command failed or unavailable; continuing movement")
 
+        verification_wait_start = time.monotonic()
+
         while True:
             status = mission_service.mission_statuses.get(mission.id)
             if not status:
@@ -266,15 +269,36 @@ class NavigationService:
                 await self._deliver_stop_command(reason="mission status change")
                 return False
 
+            if self._global_emergency_active():
+                logger.critical("Waypoint navigation blocked by active emergency stop latch")
+                await self._deliver_stop_command(reason="global emergency hold")
+                self.navigation_state.navigation_mode = NavigationMode.EMERGENCY_STOP
+                return False
+
             if not self.navigation_state.current_position:
+                if (time.monotonic() - verification_wait_start) >= self.position_verification_timeout_seconds:
+                    await self._deliver_stop_command(reason="position acquisition timeout")
+                    emergency_ok = await self.emergency_stop()
+                    raise RuntimeError(
+                        "Position acquisition timeout while navigating waypoint"
+                        + ("; emergency stop activated" if emergency_ok else "")
+                    )
                 await asyncio.sleep(0.5)
                 continue
 
             if not self._position_is_verified_for_waypoint():
                 self.navigation_state.target_velocity = 0.0
                 await self._deliver_stop_command(reason="position verification hold")
+                if (time.monotonic() - verification_wait_start) >= self.position_verification_timeout_seconds:
+                    emergency_ok = await self.emergency_stop()
+                    raise RuntimeError(
+                        "Position verification timeout while navigating waypoint"
+                        + ("; emergency stop activated" if emergency_ok else "")
+                    )
                 await asyncio.sleep(0.2)
                 continue
+
+            verification_wait_start = time.monotonic()
 
             distance_to_target = self.path_planner.calculate_distance(
                 self.navigation_state.current_position,
@@ -359,6 +383,9 @@ class NavigationService:
         ls = max(-self.max_speed, min(self.max_speed, float(left_speed)))
         rs = max(-self.max_speed, min(self.max_speed, float(right_speed)))
 
+        if self._global_emergency_active() and (abs(ls) > 1e-6 or abs(rs) > 1e-6):
+            raise RuntimeError("Emergency stop active; rejecting non-zero navigation command")
+
         # Update desired velocity estimate (magnitude)
         try:
             self.navigation_state.target_velocity = float(max(abs(ls), abs(rs)))
@@ -436,6 +463,15 @@ class NavigationService:
         if accuracy is None:
             return False
         return accuracy <= self.max_waypoint_accuracy_m
+
+    def _global_emergency_active(self) -> bool:
+        """Return True when API-level emergency stop is currently latched."""
+        try:
+            from ..api import rest as rest_api
+
+            return bool(rest_api._safety_state.get("emergency_stop_active", False))
+        except Exception:
+            return False
 
     def _latch_global_emergency_state(self) -> None:
         """Mirror the control API emergency latch for non-HTTP emergency paths."""

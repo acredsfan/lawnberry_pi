@@ -99,6 +99,39 @@ def setup_test_environment():
     pass
 
 
+@pytest.fixture(autouse=True)
+def reset_control_safety_state():
+    """Reset shared control emergency/legacy state between tests.
+
+    Emergency lockout is now intentionally latched until explicit clear, so tests must
+    start from a known nominal state to avoid cross-test leakage.
+    """
+    try:
+        from backend.src.api import rest as rest_api
+
+        rest_api._safety_state["emergency_stop_active"] = False
+        rest_api._blade_state["active"] = False
+        rest_api._emergency_until = 0.0
+        rest_api._client_emergency.clear()
+        rest_api._legacy_motors_active = False
+    except Exception:
+        # Keep fixture fail-safe for import-order edge cases in isolated tests.
+        pass
+
+    yield
+
+    try:
+        from backend.src.api import rest as rest_api
+
+        rest_api._safety_state["emergency_stop_active"] = False
+        rest_api._blade_state["active"] = False
+        rest_api._emergency_until = 0.0
+        rest_api._client_emergency.clear()
+        rest_api._legacy_motors_active = False
+    except Exception:
+        pass
+
+
 @pytest_asyncio.fixture
 async def test_client():
     """Create a test client for the FastAPI application."""

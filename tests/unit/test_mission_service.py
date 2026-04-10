@@ -8,8 +8,10 @@ from backend.src.models.mission import MissionLifecycleStatus, MissionWaypoint
 from backend.src.services.mission_service import (
     MissionConflictError,
     MissionService,
+    MissionStateError,
     MissionValidationError,
 )
+from backend.src.api.rest import _safety_state
 
 
 class DummyNavigationService:
@@ -183,3 +185,20 @@ async def test_abort_escalates_to_emergency_when_stop_navigation_fails():
     assert "emergency stop activated" in (service.mission_statuses[mission.id].detail or "")
     assert nav.stop_calls == 1
     assert nav.emergency_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_start_mission_rejected_when_emergency_stop_active():
+    nav = DummyNavigationService()
+    service = MissionService(nav)
+    mission = await service.create_mission(
+        "Emergency locked mission",
+        [MissionWaypoint(lat=0.1, lon=0.1, blade_on=False, speed=50)],
+    )
+
+    _safety_state["emergency_stop_active"] = True
+    try:
+        with pytest.raises(MissionStateError, match="emergency stop"):
+            await service.start_mission(mission.id)
+    finally:
+        _safety_state["emergency_stop_active"] = False

@@ -13,7 +13,7 @@
       "provider": "google",
       "style": "satellite"
     },
-    "provider": "google",
+    "provider": "osm",
     "style": "satellite",
     "zoom_level": 18
   },
@@ -51,5 +51,5 @@
     },
     "unit_system": "imperial"
   },
-  "updated_at": "2026-03-21T19:48:54.163064+00:00"
+  "updated_at": "2026-03-22T20:16:47.505905+00:00"
 }

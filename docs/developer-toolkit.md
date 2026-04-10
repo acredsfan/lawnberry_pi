@@ -27,6 +27,7 @@ The codebase is substantial and already covers the major product surfaces:
 - when using `scripts/setup_lets_encrypt.sh`, keep `ALT_DOMAINS` limited to hostnames; LAN/private IPs belong only on the self-signed fallback path, not in ACME requests
 - Cloudflare Access in front of the public hostname will block HTTP-01 unless `/.well-known/acme-challenge/*` is explicitly bypassed; otherwise use DNS-01 with a Cloudflare API token
 - `/api/v2/settings` now treats the unit system saved through `/api/v2/settings/system` as authoritative, preventing Settings UI unit preferences from being reset by stale legacy profile data on reload
+- `/api/v2/control/emergency` now latches control lockout via shared safety state until `/api/v2/control/emergency_clear` explicitly confirms reset, so post-E-stop commands stay fail-closed beyond transient TTL windows
 - documented hardware baseline in `spec/hardware.yaml`
 - safety, health, telemetry, settings, and mapping subsystems
 - Raspberry Pi operational support: systemd units, HTTPS/TLS automation, backups, diagnostics, validation scripts

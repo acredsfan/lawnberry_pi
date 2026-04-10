@@ -257,6 +257,11 @@ class MissionService:
         return mission
 
     async def start_mission(self, mission_id: str):
+        from ..api import rest as rest_api
+
+        if rest_api._safety_state.get("emergency_stop_active", False):
+            raise MissionStateError("Cannot start mission while emergency stop is active.")
+
         mission = self._require_mission(mission_id)
         status = self._require_status(mission_id)
         existing_task = self.mission_tasks.get(mission_id)
@@ -353,6 +358,11 @@ class MissionService:
 
 
     async def resume_mission(self, mission_id: str):
+        from ..api import rest as rest_api
+
+        if rest_api._safety_state.get("emergency_stop_active", False):
+            raise MissionStateError("Cannot resume mission while emergency stop is active.")
+
         mission = self._require_mission(mission_id)
         status = self._require_status(mission_id)
         if status.status != MissionLifecycleStatus.PAUSED:

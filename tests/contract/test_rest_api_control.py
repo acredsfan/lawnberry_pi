@@ -7,7 +7,9 @@ import httpx
 import pytest
 
 from backend.src.main import app
+from backend.src.core.globals import _safety_state
 from backend.src.models import NavigationMode, PathStatus
+from backend.src.api import rest as rest_api
 from backend.src.services.navigation_service import NavigationService
 
 BASE_URL = "http://test"
@@ -109,6 +111,10 @@ async def test_post_emergency_stop_acknowledges_and_audits():
 @pytest.mark.asyncio
 async def test_control_navigation_endpoints_surface_runtime_state(monkeypatch):
     """Control navigation endpoints should expose coherent operator-facing state."""
+
+    _safety_state["emergency_stop_active"] = False
+    rest_api._emergency_until = 0.0
+    rest_api._client_emergency.clear()
 
     class _FakeNavService:
         def __init__(self):
