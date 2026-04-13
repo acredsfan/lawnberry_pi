@@ -465,6 +465,112 @@ def test_candidate_serial_ports_prioritize_env_and_settings(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_maintain_usb_control_keepalive_uses_cmd_sent_not_status_at(monkeypatch):
+    """Keepalive must fire based on _last_cmd_sent_at, not _last_status_at.
+
+    The root-cause of the mission PWM-ack timeout bug was that _last_status_at
+    was always fresh (refreshed by firmware STATUS heartbeats) so the keepalive
+    condition `max(_last_status_at, _last_pwm_at) >= 0.9 s` was never met.
+    With the fix, only _last_cmd_sent_at (when WE sent a command) gates the
+    keepalive.
+    """
+    svc = RoboHATService()
+    svc.serial_conn = _StubSerial()
+    svc._usb_control_requested = True
+    svc._rc_enabled = False
+    svc._pending_rc_state = None
+    sent: list[str] = []
+
+    async def fake_send_line(line: str) -> bool:
+        sent.append(line)
+        return True
+
+    monkeypatch.setattr(svc, "_send_line", fake_send_line)
+
+    # Simulate: firmware is actively sending STATUS so _last_status_at is fresh,
+    # but we haven't sent any commands (_last_cmd_sent_at is 0).
+    svc._last_status_at = time.monotonic()  # very recent
+    svc._last_cmd_sent_at = 0.0             # never sent a command
+
+    await svc._maintain_usb_control()
+
+    # Keepalive should fire because _last_cmd_sent_at is stale, regardless of
+    # how fresh _last_status_at is.
+    assert sent == ["pwm,1500,1500"]
+
+
+@pytest.mark.asyncio
+async def test_maintain_usb_control_no_keepalive_when_cmd_sent_recently(monkeypatch):
+    """No keepalive should be sent when a command was recently dispatched."""
+    svc = RoboHATService()
+    svc.serial_conn = _StubSerial()
+    svc._usb_control_requested = True
+    svc._rc_enabled = False
+    svc._pending_rc_state = None
+    sent: list[str] = []
+
+    async def fake_send_line(line: str) -> bool:
+        sent.append(line)
+        return True
+
+    monkeypatch.setattr(svc, "_send_line", fake_send_line)
+
+    # We sent a command just now; watchdog should not duplicate it.
+    svc._last_cmd_sent_at = time.monotonic()
+
+    await svc._maintain_usb_control()
+
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_wait_for_pwm_ack_uses_count_not_watchdog_echo(monkeypatch):
+    """_wait_for_pwm_ack must use _pwm_ack_count not last_watchdog_echo.
+
+    The previous implementation checked last_watchdog_echo == "pwm_ack" which
+    could be overwritten by an interleaved [STATUS] message, causing a false
+    timeout even when the firmware had already acked the command.
+    """
+    svc = RoboHATService()
+    svc.serial_conn = _StubSerial()
+    svc.running = True
+
+    # Simulate a [STATUS] message arriving AFTER the PWM ack is incremented,
+    # overwriting last_watchdog_echo to "status".
+    async def inject_ack_then_status() -> None:
+        await asyncio.sleep(0.05)
+        svc._pwm_ack_count += 1
+        svc.status.last_watchdog_echo = "status"  # STATUS arrives after ack
+
+    import asyncio
+    task = asyncio.create_task(inject_ack_then_status())
+
+    ok = await svc._wait_for_pwm_ack(timeout=0.3)
+    await task
+
+    # With the counter-based check, the ack is detected despite the STATUS
+    # overwriting last_watchdog_echo.
+    assert ok is True
+
+
+@pytest.mark.asyncio
+async def test_process_line_pwm_ack_increments_counter():
+    """_process_line must increment _pwm_ack_count on [USB] PWM set lines."""
+    svc = RoboHATService()
+    assert svc._pwm_ack_count == 0
+
+    svc._process_line("[USB] PWM set → steer=1500 µs throttle=1500 µs")
+    assert svc._pwm_ack_count == 1
+
+    svc._process_line("[USB] PWM set → steer=1600 µs throttle=1400 µs")
+    assert svc._pwm_ack_count == 2
+
+    # Non-PWM messages must not increment the counter.
+    svc._process_line("[STATUS] {\"rc_enabled\": false, \"uptime_seconds\": 1}")
+    assert svc._pwm_ack_count == 2
+
+
+@pytest.mark.asyncio
 async def test_initialize_robohat_service_attempts_candidates(monkeypatch):
     attempts: list[str] = []
 

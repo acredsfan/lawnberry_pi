@@ -87,7 +87,9 @@ class RoboHATService:
     """RoboHAT RP2040 serial bridge service"""
 
     _PROBE_STARTUP_SETTLE_SECONDS = 3.0
-    
+    _RECONNECT_DELAY_SECONDS = 5.0
+    _MAX_RECONNECT_ATTEMPTS = 12  # ~1 minute of retries
+
     def __init__(self, serial_port: str = "/dev/ttyACM0", baud_rate: int = 115200):
         self.serial_port = serial_port
         self.baud_rate = baud_rate
@@ -102,9 +104,20 @@ class RoboHATService:
         self._pending_rc_state: Optional[bool] = None
         self._pending_rc_since: float = 0.0
         self._last_status_at: float = 0.0
+        # Track the last time we SENT any command to the firmware.  The firmware
+        # USB timeout (SERIAL_TIMEOUT ≈ 5 s) is reset by received commands, not
+        # by messages it sends us.  Using _last_status_at (incoming) for the
+        # keepalive gate was the root-cause of the "firmware USB timeout while
+        # we think we're in USB mode" bug — status heartbeats kept _last_status_at
+        # fresh while no actual commands reached the firmware.
+        self._last_cmd_sent_at: float = 0.0
         # Track last PWM sent so we can refresh it to avoid firmware USB timeout
         self._last_pwm: tuple[int, int] = (1500, 1500)
         self._last_pwm_at: float = 0.0
+        # Counter incremented each time the firmware acks a PWM command.  Using a
+        # counter avoids the race where a [STATUS] message overwrites
+        # last_watchdog_echo between the PWM send and the ack-poll iteration.
+        self._pwm_ack_count: int = 0
 
     @staticmethod
     def _is_robohat_response_line(line: str) -> bool:
@@ -237,6 +250,7 @@ class RoboHATService:
             async with self._serial_lock:
                 await asyncio.to_thread(self.serial_conn.write, message)
                 await asyncio.to_thread(self.serial_conn.flush)
+            self._last_cmd_sent_at = time.monotonic()
             return True
         except Exception as exc:  # pragma: no cover - hardware error path
             logger.error(f"Failed to send RoboHAT command line '%s': %s", line, exc)
@@ -248,13 +262,13 @@ class RoboHATService:
         """Wait for the firmware to acknowledge or reject the last PWM command."""
         deadline = time.monotonic() + timeout
         starting_errors = self.status.error_count
-        starting_status_at = self._last_status_at
+        starting_count = self._pwm_ack_count
 
         while time.monotonic() < deadline:
             last_error = (self.status.last_error or "").lower()
             if self.status.error_count > starting_errors and "pwm" in last_error:
                 return False
-            if self.status.last_watchdog_echo == "pwm_ack" and self._last_status_at > starting_status_at:
+            if self._pwm_ack_count > starting_count:
                 return True
             await asyncio.sleep(0.02)
 
@@ -367,9 +381,12 @@ class RoboHATService:
                 await self._set_rc_enabled(False, force=True)
             return
         # Refresh the last commanded PWM periodically to prevent the firmware
-        # from timing out back to RC mode (SERIAL_TIMEOUT ≈ 2s on firmware).
+        # from timing out back to RC mode (SERIAL_TIMEOUT ≈ 5s on firmware).
+        # NOTE: use _last_cmd_sent_at (when WE sent a command) not _last_status_at
+        # (when the firmware sent us a message) — the firmware timeout clock is
+        # reset by commands received, not by messages it emits.
         now = time.monotonic()
-        if (now - max(self._last_status_at, self._last_pwm_at)) >= 0.9:
+        if (now - self._last_cmd_sent_at) >= 0.9:
             steer_us, thr_us = self._last_pwm
             await self._send_line(f"pwm,{steer_us},{thr_us}")
             self._last_pwm_at = now
@@ -415,14 +432,64 @@ class RoboHATService:
         self.status.last_error = "usb_control_unavailable"
         return False
     
+    async def _reconnect(self) -> None:
+        """Attempt to re-open the serial connection after a disconnect.
+
+        Probes all known candidate ports (stable by-id path first) so a
+        device renumbering (e.g. ttyACM0 → ttyACM2 after USB replug) is
+        handled transparently without a backend restart.
+        """
+        self.status.serial_connected = False
+        if self.serial_conn:
+            try:
+                self.serial_conn.close()
+            except Exception:
+                pass
+            self.serial_conn = None
+
+        for attempt in range(self._MAX_RECONNECT_ATTEMPTS):
+            if not self.running:
+                return
+            await asyncio.sleep(self._RECONNECT_DELAY_SECONDS)
+            candidates = _candidate_serial_ports()
+            for candidate in candidates:
+                if not self.running:
+                    return
+                logger.info("RoboHAT reconnect attempt %d/%d on %s",
+                            attempt + 1, self._MAX_RECONNECT_ATTEMPTS, candidate)
+                try:
+                    conn = serial.Serial(
+                        port=candidate,
+                        baudrate=self.baud_rate,
+                        timeout=1.0,
+                        write_timeout=1.0,
+                    )
+                    self.serial_conn = conn
+                    self.serial_port = candidate
+                    await asyncio.sleep(self._PROBE_STARTUP_SETTLE_SECONDS)
+                    self._drain_serial_buffer()
+                    if await self._probe_firmware_response():
+                        self.status.serial_connected = True
+                        logger.info("RoboHAT reconnected on %s", candidate)
+                        return
+                    conn.close()
+                    self.serial_conn = None
+                except Exception as exc:
+                    logger.debug("RoboHAT reconnect candidate %s failed: %s", candidate, exc)
+                    self.serial_conn = None
+
+        logger.error("RoboHAT reconnect exhausted all attempts; serial remains offline")
+
     async def _read_loop(self):
-        """Continuous read loop for RoboHAT messages"""
+        """Continuous read loop for RoboHAT messages, with USB replug recovery."""
+        reconnecting = False
         while self.running:
             try:
                 line = None
                 if self.serial_conn and self.serial_conn.is_open and self.serial_conn.in_waiting:
                     raw = await asyncio.to_thread(self.serial_conn.readline)
                     line = raw.decode("utf-8", errors="ignore").strip()
+                    reconnecting = False
 
                 if line:
                     self._process_line(line)
@@ -431,6 +498,12 @@ class RoboHATService:
 
             except asyncio.CancelledError:
                 break
+            except (serial.SerialException, OSError) as e:
+                if not reconnecting:
+                    logger.warning("RoboHAT serial connection lost (%s); attempting reconnect", e)
+                    reconnecting = True
+                    asyncio.create_task(self._reconnect())
+                await asyncio.sleep(1.0)
             except Exception as e:
                 logger.error(f"Read loop error: {e}")
                 await asyncio.sleep(0.1)
@@ -505,6 +578,7 @@ class RoboHATService:
 
         if line_lower.startswith("[usb] pwm"):
             self._last_status_at = time.monotonic()
+            self._pwm_ack_count += 1
             self.status.motor_controller_ok = True
             self.status.last_watchdog_echo = "pwm_ack"
             self.status.last_error = None
@@ -821,6 +895,9 @@ def _candidate_serial_ports(explicit: Optional[str] = None) -> list[str]:
         add(os.getenv(env_var))
 
     add(_read_profile_robohat_port())
+
+    # Stable udev symlink created by 99-robohat-rp2040.rules — always try first.
+    add("/dev/robohat", require_exists=True)
 
     for path in _serial_by_id_candidates():
         add(path, require_exists=True)
