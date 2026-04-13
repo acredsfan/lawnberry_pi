@@ -22,9 +22,13 @@ vi.mock('@/stores/toast', () => ({
 vi.mock('@/components/ui/VirtualJoystick.vue', () => {
   const stub = defineComponent({
     name: 'VirtualJoystickStub',
+    props: {
+      disabled: { type: Boolean, default: false },
+    },
     emits: ['change', 'end'],
     methods: {
       triggerChange(payload: any) {
+        if (this.disabled) return
         this.$emit('change', payload)
       },
       triggerEnd() {
@@ -35,6 +39,7 @@ vi.mock('@/components/ui/VirtualJoystick.vue', () => {
         this.$emit('end')
       },
       setVector(vector: { x: number; y: number }) {
+        if (this.disabled) return
         this.$emit('change', {
           ...vector,
           magnitude: Math.min(1, Math.hypot(vector.x, vector.y)),
@@ -128,8 +133,14 @@ afterEach(() => {
 
 describe('ControlView manual movement loop', () => {
   it('streams drive commands while a direction control is held', async () => {
-    const wrapper = await mountControlView()
     const store = controlStoreContainer.current
+    store.robohatStatus = {
+      telemetry_source: 'hardware',
+      serial_connected: true,
+      motor_controller_ok: true,
+      last_watchdog_echo: 'rc=disable',
+    }
+    const wrapper = await mountControlView()
     const joystick = wrapper.findComponent({ name: 'VirtualJoystickStub' })
 
     joystick.vm.triggerChange({ x: 0, y: 1, magnitude: 1, active: true })
@@ -157,8 +168,14 @@ describe('ControlView manual movement loop', () => {
   })
 
   it('stop button immediately queues a zero vector command', async () => {
-    const wrapper = await mountControlView()
     const store = controlStoreContainer.current
+    store.robohatStatus = {
+      telemetry_source: 'hardware',
+      serial_connected: true,
+      motor_controller_ok: true,
+      last_watchdog_echo: 'rc=disable',
+    }
+    const wrapper = await mountControlView()
     const joystick = wrapper.findComponent({ name: 'VirtualJoystickStub' })
     joystick.vm.triggerChange({ x: 0, y: 1, magnitude: 1, active: true })
     await flushPromises()
@@ -211,7 +228,7 @@ describe('ControlView manual movement loop', () => {
     await flushPromises()
 
     expect(store.submitCommand).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Motor controller offline – command not sent')
+    expect(wrapper.text()).toContain('Motor controller USB link not detected. Check cabling and power.')
 
     toastStore.show.mockClear()
 
@@ -227,6 +244,46 @@ describe('ControlView manual movement loop', () => {
     expect(wrapper.find('.controller-chip__value').text()).toBe('Ready')
     expect(toastStore.show.mock.calls).toContainEqual(['Motor controller connected', 'success', 2500])
     expect(toastStore.show.mock.calls).toContainEqual(['Motor controller ready', 'success', 2500])
+
+    joystick.vm.triggerChange({ x: 0, y: 1, magnitude: 1, active: true })
+    await flushPromises()
+
+    expect(store.submitCommand).toHaveBeenCalledTimes(1)
+
+    joystick.vm.triggerEnd()
+    await flushPromises()
+    wrapper.unmount()
+  })
+
+  it('keeps joystick movement blocked until the controller is ready', async () => {
+    const store = controlStoreContainer.current
+    store.robohatStatus = {
+      telemetry_source: 'hardware',
+      serial_connected: true,
+      motor_controller_ok: false,
+      last_error: 'usb_control_unavailable',
+      last_watchdog_echo: null,
+    }
+
+    const wrapper = await mountControlView()
+    const joystick = wrapper.findComponent({ name: 'VirtualJoystickStub' })
+
+    expect(wrapper.find('.controller-chip__value').text()).toBe('Handshake pending')
+
+    joystick.vm.triggerChange({ x: 0, y: 1, magnitude: 1, active: true })
+    await flushPromises()
+
+    expect(store.submitCommand).not.toHaveBeenCalled()
+
+    store.robohatStatus = {
+      telemetry_source: 'hardware',
+      serial_connected: true,
+      motor_controller_ok: true,
+      last_watchdog_echo: 'rc=disable',
+      last_error: null,
+    }
+    await nextTick()
+    await flushPromises()
 
     joystick.vm.triggerChange({ x: 0, y: 1, magnitude: 1, active: true })
     await flushPromises()

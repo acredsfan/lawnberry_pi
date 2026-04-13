@@ -625,6 +625,16 @@ def _navigation_error_response(nav_service: Any, *, status_label: str, detail: s
     }
     return JSONResponse(status_code=409, content=payload)
 
+
+def _manual_drive_status_reason(active_interlocks: list[str]) -> str:
+    if "obstacle_detected" in active_interlocks:
+        return "OBSTACLE_DETECTED"
+    if "location_awareness_unavailable" in active_interlocks:
+        return "LOCATION_AWARENESS_UNAVAILABLE"
+    if "telemetry_unavailable" in active_interlocks or "telemetry_stale" in active_interlocks:
+        return "TELEMETRY_UNAVAILABLE"
+    return "SAFETY_LOCKOUT"
+
 # Import helper from auth router for session resolution
 from .routers.auth import _resolve_manual_session
 
@@ -782,11 +792,106 @@ async def control_drive_v2(cmd: dict, request: Request):
     except (TypeError, ValueError):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="max_speed_limit must be numeric")
     speed_limit = max(0.0, min(1.0, speed_limit))
+    motion_requested = abs(throttle) > 1e-3 or abs(turn) > 1e-3
     
     # Send command to RoboHAT
 
     robohat = get_robohat_service()
     watchdog_start = datetime.now(timezone.utc)
+    telemetry_snapshot: dict[str, Any] | None = None
+    manual_active_interlocks: list[str] = []
+
+    if motion_requested and robohat and robohat.status.serial_connected and os.getenv("SIM_MODE", "0") == "0":
+        try:
+            from ..core.config_loader import ConfigLoader
+            from ..services.navigation_service import NavigationService
+
+            telemetry_snapshot = await websocket_hub._generate_telemetry()
+            _, limits = ConfigLoader().get()
+            max_position_accuracy_m = NavigationService.get_instance().max_waypoint_accuracy_m
+
+            source = telemetry_snapshot.get("source")
+            if source != "hardware":
+                manual_active_interlocks.append("telemetry_unavailable")
+            else:
+                snapshot_timestamp = telemetry_snapshot.get("timestamp")
+                try:
+                    snapshot_at = datetime.fromisoformat(str(snapshot_timestamp))
+                    if snapshot_at.tzinfo is None:
+                        snapshot_at = snapshot_at.replace(tzinfo=timezone.utc)
+                    if (datetime.now(timezone.utc) - snapshot_at).total_seconds() > 2.5:
+                        manual_active_interlocks.append("telemetry_stale")
+                except Exception:
+                    manual_active_interlocks.append("telemetry_stale")
+
+                position = telemetry_snapshot.get("position") or {}
+                latitude = position.get("latitude")
+                longitude = position.get("longitude")
+                accuracy = position.get("accuracy")
+                if latitude is None or longitude is None or accuracy is None:
+                    manual_active_interlocks.append("location_awareness_unavailable")
+                else:
+                    try:
+                        if float(accuracy) > float(max_position_accuracy_m):
+                            manual_active_interlocks.append("location_awareness_unavailable")
+                    except (TypeError, ValueError):
+                        manual_active_interlocks.append("location_awareness_unavailable")
+
+                tof = telemetry_snapshot.get("tof") or {}
+                threshold_mm = float(limits.tof_obstacle_distance_meters) * 1000.0
+                for side in ("left", "right"):
+                    side_payload = tof.get(side) or {}
+                    distance_mm = side_payload.get("distance_mm")
+                    if distance_mm is None:
+                        continue
+                    try:
+                        if float(distance_mm) <= threshold_mm:
+                            manual_active_interlocks.append("obstacle_detected")
+                            break
+                    except (TypeError, ValueError):
+                        continue
+        except Exception as exc:
+            logger.warning("Manual drive telemetry safety validation failed: %s", exc)
+            manual_active_interlocks.append("telemetry_unavailable")
+
+    if manual_active_interlocks:
+        manual_active_interlocks = list(dict.fromkeys(manual_active_interlocks))
+        blocked_response = ControlResponseV2(
+            accepted=False,
+            audit_id=audit_id,
+            result="blocked",
+            status_reason=_manual_drive_status_reason(manual_active_interlocks),
+            safety_checks=[
+                "emergency_stop_check",
+                "command_validation",
+                "telemetry_source_check",
+                "location_awareness_check",
+                "obstacle_clearance_check",
+            ],
+            active_interlocks=manual_active_interlocks,
+            remediation={
+                "docs_link": "/docs/OPERATIONS.md#manual-drive-safety-gating",
+                "message": "Clear nearby obstacles and restore fresh hardware telemetry before retrying manual movement.",
+            },
+            telemetry_snapshot=telemetry_snapshot,
+            timestamp=timestamp.isoformat(),
+        )
+        try:
+            details_cmd = cmd if isinstance(cmd, dict) else cmd.model_dump()
+        except Exception:
+            details_cmd = {}
+        if isinstance(details_cmd, dict) and "session_id" in details_cmd:
+            details_cmd = dict(details_cmd)
+            details_cmd["session_id"] = "***"
+        persistence.add_audit_log(
+            "control.drive.blocked",
+            details={
+                "reason": blocked_response.status_reason,
+                "active_interlocks": manual_active_interlocks,
+                "command": details_cmd,
+            },
+        )
+        return JSONResponse(status_code=423, content=blocked_response.model_dump())
     
     if robohat and robohat.status.serial_connected:
         # Calculate differential speeds

@@ -1,6 +1,7 @@
 """Contract tests for manual control REST endpoints."""
 
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
@@ -11,6 +12,7 @@ from backend.src.core.globals import _safety_state
 from backend.src.models import NavigationMode, PathStatus
 from backend.src.api import rest as rest_api
 from backend.src.services.navigation_service import NavigationService
+from backend.src.services import robohat_service as robohat_module
 
 BASE_URL = "http://test"
 
@@ -63,6 +65,55 @@ async def test_post_drive_command_returns_audit_id_and_snapshot():
     assert snapshot.get("status") in {"healthy", "warning"}
     assert snapshot.get("latency_ms") is not None
     assert payload.get("status_reason") in {None, "nominal", "safety_override"}
+
+
+@pytest.mark.asyncio
+async def test_post_drive_command_blocks_when_obstacle_detected(monkeypatch):
+    transport = httpx.ASGITransport(app=app)
+    monkeypatch.setenv("SIM_MODE", "0")
+
+    async def fake_telemetry():
+        return {
+            "source": "hardware",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "position": {
+                "latitude": 39.0,
+                "longitude": -84.0,
+                "accuracy": 0.2,
+            },
+            "tof": {
+                "left": {"distance_mm": 150.0},
+                "right": {"distance_mm": 500.0},
+            },
+        }
+
+    async def fake_send_motor_command(_left: float, _right: float) -> bool:
+        raise AssertionError("drive command should not reach RoboHAT while obstacle interlock is active")
+
+    fake_robohat = SimpleNamespace(
+        status=SimpleNamespace(serial_connected=True, last_watchdog_echo="status", last_error=None),
+        send_motor_command=fake_send_motor_command,
+    )
+
+    monkeypatch.setattr(rest_api.websocket_hub, "_generate_telemetry", fake_telemetry)
+    monkeypatch.setattr(robohat_module, "get_robohat_service", lambda: fake_robohat)
+    monkeypatch.setattr(rest_api, "_resolve_manual_session", lambda _session_id: {"principal": "operator"})
+
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        response = await client.post(
+            "/api/v2/control/drive",
+            json={
+                "session_id": _session_id(),
+                "vector": {"linear": 0.3, "angular": 0.0},
+                "duration_ms": 500,
+            },
+        )
+
+    assert response.status_code == 423, response.text
+    payload = response.json()
+    assert payload["result"] == "blocked"
+    assert payload["status_reason"] == "OBSTACLE_DETECTED"
+    assert "obstacle_detected" in payload["active_interlocks"]
 
 
 @pytest.mark.asyncio

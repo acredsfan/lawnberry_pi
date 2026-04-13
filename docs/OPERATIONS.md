@@ -18,6 +18,32 @@ Use these runtime defaults consistently when starting or validating the stack:
 
 This means `8081`/`3000` are the canonical backend/frontend ports for both local development and deployed operation. The preview server on `4173` is intentional and only used for preview/E2E flows.
 
+## On-device Wi-Fi failover
+
+On the mower, Wi-Fi is managed by NetworkManager with two radios:
+
+- `wlan1` is the current primary client radio and normally carries `wlan1-primary`
+- `wlan0` is kept managed as a standby/backup scan radio
+
+Operational notes:
+
+- The built-in radio must remain managed by NetworkManager; on this Pi that is enforced with
+  `/etc/udev/rules.d/100-manage-wlan0.rules`
+- Backup NetworkManager profiles exist on `wlan0` for `Butters Read-Link`, `Link Outdoor`, and `Link_IoT`
+- `/etc/NetworkManager/dispatcher.d/90-wifi-failover` promotes the best visible backup profile on `wlan0` if
+  `wlan1` drops off Wi-Fi completely
+- Backup profiles intentionally keep `autoconnect=false` so they do not steal the active route during normal
+  operation; the dispatcher is what activates them on failure
+
+Useful checks:
+
+```bash
+nmcli -f DEVICE,TYPE,STATE,CONNECTION dev status
+nmcli -f NAME,DEVICE,AUTOCONNECT connection show
+nmcli -f SSID,SIGNAL,CHAN,FREQ dev wifi list ifname wlan0 --rescan yes
+journalctl -t wifi-failover -n 50 --no-pager
+```
+
 ## Simulation vs hardware mode
 
 The backend has two meaningful startup modes:
@@ -109,6 +135,50 @@ Operational notes:
 - The RoboHAT status endpoint now treats the firmware's `rc=disable` acknowledgement as controller-ready instead of leaving the UI stuck on a stale handshake-pending warning.
 - Older RoboHAT CircuitPython builds may take about three seconds to begin responding after the USB serial port opens and may emit heartbeat lines like `[RC] steer=...` instead of the newer `get_rc_status` payload. Treat that as compatible firmware, not a missing board.
 - Camera snapshot and MJPEG endpoints now emit raw JPEG bytes; if the live feed regresses again, verify intermediate proxies are not recompressing or buffering `/api/v2/camera/stream.mjpeg`.
+
+## Manual drive safety gating
+
+Manual drive now fails closed for **non-zero** movement commands on live hardware when the backend cannot confirm a safe local-control context.
+
+- The RoboHAT controller must be connected and controller-ready before the joystick is enabled in the WebUI.
+- The backend blocks non-zero drive commands with HTTP `423` if fresh hardware telemetry is unavailable, usable GPS position
+  awareness is missing, or a ToF obstacle reading is at/inside the configured clearance threshold.
+- Zero-vector stop commands remain allowed so an operator can still halt motion immediately while the controller is connected.
+
+Useful checks:
+
+```bash
+curl -s http://127.0.0.1:8081/api/v2/hardware/robohat | python -m json.tool
+curl -s http://127.0.0.1:8081/api/v2/dashboard/telemetry | python -m json.tool
+curl -s http://127.0.0.1:8081/api/v2/sensors/health | python -m json.tool
+```
+
+If manual motion is blocked with `OBSTACLE_DETECTED`, `LOCATION_AWARENESS_UNAVAILABLE`, or `TELEMETRY_UNAVAILABLE`,
+clear nearby obstacles and restore fresh hardware telemetry before retrying.
+
+## Mission execution safety feedback
+
+Mission creation/start can succeed before the mower has enough verified autonomy feedback to traverse the first waypoint, so
+watch the mission status contract instead of assuming `running` alone means the rover is moving.
+
+- Autonomous obstacle gating now uses the same configured ToF clearance threshold as manual drive:
+  `config/limits.yaml` → `tof_obstacle_distance_meters` (currently `0.2` m).
+- If waypoint traversal cannot begin safely after the bounded verification window, the mission now fails with explicit detail
+  instead of remaining indefinitely `running` / `executing` with no progress.
+- RoboHAT drive commands now wait for an explicit firmware PWM acknowledgement before the backend reports them accepted; if
+  the RP2040 rejects the command or never acknowledges it, the mission/manual-control path surfaces that as a controller
+  failure instead of treating a successful serial write as motion success.
+- `GET /api/v2/control/status` reflects the navigation mode/path state, while
+  `GET /api/v2/missions/{mission_id}/status` is the authoritative mission lifecycle/detail surface.
+
+Useful checks:
+
+```bash
+curl -s http://127.0.0.1:8081/api/v2/control/status | python -m json.tool
+curl -s http://127.0.0.1:8081/api/v2/missions/<mission-id>/status | python -m json.tool
+curl -s http://127.0.0.1:8081/api/v2/hardware/robohat | python -m json.tool
+curl -s http://127.0.0.1:8081/api/v2/dashboard/telemetry | python -m json.tool
+```
 
 ## AI
 - GET http://127.0.0.1:8081/api/v2/ai/datasets

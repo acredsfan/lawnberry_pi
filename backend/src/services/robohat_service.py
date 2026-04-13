@@ -16,6 +16,7 @@ import glob
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -44,6 +45,7 @@ class RoboHATStatus:
     last_error: Optional[str] = None
     motor_controller_ok: bool = False
     encoder_feedback_ok: bool = False
+    encoder_position: int = 0
     timestamp: datetime = None
     
     def __post_init__(self):
@@ -63,6 +65,7 @@ class RoboHATStatus:
             "last_error": self.last_error,
             "motor_controller_ok": self.motor_controller_ok,
             "encoder_feedback_ok": self.encoder_feedback_ok,
+            "encoder_position": self.encoder_position,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "health_status": self.get_health_status()
         }
@@ -71,7 +74,9 @@ class RoboHATStatus:
         """Get overall health status"""
         if not self.serial_connected:
             return "disconnected"
-        if self.error_count > 10:
+        # Only fault on sustained errors – occasional race-condition rejections
+        # (firmware USB-timeout race) accumulate slowly and are not fatal.
+        if self.error_count > 50:
             return "fault"
         if not self.watchdog_active or not self.motor_controller_ok:
             return "warning"
@@ -238,6 +243,24 @@ class RoboHATService:
             self.status.error_count += 1
             self.status.last_error = str(exc)
             return False
+
+    async def _wait_for_pwm_ack(self, *, timeout: float = 0.35) -> bool:
+        """Wait for the firmware to acknowledge or reject the last PWM command."""
+        deadline = time.monotonic() + timeout
+        starting_errors = self.status.error_count
+        starting_status_at = self._last_status_at
+
+        while time.monotonic() < deadline:
+            last_error = (self.status.last_error or "").lower()
+            if self.status.error_count > starting_errors and "pwm" in last_error:
+                return False
+            if self.status.last_watchdog_echo == "pwm_ack" and self._last_status_at > starting_status_at:
+                return True
+            await asyncio.sleep(0.02)
+
+        self.status.last_error = self.status.last_error or "pwm_ack_timeout"
+        logger.warning("Timed out waiting for RoboHAT PWM acknowledgement")
+        return False
 
     def _drain_serial_buffer(self) -> None:
         """Synchronously drain any pending bytes from the serial buffer."""
@@ -412,6 +435,23 @@ class RoboHATService:
                 logger.error(f"Read loop error: {e}")
                 await asyncio.sleep(0.1)
     
+    @staticmethod
+    def _parse_encoder_from_line(line: str) -> Optional[int]:
+        """Extract encoder tick count from a firmware heartbeat/status line.
+
+        Matches ``enc=N`` or ``"encoder": N`` patterns in lines such as::
+
+            [USB] signal=LOST steer=1500 µs thr=1500 µs blade=OFF enc=42
+            [RC-emergency] ... enc=-17
+        """
+        m = re.search(r"\benc=(-?\d+)", line)
+        if m:
+            try:
+                return int(m.group(1))
+            except ValueError:
+                pass
+        return None
+
     def _process_line(self, line: str) -> None:
         """Parse human-readable firmware messages and update status fields."""
         if not line:
@@ -437,7 +477,10 @@ class RoboHATService:
             if rc_enabled != self._rc_enabled:
                 self._mark_rc_state(rc_enabled)
             self.status.motor_controller_ok = not rc_enabled
-            self.status.encoder_feedback_ok = payload.get("encoder") is not None
+            enc = payload.get("encoder")
+            self.status.encoder_feedback_ok = enc is not None
+            if enc is not None:
+                self.status.encoder_position = int(enc)
             self.status.last_watchdog_echo = "status"
             if not rc_enabled:
                 self.status.last_error = None
@@ -455,6 +498,8 @@ class RoboHATService:
             self.status.motor_controller_ok = True
             self.status.last_watchdog_echo = "rc_disable_ack"
             self.status.last_error = None
+            # Clear accumulated transient errors – USB control is confirmed healthy.
+            self.status.error_count = 0
             logger.info("RoboHAT reported USB control active")
             return
 
@@ -481,6 +526,12 @@ class RoboHATService:
             self.status.last_watchdog_echo = line.strip()
             if not self._rc_enabled:
                 self.status.last_error = None
+            # Parse encoder tick count from firmware heartbeat lines, e.g.:
+            # "[USB] signal=LOST steer=1500 µs thr=1500 µs blade=OFF enc=42"
+            enc = self._parse_encoder_from_line(line)
+            if enc is not None:
+                self.status.encoder_position = enc
+                self.status.encoder_feedback_ok = True
             return
 
         if line_lower.startswith("\u25b6") or line_lower.startswith("▶"):
@@ -488,10 +539,14 @@ class RoboHATService:
             self.status.firmware_version = line.strip()
             return
 
-        if line_lower.startswith("[rc]"):
-            # Heartbeat from firmware – keep as last echo.
+        if line_lower.startswith("[rc]") or line_lower.startswith("[rc-"):
+            # Heartbeat from firmware – keep as last echo and parse encoder.
             self.status.last_watchdog_echo = line
             self._last_status_at = time.monotonic()
+            enc = self._parse_encoder_from_line(line)
+            if enc is not None:
+                self.status.encoder_position = enc
+                self.status.encoder_feedback_ok = True
             return
 
         # For everything else, keep a debug breadcrumb without polluting logs.
@@ -507,6 +562,8 @@ class RoboHATService:
 
         steer_us, throttle_us = self._mix_arcade_to_pwm(left_speed, right_speed)
         ok = await self._send_line(f"pwm,{steer_us},{throttle_us}")
+        if ok:
+            ok = await self._wait_for_pwm_ack()
 
         if ok:
             self.status.motor_controller_ok = True
@@ -518,7 +575,7 @@ class RoboHATService:
             self._last_pwm_at = time.monotonic()
         else:
             self.status.motor_controller_ok = False
-            self.status.last_error = "pwm_send_failed"
+            self.status.last_error = self.status.last_error or "pwm_send_failed"
         return ok
     
     async def send_blade_command(self, active: bool, speed: float = 1.0) -> bool:

@@ -508,7 +508,7 @@ const robohatStatus = computed(() => control.robohatStatus as RoboHATStatus | nu
 const motorControllerState = computed<MotorControllerState>(() => describeMotorController(robohatStatus.value))
 
 const canMove = computed(() =>
-  isControlUnlocked.value && !performing.value && !lockout.value && motorControllerState.value.serialConnected
+  isControlUnlocked.value && !performing.value && !lockout.value && motorControllerState.value.ready
 )
 
 const canSubmitBlade = computed(() =>

@@ -28,10 +28,13 @@ class DummyNavigationService:
         self._mission_gate: asyncio.Event | None = None
         self.stop_navigation_results: list[bool] = []
         self.set_speed_failures_remaining = 0
+        self.execute_exception: Exception | None = None
 
     async def execute_mission(self, mission):
         if self._mission_gate is not None:
             await self._mission_gate.wait()
+        if self.execute_exception is not None:
+            raise self.execute_exception
         return None
 
     async def stop_navigation(self):
@@ -202,3 +205,23 @@ async def test_start_mission_rejected_when_emergency_stop_active():
             await service.start_mission(mission.id)
     finally:
         _safety_state["emergency_stop_active"] = False
+
+
+@pytest.mark.asyncio
+async def test_start_mission_surfaces_navigation_failure_detail():
+    nav = DummyNavigationService()
+    nav.execute_exception = RuntimeError("Heading unavailable while navigating waypoint")
+    service = MissionService(nav)
+    mission = await service.create_mission(
+        "Execution failure",
+        [MissionWaypoint(lat=0.1, lon=0.1, blade_on=False, speed=50)],
+    )
+
+    await service.start_mission(mission.id)
+    for _ in range(20):
+        if service.mission_statuses[mission.id].status == MissionLifecycleStatus.FAILED:
+            break
+        await asyncio.sleep(0.01)
+
+    assert service.mission_statuses[mission.id].status == MissionLifecycleStatus.FAILED
+    assert service.mission_statuses[mission.id].detail == "Heading unavailable while navigating waypoint"

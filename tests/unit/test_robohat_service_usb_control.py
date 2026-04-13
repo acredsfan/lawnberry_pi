@@ -80,16 +80,48 @@ async def test_send_motor_command_forces_rc_disable(monkeypatch):
         svc._rc_enabled = False
         return True
 
+    async def fake_wait_for_pwm_ack(timeout: float = 0.35) -> bool:  # noqa: ARG001
+        return True
+
     # Prevent the maintain loop from interfering
     svc._usb_control_requested = True
     monkeypatch.setattr(svc, "_send_line", fake_send_line)
     monkeypatch.setattr(svc, "_wait_for_usb_control", fake_wait_for_usb_control)
+    monkeypatch.setattr(svc, "_wait_for_pwm_ack", fake_wait_for_pwm_ack)
 
     ok = await svc.send_motor_command(0.1, 0.1)
 
     assert ok is True
     assert calls[0] == "rc=disable"
     assert any(call.startswith("pwm,") for call in calls[1:])
+
+
+@pytest.mark.asyncio
+async def test_send_motor_command_fails_when_pwm_ack_rejected(monkeypatch):
+    svc = RoboHATService()
+    svc.serial_conn = _StubSerial()
+    svc.running = True
+    svc._rc_enabled = False
+
+    async def fake_send_line(line: str) -> bool:  # noqa: ARG001
+        return True
+
+    async def fake_wait_for_usb_control(timeout: float = 0.75) -> bool:  # noqa: ARG001
+        return True
+
+    async def fake_wait_for_pwm_ack(timeout: float = 0.35) -> bool:  # noqa: ARG001
+        svc.status.last_error = "[USB] Invalid: pwm,1500,1500"
+        return False
+
+    monkeypatch.setattr(svc, "_send_line", fake_send_line)
+    monkeypatch.setattr(svc, "_wait_for_usb_control", fake_wait_for_usb_control)
+    monkeypatch.setattr(svc, "_wait_for_pwm_ack", fake_wait_for_pwm_ack)
+
+    ok = await svc.send_motor_command(0.0, 0.0)
+
+    assert ok is False
+    assert svc.status.motor_controller_ok is False
+    assert "invalid" in (svc.status.last_error or "").lower()
 
 
 @pytest.mark.asyncio
@@ -306,6 +338,16 @@ async def test_process_line_legacy_timeout_marks_rc_enabled():
     svc._process_line("[USB] Timeout → back to RC")
 
     assert svc._rc_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_process_line_advanced_rc_heartbeat_updates_watchdog():
+    svc = RoboHATService()
+
+    svc._process_line("[RC-manual] signal=OK steer=1500 µs thr=1500 µs blade=OFF enc=0")
+
+    assert svc.status.last_watchdog_echo.startswith("[RC-manual]")
+    assert svc._last_status_at > 0
 
 
 @pytest.mark.asyncio

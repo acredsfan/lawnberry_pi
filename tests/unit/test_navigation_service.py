@@ -3,7 +3,17 @@ import asyncio
 import pytest
 
 import backend.src.services.mission_service as mission_service_module
-from backend.src.models import NavigationMode, PathStatus, Position, Waypoint
+import backend.src.services.navigation_service as navigation_service_module
+from backend.src.models import (
+    GpsReading,
+    ImuReading,
+    NavigationMode,
+    PathStatus,
+    Position,
+    SensorData,
+    TofReading,
+    Waypoint,
+)
 from backend.src.models.mission import MissionLifecycleStatus
 from backend.src.services.mission_service import MissionService
 from backend.src.services.navigation_service import NavigationService
@@ -178,3 +188,99 @@ async def test_resume_navigation_requires_paused_state_and_path():
     assert await nav.resume_navigation() is True
     assert nav.navigation_state.navigation_mode == NavigationMode.AUTO
     assert nav.navigation_state.path_status == PathStatus.EXECUTING
+
+
+@pytest.mark.asyncio
+async def test_update_navigation_state_uses_configured_tof_threshold(monkeypatch):
+    class StubConfigLoader:
+        def get(self):
+            return object(), type("Limits", (), {"tof_obstacle_distance_meters": 0.2})()
+
+    monkeypatch.setattr(navigation_service_module, "ConfigLoader", StubConfigLoader)
+
+    nav = NavigationService()
+
+    clear_path_data = SensorData(
+        gps=GpsReading(latitude=1.0, longitude=1.0, accuracy=0.5),
+        imu=ImuReading(yaw=0.0),
+        tof_left=TofReading(distance=250.0, sensor_side="left"),
+        tof_right=TofReading(distance=350.0, sensor_side="right"),
+    )
+    await nav.update_navigation_state(clear_path_data)
+    assert nav.navigation_state.obstacle_avoidance_active is False
+
+    blocked_path_data = SensorData(
+        gps=GpsReading(latitude=1.0, longitude=1.0, accuracy=0.5),
+        imu=ImuReading(yaw=0.0),
+        tof_left=TofReading(distance=199.0, sensor_side="left"),
+    )
+    await nav.update_navigation_state(blocked_path_data)
+    assert nav.navigation_state.obstacle_avoidance_active is True
+
+
+@pytest.mark.asyncio
+async def test_go_to_waypoint_fails_when_heading_missing_too_long(monkeypatch):
+    nav = NavigationService()
+    nav.position_verification_timeout_seconds = 0.1
+    mission_service = MissionService(nav)
+    mission_service_module._mission_service_instance = mission_service
+
+    mission = await mission_service.create_mission(
+        "Heading missing",
+        [
+            {"lat": 0.1, "lon": 0.2, "blade_on": False, "speed": 50},
+        ],
+    )
+    mission_service.mission_statuses[mission.id].status = MissionLifecycleStatus.RUNNING
+    nav.navigation_state.current_position = Position(latitude=0.0, longitude=0.0, accuracy=1.0)
+    nav.navigation_state.last_gps_fix = nav.navigation_state.current_position.timestamp
+    nav.navigation_state.dead_reckoning_active = False
+    nav.navigation_state.heading = None
+
+    async def fake_deliver_stop_command(*, reason: str, retries: int = 3, initial_delay: float = 0.1):
+        return True
+
+    async def fake_emergency_stop():
+        nav.navigation_state.navigation_mode = NavigationMode.EMERGENCY_STOP
+        return True
+
+    monkeypatch.setattr(nav, "_deliver_stop_command", fake_deliver_stop_command)
+    monkeypatch.setattr(nav, "emergency_stop", fake_emergency_stop)
+
+    with pytest.raises(RuntimeError, match="Heading unavailable while navigating waypoint"):
+        await nav.go_to_waypoint(mission, mission.waypoints[0])
+
+
+@pytest.mark.asyncio
+async def test_execute_mission_marks_navigation_failed_on_waypoint_error(monkeypatch):
+    nav = NavigationService()
+    mission_service = MissionService(nav)
+    mission_service_module._mission_service_instance = mission_service
+
+    mission = await mission_service.create_mission(
+        "Execution failure",
+        [
+            {"lat": 0.1, "lon": 0.2, "blade_on": False, "speed": 50},
+        ],
+    )
+    mission_service.mission_statuses[mission.id].status = MissionLifecycleStatus.RUNNING
+
+    stop_reasons: list[str] = []
+
+    async def fake_go_to_waypoint(_mission, _waypoint):
+        raise RuntimeError("Heading unavailable while navigating waypoint")
+
+    async def fake_deliver_stop_command(*, reason: str, retries: int = 3, initial_delay: float = 0.1):
+        stop_reasons.append(reason)
+        return True
+
+    monkeypatch.setattr(nav, "go_to_waypoint", fake_go_to_waypoint)
+    monkeypatch.setattr(nav, "_deliver_stop_command", fake_deliver_stop_command)
+
+    with pytest.raises(RuntimeError, match="Heading unavailable while navigating waypoint"):
+        await nav.execute_mission(mission)
+
+    assert nav.navigation_state.path_status == PathStatus.FAILED
+    assert nav.navigation_state.navigation_mode == NavigationMode.IDLE
+    assert nav.navigation_state.target_velocity == 0.0
+    assert stop_reasons == ["mission failure"]

@@ -9,14 +9,20 @@ import math
 import os
 import time
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Tuple, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple
 
-from ..models import (
-    NavigationState, Position, Waypoint, Obstacle, CoverageCell,
-    NavigationMode, PathStatus, SensorData
-)
-from ..nav.path_planner import PathPlanner
+from ..core.config_loader import ConfigLoader
 from ..nav.geoutils import point_in_polygon
+from ..nav.path_planner import PathPlanner
+from ..models import (
+    NavigationMode,
+    NavigationState,
+    Obstacle,
+    PathStatus,
+    Position,
+    SensorData,
+    Waypoint,
+)
 from .robohat_service import get_robohat_service
 
 logger = logging.getLogger(__name__)
@@ -28,7 +34,7 @@ logger = logging.getLogger(__name__)
 class ObstacleDetector:
     """Obstacle detection and avoidance"""
     
-    def __init__(self, safety_distance: float = 1.0):
+    def __init__(self, safety_distance: float = 0.2):
         self.safety_distance = safety_distance
         self.detected_obstacles: List[Obstacle] = []
     
@@ -36,10 +42,11 @@ class ObstacleDetector:
         """Update obstacle list from sensor data"""
         obstacles = []
         obstacle_id_counter = 0
+        threshold_mm = max(0.0, float(self.safety_distance) * 1000.0)
         
         # ToF sensor obstacles
-        if sensor_data.tof_left and sensor_data.tof_left.distance:
-            if sensor_data.tof_left.distance < 1000:  # Less than 1 meter
+        if sensor_data.tof_left and sensor_data.tof_left.distance is not None:
+            if float(sensor_data.tof_left.distance) <= threshold_mm:
                 obstacles.append(Obstacle(
                     id=f"tof_left_{obstacle_id_counter}",
                     position=Position(latitude=0, longitude=0),  # Relative position
@@ -49,8 +56,8 @@ class ObstacleDetector:
                 ))
                 obstacle_id_counter += 1
         
-        if sensor_data.tof_right and sensor_data.tof_right.distance:
-            if sensor_data.tof_right.distance < 1000:  # Less than 1 meter
+        if sensor_data.tof_right and sensor_data.tof_right.distance is not None:
+            if float(sensor_data.tof_right.distance) <= threshold_mm:
                 obstacles.append(Obstacle(
                     id=f"tof_right_{obstacle_id_counter}",
                     position=Position(latitude=0, longitude=0),  # Relative position
@@ -125,7 +132,6 @@ class NavigationService:
     def __init__(self, weather=None):
         self.navigation_state = NavigationState()
         self.path_planner = PathPlanner()
-        self.obstacle_detector = ObstacleDetector()
         self.dead_reckoning = DeadReckoningSystem()
         # Optional weather service with get_current() and get_planning_advice()
         self.weather = weather
@@ -134,10 +140,21 @@ class NavigationService:
         self.max_speed = 0.8  # m/s
         self.cruise_speed = 0.5  # m/s
         self.waypoint_tolerance = 0.5  # meters
-        self.obstacle_avoidance_distance = 1.0  # meters
+        self.obstacle_avoidance_distance = 0.2  # meters
         self.max_waypoint_fix_age_seconds = 2.0
         self.max_waypoint_accuracy_m = 5.0
         self.position_verification_timeout_seconds = 30.0
+
+        try:
+            _, limits = ConfigLoader().get()
+            self.obstacle_avoidance_distance = float(limits.tof_obstacle_distance_meters)
+        except Exception as exc:
+            logger.warning(
+                "Failed to load navigation obstacle threshold from safety limits: %s",
+                exc,
+            )
+
+        self.obstacle_detector = ObstacleDetector(self.obstacle_avoidance_distance)
         
         # State tracking
         self.total_distance = 0.0
@@ -228,6 +245,15 @@ class NavigationService:
                 self.navigation_state.path_status = PathStatus.COMPLETED
                 self.navigation_state.navigation_mode = NavigationMode.IDLE
                 logger.info(f"Mission {mission.id} completed.")
+        except Exception:
+            self.navigation_state.target_velocity = 0.0
+            self.navigation_state.path_status = PathStatus.FAILED
+            if self.navigation_state.navigation_mode != NavigationMode.EMERGENCY_STOP:
+                self.navigation_state.navigation_mode = NavigationMode.IDLE
+                stop_confirmed = await self._deliver_stop_command(reason="mission failure")
+                if not stop_confirmed:
+                    logger.error("Mission %s failed and stop delivery could not be confirmed", mission.id)
+            raise
         finally:
             self._mission_execution_active = False
 
@@ -250,6 +276,8 @@ class NavigationService:
             logger.warning("Blade command failed or unavailable; continuing movement")
 
         verification_wait_start = time.monotonic()
+        heading_wait_start: float | None = None
+        obstacle_wait_start: float | None = None
 
         while True:
             status = mission_service.mission_statuses.get(mission.id)
@@ -276,6 +304,8 @@ class NavigationService:
                 return False
 
             if not self.navigation_state.current_position:
+                heading_wait_start = None
+                obstacle_wait_start = None
                 if (time.monotonic() - verification_wait_start) >= self.position_verification_timeout_seconds:
                     await self._deliver_stop_command(reason="position acquisition timeout")
                     emergency_ok = await self.emergency_stop()
@@ -287,6 +317,8 @@ class NavigationService:
                 continue
 
             if not self._position_is_verified_for_waypoint():
+                heading_wait_start = None
+                obstacle_wait_start = None
                 self.navigation_state.target_velocity = 0.0
                 await self._deliver_stop_command(reason="position verification hold")
                 if (time.monotonic() - verification_wait_start) >= self.position_verification_timeout_seconds:
@@ -320,10 +352,19 @@ class NavigationService:
                 self.navigation_state.current_position,
                 target_pos,
             ):
-                logger.warning("Obstacle detected while navigating to waypoint; holding position")
+                heading_wait_start = None
+                if obstacle_wait_start is None:
+                    obstacle_wait_start = time.monotonic()
+                    logger.warning("Obstacle detected while navigating to waypoint; holding position")
                 await self._deliver_stop_command(reason="obstacle hold")
+                if (time.monotonic() - obstacle_wait_start) >= self.position_verification_timeout_seconds:
+                    raise RuntimeError(
+                        "Obstacle persisted inside navigation safety distance "
+                        f"({self.obstacle_avoidance_distance:.2f} m) while navigating waypoint"
+                    )
                 await asyncio.sleep(0.2)
                 continue
+            obstacle_wait_start = None
 
             # Calculate heading and apply motor commands
             heading_to_target = self.path_planner.calculate_bearing(
@@ -333,9 +374,19 @@ class NavigationService:
             
             current_heading = self.navigation_state.heading
             if current_heading is None:
-                logger.warning("No heading data, cannot navigate.")
+                if heading_wait_start is None:
+                    heading_wait_start = time.monotonic()
+                    logger.warning("No heading data, cannot navigate.")
+                await self._deliver_stop_command(reason="heading unavailable hold")
+                if (time.monotonic() - heading_wait_start) >= self.position_verification_timeout_seconds:
+                    emergency_ok = await self.emergency_stop()
+                    raise RuntimeError(
+                        "Heading unavailable while navigating waypoint"
+                        + ("; emergency stop activated" if emergency_ok else "")
+                    )
                 await asyncio.sleep(1)
                 continue
+            heading_wait_start = None
 
             heading_error = (heading_to_target - current_heading + 180) % 360 - 180
             

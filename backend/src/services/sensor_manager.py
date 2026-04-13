@@ -645,6 +645,7 @@ class PowerSensorInterface:
 
 class SensorManager:
     """Main sensor manager coordinating all sensor interfaces"""
+    SENSOR_READ_TIMEOUT_SECONDS = 2.0
     
     def __init__(
         self,
@@ -691,14 +692,25 @@ class SensorManager:
         if not self.initialized:
             logger.warning("Sensor manager not initialized")
             return SensorData()
-        
+
+        async def _read_with_timeout(name: str, coro: Any) -> Any:
+            try:
+                return await asyncio.wait_for(coro, timeout=self.SENSOR_READ_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Timed out reading %s after %.1fs; continuing with partial telemetry",
+                    name,
+                    self.SENSOR_READ_TIMEOUT_SECONDS,
+                )
+                return None
+         
         # Read all sensors concurrently where possible
         tasks = [
-            self.gps.read_gps(),
-            self.imu.read_imu(),
-            self.tof.read_tof_sensors(),
-            self.environmental.read_environmental(),
-            self.power.read_power()
+            _read_with_timeout("gps", self.gps.read_gps()),
+            _read_with_timeout("imu", self.imu.read_imu()),
+            _read_with_timeout("tof", self.tof.read_tof_sensors()),
+            _read_with_timeout("environmental", self.environmental.read_environmental()),
+            _read_with_timeout("power", self.power.read_power()),
         ]
         
         results = await asyncio.gather(*tasks, return_exceptions=True)

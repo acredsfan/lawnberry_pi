@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import sys
 import time
+import os
 
 import board
 import digitalio
@@ -87,6 +88,7 @@ for ch_num, config in RC_CHANNELS.items():
 blade_pwm = pwmio.PWMOut(board.GP12, frequency=PWM_FREQ, duty_cycle=0)
 mode_switch_pin = digitalio.DigitalInOut(board.GP13)
 mode_switch_pin.direction = digitalio.Direction.OUTPUT
+mode_switch_pin.value = False
 
 # ---------- Quadrature encoder ---------- #
 encoder = rotaryio.IncrementalEncoder(board.GP8, board.GP9)
@@ -101,7 +103,7 @@ wdt.mode = WatchDogMode.RESET
 rc_enabled        = True
 rc_mode          = RCMode.EMERGENCY
 last_serial_time  = time.monotonic()
-SERIAL_TIMEOUT    = 2.0
+SERIAL_TIMEOUT    = 5.0
 _prev_led_state   = None
 blade_enabled     = False
 rc_signal_lost_time = None
@@ -118,6 +120,11 @@ def us_to_dc(us: int, freq: int = PWM_FREQ) -> int:
 def set_pwm(steer_us: int, thr_us: int) -> None:
     steer_pwm.duty_cycle = us_to_dc(steer_us)
     thr_pwm.duty_cycle   = us_to_dc(thr_us)
+
+
+def set_drive_outputs_enabled(enabled: bool) -> None:
+    """Gate the external drive path wired behind the RoboHAT mode switch."""
+    mode_switch_pin.value = bool(enabled)
 
 
 def drain_pulsein(pin: PulseIn) -> list[int]:
@@ -234,14 +241,39 @@ def read_serial_line() -> str | None:
     return None
 
 
+def get_circuitpython_version() -> str:
+    """Return best-effort CircuitPython version across CP9/CP10 builds."""
+    try:
+        uname = os.uname()
+        release = getattr(uname, "release", "")
+        if release:
+            return str(release)
+    except Exception:
+        pass
+
+    try:
+        impl = getattr(sys, "implementation", None)
+        version = getattr(impl, "version", None)
+        if version and len(version) >= 3:
+            return f"{version[0]}.{version[1]}.{version[2]}"
+    except Exception:
+        pass
+
+    return "unknown"
+
+
 # ---------- main loop ---------- #
 def main() -> None:
     global rc_enabled, last_serial_time, rc_mode, blade_enabled  # pylint: disable=global-statement
 
     set_pwm(1500, 1500)
     blade_pwm.duty_cycle = 0
+    # Keep the Cytron drive path explicitly enabled while PWM outputs are under
+    # firmware control. Older minimal builds left GP13 floating/low, which can
+    # result in accepted USB commands without any actual motor response.
+    set_drive_outputs_enabled(True)
     set_led(True, force=True)
-    print("▶ RoboHAT Advanced RC Control ready (CircuitPython ", microcontroller.circuitpython_version, ")")
+    print(f"▶ RoboHAT Advanced RC Control ready (CircuitPython {get_circuitpython_version()})")
 
     hb_t   = time.monotonic()
     channel_values = {}
@@ -252,6 +284,10 @@ def main() -> None:
 
         # --- USB commands --- #
         if (line := read_serial_line()):
+            # Any received command resets the USB-timeout clock so that
+            # status queries (get_rc_status, enc=zero, blade=…) do not
+            # inadvertently drain the 2 s budget while RC is disabled.
+            last_serial_time = now
             cmd, param1, param2 = parse_cmd(line)
             if cmd == "rc_enable":
                 rc_enabled = True
@@ -359,5 +395,6 @@ if __name__ == "__main__":
         print(f"[FATAL] {err!r}")
     finally:
         set_pwm(1500, 1500)
+        set_drive_outputs_enabled(False)
         pixel[0] = (255, 0, 0)  # red = halted/error
         pixel.show()
