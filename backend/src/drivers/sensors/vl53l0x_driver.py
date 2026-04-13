@@ -29,6 +29,12 @@ from typing import Any, Optional
 from ...core.simulation import is_simulation_mode
 from ..base import HardwareDriver
 
+# VL53L0X out-of-range sentinel: the sensor returns exactly 8190 mm when a
+# measurement is invalid or the target is beyond measurement range (VCSEL period
+# pre-range limit exceeded).  This value must never be treated as a real distance
+# — it must be filtered to None before reaching obstacle-detection logic.
+TOF_SENSOR_MAX_VALID_MM: int = 8190
+
 # Shared singletons for Adafruit backend and GPIO control
 _adafruit_i2c = None
 _gpio_provider = None  # one of ('lgpio','periphery','rpi_gpio', None)
@@ -177,7 +183,16 @@ class VL53L0XDriver(HardwareDriver):
             # Ignore errors and keep last good reading
             distance = None
 
-        # Update state if we obtained a measurement
+        # VL53L0X emits TOF_SENSOR_MAX_VALID_MM (8190 mm) as a sentinel for
+        # "out of range / measurement invalid".  Discard it — do NOT cache it
+        # as a valid distance and do NOT treat it as a clear-path indicator.
+        # Increment fail_count so repeated sentinels can trigger re-init.
+        if isinstance(distance, int) and distance >= TOF_SENSOR_MAX_VALID_MM:
+            self._last_read_ts = time.time()
+            self._fail_count += 1
+            return None
+
+        # Update state if we obtained a valid in-range measurement
         if isinstance(distance, int) and distance >= 0:
             self._last_distance_mm = distance
             self._last_read_ts = time.time()
@@ -192,7 +207,7 @@ class VL53L0XDriver(HardwareDriver):
         return self._last_distance_mm
 
 
-__all__ = ["VL53L0XDriver", "ensure_pair_addressing"]
+__all__ = ["VL53L0XDriver", "ensure_pair_addressing", "TOF_SENSOR_MAX_VALID_MM"]
 
 # -------------------------- Private helpers ---------------------------
 

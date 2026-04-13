@@ -8,12 +8,14 @@ on all responses as a backstop.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Iterable, Set
+import logging
+from typing import Any, Set
 
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
+logger = logging.getLogger(__name__)
 
 SENSITIVE_KEYS: Set[str] = {
     "password",
@@ -37,6 +39,20 @@ def _redact(obj: Any) -> Any:
     return obj
 
 
+def _strip_framing_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Remove headers that must be recomputed when body content changes."""
+    for key in (
+        "content-length",
+        "Content-Length",
+        "transfer-encoding",
+        "Transfer-Encoding",
+        "content-type",
+        "Content-Type",
+    ):
+        headers.pop(key, None)
+    return headers
+
+
 class SanitizationMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: FastAPI, *, max_process_bytes: int = 256_000) -> None:
         super().__init__(app)
@@ -55,48 +71,67 @@ class SanitizationMiddleware(BaseHTTPMiddleware):
         if any(request.url.path.startswith(prefix) for prefix in self._skip_response_redaction):
             return response
 
-        # Redact JSON bodies up to a reasonable size to avoid overhead
+        # Redact JSON bodies up to a reasonable size to avoid overhead.
         ctype = (response.headers.get("Content-Type") or "").lower()
-        if "application/json" in ctype:
-            raw: bytes | None = None
-            # Try direct body access first
-            body_attr = getattr(response, "body", None)
-            if isinstance(body_attr, (bytes, bytearray)):
-                raw = bytes(body_attr)
-            # Fallback: attempt to drain body iterator if present
-            if raw is None and getattr(response, "body_iterator", None) is not None:
-                chunks: list[bytes] = []
-                try:
-                    async for chunk in response.body_iterator:  # type: ignore[attr-defined]
-                        chunks.append(chunk)
-                    raw = b"".join(chunks)
-                except Exception:
-                    raw = None
-            if raw is not None and len(raw) <= self._max:
-                try:
-                    parsed = json.loads(raw.decode("utf-8") if raw else "null")
-                    redacted = _redact(parsed)
-                    headers = dict(response.headers)
-                    for key in [
-                        "content-length",
-                        "Content-Length",
-                        "transfer-encoding",
-                        "Transfer-Encoding",
-                        "content-type",
-                        "Content-Type",
-                    ]:
-                        headers.pop(key, None)
-                    # Build a fresh JSON response so content-length is recalculated.
-                    new_resp = JSONResponse(
-                        content=redacted,
-                        status_code=response.status_code,
-                        headers=headers,
-                        media_type=response.media_type or "application/json",
-                        background=getattr(response, "background", None),
-                    )
-                    return new_resp
-                except Exception:
-                    pass
+        if "application/json" not in ctype:
+            return response
+
+        # --- Drain the body so we can inspect / redact it. ---
+        # Starlette's _StreamingResponse (returned by call_next) does NOT
+        # set a 'body' attribute — its body lives only in body_iterator.
+        # Reading body_iterator exhausts it, so we MUST never return the
+        # original _StreamingResponse after draining; we always reconstruct.
+        raw: bytes | None = None
+        body_was_drained = False
+
+        body_attr = getattr(response, "body", None)
+        if isinstance(body_attr, (bytes, bytearray)) and body_attr:
+            # Direct body attribute present (e.g. pre-rendered Response subclass).
+            raw = bytes(body_attr)
+        elif getattr(response, "body_iterator", None) is not None:
+            chunks: list[bytes] = []
+            try:
+                async for chunk in response.body_iterator:  # type: ignore[attr-defined]
+                    chunks.append(chunk)
+            except Exception as exc:
+                logger.debug("SanitizationMiddleware: body drain interrupted: %s", exc)
+            raw = b"".join(chunks)
+            body_was_drained = True
+
+        # --- Try JSON redaction ---
+        if raw is not None and len(raw) <= self._max:
+            try:
+                parsed = json.loads(raw.decode("utf-8") if raw else "null")
+                redacted = _redact(parsed)
+                headers = _strip_framing_headers(dict(response.headers))
+                # Build a fresh JSONResponse — init_headers recalculates
+                # Content-Length from the new body, preventing any mismatch.
+                return JSONResponse(
+                    content=redacted,
+                    status_code=response.status_code,
+                    headers=headers,
+                    media_type=response.media_type or "application/json",
+                    background=getattr(response, "background", None),
+                )
+            except Exception as exc:
+                logger.debug("SanitizationMiddleware: JSON redaction failed: %s", exc)
+
+        # --- Fallback: body too large or JSON processing failed. ---
+        # If we drained body_iterator the original _StreamingResponse is now
+        # exhausted.  Returning it would cause a Content-Length mismatch at
+        # the ASGI layer (uvicorn raises "shorter/longer than Content-Length").
+        # Reconstruct a plain Response from the drained bytes instead.
+        if body_was_drained and raw is not None:
+            headers = _strip_framing_headers(dict(response.headers))
+            return Response(
+                content=raw,
+                status_code=response.status_code,
+                headers=headers,
+                media_type=response.media_type,
+                background=getattr(response, "background", None),
+            )
+
+        # Non-streaming body that we couldn't redact — return unchanged.
         return response
 
 

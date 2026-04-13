@@ -30,8 +30,12 @@ _CALIBRATION_STATE_TO_SCORE = {
     "fully_calibrated": 3,
     "calibrated": 3,
     "calibrating": 2,
+    # "rvc_active": BNO085 is streaming in UART/RVC mode; calibration level is
+    # not exposed by the protocol but the sensor is running correctly.
+    "rvc_active": 2,
     "partial": 2,
     "unknown": 1,
+    "uncalibrated": 0,
     None: 0,
 }
 

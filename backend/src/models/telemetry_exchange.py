@@ -127,8 +127,8 @@ class PowerData(BaseModel):
 
 class ToFData(BaseModel):
     """Time-of-Flight sensor data"""
-    distance_mm: int = 0
-    range_status: str = "valid"  # valid, out_of_range, signal_fail
+    distance_mm: Optional[int] = None  # None when sensor has no target in range
+    range_status: str = "valid"  # valid, no_target, out_of_range, signal_fail
     signal_rate: float = 0.0
 
 

@@ -284,3 +284,83 @@ async def test_execute_mission_marks_navigation_failed_on_waypoint_error(monkeyp
     assert nav.navigation_state.navigation_mode == NavigationMode.IDLE
     assert nav.navigation_state.target_velocity == 0.0
     assert stop_reasons == ["mission failure"]
+
+
+@pytest.mark.asyncio
+async def test_gps_reacquisition_clears_dead_reckoning_and_logs_mismatch(caplog):
+    """After GPS outage (dead reckoning active), re-acquiring GPS clears the DR flag
+    and emits a position-mismatch warning when divergence exceeds the threshold."""
+    import logging
+
+    nav = NavigationService()
+    nav.position_mismatch_warn_threshold_m = 2.0  # low threshold for test
+
+    # Simulate GPS outage: run DR first
+    nav.navigation_state.heading = 0.0
+    dr_sd = SensorData(imu=ImuReading(yaw=0.0))
+    await nav.update_navigation_state(dr_sd)
+    assert nav.navigation_state.dead_reckoning_active is True
+
+    # Force DR estimated position far from the incoming GPS fix to trigger warning
+    nav.dead_reckoning.estimated_position = Position(latitude=0.0, longitude=0.0, accuracy=10.0)
+
+    # Provide a GPS fix that is > 2m away from (0, 0) — (1.0, 1.0) is ~157 km away
+    gps_sd = SensorData(
+        gps=GpsReading(latitude=1.0, longitude=1.0, accuracy=1.5),
+    )
+    with caplog.at_level(logging.WARNING, logger="backend.src.services.navigation_service"):
+        state = await nav.update_navigation_state(gps_sd)
+
+    assert state.dead_reckoning_active is False, "dead_reckoning_active should be cleared on GPS fix"
+    assert state.last_gps_fix is not None, "last_gps_fix should be set on GPS fix"
+    assert abs(state.current_position.latitude - 1.0) < 1e-6, "position should snap to GPS"
+
+    # A position-mismatch warning must have been emitted
+    mismatch_records = [
+        r for r in caplog.records
+        if "position mismatch" in r.message.lower() and r.levelno >= logging.WARNING
+    ]
+    assert mismatch_records, (
+        "Expected a position-mismatch WARNING when GPS re-acquired after DR divergence"
+    )
+
+
+@pytest.mark.asyncio
+async def test_gps_reacquisition_no_mismatch_warning_when_within_threshold(caplog):
+    """When GPS returns with negligible divergence from DR estimate, only an INFO
+    re-sync message is emitted — no WARNING."""
+    import logging
+
+    nav = NavigationService()
+    nav.position_mismatch_warn_threshold_m = 1000.0  # very high threshold
+
+    # Seed dead reckoning
+    nav.navigation_state.heading = 0.0
+    await nav.update_navigation_state(SensorData(imu=ImuReading(yaw=0.0)))
+    assert nav.navigation_state.dead_reckoning_active is True
+
+    # DR position is at origin; GPS fix also effectively at origin (tiny offset)
+    nav.dead_reckoning.estimated_position = Position(latitude=37.0, longitude=-122.0, accuracy=10.0)
+
+    gps_sd = SensorData(
+        gps=GpsReading(latitude=37.0, longitude=-122.0, accuracy=1.0),
+    )
+    with caplog.at_level(logging.DEBUG, logger="backend.src.services.navigation_service"):
+        state = await nav.update_navigation_state(gps_sd)
+
+    assert state.dead_reckoning_active is False
+
+    # No WARNING-level mismatch record expected
+    warning_mismatch = [
+        r for r in caplog.records
+        if "position mismatch" in r.message.lower() and r.levelno >= logging.WARNING
+    ]
+    assert not warning_mismatch, (
+        "No position-mismatch WARNING expected when divergence is within threshold"
+    )
+    # But an INFO re-sync log should be present
+    info_resync = [
+        r for r in caplog.records
+        if "gps re-acquired" in r.message.lower() and r.levelno == logging.INFO
+    ]
+    assert info_resync, "Expected an INFO re-sync log on clean GPS re-acquisition"

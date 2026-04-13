@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request, status, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
 from typing import Optional, Any, Dict
@@ -96,14 +96,14 @@ def get_map_zones(request: Request):
     inm = request.headers.get("if-none-match")
     ims = request.headers.get("if-modified-since")
     if inm == etag:
-        return JSONResponse(status_code=304, content=None)
+        return Response(status_code=304)
     if ims:
         try:
             ims_dt = parsedate_to_datetime(ims)
             if ims_dt.tzinfo is None:
                 ims_dt = ims_dt.replace(tzinfo=timezone.utc)
             if ims_dt >= _zones_last_modified.replace(microsecond=0):
-                return JSONResponse(status_code=304, content=None)
+                return Response(status_code=304)
         except Exception:
             pass
     headers = {
@@ -146,14 +146,14 @@ def get_map_locations(request: Request):
     inm = request.headers.get("if-none-match")
     ims = request.headers.get("if-modified-since")
     if inm == etag:
-        return JSONResponse(status_code=304, content=None)
+        return Response(status_code=304)
     if ims:
         try:
             ims_dt = parsedate_to_datetime(ims)
             if ims_dt.tzinfo is None:
                 ims_dt = ims_dt.replace(tzinfo=timezone.utc)
             if ims_dt >= _locations_last_modified.replace(microsecond=0):
-                return JSONResponse(status_code=304, content=None)
+                return Response(status_code=304)
         except Exception:
             pass
     headers = {

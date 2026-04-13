@@ -1,365 +1,137 @@
-# Specify AI agent directory (track constitution and templates, ignore output)<<<<<<< HEAD
+# =============================================================
+# LawnBerry Pi — .gitignore
+# =============================================================
 
-.specify/out/# Python
-
+# Specify AI agent directory (track constitution/templates, ignore output)
+.specify/out/
 .specify/scripts/__pycache__/
 
+# =============================================================
+# Python
+# =============================================================
+__pycache__/
 *.py[cod]
-
-# Python*$py.class
-
-__pycache__/*.so
-
-*.py[cod].Python
-
-*$py.class=======
-
-*.pyc# Specify AI agent directory (track constitution and templates, ignore output)
-
-*.pyo.specify/out/
-
-*.pyd.specify/scripts/
-
+*$py.class
+*.so
+*.pyd
 *.pyi
+.Python
 
-*.so# Python virtual environments
-
-.Python.venv/
-
-venv/
-
-.venv/
-
-# Distribution / packagingenv/
-
-build/ENV/
-
-develop-eggs/venv-coral/
-
+# Distribution / packaging
+build/
+develop-eggs/
 dist/
-
-downloads/# Python cache and compiled files
-
-eggs/__pycache__/
-
-.eggs/*.pyc
-
-lib/*.pyo
-
-lib64/*.pyd
-
-parts/*.pyi
-
-sdist/.Python
-
-var/*.so
-
-wheels/
-
-share/python-wheels/# Distribution / packaging
-
-*.egg-info/>>>>>>> 49ef02b (docs: amend constitution to v2.0.0 (Engineering Plan alignment + safety-first mandates))
-
-lawnberry_pi.egg-info/build/
-
-.installed.cfgdevelop-eggs/
-
-*.eggdist/
-
-MANIFESTdownloads/
-
+downloads/
 eggs/
-
-# Virtual environments.eggs/
-
-.venv/lib/
-
-venv/lib64/
-
-ENV/parts/
-
-env/sdist/
-
-.virtualenv/var/
-
-venv-coral/wheels/
-
-<<<<<<< HEAD
-
-# PyInstallershare/python-wheels/
-
-*.manifest*.egg-info/
-
-*.spec.installed.cfg
-
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+lawnberry_pi.egg-info/
+.installed.cfg
 *.egg
+MANIFEST
 
-# TestingMANIFEST
+# =============================================================
+# Virtual environments
+# =============================================================
+.venv/
+venv/
+ENV/
+env/
+.virtualenv/
+venv-coral/
 
+# =============================================================
+# Testing & coverage
+# =============================================================
 .pytest_cache/
-
-.coverage# Virtual environments
-
-.coverage.*.venv/
-
-.tox/venv/
-
-.nox/ENV/
-
-htmlcov/env/
-
-nosetests.xml.virtualenv/
-
-coverage.xml
-
-*.cover# IDEs
-
-.hypothesis/.vscode/
-
-.mypy_cache/=======
-
-.dmypy.json*.egg-info/
-
-dmypy.jsonlawnberry_pi.egg-info/
-
-pytestdebug.log.installed.cfg
-
-.cache*.egg
-
-
-
-# Database files# PyInstaller
-
-*.db*.manifest
-
-*.sqlite*.spec
-
-*.sqlite3
-
-data/*.sqlite3# Unit test / coverage reports
-
-data/*.dbhtmlcov/
-
-data/lawnberry.db.tox/
-
-data/lawnberry.db-journal.nox/
-
 .coverage
+.coverage.*
+.tox/
+.nox/
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+pytestdebug.log
+.cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
-# Logs.coverage.*
+# =============================================================
+# Database files
+# =============================================================
+*.db
+*.sqlite
+*.sqlite3
+data/*.sqlite3
+data/*.db
+data/lawnberry.db
+data/lawnberry.db-journal
 
-logs/.cache
-
-*.lognosetests.xml
-
-*.potcoverage.xml
-
-logs/*.log.*
-
-npm-debug.log**.cover
-
-yarn-debug.log*.hypothesis/
-
-yarn-error.log*.pytest_cache/
-
-pnpm-debug.log*pytestdebug.log
-
+# =============================================================
+# Logs
+# =============================================================
+logs/
+*.log
+*.log.*
+backend.log
+frontend.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 lerna-debug.log*
 
-backend.log# Database files
-
-frontend.log*.sqlite3
-
-*.db
-
-# Runtime datadata/*.sqlite3
-
-data/*.jsondata/*.db
-
+# =============================================================
+# Runtime / generated data
+# =============================================================
+data/*.json
 data/*.csv
+data/exports/
+memory/*.json
 
-data/exports/# Logs
-
-memory/*.json*.log
-
-logs/*.log
-
-# Process files*.pot
-
-*.pidbackend.log
-
-*.seedfrontend.log
-
+# =============================================================
+# Process files
+# =============================================================
+*.pid
+*.seed
 *.pid.lock
 
-# Process files
-
-# Frontend (Node.js / Vue)*.pid
-
-node_modules/*.seed
-
-.npm*.pid.lock
-
-.yarn/
-
-.pnp.*# Frontend (Node.js / Vue)
-
+# =============================================================
+# Frontend (Node.js / Vue)
+# =============================================================
 node_modules/
+.npm
+.yarn/
+.pnp.*
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/dist-ssr/
+*.local
 
-# Frontend build outputs.npm
-
-frontend/node_modules/.yarn/
-
-frontend/dist/.pnp.*
-
-frontend/.vite/npm-debug.log*
-
-frontend/dist-ssr/yarn-debug.log*
-
-*.localyarn-error.log*
-
-pnpm-debug.log*
-
-# IDEs and editorslerna-debug.log*
-
+# =============================================================
+# IDEs and editors
+# =============================================================
 .vscode/*
-
-!.vscode/extensions.json# Frontend build outputs
-
-!.vscode/settings.jsonfrontend/dist/
-
-.idea/frontend/.vite/
-
-*.swpfrontend/dist-ssr/
-
-*.swo*.local
-
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
 *~
 
-# Frontend IDE
-
-# OS files.vscode/*
-
-.DS_Store!.vscode/extensions.json
-
-.DS_Store?!.vscode/settings.json
-
-._*>>>>>>> 49ef02b (docs: amend constitution to v2.0.0 (Engineering Plan alignment + safety-first mandates))
-
-.Spotlight-V100.idea/
-
-.Trashes*.swp
-
-ehthumbs.db*.swo
-
-Thumbs.db*~
-
-.DS_Store
-
-# Secrets and environment<<<<<<< HEAD
-
-.env
-
-.env.local# Testing
-
-.env.*.local.pytest_cache/
-
-.env.production.coverage
-
-config/secrets.json.tox/
-
-config/*.keyhtmlcov/
-
-config/*.pem.mypy_cache/
-
-.dmypy.json
-
-# Temporary filesdmypy.json
-
-tmp/
-
-temp/# Database
-
-*.tmp*.db
-
-*.temp*.sqlite
-
-*.bak*.sqlite3
-
-.cache/data/lawnberry.db
-
-.temp/data/lawnberry.db-journal
-
-
-
-# Backups# Logs
-
-backups/logs/
-
-*.backup*.log
-
-npm-debug.log*
-
-# Build artifactsyarn-debug.log*
-
-*.tar.gzyarn-error.log*
-
-*.zip
-
-# Runtime data
-
-# Hardware integration (temporary/local testing)data/*.json
-
-hw-integration/data/*.csv
-
-data/exports/
-
-# Compiled RoboHAT code (built locally)memory/*.json
-
-robohat-rp2040-code/*.uf2
-
-# Hardware integration (temporary/local testing)
-
-# UV lock file (managed by uv)hw-integration/
-
-uv.lock
-
-# Compiled RoboHAT code (built locally)
-
-# Chat modes (temporary agent context)robohat-rp2040-code/*.uf2
-
-.github/chatmodes/=======
-
-Thumbs.db
-
-# Logo image (uncomment if proprietary)
-
-# LawnBerryPi_logo.png# Environment variables
-
-# Checklists/Todo lists
-
-PRODUCTION_READINESS_TODO.md
-AVAILABLE_TOOLS.md
-CODEBASE_ANALYSIS_REPORT.md
-CLEANUP_MANIFEST.md
-LawnBerryPi_EngineeringPlan.md
-REPOSITORY_RESTRUCTURE_MANIFEST.md
-CHAT_MODE_MODEL_SELECTION.md
-
-# Secrets and environment
-
-.env
-.env.local
-.env.*.local
-.env.production
-
-# Backups
-backups/
-*.backup
-*.bak
->>>>>>> 49ef02b (docs: amend constitution to v2.0.0 (Engineering Plan alignment + safety-first mandates))
-
+# =============================================================
 # OS files
+# =============================================================
 .DS_Store
 .DS_Store?
 ._*
@@ -368,78 +140,83 @@ backups/
 ehthumbs.db
 Thumbs.db
 
-<<<<<<< HEAD
+# =============================================================
 # Secrets and environment
+# =============================================================
 .env
 .env.local
 .env.*.local
+.env.production
 config/secrets.json
 config/maps_settings.json
 config/*.key
 config/*.pem
 
+# =============================================================
 # Temporary files
+# =============================================================
 tmp/
 temp/
 *.tmp
+*.temp
 *.bak
-*.swp
-*~
+.temp/
 
+# =============================================================
+# Backups
+# =============================================================
+backups/
+*.backup
+
+# =============================================================
 # Build artifacts
+# =============================================================
 *.tar.gz
 *.zip
 
-# Frontend specific (covered by frontend/.gitignore but listed for clarity)
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
+# =============================================================
+# Hardware integration (local testing only)
+# =============================================================
+hw-integration/
+robohat-rp2040-code/*.uf2
 
-# Python package artifacts
-lawnberry_pi.egg-info/
+# uv.lock is intentionally tracked for reproducible dependency pinning on the Pi
 
-# UV lock file (managed by uv, not committed)
-uv.lock
-
+# =============================================================
 # Chat modes (temporary agent context)
+# =============================================================
 .github/chatmodes/
 
-# Logo image (uncomment if proprietary)
-# LawnBerryPi_logo.png
-=======
-# Temporary files
-*.tmp
-*.temp
-.cache/
-.temp/
-
-# Hardware test outputs (optional - keep if needed for debugging)
-# hw-integration/test_results/
-
-# Editor configurations (keep project settings, ignore personal)
-.vscode/settings.json
-.vscode/*.code-workspace
-
-# UV lock file (keep for reproducibility)
-# uv.lock is tracked for dependency locking
->>>>>>> 49ef02b (docs: amend constitution to v2.0.0 (Engineering Plan alignment + safety-first mandates))
-
-# -----------------------------
-# Virtual environments (explicit)
-# Ensure Python virtual envs are ignored throughout the repo
-.venv/
-venv/
-env/
-ENV/
-.virtualenv/
-venv-coral/
+# =============================================================
+# Stale planning / temporary markdown docs
+# =============================================================
 Remaining_features.md
+PRODUCTION_READINESS_TODO.md
+AVAILABLE_TOOLS.md
+CODEBASE_ANALYSIS_REPORT.md
+CLEANUP_MANIFEST.md
+LawnBerryPi_EngineeringPlan.md
+REPOSITORY_RESTRUCTURE_MANIFEST.md
+CHAT_MODE_MODEL_SELECTION.md
+console_output.md
+
+# =============================================================
+# Temporary test/debug files in repo root
+# =============================================================
 test_satellite_setting.html
 test_error_handling.html
+test_movement.py
+
+# =============================================================
+# Remote access runtime state
+# =============================================================
+data/remote_access_status.json
+
+# =============================================================
+# Frontend test files generated during development
+# =============================================================
 frontend/tests/unit/test_satellite_google_maps.spec.ts
 frontend/tests/unit/test_satellite_osm_provider.spec.ts
 frontend/tests/unit/test_satellite_settings_persistence.spec.ts
 tests/integration/test_satellite_settings_api.py
 tests/unit/test_manual_control_unlock.py
-data/remote_access_status.json
-console_output.md

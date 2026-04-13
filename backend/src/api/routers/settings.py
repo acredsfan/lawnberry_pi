@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from ...core.globals import _security_last_modified, _security_settings
@@ -429,19 +429,19 @@ def _response_headers(payload: Any, last_modified: datetime | None = None) -> di
     return headers
 
 
-def _maybe_not_modified(request: Request, payload: Any, last_modified: datetime | None = None) -> JSONResponse | None:
+def _maybe_not_modified(request: Request, payload: Any, last_modified: datetime | None = None) -> Response | None:
     headers = _response_headers(payload, last_modified)
     inm = request.headers.get("if-none-match")
     ims = request.headers.get("if-modified-since")
     if inm == headers["ETag"]:
-        return JSONResponse(status_code=304, content=None, headers=headers)
+        return Response(status_code=304, headers=headers)
     if ims and last_modified is not None:
         try:
             ims_dt = parsedate_to_datetime(ims)
             if ims_dt.tzinfo is None:
                 ims_dt = ims_dt.replace(tzinfo=timezone.utc)
             if ims_dt >= last_modified.replace(microsecond=0):
-                return JSONResponse(status_code=304, content=None, headers=headers)
+                return Response(status_code=304, headers=headers)
         except Exception:
             pass
     return None

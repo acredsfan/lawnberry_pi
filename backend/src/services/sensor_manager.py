@@ -158,17 +158,26 @@ class IMUSensorInterface:
             if getattr(self, "_driver", None) is not None:
                 o = await self._driver.read_orientation()
                 if o is not None:
+                    # Driver always sets calibration_status; never fall back to
+                    # "unknown".  "rvc_active" means the BNO085 is producing
+                    # valid RVC frames (calibration level not exposed by that
+                    # protocol).  "uncalibrated" means no frames yet.
+                    cal = o.get("calibration_status") or "uncalibrated"
                     reading = ImuReading(
                         roll=o.get("roll"),
                         pitch=o.get("pitch"),
                         yaw=o.get("yaw"),
-                        accel_z=9.8,  # minimal gravity placeholder
-                        calibration_status=o.get("calibration_status") or "unknown"
+                        accel_x=o.get("accel_x"),
+                        accel_y=o.get("accel_y"),
+                        accel_z=o.get("accel_z"),
+                        calibration_status=cal
                     )
                 else:
                     reading = self.last_reading
             else:
-                reading = ImuReading(roll=0.0, pitch=0.0, yaw=0.0, calibration_status="unknown")
+                # Driver unavailable but interface is ONLINE -- report
+                # "uncalibrated" rather than "unknown".
+                reading = ImuReading(roll=0.0, pitch=0.0, yaw=0.0, calibration_status="uncalibrated")
 
             if reading is not None:
                 self.last_reading = reading
@@ -239,16 +248,22 @@ class ToFSensorInterface:
                 async with self.coordinator.acquire_i2c("vl53l0x_pair"):
                     dl = await self._left.read_distance_mm()
                     dr = await self._right.read_distance_mm()
+                # Defense-in-depth: filter VL53L0X out-of-range sentinel (≥ 8000 mm)
+                # in case the driver layer didn't catch it (e.g. a library wrapping the raw value).
+                if isinstance(dl, int) and dl >= 8000:
+                    dl = None
+                if isinstance(dr, int) and dr >= 8000:
+                    dr = None
                 left_reading = TofReading(
                     distance=float(dl) if dl is not None else None,
                     signal_strength=None,
-                    range_status="valid" if dl else "unknown",
+                    range_status="valid" if dl is not None else "no_target",
                     sensor_side="left",
                 )
                 right_reading = TofReading(
                     distance=float(dr) if dr is not None else None,
                     signal_strength=None,
-                    range_status="valid" if dr else "unknown",
+                    range_status="valid" if dr is not None else "no_target",
                     sensor_side="right",
                 )
                 self.left_reading = left_reading
@@ -834,6 +849,19 @@ class SensorManager:
         # IMU stream
         if sensor_data.imu:
             imu_reading = sensor_data.imu
+            # Map calibration_status string to numeric level (0-3).
+            # "rvc_active" means the BNO085 is streaming in RVC mode;
+            # the protocol does not expose calibration registers so we
+            # report level 2 (operational, not fully verified).
+            _CAL_LEVEL = {
+                "fully_calibrated": 3,
+                "calibrated": 3,
+                "calibrating": 2,
+                "rvc_active": 2,
+                "partial": 1,
+                "uncalibrated": 0,
+            }
+            cal_sys = _CAL_LEVEL.get(imu_reading.calibration_status or "", 1)
             imu_data = IMUData(
                 roll_deg=imu_reading.roll,
                 pitch_deg=imu_reading.pitch,
@@ -844,7 +872,7 @@ class SensorManager:
                 gyro_x=imu_reading.gyro_x,
                 gyro_y=imu_reading.gyro_y,
                 gyro_z=imu_reading.gyro_z,
-                calibration_sys=3 if imu_reading.calibration_status == "fully_calibrated" else 1
+                calibration_sys=cal_sys
             )
             streams.append(HardwareTelemetryStream(
                 timestamp=start_time,
@@ -881,14 +909,14 @@ class SensorManager:
         if sensor_data.tof_left:
             tof_left = sensor_data.tof_left
             tof_data = ToFData(
-                distance_mm=int(tof_left.distance),
-                range_status=tof_left.range_status,
-                signal_rate=tof_left.signal_strength
+                distance_mm=int(tof_left.distance) if tof_left.distance is not None else None,
+                range_status=tof_left.range_status or "no_target",
+                signal_rate=tof_left.signal_strength or 0.0
             )
             streams.append(HardwareTelemetryStream(
                 timestamp=start_time,
                 component_id=ComponentId.TOF_LEFT,
-                value=tof_data.distance_mm,
+                value=tof_data.distance_mm if tof_data.distance_mm is not None else 0,
                 status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.TOF_LEFT)),
                 latency_ms=latency_ms,
                 tof_data=tof_data
@@ -898,14 +926,14 @@ class SensorManager:
         if sensor_data.tof_right:
             tof_right = sensor_data.tof_right
             tof_data = ToFData(
-                distance_mm=int(tof_right.distance),
-                range_status=tof_right.range_status,
-                signal_rate=tof_right.signal_strength
+                distance_mm=int(tof_right.distance) if tof_right.distance is not None else None,
+                range_status=tof_right.range_status or "no_target",
+                signal_rate=tof_right.signal_strength or 0.0
             )
             streams.append(HardwareTelemetryStream(
                 timestamp=start_time,
                 component_id=ComponentId.TOF_RIGHT,
-                value=tof_data.distance_mm,
+                value=tof_data.distance_mm if tof_data.distance_mm is not None else 0,
                 status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.TOF_RIGHT)),
                 latency_ms=latency_ms,
                 tof_data=tof_data

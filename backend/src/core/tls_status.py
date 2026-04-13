@@ -8,10 +8,15 @@ Notes:
 - Prefers the nginx-active certificate if one is referenced in nginx configs.
 - Falls back to Let's Encrypt directory (based on LB_DOMAIN/.env or first live dir).
 - Otherwise considers the self-signed baseline.
+- Direct file access is the primary path.  The pi user is expected to have
+  read ACLs on /etc/letsencrypt/live/ and /etc/letsencrypt/archive/ (set via
+  setfacl); a PermissionError produces a logged warning rather than silently
+  falling through.
 """
 # ruff: noqa: I001
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -19,6 +24,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 NGINX_CONF_PATHS = [
@@ -65,8 +72,14 @@ def _detect_nginx_cert_path() -> Path | None:
                         if cp.exists():
                             return cp
                     except PermissionError:
-                        # Can't traverse the cert directory (e.g. /etc/letsencrypt/live
-                        # is root-only), but nginx has it configured so it must be valid.
+                        # Defensive guard: can't stat the cert path, but nginx has it
+                        # configured so it must be present.  Log a warning — this
+                        # should not happen if ACLs are correctly applied.
+                        logger.warning(
+                            "PermissionError checking nginx cert path %s — "
+                            "verify setfacl ACLs on /etc/letsencrypt/",
+                            cp,
+                        )
                         return cp
         except Exception:
             continue
@@ -79,10 +92,15 @@ def _detect_le_cert_path(domain_hint: str | None) -> tuple[Path | None, str | No
         try:
             if candidate.exists():
                 return candidate, domain_hint
-        except (PermissionError, OSError):
-            # The letsencrypt live dir may not be traversable by the current user;
-            # skip file-existence checks and let the caller fall back to s_client.
-            pass
+        except PermissionError:
+            # Defensive guard: ACLs should give pi read access; log so the
+            # operator knows to re-run the fix-permissions deploy hook.
+            logger.warning(
+                "PermissionError reading LE cert path %s — "
+                "verify setfacl ACLs on /etc/letsencrypt/ (run the "
+                "fix-permissions deploy hook as root)",
+                candidate,
+            )
     # fallback: first directory in live
     try:
         for d in sorted(LE_LIVE_DIR.iterdir()):
@@ -93,7 +111,17 @@ def _detect_le_cert_path(domain_hint: str | None) -> tuple[Path | None, str | No
                 if pem.exists():
                     return pem, d.name
             except (PermissionError, OSError):
-                pass
+                logger.warning(
+                    "PermissionError reading LE cert path %s — "
+                    "verify setfacl ACLs on /etc/letsencrypt/",
+                    pem,
+                )
+    except PermissionError:
+        logger.warning(
+            "PermissionError iterating %s — "
+            "verify setfacl ACLs on /etc/letsencrypt/",
+            LE_LIVE_DIR,
+        )
     except Exception:
         pass
     return None, None
@@ -186,10 +214,10 @@ def _probe_cert_via_tls(
 ) -> tuple[datetime | None, float | None, str | None]:
     """Get certificate expiry/CN by probing the live TLS endpoint.
 
-    Used as a fallback when the cert file itself is not readable by the current
-    user (e.g. /etc/letsencrypt/live is root-only on Raspberry Pi deployments).
-    Runs ``openssl s_client`` and pipes the presented certificate into
-    ``openssl x509``; no file access is required.
+    Retained as a utility for manual diagnostics and tests.  It is *not*
+    called automatically by ``get_tls_status()`` — direct file access (now
+    possible because the pi user has setfacl read ACLs on the Let's Encrypt
+    directories) is the sole production path.
 
     Returns ``(not_after, days_left, cn)`` — any member may be ``None`` on
     failure.
@@ -274,17 +302,6 @@ def get_tls_status() -> dict[str, Any]:
 
     not_after, days_left = _parse_not_after(info.path)
     cn = _subject_cn(info.path)
-
-    # When the cert file is inaccessible (e.g. root-only letsencrypt dir) the
-    # file-based openssl calls return None.  Fall back to probing the live TLS
-    # endpoint so we can still report accurate expiry information.
-    if days_left is None:
-        tls_not_after, tls_days, tls_cn = _probe_cert_via_tls()
-        if tls_days is not None:
-            not_after = tls_not_after
-            days_left = tls_days
-            if cn is None:
-                cn = tls_cn
 
     # Health policy
     status: str

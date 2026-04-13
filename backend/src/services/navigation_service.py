@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core.config_loader import ConfigLoader
-from ..nav.geoutils import point_in_polygon
+from ..nav.geoutils import haversine_m, point_in_polygon
 from ..nav.path_planner import PathPlanner
 from ..models import (
     NavigationMode,
@@ -144,6 +144,9 @@ class NavigationService:
         self.max_waypoint_fix_age_seconds = 2.0
         self.max_waypoint_accuracy_m = 5.0
         self.position_verification_timeout_seconds = 30.0
+        # Warn when GPS position diverges from dead-reckoning estimate by more
+        # than this distance (metres) on re-acquisition after a GPS outage.
+        self.position_mismatch_warn_threshold_m = 5.0
 
         try:
             _, limits = ConfigLoader().get()
@@ -583,6 +586,43 @@ class NavigationService:
                 altitude=sensor_data.gps.altitude,
                 accuracy=sensor_data.gps.accuracy
             )
+
+            # When dead reckoning was active, compare the DR estimate to the
+            # incoming GPS fix.  A large divergence means the internal position
+            # model drifted significantly during the outage (e.g. caused by GPS
+            # health being reported as unknown).  Log a structured warning so
+            # operators can diagnose the recovery and confirm resync is clean.
+            if self.navigation_state.dead_reckoning_active:
+                dr_pos = self.dead_reckoning.estimated_position
+                if dr_pos is not None:
+                    try:
+                        mismatch_m = haversine_m(
+                            dr_pos.latitude,
+                            dr_pos.longitude,
+                            gps_position.latitude,
+                            gps_position.longitude,
+                        )
+                        if mismatch_m > self.position_mismatch_warn_threshold_m:
+                            logger.warning(
+                                "Position mismatch on GPS re-acquisition: "
+                                "dead-reckoning estimate diverged %.1fm from GPS fix "
+                                "(DR lat=%.6f lon=%.6f, GPS lat=%.6f lon=%.6f); "
+                                "re-synchronising to GPS.",
+                                mismatch_m,
+                                dr_pos.latitude,
+                                dr_pos.longitude,
+                                gps_position.latitude,
+                                gps_position.longitude,
+                            )
+                        else:
+                            logger.info(
+                                "GPS re-acquired after dead-reckoning; position divergence "
+                                "%.1fm (within %.1fm threshold); re-synchronising.",
+                                mismatch_m,
+                                self.position_mismatch_warn_threshold_m,
+                            )
+                    except Exception:
+                        logger.debug("Position mismatch check failed; continuing with GPS fix.", exc_info=True)
             
             # Update dead reckoning reference
             self.dead_reckoning.update_gps_reference(gps_position)

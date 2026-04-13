@@ -275,7 +275,12 @@ class HealthService:
             if not key.endswith("_status"):
                 continue
             component_name = key.removesuffix("_status")
-            component_status = str(value).lower()
+            # Use .value for Enum members — Python 3.11 changed str(StrEnum) to
+            # return "ClassName.MEMBER" instead of the plain string value, which
+            # broke downstream membership checks like {"online", "ok", ...}.
+            component_status = (
+                value.value if hasattr(value, "value") else str(value)
+            ).lower()
             component_level = self._map_sensor_status_to_health(component_status)
             components[component_name] = {
                 "status": component_status,

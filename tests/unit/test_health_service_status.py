@@ -9,6 +9,7 @@ import yaml
 
 from backend.src.core.health import HealthService
 from backend.src.core.observability import observability
+from backend.src.models.sensor_data import SensorStatus
 
 
 @pytest.fixture(autouse=True)
@@ -167,3 +168,99 @@ def test_health_service_includes_error_alerts(tmp_path: Path, monkeypatch: pytes
 
     assert any(alert.get("origin") == "telemetry" for alert in report.get("alerts", []))
     assert report["error_rates"].get("telemetry", {}).get("errors_last_window", 0) >= 4
+
+
+# ---------------------------------------------------------------------------
+# Regression: Python 3.11 str(StrEnum) returns "ClassName.MEMBER", not value
+# ---------------------------------------------------------------------------
+
+def _make_service(tmp_path: Path, *, sensor_provider=None, dep_provider=None) -> HealthService:
+    hw_path = tmp_path / "hardware.yaml"
+    sys_path = tmp_path / "default.json"
+    db_path = tmp_path / "lawnberry.db"
+    _write_hardware_config(hw_path)
+    _write_system_config(sys_path, remote_access=False)
+    _initialize_database(db_path)
+    return HealthService(
+        hardware_config_path=hw_path,
+        system_config_path=sys_path,
+        remote_access_status_path=tmp_path / "remote_access_status.json",
+        database_path=db_path,
+        error_window_seconds=60,
+        sensor_health_provider=sensor_provider,
+        dependency_provider=dep_provider or _fake_dependencies,
+    )
+
+
+def test_sensor_status_rollup_with_enum_members_all_online(tmp_path: Path):
+    """_sensor_status_to_payload must map SensorStatus enum members correctly.
+
+    Python 3.11 changed str(SensorStatus.ONLINE) from "online" to
+    "SensorStatus.ONLINE".  The rollup must use .value so that all-ONLINE
+    sensors produce sensor_health.status == "healthy", not "unknown".
+    """
+    service = _make_service(tmp_path)
+
+    # Build a status dict that mirrors what SensorManager.get_sensor_status()
+    # returns — values are SensorStatus enum members, not plain strings.
+    fake_status: dict[str, Any] = {
+        "initialized": True,
+        "gps_status": SensorStatus.ONLINE,
+        "imu_status": SensorStatus.ONLINE,
+        "tof_status": SensorStatus.ONLINE,
+        "environmental_status": SensorStatus.ONLINE,
+        "power_status": SensorStatus.ONLINE,
+    }
+
+    payload = service._sensor_status_to_payload(fake_status)
+
+    assert payload["status"] == "healthy", (
+        f"Expected 'healthy' but got {payload['status']!r}. "
+        "Likely cause: str(SensorStatus.ONLINE) returned 'SensorStatus.ONLINE' "
+        "instead of 'online' (Python 3.11 str-enum regression)."
+    )
+    assert payload["initialized"] is True
+    for name, component in payload["components"].items():
+        assert component["status"] == "online", (
+            f"Component {name!r} status should be 'online', got {component['status']!r}"
+        )
+        assert component["health"] == "healthy", (
+            f"Component {name!r} health should be 'healthy', got {component['health']!r}"
+        )
+
+
+def test_sensor_status_rollup_with_enum_members_mixed(tmp_path: Path):
+    """Mixed ONLINE/ERROR sensor statuses produce the correct aggregate."""
+    service = _make_service(tmp_path)
+
+    fake_status: dict[str, Any] = {
+        "initialized": True,
+        "gps_status": SensorStatus.ONLINE,
+        "imu_status": SensorStatus.ERROR,
+        "tof_status": SensorStatus.OFFLINE,
+        "power_status": SensorStatus.ONLINE,
+    }
+
+    payload = service._sensor_status_to_payload(fake_status)
+
+    # ERROR and OFFLINE both map to CRITICAL → overall must be critical
+    assert payload["status"] == "critical"
+    assert payload["components"]["gps"]["health"] == "healthy"
+    assert payload["components"]["imu"]["health"] == "critical"
+    assert payload["components"]["tof"]["health"] == "critical"
+
+
+def test_sensor_status_rollup_with_plain_strings(tmp_path: Path):
+    """Plain string values (legacy / test doubles) still work after the fix."""
+    service = _make_service(tmp_path)
+
+    fake_status: dict[str, Any] = {
+        "initialized": True,
+        "gps_status": "online",
+        "imu_status": "online",
+    }
+
+    payload = service._sensor_status_to_payload(fake_status)
+
+    assert payload["status"] == "healthy"
+    assert payload["components"]["gps"]["status"] == "online"
