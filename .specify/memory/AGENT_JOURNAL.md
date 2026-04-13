@@ -1,3 +1,46 @@
+## 2026-04-13 — Bug Fix: TLS Probe Failure in /api/v2/health (fix-tls-probe)
+
+**Symptom:** `GET /api/v2/health` returned `tls: {status: "unknown", detail: "TLS probe failed"}`.
+
+**Root cause:** `_detect_le_cert_path()` in `backend/src/core/tls_status.py` called
+`candidate.exists()` (→ `os.stat()`) on the domain-hint LE cert path
+(`/etc/letsencrypt/live/lawnberry.link-smart-home.com/fullchain.pem`) without a
+`try/except`. The `pi` user has no permission to traverse `/etc/letsencrypt/live/`
+(mode 700, owned by root). The uncaught `PermissionError` propagated up through
+`get_tls_status()` into `health.py`'s bare `except Exception`, producing the
+`"TLS probe failed"` message.
+
+**Fix (`backend/src/core/tls_status.py`):**
+1. `_detect_nginx_cert_path`: wraps `cp.exists()` in `try/except PermissionError` —
+   returns the nginx-configured path even when `stat` is forbidden (nginx serves it,
+   so it must be valid). Was already present in this state.
+2. `_detect_le_cert_path`: wraps both the domain-hint `candidate.exists()` and the
+   fallback iterator `pem.exists()` in `try/except (PermissionError, OSError)`.
+   Was already present in this state.
+3. Added `_run_openssl_from_pem` — runs `openssl x509` with PEM data on stdin.
+4. Added `_fetch_pem_from_endpoint` — fetches the leaf cert PEM from a live TLS
+   endpoint via `openssl s_client`.
+5. Added `_probe_cert_via_tls` — pipes `openssl s_client` output into `openssl x509`
+   to extract `notAfter` and `CN` without needing file access.
+6. `get_tls_status`: added fallback to `_probe_cert_via_tls(127.0.0.1, 443)` when
+   file-based `_parse_not_after` returns `None` (i.e. the cert file is unreadable).
+
+**Outcome after fix:**
+```
+"tls": {"status": "healthy", "detail": "Certificate valid",
+        "mode": "letsencrypt", "domain": "lawnberry.link-smart-home.com",
+        "days_until_expiry": 65.1, "valid_now": true}
+```
+
+**Tests:** `tests/unit/test_tls_status.py` — 8 tests, all pass.
+  Covers: PermissionError in `_detect_le_cert_path`, nginx path PermissionError
+  fallback, `_probe_cert_via_tls` subprocess failure, PEM parsing, and the
+  end-to-end scenario where both file access fails but TLS probe succeeds.
+
+**No nginx config or certs modified.** Backend restarted and verified live.
+
+---
+
 ## 2025-10-04 — Phase 7: Documentation Ops/Setup/Hardware (T088–T090)
 
 - Updated `docs/OPERATIONS.md` to align with current backend port (8081) and API paths, and added sections referenced by remediation links in APIs: Emergency Stop Recovery, Blade Safety Lockout, IMU Calibration, GPS Setup, Geofence Definition, Telemetry Latency Troubleshooting, Performance Optimization, Documentation Troubleshooting, Verification Artifacts, Settings Management, Branding Assets.

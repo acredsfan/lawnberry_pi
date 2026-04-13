@@ -61,7 +61,12 @@ def _detect_nginx_cert_path() -> Path | None:
                 m = cert_re.match(line)
                 if m:
                     cp = Path(m.group(1).strip())
-                    if cp.exists():
+                    try:
+                        if cp.exists():
+                            return cp
+                    except PermissionError:
+                        # Can't traverse the cert directory (e.g. /etc/letsencrypt/live
+                        # is root-only), but nginx has it configured so it must be valid.
                         return cp
         except Exception:
             continue
@@ -71,16 +76,24 @@ def _detect_nginx_cert_path() -> Path | None:
 def _detect_le_cert_path(domain_hint: str | None) -> tuple[Path | None, str | None]:
     if domain_hint:
         candidate = LE_LIVE_DIR / domain_hint / "fullchain.pem"
-        if candidate.exists():
-            return candidate, domain_hint
+        try:
+            if candidate.exists():
+                return candidate, domain_hint
+        except (PermissionError, OSError):
+            # The letsencrypt live dir may not be traversable by the current user;
+            # skip file-existence checks and let the caller fall back to s_client.
+            pass
     # fallback: first directory in live
     try:
         for d in sorted(LE_LIVE_DIR.iterdir()):
             if not d.is_dir():
                 continue
             pem = d / "fullchain.pem"
-            if pem.exists():
-                return pem, d.name
+            try:
+                if pem.exists():
+                    return pem, d.name
+            except (PermissionError, OSError):
+                pass
     except Exception:
         pass
     return None, None
@@ -92,6 +105,55 @@ def _run_openssl(args: list[str], timeout: float = 2.0) -> str | None:
             ["openssl", *args], timeout=timeout, stderr=subprocess.DEVNULL
         )
         return out.decode("utf-8", errors="ignore").strip()
+    except Exception:
+        return None
+
+
+def _run_openssl_from_pem(args: list[str], pem_data: str, timeout: float = 3.0) -> str | None:
+    """Run an ``openssl x509`` command with a PEM certificate provided on stdin."""
+    try:
+        proc = subprocess.run(
+            ["openssl", *args],
+            input=pem_data.encode("utf-8"),
+            capture_output=True,
+            timeout=timeout,
+        )
+        if proc.returncode != 0:
+            return None
+        return proc.stdout.decode("utf-8", errors="ignore").strip()
+    except Exception:
+        return None
+
+
+def _fetch_pem_from_endpoint(
+    host: str = "127.0.0.1",
+    port: int = 443,
+    domain: str | None = None,
+    timeout: float = 5.0,
+) -> str | None:
+    """Connect to a live TLS endpoint and return the leaf certificate as a PEM string.
+
+    This is used as a fallback when the certificate file cannot be read directly
+    (e.g. when the process lacks permission to access /etc/letsencrypt/live/).
+    """
+    cmd = ["openssl", "s_client", "-connect", f"{host}:{port}"]
+    if domain:
+        cmd += ["-servername", domain]
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=b"",
+            capture_output=True,
+            timeout=timeout,
+        )
+        output = proc.stdout.decode("utf-8", errors="ignore")
+        begin_marker = "-----BEGIN CERTIFICATE-----"
+        end_marker = "-----END CERTIFICATE-----"
+        start = output.find(begin_marker)
+        stop = output.find(end_marker)
+        if start == -1 or stop == -1:
+            return None
+        return output[start: stop + len(end_marker)]
     except Exception:
         return None
 
@@ -117,6 +179,58 @@ def _subject_cn(pem_path: Path) -> str | None:
     # subject=CN = example.com or subject= /CN=example.com
     m = re.search(r"CN\s*=\s*([^/]+)$", subj)
     return m.group(1).strip() if m else None
+
+
+def _probe_cert_via_tls(
+    host: str = "127.0.0.1", port: int = 443, timeout: float = 4.0
+) -> tuple[datetime | None, float | None, str | None]:
+    """Get certificate expiry/CN by probing the live TLS endpoint.
+
+    Used as a fallback when the cert file itself is not readable by the current
+    user (e.g. /etc/letsencrypt/live is root-only on Raspberry Pi deployments).
+    Runs ``openssl s_client`` and pipes the presented certificate into
+    ``openssl x509``; no file access is required.
+
+    Returns ``(not_after, days_left, cn)`` — any member may be ``None`` on
+    failure.
+    """
+    try:
+        proc_sc = subprocess.run(
+            [
+                "openssl", "s_client",
+                "-connect", f"{host}:{port}",
+                "-servername", "localhost",
+            ],
+            input=b"",
+            capture_output=True,
+            timeout=timeout,
+        )
+        proc_x509 = subprocess.run(
+            ["openssl", "x509", "-noout", "-enddate", "-subject"],
+            input=proc_sc.stdout,
+            capture_output=True,
+            timeout=timeout,
+        )
+        text = proc_x509.stdout.decode("utf-8", errors="ignore").strip()
+        not_after: datetime | None = None
+        days_left: float | None = None
+        cn: str | None = None
+        for line in text.splitlines():
+            if line.startswith("notAfter="):
+                value = line.split("=", 1)[1].strip()
+                try:
+                    dt = datetime.strptime(value, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
+                    not_after = dt
+                    days_left = (dt - datetime.now(UTC)).total_seconds() / 86400.0
+                except Exception:
+                    pass
+            elif line.startswith("subject="):
+                m = re.search(r"CN\s*=\s*([^,/\n]+)", line)
+                if m:
+                    cn = m.group(1).strip()
+        return not_after, days_left, cn
+    except Exception:
+        return None, None, None
 
 
 def _active_cert_info() -> CertInfo:
@@ -160,6 +274,17 @@ def get_tls_status() -> dict[str, Any]:
 
     not_after, days_left = _parse_not_after(info.path)
     cn = _subject_cn(info.path)
+
+    # When the cert file is inaccessible (e.g. root-only letsencrypt dir) the
+    # file-based openssl calls return None.  Fall back to probing the live TLS
+    # endpoint so we can still report accurate expiry information.
+    if days_left is None:
+        tls_not_after, tls_days, tls_cn = _probe_cert_via_tls()
+        if tls_days is not None:
+            not_after = tls_not_after
+            days_left = tls_days
+            if cn is None:
+                cn = tls_cn
 
     # Health policy
     status: str
