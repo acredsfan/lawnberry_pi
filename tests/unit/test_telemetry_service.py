@@ -60,6 +60,8 @@ async def test_get_telemetry_hardware():
     mock_manager.read_all_sensors.return_value = future
     
     mock_app_state.sensor_manager = mock_manager
+    # Ensure battery_config is None so voltage_to_soc uses defaults instead of MagicMock values
+    mock_app_state.hardware_config = None
     service.app_state = mock_app_state
     
     telemetry = await service.get_telemetry(sim_mode=False)

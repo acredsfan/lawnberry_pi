@@ -13,6 +13,7 @@ Platform notes:
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from dataclasses import dataclass
@@ -150,7 +151,14 @@ class GPSDriver(HardwareDriver):
             self._last_read_ts = time.time()
             return reading
 
-        # Real hardware path (not exercised in CI/tests). Keep resilient.
+        # Real hardware path — run in a thread so blocking serial I/O never stalls the event loop.
+        try:
+            return await asyncio.to_thread(self._read_hardware_blocking)
+        except Exception:
+            return self._last_read
+
+    def _read_hardware_blocking(self) -> "GpsReading | None":
+        """Blocking hardware read — must only be called via asyncio.to_thread."""
         try:
             if self._serial is None:
                 # Lazy open serial port based on mode with simple autodetect
@@ -221,6 +229,7 @@ class GPSDriver(HardwareDriver):
             # Allow a bit more time on first acquisition
             deadline = time.time() + (1.5 if not self._first_read_done else 0.75)
             got_lat = got_lon = False
+            got_gga = False  # track GGA specifically; it carries fix quality + satellites
             acc: Optional[float] = None
             acc_source: Optional[str] = None  # 'gst' | 'hdop'
             hdop_val: Optional[float] = None
@@ -265,6 +274,7 @@ class GPSDriver(HardwareDriver):
                         status = self._map_fix_quality(fix_quality)
                         if status is not None:
                             rtk_status = status
+                        got_gga = True
                 elif raw.startswith(("$GPRMC", "$GNRMC")):
                     try:
                         self._last_nmea["RMC"] = raw
@@ -291,7 +301,9 @@ class GPSDriver(HardwareDriver):
                             acc = max(0.005, gst_accuracy)
                             acc_source = "gst"
 
-                if got_lat and got_lon:
+                # Break once we have position AND fix quality from GGA.
+                # Do not break on RMC alone — it lacks fix quality and satellite data.
+                if got_lat and got_lon and got_gga:
                     break
 
             if got_lat and got_lon:
