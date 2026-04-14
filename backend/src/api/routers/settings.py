@@ -826,3 +826,55 @@ async def update_telemetry_settings(settings: dict[str, Any]):
         "cadence_hz": profile.telemetry.cadence_hz,
         "latency_targets": profile.telemetry.latency_targets,
     }
+
+
+# ---------------------------------------------------------------------------
+# Safety limits settings  (reads/writes config/limits.yaml)
+# ---------------------------------------------------------------------------
+
+@router.get("/settings/safety")
+async def get_safety_settings():
+    """Return the current safety limits from limits.yaml."""
+    from ...core.config_loader import ConfigLoader
+
+    try:
+        _, limits = ConfigLoader().get()
+        return limits.model_dump()
+    except Exception as exc:
+        logger.error("Failed to load safety limits: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to load safety limits")
+
+
+@router.put("/settings/safety")
+async def put_safety_settings(request: Request):
+    """Update safety limits, write to limits.yaml, and hot-reload runtime.
+
+    Accepts a partial JSON object — only supplied keys are changed.
+    """
+    from ...core.config_loader import ConfigLoader
+    from ...services.navigation_service import NavigationService
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="Body must be a JSON object")
+
+    loader = ConfigLoader()
+    try:
+        updated = loader.update_limits(body)
+    except Exception as exc:
+        logger.error("Failed to update safety limits: %s", exc)
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # Hot-reload the live NavigationService obstacle threshold
+    try:
+        nav = NavigationService.get_instance()
+        nav.obstacle_avoidance_distance = float(updated.tof_obstacle_distance_meters)
+        nav.obstacle_detector.safety_distance = float(updated.tof_obstacle_distance_meters)
+        logger.info(
+            "Live-reloaded obstacle threshold to %.3f m",
+            updated.tof_obstacle_distance_meters,
+        )
+    except Exception as exc:
+        logger.warning("NavigationService live-reload skipped: %s", exc)
+
+    return updated.model_dump()

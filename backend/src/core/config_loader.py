@@ -112,6 +112,35 @@ class ConfigLoader:
         self._cache = None
         return self.load()
 
+    def update_limits(self, patch: Dict[str, Any]) -> SafetyLimits:
+        """Merge *patch* into limits.yaml, validate, write back, and reload.
+
+        Only keys present in SafetyLimits are accepted; unknown keys are
+        silently dropped.  Returns the validated SafetyLimits after write.
+        """
+        current_raw = self._read_yaml(self.limits_path)
+        allowed = set(SafetyLimits.model_fields.keys())
+        for key, value in patch.items():
+            if key in allowed:
+                current_raw[key] = value
+
+        # Validate before writing
+        updated = SafetyLimits(**self._normalize_limits_yaml(current_raw))
+
+        # Write with a header comment
+        with open(self.limits_path, "w", encoding="utf-8") as f:
+            f.write("# LawnBerry safety limits configuration\n")
+            f.write("# Values below respect constitutional constraints.\n\n")
+            yaml.dump(
+                updated.model_dump(),
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+
+        self._cache = None  # bust cache so next get() reads new values
+        return updated
+
     @staticmethod
     def _normalize_hardware_yaml(cfg: Dict[str, Any]) -> Dict[str, Any]:
         """Map YAML structure to HardwareConfig fields.

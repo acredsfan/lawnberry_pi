@@ -397,6 +397,72 @@
       </div>
     </div>
     
+    <!-- Safety Tab -->
+    <div v-if="activeTab === 'safety'" class="settings-section" :id="'panel-safety'" role="tabpanel" aria-labelledby="safety">
+      <div class="card">
+        <div class="card-header">
+          <h3>Obstacle Detection</h3>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label for="obstacle-distance">Obstacle Stop Distance</label>
+            <p class="form-text">Minimum distance from Time-of-Flight sensors before the mower triggers an obstacle stop. Reduce false positives by increasing this value; lower it for tighter obstacle avoidance.</p>
+            <div class="input-with-unit">
+              <input
+                type="number"
+                id="obstacle-distance"
+                class="form-control"
+                :value="obstacleDistanceDisplay"
+                :step="systemSettings.ui.unit_system === 'imperial' ? 0.5 : 1"
+                :min="systemSettings.ui.unit_system === 'imperial' ? 2 : 50"
+                :max="systemSettings.ui.unit_system === 'imperial' ? 48 : 1200"
+                @input="setObstacleDistanceFromDisplay(($event.target as HTMLInputElement).value)"
+              />
+              <span class="unit-label">{{ systemSettings.ui.unit_system === 'imperial' ? 'inches' : 'mm' }}</span>
+            </div>
+            <p class="form-text dim">
+              Current: {{ obstacleDistanceDisplay }} {{ systemSettings.ui.unit_system === 'imperial' ? 'in' : 'mm' }}
+              ({{ (safetySettings.tof_obstacle_distance_meters * 1000).toFixed(0) }} mm / {{ safetySettings.tof_obstacle_distance_meters.toFixed(3) }} m)
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Tilt &amp; Battery</h3>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label for="tilt-threshold">Tilt Threshold (degrees)</label>
+            <p class="form-text">Maximum tilt angle before the safety interlock triggers.</p>
+            <input type="number" id="tilt-threshold" class="form-control" v-model.number="safetySettings.tilt_threshold_degrees" step="1" min="10" max="45" />
+          </div>
+          <div class="form-group">
+            <label for="battery-low">Battery Low Voltage (V)</label>
+            <p class="form-text">Voltage at which low-battery warning activates.</p>
+            <input type="number" id="battery-low" class="form-control" v-model.number="safetySettings.battery_low_voltage" step="0.1" min="10" max="14" />
+          </div>
+          <div class="form-group">
+            <label for="battery-critical">Battery Critical Voltage (V)</label>
+            <p class="form-text">Voltage at which emergency stop triggers. Must be below low voltage.</p>
+            <input type="number" id="battery-critical" class="form-control" v-model.number="safetySettings.battery_critical_voltage" step="0.1" min="9" max="14" />
+          </div>
+          <div class="form-group">
+            <label for="geofence-buffer">Geofence Buffer (meters)</label>
+            <p class="form-text">Extra margin around yard boundary before geofence violation triggers.</p>
+            <input type="number" id="geofence-buffer" class="form-control" v-model.number="safetySettings.geofence_buffer_meters" step="0.1" min="0" max="5" />
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-primary" @click="saveSafetySettings" :disabled="saving">
+          {{ saving ? 'Saving...' : 'Save Safety Settings' }}
+        </button>
+      </div>
+    </div>
+
     <!-- Diagnostics Tab -->
     <div v-if="activeTab === 'diagnostics'" class="settings-section" :id="'panel-diagnostics'" role="tabpanel" aria-labelledby="diagnostics">
       <div class="card">
@@ -442,6 +508,7 @@ const tabs = [
   { id: 'remote', label: 'Remote Access' },
   { id: 'maps', label: 'Maps' },
   { id: 'gps', label: 'GPS Policy' },
+  { id: 'safety', label: 'Safety' },
   { id: 'diagnostics', label: 'Diagnostics' }
 ]
 
@@ -576,6 +643,34 @@ const gpsSettings = ref({
   accuracy_threshold_meters: 3
 })
 
+const safetySettings = ref({
+  tof_obstacle_distance_meters: 0.2,
+  tilt_threshold_degrees: 30.0,
+  geofence_buffer_meters: 0.5,
+  battery_low_voltage: 12.2,
+  battery_critical_voltage: 11.8,
+  motor_current_max_amps: 5.0,
+  high_temperature_celsius: 80.0,
+})
+
+const obstacleDistanceDisplay = computed(() => {
+  const meters = safetySettings.value.tof_obstacle_distance_meters
+  if (systemSettings.value.ui.unit_system === 'imperial') {
+    return parseFloat((meters * 39.3701).toFixed(1))
+  }
+  return Math.round(meters * 1000)
+})
+
+function setObstacleDistanceFromDisplay(raw: string) {
+  const val = parseFloat(raw)
+  if (isNaN(val) || val <= 0) return
+  if (systemSettings.value.ui.unit_system === 'imperial') {
+    safetySettings.value.tof_obstacle_distance_meters = val / 39.3701
+  } else {
+    safetySettings.value.tof_obstacle_distance_meters = val / 1000
+  }
+}
+
 watch(
   () => systemSettings.value.ui.unit_system,
   (value) => {
@@ -604,12 +699,13 @@ watch(
 // Load settings
 async function loadAllSettings() {
   try {
-    const [system, security, remote, maps, gps] = await Promise.all([
+    const [system, security, remote, maps, gps, safety] = await Promise.all([
       api.get('/api/v2/settings/system'),
       api.get('/api/v2/settings/security'),
       api.get('/api/v2/settings/remote-access'),
       api.get('/api/v2/settings/maps'),
-      api.get('/api/v2/settings/gps-policy')
+      api.get('/api/v2/settings/gps-policy'),
+      api.get('/api/v2/settings/safety')
     ])
     
     const systemData = system.data || {}
@@ -643,6 +739,9 @@ async function loadAllSettings() {
       },
     }
     gpsSettings.value = { ...gpsSettings.value, ...gps.data }
+    if (safety.data) {
+      safetySettings.value = { ...safetySettings.value, ...safety.data }
+    }
     // Auto-detect timezone from mower if unset or left at default
     const needsAutoDetect = (!systemSettings.value.timezone || systemSettings.value.timezone.toUpperCase() === 'UTC') && (!timezoneSourceFromApi || timezoneSourceFromApi === 'default')
     if (needsAutoDetect) {
@@ -708,6 +807,10 @@ async function saveMapsSettings() {
 
 async function saveGpsSettings() {
   await saveSettings('/api/v2/settings/gps-policy', gpsSettings.value)
+}
+
+async function saveSafetySettings() {
+  await saveSettings('/api/v2/settings/safety', safetySettings.value)
 }
 
 async function saveSettings(endpoint: string, data: any) {
@@ -963,5 +1066,27 @@ function onTabKeydown(e: KeyboardEvent, idx: number) {
     padding-top: 1rem;
     margin-top: 1rem;
   }
+}
+
+.input-with-unit {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 300px;
+}
+
+.input-with-unit .form-control {
+  flex: 1;
+}
+
+.unit-label {
+  font-size: 0.9rem;
+  color: var(--text-secondary, #888);
+  white-space: nowrap;
+}
+
+.form-text.dim {
+  opacity: 0.7;
+  font-size: 0.8rem;
 }
 </style>
