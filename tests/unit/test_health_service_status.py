@@ -243,11 +243,13 @@ def test_sensor_status_rollup_with_enum_members_mixed(tmp_path: Path):
 
     payload = service._sensor_status_to_payload(fake_status)
 
-    # ERROR and OFFLINE both map to CRITICAL → overall must be critical
+    # ERROR maps to CRITICAL; OFFLINE maps to DEGRADED (intentional: an absent optional
+    # peripheral should not drag the whole robot to critical).  Overall status is driven
+    # by the worst component, so ERROR (critical) wins over OFFLINE (degraded).
     assert payload["status"] == "critical"
     assert payload["components"]["gps"]["health"] == "healthy"
     assert payload["components"]["imu"]["health"] == "critical"
-    assert payload["components"]["tof"]["health"] == "critical"
+    assert payload["components"]["tof"]["health"] == "degraded"
 
 
 def test_sensor_status_rollup_with_plain_strings(tmp_path: Path):
