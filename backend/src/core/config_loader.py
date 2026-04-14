@@ -201,6 +201,8 @@ class ConfigLoader:
                 mapped["imu_type"] = imu.get("type")
         if isinstance(imu, dict) and "port" in imu and "imu_port" not in mapped:
             mapped["imu_port"] = imu["port"]
+        if isinstance(imu, dict) and "yaw_offset_degrees" in imu and "imu_yaw_offset_degrees" not in mapped:
+            mapped["imu_yaw_offset_degrees"] = float(imu["yaw_offset_degrees"])
 
         sensors = cfg.get("sensors") or {}
         tof = sensors.get("tof") if isinstance(sensors, dict) else None

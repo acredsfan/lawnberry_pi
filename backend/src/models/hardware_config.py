@@ -121,6 +121,13 @@ class HardwareConfig(BaseModel):
     gps_ntrip_enabled: bool = Field(default=False)
     imu_type: Optional[IMUType] = Field(default=None)
     imu_port: Optional[str] = Field(default=None, description="Serial port for IMU (e.g. /dev/ttyAMA4)")
+    imu_yaw_offset_degrees: float = Field(
+        default=0.0,
+        description=(
+            "Degrees added to raw IMU yaw before use in navigation. "
+            "Set to 180 if the IMU chip X-axis is mounted facing backward relative to mower forward."
+        ),
+    )
     tof_sensors: List[str] = Field(default_factory=list, description="ToF sensor positions e.g. ['left','right']")
     env_sensor: bool = Field(default=False, description="BME280 present")
     power_monitor: bool = Field(default=False, description="INA3221 present")

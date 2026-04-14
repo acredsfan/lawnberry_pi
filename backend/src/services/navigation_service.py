@@ -149,11 +149,18 @@ class NavigationService:
         self.position_mismatch_warn_threshold_m = 5.0
 
         try:
-            _, limits = ConfigLoader().get()
+            hardware, limits = ConfigLoader().get()
             self.obstacle_avoidance_distance = float(limits.tof_obstacle_distance_meters)
+            self._imu_yaw_offset: float = float(getattr(hardware, "imu_yaw_offset_degrees", 0.0))
+            if self._imu_yaw_offset != 0.0:
+                logger.info(
+                    "IMU yaw offset loaded: %.1f° (applied to raw BNO085 yaw before navigation)",
+                    self._imu_yaw_offset,
+                )
         except Exception as exc:
+            self._imu_yaw_offset = 0.0
             logger.warning(
-                "Failed to load navigation obstacle threshold from safety limits: %s",
+                "Failed to load navigation config from hardware/safety limits: %s",
                 exc,
             )
 
@@ -670,13 +677,35 @@ class NavigationService:
             and sensor_data.imu.calibration_status != "uncalibrated"
         )
         if imu_valid:
-            self.navigation_state.heading = sensor_data.imu.yaw  # type: ignore[union-attr]
+            raw_yaw = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
+            adjusted_yaw = (raw_yaw + self._imu_yaw_offset) % 360.0
+            self.navigation_state.heading = adjusted_yaw
+            # Log IMU vs GPS COG discrepancy for field validation (only when COG is reliable)
+            gps_cog_available = (
+                sensor_data.gps is not None
+                and sensor_data.gps.heading is not None
+                and (sensor_data.gps.speed or 0.0) >= 0.5
+            )
+            if gps_cog_available:
+                cog = float(sensor_data.gps.heading)  # type: ignore[union-attr]
+                delta = (adjusted_yaw - cog + 180.0) % 360.0 - 180.0
+                logger.debug(
+                    "HDG: raw_imu=%.1f° adjusted=%.1f° gps_cog=%.1f° delta=%.1f°",
+                    raw_yaw, adjusted_yaw, cog, delta,
+                )
+                if abs(delta) > 45.0:
+                    logger.warning(
+                        "HDG mismatch: adjusted IMU=%.1f° vs GPS COG=%.1f° (delta=%.1f°) — "
+                        "check imu_yaw_offset_degrees in hardware.yaml",
+                        adjusted_yaw, cog, delta,
+                    )
         elif (
             sensor_data.gps is not None
             and sensor_data.gps.heading is not None
             and (sensor_data.gps.speed or 0.0) >= 0.3  # COG valid only when moving
         ):
-            # Use GPS course-over-ground as heading fallback while in motion
+            # Use GPS course-over-ground as heading fallback while in motion.
+            # GPS COG is already in world frame; IMU yaw_offset does NOT apply here.
             self.navigation_state.heading = sensor_data.gps.heading
 
 

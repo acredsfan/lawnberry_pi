@@ -15,6 +15,7 @@ gps:
 imu:
   type: BNO085
   port: /dev/ttyAMA4  # UART4 — BNO085 wired to Pi UART4
+  yaw_offset_degrees: 180  # BNO085 X-axis mounted facing backward; adds 180° to raw yaw
 sensors:
   tof:
     - left
