@@ -73,6 +73,11 @@ async def test_post_drive_command_blocks_when_obstacle_detected(monkeypatch):
     monkeypatch.setenv("SIM_MODE", "0")
 
     async def fake_telemetry():
+        # Use a distance clearly below whatever the configured obstacle threshold is
+        from backend.src.core.config_loader import ConfigLoader
+        _, safety = ConfigLoader().get()
+        threshold_m = safety.tof_obstacle_distance_meters
+        obstacle_distance_mm = threshold_m * 1000 * 0.5  # half the threshold — definitely blocked
         return {
             "source": "hardware",
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -82,7 +87,7 @@ async def test_post_drive_command_blocks_when_obstacle_detected(monkeypatch):
                 "accuracy": 0.2,
             },
             "tof": {
-                "left": {"distance_mm": 150.0},
+                "left": {"distance_mm": obstacle_distance_mm},
                 "right": {"distance_mm": 500.0},
             },
         }

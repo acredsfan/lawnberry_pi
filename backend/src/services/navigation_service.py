@@ -284,6 +284,7 @@ class NavigationService:
         verification_wait_start = time.monotonic()
         heading_wait_start: float | None = None
         obstacle_wait_start: float | None = None
+        _last_nav_log: float = 0.0
 
         while True:
             status = mission_service.mission_statuses.get(mission.id)
@@ -428,13 +429,20 @@ class NavigationService:
                 base_speed = self.cruise_speed
 
             forward_speed = base_speed
-            if abs(heading_error) > 30:
-                forward_speed *= 0.5 # Slow down for sharp turns
+            # Gradual slowdown for heading corrections: full speed at 0° error,
+            # 50% at 90° error (linear taper). Keeps enough speed to overcome
+            # motor controller dead zone and maintain GPS COG lock.
+            if abs(heading_error) > 10:
+                taper = max(0.5, 1.0 - abs(heading_error) / 180.0)
+                forward_speed *= taper
 
             # During heading bootstrap, enforce minimum forward speed so GPS COG
             # activates quickly (COG gate is 0.3 m/s; target 0.4 m/s for margin).
             if _in_heading_bootstrap:
                 forward_speed = max(forward_speed, 0.4)
+
+            # Enforce a floor so the motor controller dead zone is always overcome.
+            forward_speed = max(forward_speed, 0.3)
             
             left_speed = forward_speed * (1 - turn_effort)
             right_speed = forward_speed * (1 + turn_effort)
@@ -467,8 +475,24 @@ class NavigationService:
                 await self._deliver_stop_command(reason="navigation command failure")
                 raise RuntimeError("Failed to deliver navigation motor command") from _motor_last_exc
 
-            # Simulation of movement
-            await asyncio.sleep(0.2) # Control loop at 5Hz
+            # Periodic navigation progress log (~every 5 s)
+            _now = time.monotonic()
+            if (_now - _last_nav_log) >= 5.0:
+                _last_nav_log = _now
+                logger.info(
+                    "NAV → wp(%.6f,%.6f) dist=%.1fm hdg=%.1f° err=%.1f° spd=L%.2f/R%.2f bootstrap=%s",
+                    target_pos.latitude,
+                    target_pos.longitude,
+                    distance_to_target,
+                    current_heading if current_heading is not None else -1,
+                    heading_error,
+                    left_speed,
+                    right_speed,
+                    _in_heading_bootstrap,
+                )
+
+            # Control loop at 5Hz
+            await asyncio.sleep(0.2)
 
         return False
 

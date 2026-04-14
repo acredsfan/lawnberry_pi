@@ -1,6 +1,3 @@
-# LawnBerry safety limits configuration (example)
-# Values below respect constitutional constraints.
-
 estop_latency_ms: 100
 tilt_threshold_degrees: 30.0
 tilt_cutoff_latency_ms: 200
@@ -10,4 +7,4 @@ motor_current_max_amps: 5.0
 watchdog_timeout_ms: 1000
 geofence_buffer_meters: 0.5
 high_temperature_celsius: 80.0
-tof_obstacle_distance_meters: 0.2
+tof_obstacle_distance_meters: 0.10159994513602963

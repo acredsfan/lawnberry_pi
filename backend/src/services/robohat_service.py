@@ -733,9 +733,22 @@ class RoboHATService:
         return steer_us, throttle_us
 
     @staticmethod
-    def _scale_to_pwm(value: float, span: int = 450, center: int = 1500) -> int:
+    def _scale_to_pwm(value: float, span: int = 450, center: int = 1500,
+                       dead_zone: int = 80) -> int:
+        """Convert a [-1, 1] value to PWM microseconds.
+
+        ``dead_zone`` is the minimum µs offset from *center* that the motor
+        driver requires before the motors actually move (MDDRC10 dead band).
+        When ``value`` is non-zero the output is shifted past the dead zone so
+        that even small commands produce real wheel motion.
+        """
         value = max(-1.0, min(1.0, value))
-        us = int(round(center + value * span))
+        if abs(value) < 1e-4:
+            return center
+        sign = 1 if value > 0 else -1
+        # Map [0..1] → [dead_zone .. span] µs offset
+        live_span = span - dead_zone
+        us = int(round(center + sign * (dead_zone + abs(value) * live_span)))
         return max(1000, min(2000, us))
 
     async def shutdown(self):
