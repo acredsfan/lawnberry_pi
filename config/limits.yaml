@@ -4,8 +4,8 @@
 estop_latency_ms: 100
 tilt_threshold_degrees: 30.0
 tilt_cutoff_latency_ms: 200
-battery_low_voltage: 10.0
-battery_critical_voltage: 9.5
+battery_low_voltage: 12.2
+battery_critical_voltage: 11.8
 motor_current_max_amps: 5.0
 watchdog_timeout_ms: 1000
 geofence_buffer_meters: 0.5

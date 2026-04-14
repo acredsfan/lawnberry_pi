@@ -203,6 +203,9 @@ class NavigationService:
         self.navigation_state.operation_start_time = datetime.now(timezone.utc)
         self._mission_execution_active = True
 
+        # Load yard boundary from map zones so geofence enforcement is active for this mission
+        self._load_boundaries_from_zones()
+
         try:
             while self.navigation_state.current_waypoint_index < len(self.navigation_state.planned_path):
                 status = mission_service.mission_statuses.get(mission.id)
@@ -311,7 +314,7 @@ class NavigationService:
                 obstacle_wait_start = None
                 if (time.monotonic() - verification_wait_start) >= self.position_verification_timeout_seconds:
                     await self._deliver_stop_command(reason="position acquisition timeout")
-                    emergency_ok = await self.emergency_stop()
+                    emergency_ok = await self.emergency_stop(reason="GPS position unavailable for 30 s")
                     raise RuntimeError(
                         "Position acquisition timeout while navigating waypoint"
                         + ("; emergency stop activated" if emergency_ok else "")
@@ -325,7 +328,7 @@ class NavigationService:
                 self.navigation_state.target_velocity = 0.0
                 await self._deliver_stop_command(reason="position verification hold")
                 if (time.monotonic() - verification_wait_start) >= self.position_verification_timeout_seconds:
-                    emergency_ok = await self.emergency_stop()
+                    emergency_ok = await self.emergency_stop(reason="GPS accuracy too low for 30 s")
                     raise RuntimeError(
                         "Position verification timeout while navigating waypoint"
                         + ("; emergency stop activated" if emergency_ok else "")
@@ -369,6 +372,21 @@ class NavigationService:
                 continue
             obstacle_wait_start = None
 
+            # Geofence enforcement: stop and return to boundary if outside mowing area
+            if self.navigation_state.safety_boundaries and self.navigation_state.current_position:
+                outer_boundary = self.navigation_state.safety_boundaries[0]
+                polygon = [(p.latitude, p.longitude) for p in outer_boundary]
+                cur = self.navigation_state.current_position
+                if not point_in_polygon(cur.latitude, cur.longitude, polygon):
+                    await self._deliver_stop_command(reason="outside geofence boundary")
+                    nearest = self._nearest_boundary_point(cur, outer_boundary)
+                    logger.warning(
+                        "Mower outside geofence boundary at (%.6f, %.6f); returning to boundary (%.6f, %.6f)",
+                        cur.latitude, cur.longitude, nearest.latitude, nearest.longitude,
+                    )
+                    target_pos = nearest
+                    continue
+
             # Calculate heading and apply motor commands
             heading_to_target = self.path_planner.calculate_bearing(
                 self.navigation_state.current_position,
@@ -376,20 +394,25 @@ class NavigationService:
             )
             
             current_heading = self.navigation_state.heading
+            _in_heading_bootstrap = current_heading is None
             if current_heading is None:
+                # No heading from IMU or GPS COG yet.  Bootstrap by assuming we face
+                # the target so the mower starts moving; GPS COG will take over once
+                # speed >= 0.3 m/s.  E-stop is intentionally NOT triggered here — a
+                # missing heading source is a navigation limitation, not a safety
+                # emergency.  The mission will be aborted cleanly if heading never arrives.
                 if heading_wait_start is None:
                     heading_wait_start = time.monotonic()
-                    logger.warning("No heading data, cannot navigate.")
-                await self._deliver_stop_command(reason="heading unavailable hold")
-                if (time.monotonic() - heading_wait_start) >= self.position_verification_timeout_seconds:
-                    emergency_ok = await self.emergency_stop()
-                    raise RuntimeError(
-                        "Heading unavailable while navigating waypoint"
-                        + ("; emergency stop activated" if emergency_ok else "")
+                    logger.warning(
+                        "No heading data available; assuming bearing %.1f° to target to start motion.",
+                        heading_to_target,
                     )
-                await asyncio.sleep(1)
-                continue
-            heading_wait_start = None
+                if (time.monotonic() - heading_wait_start) >= self.position_verification_timeout_seconds:
+                    await self._deliver_stop_command(reason="heading unavailable — mission aborted")
+                    raise RuntimeError("Heading unavailable while navigating waypoint; mission aborted")
+                current_heading = heading_to_target
+            else:
+                heading_wait_start = None
 
             heading_error = (heading_to_target - current_heading + 180) % 360 - 180
             
@@ -407,6 +430,11 @@ class NavigationService:
             forward_speed = base_speed
             if abs(heading_error) > 30:
                 forward_speed *= 0.5 # Slow down for sharp turns
+
+            # During heading bootstrap, enforce minimum forward speed so GPS COG
+            # activates quickly (COG gate is 0.3 m/s; target 0.4 m/s for margin).
+            if _in_heading_bootstrap:
+                forward_speed = max(forward_speed, 0.4)
             
             left_speed = forward_speed * (1 - turn_effort)
             right_speed = forward_speed * (1 + turn_effort)
@@ -415,13 +443,30 @@ class NavigationService:
             left_speed = max(-self.max_speed, min(self.max_speed, left_speed))
             right_speed = max(-self.max_speed, min(self.max_speed, right_speed))
 
-            try:
-                await self.set_speed(left_speed, right_speed)
-            except Exception as e:
-                logger.error(f"Failed to set motor speed: {e}")
+            # Retry transient motor command failures (e.g. single PWM ack timeout)
+            # before aborting the mission.
+            _motor_attempts = 3
+            _motor_last_exc: Exception | None = None
+            for _attempt in range(1, _motor_attempts + 1):
+                try:
+                    await self.set_speed(left_speed, right_speed)
+                    _motor_last_exc = None
+                    break
+                except Exception as e:
+                    _motor_last_exc = e
+                    logger.warning(
+                        "Motor command attempt %d/%d failed: %s",
+                        _attempt,
+                        _motor_attempts,
+                        e,
+                    )
+                    if _attempt < _motor_attempts:
+                        await asyncio.sleep(0.15)
+            if _motor_last_exc is not None:
+                logger.error("All %d motor command attempts failed: %s", _motor_attempts, _motor_last_exc)
                 await self._deliver_stop_command(reason="navigation command failure")
-                raise RuntimeError("Failed to deliver navigation motor command") from e
-            
+                raise RuntimeError("Failed to deliver navigation motor command") from _motor_last_exc
+
             # Simulation of movement
             await asyncio.sleep(0.2) # Control loop at 5Hz
 
@@ -855,12 +900,19 @@ class NavigationService:
             logger.error("Navigation stop requested but controller stop could not be confirmed")
         return stop_confirmed
     
-    async def emergency_stop(self) -> bool:
+    async def emergency_stop(self, reason: str = "emergency stop") -> bool:
         """Emergency stop navigation"""
         self.navigation_state.navigation_mode = NavigationMode.EMERGENCY_STOP
         self.navigation_state.target_velocity = 0.0
         self.navigation_state.path_status = PathStatus.INTERRUPTED
         self._latch_global_emergency_state()
+
+        # Record reason so the UI can show why the e-stop was activated
+        try:
+            import backend.src.api.rest as rest_api
+            rest_api._safety_state["estop_reason"] = reason
+        except Exception:
+            pass
         
         # Try to invoke controller-level emergency stop when available
         emergency_ok = True
@@ -935,11 +987,41 @@ class NavigationService:
         """Set safety boundaries that must not be crossed"""
         self.navigation_state.safety_boundaries = boundaries
         logger.info(f"Set {len(boundaries)} safety boundaries")
+
+    def _load_boundaries_from_zones(self) -> None:
+        """Load mowing-area polygons from the map zones store into safety_boundaries."""
+        try:
+            from ..api import rest as rest_api
+            zones = rest_api._zones_store  # list[Zone]
+            boundary_polygons: list[list[Position]] = []
+            for zone in zones:
+                if not getattr(zone, "exclusion_zone", False):
+                    pts = [Position(latitude=p.latitude, longitude=p.longitude) for p in zone.polygon]
+                    if len(pts) >= 3:
+                        boundary_polygons.append(pts)
+            if boundary_polygons:
+                self.navigation_state.safety_boundaries = boundary_polygons
+                logger.info("Loaded %d boundary polygon(s) from map zones", len(boundary_polygons))
+            else:
+                logger.warning("No mowing-area zones defined; geofence enforcement disabled for this mission")
+        except Exception:
+            logger.warning("Failed to load map zones for geofence; continuing without boundary enforcement", exc_info=True)
     
     def add_no_go_zone(self, zone: List[Position]):
         """Add a no-go zone to avoid"""
         self.navigation_state.no_go_zones.append(zone)
         logger.info("Added no-go zone")
+
+    def _nearest_boundary_point(self, pos: "Position", boundary: List["Position"]) -> "Position":
+        """Return the boundary vertex closest to pos (Euclidean approx for nearby points)."""
+        best = boundary[0]
+        best_dist = haversine_m(pos.latitude, pos.longitude, best.latitude, best.longitude)
+        for pt in boundary[1:]:
+            d = haversine_m(pos.latitude, pos.longitude, pt.latitude, pt.longitude)
+            if d < best_dist:
+                best_dist = d
+                best = pt
+        return best
     
     async def get_navigation_status(self) -> Dict[str, Any]:
         """Get current navigation status"""

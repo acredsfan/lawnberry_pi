@@ -7,7 +7,7 @@ from ..models.auth_security_config import AuthSecurityConfig
 
 # Blade/global safety state
 _blade_state = {"active": False}
-_safety_state = {"emergency_stop_active": False}
+_safety_state: dict = {"emergency_stop_active": False, "estop_reason": None}
 # Short-lived emergency TTL to block immediate subsequent commands without cross-test leakage
 _emergency_until: float = 0.0
 # Per-client emergency flags (scoped by Authorization or X-Client-Id)

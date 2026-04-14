@@ -36,6 +36,8 @@ async def test_dead_reckoning_resets_with_gps_fix():
             "longitude": gps_pos.longitude,
             "altitude": None,
             "accuracy": 2.0,
+            "heading": None,
+            "speed": 0.0,
         },
     )()
     state = await nav.update_navigation_state(sd)

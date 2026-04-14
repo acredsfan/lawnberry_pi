@@ -101,8 +101,8 @@ class SafetyThresholds(BaseModel):
     obstacle_emergency_distance_m: float = 0.2   # Emergency stop distance
     
     # Power safety
-    battery_critical_voltage: float = 10.0       # Critical battery voltage
-    battery_low_voltage: float = 11.0           # Low battery warning
+    battery_critical_voltage: float = 11.8       # Critical battery voltage (4S LiFePO4: ~2-5% SOC)
+    battery_low_voltage: float = 12.2            # Low battery warning (4S LiFePO4: ~10% SOC)
     max_motor_current_a: float = 5.0            # Maximum motor current
     motor_temperature_limit_c: float = 80.0     # Motor temperature limit
     

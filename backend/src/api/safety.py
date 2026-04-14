@@ -37,6 +37,7 @@ async def clear_emergency_stop(payload: EmergencyClearRequest):
 
     # Clear local safety state and ensure blade remains off
     _safety_state["emergency_stop_active"] = False
+    _safety_state["estop_reason"] = None
     _blade_state["active"] = False
     rest_api._emergency_until = 0.0
     _client_emergency.clear()

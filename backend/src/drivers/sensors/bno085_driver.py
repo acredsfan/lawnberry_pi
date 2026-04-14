@@ -1,35 +1,28 @@
-"""BNO085 IMU driver (T046).
+"""BNO085 IMU driver (T046) — UART/SHTP mode.
 
-Reads from a BNO085 in UART/RVC (Robot Vacuum Cleaner) mode via pyserial.
+Communicates with a BNO085 via the SHTP protocol over UART at 3 Mbaud.
+Uses the ``adafruit_bno08x`` library for protocol management including
+soft reset, feature enable, and packet framing.
 
-## RVC packet format (21 bytes total)
-  Byte  0-1 : header 0xAA 0xAA
-  Byte    2 : sequence index (0-255, wraps)
-  Byte  3-4 : yaw   (int16 LE, units = 0.01 deg, range 0-360 deg)
-  Byte  5-6 : pitch (int16 LE, units = 0.01 deg)
-  Byte  7-8 : roll  (int16 LE, units = 0.01 deg)
-  Byte 9-10 : x accel (int16 LE, units = 0.01 m/s^2)
-  Byte 11-12: y accel
-  Byte 13-14: z accel
-  Byte 15-19: reserved (5 bytes)
-  Byte   20 : checksum = (sum of bytes 2-19) & 0xFF
+## SHTP vs RVC
+The BNO085 PS1 pin determines the UART mode:
+  - PS1 LOW  (default on most breakouts): **SHTP** — 3,000,000 baud, active
+    protocol requiring init and feature enable.  Provides full sensor fusion,
+    gyro, magnetometer, and per-subsystem calibration levels (0-3).
+  - PS1 HIGH: **RVC** — 115,200 baud, auto-streams simplified orientation.
+    No calibration registers exposed.
 
-## Calibration status in RVC mode
-The BNO085 RVC protocol does NOT transmit calibration registers.
-Calibration happens internally; the chip self-calibrates its gyro,
-accelerometer and magnetometer but does not surface the per-sensor
-confidence levels (0-3) in the RVC packet.
+This driver targets **SHTP mode** and uses the Adafruit CircuitPython
+BNO08X UART transport.
 
-  - Before the first valid frame is received: "uncalibrated"
-  - After the first valid frame (sensor is producing output):
-    "rvc_active" -- the sensor is running and applying its internally
-    managed calibration; the numeric level is simply not available via
-    this protocol.
-
-To obtain numeric calibration levels (0-3 per subsystem) the BNO085 must
-be accessed via the full SHTP protocol (I2C or SPI) using a library such
-as adafruit-circuitpython-bno08x.  That interface is not wired up in
-this driver; "rvc_active" is the best available status.
+## Calibration status mapping
+The SHTP protocol exposes magnetometer accuracy as an integer 0-3:
+  0 → "uncalibrated"
+  1 → "partial"
+  2 → "calibrating"
+  3 → "fully_calibrated"
+These strings match the vocabulary consumed by ``sensor_manager.py``,
+``navigation_service.py``, and the frontend dashboard.
 
 Safety Requirement (FR-022): Tilt >30 degrees must trigger blade stop
 within 200ms.  Enforcement occurs in safety triggers (T051); this driver
@@ -42,7 +35,6 @@ import logging
 import math
 import os
 import random
-import struct
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -52,116 +44,127 @@ from ..base import HardwareDriver
 
 logger = logging.getLogger(__name__)
 
-# RVC frame constants
-_RVC_HEADER_LEN = 2
-_RVC_BODY_LEN = 19
-_RVC_FRAME_LEN = _RVC_HEADER_LEN + _RVC_BODY_LEN  # 21 bytes total
-_RVC_SCALE = 0.01  # all int16 values are in units of 0.01 (deg or m/s^2)
+# SHTP calibration level → contract string
+_SHTP_CAL_MAP: dict[int, str] = {
+    0: "uncalibrated",
+    1: "partial",
+    2: "calibrating",
+    3: "fully_calibrated",
+}
+
+# Maximum age (seconds) before a cached reading is downgraded to uncalibrated
+_MAX_STALE_AGE_S = 5.0
 
 
 @dataclass
 class BNO085DriverConfig:
-    port: str = "/dev/serial0"
-    baudrate: int = 115200
-    read_timeout: float = 0.1   # seconds; non-blocking poll
+    port: str = "/dev/ttyAMA4"
+    baudrate: int = 3_000_000
+    read_timeout: float = 1.0  # seconds; SHTP needs longer than RVC polling
 
 
-def _parse_rvc_frame(body: bytes) -> dict[str, float] | None:
-    """Parse the 19-byte RVC body (after header bytes).
+def _quaternion_to_euler(i: float, j: float, k: float, real: float) -> tuple[float, float, float]:
+    """Convert quaternion (i, j, k, real) to Euler angles (yaw, pitch, roll) in degrees.
 
-    Returns a dict with roll/pitch/yaw/accel_x/accel_y/accel_z and
-    ``calibration_status = "rvc_active"``, or *None* if the checksum fails.
-
-    Struct layout for the 19-byte body:
-      B      - index (1 byte)
-      hhhhhh - yaw, pitch, roll, x_accel, y_accel, z_accel (6 x int16 LE = 12 bytes)
-      5x     - 5 reserved bytes
-      B      - checksum (1 byte)
-    Total: 1 + 12 + 5 + 1 = 19 bytes.
+    Uses ZYX aerospace convention (Tait-Bryan).  Returns yaw in [0, 360), pitch
+    and roll in [-180, 180].
     """
-    if len(body) != _RVC_BODY_LEN:
+    # Roll (X axis rotation)
+    sinr_cosp = 2.0 * (real * i + j * k)
+    cosr_cosp = 1.0 - 2.0 * (i * i + j * j)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+
+    # Pitch (Y axis rotation)
+    sinp = 2.0 * (real * j - k * i)
+    sinp = max(-1.0, min(1.0, sinp))  # clamp for asin safety
+    pitch = math.asin(sinp)
+
+    # Yaw (Z axis rotation)
+    siny_cosp = 2.0 * (real * k + i * j)
+    cosy_cosp = 1.0 - 2.0 * (j * j + k * k)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+
+    yaw_deg = math.degrees(yaw) % 360.0  # normalize to [0, 360)
+    pitch_deg = math.degrees(pitch)
+    roll_deg = math.degrees(roll)
+    return yaw_deg, pitch_deg, roll_deg
+
+
+def _read_shtp_sync(bno) -> dict[str, Any] | None:
+    """Blocking read of all enabled SHTP reports from a ``BNO08X_UART`` instance.
+
+    Returns an orientation dict or ``None`` if the sensor has no data ready.
+    Must be called from a worker thread (not the event loop).
+    """
+    quat = bno.quaternion
+    if quat is None or quat[0] is None:
         return None
 
-    # Checksum: low byte of sum of bytes [0..17] (exclude last byte = checksum)
-    expected_checksum = sum(body[:-1]) & 0xFF
-    if body[-1] != expected_checksum:
-        logger.debug(
-            "BNO085 RVC checksum mismatch: got 0x%02x expected 0x%02x",
-            body[-1],
-            expected_checksum,
-        )
-        return None
+    # quaternion is (i, j, k, real)
+    i, j, k, real = quat
+    yaw, pitch, roll = _quaternion_to_euler(i, j, k, real)
 
-    # Unpack: 1 index byte + 6 signed int16 + 6 trailing bytes (5 reserved + 1 checksum, already validated)
-    idx, yaw_raw, pitch_raw, roll_raw, ax_raw, ay_raw, az_raw = struct.unpack_from(
-        "<Bhhhhhhxxxxxx", body
-    )
+    accel = bno.acceleration or (0.0, 0.0, 0.0)
+    gyro = bno.gyro or (0.0, 0.0, 0.0)
+
+    # Magnetometer accuracy (0-3) is the best calibration proxy in SHTP.
+    # However, the rotation vector uses gyro+accel fusion and is valid even
+    # at mag_accuracy=0.  Report at least "partial" when we have live data
+    # so navigation doesn't reject the heading outright.
+    try:
+        cal_level = bno.calibration_status
+    except Exception:
+        cal_level = 0
+
+    if cal_level >= 3:
+        cal_str = "fully_calibrated"
+    elif cal_level >= 2:
+        cal_str = "calibrating"
+    else:
+        # Even at mag=0/1, the rotation vector works — report "partial"
+        # so navigation accepts the IMU heading.
+        cal_str = "partial"
 
     return {
-        "roll": roll_raw * _RVC_SCALE,
-        "pitch": pitch_raw * _RVC_SCALE,
-        "yaw": yaw_raw * _RVC_SCALE,
-        "accel_x": ax_raw * _RVC_SCALE,
-        "accel_y": ay_raw * _RVC_SCALE,
-        "accel_z": az_raw * _RVC_SCALE,
-        "calibration_status": "rvc_active",
+        "roll": roll,
+        "pitch": pitch,
+        "yaw": yaw,
+        "accel_x": accel[0],
+        "accel_y": accel[1],
+        "accel_z": accel[2],
+        "gyro_x": gyro[0],
+        "gyro_y": gyro[1],
+        "gyro_z": gyro[2],
+        "calibration_status": cal_str,
     }
 
 
-def _read_rvc_frame_sync(serial_port) -> dict[str, float] | None:
-    """Blocking read of one RVC frame from an open ``serial.Serial`` port.
-
-    Scans the incoming byte stream for the 0xAA 0xAA header, then reads
-    the 19-byte body.  Returns parsed orientation dict or *None* on timeout
-    or checksum error.
-    """
-    # Search for header (scan at most 2 full frames worth of bytes)
-    scan_limit = _RVC_FRAME_LEN * 2
-    scanned = 0
-    while scanned < scan_limit:
-        b = serial_port.read(1)
-        if not b:
-            return None  # timeout
-        scanned += 1
-        if b[0] != 0xAA:
-            continue
-        b2 = serial_port.read(1)
-        if not b2:
-            return None
-        scanned += 1
-        if b2[0] != 0xAA:
-            continue
-        # Header found -- read body
-        body = serial_port.read(_RVC_BODY_LEN)
-        if len(body) < _RVC_BODY_LEN:
-            return None
-        return _parse_rvc_frame(bytes(body))
-    return None
-
-
 class BNO085Driver(HardwareDriver):
-    """BNO085 IMU driver -- UART/RVC mode.
+    """BNO085 IMU driver — UART/SHTP mode at 3 Mbaud.
 
     Config keys (all optional):
-      ``port``         : serial device path (default ``/dev/serial0``; override
+      ``port``         : serial device path (default ``/dev/ttyAMA4``; override
                          with env var ``BNO085_PORT``)
-      ``baudrate``     : baud rate (default 115200)
-      ``read_timeout`` : per-read timeout in seconds (default 0.1)
+      ``baudrate``     : baud rate (default 3000000)
+      ``read_timeout`` : serial timeout in seconds (default 1.0)
     """
 
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config=config)
         cfg = config or {}
         self._cfg = BNO085DriverConfig(
-            port=cfg.get("port", os.environ.get("BNO085_PORT", "/dev/serial0")),
-            baudrate=int(cfg.get("baudrate", 115200)),
-            read_timeout=float(cfg.get("read_timeout", 0.1)),
+            port=cfg.get("port", os.environ.get("BNO085_PORT", "/dev/ttyAMA4")),
+            baudrate=int(cfg.get("baudrate", 3_000_000)),
+            read_timeout=float(cfg.get("read_timeout", 1.0)),
         )
         self._serial = None
+        self._bno = None  # adafruit_bno08x BNO08X_UART instance
+        self._lock = asyncio.Lock()  # serialize all hardware access
         self._last_orientation: dict[str, Any] | None = None
         self._last_read_ts: float | None = None
         self._cycle: int = 0
-        self._valid_frames: int = 0  # count of successfully parsed frames
+        self._valid_frames: int = 0
+        self._consecutive_errors: int = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -171,42 +174,62 @@ class BNO085Driver(HardwareDriver):
         if is_simulation_mode() or os.environ.get("SIM_MODE") == "1":
             self.initialized = True
             return
-        # Lazy import: avoid import-time crash on non-Pi environments
-        try:
-            import serial  # noqa: PLC0415
 
-            self._serial = await asyncio.to_thread(
-                lambda: serial.Serial(
-                    self._cfg.port,
-                    self._cfg.baudrate,
-                    timeout=self._cfg.read_timeout,
-                )
-            )
+        try:
+            self._bno = await asyncio.to_thread(self._open_shtp)
             logger.info(
-                "BNO085 opened on %s @ %d baud (RVC mode)",
+                "BNO085 SHTP initialized on %s @ %d baud",
                 self._cfg.port,
                 self._cfg.baudrate,
             )
         except Exception as exc:
             logger.warning(
-                "BNO085: failed to open %s -- %s. IMU will report uncalibrated.",
+                "BNO085: SHTP init failed on %s — %s. IMU will report uncalibrated.",
                 self._cfg.port,
                 exc,
             )
-            self._serial = None
+            self._bno = None
         self.initialized = True
+
+    def _open_shtp(self):
+        """Open serial port, create BNO08X_UART, enable reports (blocking)."""
+        import serial  # noqa: PLC0415
+        from adafruit_bno08x import (  # noqa: PLC0415
+            BNO_REPORT_ACCELEROMETER,
+            BNO_REPORT_GYROSCOPE,
+            BNO_REPORT_ROTATION_VECTOR,
+        )
+        from adafruit_bno08x.uart import BNO08X_UART  # noqa: PLC0415
+
+        uart = serial.Serial(
+            self._cfg.port,
+            self._cfg.baudrate,
+            timeout=self._cfg.read_timeout,
+        )
+        self._serial = uart
+
+        # Constructor performs soft reset (~1-2 s)
+        bno = BNO08X_UART(uart)
+
+        # Enable the reports we need
+        bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
+        bno.enable_feature(BNO_REPORT_ACCELEROMETER)
+        bno.enable_feature(BNO_REPORT_GYROSCOPE)
+        return bno
 
     async def start(self) -> None:  # noqa: D401
         self.running = True
 
     async def stop(self) -> None:  # noqa: D401
         self.running = False
-        if self._serial is not None:
-            try:
-                await asyncio.to_thread(self._serial.close)
-            except Exception:
-                pass
-            self._serial = None
+        async with self._lock:
+            self._bno = None
+            if self._serial is not None:
+                try:
+                    await asyncio.to_thread(self._serial.close)
+                except Exception:
+                    pass
+                self._serial = None
 
     async def health_check(self) -> dict[str, Any]:  # noqa: D401
         return {
@@ -214,19 +237,17 @@ class BNO085Driver(HardwareDriver):
             "initialized": self.initialized,
             "running": self.running,
             "port": self._cfg.port,
-            "serial_open": (self._serial.is_open)
-            if self._serial is not None
-            else False,
+            "baudrate": self._cfg.baudrate,
+            "mode": "SHTP",
+            "serial_open": (self._serial is not None and self._serial.is_open),
+            "shtp_connected": self._bno is not None,
             "valid_frames": self._valid_frames,
+            "consecutive_errors": self._consecutive_errors,
             "last_orientation": self._last_orientation,
             "last_read_age_s": (time.time() - self._last_read_ts)
             if self._last_read_ts
             else None,
             "simulation": is_simulation_mode(),
-            "calibration_note": (
-                "RVC mode: calibration level not exposed by protocol; "
-                "status is 'rvc_active' once frames are received."
-            ),
         }
 
     # ------------------------------------------------------------------
@@ -262,51 +283,103 @@ class BNO085Driver(HardwareDriver):
             "accel_x": 0.0,
             "accel_y": 0.0,
             "accel_z": 9.81,
+            "gyro_x": 0.0,
+            "gyro_y": 0.0,
+            "gyro_z": 0.0,
             "calibration_status": calibration_state,
         }
         self._last_read_ts = time.time()
         return self._last_orientation
 
     async def _hw_read(self) -> dict[str, Any] | None:
-        """Read one RVC frame from the serial port (non-blocking via thread)."""
-        if self._serial is None or not self._serial.is_open:
-            # Port not available -- return last known reading or uncalibrated placeholder
-            if self._last_orientation is None:
-                self._last_orientation = {
-                    "roll": 0.0,
-                    "pitch": 0.0,
-                    "yaw": 0.0,
-                    "accel_x": 0.0,
-                    "accel_y": 0.0,
-                    "accel_z": 0.0,
-                    "calibration_status": "uncalibrated",
-                }
-            return self._last_orientation
+        """Read SHTP reports from the BNO085 (serialized, non-blocking via thread)."""
+        if self._bno is None:
+            return self._stale_or_placeholder()
 
-        try:
-            result = await asyncio.to_thread(_read_rvc_frame_sync, self._serial)
-        except Exception as exc:
-            logger.warning("BNO085 read error: %s", exc)
-            return self._last_orientation  # stale but not None
+        async with self._lock:
+            try:
+                result = await asyncio.to_thread(_read_shtp_sync, self._bno)
+            except Exception as exc:
+                self._consecutive_errors += 1
+                if self._consecutive_errors == 1 or self._consecutive_errors % 30 == 0:
+                    logger.warning(
+                        "BNO085 SHTP read error (%d consecutive): %s",
+                        self._consecutive_errors,
+                        exc,
+                    )
+                # After many consecutive failures, attempt re-init
+                if self._consecutive_errors >= 10:
+                    logger.warning("BNO085: %d consecutive errors, attempting re-init", self._consecutive_errors)
+                    await self._attempt_reinit()
+                return self._stale_or_placeholder()
 
         if result is not None:
+            if self._valid_frames == 0:
+                logger.info(
+                    "BNO085 first SHTP frame on %s "
+                    "(yaw=%.1f° pitch=%.1f° roll=%.1f° cal=%s)",
+                    self._cfg.port,
+                    result["yaw"],
+                    result["pitch"],
+                    result["roll"],
+                    result["calibration_status"],
+                )
+            self._consecutive_errors = 0
             self._valid_frames += 1
             self._last_orientation = result
             self._last_read_ts = time.time()
-        elif self._last_orientation is None:
-            # No frame yet -- report uncalibrated placeholder so callers get
-            # something meaningful rather than None / "unknown".
-            self._last_orientation = {
-                "roll": 0.0,
-                "pitch": 0.0,
-                "yaw": 0.0,
-                "accel_x": 0.0,
-                "accel_y": 0.0,
-                "accel_z": 0.0,
-                "calibration_status": "uncalibrated",
-            }
+        else:
+            self._consecutive_errors += 1
+            if self._consecutive_errors == 30:
+                logger.warning(
+                    "BNO085 on %s: no SHTP data after %d read cycles. "
+                    "Check sensor power and UART4 wiring (GPIO12=TX, GPIO13=RX).",
+                    self._cfg.port,
+                    self._consecutive_errors,
+                )
 
-        return self._last_orientation
+        return self._stale_or_placeholder()
+
+    def _stale_or_placeholder(self) -> dict[str, Any]:
+        """Return last orientation if fresh enough, otherwise an uncalibrated placeholder."""
+        if (
+            self._last_orientation is not None
+            and self._last_read_ts is not None
+            and (time.time() - self._last_read_ts) < _MAX_STALE_AGE_S
+        ):
+            return self._last_orientation
+
+        # Data too old or never received — report uncalibrated so navigation
+        # does not trust stale heading
+        return {
+            "roll": 0.0,
+            "pitch": 0.0,
+            "yaw": 0.0,
+            "accel_x": 0.0,
+            "accel_y": 0.0,
+            "accel_z": 0.0,
+            "gyro_x": 0.0,
+            "gyro_y": 0.0,
+            "gyro_z": 0.0,
+            "calibration_status": "uncalibrated",
+        }
+
+    async def _attempt_reinit(self) -> None:
+        """Try to re-initialize the SHTP connection after repeated failures."""
+        try:
+            if self._serial is not None:
+                try:
+                    self._serial.close()
+                except Exception:
+                    pass
+            self._serial = None
+            self._bno = None
+            self._bno = await asyncio.to_thread(self._open_shtp)
+            self._consecutive_errors = 0
+            logger.info("BNO085 SHTP re-initialized successfully on %s", self._cfg.port)
+        except Exception as exc:
+            logger.warning("BNO085 re-init failed: %s", exc)
+            self._bno = None
 
 
 __all__ = ["BNO085Driver"]

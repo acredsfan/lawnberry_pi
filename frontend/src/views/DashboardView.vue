@@ -102,16 +102,37 @@
         <div class="metric-status solar-status" :class="solarStatusClass">{{ solarStatus }}</div>
       </div>
 
-      <!-- Speed -->
-      <div class="retro-card telemetry-card">
+      <!-- Orientation (speed + heading + tilt) -->
+      <div class="retro-card telemetry-card orientation-card">
         <div class="card-header">
-          <h4>VELOCITY</h4>
-          <div class="speed-icon">🚀</div>
+          <h4>ORIENTATION</h4>
+          <div class="speed-icon">🧭</div>
         </div>
-        <div class="card-content">
-          <div class="metric-value" data-testid="speed-value">{{ speedDisplay }} <span class="unit">{{ speedUnit }}</span></div>
-          <div class="speed-trend" :class="speedTrendClass">
-            {{ speedTrend > 0 ? '▲' : speedTrend < 0 ? '▼' : '▬' }} {{ Math.abs(speedTrend) }}%
+        <div class="card-content orientation-content">
+          <div class="orient-row">
+            <span class="metric-label">Speed</span>
+            <span class="metric-value" data-testid="speed-value">{{ speedDisplay }}<span class="unit">{{ speedUnit }}</span></span>
+            <span class="speed-trend" :class="speedTrendClass">{{ speedTrend > 0 ? '▲' : speedTrend < 0 ? '▼' : '▬' }} {{ Math.abs(speedTrend) }}%</span>
+          </div>
+          <div class="orient-row">
+            <span class="metric-label">Heading (Nav)</span>
+            <span class="metric-value">{{ navHeadingDisplay }}</span>
+          </div>
+          <div class="orient-row">
+            <span class="metric-label">IMU Yaw</span>
+            <span class="metric-value">{{ imuYawDisplay }}</span>
+          </div>
+          <div class="orient-row">
+            <span class="metric-label">GPS COG</span>
+            <span class="metric-value">{{ gpsHeadingDisplay }}</span>
+          </div>
+          <div class="orient-row">
+            <span class="metric-label">Pitch</span>
+            <span class="metric-value">{{ imuPitchDisplay }}</span>
+          </div>
+          <div class="orient-row">
+            <span class="metric-label">Roll</span>
+            <span class="metric-value">{{ imuRollDisplay }}</span>
           </div>
         </div>
       </div>
@@ -321,6 +342,11 @@ const loadCurrent = ref<number | null>(null)
 const loadPower = ref<number | null>(null)
 const speed = ref(0)
 const speedTrend = ref(0)
+const imuYaw = ref<number | null>(null)
+const imuPitch = ref<number | null>(null)
+const imuRoll = ref<number | null>(null)
+const gpsHeading = ref<number | null>(null)
+const navHeading = ref<number | null>(null)
 
 const temperature = ref<number | null>(null)
 const humidity = ref<number | null>(null)
@@ -508,6 +534,20 @@ const speedDisplay = computed(() => {
 })
 
 const speedUnit = computed(() => (unitSystem.value === 'imperial' ? 'mph' : 'm/s'))
+
+function formatHeading(deg: number | null): string {
+  if (deg === null || deg === undefined) return '--'
+  const d = ((deg % 360) + 360) % 360
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+  const dir = dirs[Math.round(d / 45) % 8]
+  return `${d.toFixed(0)}° ${dir}`
+}
+
+const imuYawDisplay = computed(() => formatHeading(imuYaw.value))
+const gpsHeadingDisplay = computed(() => formatHeading(gpsHeading.value))
+const navHeadingDisplay = computed(() => formatHeading(navHeading.value))
+const imuPitchDisplay = computed(() => (imuPitch.value !== null ? `${imuPitch.value.toFixed(1)}°` : '--'))
+const imuRollDisplay = computed(() => (imuRoll.value !== null ? `${imuRoll.value.toFixed(1)}°` : '--'))
 
 const temperatureDisplay = computed(() => {
   if (temperature.value === null) return '--'
@@ -1272,6 +1312,15 @@ const loadTelemetryData = async () => {
       speed.value = speedValue
     }
 
+    // Orientation: IMU angles + GPS/nav headings
+    if (telemetry.imu) {
+      imuYaw.value = typeof telemetry.imu.yaw === 'number' ? telemetry.imu.yaw : imuYaw.value
+      imuPitch.value = typeof telemetry.imu.pitch === 'number' ? telemetry.imu.pitch : imuPitch.value
+      imuRoll.value = typeof telemetry.imu.roll === 'number' ? telemetry.imu.roll : imuRoll.value
+    }
+    if (typeof telemetry.position?.heading === 'number') gpsHeading.value = telemetry.position.heading
+    if (typeof telemetry.nav_heading === 'number') navHeading.value = telemetry.nav_heading
+
     // Update environmental data
     if (telemetry.environmental) {
       const env = telemetry.environmental
@@ -1356,6 +1405,14 @@ function applyRealtimeTelemetrySnapshot(telemetry: any) {
     speed.value = realtimeSpeed
   }
 
+  if (telemetry.imu) {
+    if (typeof telemetry.imu.yaw === 'number') imuYaw.value = telemetry.imu.yaw
+    if (typeof telemetry.imu.pitch === 'number') imuPitch.value = telemetry.imu.pitch
+    if (typeof telemetry.imu.roll === 'number') imuRoll.value = telemetry.imu.roll
+  }
+  if (typeof telemetry.position?.heading === 'number') gpsHeading.value = telemetry.position.heading
+  if (typeof telemetry.nav_heading === 'number') navHeading.value = telemetry.nav_heading
+
   if (telemetry.environmental) {
     const env = telemetry.environmental
     temperature.value = typeof env.temperature_c === 'number' ? env.temperature_c : temperature.value
@@ -1431,6 +1488,14 @@ function registerTelemetrySubscriptions() {
       speedTrend.value = speed.value > 0.1 ? ((newSpeed - speed.value) / speed.value) * 100 : 0
       speed.value = newSpeed
     }
+
+    if (data.imu) {
+      if (typeof data.imu.yaw === 'number') imuYaw.value = data.imu.yaw
+      if (typeof data.imu.pitch === 'number') imuPitch.value = data.imu.pitch
+      if (typeof data.imu.roll === 'number') imuRoll.value = data.imu.roll
+    }
+    if (typeof data.position?.heading === 'number') gpsHeading.value = data.position.heading
+    if (typeof data.nav_heading === 'number') navHeading.value = data.nav_heading
   })
 
   subscribe('telemetry.motors', (data) => {
@@ -1499,6 +1564,9 @@ function registerTelemetrySubscriptions() {
     if (data.imu) {
       imuCalibrationScore.value = data.imu.calibration ?? imuCalibrationScore.value
       imuCalibrationStatus.value = data.imu.calibration_status ?? imuCalibrationStatus.value
+      if (typeof data.imu.yaw === 'number') imuYaw.value = data.imu.yaw
+      if (typeof data.imu.pitch === 'number') imuPitch.value = data.imu.pitch
+      if (typeof data.imu.roll === 'number') imuRoll.value = data.imu.roll
     }
     if (data.tof) {
       applyTofMetrics(data)
@@ -2650,6 +2718,33 @@ onMounted(async () => {
 .speed-trend.trend-stable {
   color: #ffff00;
   text-shadow: 0 0 10px rgba(255, 255, 0, 0.7);
+}
+
+/* Orientation card */
+.orientation-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.orient-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.orient-row .metric-label {
+  min-width: 90px;
+  font-size: 0.7rem;
+  color: #00ff88;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.orient-row .metric-value {
+  font-size: 0.85rem;
+  color: #00ffff;
+  font-family: 'Courier New', monospace;
 }
 
 /* Event Log */

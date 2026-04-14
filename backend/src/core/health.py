@@ -199,28 +199,36 @@ class HealthService:
         created_manager = False
 
         existing_manager: Any | None = None
+        # Prefer the authoritative shared AppState — it is populated by the lazy
+        # initialize_sensors() call in TelemetryService and is always up-to-date
+        # regardless of when websocket_hub.bind_app_state() ran at startup.
         try:
-            from ..api import rest as api_rest  # type: ignore
+            from ..core.state_manager import AppState as _AppState  # type: ignore
+            existing_manager = _AppState.get_instance().sensor_manager
         except Exception:
-            api_rest = None  # type: ignore
-        else:
-            existing_manager = getattr(
-                getattr(api_rest, "websocket_hub", None), "_sensor_manager", None
-            )
+            existing_manager = None
+        # Fall back to the websocket_hub attribute for backward compatibility
+        if existing_manager is None:
+            try:
+                from ..api import rest as api_rest  # type: ignore
+            except Exception:
+                api_rest = None  # type: ignore
+            else:
+                existing_manager = getattr(
+                    getattr(api_rest, "websocket_hub", None), "_sensor_manager", None
+                )
 
         if existing_manager is not None:
             manager = existing_manager
         else:
-            try:
-                from ..services.sensor_manager import SensorManager  # type: ignore
-            except Exception as exc:
-                return self._sensor_health_payload(
-                    HealthLevel.UNKNOWN,
-                    f"Sensor manager unavailable: {exc}",
-                    {},
-                )
-            manager = SensorManager()
-            created_manager = True
+            # Don't create a temporary SensorManager — it would open/close
+            # hardware ports and interfere with the real lazy-init manager.
+            return self._sensor_health_payload(
+                HealthLevel.UNKNOWN,
+                "Sensor manager not yet initialized (waiting for first telemetry request)",
+                {},
+                initialized=False,
+            )
 
         try:
             if not getattr(manager, "initialized", False):
@@ -307,9 +315,13 @@ class HealthService:
         normalized = status.lower()
         if normalized in {"online", "ok", "healthy", "ready", "running"}:
             return HealthLevel.HEALTHY
-        if normalized in {"calibrating", "initializing", "unknown", "standby", "warning"}:
+        # "offline" means the sensor is not connected/available — degraded monitoring,
+        # not a running system that has faulted.  Keep it out of CRITICAL so an absent
+        # optional peripheral (e.g. power monitor) does not drag the whole robot to
+        # critical when GPS/IMU/ToF are all healthy.
+        if normalized in {"offline", "calibrating", "initializing", "unknown", "standby", "warning"}:
             return HealthLevel.DEGRADED
-        if normalized in {"offline", "error", "fault", "timeout", "failed"}:
+        if normalized in {"error", "fault", "timeout", "failed"}:
             return HealthLevel.CRITICAL
         return HealthLevel.UNKNOWN
 

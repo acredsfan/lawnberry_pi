@@ -142,6 +142,7 @@ export const useControlStore = defineStore('control', () => {
   const commandInProgress = ref(false);
   const robohatStatus = ref<RoboHATStatus | null>(null);
   const emergencyStopActive = ref(false);
+  const emergencyStopReason = ref<string | null>(null);
 
   function applyLockoutState(source: ControlPayload | null | undefined, reason: string, until?: string | null) {
     lockout.value = true;
@@ -232,8 +233,9 @@ export const useControlStore = defineStore('control', () => {
 
   async function fetchControlStatus() {
     try {
-      const result = await getControlStatus() as { emergency_stop_active?: boolean };
+      const result = await getControlStatus() as { emergency_stop_active?: boolean; estop_reason?: string | null };
       emergencyStopActive.value = !!result?.emergency_stop_active;
+      emergencyStopReason.value = result?.estop_reason ?? null;
       return result;
     } catch {
       // non-fatal — keep last known state
@@ -244,6 +246,7 @@ export const useControlStore = defineStore('control', () => {
     try {
       const result = await apiClearEmergencyStop(reason);
       emergencyStopActive.value = false;
+      emergencyStopReason.value = null;
       return result;
     } catch (e) {
       throw e;
@@ -291,6 +294,7 @@ export const useControlStore = defineStore('control', () => {
     commandInProgress,
     robohatStatus,
     emergencyStopActive,
+    emergencyStopReason,
     canSubmitCommand,
     lockoutDisplay,
     lockoutTimeRemaining,

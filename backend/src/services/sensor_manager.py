@@ -159,10 +159,6 @@ class IMUSensorInterface:
             if getattr(self, "_driver", None) is not None:
                 o = await self._driver.read_orientation()
                 if o is not None:
-                    # Driver always sets calibration_status; never fall back to
-                    # "unknown".  "rvc_active" means the BNO085 is producing
-                    # valid RVC frames (calibration level not exposed by that
-                    # protocol).  "uncalibrated" means no frames yet.
                     cal = o.get("calibration_status") or "uncalibrated"
                     reading = ImuReading(
                         roll=o.get("roll"),
@@ -171,7 +167,10 @@ class IMUSensorInterface:
                         accel_x=o.get("accel_x"),
                         accel_y=o.get("accel_y"),
                         accel_z=o.get("accel_z"),
-                        calibration_status=cal
+                        gyro_x=o.get("gyro_x"),
+                        gyro_y=o.get("gyro_y"),
+                        gyro_z=o.get("gyro_z"),
+                        calibration_status=cal,
                     )
                 else:
                     reading = self.last_reading
@@ -661,7 +660,7 @@ class PowerSensorInterface:
 
 class SensorManager:
     """Main sensor manager coordinating all sensor interfaces"""
-    SENSOR_READ_TIMEOUT_SECONDS = 2.0
+    SENSOR_READ_TIMEOUT_SECONDS = 5.0  # BNO085 RVC header scan can take up to 4.2s worst-case
     POWER_READ_TIMEOUT_SECONDS = 12.0  # Victron BLE CLI can take up to 8 s
 
     def __init__(
@@ -865,8 +864,8 @@ class SensorManager:
                 "fully_calibrated": 3,
                 "calibrated": 3,
                 "calibrating": 2,
-                "rvc_active": 2,
                 "partial": 1,
+                "rvc_active": 2,  # legacy: BNO085 RVC mode fallback
                 "uncalibrated": 0,
             }
             cal_sys = _CAL_LEVEL.get(imu_reading.calibration_status or "", 1)

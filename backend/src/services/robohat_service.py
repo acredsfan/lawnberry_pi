@@ -258,7 +258,7 @@ class RoboHATService:
             self.status.last_error = str(exc)
             return False
 
-    async def _wait_for_pwm_ack(self, *, timeout: float = 0.35) -> bool:
+    async def _wait_for_pwm_ack(self, *, timeout: float = 1.0) -> bool:
         """Wait for the firmware to acknowledge or reject the last PWM command."""
         deadline = time.monotonic() + timeout
         starting_errors = self.status.error_count
@@ -485,14 +485,17 @@ class RoboHATService:
         reconnecting = False
         while self.running:
             try:
-                line = None
-                if self.serial_conn and self.serial_conn.is_open and self.serial_conn.in_waiting:
+                # Drain ALL lines in the serial buffer before sleeping so that
+                # a preceding command response (e.g. blade=off → "[USB] Blade: OFF")
+                # does not block the PWM ack from being processed within the same
+                # 20 ms window.  Each asyncio.to_thread() still yields to the event
+                # loop, so other coroutines remain responsive during the drain.
+                while self.serial_conn and self.serial_conn.is_open and self.serial_conn.in_waiting:
                     raw = await asyncio.to_thread(self.serial_conn.readline)
                     line = raw.decode("utf-8", errors="ignore").strip()
                     reconnecting = False
-
-                if line:
-                    self._process_line(line)
+                    if line:
+                        self._process_line(line)
 
                 await asyncio.sleep(0.02)
 
@@ -637,7 +640,7 @@ class RoboHATService:
         steer_us, throttle_us = self._mix_arcade_to_pwm(left_speed, right_speed)
         ok = await self._send_line(f"pwm,{steer_us},{throttle_us}")
         if ok:
-            ok = await self._wait_for_pwm_ack()
+            ok = await self._wait_for_pwm_ack(timeout=1.5)
 
         if ok:
             self.status.motor_controller_ok = True

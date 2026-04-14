@@ -113,11 +113,24 @@ class GlobalRateLimiter(BaseHTTPMiddleware):
 
 def register_global_rate_limiter(app: FastAPI) -> None:
     """Register the global rate limiter middleware with env-based config."""
-    rate = float(os.getenv("GLOBAL_RATE_LIMIT_RATE", "2"))
-    burst = int(os.getenv("GLOBAL_RATE_LIMIT_BURST", "20"))
-    # Exempt core health/docs and low-risk settings endpoints by default to avoid
-    # test flakiness and allow bursty UI saves; can be overridden via env.
-    exempt_default = "/health,/metrics,/docs,/openapi.json,/api/v2/settings/maps,/api/v2/camera/stream.mjpeg"
+    rate = float(os.getenv("GLOBAL_RATE_LIMIT_RATE", "10"))
+    burst = int(os.getenv("GLOBAL_RATE_LIMIT_BURST", "60"))
+    # Exempt core health/docs, read-only polling endpoints, and streaming endpoints.
+    # These are either safety-critical, low-risk reads, or high-frequency UI polls
+    # that would otherwise trigger 429s during normal single-user dashboard use.
+    exempt_default = (
+        "/health,/metrics,/docs,/openapi.json"
+        ",/api/v2/settings/maps"
+        ",/api/v2/camera/stream.mjpeg"
+        ",/api/v2/dashboard/telemetry"
+        ",/api/v2/dashboard/metrics"
+        ",/api/v2/sensors"
+        ",/api/v2/navigation/state"
+        ",/api/v2/mission/status"
+        ",/api/v2/safety/status"
+        ",/api/v2/control/status"
+        ",/api/v2/weather/current"
+    )
     exempt = os.getenv("GLOBAL_RATE_LIMIT_EXEMPT", exempt_default).split(",")
     override_str = os.getenv("GLOBAL_RATE_LIMIT_OVERRIDES", "")
     overrides: list[tuple[str, float, int]] = []

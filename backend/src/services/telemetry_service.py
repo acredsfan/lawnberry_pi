@@ -10,7 +10,19 @@ from ..utils.battery import voltage_to_soc
 
 logger = logging.getLogger(__name__)
 
+# Module-level lock: guarantees only one sensor init across all TelemetryService
+# instances, even when multiple are created before the first finishes.
+_sensor_init_lock: asyncio.Lock | None = None
+
+def _get_sensor_init_lock() -> asyncio.Lock:
+    """Lazily create the init lock bound to the current event loop."""
+    global _sensor_init_lock
+    if _sensor_init_lock is None:
+        _sensor_init_lock = asyncio.Lock()
+    return _sensor_init_lock
+
 class TelemetryService:
+
     def __init__(self):
         self.app_state = AppState.get_instance()
         self._last_position: Dict[str, Any] = {}
@@ -18,79 +30,77 @@ class TelemetryService:
 
     async def initialize_sensors(self):
         """Initialize the sensor manager."""
-        if self.app_state.sensor_manager is not None:
-            return
+        async with _get_sensor_init_lock():
+            if self.app_state.sensor_manager is not None:
+                return
 
-        from ..services.sensor_manager import SensorManager
-        from ..models.hardware_config import GPSType
-        from ..models.sensor_data import GpsMode
-        import os
+            from ..services.sensor_manager import SensorManager
+            from ..models.hardware_config import GPSType
+            from ..models.sensor_data import GpsMode
+            import os
 
-        # Determine GPS Mode
-        gps_mode = GpsMode.NEO8M_UART
-        ntrip_enabled = False
-        hw_cfg = self.app_state.hardware_config
-        
-        if hw_cfg and getattr(hw_cfg, "gps_type", None) in {GPSType.ZED_F9P_USB, GPSType.ZED_F9P_UART}:
-            gps_mode = GpsMode.F9P_USB if getattr(hw_cfg, "gps_type", None) == GPSType.ZED_F9P_USB else GpsMode.F9P_UART
-            ntrip_enabled = bool(getattr(hw_cfg, "gps_ntrip_enabled", False))
+            # Determine GPS Mode
+            gps_mode = GpsMode.NEO8M_UART
+            ntrip_enabled = False
+            hw_cfg = self.app_state.hardware_config
+            
+            if hw_cfg and getattr(hw_cfg, "gps_type", None) in {GPSType.ZED_F9P_USB, GPSType.ZED_F9P_UART}:
+                gps_mode = GpsMode.F9P_USB if getattr(hw_cfg, "gps_type", None) == GPSType.ZED_F9P_USB else GpsMode.F9P_UART
+                ntrip_enabled = bool(getattr(hw_cfg, "gps_ntrip_enabled", False))
 
-        # Hint GPS device
-        if not os.environ.get("GPS_DEVICE"):
-            for candidate in ["/dev/ttyACM1", "/dev/ttyACM0", "/dev/ttyAMA0", "/dev/ttyUSB0"]:
-                if os.path.exists(candidate):
-                    os.environ["GPS_DEVICE"] = candidate
-                    break
+            # Hint GPS device
+            if not os.environ.get("GPS_DEVICE"):
+                for candidate in ["/dev/ttyACM1", "/dev/ttyACM0", "/dev/ttyAMA0", "/dev/ttyUSB0"]:
+                    if os.path.exists(candidate):
+                        os.environ["GPS_DEVICE"] = candidate
+                        break
 
-        # Config extraction
-        tof_cfg = None
-        power_cfg = None
-        battery_cfg = None
-        imu_cfg = None
-        if hw_cfg:
+            # Config extraction
+            tof_cfg = None
+            power_cfg = None
+            battery_cfg = None
+            imu_cfg = None
+            if hw_cfg:
+                try:
+                    tc = getattr(hw_cfg, "tof_config", None)
+                    if tc: tof_cfg = tc.model_dump()
+
+                    pc = getattr(hw_cfg, "ina3221_config", None)
+                    victron = getattr(hw_cfg, "victron_config", None)
+                    if pc or victron:
+                        power_cfg = {}
+                        if pc: power_cfg["ina3221"] = pc.model_dump(exclude_none=True)
+                        if victron: power_cfg["victron"] = victron.model_dump(exclude_none=True)
+
+                    battery_cfg = getattr(hw_cfg, "battery_config", None)
+
+                    # IMU port from hardware config (overrides env var BNO085_PORT if set)
+                    imu_port = getattr(hw_cfg, "imu_port", None)
+                    if imu_port:
+                        imu_cfg = {"port": imu_port}
+                except Exception:
+                    pass
+
+            manager = SensorManager(gps_mode=gps_mode, tof_config=tof_cfg, power_config=power_cfg, battery_config=battery_cfg, imu_config=imu_cfg)
+            await manager.initialize()
+            self.app_state.sensor_manager = manager
+            self.app_state.ntrip_forwarder = None
+            # Sync the websocket_hub's cached reference so the health probe finds it.
             try:
-                tc = getattr(hw_cfg, "tof_config", None)
-                if tc: tof_cfg = tc.model_dump()
-
-                pc = getattr(hw_cfg, "ina3221_config", None)
-                victron = getattr(hw_cfg, "victron_config", None)
-                if pc or victron:
-                    power_cfg = {}
-                    if pc: power_cfg["ina3221"] = pc.model_dump(exclude_none=True)
-                    if victron: power_cfg["victron"] = victron.model_dump(exclude_none=True)
-
-                battery_cfg = getattr(hw_cfg, "battery_config", None)
-
-                # IMU port from hardware config (overrides env var BNO085_PORT if set)
-                imu_port = getattr(hw_cfg, "imu_port", None)
-                if imu_port:
-                    imu_cfg = {"port": imu_port}
+                from ..services.websocket_hub import websocket_hub as _hub  # type: ignore
+                _hub._sensor_manager = manager
             except Exception:
                 pass
-
-        manager = SensorManager(gps_mode=gps_mode, tof_config=tof_cfg, power_config=power_cfg, battery_config=battery_cfg, imu_config=imu_cfg)
-        await manager.initialize()
-        self.app_state.sensor_manager = manager
-        self.app_state.ntrip_forwarder = None
-        # Sync the websocket_hub's cached reference so the health probe finds it.
-        try:
-            from ..services.websocket_hub import websocket_hub as _hub  # type: ignore
-            _hub._sensor_manager = manager
-        except Exception:
-            pass
-        
-        # TODO: Handle NTRIP forwarder if needed, or keep it separate.
-        # For now, let's assume NTRIP is handled by the manager or a separate service, 
-        # but the original code had it in WebSocketHub. I should probably move it here too.
-        if ntrip_enabled and os.getenv("SIM_MODE", "0") != "1":
-             from ..services.ntrip_client import NtripForwarder
-             forwarder = NtripForwarder.from_environment(gps_mode=gps_mode)
-             if forwarder:
-                 try:
-                     await forwarder.start()
-                     self.app_state.ntrip_forwarder = forwarder
-                 except Exception as e:
-                     logger.error(f"Failed to start NTRIP: {e}")
+            
+            if ntrip_enabled and os.getenv("SIM_MODE", "0") != "1":
+                from ..services.ntrip_client import NtripForwarder
+                forwarder = NtripForwarder.from_environment(gps_mode=gps_mode)
+                if forwarder:
+                    try:
+                        await forwarder.start()
+                        self.app_state.ntrip_forwarder = forwarder
+                    except Exception as e:
+                        logger.error(f"Failed to start NTRIP: {e}")
 
     async def get_telemetry(self, sim_mode: bool = False) -> Dict[str, Any]:
         """Generate telemetry data from hardware or simulation."""
@@ -174,6 +184,7 @@ class TelemetryService:
             "gps_mode": getattr(pos, "mode", None),
             "satellites": getattr(pos, "satellites", None),
             "speed": getattr(pos, "speed", None),
+            "heading": getattr(pos, "heading", None),
             "rtk_status": getattr(pos, "rtk_status", None),
             "hdop": getattr(pos, "hdop", None),
         }
@@ -217,6 +228,16 @@ class TelemetryService:
             "safety_state": "emergency_stop" if self.app_state.safety_state.get("emergency_stop_active") else "nominal",
             "uptime_seconds": time.time(),
         }
+
+        # Add fused navigation heading from NavigationService (IMU yaw preferred, GPS COG fallback)
+        try:
+            from .navigation_service import NavigationService
+            nav_svc = NavigationService.get_instance()
+            nav_state = getattr(nav_svc, "navigation_state", None)
+            if nav_state is not None:
+                telemetry["nav_heading"] = getattr(nav_state, "heading", None)
+        except Exception:
+            telemetry["nav_heading"] = None
         
         # Add Power Data
         if data and data.power:

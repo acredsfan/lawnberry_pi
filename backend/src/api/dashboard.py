@@ -13,6 +13,7 @@ from fastapi import APIRouter, Request
 from ..models.operational_data import OperationalData
 from ..models import SensorData
 from ..services.sensor_manager import SensorManager  # type: ignore
+from ..utils.battery import voltage_to_soc, battery_health_label
 
 router = APIRouter()
 
@@ -54,22 +55,9 @@ async def _ensure_sensor_snapshot(request: Request) -> Tuple[SensorManager | Non
     return sensor_manager, snapshot
 
 def _estimate_soc_from_voltage(voltage: float | None) -> float:
-    if voltage is None:
-        return 0.0
-    try:
-        value = float(voltage)
-    except (TypeError, ValueError):
-        return 0.0
-
-    min_v = 11.5
-    max_v = 13.0
-    if value <= min_v:
-        return 0.0
-    if value >= max_v:
-        return 100.0
-
-    ratio = (value - min_v) / (max_v - min_v)
-    return round(ratio * 100.0, 1)
+    """Estimate SOC from pack voltage using the shared battery utility."""
+    result = voltage_to_soc(voltage)
+    return result if result is not None else 0.0
 
 
 def _battery_block(sensor_data: SensorData | None, sm: SensorManager | None) -> dict[str, Any]:
@@ -94,7 +82,7 @@ def _battery_block(sensor_data: SensorData | None, sm: SensorManager | None) -> 
             pct = _estimate_soc_from_voltage(pr.battery_voltage)
         volt = pr.battery_voltage or 0.0
         curr = pr.battery_current or 0.0
-        health = "healthy" if volt > 11.0 else ("warning" if volt > 10.0 else "critical")
+        health = battery_health_label(volt) if volt else "unknown"
     return {
         "percentage": pct,
         "voltage": volt,

@@ -539,9 +539,10 @@ def _emergency_active() -> bool:
         return False
 
 
-def _latch_emergency_state(request: Request | None = None) -> None:
+def _latch_emergency_state(request: Request | None = None, reason: str = "Manual emergency stop") -> None:
     """Latch emergency state until explicitly cleared by /control/emergency_clear."""
     _safety_state["emergency_stop_active"] = True
+    _safety_state["estop_reason"] = reason
     _blade_state["active"] = False
 
     global _legacy_motors_active
@@ -1071,7 +1072,7 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
         session_context = _resolve_manual_session(payload.get("session_id"))
     
     # Set emergency state (latched until explicit clear)
-    _latch_emergency_state(request)
+    _latch_emergency_state(request, reason="Operator-triggered emergency stop")
     
     # Send emergency stop to RoboHAT
     robohat = get_robohat_service()
@@ -1283,5 +1284,6 @@ async def control_navigation_status():
     return {
         "ok": True,
         "status": "emergency_stop" if _safety_state.get("emergency_stop_active") else "ready",
+        "estop_reason": _safety_state.get("estop_reason"),
         **_control_navigation_snapshot(nav_service),
     }

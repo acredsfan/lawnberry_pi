@@ -145,6 +145,9 @@
         >
           ✅ CLEAR EMERGENCY STOP
         </button>
+        <div v-if="isEmergencyStopActive && estopReason" class="estop-reason-banner">
+          <span class="estop-reason-label">⚠️ E-Stop reason:</span> {{ estopReason }}
+        </div>
       </div>
 
       <!-- Live Camera Feed -->
@@ -516,6 +519,7 @@ const robohatStatus = computed(() => control.robohatStatus as RoboHATStatus | nu
 const motorControllerState = computed<MotorControllerState>(() => describeMotorController(robohatStatus.value))
 
 const isEmergencyStopActive = computed(() => control.emergencyStopActive)
+const estopReason = computed(() => control.emergencyStopReason)
 
 const canMove = computed(() =>
   isControlUnlocked.value && !performing.value && !lockout.value && motorControllerState.value.ready
@@ -1945,8 +1949,23 @@ onUnmounted(() => {
   font-size: 1.1rem;
   padding: 0.875rem 2rem;
   width: 100%;
-  margin-bottom: 2rem;
+  margin-bottom: 0.5rem;
   border: 2px solid #1e7e34;
+}
+
+.estop-reason-banner {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  color: #856404;
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+  padding: 0.5rem 1rem;
+  width: 100%;
+}
+
+.estop-reason-label {
+  font-weight: 600;
 }
 
 @keyframes pulse {

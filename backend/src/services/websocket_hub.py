@@ -204,6 +204,7 @@ class WebSocketHub:
             await self.broadcast_to_topic("telemetry.navigation", {
                 "position": telemetry_data["position"],
                 "velocity": telemetry_data.get("velocity"),
+                "nav_heading": telemetry_data.get("nav_heading"),
                 "source": telemetry_data.get("source")
             })
             

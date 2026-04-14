@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from .rest import websocket_hub
+from .rest import websocket_hub, _safety_state
 from ..core.robot_state_manager import get_robot_state_manager
 from ..models.safety_interlock import SafetyInterlock
 
@@ -24,12 +24,18 @@ router = APIRouter()
 async def get_status_v2():
     """Return current robot state in a simplified schema for contract tests."""
     mgr = get_robot_state_manager()
+    try:
+        telemetry: dict[str, Any] = await websocket_hub._generate_telemetry()
+        mgr.update_from_telemetry(telemetry)
+    except Exception:
+        pass
     st = mgr.get_state()
     return {
         "battery_percentage": st.battery.percentage,
         "navigation_state": st.navigation_mode.value,
         "safety_status": {
-            "emergency_stop_active": False,
+            "emergency_stop_active": bool(_safety_state.get("emergency_stop_active", False)),
+            "estop_reason": _safety_state.get("estop_reason"),
             "tilt_detected": False,
             "obstacle_detected": False,
             "blade_safety_ok": True,
