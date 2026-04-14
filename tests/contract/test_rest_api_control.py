@@ -123,25 +123,29 @@ async def test_post_drive_command_blocks_when_obstacle_detected(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_post_blade_command_surfaces_lockout_reason():
-    """Blade engagement should be blocked during safety lockout with structured reason."""
+    """Blade engagement must be blocked with 409 when emergency stop is active."""
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        # Activate emergency stop (session_id required by the endpoint)
+        await client.post("/api/v2/control/emergency", json={"session_id": _session_id()})
+
         response = await client.post(
             "/api/v2/control/blade",
-            json={
-                "session_id": _session_id(),
-                "action": "engage",
-                "reason": "safety_lockout",
-            },
+            json={"active": True},
         )
 
-        # During lockout the endpoint must return HTTP 423 with remediation info.
-        assert response.status_code == 423, response.text
+        # Emergency stop blocks blade engagement — 409 Conflict
+        assert response.status_code == 409, response.text
         payload = response.json()
-        assert payload.get("result") == "blocked"
-        assert payload.get("status_reason") == "SAFETY_LOCKOUT"
-        assert "remediation_url" in payload
+        assert "emergency_stop" in payload.get("detail", "").lower()
+
+        # Disable is always allowed regardless of e-stop state
+        response = await client.post(
+            "/api/v2/control/blade",
+            json={"active": False},
+        )
+        assert response.status_code == 200, response.text
 
 
 @pytest.mark.asyncio

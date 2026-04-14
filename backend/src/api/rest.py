@@ -969,92 +969,60 @@ class BladeContractIn(BaseModel):
 
 @router.post("/control/blade")
 async def control_blade_v2(cmd: dict, request: Request):
-    """Execute blade command with safety interlocks and audit logging"""
+    """Execute blade command with safety interlocks and audit logging.
+
+    The only gate here is the emergency-stop interlock.  UI login already
+    authenticates the caller; no additional session/auth layer is required.
+    """
     import uuid
-    from ..services.robohat_service import get_robohat_service
-    
+
     audit_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc)
-    
-    # Contract requires safety lockout for blade engagement by default
-    # Return HTTP 423 (Locked) with remediation
-    # Legacy behavior for integration tests
-    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-    if "session_id" not in cmd and ("active" in cmd or "command" in cmd):
-        # Enable
-        if (cmd.get("command") == "blade_enable") or (cmd.get("active") is True):
-            # Block if emergency is active (global TTL or per-client TTL)
-            if _emergency_active() or _client_emergency_active(request):
-                body = {"detail": "safety_interlock: emergency_stop_active - blade commands blocked"}
-                persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
-                return JSONResponse(status_code=403, content=body)
-            # Safety interlock: reject with 403 if motors active; otherwise accept
-            global _legacy_motors_active
-            if _legacy_motors_active:
-                body = {"detail": "Safety interlock: motors_active"}
-                persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
-                return JSONResponse(status_code=403, content=body)
-            # If no auth header provided, allow enabling for audit test flow only when motors are stopped
-            if not auth_header:
-                body = {"blade_status": "ENABLED"}
-                persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
-                return JSONResponse(status_code=200, content=body)
-            body = {"blade_status": "ENABLED"}
-            persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
-            return JSONResponse(status_code=200, content=body)
-        # Disable
-        if (cmd.get("command") == "blade_disable") or (cmd.get("active") is False):
-            body = {"blade_status": "DISABLED"}
-            persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
-            return JSONResponse(status_code=200, content=body)
 
-    session_context = _resolve_manual_session(cmd.get("session_id"))
+    # Resolve desired state from either {"active": bool} or {"action": str}
+    desired: bool | None = None
+    if "active" in cmd:
+        desired = bool(cmd["active"])
+    elif "action" in cmd:
+        action = str(cmd["action"]).lower()
+        if action in {"enable", "on", "start"}:
+            desired = True
+        elif action in {"disable", "off", "stop"}:
+            desired = False
+    elif cmd.get("command") == "blade_enable":
+        desired = True
+    elif cmd.get("command") == "blade_disable":
+        desired = False
 
-    # Basic control path when explicitly authorized or legacy payloads handled above.
+    if desired is None:
+        body = {"detail": "Invalid blade command — provide 'active' (bool) or 'action' (enable/disable)"}
+        return JSONResponse(status_code=422, content=body)
+
+    # Only block on emergency stop — not on motor state or auth headers
+    if desired is True and (_emergency_active() or _client_emergency_active(request)):
+        body = {"detail": "safety_interlock: emergency_stop_active — blade commands blocked"}
+        persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
+        return JSONResponse(status_code=409, content=body)
+
     try:
-        desired = None
-        if isinstance(cmd, dict) and "action" in cmd:
-            desired = True if str(cmd.get("action")).lower() in {"enable", "on", "start"} else False if str(cmd.get("action")).lower() in {"disable", "off", "stop"} else None
-        elif isinstance(cmd, dict) and "active" in cmd:
-            desired = bool(cmd.get("active"))
-        if desired is not None and not (_emergency_active() or _client_emergency_active(request)):
-            from ..services.blade_service import get_blade_service
-            bs = get_blade_service()
-            await bs.initialize()
-            ok = await bs.set_active(desired)
-            body = {"accepted": ok, "audit_id": audit_id, "result": "accepted" if ok else "rejected", "timestamp": timestamp.isoformat()}
-            log_command = cmd if not isinstance(cmd, dict) else {**cmd}
-            if isinstance(log_command, dict) and "session_id" in log_command:
-                log_command["session_id"] = "***"
-            if isinstance(log_command, dict) and session_context.get("principal"):
-                log_command.setdefault("principal", session_context.get("principal"))
-            persistence.add_audit_log("control.blade.v2", details={"command": log_command, "response": body})
-            return JSONResponse(status_code=200 if ok else 409, content=body)
-    except Exception:
-        pass
-
-    payload = {
-        "accepted": False,
-        "audit_id": audit_id,
-        "result": "blocked",
-        "status_reason": "SAFETY_LOCKOUT",
-        "remediation_url": "/docs/OPERATIONS.md#blade-safety-lockout",
-        "safety_checks": ["emergency_stop_check", "blade_lockout"],
-        "active_interlocks": ["blade_requires_authorization"],
-        "timestamp": timestamp.isoformat(),
-    }
-    try:
-        cmd_details = cmd if isinstance(cmd, dict) else cmd.model_dump()
-    except Exception:
-        cmd_details = {}
-    if isinstance(cmd_details, dict):
-        cmd_details = dict(cmd_details)
-        if "session_id" in cmd_details:
-            cmd_details["session_id"] = "***"
-        if session_context and session_context.get("principal"):
-            cmd_details.setdefault("principal", session_context.get("principal"))
-    persistence.add_audit_log("control.blade.blocked", details={"command": cmd_details, "response": payload})
-    return JSONResponse(status_code=423, content=payload)
+        from ..services.blade_service import get_blade_service
+        bs = get_blade_service()
+        await bs.initialize()
+        ok = await bs.set_active(desired)
+        body = {
+            "accepted": ok,
+            "audit_id": audit_id,
+            "result": "accepted" if ok else "rejected",
+            "blade_status": "ENABLED" if desired else "DISABLED",
+            "timestamp": timestamp.isoformat(),
+        }
+        persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
+        return JSONResponse(status_code=200 if ok else 409, content=body)
+    except Exception as exc:
+        logger.exception("Blade command failed: %s", exc)
+        body = {"detail": f"Blade command error: {exc}"}
+        persistence.add_audit_log("control.blade.error", details={"command": cmd, "response": body})
+        return JSONResponse(status_code=500, content=body)
 
 @router.post("/control/emergency", response_model=ControlResponseV2, status_code=202)
 async def control_emergency_v2(body: Optional[dict] = None, request: Request = None):

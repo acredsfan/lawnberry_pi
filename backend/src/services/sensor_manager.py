@@ -6,6 +6,7 @@ Hardware sensor interfaces with I2C/UART coordination and validation
 import asyncio
 import logging
 import math
+import time
 from datetime import datetime, timezone
 from typing import Dict, Optional, List, Any
 from contextlib import asynccontextmanager
@@ -685,6 +686,16 @@ class SensorManager:
 
         self.initialized = False
         self.validation_enabled = True
+
+        # Serialize concurrent reads: only one real hardware read at a time.
+        # Rapid callers get the cached result if it is fresh enough.
+        self._read_lock: asyncio.Lock = asyncio.Lock()
+        self._read_cache: Optional["SensorData"] = None
+        self._read_cache_ts: float = 0.0
+        # 180 ms — slightly less than the 200 ms telemetry-loop period so the
+        # loop always gets a fresh read while HTTP bursts are served from cache.
+        _CACHE_TTL_S: float = 0.18
+        self._CACHE_TTL_S = _CACHE_TTL_S
         
     async def initialize(self) -> bool:
         """Initialize all sensors"""
@@ -709,10 +720,29 @@ class SensorManager:
         return self.initialized
     
     async def read_all_sensors(self) -> SensorData:
-        """Read data from all sensors"""
+        """Read data from all sensors.
+
+        Only one hardware read is allowed in-flight at a time.  Concurrent
+        callers wait on ``_read_lock`` then receive the cached result if it is
+        still fresh (< ``_CACHE_TTL_S`` seconds old).  This prevents thread-pool
+        exhaustion when the BNO085 or another blocking driver is slow.
+        """
         if not self.initialized:
             logger.warning("Sensor manager not initialized")
             return SensorData()
+
+        async with self._read_lock:
+            now = time.monotonic()
+            if self._read_cache is not None and (now - self._read_cache_ts) < self._CACHE_TTL_S:
+                return self._read_cache
+
+            result = await self._do_read_all_sensors()
+            self._read_cache = result
+            self._read_cache_ts = time.monotonic()
+            return result
+
+    async def _do_read_all_sensors(self) -> SensorData:
+        """Perform a real hardware read of all sensors (called under _read_lock)."""
 
         async def _read_with_timeout(name: str, coro: Any, timeout: float | None = None) -> Any:
             t = timeout if timeout is not None else self.SENSOR_READ_TIMEOUT_SECONDS

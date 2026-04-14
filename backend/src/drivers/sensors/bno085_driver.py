@@ -36,6 +36,7 @@ import math
 import os
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,6 +44,11 @@ from ...core.simulation import is_simulation_mode
 from ..base import HardwareDriver
 
 logger = logging.getLogger(__name__)
+
+# Dedicated thread pool for BNO085 SHTP reads.  A size of 2 gives one active
+# read plus one queued — enough headroom without ever exhausting the global
+# asyncio thread pool (which is shared with GPS, INA3221, VL53L0X, etc.).
+_BNO085_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="bno085")
 
 # SHTP calibration level → contract string
 _SHTP_CAL_MAP: dict[int, str] = {
@@ -60,7 +66,10 @@ _MAX_STALE_AGE_S = 5.0
 class BNO085DriverConfig:
     port: str = "/dev/ttyAMA4"
     baudrate: int = 3_000_000
-    read_timeout: float = 1.0  # seconds; SHTP needs longer than RVC polling
+    # Shorter timeout so a non-responding sensor yields the thread quickly.
+    # At 3 Mbaud, a full SHTP packet (≤256 B) arrives in <1 ms; 200 ms is
+    # conservative but avoids the 1-second blocking seen with the old default.
+    read_timeout: float = 0.2
 
 
 def _quaternion_to_euler(i: float, j: float, k: float, real: float) -> tuple[float, float, float]:
@@ -176,7 +185,8 @@ class BNO085Driver(HardwareDriver):
             return
 
         try:
-            self._bno = await asyncio.to_thread(self._open_shtp)
+            loop = asyncio.get_running_loop()
+            self._bno = await loop.run_in_executor(_BNO085_EXECUTOR, self._open_shtp)
             logger.info(
                 "BNO085 SHTP initialized on %s @ %d baud",
                 self._cfg.port,
@@ -292,13 +302,18 @@ class BNO085Driver(HardwareDriver):
         return self._last_orientation
 
     async def _hw_read(self) -> dict[str, Any] | None:
-        """Read SHTP reports from the BNO085 (serialized, non-blocking via thread)."""
+        """Read SHTP reports from the BNO085 (serialized, non-blocking via thread).
+
+        Uses the dedicated ``_BNO085_EXECUTOR`` so a slow/stuck read never
+        exhausts the global asyncio thread pool.
+        """
         if self._bno is None:
             return self._stale_or_placeholder()
 
         async with self._lock:
             try:
-                result = await asyncio.to_thread(_read_shtp_sync, self._bno)
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(_BNO085_EXECUTOR, _read_shtp_sync, self._bno)
             except Exception as exc:
                 self._consecutive_errors += 1
                 if self._consecutive_errors == 1 or self._consecutive_errors % 30 == 0:
@@ -374,7 +389,8 @@ class BNO085Driver(HardwareDriver):
                     pass
             self._serial = None
             self._bno = None
-            self._bno = await asyncio.to_thread(self._open_shtp)
+            loop = asyncio.get_running_loop()
+            self._bno = await loop.run_in_executor(_BNO085_EXECUTOR, self._open_shtp)
             self._consecutive_errors = 0
             logger.info("BNO085 SHTP re-initialized successfully on %s", self._cfg.port)
         except Exception as exc:
