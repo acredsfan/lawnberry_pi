@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 from ..core.state_manager import AppState
 from ..models.sensor_data import SensorData
+from ..utils.battery import voltage_to_soc
 
 logger = logging.getLogger(__name__)
 
@@ -44,24 +45,39 @@ class TelemetryService:
         # Config extraction
         tof_cfg = None
         power_cfg = None
+        battery_cfg = None
+        imu_cfg = None
         if hw_cfg:
             try:
                 tc = getattr(hw_cfg, "tof_config", None)
                 if tc: tof_cfg = tc.model_dump()
-                
+
                 pc = getattr(hw_cfg, "ina3221_config", None)
                 victron = getattr(hw_cfg, "victron_config", None)
                 if pc or victron:
                     power_cfg = {}
                     if pc: power_cfg["ina3221"] = pc.model_dump(exclude_none=True)
                     if victron: power_cfg["victron"] = victron.model_dump(exclude_none=True)
+
+                battery_cfg = getattr(hw_cfg, "battery_config", None)
+
+                # IMU port from hardware config (overrides env var BNO085_PORT if set)
+                imu_port = getattr(hw_cfg, "imu_port", None)
+                if imu_port:
+                    imu_cfg = {"port": imu_port}
             except Exception:
                 pass
 
-        manager = SensorManager(gps_mode=gps_mode, tof_config=tof_cfg, power_config=power_cfg)
+        manager = SensorManager(gps_mode=gps_mode, tof_config=tof_cfg, power_config=power_cfg, battery_config=battery_cfg, imu_config=imu_cfg)
         await manager.initialize()
         self.app_state.sensor_manager = manager
         self.app_state.ntrip_forwarder = None
+        # Sync the websocket_hub's cached reference so the health probe finds it.
+        try:
+            from ..services.websocket_hub import websocket_hub as _hub  # type: ignore
+            _hub._sensor_manager = manager
+        except Exception:
+            pass
         
         # TODO: Handle NTRIP forwarder if needed, or keep it separate.
         # For now, let's assume NTRIP is handled by the manager or a separate service, 
@@ -132,13 +148,18 @@ class TelemetryService:
         
         if data and data.power:
             batt_v = float(data.power.battery_voltage or 0.0)
-            # Simple SOC estimation logic (could be moved to a utility)
-            estimate = max(0.0, min(100.0, (batt_v - 11.0) / (13.0 - 11.0) * 100.0))
             batt_cur = getattr(data.power, "battery_current", 0.0)
+            bc = getattr(getattr(self.app_state, "hardware_config", None), "battery_config", None)
+            soc = voltage_to_soc(
+                batt_v,
+                min_voltage=bc.min_voltage if bc else None,
+                max_voltage=bc.max_voltage if bc else None,
+                chemistry=bc.chemistry if bc else "lifepo4",
+            ) or 0.0
             if isinstance(batt_cur, (int, float)) and batt_cur > 0.05:
-                battery_pct = min(99.0, estimate)
+                battery_pct = min(99.0, soc)
             else:
-                battery_pct = estimate
+                battery_pct = soc
 
         # Position handling with caching
         pos = data.gps if data else None

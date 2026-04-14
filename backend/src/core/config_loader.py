@@ -170,6 +170,8 @@ class ConfigLoader:
                 mapped["imu_type"] = "bno085-uart"
             else:
                 mapped["imu_type"] = imu.get("type")
+        if isinstance(imu, dict) and "port" in imu and "imu_port" not in mapped:
+            mapped["imu_port"] = imu["port"]
 
         sensors = cfg.get("sensors") or {}
         tof = sensors.get("tof") if isinstance(sensors, dict) else None
@@ -201,6 +203,11 @@ class ConfigLoader:
             mapped["ina3221_config"] = cfg["ina3221"]
         if "victron" in cfg and isinstance(cfg["victron"], dict):
             mapped["victron_config"] = cfg["victron"]
+
+        # Battery pack specification block
+        battery = cfg.get("battery")
+        if isinstance(battery, dict):
+            mapped["battery_config"] = battery
 
         motor = cfg.get("motor_controller") or {}
         if isinstance(motor, dict) and "type" in motor and "motor_controller" not in mapped:

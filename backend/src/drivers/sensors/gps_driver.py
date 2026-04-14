@@ -331,6 +331,7 @@ class GPSDriver(HardwareDriver):
                     altitude=alt,
                     accuracy=acc,
                     speed=spd,
+                    heading=hdg,
                     satellites=sats,
                     mode=self.cfg.mode,
                     rtk_status=rtk_status,

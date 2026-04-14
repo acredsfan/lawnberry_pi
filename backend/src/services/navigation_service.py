@@ -546,11 +546,26 @@ class NavigationService:
         current_position = await self._update_position(sensor_data)
         if current_position:
             self.navigation_state.current_position = current_position
-        
-        # Update heading from IMU
-        if sensor_data.imu and sensor_data.imu.yaw is not None:
-            self.navigation_state.heading = sensor_data.imu.yaw
-        
+
+        # Update heading: prefer IMU yaw, fall back to GPS course-over-ground when moving.
+        # Reject IMU placeholder value (yaw=0.0 with calibration_status="uncalibrated")
+        # so stale defaults don't corrupt the navigation heading controller.
+        imu_valid = (
+            sensor_data.imu is not None
+            and sensor_data.imu.yaw is not None
+            and sensor_data.imu.calibration_status != "uncalibrated"
+        )
+        if imu_valid:
+            self.navigation_state.heading = sensor_data.imu.yaw  # type: ignore[union-attr]
+        elif (
+            sensor_data.gps is not None
+            and sensor_data.gps.heading is not None
+            and (sensor_data.gps.speed or 0.0) >= 0.3  # COG valid only when moving
+        ):
+            # Use GPS course-over-ground as heading fallback while in motion
+            self.navigation_state.heading = sensor_data.gps.heading
+
+
         # Update obstacles
         obstacles = self.obstacle_detector.update_obstacles_from_sensors(sensor_data)
         self.navigation_state.obstacle_map = obstacles

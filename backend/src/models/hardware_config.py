@@ -69,6 +69,48 @@ class BladeControllerType(str, Enum):
     IBT_4 = "ibt-4"
 
 
+class BatteryConfig(BaseModel):
+    """Battery pack specification.
+
+    Used for voltage-to-SOC estimation and runtime calculations.
+    Set these values in the ``battery:`` section of ``config/hardware.yaml``
+    to match your actual battery pack.
+
+    Defaults match the standard LawnBerry Pi build:
+    LiFePO4 12.8 V nominal, 30 Ah / 384 Wh.
+    """
+
+    chemistry: str = Field(
+        default="lifepo4",
+        description="Battery chemistry: 'lifepo4' (default) or any string for linear model fallback.",
+    )
+    capacity_ah: float = Field(
+        default=30.0,
+        gt=0,
+        description="Total rated capacity in Amp-hours (e.g. 384 Wh / 12.8 V = 30 Ah).",
+    )
+    capacity_wh: float = Field(
+        default=384.0,
+        gt=0,
+        description="Total rated capacity in Watt-hours.",
+    )
+    nominal_voltage: float = Field(
+        default=12.8,
+        gt=0,
+        description="Nominal pack voltage (e.g. 12.8 V for 4S LiFePO4).",
+    )
+    min_voltage: float = Field(
+        default=10.0,
+        gt=0,
+        description="Absolute discharge cutoff voltage — maps to 0 % SOC.",
+    )
+    max_voltage: float = Field(
+        default=14.6,
+        gt=0,
+        description="Full-charge voltage — maps to 100 % SOC (e.g. 14.6 V for 4S LiFePO4).",
+    )
+
+
 class HardwareConfig(BaseModel):
     """Declares physical hardware modules present in the system.
 
@@ -78,6 +120,7 @@ class HardwareConfig(BaseModel):
     gps_type: Optional[GPSType] = Field(default=None)
     gps_ntrip_enabled: bool = Field(default=False)
     imu_type: Optional[IMUType] = Field(default=None)
+    imu_port: Optional[str] = Field(default=None, description="Serial port for IMU (e.g. /dev/ttyAMA4)")
     tof_sensors: List[str] = Field(default_factory=list, description="ToF sensor positions e.g. ['left','right']")
     env_sensor: bool = Field(default=False, description="BME280 present")
     power_monitor: bool = Field(default=False, description="INA3221 present")
@@ -90,6 +133,8 @@ class HardwareConfig(BaseModel):
     ina3221_config: Optional[Ina3221Config] = Field(default=None)
     # Optional Victron SmartSolar BLE configuration
     victron_config: Optional[VictronBleConfig] = Field(default=None)
+    # Battery pack specification — used for SOC estimation and runtime calcs
+    battery_config: BatteryConfig = Field(default_factory=BatteryConfig)
 
     @field_validator("gps_ntrip_enabled")
     @classmethod

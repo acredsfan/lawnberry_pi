@@ -11,11 +11,12 @@ from typing import Dict, Optional, List, Any
 from contextlib import asynccontextmanager
 
 from ..models import (
-    SensorData, GpsReading, ImuReading, TofReading, EnvironmentalReading, 
+    SensorData, GpsReading, ImuReading, TofReading, EnvironmentalReading,
     PowerReading, SensorType, SensorStatus, GpsMode,
     HardwareTelemetryStream, ComponentId, ComponentStatus, RtkFixType,
     GPSData, IMUData, PowerData, ToFData
 )
+from ..utils.battery import voltage_to_soc, battery_health_label
 
 logger = logging.getLogger(__name__)
 
@@ -121,14 +122,14 @@ class GPSSensorInterface:
 
 class IMUSensorInterface:
     """BNO085 IMU sensor interface"""
-    
-    def __init__(self, coordinator: SensorCoordinator):
+
+    def __init__(self, coordinator: SensorCoordinator, imu_config: dict | None = None):
         self.coordinator = coordinator
         self.last_reading: Optional[ImuReading] = None
         self.status = SensorStatus.OFFLINE
         try:
             from ..drivers.sensors.bno085_driver import BNO085Driver  # type: ignore
-            self._driver = BNO085Driver({})
+            self._driver = BNO085Driver(imu_config or {})
         except Exception:  # pragma: no cover
             self._driver = None
         
@@ -661,22 +662,28 @@ class PowerSensorInterface:
 class SensorManager:
     """Main sensor manager coordinating all sensor interfaces"""
     SENSOR_READ_TIMEOUT_SECONDS = 2.0
-    
+    POWER_READ_TIMEOUT_SECONDS = 12.0  # Victron BLE CLI can take up to 8 s
+
     def __init__(
         self,
         gps_mode: GpsMode = GpsMode.NEO8M_UART,
         tof_config: dict | None = None,
         power_config: dict | None = None,
+        battery_config=None,  # Optional[BatteryConfig]
+        imu_config: dict | None = None,
     ):
         self.coordinator = SensorCoordinator()
-        
+
+        # Battery spec — used for SOC estimation and health classification
+        self._battery_config = battery_config  # BatteryConfig | None
+
         # Initialize sensor interfaces
         self.gps = GPSSensorInterface(gps_mode, self.coordinator)
-        self.imu = IMUSensorInterface(self.coordinator)
+        self.imu = IMUSensorInterface(self.coordinator, imu_config=imu_config)
         self.tof = ToFSensorInterface(self.coordinator, tof_config=tof_config)
         self.environmental = EnvironmentalSensorInterface(self.coordinator)
         self.power = PowerSensorInterface(self.coordinator, driver_config=power_config)
-        
+
         self.initialized = False
         self.validation_enabled = True
         
@@ -708,24 +715,25 @@ class SensorManager:
             logger.warning("Sensor manager not initialized")
             return SensorData()
 
-        async def _read_with_timeout(name: str, coro: Any) -> Any:
+        async def _read_with_timeout(name: str, coro: Any, timeout: float | None = None) -> Any:
+            t = timeout if timeout is not None else self.SENSOR_READ_TIMEOUT_SECONDS
             try:
-                return await asyncio.wait_for(coro, timeout=self.SENSOR_READ_TIMEOUT_SECONDS)
+                return await asyncio.wait_for(coro, timeout=t)
             except asyncio.TimeoutError:
                 logger.warning(
                     "Timed out reading %s after %.1fs; continuing with partial telemetry",
                     name,
-                    self.SENSOR_READ_TIMEOUT_SECONDS,
+                    t,
                 )
                 return None
-         
-        # Read all sensors concurrently where possible
+
+        # Read all sensors concurrently; power gets a longer budget for BLE
         tasks = [
             _read_with_timeout("gps", self.gps.read_gps()),
             _read_with_timeout("imu", self.imu.read_imu()),
             _read_with_timeout("tof", self.tof.read_tof_sensors()),
             _read_with_timeout("environmental", self.environmental.read_environmental()),
-            _read_with_timeout("power", self.power.read_power()),
+            _read_with_timeout("power", self.power.read_power(), timeout=self.POWER_READ_TIMEOUT_SECONDS),
         ]
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -883,9 +891,21 @@ class SensorManager:
                 imu_data=imu_data
             ))
         
-        # Power stream
         if sensor_data.power:
             power_reading = sensor_data.power
+            bc = self._battery_config
+            soc = voltage_to_soc(
+                power_reading.battery_voltage,
+                min_voltage=bc.min_voltage if bc else None,
+                max_voltage=bc.max_voltage if bc else None,
+                chemistry=bc.chemistry if bc else "lifepo4",
+            )
+            health_str = battery_health_label(power_reading.battery_voltage)
+            health_status = (
+                ComponentStatus.HEALTHY if health_str == "healthy"
+                else ComponentStatus.WARNING if health_str == "warning"
+                else ComponentStatus.FAULT
+            )
             power_data = PowerData(
                 battery_voltage=power_reading.battery_voltage,
                 battery_current=power_reading.battery_current,
@@ -893,8 +913,8 @@ class SensorManager:
                 solar_voltage=power_reading.solar_voltage,
                 solar_current=power_reading.solar_current,
                 solar_power=power_reading.solar_power,
-                battery_soc_percent=self._estimate_battery_soc(power_reading.battery_voltage),
-                battery_health=ComponentStatus.HEALTHY if power_reading.battery_voltage > 11.0 else ComponentStatus.WARNING
+                battery_soc_percent=soc,
+                battery_health=health_status,
             )
             streams.append(HardwareTelemetryStream(
                 timestamp=start_time,
@@ -984,20 +1004,11 @@ class SensorManager:
             return ComponentStatus.WARNING
     
     def _estimate_battery_soc(self, voltage: Optional[float]) -> Optional[float]:
-        """Estimate battery state-of-charge using a clamped linear model."""
-        if voltage is None:
-            return None
-        try:
-            value = float(voltage)
-        except (TypeError, ValueError):
-            return None
-
-        min_v = 11.5
-        max_v = 13.0
-        if value <= min_v:
-            return 0.0
-        if value >= max_v:
-            return 100.0
-
-        ratio = (value - min_v) / (max_v - min_v)
-        return round(ratio * 100.0, 1)
+        """Estimate SOC using the shared battery utility (LiFePO4 OCV table by default)."""
+        bc = self._battery_config
+        return voltage_to_soc(
+            voltage,
+            min_voltage=bc.min_voltage if bc else None,
+            max_voltage=bc.max_voltage if bc else None,
+            chemistry=bc.chemistry if bc else "lifepo4",
+        )

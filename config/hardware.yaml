@@ -14,6 +14,7 @@ gps:
   type: ZED-F9P
 imu:
   type: BNO085
+  port: /dev/ttyAMA4  # UART4 — BNO085 wired to Pi UART4
 sensors:
   tof:
     - left
@@ -40,8 +41,8 @@ victron:
   device_id: "EC:1A:A8:DD:99:C2"  # Replace with your device MAC (leave quoted)
   # Provide either the Instant Readout encryption key (preferred) or a pre-composed
   # '<address>@<key>' device_key string accepted by victron-ble.
-  encryption_key: "<replace-with-instant-readout-key>"
-  # device_key: "EC:1A:A8:DD:99:C2@<replace-with-instant-readout-key>"
+  encryption_key: "d25b6546b47ebb21a04ff86a2c4fbb76"
+  # device_key: "EC:1A:A8:DD:99:C2@d25b6546b47ebb21a04ff86a2c4fbb76"
   # Path to victron-ble CLI (must be installed on the system)
   cli_path: victron-ble
   # Optional adapter name/number to pass to victron-ble
@@ -52,6 +53,16 @@ victron:
   prefer_load: true
 motor_controller: robohat-rp2040
 blade_controller: ibt-4
+
+# Battery pack specification — used for SOC estimation and runtime calculations.
+# Adjust these values if you swap batteries.
+battery:
+  chemistry: lifepo4        # lifepo4 (OCV curve) or other (linear model fallback)
+  capacity_ah: 30.0         # Rated capacity: 384 Wh / 12.8 V = 30 Ah
+  capacity_wh: 384.0        # Rated capacity in Watt-hours
+  nominal_voltage: 12.8     # 4S LiFePO4 nominal pack voltage
+  min_voltage: 10.0         # Absolute discharge cutoff (BMS protection)
+  max_voltage: 14.6         # Full-charge voltage (Victron absorption target)
 
 # Flat alternatives (uncomment to use):
 # gps_type: zed-f9p-usb
