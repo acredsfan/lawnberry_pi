@@ -891,7 +891,7 @@ async def control_drive_v2(cmd: dict, request: Request):
                 "command": details_cmd,
             },
         )
-        return JSONResponse(status_code=423, content=blocked_response.model_dump())
+        return JSONResponse(status_code=423, content=blocked_response.model_dump(mode="json"))
     
     if robohat and robohat.status.serial_connected:
         # Calculate differential speeds
@@ -957,7 +957,7 @@ async def control_drive_v2(cmd: dict, request: Request):
         if principal and "principal" not in details_cmd:
             details_cmd["principal"] = principal
         details_cmd["max_speed_limit"] = speed_limit
-    persistence.add_audit_log("control.drive.v2", details={"command": details_cmd, "response": response.model_dump()})
+    persistence.add_audit_log("control.drive.v2", details={"command": details_cmd, "response": response.model_dump(mode="json")})
     
     return response
 
@@ -1111,7 +1111,7 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
     )
     
     # Audit the emergency stop
-    audit_details: dict[str, Any] = {"response": response.model_dump()}
+    audit_details: dict[str, Any] = {"response": response.model_dump(mode="json")}
     if session_context and session_context.get("principal"):
         audit_details["principal"] = session_context["principal"]
     persistence.add_audit_log(
