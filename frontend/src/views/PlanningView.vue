@@ -409,7 +409,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useApiService } from '@/services/api'
 import { useWebSocket } from '@/services/websocket'
@@ -894,25 +894,33 @@ onMounted(async () => {
   await connect()
   
   // Subscribe to job progress updates
-  subscribe('jobs.progress', (data) => {
+  const jobProgressHandler = (data: any) => {
     const job = jobs.value.find(j => j.id === data.job_id)
     if (job) {
       job.progress = data.progress_percent
       job.estimated_remaining = data.remaining_time_min
     }
-  })
+  }
+  subscribe('jobs.progress', jobProgressHandler)
   
   // Subscribe to weather updates
-  subscribe('telemetry.weather', (data) => {
+  const weatherHandler = (data: any) => {
     currentWeather.value = {
       temperature_c: data.temperature_c ?? currentWeather.value.temperature_c,
       humidity_percent: data.humidity_percent || currentWeather.value.humidity_percent,
       condition: data.condition || currentWeather.value.condition
     }
-  })
-  
+  }
+  subscribe('telemetry.weather', weatherHandler)
+
+  // Cleanup subscriptions when component is unmounted
   await refreshJobs()
   await refreshSchedules()
+})
+
+onUnmounted(() => {
+  unsubscribe('jobs.progress')
+  unsubscribe('telemetry.weather')
 })
 </script>
 

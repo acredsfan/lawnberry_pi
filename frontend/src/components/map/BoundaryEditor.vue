@@ -324,6 +324,10 @@ import { shouldUseGoogleProvider, getOsmTileLayer, type TileLayerConfig } from '
 const mapStore = useMapStore();
 const toast = useToastStore();
 
+// Shared telemetry socket — must be at setup scope so onUnmounted cleans up properly
+const { connect: connectTelemetry, subscribe: subscribeTelemetry, unsubscribe: unsubscribeTelemetry } = useWebSocket('telemetry')
+let _navHandler: ((payload: any) => void) | null = null
+
 // Props
 interface Props {
   configId?: string;
@@ -1111,9 +1115,8 @@ onMounted(async () => {
   await ensureBaseLayer();
 
     // Connect to telemetry and track navigation updates
-    const { connect, subscribe } = useWebSocket('telemetry');
-    await connect();
-    subscribe('telemetry.navigation', (payload: any) => {
+    await connectTelemetry();
+    _navHandler = (payload: any) => {
       const pos = payload?.position;
       const lat = Number(pos?.latitude)
       const lon = Number(pos?.longitude)
@@ -1128,7 +1131,8 @@ onMounted(async () => {
           firstLockCentered.value = true
         }
       }
-    });
+    };
+    subscribeTelemetry('telemetry.navigation', _navHandler);
 
     // REST fallback: poll dashboard telemetry in case WebSocket is blocked by proxies
     restPollTimer.value = window.setInterval(async () => {
@@ -1157,6 +1161,11 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (_navHandler) {
+    unsubscribeTelemetry('telemetry.navigation', _navHandler)
+    _navHandler = null
+  }
+
   if (restPollTimer.value) {
     clearInterval(restPollTimer.value)
     restPollTimer.value = null

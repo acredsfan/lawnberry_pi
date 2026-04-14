@@ -16,8 +16,11 @@ export class WebSocketService {
   private subscriptions = new Set<string>()
   private listeners = new Map<string, Array<(data: any) => void>>()
   private connectionListeners = new Set<(connected: boolean) => void>()
+  private rawMessageListeners = new Set<(msg: WebSocketMessage) => void>()
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private lastPongAt = 0
+  private _intentionalClose = false
+  private _connectionPromise: Promise<void> | null = null
 
   private urlCandidates: string[]
   private urlIndex = 0
@@ -51,19 +54,26 @@ export class WebSocketService {
       this.notifyConnectionState(true)
       return Promise.resolve()
     }
+    // Deduplicate: if a connect attempt is already in flight, return the same promise
+    if (this._connectionPromise) {
+      return this._connectionPromise
+    }
+    this._intentionalClose = false
 
-    return new Promise((resolve, reject) => {
+    this._connectionPromise = new Promise((resolve, reject) => {
       let settled = false
 
       const resolveOnce = () => {
         if (settled) return
         settled = true
+        this._connectionPromise = null
         resolve()
       }
 
       const rejectOnce = (error: Error) => {
         if (settled) return
         settled = true
+        this._connectionPromise = null
         reject(error)
       }
 
@@ -165,9 +175,14 @@ export class WebSocketService {
 
       tryConnect()
     })
+    return this._connectionPromise
   }
 
   private handleMessage(message: WebSocketMessage) {
+    // Dispatch to raw (any-message) listeners first
+    this.rawMessageListeners.forEach(cb => {
+      try { cb(message) } catch { /* ignore listener errors */ }
+    })
     // Handle different message types
     switch (message.event) {
       case 'telemetry.data':
@@ -206,6 +221,7 @@ export class WebSocketService {
   }
 
   private handleReconnect() {
+    if (this._intentionalClose) return
     if (this.maxReconnectAttempts >= 0 && this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.warn('Max reconnection attempts reached — switching to fallback polling only')
       return
@@ -245,12 +261,13 @@ export class WebSocketService {
   }
 
   unsubscribe(topic: string) {
+    // Always remove from desired-subscription set so we don't re-subscribe on reconnect
+    this.subscriptions.delete(topic)
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: 'unsubscribe',
         topic: topic
       }))
-      this.subscriptions.delete(topic)
     }
   }
 
@@ -316,7 +333,14 @@ export class WebSocketService {
   }
 
   disconnect() {
+    this._intentionalClose = true
+    this._connectionPromise = null
     if (this.ws) {
+      // Null handlers before close to prevent onclose from triggering handleReconnect
+      this.ws.onopen = null
+      this.ws.onmessage = null
+      this.ws.onclose = null
+      this.ws.onerror = null
       this.ws.close()
       this.ws = null
     }
@@ -377,27 +401,25 @@ export class WebSocketService {
     }
   }
 
+  onAnyMessage(callback: (msg: WebSocketMessage) => void): () => void {
+    this.rawMessageListeners.add(callback)
+    return () => { this.rawMessageListeners.delete(callback) }
+  }
+
   dispatchTestMessage(message: WebSocketMessage) {
     this.handleMessage(message)
   }
 }
 
-// Global WebSocket service instance
-let wsService: WebSocketService | null = null
+// Per-type singletons — one shared connection per channel (telemetry / control)
+const _wsServiceMap: Partial<Record<'telemetry' | 'control', WebSocketService>> = {}
 
-
-// Factory for telemetry or control WebSocket
-export function useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handlers?: { onMessage?: (msg: any) => void }) {
-  let wsUrl: string
-  // If behind a reverse proxy, honor X-Forwarded-Proto via location.protocol
+function _buildWsUrl(type: 'telemetry' | 'control'): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
-  if (type === 'telemetry') {
-    wsUrl = `${protocol}//${host}/api/v2/ws/telemetry`
-  } else {
-    wsUrl = `${protocol}//${host}/api/v2/ws/control`
-  }
-  // Attach access token for authenticated websocket upgrade when required by server
+  let wsUrl = type === 'telemetry'
+    ? `${protocol}//${host}/api/v2/ws/telemetry`
+    : `${protocol}//${host}/api/v2/ws/control`
   try {
     const token = localStorage.getItem('auth_token')
     if (token) {
@@ -408,23 +430,39 @@ export function useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handle
   } catch {
     // ignore
   }
-  const wsService = new WebSocketService(wsUrl)
+  return wsUrl
+}
 
-  const connected = ref(wsService.isConnected)
+// Factory for telemetry or control WebSocket — returns a shared singleton per type.
+export function useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handlers?: { onMessage?: (msg: any) => void }) {
+  // Create singleton on first call for this channel type
+  if (!_wsServiceMap[type]) {
+    _wsServiceMap[type] = new WebSocketService(_buildWsUrl(type))
+  }
+  const service = _wsServiceMap[type]!
+
+  const connected = ref(service.isConnected)
   const connecting = ref(false)
-  const unsubscribeState = wsService.onConnectionStateChange((state) => {
+
+  const unsubscribeState = service.onConnectionStateChange((state) => {
     connected.value = state
     if (!state) {
       connecting.value = false
     }
   })
 
+  // Use proper onAnyMessage API instead of monkey-patching handleMessage
+  let unsubscribeRaw: (() => void) | null = null
+  if (handlers?.onMessage) {
+    unsubscribeRaw = service.onAnyMessage(handlers.onMessage)
+  }
+
   const connect = async () => {
-    if (!wsService.isConnected && !connecting.value) {
+    if (!service.isConnected && !connecting.value) {
       connecting.value = true
       try {
-        await wsService.connect()
-        connected.value = wsService.isConnected
+        await service.connect()
+        connected.value = service.isConnected
       } catch (error) {
         console.error('Failed to connect to WebSocket:', error)
         connected.value = false
@@ -434,31 +472,17 @@ export function useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handle
     }
   }
 
+  // Disconnect tears down the shared connection and invalidates the singleton
+  // so the next connect() call rebuilds with a fresh auth token.
   const disconnect = () => {
-    wsService.disconnect()
+    service.disconnect()
+    delete _wsServiceMap[type]
     connected.value = false
-  }
-
-  const subscribe = (topic: string, callback: (data: any) => void) => {
-    wsService.onTopic(topic, callback)
-  }
-
-  const unsubscribe = (topic: string, callback?: (data: any) => void) => {
-    wsService.offTopic(topic, callback)
-  }
-
-  // Listen for all messages if handler provided
-  if (handlers?.onMessage) {
-    // Patch handleMessage to call onMessage
-    const origHandleMessage = (wsService as any).handleMessage?.bind(wsService)
-    ;(wsService as any).handleMessage = function(message: any) {
-      handlers.onMessage!(message)
-      if (origHandleMessage) origHandleMessage(message)
-    }
   }
 
   onUnmounted(() => {
     unsubscribeState()
+    unsubscribeRaw?.()
   })
 
   return {
@@ -466,11 +490,11 @@ export function useWebSocket(type: 'telemetry' | 'control' = 'telemetry', handle
     connecting,
     connect,
     disconnect,
-    subscribe,
-    unsubscribe,
-    setCadence: (hz: number) => wsService.setCadence(hz),
-    ping: () => wsService.ping(),
-    listTopics: () => wsService.listTopics(),
-    dispatchTestMessage: (message: WebSocketMessage) => wsService.dispatchTestMessage(message)
+    subscribe: (topic: string, callback: (data: any) => void) => service.onTopic(topic, callback),
+    unsubscribe: (topic: string, callback?: (data: any) => void) => service.offTopic(topic, callback),
+    setCadence: (hz: number) => service.setCadence(hz),
+    ping: () => service.ping(),
+    listTopics: () => service.listTopics(),
+    dispatchTestMessage: (message: WebSocketMessage) => service.dispatchTestMessage(message)
   }
 }

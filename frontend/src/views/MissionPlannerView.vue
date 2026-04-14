@@ -172,7 +172,6 @@ onUnmounted(() => {
     telemetrySocket.unsubscribe('telemetry.navigation', navigationHandler);
     navigationHandler = null;
   }
-  telemetrySocket.disconnect();
 
   if (restPollTimer.value) {
     clearInterval(restPollTimer.value)
