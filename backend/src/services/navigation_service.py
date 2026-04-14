@@ -288,6 +288,9 @@ class NavigationService:
         # Stall detection: ramp up motor power when heading isn't changing
         _stall_start: float | None = None
         _stall_heading: float | None = None
+        # Hysteresis: prevent TANK/BLEND mode flapping near the 60° boundary.
+        # Enter TANK when |error| > 70°, exit TANK when |error| < 50°.
+        _in_tank_mode: bool = False
 
         while True:
             status = mission_service.mission_statuses.get(mission.id)
@@ -452,14 +455,23 @@ class NavigationService:
             abs_err = abs(heading_error)
             turn_sign = 1.0 if heading_error > 0 else -1.0
 
-            if abs_err > 60:
+            # Hysteresis: enter TANK at >70°, exit at <50° to prevent mode flapping.
+            if abs_err > 70:
+                _in_tank_mode = True
+            elif abs_err < 50:
+                _in_tank_mode = False
+
+            if _in_tank_mode:
                 # TANK TURN: counter-rotate wheels in place to point toward
                 # the waypoint.  One-wheel turns can't overcome grass friction.
+                # Sign convention: steer<1500 → CW turn (increases heading).
+                # turn_sign > 0 means we need CW → left > right → angular < 0 → steer < 1500.
                 turn_speed = min(self.max_speed, 0.5 + _stall_boost)
-                left_speed = -turn_sign * turn_speed
-                right_speed = turn_sign * turn_speed
+                left_speed = turn_sign * turn_speed
+                right_speed = -turn_sign * turn_speed
             else:
-                # BLENDED: proportional turn with forward movement
+                # BLENDED: proportional turn with forward movement.
+                # Positive turn_effort → CW needed → left > right (same sign convention as TANK).
                 turn_effort = max(-1.0, min(1.0, heading_error / 45.0))
                 forward_speed = base_speed
                 # Gentle taper: full speed at 0°, 70% at 60°
@@ -475,8 +487,8 @@ class NavigationService:
                 # Floor so motor controller dead zone is always overcome
                 forward_speed = max(forward_speed, 0.3)
 
-                left_speed = forward_speed - turn_effort * forward_speed
-                right_speed = forward_speed + turn_effort * forward_speed
+                left_speed = forward_speed + turn_effort * forward_speed
+                right_speed = forward_speed - turn_effort * forward_speed
 
             # Clamp speeds
             left_speed = max(-self.max_speed, min(self.max_speed, left_speed))
@@ -510,7 +522,7 @@ class NavigationService:
             _now = time.monotonic()
             if (_now - _last_nav_log) >= 5.0:
                 _last_nav_log = _now
-                _mode = "TANK" if abs_err > 60 else "BLEND"
+                _mode = "TANK" if _in_tank_mode else "BLEND"
                 logger.info(
                     "NAV %s → wp(%.6f,%.6f) dist=%.1fm hdg=%.1f° err=%.1f° spd=L%.2f/R%.2f boost=%.0f%%",
                     _mode,

@@ -738,11 +738,12 @@ async def control_drive_v2(cmd: dict, request: Request):
                 details={"reason": "emergency_stop_active", "command": cmd_details}
             )
             return JSONResponse(status_code=403, content={"detail": "Emergency stop active - drive commands blocked"})
-        # Compute motor speeds using arcade drive
+        # Compute motor speeds using arcade drive.
+        # Convention: positive turn = turn right → left wheel faster than right.
         throttle = float(cmd.get("throttle", 0.0))
         turn = float(cmd.get("turn", 0.0))
-        left_speed = throttle - turn
-        right_speed = throttle + turn
+        left_speed = throttle + turn
+        right_speed = throttle - turn
         # Clamp
         max_speed_limit = 1.0
         left_speed = max(-max_speed_limit, min(max_speed_limit, left_speed))
@@ -895,9 +896,10 @@ async def control_drive_v2(cmd: dict, request: Request):
         return JSONResponse(status_code=423, content=blocked_response.model_dump(mode="json"))
     
     if robohat and robohat.status.serial_connected:
-        # Calculate differential speeds
-        left_speed = throttle - turn
-        right_speed = throttle + turn
+        # Calculate differential speeds.
+        # Convention: positive turn = turn right → left wheel faster than right.
+        left_speed = throttle + turn
+        right_speed = throttle - turn
         
         # Clamp to max speed limit
         left_speed = max(-speed_limit, min(speed_limit, left_speed))
