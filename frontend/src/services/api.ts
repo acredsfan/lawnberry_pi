@@ -24,6 +24,19 @@ export async function getRoboHATStatus() {
   return response.data
 }
 
+export async function getControlStatus() {
+  const response = await apiService.get('/api/v2/control/status')
+  return response.data
+}
+
+export async function clearEmergencyStop(reason = '') {
+  const response = await apiService.post('/api/v2/control/emergency_clear', {
+    confirmation: true,
+    reason
+  })
+  return response.data
+}
+
 // Map API methods
 export async function getMapConfiguration(configId: string = 'default') {
   const response = await apiService.get(`/api/v2/map/configuration?config_id=${configId}`)

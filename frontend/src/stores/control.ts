@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { sendControlCommand, getRoboHATStatus } from '../services/api';
+import { sendControlCommand, getRoboHATStatus, getControlStatus, clearEmergencyStop as apiClearEmergencyStop } from '../services/api';
 import { useWebSocket } from '../services/websocket';
 
 type ControlPayload = Record<string, unknown>;
@@ -141,6 +141,7 @@ export const useControlStore = defineStore('control', () => {
   const isLoading = ref(false);
   const commandInProgress = ref(false);
   const robohatStatus = ref<RoboHATStatus | null>(null);
+  const emergencyStopActive = ref(false);
 
   function applyLockoutState(source: ControlPayload | null | undefined, reason: string, until?: string | null) {
     lockout.value = true;
@@ -229,6 +230,26 @@ export const useControlStore = defineStore('control', () => {
     }
   }
 
+  async function fetchControlStatus() {
+    try {
+      const result = await getControlStatus() as { emergency_stop_active?: boolean };
+      emergencyStopActive.value = !!result?.emergency_stop_active;
+      return result;
+    } catch {
+      // non-fatal — keep last known state
+    }
+  }
+
+  async function clearEstop(reason = '') {
+    try {
+      const result = await apiClearEmergencyStop(reason);
+      emergencyStopActive.value = false;
+      return result;
+    } catch (e) {
+      throw e;
+    }
+  }
+
   const canSubmitCommand = computed(() => {
     return !lockoutActive.value && !commandInProgress.value;
   });
@@ -269,11 +290,14 @@ export const useControlStore = defineStore('control', () => {
     isLoading,
     commandInProgress,
     robohatStatus,
+    emergencyStopActive,
     canSubmitCommand,
     lockoutDisplay,
     lockoutTimeRemaining,
     submitCommand,
     fetchRoboHATStatus,
+    fetchControlStatus,
+    clearEstop,
     initWebSocket,
     cleanup
   };

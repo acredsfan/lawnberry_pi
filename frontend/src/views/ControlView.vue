@@ -137,6 +137,14 @@
         >
           🛑 EMERGENCY STOP
         </button>
+        <button
+          v-if="isEmergencyStopActive"
+          class="btn btn-clear-estop"
+          :disabled="performing"
+          @click="clearEmergencyStop"
+        >
+          ✅ CLEAR EMERGENCY STOP
+        </button>
       </div>
 
       <!-- Live Camera Feed -->
@@ -506,6 +514,8 @@ const canAuthenticate = computed(() => {
 const robohatStatus = computed(() => control.robohatStatus as RoboHATStatus | null)
 
 const motorControllerState = computed<MotorControllerState>(() => describeMotorController(robohatStatus.value))
+
+const isEmergencyStopActive = computed(() => control.emergencyStopActive)
 
 const canMove = computed(() =>
   isControlUnlocked.value && !performing.value && !lockout.value && motorControllerState.value.ready
@@ -1487,9 +1497,22 @@ async function emergencyStop() {
     await control.submitCommand('emergency', { session_id: ensureSession().session_id })
     currentSpeed.value = 0
     mowingActive.value = false
+    await control.fetchControlStatus()
     showStatus('Emergency stop activated', true)
   } catch (error) {
     showStatus('Failed to trigger emergency stop', false)
+  } finally {
+    setPerforming(false)
+  }
+}
+
+async function clearEmergencyStop() {
+  setPerforming(true)
+  try {
+    await control.clearEstop('operator cleared via control panel')
+    showStatus('Emergency stop cleared — mower ready', true)
+  } catch (error) {
+    showStatus('Failed to clear emergency stop', false)
   } finally {
     setPerforming(false)
   }
@@ -1655,18 +1678,25 @@ watch(speedLevel, () => {
 })
 
 let telemetryInterval: number | undefined
+let controlStatusInterval: number | undefined
 
 onMounted(async () => {
   await loadSecurityConfig()
   await restoreExistingControlSession()
   await refreshTelemetry()
+  await control.fetchControlStatus()
   telemetryInterval = window.setInterval(refreshTelemetry, 5000)
+  controlStatusInterval = window.setInterval(() => control.fetchControlStatus(), 3000)
 })
 
 onUnmounted(() => {
   if (telemetryInterval) {
     window.clearInterval(telemetryInterval)
     telemetryInterval = undefined
+  }
+  if (controlStatusInterval) {
+    window.clearInterval(controlStatusInterval)
+    controlStatusInterval = undefined
   }
   if (sessionTimer) {
     window.clearInterval(sessionTimer)
@@ -1905,8 +1935,18 @@ onUnmounted(() => {
   font-size: 1.25rem;
   padding: 1rem 2rem;
   width: 100%;
-  margin-bottom: 2rem;
+  margin-bottom: 0.75rem;
   animation: pulse 2s infinite;
+}
+
+.btn-clear-estop {
+  background: #28a745;
+  color: white;
+  font-size: 1.1rem;
+  padding: 0.875rem 2rem;
+  width: 100%;
+  margin-bottom: 2rem;
+  border: 2px solid #1e7e34;
 }
 
 @keyframes pulse {
