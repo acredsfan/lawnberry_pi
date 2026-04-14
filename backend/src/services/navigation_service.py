@@ -285,6 +285,9 @@ class NavigationService:
         heading_wait_start: float | None = None
         obstacle_wait_start: float | None = None
         _last_nav_log: float = 0.0
+        # Stall detection: ramp up motor power when heading isn't changing
+        _stall_start: float | None = None
+        _stall_heading: float | None = None
 
         while True:
             status = mission_service.mission_statuses.get(mission.id)
@@ -416,10 +419,27 @@ class NavigationService:
                 heading_wait_start = None
 
             heading_error = (heading_to_target - current_heading + 180) % 360 - 180
-            
-            # Proportional controller for turning
-            turn_effort = max(-1.0, min(1.0, heading_error / 45.0)) # Normalize error to [-1, 1] over a 90 degree arc
-            
+
+            # --- Stall detection: if heading barely changes while we command a
+            # turn, progressively boost motor power to overcome grass/friction.
+            _stall_boost = 0.0
+            if abs(heading_error) > 20:
+                if _stall_start is None:
+                    _stall_start = time.monotonic()
+                    _stall_heading = current_heading
+                else:
+                    _hdg_delta = abs(((current_heading - (_stall_heading or 0)) + 180) % 360 - 180)
+                    if _hdg_delta < 5.0:
+                        # Heading barely moved — ramp up 15% per second, cap at +60%
+                        _stall_boost = min(0.6, (time.monotonic() - _stall_start) * 0.15)
+                    else:
+                        # Heading is changing — reset stall tracker
+                        _stall_start = time.monotonic()
+                        _stall_heading = current_heading
+            else:
+                _stall_start = None
+                _stall_heading = None
+
             # Set speed (scale by waypoint speed preference when provided)
             base_speed = self.cruise_speed
             try:
@@ -428,25 +448,36 @@ class NavigationService:
             except Exception:
                 base_speed = self.cruise_speed
 
-            forward_speed = base_speed
-            # Gradual slowdown for heading corrections: full speed at 0° error,
-            # 50% at 90° error (linear taper). Keeps enough speed to overcome
-            # motor controller dead zone and maintain GPS COG lock.
-            if abs(heading_error) > 10:
-                taper = max(0.5, 1.0 - abs(heading_error) / 180.0)
-                forward_speed *= taper
+            # --- Motor command strategy depends on heading error magnitude ---
+            abs_err = abs(heading_error)
+            turn_sign = 1.0 if heading_error > 0 else -1.0
 
-            # During heading bootstrap, enforce minimum forward speed so GPS COG
-            # activates quickly (COG gate is 0.3 m/s; target 0.4 m/s for margin).
-            if _in_heading_bootstrap:
-                forward_speed = max(forward_speed, 0.4)
+            if abs_err > 60:
+                # TANK TURN: counter-rotate wheels in place to point toward
+                # the waypoint.  One-wheel turns can't overcome grass friction.
+                turn_speed = min(self.max_speed, 0.5 + _stall_boost)
+                left_speed = -turn_sign * turn_speed
+                right_speed = turn_sign * turn_speed
+            else:
+                # BLENDED: proportional turn with forward movement
+                turn_effort = max(-1.0, min(1.0, heading_error / 45.0))
+                forward_speed = base_speed
+                # Gentle taper: full speed at 0°, 70% at 60°
+                if abs_err > 10:
+                    taper = max(0.7, 1.0 - abs_err / 200.0)
+                    forward_speed *= taper
 
-            # Enforce a floor so the motor controller dead zone is always overcome.
-            forward_speed = max(forward_speed, 0.3)
-            
-            left_speed = forward_speed * (1 - turn_effort)
-            right_speed = forward_speed * (1 + turn_effort)
-            
+                # During heading bootstrap, enforce minimum forward speed so GPS
+                # COG activates quickly (COG gate is 0.3 m/s; 0.4 m/s for margin).
+                if _in_heading_bootstrap:
+                    forward_speed = max(forward_speed, 0.4)
+
+                # Floor so motor controller dead zone is always overcome
+                forward_speed = max(forward_speed, 0.3)
+
+                left_speed = forward_speed - turn_effort * forward_speed
+                right_speed = forward_speed + turn_effort * forward_speed
+
             # Clamp speeds
             left_speed = max(-self.max_speed, min(self.max_speed, left_speed))
             right_speed = max(-self.max_speed, min(self.max_speed, right_speed))
@@ -479,8 +510,10 @@ class NavigationService:
             _now = time.monotonic()
             if (_now - _last_nav_log) >= 5.0:
                 _last_nav_log = _now
+                _mode = "TANK" if abs_err > 60 else "BLEND"
                 logger.info(
-                    "NAV → wp(%.6f,%.6f) dist=%.1fm hdg=%.1f° err=%.1f° spd=L%.2f/R%.2f bootstrap=%s",
+                    "NAV %s → wp(%.6f,%.6f) dist=%.1fm hdg=%.1f° err=%.1f° spd=L%.2f/R%.2f boost=%.0f%%",
+                    _mode,
                     target_pos.latitude,
                     target_pos.longitude,
                     distance_to_target,
@@ -488,7 +521,7 @@ class NavigationService:
                     heading_error,
                     left_speed,
                     right_speed,
-                    _in_heading_bootstrap,
+                    _stall_boost * 100,
                 )
 
             # Control loop at 5Hz
