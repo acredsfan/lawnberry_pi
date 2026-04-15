@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional, Mapping
@@ -24,6 +25,8 @@ class WebSocketHub:
         self._sensor_manager: Optional[Any] = None
         self._ntrip_forwarder: Optional[Any] = None
         self._calibration_lock = asyncio.Lock()
+        self._last_telemetry_snapshot: Optional[dict[str, Any]] = None
+        self._last_telemetry_at: float = 0.0
 
     def bind_app_state(self, state: Any) -> None:
         """Expose app.state to the hub."""
@@ -177,7 +180,11 @@ class WebSocketHub:
             try:
                 sim_mode = os.getenv("SIM_MODE", "0") != "0"
                 telemetry_data = await telemetry_service.get_telemetry(sim_mode=sim_mode)
-                
+
+                # Cache the latest snapshot for drive-route safety validation.
+                self._last_telemetry_snapshot = dict(telemetry_data)
+                self._last_telemetry_at = time.monotonic()
+
                 # Broadcast topics
                 await self._broadcast_telemetry_topics(telemetry_data)
                 
@@ -240,6 +247,19 @@ class WebSocketHub:
         
         # Legacy full update
         await self.broadcast_to_topic("telemetry/updates", telemetry_data)
+
+    async def get_last_telemetry(self, max_age_s: float = 0.5) -> dict[str, Any]:
+        """Return the most recent cached telemetry snapshot if it is fresh enough.
+
+        Falls back to a live ``_generate_telemetry()`` call when no cached value
+        exists or when the cached value is older than *max_age_s* seconds.
+        Always returns a shallow copy so callers cannot mutate shared state.
+        """
+        if self._last_telemetry_snapshot is not None:
+            age = time.monotonic() - self._last_telemetry_at
+            if age <= max_age_s:
+                return dict(self._last_telemetry_snapshot)
+        return await self._generate_telemetry()
 
     # Helper for legacy external access if needed (e.g. by routers)
     async def _generate_telemetry(self) -> dict:

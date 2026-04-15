@@ -643,7 +643,7 @@ class RoboHATService:
         # For everything else, keep a debug breadcrumb without polluting logs.
         logger.debug("RoboHAT: %s", line)
     
-    async def send_motor_command(self, left_speed: float, right_speed: float) -> bool:
+    async def send_motor_command(self, left_speed: float, right_speed: float, ack_timeout: float = 0.35) -> bool:
         """Send motor command to RoboHAT"""
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
             return False
@@ -654,7 +654,7 @@ class RoboHATService:
         steer_us, throttle_us = self._mix_arcade_to_pwm(left_speed, right_speed)
         ok = await self._send_line(f"pwm,{steer_us},{throttle_us}")
         if ok:
-            ok = await self._wait_for_pwm_ack(timeout=1.5)
+            ok = await self._wait_for_pwm_ack(timeout=ack_timeout)
 
         if ok:
             self.status.motor_controller_ok = True
@@ -740,7 +740,9 @@ class RoboHATService:
         right_norm = right_speed / max_input
 
         linear = (left_norm + right_norm) / 2.0
-        angular = (right_norm - left_norm) / 2.0
+        # Steer convention: positive angular → steer_us > 1500 → MDDRC10 right turn.
+        # Left turn: left < right → left_norm < right_norm → angular < 0 → steer_us < 1500.
+        angular = (left_norm - right_norm) / 2.0
 
         throttle_us = RoboHATService._scale_to_pwm(linear)
         steer_us = RoboHATService._scale_to_pwm(angular, span=350)

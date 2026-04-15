@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { sendControlCommand, getRoboHATStatus, getControlStatus, clearEmergencyStop as apiClearEmergencyStop } from '../services/api';
 import { useWebSocket } from '../services/websocket';
 
@@ -144,15 +144,44 @@ export const useControlStore = defineStore('control', () => {
   const emergencyStopActive = ref(false);
   const emergencyStopReason = ref<string | null>(null);
 
+  let _lockoutClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function _scheduleLockoutClear(until: string) {
+    if (_lockoutClearTimer !== null) {
+      clearTimeout(_lockoutClearTimer);
+      _lockoutClearTimer = null;
+    }
+    const ms = new Date(until).getTime() - Date.now();
+    if (ms <= 0) {
+      clearLockoutState();
+      return;
+    }
+    _lockoutClearTimer = setTimeout(() => {
+      _lockoutClearTimer = null;
+      clearLockoutState();
+    }, ms);
+  }
+
   function applyLockoutState(source: ControlPayload | null | undefined, reason: string, until?: string | null) {
     lockout.value = true;
     lockoutActive.value = true;
     lockoutReason.value = reason || 'Unknown';
     lockoutUntil.value = until ?? null;
     remediationLink.value = extractRemediationLink(source);
+    if (until) {
+      _scheduleLockoutClear(until);
+    } else if (_lockoutClearTimer !== null) {
+      // New permanent lockout cancels any pending auto-clear.
+      clearTimeout(_lockoutClearTimer);
+      _lockoutClearTimer = null;
+    }
   }
 
   function clearLockoutState() {
+    if (_lockoutClearTimer !== null) {
+      clearTimeout(_lockoutClearTimer);
+      _lockoutClearTimer = null;
+    }
     lockout.value = false;
     lockoutActive.value = false;
     lockoutReason.value = '';
@@ -191,7 +220,7 @@ export const useControlStore = defineStore('control', () => {
       lastCommandResult.value = result;
       lastCommandEcho.value = result;
       if (result.result === 'blocked') {
-        applyLockoutState(result, result.status_reason || 'SAFETY_LOCKOUT');
+        applyLockoutState(result, result.status_reason || 'SAFETY_LOCKOUT', result.until as string | undefined);
       }
       return result;
     } catch (e: unknown) {
@@ -210,7 +239,8 @@ export const useControlStore = defineStore('control', () => {
       lastCommandResult.value = { result: 'error', status_reason: statusReason };
 
       if (isSafetyLockoutError(e)) {
-        applyLockoutState(error?.response?.data, statusReason);
+        const untilStr = String(error?.response?.data?.until ?? '') || null;
+        applyLockoutState(error?.response?.data, statusReason, untilStr);
       }
 
       throw e;

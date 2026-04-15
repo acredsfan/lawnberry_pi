@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, status, Query
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Any, Dict
 import json
 import hashlib
@@ -528,6 +528,7 @@ class ControlResponseV2(BaseModel):
     active_interlocks: list[str] = []
     remediation: Optional[dict[str, str]] = None
     telemetry_snapshot: Optional[dict[str, Any]] = None
+    until: Optional[str] = None
     timestamp: str
 
 def _emergency_active() -> bool:
@@ -808,7 +809,7 @@ async def control_drive_v2(cmd: dict, request: Request):
             from ..core.config_loader import ConfigLoader
             from ..services.navigation_service import NavigationService
 
-            telemetry_snapshot = await websocket_hub._generate_telemetry()
+            telemetry_snapshot = await websocket_hub.get_last_telemetry(max_age_s=0.5)
             _, limits = ConfigLoader().get()
             max_position_accuracy_m = NavigationService.get_instance().max_waypoint_accuracy_m
 
@@ -858,6 +859,16 @@ async def control_drive_v2(cmd: dict, request: Request):
 
     if manual_active_interlocks:
         manual_active_interlocks = list(dict.fromkeys(manual_active_interlocks))
+
+        # Determine auto-expiry for transient vs persistent faults.
+        # Obstacle faults clear only when the obstacle actually moves — no time-based expiry.
+        # Telemetry/location faults are transient and auto-expire so the UI unlocks once sensors recover.
+        _transient_interlocks = {"telemetry_unavailable", "telemetry_stale", "location_awareness_unavailable"}
+        _has_only_transient = all(i in _transient_interlocks for i in manual_active_interlocks)
+        lockout_until_str: str | None = None
+        if _has_only_transient:
+            lockout_until_str = (datetime.now(timezone.utc) + timedelta(seconds=3)).isoformat()
+
         blocked_response = ControlResponseV2(
             accepted=False,
             audit_id=audit_id,
@@ -876,6 +887,7 @@ async def control_drive_v2(cmd: dict, request: Request):
                 "message": "Clear nearby obstacles and restore fresh hardware telemetry before retrying manual movement.",
             },
             telemetry_snapshot=telemetry_snapshot,
+            until=lockout_until_str,
             timestamp=timestamp.isoformat(),
         )
         try:
