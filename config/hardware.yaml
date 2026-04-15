@@ -12,6 +12,9 @@
 #
 gps:
   type: ZED-F9P
+  position_offset:
+    lat_m: 0.0  # metres north (+) / south (−). Set via "Calibrate GPS" in Mission Planner.
+    lon_m: 0.0  # metres east  (+) / west  (−). Set via "Calibrate GPS" in Mission Planner.
 imu:
   type: BNO085
   port: /dev/ttyAMA4  # UART4 — BNO085 wired to Pi UART4

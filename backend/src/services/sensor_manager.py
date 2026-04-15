@@ -111,6 +111,25 @@ class GPSSensorInterface:
                     satellites=8,
                     mode=self.gps_mode
                 )
+
+            # Apply configured position calibration offset (gps.position_offset in hardware.yaml).
+            # This corrects for satellite imagery tile misalignment so the mower's displayed
+            # position matches the physical location shown in the map.
+            if reading is not None and reading.latitude is not None and reading.longitude is not None:
+                try:
+                    from ..core.config_loader import ConfigLoader
+                    hw, _ = ConfigLoader().get()
+                    lat_m = hw.gps_position_offset_lat_m
+                    lon_m = hw.gps_position_offset_lon_m
+                    if lat_m or lon_m:
+                        lat_deg = lat_m / 111111.0
+                        lon_deg = lon_m / (111111.0 * math.cos(math.radians(reading.latitude)))
+                        reading = reading.model_copy(update={
+                            "latitude": reading.latitude + lat_deg,
+                            "longitude": reading.longitude + lon_deg,
+                        })
+                except Exception:
+                    pass  # non-fatal; offset simply not applied
             
             self.last_reading = reading
             return reading
