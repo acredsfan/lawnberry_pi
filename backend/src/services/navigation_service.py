@@ -497,6 +497,14 @@ class NavigationService:
                 left_speed = forward_speed + turn_effort * forward_speed
                 right_speed = forward_speed - turn_effort * forward_speed
 
+                # In thick grass single-wheel pivots (one wheel stopped) cause
+                # bogging.  Ensure both wheels keep at least 20% forward speed.
+                _inner_min = forward_speed * 0.2
+                if turn_effort > 0:   # CW turn — right is inner wheel
+                    right_speed = max(right_speed, _inner_min)
+                elif turn_effort < 0:  # CCW turn — left is inner wheel
+                    left_speed = max(left_speed, _inner_min)
+
             # Clamp speeds
             left_speed = max(-self.max_speed, min(self.max_speed, left_speed))
             right_speed = max(-self.max_speed, min(self.max_speed, right_speed))

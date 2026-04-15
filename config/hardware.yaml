@@ -55,6 +55,9 @@ victron:
 motor_controller: robohat-rp2040
 blade_controller: ibt-4
 
+encoders:
+  enabled: false  # one hall sensor detached — disable until repaired; nav uses GPS+IMU
+
 # Battery pack specification — used for SOC estimation and runtime calculations.
 # Adjust these values if you swap batteries.
 battery:

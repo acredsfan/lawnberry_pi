@@ -204,6 +204,10 @@ class ConfigLoader:
         if isinstance(imu, dict) and "yaw_offset_degrees" in imu and "imu_yaw_offset_degrees" not in mapped:
             mapped["imu_yaw_offset_degrees"] = float(imu["yaw_offset_degrees"])
 
+        encoders = cfg.get("encoders") or {}
+        if isinstance(encoders, dict) and "enabled" in encoders and "encoder_enabled" not in mapped:
+            mapped["encoder_enabled"] = bool(encoders["enabled"])
+
         sensors = cfg.get("sensors") or {}
         tof = sensors.get("tof") if isinstance(sensors, dict) else None
         if isinstance(tof, list) and "tof_sensors" not in mapped:

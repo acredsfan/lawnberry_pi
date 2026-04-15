@@ -118,6 +118,17 @@ class RoboHATService:
         # counter avoids the race where a [STATUS] message overwrites
         # last_watchdog_echo between the PWM send and the ack-poll iteration.
         self._pwm_ack_count: int = 0
+        # Encoder enabled flag — False when hall sensors are missing/unreliable.
+        # Loaded from config/hardware.yaml encoders.enabled (default True).
+        self._encoder_enabled: bool = True
+        try:
+            from backend.src.core.config_loader import ConfigLoader
+            hw, _ = ConfigLoader().get()
+            self._encoder_enabled = bool(getattr(hw, "encoder_enabled", True))
+            if not self._encoder_enabled:
+                logger.info("Encoder feedback disabled via hardware config (encoders.enabled: false)")
+        except Exception:
+            pass  # non-fatal; fall back to enabled (safe default)
 
     @staticmethod
     def _is_robohat_response_line(line: str) -> bool:
@@ -554,9 +565,12 @@ class RoboHATService:
                 self._mark_rc_state(rc_enabled)
             self.status.motor_controller_ok = not rc_enabled
             enc = payload.get("encoder")
-            self.status.encoder_feedback_ok = enc is not None
-            if enc is not None:
-                self.status.encoder_position = int(enc)
+            if self._encoder_enabled:
+                self.status.encoder_feedback_ok = enc is not None
+                if enc is not None:
+                    self.status.encoder_position = int(enc)
+            else:
+                self.status.encoder_feedback_ok = False
             self.status.last_watchdog_echo = "status"
             if not rc_enabled:
                 self.status.last_error = None
@@ -606,7 +620,7 @@ class RoboHATService:
             # Parse encoder tick count from firmware heartbeat lines, e.g.:
             # "[USB] signal=LOST steer=1500 µs thr=1500 µs blade=OFF enc=42"
             enc = self._parse_encoder_from_line(line)
-            if enc is not None:
+            if enc is not None and self._encoder_enabled:
                 self.status.encoder_position = enc
                 self.status.encoder_feedback_ok = True
             return
@@ -621,7 +635,7 @@ class RoboHATService:
             self.status.last_watchdog_echo = line
             self._last_status_at = time.monotonic()
             enc = self._parse_encoder_from_line(line)
-            if enc is not None:
+            if enc is not None and self._encoder_enabled:
                 self.status.encoder_position = enc
                 self.status.encoder_feedback_ok = True
             return

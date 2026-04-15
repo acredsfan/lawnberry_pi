@@ -128,6 +128,13 @@ class HardwareConfig(BaseModel):
             "Set to 180 if the IMU chip X-axis is mounted facing backward relative to mower forward."
         ),
     )
+    encoder_enabled: bool = Field(
+        default=True,
+        description=(
+            "Set false if wheel encoders are missing or unreliable. "
+            "When false, encoder_feedback_ok is suppressed in telemetry and odometry falls back to velocity integration."
+        ),
+    )
     tof_sensors: List[str] = Field(default_factory=list, description="ToF sensor positions e.g. ['left','right']")
     env_sensor: bool = Field(default=False, description="BME280 present")
     power_monitor: bool = Field(default=False, description="INA3221 present")
