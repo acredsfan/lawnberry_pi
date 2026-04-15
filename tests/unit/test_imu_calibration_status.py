@@ -1,12 +1,11 @@
-"""Unit tests for IMU calibration status reporting (fix-imu-calibration-unknown).
+"""Unit tests for IMU calibration status reporting.
 
 Verifies that:
-  - BNO085Driver RVC frame parser (_parse_rvc_frame) produces "rvc_active"
-    calibration_status and correct angle/accel values.
-  - _parse_rvc_frame rejects frames with bad checksums.
+  - BNO085Driver _read_shtp_sync uses game_quaternion (no magnetometer dependency).
+  - Calibration status is "calibrating" during warmup (<30 frames) and
+    "fully_calibrated" once settled (>=30 frames).
   - BNO085Driver never returns calibration_status "unknown" in HW mode.
   - BNO085Driver returns "uncalibrated" before any valid frame is received.
-  - BNO085Driver returns "rvc_active" after a valid RVC frame is received.
   - IMUSensorInterface.read_imu() propagates the driver's calibration_status.
   - IMUSensorInterface fallback (no driver) also avoids "unknown".
   - None calibration_status from driver falls back to "uncalibrated", not "unknown".
@@ -15,103 +14,114 @@ Verifies that:
 
 Architecture note
 -----------------
-The BNO085 is used in UART/RVC (Robot Vacuum Cleaner) mode.  The RVC packet
-format does NOT include calibration register bytes; the chip calibrates
-internally and does not surface per-subsystem levels (0-3) via this protocol.
-The driver therefore reports:
-  "uncalibrated" -- no valid frame received yet (e.g. serial port offline)
-  "rvc_active"   -- valid frames are being received; HW calibration is applied
-                    internally but not measurable from this driver.
+The BNO085 is used in UART/SHTP mode at 3 Mbaud.  The Game Rotation Vector
+report provides yaw/pitch/roll via gyro + accelerometer fusion *without* using
+the magnetometer.  This is intentional: motor currents create magnetic noise
+that prevents reliable magnetometer calibration on the mower.
+
+Calibration semantics:
+  "uncalibrated"     -- no valid SHTP frame received yet (sensor offline / wiring issue)
+  "calibrating"      -- frames arriving but gyro integration still settling (<30 frames)
+  "fully_calibrated" -- >=30 valid frames; gyro settled; heading is reliable
 """
 from __future__ import annotations
 
-import struct
 from types import SimpleNamespace
 
 import pytest
 
 
 # ---------------------------------------------------------------------------
-# Helpers: build a syntactically-valid RVC body
+# Helpers: build a mock BNO08X_UART object for _read_shtp_sync
 # ---------------------------------------------------------------------------
 
-def _build_rvc_body(
-    yaw_deg: float = 90.0,
-    pitch_deg: float = 1.0,
-    roll_deg: float = 0.5,
-    az_mps2: float = 9.81,
-) -> bytes:
-    """Build a valid 19-byte RVC body with correct checksum."""
-    body_data = struct.pack(
-        "<Bhhhhhhxxxxx",
-        1,                          # index
-        int(yaw_deg / 0.01),        # yaw raw
-        int(pitch_deg / 0.01),      # pitch raw
-        int(roll_deg / 0.01),       # roll raw
-        0,                          # ax
-        0,                          # ay
-        int(az_mps2 / 0.01),        # az
-    )
-    checksum = sum(body_data) & 0xFF
-    return body_data + bytes([checksum])
-
-
-# ---------------------------------------------------------------------------
-# _parse_rvc_frame
-# ---------------------------------------------------------------------------
-
-def test_parse_rvc_frame_correct_angles():
-    from backend.src.drivers.sensors.bno085_driver import _parse_rvc_frame
-
-    body = _build_rvc_body(yaw_deg=90.0, pitch_deg=1.0, roll_deg=0.5, az_mps2=9.81)
-    result = _parse_rvc_frame(body)
-
-    assert result is not None, "Valid frame should parse successfully"
-    assert abs(result["yaw"] - 90.0) < 0.02
-    assert abs(result["pitch"] - 1.0) < 0.02
-    assert abs(result["roll"] - 0.5) < 0.02
-    assert abs(result["accel_z"] - 9.81) < 0.02
-
-
-def test_parse_rvc_frame_calibration_status_is_rvc_active():
-    from backend.src.drivers.sensors.bno085_driver import _parse_rvc_frame
-
-    body = _build_rvc_body()
-    result = _parse_rvc_frame(body)
-
-    assert result is not None
-    assert result["calibration_status"] == "rvc_active", (
-        f"Expected 'rvc_active', got {result['calibration_status']!r}"
+def _make_mock_bno(
+    quat=(0.0, 0.0, 0.0, 1.0),
+    accel=(0.0, 0.0, 9.81),
+    gyro=(0.0, 0.0, 0.0),
+):
+    """Return a SimpleNamespace that mimics the Adafruit BNO08X_UART interface."""
+    return SimpleNamespace(
+        game_quaternion=quat,
+        acceleration=accel,
+        gyro=gyro,
     )
 
 
-def test_parse_rvc_frame_rejects_bad_checksum():
-    from backend.src.drivers.sensors.bno085_driver import _parse_rvc_frame
+# ---------------------------------------------------------------------------
+# _read_shtp_sync — calibration status based on valid_frames
+# ---------------------------------------------------------------------------
 
-    body = _build_rvc_body()
-    bad_body = body[:-1] + bytes([(body[-1] + 1) & 0xFF])  # flip checksum
-    result = _parse_rvc_frame(bad_body)
+def test_read_shtp_sync_returns_none_when_no_quaternion():
+    """_read_shtp_sync must return None when game_quaternion is not available."""
+    from backend.src.drivers.sensors.bno085_driver import _read_shtp_sync
 
-    assert result is None, "Frame with bad checksum must be rejected"
-
-
-def test_parse_rvc_frame_rejects_wrong_length():
-    from backend.src.drivers.sensors.bno085_driver import _parse_rvc_frame
-
-    assert _parse_rvc_frame(b"\x00" * 18) is None  # too short
-    assert _parse_rvc_frame(b"\x00" * 20) is None  # too long
+    bno = _make_mock_bno(quat=None)
+    result = _read_shtp_sync(bno, valid_frames=0)
+    assert result is None
 
 
-def test_parse_rvc_frame_negative_angles():
-    """Signed int16 must handle negative pitch and roll."""
-    from backend.src.drivers.sensors.bno085_driver import _parse_rvc_frame
+def test_read_shtp_sync_returns_none_when_quaternion_element_is_none():
+    from backend.src.drivers.sensors.bno085_driver import _read_shtp_sync
 
-    body = _build_rvc_body(yaw_deg=0.0, pitch_deg=-5.0, roll_deg=-10.0)
-    result = _parse_rvc_frame(body)
+    bno = _make_mock_bno(quat=(None, 0.0, 0.0, 1.0))
+    result = _read_shtp_sync(bno, valid_frames=50)
+    assert result is None
 
+
+def test_read_shtp_sync_calibrating_before_warmup():
+    """Before 30 valid frames the calibration_status must be 'calibrating'."""
+    from backend.src.drivers.sensors.bno085_driver import _read_shtp_sync
+
+    bno = _make_mock_bno()
+    for frames in (0, 1, 15, 29):
+        result = _read_shtp_sync(bno, valid_frames=frames)
+        assert result is not None
+        assert result["calibration_status"] == "calibrating", (
+            f"Expected 'calibrating' at valid_frames={frames}, "
+            f"got {result['calibration_status']!r}"
+        )
+
+
+def test_read_shtp_sync_fully_calibrated_after_warmup():
+    """At 30+ valid frames the calibration_status must be 'fully_calibrated'."""
+    from backend.src.drivers.sensors.bno085_driver import _read_shtp_sync
+
+    bno = _make_mock_bno()
+    for frames in (30, 31, 100, 500):
+        result = _read_shtp_sync(bno, valid_frames=frames)
+        assert result is not None
+        assert result["calibration_status"] == "fully_calibrated", (
+            f"Expected 'fully_calibrated' at valid_frames={frames}, "
+            f"got {result['calibration_status']!r}"
+        )
+
+
+def test_read_shtp_sync_never_returns_unknown_or_rvc_active():
+    """_read_shtp_sync must never emit 'unknown' or 'rvc_active'."""
+    from backend.src.drivers.sensors.bno085_driver import _read_shtp_sync
+
+    bno = _make_mock_bno()
+    for frames in (0, 29, 30, 100):
+        result = _read_shtp_sync(bno, valid_frames=frames)
+        assert result is not None
+        cal = result["calibration_status"]
+        assert cal not in ("unknown", "rvc_active"), (
+            f"Forbidden calibration_status {cal!r} at valid_frames={frames}"
+        )
+
+
+def test_read_shtp_sync_euler_angles_identity_quaternion():
+    """Identity quaternion (w=1) must produce yaw=0, pitch=0, roll=0."""
+    from backend.src.drivers.sensors.bno085_driver import _read_shtp_sync
+
+    # Identity: i=0, j=0, k=0, real=1
+    bno = _make_mock_bno(quat=(0.0, 0.0, 0.0, 1.0))
+    result = _read_shtp_sync(bno, valid_frames=50)
     assert result is not None
-    assert abs(result["pitch"] - (-5.0)) < 0.02
-    assert abs(result["roll"] - (-10.0)) < 0.02
+    assert abs(result["yaw"]) < 0.01
+    assert abs(result["pitch"]) < 0.01
+    assert abs(result["roll"]) < 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -157,15 +167,16 @@ async def test_bno085_driver_hw_path_never_returns_unknown(monkeypatch):
         result = await drv.read_orientation()
         assert result is not None
         assert result.get("calibration_status") != "unknown", (
-            "calibration_status 'unknown' is forbidden; use 'uncalibrated' or 'rvc_active'"
+            "calibration_status 'unknown' is forbidden; use 'uncalibrated' or 'calibrating'"
         )
 
     await drv.stop()
 
 
 @pytest.mark.asyncio
-async def test_bno085_driver_hw_path_rvc_active_after_valid_frame(monkeypatch):
-    """After _valid_frames > 0, the last_orientation must carry 'rvc_active'."""
+async def test_bno085_driver_hw_path_fully_calibrated_after_warmup(monkeypatch):
+    """After valid_frames >= 30, read_orientation must carry 'fully_calibrated'."""
+    import time
     import backend.src.core.simulation as sim_mod
     monkeypatch.setattr(sim_mod, "is_simulation_mode", lambda: False)
     monkeypatch.delenv("SIM_MODE", raising=False)
@@ -176,20 +187,19 @@ async def test_bno085_driver_hw_path_rvc_active_after_valid_frame(monkeypatch):
     await drv.initialize()
     await drv.start()
 
-    # Inject a pre-parsed frame directly (simulates a successful serial read)
-    body = _build_rvc_body(yaw_deg=45.0, pitch_deg=0.0, roll_deg=0.0)
-    from backend.src.drivers.sensors.bno085_driver import _parse_rvc_frame
-    parsed = _parse_rvc_frame(body)
-    assert parsed is not None
-
-    drv._valid_frames += 1
-    drv._last_orientation = parsed
-    import time
+    # Inject a pre-warmed orientation (simulates 30+ successful hardware reads).
+    drv._valid_frames = 30
+    drv._last_orientation = {
+        "roll": 0.0, "pitch": 0.0, "yaw": 45.0,
+        "accel_x": 0.0, "accel_y": 0.0, "accel_z": 9.81,
+        "gyro_x": 0.0, "gyro_y": 0.0, "gyro_z": 0.0,
+        "calibration_status": "fully_calibrated",
+    }
     drv._last_read_ts = time.time()
 
-    result = await drv.read_orientation()  # serial is None, so returns _last_orientation
+    result = await drv.read_orientation()
     assert result is not None
-    assert result["calibration_status"] == "rvc_active"
+    assert result["calibration_status"] == "fully_calibrated"
     assert abs(result["yaw"] - 45.0) < 0.02
 
     await drv.stop()
@@ -292,8 +302,8 @@ async def test_imu_interface_no_driver_returns_uncalibrated():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_imu_interface_propagates_rvc_active():
-    """read_imu must propagate 'rvc_active' calibration_status from driver."""
+async def test_imu_interface_propagates_fully_calibrated():
+    """read_imu must propagate 'fully_calibrated' from driver (warmed-up SHTP)."""
     from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
     from backend.src.models.sensor_data import SensorStatus
 
@@ -305,35 +315,6 @@ async def test_imu_interface_propagates_rvc_active():
             "accel_x": 0.0,
             "accel_y": 0.0,
             "accel_z": 9.81,
-            "calibration_status": "rvc_active",
-        }
-
-    fake_driver = SimpleNamespace(read_orientation=fake_read_orientation)
-    coordinator = SensorCoordinator.__new__(SensorCoordinator)
-    iface = IMUSensorInterface.__new__(IMUSensorInterface)
-    iface.coordinator = coordinator
-    iface.last_reading = None
-    iface.status = SensorStatus.ONLINE
-    iface._driver = fake_driver
-
-    reading = await iface.read_imu()
-
-    assert reading is not None
-    assert reading.calibration_status == "rvc_active"
-    assert reading.roll == pytest.approx(1.0)
-    assert reading.yaw == pytest.approx(90.0)
-
-
-@pytest.mark.asyncio
-async def test_imu_interface_propagates_fully_calibrated():
-    """read_imu must propagate 'fully_calibrated' (sim mode status) from driver."""
-    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
-    from backend.src.models.sensor_data import SensorStatus
-
-    async def fake_read_orientation():
-        return {
-            "roll": 0.0, "pitch": 0.0, "yaw": 45.0,
-            "accel_x": 0.0, "accel_y": 0.0, "accel_z": 9.8,
             "calibration_status": "fully_calibrated",
         }
 
@@ -346,8 +327,37 @@ async def test_imu_interface_propagates_fully_calibrated():
     iface._driver = fake_driver
 
     reading = await iface.read_imu()
+
     assert reading is not None
     assert reading.calibration_status == "fully_calibrated"
+    assert reading.roll == pytest.approx(1.0)
+    assert reading.yaw == pytest.approx(90.0)
+
+
+@pytest.mark.asyncio
+async def test_imu_interface_propagates_calibrating():
+    """read_imu must propagate 'calibrating' from driver (warmup phase)."""
+    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
+    from backend.src.models.sensor_data import SensorStatus
+
+    async def fake_read_orientation():
+        return {
+            "roll": 0.0, "pitch": 0.0, "yaw": 45.0,
+            "accel_x": 0.0, "accel_y": 0.0, "accel_z": 9.8,
+            "calibration_status": "calibrating",
+        }
+
+    fake_driver = SimpleNamespace(read_orientation=fake_read_orientation)
+    coordinator = SensorCoordinator.__new__(SensorCoordinator)
+    iface = IMUSensorInterface.__new__(IMUSensorInterface)
+    iface.coordinator = coordinator
+    iface.last_reading = None
+    iface.status = SensorStatus.ONLINE
+    iface._driver = fake_driver
+
+    reading = await iface.read_imu()
+    assert reading is not None
+    assert reading.calibration_status == "calibrating"
 
 
 @pytest.mark.asyncio
@@ -385,7 +395,7 @@ async def test_imu_interface_none_calibration_falls_back_to_uncalibrated():
 # ---------------------------------------------------------------------------
 
 def test_calibration_score_rvc_active():
-    """'rvc_active' must score 2 (operational, level not measurable)."""
+    """'rvc_active' must score 2 (retained for backwards compat)."""
     from backend.src.services.calibration_service import _CALIBRATION_STATE_TO_SCORE
 
     assert _CALIBRATION_STATE_TO_SCORE["rvc_active"] == 2
@@ -398,17 +408,24 @@ def test_calibration_score_uncalibrated():
     assert _CALIBRATION_STATE_TO_SCORE["uncalibrated"] == 0
 
 
+def test_calibration_score_calibrating():
+    """'calibrating' must score 2 (warmup — partially operational)."""
+    from backend.src.services.calibration_service import _CALIBRATION_STATE_TO_SCORE
+
+    assert _CALIBRATION_STATE_TO_SCORE["calibrating"] == 2
+
+
+def test_calibration_score_fully_calibrated():
+    """'fully_calibrated' must score 3."""
+    from backend.src.services.calibration_service import _CALIBRATION_STATE_TO_SCORE
+
+    assert _CALIBRATION_STATE_TO_SCORE["fully_calibrated"] == 3
+
+
 def test_calibration_score_unknown_not_in_map():
     """'unknown' must NOT appear in the calibration score map (it was retired)."""
     from backend.src.services.calibration_service import _CALIBRATION_STATE_TO_SCORE
 
-    # "unknown" is preserved for backwards compat at score=1 but "rvc_active"
-    # should now be the real operational status.
     assert "rvc_active" in _CALIBRATION_STATE_TO_SCORE
     assert "uncalibrated" in _CALIBRATION_STATE_TO_SCORE
-
-
-def test_calibration_score_fully_calibrated():
-    from backend.src.services.calibration_service import _CALIBRATION_STATE_TO_SCORE
-
-    assert _CALIBRATION_STATE_TO_SCORE["fully_calibrated"] == 3
+    assert "fully_calibrated" in _CALIBRATION_STATE_TO_SCORE

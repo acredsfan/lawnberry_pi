@@ -99,40 +99,35 @@ def _quaternion_to_euler(i: float, j: float, k: float, real: float) -> tuple[flo
     return yaw_deg, pitch_deg, roll_deg
 
 
-def _read_shtp_sync(bno) -> dict[str, Any] | None:
+def _read_shtp_sync(bno, valid_frames: int = 0) -> dict[str, Any] | None:
     """Blocking read of all enabled SHTP reports from a ``BNO08X_UART`` instance.
 
     Returns an orientation dict or ``None`` if the sensor has no data ready.
     Must be called from a worker thread (not the event loop).
+
+    Uses the *Game Rotation Vector* report which provides stable heading based on
+    gyro + accelerometer fusion only — no magnetometer required.  This avoids
+    false calibration failures caused by motor-current magnetic interference.
+
+    Calibration status reflects sensor warmup rather than magnetometer accuracy:
+      - "calibrating":     fewer than 30 valid frames (gyro still integrating, ~6 s)
+      - "fully_calibrated": 30 or more valid frames (gyro settled, heading reliable)
     """
-    quat = bno.quaternion
+    quat = bno.game_quaternion  # Game Rotation Vector — no magnetometer dependency
     if quat is None or quat[0] is None:
         return None
 
-    # quaternion is (i, j, k, real)
+    # game_quaternion is (i, j, k, real)
     i, j, k, real = quat
     yaw, pitch, roll = _quaternion_to_euler(i, j, k, real)
 
     accel = bno.acceleration or (0.0, 0.0, 0.0)
     gyro = bno.gyro or (0.0, 0.0, 0.0)
 
-    # Magnetometer accuracy (0-3) is the best calibration proxy in SHTP.
-    # However, the rotation vector uses gyro+accel fusion and is valid even
-    # at mag_accuracy=0.  Report at least "partial" when we have live data
-    # so navigation doesn't reject the heading outright.
-    try:
-        cal_level = bno.calibration_status
-    except Exception:
-        cal_level = 0
-
-    if cal_level >= 3:
-        cal_str = "fully_calibrated"
-    elif cal_level >= 2:
-        cal_str = "calibrating"
-    else:
-        # Even at mag=0/1, the rotation vector works — report "partial"
-        # so navigation accepts the IMU heading.
-        cal_str = "partial"
+    # Game rotation vector has no magnetometer accuracy field.
+    # Report "calibrating" during the brief gyro warmup (~30 frames, ≈6 s at 5 Hz)
+    # then "fully_calibrated" once the integration has settled.
+    cal_str = "fully_calibrated" if valid_frames >= 30 else "calibrating"
 
     return {
         "roll": roll,
@@ -206,8 +201,8 @@ class BNO085Driver(HardwareDriver):
         import serial  # noqa: PLC0415
         from adafruit_bno08x import (  # noqa: PLC0415
             BNO_REPORT_ACCELEROMETER,
+            BNO_REPORT_GAME_ROTATION_VECTOR,
             BNO_REPORT_GYROSCOPE,
-            BNO_REPORT_ROTATION_VECTOR,
         )
         from adafruit_bno08x.uart import BNO08X_UART  # noqa: PLC0415
 
@@ -221,8 +216,10 @@ class BNO085Driver(HardwareDriver):
         # Constructor performs soft reset (~1-2 s)
         bno = BNO08X_UART(uart)
 
-        # Enable the reports we need
-        bno.enable_feature(BNO_REPORT_ROTATION_VECTOR)
+        # Game Rotation Vector: gyro + accelerometer fusion only.
+        # Deliberately avoids the magnetometer so motor-current magnetic
+        # interference doesn't degrade heading quality or prevent calibration.
+        bno.enable_feature(BNO_REPORT_GAME_ROTATION_VECTOR)
         bno.enable_feature(BNO_REPORT_ACCELEROMETER)
         bno.enable_feature(BNO_REPORT_GYROSCOPE)
         return bno
@@ -313,7 +310,9 @@ class BNO085Driver(HardwareDriver):
         async with self._lock:
             try:
                 loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(_BNO085_EXECUTOR, _read_shtp_sync, self._bno)
+                result = await loop.run_in_executor(
+                    _BNO085_EXECUTOR, _read_shtp_sync, self._bno, self._valid_frames
+                )
             except Exception as exc:
                 self._consecutive_errors += 1
                 if self._consecutive_errors == 1 or self._consecutive_errors % 30 == 0:
