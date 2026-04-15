@@ -35,14 +35,12 @@
         >
         </l-marker>
 
-        <!-- Mower Position -->
-        <l-circle-marker
+        <!-- Mower Position with heading arrow -->
+        <l-marker
           v-if="mowerLatLng"
-          :lat-lng="mowerLatLng"
-          :radius="6"
-          :color="'#32cd32'"
-          :weight="2"
-          :fill-opacity="0.9"
+          :lat-lng="(mowerLatLng as [number, number])"
+          :icon="mowerIcon(props.mowerPosition?.heading ?? null)"
+          :z-index-offset="1000"
         />
         <l-circle
           v-if="mowerLatLng && accuracyRadius > 0"
@@ -67,7 +65,6 @@ import {
   LLayerGroup,
   LMarker,
   LPolyline,
-  LCircleMarker,
   LCircle,
 } from '@vue-leaflet/vue-leaflet';
 import L from 'leaflet';
@@ -81,7 +78,7 @@ import type { Waypoint } from '@/stores/mission';
 // Props
 const props = defineProps<{
   waypoints: Waypoint[];
-  mowerPosition: { lat: number; lon: number; accuracy: number } | null;
+  mowerPosition: { lat: number; lon: number; accuracy: number; heading?: number | null } | null;
   followMower: boolean;
   mapSettings?: { provider: 'google' | 'osm' | 'none'; style: 'standard' | 'satellite' | 'hybrid' | 'terrain'; google_api_key: string } | null;
 }>();
@@ -131,6 +128,34 @@ function waypointIcon(index: number) {
     className: 'wp-pin-wrap',
     iconSize: [24, 24],
     iconAnchor: [12, 12],
+  });
+}
+
+function mowerIcon(heading: number | null): L.DivIcon {
+  const hasHeading = heading != null;
+  const rotation = hasHeading ? heading : 0;
+  // Arrow triangle points North (up) in SVG space, rotated by compass heading.
+  // Dashed + semi-transparent when heading is unavailable.
+  const arrowAttrs = hasHeading
+    ? 'fill="#32cd32" stroke="#001018" stroke-width="1.5" opacity="1"'
+    : 'fill="none" stroke="#32cd32" stroke-width="1.5" stroke-dasharray="3 2" opacity="0.5"';
+  const headingLabel = hasHeading
+    ? `<text x="0" y="28" text-anchor="middle" font-size="9" font-family="monospace"
+         fill="#32cd32" stroke="#001018" stroke-width="2" paint-order="stroke"
+         style="pointer-events:none">${Math.round(rotation)}°</text>`
+    : '';
+  const svg = `<svg width="48" height="48" viewBox="-24 -24 48 48" style="overflow:visible">
+    <g transform="rotate(${rotation})">
+      <circle cx="0" cy="0" r="7" fill="#32cd32" stroke="#001018" stroke-width="1.5"/>
+      <polygon points="0,-19 -5,-10 5,-10" ${arrowAttrs}/>
+    </g>
+    ${headingLabel}
+  </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: 'mower-heading-icon',
+    iconSize: [48, 48],
+    iconAnchor: [24, 24],
   });
 }
 
@@ -391,5 +416,10 @@ defineExpose({ recenter });
 .wp-pin span {
   font-size: 12px;
   line-height: 1;
+}
+.mower-heading-icon {
+  background: transparent !important;
+  border: none !important;
+  overflow: visible !important;
 }
 </style>

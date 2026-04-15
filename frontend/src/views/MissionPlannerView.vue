@@ -82,6 +82,7 @@ const missionMapRef = ref<any>(null);
 const followMower = ref(true);
 const mowerLatLng = ref<[number, number] | null>(null);
 const gpsAccuracyMeters = ref<number | null>(null);
+const mowerHeading = ref<number | null>(null);
 const missionName = ref('');
 const mapStyle = ref<'standard' | 'satellite' | 'hybrid' | 'terrain'>('standard');
 const creatingMission = ref(false);
@@ -140,6 +141,8 @@ onMounted(async () => {
         gpsAccuracyMeters.value = Number.isFinite(accuracy) ? accuracy : null;
         lastWsUpdateAt.value = Date.now();
       }
+      const hdg = payload?.nav_heading;
+      mowerHeading.value = hdg != null && Number.isFinite(Number(hdg)) ? Number(hdg) : null;
     };
     telemetrySocket.subscribe('telemetry.navigation', navigationHandler);
   } catch (error) {
@@ -160,6 +163,8 @@ onMounted(async () => {
         mowerLatLng.value = [lat, lon]
         const acc = Number(data?.position?.accuracy)
         gpsAccuracyMeters.value = Number.isFinite(acc) ? acc : null
+        const hdg = data?.nav_heading
+        mowerHeading.value = hdg != null && Number.isFinite(Number(hdg)) ? Number(hdg) : null
       }
     } catch {/* ignore */}
   }, 2000)
@@ -185,6 +190,7 @@ const mowerPosition = computed(() => {
     lat: mowerLatLng.value[0],
     lon: mowerLatLng.value[1],
     accuracy: gpsAccuracyMeters.value || 0,
+    heading: mowerHeading.value,
   };
 });
 
