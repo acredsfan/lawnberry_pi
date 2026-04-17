@@ -680,8 +680,12 @@ class PowerSensorInterface:
 
 class SensorManager:
     """Main sensor manager coordinating all sensor interfaces"""
-    SENSOR_READ_TIMEOUT_SECONDS = 5.0  # BNO085 RVC header scan can take up to 4.2s worst-case
-    POWER_READ_TIMEOUT_SECONDS = 12.0  # Victron BLE CLI can take up to 8 s
+    # BNO085 uses SHTP Game Rotation Vector (1.0s per-read); GPS F9P_USB is fast.
+    # 2.5 s is ample for all non-BLE sensors.
+    SENSOR_READ_TIMEOUT_SECONDS = 2.5
+    # Inner _read_victron_cli_frame deadline is 8.0 s; subprocess cleanup adds ≤2 s.
+    # 11 s covers the realistic worst case with 1 s of margin.
+    POWER_READ_TIMEOUT_SECONDS = 11.0
 
     def __init__(
         self,
