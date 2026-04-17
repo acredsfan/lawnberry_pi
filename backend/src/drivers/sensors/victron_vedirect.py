@@ -9,8 +9,11 @@ matches the user's environment where only BLE connectivity is available.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
+import os
+import select
 import subprocess
 import time
 from typing import Any, Dict, Optional
@@ -20,6 +23,11 @@ from ..base import HardwareDriver
 
 
 logger = logging.getLogger(__name__)
+
+# Dedicated 1-worker thread pool isolates Victron BLE reads from the default
+# asyncio thread pool.  Without this, a slow/unreachable BLE device would
+# exhaust all pool slots and starve GPS, ToF, and BME280 reads.
+_VICTRON_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 
 class VictronVeDirectDriver(HardwareDriver):
@@ -46,8 +54,10 @@ class VictronVeDirectDriver(HardwareDriver):
         self._adapter_warned = False
         self._last_payload: Optional[Dict[str, Any]] = None
         self._last_timestamp: Optional[float] = None
+        self._read_lock: Optional[asyncio.Lock] = None
 
     async def initialize(self) -> None:
+        self._read_lock = asyncio.Lock()
         self.initialized = True
 
     async def start(self) -> None:
@@ -86,7 +96,16 @@ class VictronVeDirectDriver(HardwareDriver):
             return payload
 
         try:
-            frame = await asyncio.to_thread(self._read_victron_cli_frame)
+            # Lazy-create lock if initialize() was not awaited (defensive for tests).
+            if self._read_lock is None:
+                self._read_lock = asyncio.Lock()
+            # If a BLE read is already in flight, return stale data immediately so
+            # we never queue a second blocking thread behind the in-flight one.
+            if self._read_lock.locked():
+                return self._last_payload
+            loop = asyncio.get_event_loop()
+            async with self._read_lock:
+                frame = await loop.run_in_executor(_VICTRON_EXECUTOR, self._read_victron_cli_frame)
         except Exception:
             return self._last_payload
 
@@ -136,7 +155,6 @@ class VictronVeDirectDriver(HardwareDriver):
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
             )
         except FileNotFoundError:
             logger.error("victron-ble CLI not found at '%s'", self._cli_path)
@@ -147,49 +165,54 @@ class VictronVeDirectDriver(HardwareDriver):
 
         deadline = time.time() + self._read_timeout
         captured: Optional[dict[str, Any]] = None
-        buffer = ""
+        raw_buffer = b""
         lines_read = 0
 
         try:
             while time.time() < deadline:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
                 if proc.stdout is None:
                     break
-                line = proc.stdout.readline()
-                if not line:
+                ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 0.5))
+                if not ready:
                     if proc.poll() is not None:
                         break
-                    time.sleep(0.05)
                     continue
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                lines_read += 1
-                buffer = stripped if self._sample_limit <= 1 else f"{buffer}\n{stripped}".strip()
-                try:
-                    captured = json.loads(stripped)
-                except json.JSONDecodeError:
-                    # Attempt to parse full buffer when streaming multiple objects
-                    try:
-                        captured = json.loads(buffer)
-                    except json.JSONDecodeError:
-                        continue
-                if captured is not None:
-                    if lines_read >= self._sample_limit:
+                chunk = os.read(proc.stdout.fileno(), 4096)
+                if not chunk:
+                    if proc.poll() is not None:
                         break
-                    # Continue gathering samples until we reach sample_limit
-                    captured = None
                     continue
-            if captured is None and proc.stdout is not None:
-                # Try final buffer if set
+                raw_buffer += chunk
+                while b"\n" in raw_buffer:
+                    line_bytes, raw_buffer = raw_buffer.split(b"\n", 1)
+                    stripped = line_bytes.strip()
+                    if not stripped:
+                        continue
+                    lines_read += 1
+                    try:
+                        captured = json.loads(stripped.decode("utf-8", errors="replace"))
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    if captured is not None and lines_read >= self._sample_limit:
+                        break
+                if captured is not None and lines_read >= self._sample_limit:
+                    break
+
+            # Try any remaining partial buffer
+            if captured is None and raw_buffer.strip():
                 try:
-                    captured = json.loads(buffer)
+                    captured = json.loads(raw_buffer.strip().decode("utf-8", errors="replace"))
                 except Exception:
                     captured = None
+
             if captured is None:
                 stderr_text = ""
                 if proc.stderr is not None:
                     try:
-                        stderr_text = proc.stderr.read().strip()
+                        stderr_text = proc.stderr.read(4096).strip().decode("utf-8", errors="replace")
                     except Exception:
                         stderr_text = ""
                 if stderr_text:
@@ -205,14 +228,17 @@ class VictronVeDirectDriver(HardwareDriver):
                 try:
                     proc.wait(timeout=1.0)
                 except subprocess.TimeoutExpired:
-                    proc.kill()
-
-            # Drain stderr to avoid zombies
-            if proc.stderr is not None:
-                try:
-                    proc.stderr.close()
-                except Exception:
-                    pass
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=1.0)
+                    except Exception:
+                        pass
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except Exception:
+                        pass
 
     # legacy serial reader removed - BLE CLI is used
 

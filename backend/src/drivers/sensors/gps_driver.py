@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -59,6 +60,10 @@ class GPSDriver(HardwareDriver):
         # Real hardware handles (lazy)
         self._serial = None
         self._first_read_done = False
+        # Prevent concurrent hardware port scans — a slow cold-start scan can
+        # take several seconds and must not run twice in parallel (each consumes
+        # a thread pool slot and races on self._serial).
+        self._read_thread_lock = threading.Lock()
         # Last observed NMEA sentences (for diagnostics)
         self._last_nmea: dict[str, str] = {}
         # Cached baudrates to try for different modules
@@ -159,6 +164,9 @@ class GPSDriver(HardwareDriver):
 
     def _read_hardware_blocking(self) -> "GpsReading | None":
         """Blocking hardware read — must only be called via asyncio.to_thread."""
+        if not self._read_thread_lock.acquire(blocking=False):
+            # Another thread is already scanning; return last known position.
+            return self._last_read
         try:
             if self._serial is None:
                 # Lazy open serial port based on mode with simple autodetect
@@ -355,6 +363,8 @@ class GPSDriver(HardwareDriver):
         except Exception:
             # On errors, keep last reading and mark running
             return self._last_read
+        finally:
+            self._read_thread_lock.release()
 
     def get_last_nmea(self) -> dict[str, str]:
         """Return a shallow copy of last seen NMEA sentences for diagnostics."""
