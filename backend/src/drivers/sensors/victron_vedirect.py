@@ -103,7 +103,7 @@ class VictronVeDirectDriver(HardwareDriver):
             # we never queue a second blocking thread behind the in-flight one.
             if self._read_lock.locked():
                 return self._last_payload
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             async with self._read_lock:
                 frame = await loop.run_in_executor(_VICTRON_EXECUTOR, self._read_victron_cli_frame)
         except Exception:
@@ -209,10 +209,15 @@ class VictronVeDirectDriver(HardwareDriver):
                     captured = None
 
             if captured is None:
+                # Read stderr only if data is immediately available — never block here
+                # because the process is still running and blocking stderr.read() would
+                # deadlock: the finally block that kills the process hasn't run yet.
                 stderr_text = ""
                 if proc.stderr is not None:
                     try:
-                        stderr_text = proc.stderr.read(4096).strip().decode("utf-8", errors="replace")
+                        ready, _, _ = select.select([proc.stderr], [], [], 0.0)
+                        if ready:
+                            stderr_text = os.read(proc.stderr.fileno(), 4096).decode("utf-8", errors="replace").strip()
                     except Exception:
                         stderr_text = ""
                 if stderr_text:
