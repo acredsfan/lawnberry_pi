@@ -658,16 +658,27 @@ class PowerSensorInterface:
             and solar_current is not None
             and abs(solar_current) > 1e-6
         ):
-            # Derive voltage from power/current only when both came from Victron or both from INA
+            # Derive voltage from power/current only when both came from Victron or both from INA.
+            # Skip INA-based derivation when INA bus voltage is 0.0 — that indicates a bad/missing
+            # bus-voltage reference wire, and INA solar_power_w would also be 0.0 (0V × current),
+            # which would produce a spurious 0.0V result.
+            ina_solar_v_raw = ina.get("solar_voltage") if ina else None
+            ina_bus_valid = ina_solar_v_raw is not None and abs(float(ina_solar_v_raw)) >= 0.05
             derived = None
             try:
                 if victron_solar_power is not None and victron_solar_current is not None:
                     derived = float(victron_solar_power) / float(victron_solar_current)
-                elif ina_solar_power is not None and ina_solar_current is not None and abs(float(ina_solar_current)) > 1e-6:
+                elif (
+                    ina_bus_valid
+                    and ina_solar_power is not None
+                    and ina_solar_current is not None
+                    and abs(float(ina_solar_current)) > 1e-6
+                ):
                     derived = float(ina_solar_power) / float(ina_solar_current)
             except Exception:
                 derived = None
-            if derived is not None:
+            # Guard against zero or near-zero derived values that signal bad source data
+            if derived is not None and abs(derived) >= 0.05:
                 solar_voltage = round(derived, 3)
 
         load_current_sources: list[Any] = []
