@@ -244,8 +244,12 @@ async def test_go_to_waypoint_fails_when_heading_missing_too_long(monkeypatch):
         nav.navigation_state.navigation_mode = NavigationMode.EMERGENCY_STOP
         return True
 
+    async def fake_set_speed(left: float, right: float) -> None:
+        pass
+
     monkeypatch.setattr(nav, "_deliver_stop_command", fake_deliver_stop_command)
     monkeypatch.setattr(nav, "emergency_stop", fake_emergency_stop)
+    monkeypatch.setattr(nav, "set_speed", fake_set_speed)
 
     with pytest.raises(RuntimeError, match="Heading unavailable while navigating waypoint"):
         await nav.go_to_waypoint(mission, mission.waypoints[0])

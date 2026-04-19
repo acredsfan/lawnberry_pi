@@ -1012,7 +1012,11 @@ async def control_blade_v2(cmd: dict, request: Request):
         body = {"detail": "Invalid blade command — provide 'active' (bool) or 'action' (enable/disable)"}
         return JSONResponse(status_code=422, content=body)
 
-    # Only block on emergency stop — not on motor state or auth headers
+    if desired is True and _legacy_motors_active:
+        body = {"detail": "safety_interlock: motors_active — blade enable blocked while motors running"}
+        persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
+        return JSONResponse(status_code=403, content=body)
+
     if desired is True and (_emergency_active() or _client_emergency_active(request)):
         body = {"detail": "safety_interlock: emergency_stop_active — blade commands blocked"}
         persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})

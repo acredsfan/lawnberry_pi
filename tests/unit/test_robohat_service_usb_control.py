@@ -211,6 +211,7 @@ async def test_process_line_rc_disabled_marks_controller_ready():
 async def test_process_line_status_payload_accepts_python_dict_repr():
     svc = RoboHATService()
     svc._rc_enabled = False
+    svc._encoder_enabled = True  # isolate from hardware.yaml config
 
     svc._process_line("[STATUS] {'rc_enabled': False, 'encoder': 42, 'uptime_seconds': 12}")
 

@@ -36,3 +36,12 @@ def pytest_collection_modifyitems(config, items):
         basename = os.path.basename(str(item.fspath))
         if basename in PLACEHOLDER_BASENAMES:
             item.add_marker(skip_placeholder)
+
+
+@pytest.fixture(autouse=True)
+def reset_legacy_motor_state():
+    """Reset _legacy_motors_active between integration tests to prevent state bleed."""
+    import backend.src.api.rest as rest_module
+    rest_module._legacy_motors_active = False
+    yield
+    rest_module._legacy_motors_active = False
