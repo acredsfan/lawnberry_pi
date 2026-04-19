@@ -42,12 +42,15 @@ _pair_initialized = False
 
 
 class VL53L0XDriver(HardwareDriver):
-    """Minimal VL53L0X driver implementation.
+    """VL53L0X Time-of-Flight distance sensor driver.
 
-    In real mode this would open the I2C bus and configure continuous ranging
-    for each sensor (left/right). At this stage (Phase 3 scaffolding) we only
-    provide simulation outputs. Two instances can be created with different
-    sensor_id (e.g., "left", "right").
+    Supports two physical sensors (left/right) using separate I2C addresses.
+    On real hardware, attempts Adafruit CircuitPython backend first, then
+    Pololu-style bindings. Uses XSHUT GPIO pins for address assignment when
+    both sensors share the same default address at power-on.
+
+    Two instances can be created with different sensor_side (``"left"`` or
+    ``"right"``). Address assignment is coordinated via module-level state.
     """
 
     def __init__(self, sensor_side: str, config: dict[str, Any] | None = None):
@@ -93,7 +96,7 @@ class VL53L0XDriver(HardwareDriver):
         higher layers can proceed while we gracefully no-op on reads.
         """
         self.initialized = True
-        if is_simulation_mode() or os.environ.get("SIM_MODE") == "1":
+        if is_simulation_mode():
             return
 
         # Try Adafruit CircuitPython backend first (most common on Pi via Blinka)
@@ -109,7 +112,7 @@ class VL53L0XDriver(HardwareDriver):
 
     async def stop(self) -> None:  # noqa: D401
         self.running = False
-        if self._driver is not None and not (is_simulation_mode() or os.environ.get("SIM_MODE") == "1"):
+        if self._driver is not None and not is_simulation_mode():
             try:
                 stop_fn = getattr(self._driver, "stop_ranging", None)
                 if callable(stop_fn):
@@ -142,7 +145,7 @@ class VL53L0XDriver(HardwareDriver):
         if not self.initialized:
             return None
 
-        if is_simulation_mode() or os.environ.get("SIM_MODE") == "1":
+        if is_simulation_mode():
             # Deterministic pattern to keep tests stable
             base = 1500
             if self._sim_distance_cycle % 20 == 5:
@@ -235,23 +238,24 @@ async def _ensure_gpio_provider() -> Optional[str]:
                 return _gpio_provider
 
 
+# Module-level GPIO state singletons — safer than function-attribute caching.
+_lgpio_chip: Any = None
+_periphery_pins: dict[int, Any] = {}
+
+
 def _gpio_set(pin: int, value: int) -> None:
+    global _lgpio_chip, _periphery_pins
     if _gpio_provider == "lgpio":
         import lgpio  # type: ignore
-        # Use a global chip handle for simplicity
-        if not hasattr(_gpio_set, "_chip"):
-            _gpio_set._chip = lgpio.gpiochip_open(0)  # type: ignore[attr-defined]
-        ch = _gpio_set._chip  # type: ignore[attr-defined]
-        lgpio.gpio_claim_output(ch, pin, 0)
-        lgpio.gpio_write(ch, pin, 1 if value else 0)
+        if _lgpio_chip is None:
+            _lgpio_chip = lgpio.gpiochip_open(0)
+        lgpio.gpio_claim_output(_lgpio_chip, pin, 0)
+        lgpio.gpio_write(_lgpio_chip, pin, 1 if value else 0)
     elif _gpio_provider == "periphery":
         from periphery import GPIO  # type: ignore
-        if not hasattr(_gpio_set, "_pins"):
-            _gpio_set._pins = {}
-        pins = _gpio_set._pins  # type: ignore[attr-defined]
-        if pin not in pins:
-            pins[pin] = GPIO(pin, "out")
-        pins[pin].write(bool(value))
+        if pin not in _periphery_pins:
+            _periphery_pins[pin] = GPIO(pin, "out")
+        _periphery_pins[pin].write(bool(value))
     elif _gpio_provider == "rpi_gpio":
         import RPi.GPIO as GPIO  # type: ignore
         GPIO.setwarnings(False)
@@ -279,10 +283,10 @@ async def _try_pair_init_adafruit(left_gpio: Optional[int], right_gpio: Optional
     # Set both low
     _gpio_set(left_gpio, 0)
     _gpio_set(right_gpio, 0)
-    time.sleep(0.02)
+    await asyncio.sleep(0.02)
     # Bring right high and set new address
     _gpio_set(right_gpio, 1)
-    time.sleep(0.02)
+    await asyncio.sleep(0.02)
     try:
         import board  # type: ignore
         import busio  # type: ignore
@@ -293,21 +297,19 @@ async def _try_pair_init_adafruit(left_gpio: Optional[int], right_gpio: Optional
         sensor = adafruit_vl53l0x.VL53L0X(_adafruit_i2c)
         # Adafruit API provides set_address(new_addr)
         sensor.set_address(right_addr)
-        # Optional timing budget tune if supported
+        # Apply timing budget from env/config if supported
         try:
             if hasattr(sensor, "measurement_timing_budget"):
-                sensor.measurement_timing_budget = int(os.environ.get("TOF_TIMING_BUDGET_US", "0")) or 200000
+                tb = int(os.environ.get("TOF_TIMING_BUDGET_US", "0")) or 66000
+                sensor.measurement_timing_budget = tb
         except Exception:
             pass
-        # Optional: set measurement timing budget or continuous mode as needed
-        # sensor.measurement_timing_budget = 200000
-        # sensor.start_continuous()
     except Exception:
         return False
 
     # Bring left high
     _gpio_set(left_gpio, 1)
-    time.sleep(0.02)
+    await asyncio.sleep(0.02)
     _pair_initialized = True
     return True
 
@@ -438,7 +440,7 @@ async def _reinit_if_needed(self: VL53L0XDriver) -> None:
 
     Avoids tight loops by spacing attempts at least 2 seconds apart.
     """
-    if is_simulation_mode() or os.environ.get("SIM_MODE") == "1":
+    if is_simulation_mode():
         return
     now = time.time()
     # Only try after a few consecutive failures

@@ -21,7 +21,7 @@ sensors:
     ranging_mode: best_accuracy
     left_shutdown_gpio: 22
     right_shutdown_gpio: 23
-    timing_budget_us: 200000
+    timing_budget_us: 66000  # 66 ms (better_accuracy) — 3× faster response for obstacle detection
 power_monitor: true
 ina3221:
   shunt_ohms_ch1: 0.0025

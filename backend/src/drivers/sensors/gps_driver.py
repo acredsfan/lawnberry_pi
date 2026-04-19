@@ -31,9 +31,9 @@ from ..base import HardwareDriver
 
 @dataclass
 class GPSDriverConfig:
-    mode: GpsMode = GpsMode.NEO8M_UART
+    mode: GpsMode = GpsMode.F9P_USB
     # Serial/USB configuration (used when not in SIM_MODE)
-    usb_device: str = "/dev/ttyACM1"  # detected on Pi: ACM1 shows NMEA in probe
+    usb_device: str = "/dev/ttyACM0"  # ZED-F9P default device on Pi
     uart_device: str = "/dev/ttyAMA0"  # common UART on Pi
     baudrate: int = 9600
 
@@ -49,7 +49,7 @@ class GPSDriver(HardwareDriver):
         super().__init__(config=config)
         cfg = config or {}
         self.cfg = GPSDriverConfig(
-            mode=GpsMode(cfg.get("mode", GpsMode.NEO8M_UART)),
+            mode=GpsMode(cfg.get("mode", GpsMode.F9P_USB)),
             usb_device=cfg.get("usb_device", "/dev/ttyACM0"),
             uart_device=cfg.get("uart_device", "/dev/ttyAMA0"),
             baudrate=int(cfg.get("baudrate", 9600)),
@@ -80,7 +80,7 @@ class GPSDriver(HardwareDriver):
 
     async def initialize(self) -> None:  # noqa: D401
         # In SIM_MODE, we don't touch hardware
-        if is_simulation_mode() or os.environ.get("SIM_MODE") == "1":
+        if is_simulation_mode():
             self.initialized = True
             return
         # Lazy import serial only when needed
@@ -115,7 +115,7 @@ class GPSDriver(HardwareDriver):
             "initialized": self.initialized,
             "running": self.running,
             "last_read_age_s": (time.time() - self._last_read_ts) if self._last_read_ts else None,
-            "simulation": is_simulation_mode() or os.environ.get("SIM_MODE") == "1",
+            "simulation": is_simulation_mode(),
         }
 
     async def read_position(self) -> GpsReading | None:
@@ -128,7 +128,7 @@ class GPSDriver(HardwareDriver):
         if not self.initialized:
             return None
 
-        if is_simulation_mode() or os.environ.get("SIM_MODE") == "1":
+        if is_simulation_mode():
             # Deterministic walking pattern near Googleplex-like coords
             base_lat = 37.4220
             base_lon = -122.0841

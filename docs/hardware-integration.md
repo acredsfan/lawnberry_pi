@@ -31,13 +31,16 @@ Safety:
   - ToF Right IRQ: GPIO 12
 
 Driver behavior (backend/src/drivers/sensors/vl53l0x_driver.py):
-- Uses Python VL53L0X bindings if present (modules: `VL53L0X` or `vl53l0x`).
+- Uses Adafruit CircuitPython backend first (adafruit-circuitpython-vl53l0x), then Pololu-style bindings.
 - Falls back to previous reading if hardware access errors occur.
 - Honors environment overrides:
   - TOF_BUS (default 1)
   - TOF_LEFT_ADDR (default 0x29)
   - TOF_RIGHT_ADDR (default 0x30)
   - TOF_RANGING_MODE (short|better_accuracy|best_accuracy|long_range|high_speed; default better_accuracy)
+  - TOF_TIMING_BUDGET_US (default 66000 — 66 ms, better_accuracy mode)
+- Timing budget is also set via `config/hardware.yaml` `tof_config.timing_budget_us`. The configured default is
+  66 000 µs (66 ms, better_accuracy mode), giving 3× faster obstacle detection than the previous 200 ms setting.
 - You can also set these in `config/hardware.yaml` under `sensors.tof_config`.
 
 Verification steps:

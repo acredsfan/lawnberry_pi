@@ -711,7 +711,7 @@ class SensorManager:
 
     def __init__(
         self,
-        gps_mode: GpsMode = GpsMode.NEO8M_UART,
+        gps_mode: GpsMode = GpsMode.F9P_USB,
         tof_config: dict | None = None,
         power_config: dict | None = None,
         battery_config=None,  # Optional[BatteryConfig]

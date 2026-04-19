@@ -175,7 +175,7 @@ class BNO085Driver(HardwareDriver):
     # ------------------------------------------------------------------
 
     async def initialize(self) -> None:  # noqa: D401
-        if is_simulation_mode() or os.environ.get("SIM_MODE") == "1":
+        if is_simulation_mode():
             self.initialized = True
             return
 
@@ -265,7 +265,7 @@ class BNO085Driver(HardwareDriver):
         if not self.initialized:
             return None
 
-        if is_simulation_mode() or os.environ.get("SIM_MODE") == "1":
+        if is_simulation_mode():
             return self._sim_read()
 
         return await self._hw_read()

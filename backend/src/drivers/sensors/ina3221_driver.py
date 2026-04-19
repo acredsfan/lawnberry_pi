@@ -112,7 +112,7 @@ class INA3221Driver(HardwareDriver):
 
     async def initialize(self) -> None:  # noqa: D401
         self.initialized = True
-        if is_simulation_mode() or os.environ.get("SIM_MODE") == "1":
+        if is_simulation_mode():
             return
         try:
             from smbus2 import SMBus  # type: ignore
@@ -146,7 +146,7 @@ class INA3221Driver(HardwareDriver):
     async def read_power(self) -> dict[str, float] | None:
         if not self.initialized:
             return None
-        if is_simulation_mode() or os.environ.get("SIM_MODE") == "1":
+        if is_simulation_mode():
             # Retain previous deterministic simulation for CI
             base_voltage = 12.6 - (self._cycle * 0.005)
             if base_voltage < 11.0:
