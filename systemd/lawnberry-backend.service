@@ -9,19 +9,23 @@ Requires=lawnberry-database.service
 Type=exec
 User=pi
 Group=pi
-WorkingDirectory=/apps/lawnberry-pi
-Environment=PYTHONPATH=/apps/lawnberry-pi
+WorkingDirectory=/home/pi/lawnberry
+Environment=PYTHONPATH=/home/pi/lawnberry
 Environment=LAWNBERRY_ENV=production
-Environment=LAWNBERRY_CONFIG_DIR=/apps/lawnberry-pi/config
-Environment=LAWNBERRY_LOG_DIR=/apps/lawnberry-pi/logs
-Environment=LAWNBERRY_DATA_DIR=/apps/lawnberry-pi/data
+Environment=LAWNBERRY_CONFIG_DIR=/home/pi/lawnberry/config
+Environment=LAWNBERRY_LOG_DIR=/home/pi/lawnberry/logs
+Environment=LAWNBERRY_DATA_DIR=/home/pi/lawnberry/data
 Environment=SIM_MODE=0
 Environment=PYTHONUNBUFFERED=1
 # Load runtime secrets and configuration (e.g., NTRIP_*) from .env if present
-EnvironmentFile=-/apps/lawnberry-pi/.env
+EnvironmentFile=-/home/pi/lawnberry/.env
+
+# Restart bluetooth before starting to clear any stale BLE "In Progress" state
+# -+ means: run as root (even though service User=pi), ignore non-zero exit
+ExecStartPre=-+/usr/bin/systemctl restart bluetooth.service
 
 # Main service command
-ExecStart=/apps/lawnberry-pi/.venv/bin/uvicorn backend.src.main:app --host 0.0.0.0 --port 8081 --workers 1
+ExecStart=/home/pi/lawnberry/.venv/bin/uvicorn backend.src.main:app --host 0.0.0.0 --port 8081 --workers 1
 
 # Health checks and monitoring
 ExecReload=/bin/kill -HUP $MAINPID
@@ -39,7 +43,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
 ProtectSystem=strict
-ReadWritePaths=/apps/lawnberry-pi/logs /apps/lawnberry-pi/data /apps/lawnberry-pi/config
+ReadWritePaths=/home/pi/lawnberry/logs /home/pi/lawnberry/data /home/pi/lawnberry/config
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

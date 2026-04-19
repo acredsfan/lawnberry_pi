@@ -7,7 +7,7 @@ import asyncio
 import logging
 import math
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date as _date
 from typing import Dict, Optional, List, Any
 from contextlib import asynccontextmanager
 
@@ -372,6 +372,11 @@ class PowerSensorInterface:
         self._prefer_solar = False
         self._prefer_load = False
 
+        # Battery consumption accumulator (reset daily at midnight)
+        self._battery_consumed_today_wh: float = 0.0
+        self._last_power_read_dt: Optional[datetime] = None
+        self._last_accumulation_date: Optional[_date] = None
+
         ina_cfg = self._extract_ina_config(self._driver_config)
         victron_cfg = self._extract_victron_config(self._driver_config)
 
@@ -463,7 +468,24 @@ class PowerSensorInterface:
                         reading.battery_power = self.last_reading.battery_power
                     if reading.solar_power is None and self.last_reading.solar_power is not None:
                         reading.solar_power = self.last_reading.solar_power
-            
+
+            # Accumulate battery consumption (load_current * battery_voltage * elapsed) only for fresh readings
+            if merged is not None and reading is not None:
+                now_dt = datetime.now(timezone.utc)
+                now_date = now_dt.date()
+                if self._last_accumulation_date is not None and now_date != self._last_accumulation_date:
+                    self._battery_consumed_today_wh = 0.0
+                self._last_accumulation_date = now_date
+                if self._last_power_read_dt is not None:
+                    elapsed_s = (now_dt - self._last_power_read_dt).total_seconds()
+                    lc = reading.load_current
+                    bv = reading.battery_voltage
+                    if lc is not None and bv is not None and abs(lc) > 0.01 and bv > 0 and 0 < elapsed_s < 300:
+                        self._battery_consumed_today_wh += abs(lc) * bv * elapsed_s / 3600
+                self._last_power_read_dt = now_dt
+            if reading is not None:
+                reading.battery_consumed_today_wh = self._battery_consumed_today_wh
+
             self.last_reading = reading
             return reading
                 

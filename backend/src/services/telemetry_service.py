@@ -271,6 +271,7 @@ class TelemetryService:
             "solar_current": getattr(power_data, "solar_current", None),
             "solar_power": getattr(power_data, "solar_power", None),
             "solar_yield_today_wh": getattr(power_data, "solar_yield_today_wh", None),
+            "battery_consumed_today_wh": getattr(power_data, "battery_consumed_today_wh", None),
             "load_current": getattr(power_data, "load_current", None),
             "timestamp": getattr(power_data, "timestamp", None),
         }

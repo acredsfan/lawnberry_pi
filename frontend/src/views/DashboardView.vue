@@ -86,8 +86,8 @@
               <span class="metric-value">{{ solarYieldTodayDisplay }}Wh</span>
             </div>
             <div class="metric-line">
-              <span class="metric-label">Load State</span>
-              <span class="metric-value">{{ loadStateDisplay }}</span>
+              <span class="metric-label">Battery Consumption (Today)</span>
+              <span class="metric-value">{{ batteryConsumedTodayDisplay }}Wh</span>
             </div>
             <div class="metric-line">
               <span class="metric-label">Load Current</span>
@@ -337,7 +337,7 @@ const solarVoltage = ref<number | null>(null)
 const solarCurrent = ref<number | null>(null)
 const solarPower = ref<number | null>(null)
 const solarYieldTodayWh = ref<number | null>(null)
-const loadState = ref<string | null>(null)
+const batteryConsumedTodayWh = ref<number | null>(null)
 const loadCurrent = ref<number | null>(null)
 const loadPower = ref<number | null>(null)
 const speed = ref(0)
@@ -478,15 +478,13 @@ const solarPowerDisplay = computed(() => {
 const solarYieldTodayDisplay = computed(() => {
   if (solarYieldTodayWh.value === null) return '--'
   const v = Math.max(0, solarYieldTodayWh.value)
-  return v >= 1000 ? v.toFixed(0) : v.toFixed(0)
+  return new Intl.NumberFormat('en-US').format(Math.round(v))
 })
 
-const loadStateDisplay = computed(() => {
-  if (!loadState.value) return 'UNKNOWN'
-  const s = loadState.value.toLowerCase()
-  if (s === 'on' || s === 'enabled' || s === 'active') return 'ON'
-  if (s === 'off' || s === 'disabled') return 'OFF'
-  return loadState.value.toUpperCase()
+const batteryConsumedTodayDisplay = computed(() => {
+  if (batteryConsumedTodayWh.value === null) return '--'
+  const v = Math.max(0, batteryConsumedTodayWh.value)
+  return new Intl.NumberFormat('en-US').format(Math.round(v))
 })
 
 const loadCurrentDisplay = computed(() => {
@@ -952,30 +950,21 @@ const applyBatteryMetrics = (payload: any) => {
       loadSrc?.load_power,
       payload?.power?.load_power,
     ]
-    const loadStateCandidates = [
-      loadSrc?.state,
-      loadSrc?.load_state,
-    ]
     const lcur = loadCurrentCandidates
       .map((v) => coerceFiniteNumber(v))
       .find((v) => v !== undefined)
     const lpwr = loadPowerCandidates
       .map((v) => coerceFiniteNumber(v))
       .find((v) => v !== undefined)
-    const lst = loadStateCandidates
-      .map((v) => (typeof v === 'string' ? v : null))
-      .find((v) => v !== undefined && v !== null) as string | undefined
     if (lcur !== undefined) loadCurrent.value = lcur
     if (lpwr !== undefined) {
       loadPower.value = lpwr
     } else if (lcur !== undefined && typeof batteryVoltage.value === 'number') {
       loadPower.value = batteryVoltage.value * lcur
     }
-    if (lst) {
-      loadState.value = lst
-    } else if (lcur !== undefined) {
-      loadState.value = Math.abs(lcur) > 0.05 ? 'on' : 'off'
-    }
+    // Battery consumption today from backend accumulator
+    const bct = coerceFiniteNumber((source as any).battery_consumed_today_wh)
+    if (bct !== undefined) batteryConsumedTodayWh.value = bct
   }
 }
 

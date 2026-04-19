@@ -403,6 +403,7 @@ async def dashboard_telemetry():
             "solar_current": None,
             "solar_power": None,
             "solar_yield_today_wh": None,
+            "battery_consumed_today_wh": None,
             "load_current": None,
             "timestamp": telemetry_data.get("timestamp"),
             "battery": {
