@@ -15,13 +15,6 @@
       <button class="btn" @click="recenterToMower" :disabled="!mowerLatLng">🎯 Recenter</button>
       <button class="btn" @click="undoLastWaypoint" :disabled="missionStore.waypoints.length === 0">↩️ Undo last</button>
       <button class="btn btn-danger" @click="clearAllWaypoints" :disabled="missionStore.waypoints.length === 0">🗑️ Clear all</button>
-      <button
-        class="btn"
-        :class="calibratingGps ? 'btn-warning btn-pulse' : 'btn-secondary'"
-        @click="toggleGpsCalibration"
-        :title="calibratingGps ? 'Click on the map where the mower is actually located' : 'Align displayed GPS position with satellite imagery'"
-      >{{ calibratingGps ? '📍 Click mower location…' : '📍 Calibrate GPS' }}</button>
-      <button v-if="gpsOffsetActive" class="btn btn-secondary" @click="clearGpsCalibration" title="Remove GPS offset and return to raw GPS coordinates">✖ Clear GPS offset</button>
     </div>
     <div class="map-container">
       <MissionMap
@@ -92,11 +85,6 @@ const gpsAccuracyMeters = ref<number | null>(null);
 const mowerHeading = ref<number | null>(null);
 const missionName = ref('');
 const mapStyle = ref<'standard' | 'satellite' | 'hybrid' | 'terrain'>('standard');
-const creatingMission = ref(false);
-const startingMission = ref(false);
-const missionActionHint = ref('');
-const calibratingGps = ref(false);
-const gpsOffsetActive = ref(false);
 const mapDisplaySettings = ref<{ provider: 'google' | 'osm' | 'none'; style: 'standard' | 'satellite' | 'hybrid' | 'terrain'; google_api_key: string }>({
   provider: 'osm',
   style: 'standard',
@@ -126,13 +114,6 @@ onMounted(async () => {
   } catch (error) {
     console.warn('Failed to load mission planner map display settings:', error);
   }
-
-  // Load current GPS calibration offset (so "Clear GPS offset" shows if one is active)
-  try {
-    const offsetRes = await api.get('/api/v2/gps/offset');
-    const d = offsetRes?.data || {};
-    gpsOffsetActive.value = !!(d.offset_lat_m || d.offset_lon_m);
-  } catch {/* ignore — endpoint may not exist yet on first load */}
 
   // Ensure configuration for initial center
   if (!mapStore.configuration) {
@@ -211,10 +192,6 @@ const mowerPosition = computed(() => {
 });
 
 function handleAddWaypoint(lat: number, lon: number) {
-  if (calibratingGps.value) {
-    submitGpsCalibration(lat, lon);
-    return;
-  }
   missionStore.addWaypoint(lat, lon);
 }
 
@@ -229,44 +206,6 @@ function handleRemoveWaypoint(id: string) {
 function recenterToMower() {
   if (mowerLatLng.value && missionMapRef.value) {
     missionMapRef.value.recenter(mowerLatLng.value[0], mowerLatLng.value[1], 18);
-  }
-}
-
-function toggleGpsCalibration() {
-  calibratingGps.value = !calibratingGps.value;
-  if (calibratingGps.value) {
-    missionActionHint.value = '📍 Click on the satellite map where the mower is physically located to align GPS. Press the button again to cancel.';
-  } else {
-    missionActionHint.value = '';
-  }
-}
-
-async function submitGpsCalibration(lat: number, lon: number) {
-  calibratingGps.value = false;
-  missionActionHint.value = 'Saving GPS calibration…';
-  try {
-    const res = await api.post('/api/v2/gps/calibrate', { latitude: lat, longitude: lon });
-    const d = res?.data || {};
-    gpsOffsetActive.value = true;
-    missionActionHint.value = `✅ GPS offset saved: ${(d.offset_lat_m ?? 0).toFixed(2)} m north, ${(d.offset_lon_m ?? 0).toFixed(2)} m east. Displayed position now matches imagery.`;
-    setTimeout(() => { if (missionActionHint.value.startsWith('✅ GPS')) missionActionHint.value = ''; }, 8000);
-  } catch (err: any) {
-    const msg = err?.response?.data?.detail || String(err);
-    missionActionHint.value = `❌ GPS calibration failed: ${msg}`;
-    setTimeout(() => { if (missionActionHint.value.startsWith('❌')) missionActionHint.value = ''; }, 8000);
-  }
-}
-
-async function clearGpsCalibration() {
-  try {
-    await api.delete('/api/v2/gps/offset');
-    gpsOffsetActive.value = false;
-    missionActionHint.value = '✅ GPS offset cleared — using raw GPS coordinates.';
-    setTimeout(() => { if (missionActionHint.value.startsWith('✅ GPS offset cleared')) missionActionHint.value = ''; }, 5000);
-  } catch (err: any) {
-    const msg = err?.response?.data?.detail || String(err);
-    missionActionHint.value = `❌ Failed to clear GPS offset: ${msg}`;
-    setTimeout(() => { if (missionActionHint.value.startsWith('❌')) missionActionHint.value = ''; }, 5000);
   }
 }
 
@@ -485,14 +424,6 @@ const missionWaypointProgress = computed(() => {
 }
 .wp-pin span { font-size: 12px; line-height: 1; }
 
-/* GPS calibration button states */
 .btn-secondary { background: #4b5563; border-color: #6b7280; }
 .btn-secondary:hover { background: #374151; }
-.btn-warning { background: #d97706; border-color: #f59e0b; color: #fff; }
-.btn-warning:hover { background: #b45309; }
-.btn-pulse { animation: gps-pulse 1.2s ease-in-out infinite; }
-@keyframes gps-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6); }
-  50%       { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
-}
 </style>
