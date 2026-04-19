@@ -109,9 +109,17 @@ class DeadReckoningSystem:
         
         self.active = True
         
-        # Simple dead reckoning calculation
-        lat_offset = distance_traveled * math.cos(math.radians(heading)) / 111000
-        lon_offset = distance_traveled * math.sin(math.radians(heading)) / (111000 * 0.7)
+        # Dead reckoning: convert bearing + distance to lat/lon offsets.
+        # Latitude: 1 degree ≈ 111,000 m regardless of position.
+        # Longitude: 1 degree ≈ 111,000 * cos(lat) m — use the actual reference latitude.
+        lat_ref = self.last_gps_position.latitude
+        meters_per_deg_lon = 111000.0 * math.cos(math.radians(lat_ref))
+        lat_offset = distance_traveled * math.cos(math.radians(heading)) / 111000.0
+        lon_offset = (
+            distance_traveled * math.sin(math.radians(heading)) / meters_per_deg_lon
+            if abs(meters_per_deg_lon) > 1.0
+            else 0.0
+        )
         
         self.estimated_position = Position(
             latitude=self.last_gps_position.latitude + lat_offset,

@@ -1,11 +1,8 @@
 # LawnBerry hardware configuration
-# Auto-updated by GPS calibration — manual edits are preserved in other keys.
 
 gps:
   type: ZED-F9P
-  position_offset:
-    lat_m: 0.0
-    lon_m: 0.0
+  usb_device: /dev/ttyACM0
 imu:
   type: BNO085
   port: /dev/ttyAMA4

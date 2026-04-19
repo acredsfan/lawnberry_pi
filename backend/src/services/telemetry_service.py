@@ -48,9 +48,16 @@ class TelemetryService:
                 gps_mode = GpsMode.F9P_USB if getattr(hw_cfg, "gps_type", None) == GPSType.ZED_F9P_USB else GpsMode.F9P_UART
                 ntrip_enabled = bool(getattr(hw_cfg, "gps_ntrip_enabled", False))
 
-            # Hint GPS device
-            if not os.environ.get("GPS_DEVICE"):
-                for candidate in ["/dev/ttyACM1", "/dev/ttyACM0", "/dev/ttyAMA0", "/dev/ttyUSB0"]:
+            # Hint GPS device — prefer explicit config, fall back to port scan
+            gps_usb_device: str | None = None
+            if hw_cfg:
+                _usb = getattr(hw_cfg, "usb_device", None)
+                if isinstance(_usb, str) and _usb:
+                    gps_usb_device = _usb
+            if gps_usb_device:
+                os.environ["GPS_DEVICE"] = gps_usb_device
+            elif not os.environ.get("GPS_DEVICE"):
+                for candidate in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyAMA0", "/dev/ttyUSB0"]:
                     if os.path.exists(candidate):
                         os.environ["GPS_DEVICE"] = candidate
                         break
@@ -81,7 +88,7 @@ class TelemetryService:
                 except Exception:
                     pass
 
-            manager = SensorManager(gps_mode=gps_mode, tof_config=tof_cfg, power_config=power_cfg, battery_config=battery_cfg, imu_config=imu_cfg)
+            manager = SensorManager(gps_mode=gps_mode, tof_config=tof_cfg, power_config=power_cfg, battery_config=battery_cfg, imu_config=imu_cfg, gps_usb_device=gps_usb_device)
             await manager.initialize()
             self.app_state.sensor_manager = manager
             self.app_state.ntrip_forwarder = None

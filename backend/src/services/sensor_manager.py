@@ -61,7 +61,7 @@ class SensorCoordinator:
 class GPSSensorInterface:
     """GPS sensor interface supporting multiple modules"""
     
-    def __init__(self, gps_mode: GpsMode, coordinator: SensorCoordinator):
+    def __init__(self, gps_mode: GpsMode, coordinator: SensorCoordinator, usb_device: str | None = None):
         self.gps_mode = gps_mode
         self.coordinator = coordinator
         self.last_reading: Optional[GpsReading] = None
@@ -69,7 +69,10 @@ class GPSSensorInterface:
         # Concrete driver (lazy, SIM-safe)
         try:
             from ..drivers.sensors.gps_driver import GPSDriver  # type: ignore
-            self._driver = GPSDriver({"mode": gps_mode})
+            driver_cfg: dict = {"mode": gps_mode}
+            if usb_device:
+                driver_cfg["usb_device"] = usb_device
+            self._driver = GPSDriver(driver_cfg)
         except Exception:  # pragma: no cover - keep SIM-safe
             self._driver = None
         
@@ -112,25 +115,6 @@ class GPSSensorInterface:
                     mode=self.gps_mode
                 )
 
-            # Apply configured position calibration offset (gps.position_offset in hardware.yaml).
-            # This corrects for satellite imagery tile misalignment so the mower's displayed
-            # position matches the physical location shown in the map.
-            if reading is not None and reading.latitude is not None and reading.longitude is not None:
-                try:
-                    from ..core.config_loader import ConfigLoader
-                    hw, _ = ConfigLoader().get()
-                    lat_m = hw.gps_position_offset_lat_m
-                    lon_m = hw.gps_position_offset_lon_m
-                    if lat_m or lon_m:
-                        lat_deg = lat_m / 111111.0
-                        lon_deg = lon_m / (111111.0 * math.cos(math.radians(reading.latitude)))
-                        reading = reading.model_copy(update={
-                            "latitude": reading.latitude + lat_deg,
-                            "longitude": reading.longitude + lon_deg,
-                        })
-                except Exception:
-                    pass  # non-fatal; offset simply not applied
-            
             self.last_reading = reading
             return reading
             
@@ -727,6 +711,7 @@ class SensorManager:
         power_config: dict | None = None,
         battery_config=None,  # Optional[BatteryConfig]
         imu_config: dict | None = None,
+        gps_usb_device: str | None = None,
     ):
         self.coordinator = SensorCoordinator()
 
@@ -734,7 +719,7 @@ class SensorManager:
         self._battery_config = battery_config  # BatteryConfig | None
 
         # Initialize sensor interfaces
-        self.gps = GPSSensorInterface(gps_mode, self.coordinator)
+        self.gps = GPSSensorInterface(gps_mode, self.coordinator, usb_device=gps_usb_device)
         self.imu = IMUSensorInterface(self.coordinator, imu_config=imu_config)
         self.tof = ToFSensorInterface(self.coordinator, tof_config=tof_config)
         self.environmental = EnvironmentalSensorInterface(self.coordinator)

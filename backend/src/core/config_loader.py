@@ -141,33 +141,6 @@ class ConfigLoader:
         self._cache = None  # bust cache so next get() reads new values
         return updated
 
-    def update_gps_offset(self, lat_m: float, lon_m: float) -> "HardwareConfig":
-        """Persist GPS position calibration offset to hardware.yaml and reload.
-
-        Modifies (or creates) the ``gps.position_offset`` block in hardware.yaml
-        while leaving every other key intact.  Returns the updated HardwareConfig.
-        """
-        raw = self._read_yaml(self.hardware_path)
-        if not isinstance(raw, dict):
-            raw = {}
-
-        # Ensure the gps block and position_offset sub-block exist.
-        if not isinstance(raw.get("gps"), dict):
-            raw["gps"] = {}
-        if not isinstance(raw["gps"].get("position_offset"), dict):
-            raw["gps"]["position_offset"] = {}
-        raw["gps"]["position_offset"]["lat_m"] = round(float(lat_m), 6)
-        raw["gps"]["position_offset"]["lon_m"] = round(float(lon_m), 6)
-
-        with open(self.hardware_path, "w", encoding="utf-8") as f:
-            f.write("# LawnBerry hardware configuration\n")
-            f.write("# Auto-updated by GPS calibration — manual edits are preserved in other keys.\n\n")
-            yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
-
-        self._cache = None
-        hw, _ = self.load()
-        return hw
-
     @staticmethod
     def _normalize_hardware_yaml(cfg: Dict[str, Any]) -> Dict[str, Any]:
         """Map YAML structure to HardwareConfig fields.
@@ -218,15 +191,6 @@ class ConfigLoader:
 
         if isinstance(gps, dict) and "ntrip_enabled" in gps and "gps_ntrip_enabled" not in mapped:
             mapped["gps_ntrip_enabled"] = bool(gps.get("ntrip_enabled"))
-
-        # GPS position calibration offset (gps.position_offset.{lat_m,lon_m})
-        if isinstance(gps, dict):
-            pos_off = gps.get("position_offset") or {}
-            if isinstance(pos_off, dict):
-                if "lat_m" in pos_off and "gps_position_offset_lat_m" not in mapped:
-                    mapped["gps_position_offset_lat_m"] = float(pos_off["lat_m"])
-                if "lon_m" in pos_off and "gps_position_offset_lon_m" not in mapped:
-                    mapped["gps_position_offset_lon_m"] = float(pos_off["lon_m"])
 
         imu = cfg.get("imu") or {}
         if isinstance(imu, dict) and "type" in imu and "imu_type" not in mapped:

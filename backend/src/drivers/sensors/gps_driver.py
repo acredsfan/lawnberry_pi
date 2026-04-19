@@ -262,27 +262,34 @@ class GPSDriver(HardwareDriver):
                     gga = self._parse_gga(raw)
                     if gga:
                         lat, lon, alt_gga, sats_gga, hdop, fix_quality = gga
-                        if lat is not None and lon is not None:
-                            got_lat = got_lon = True
-                        if alt_gga is not None:
-                            alt = alt_gga
-                        if sats_gga is not None:
-                            sats = sats_gga
-                        # Approximate accuracy from HDOP (rough scale)
-                        if hdop is not None:
-                            hdop_val = hdop
-                            # HDOP is a dilution-of-precision multiplier, not an accuracy by itself.
-                            # Historically we used "max(0.5, hdop)" which masked RTK improvements
-                            # (HDOP ~0.5) even when the fix was RTK_FIXED. Keep an HDOP-derived fallback
-                            # but allow heuristics/real accuracy sources (GST/UBX) to override it later.
-                            hdop_based = max(0.2, hdop * 1.0)
-                            if acc is None or hdop_based < acc:
-                                acc = hdop_based
-                                acc_source = "hdop"
-                        status = self._map_fix_quality(fix_quality)
-                        if status is not None:
-                            rtk_status = status
-                        got_gga = True
+                        # Reject positions with no fix (fix_quality 0 = invalid)
+                        if fix_quality == 0:
+                            got_gga = True  # saw a GGA, just no fix yet
+                            if sats_gga is not None:
+                                sats = sats_gga
+                            rtk_status = "NO_FIX"
+                        else:
+                            if lat is not None and lon is not None:
+                                got_lat = got_lon = True
+                            if alt_gga is not None:
+                                alt = alt_gga
+                            if sats_gga is not None:
+                                sats = sats_gga
+                            # Approximate accuracy from HDOP (rough scale)
+                            if hdop is not None:
+                                hdop_val = hdop
+                                # HDOP is a dilution-of-precision multiplier, not an accuracy by itself.
+                                # Historically we used "max(0.5, hdop)" which masked RTK improvements
+                                # (HDOP ~0.5) even when the fix was RTK_FIXED. Keep an HDOP-derived fallback
+                                # but allow heuristics/real accuracy sources (GST/UBX) to override it later.
+                                hdop_based = max(0.2, hdop * 1.0)
+                                if acc is None or hdop_based < acc:
+                                    acc = hdop_based
+                                    acc_source = "hdop"
+                            status = self._map_fix_quality(fix_quality)
+                            if status is not None:
+                                rtk_status = status
+                            got_gga = True
                 elif raw.startswith(("$GPRMC", "$GNRMC")):
                     try:
                         self._last_nmea["RMC"] = raw

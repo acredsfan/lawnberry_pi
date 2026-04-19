@@ -119,22 +119,6 @@ class HardwareConfig(BaseModel):
 
     gps_type: Optional[GPSType] = Field(default=None)
     gps_ntrip_enabled: bool = Field(default=False)
-    gps_position_offset_lat_m: float = Field(
-        default=0.0,
-        description=(
-            "Metres added to raw GPS latitude (positive = north). "
-            "Used to align the displayed position with satellite imagery when the "
-            "imagery has a systematic offset. Set via POST /api/v2/gps/calibrate."
-        ),
-    )
-    gps_position_offset_lon_m: float = Field(
-        default=0.0,
-        description=(
-            "Metres added to raw GPS longitude (positive = east). "
-            "Used to align the displayed position with satellite imagery. "
-            "Set via POST /api/v2/gps/calibrate."
-        ),
-    )
     imu_type: Optional[IMUType] = Field(default=None)
     imu_port: Optional[str] = Field(default=None, description="Serial port for IMU (e.g. /dev/ttyAMA4)")
     imu_yaw_offset_degrees: float = Field(
