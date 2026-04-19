@@ -93,6 +93,21 @@ else
   echo "[setup] Warning: DISPLAY is set ($DISPLAY) - ensure headless operation for production"
 fi
 
+# Install udev rules for stable device symlinks (idempotent)
+UDEV_SRC="$ROOT_DIR/scripts/udev"
+UDEV_DST="/etc/udev/rules.d"
+if [[ -d "$UDEV_SRC" ]]; then
+  echo "[setup] Installing udev rules from scripts/udev/ ..."
+  for rule_file in "$UDEV_SRC"/*.rules; do
+    [[ -f "$rule_file" ]] || continue
+    rule_name="$(basename "$rule_file")"
+    sudo install -m 0644 -o root -g root "$rule_file" "$UDEV_DST/$rule_name"
+    echo "[setup]   Installed $rule_name"
+  done
+  sudo udevadm control --reload-rules && sudo udevadm trigger
+  echo "[setup] udev rules reloaded"
+fi
+
 # Platform summary
 echo "[setup] Platform: $(uname -a)"
 echo "[setup] Python: $(python3 --version 2>/dev/null || echo 'not found')"

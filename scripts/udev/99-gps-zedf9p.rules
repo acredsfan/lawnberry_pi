@@ -1,0 +1,4 @@
+# LawnBerry Pi - ZED-F9P GPS stable symlink
+# Creates /dev/lawnberry-gps so GPS driver and NTRIP client always
+# find the correct device regardless of USB enumeration order.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1546", ATTRS{idProduct}=="01a9", SYMLINK+="lawnberry-gps", MODE="0660", GROUP="dialout"

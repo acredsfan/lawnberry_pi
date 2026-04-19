@@ -1,0 +1,5 @@
+# LawnBerry Pi - RoboHAT RP2040-Zero stable symlink
+# Matches the Waveshare RP2040-Zero running the RoboHAT firmware.
+# Creates /dev/robohat → /dev/ttyACMx so the backend always finds it
+# regardless of USB enumeration order.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="101f", ATTRS{serial}=="E6625C05E7565F23", SYMLINK+="robohat", MODE="0660", GROUP="dialout"
