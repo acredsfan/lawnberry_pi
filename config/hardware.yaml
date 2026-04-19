@@ -2,7 +2,7 @@
 
 gps:
   type: ZED-F9P
-  usb_device: /dev/ttyACM1
+  usb_device: /dev/lawnberry-gps
 imu:
   type: BNO085
   port: /dev/ttyAMA4
