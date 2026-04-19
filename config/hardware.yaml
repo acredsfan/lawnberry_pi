@@ -1,83 +1,49 @@
-# LawnBerry hardware configuration (example)
-# See specs and docs for details. This file declares which hardware modules
-# are present.
-#
-# When SIM_MODE=0 (hardware mode), this file should reflect the real attached
-# hardware and any non-default wiring/configuration.
-# When SIM_MODE=1 (pure simulation mode), hardware startup is skipped and this
-# file mainly serves as a tracked template/reference.
+# LawnBerry hardware configuration
+# Auto-updated by GPS calibration — manual edits are preserved in other keys.
 
-# Flat form (direct to HardwareConfig) or nested form (compatibility) supported.
-# Example nested form used by tests:
-#
 gps:
   type: ZED-F9P
   position_offset:
-    lat_m: 0.0  # metres north (+) / south (−). Set via "Calibrate GPS" in Mission Planner.
-    lon_m: 0.0  # metres east  (+) / west  (−). Set via "Calibrate GPS" in Mission Planner.
+    lat_m: 0.0
+    lon_m: 0.0
 imu:
   type: BNO085
-  port: /dev/ttyAMA4  # UART4 — BNO085 wired to Pi UART4
-  yaw_offset_degrees: 180  # BNO085 X-axis mounted facing backward; adds 180° to raw yaw
+  port: /dev/ttyAMA4
+  yaw_offset_degrees: 180
 sensors:
   tof:
-    - left
-    - right
-  # Optional advanced configuration for ToF sensors (VL53L0X)
-  # Uncomment and adjust if your wiring differs from defaults
+  - left
+  - right
   tof_config:
-    bus: 1            # I2C bus number
-    left_address: 0x29
-    right_address: 0x30
-    ranging_mode: best_accuracy   # options: short|better_accuracy|best_accuracy|long_range|high_speed
-    left_shutdown_gpio: 22       # optional XSHUT pin to assign unique address at boot
+    bus: 1
+    left_address: 41
+    right_address: 48
+    ranging_mode: best_accuracy
+    left_shutdown_gpio: 22
     right_shutdown_gpio: 23
-    timing_budget_us: 200000     # optional: improve accuracy, adjust if needed
+    timing_budget_us: 200000
 power_monitor: true
 ina3221:
-  # Solar input channel (ch1) uses 30A/75mV shunt => 0.0025 ohm
   shunt_ohms_ch1: 0.0025
-  # Battery channel (ch3) uses 50A/75mV shunt => 0.0015 ohm
   shunt_ohms_ch3: 0.0015
 victron:
   enabled: true
-  # When using BLE, set device_id to the SmartSolar identifier (MAC or name) or leave null to auto-scan
-  device_id: "EC:1A:A8:DD:99:C2"  # Replace with your device MAC (leave quoted)
-  # Provide either the Instant Readout encryption key (preferred) or a pre-composed
-  # '<address>@<key>' device_key string accepted by victron-ble.
-  encryption_key: "d25b6546b47ebb21a04ff86a2c4fbb76"
-  # device_key: "EC:1A:A8:DD:99:C2@d25b6546b47ebb21a04ff86a2c4fbb76"
-  # Path to victron-ble CLI (must be installed on the system)
+  device_id: EC:1A:A8:DD:99:C2
+  encryption_key: b8e2843ce61217e9a5cc4a81dff4da0b
   cli_path: victron-ble
-  # Optional adapter name/number to pass to victron-ble
   adapter: null
-  # Prefer Victron SmartSolar telemetry for these channels when merging with INA3221.
   prefer_battery: true
   prefer_solar: true
   prefer_load: true
 motor_controller: robohat-rp2040
 blade_controller: ibt-4
-
 encoders:
-  enabled: false  # one hall sensor detached — disable until repaired; nav uses GPS+IMU
-
-# Battery pack specification — used for SOC estimation and runtime calculations.
-# Adjust these values if you swap batteries.
+  enabled: false
 battery:
-  chemistry: lifepo4        # lifepo4 (OCV curve) or other (linear model fallback)
-  capacity_ah: 30.0         # Rated capacity: 384 Wh / 12.8 V = 30 Ah
-  capacity_wh: 384.0        # Rated capacity in Watt-hours
-  nominal_voltage: 12.8     # 4S LiFePO4 nominal pack voltage
-  min_voltage: 10.0         # Absolute discharge cutoff (BMS protection)
-  max_voltage: 14.6         # Full-charge voltage (Victron absorption target)
-
-# Flat alternatives (uncomment to use):
-# gps_type: zed-f9p-usb
-gps_ntrip_enabled: true   # Set true if RTK corrections are enabled on the ZED-F9P (configured via u-center)
-# imu_type: bno085-uart
-# tof_sensors: [left, right]
-# env_sensor: true
-# power_monitor: true
-# motor_controller: robohat-rp2040   # Drive via RoboHAT → Cytron MDDRC10 (preferred)
-# blade_controller: ibt-4            # Blade via IBT-4 H-Bridge (GPIO24→IN1, GPIO25→IN2)
-# camera_enabled: false
+  chemistry: lifepo4
+  capacity_ah: 30.0
+  capacity_wh: 384.0
+  nominal_voltage: 12.8
+  min_voltage: 10.0
+  max_voltage: 14.6
+gps_ntrip_enabled: true
