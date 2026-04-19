@@ -904,11 +904,33 @@ def _list_ports_candidates() -> list[str]:
     return matches
 
 
+def _known_gps_devices() -> set[str]:
+    """Return the set of real device paths that are known to be the GPS receiver.
+
+    Resolves the stable GPS symlinks (/dev/lawnberry-gps, /dev/gps_rtk) to
+    their underlying ttyACM paths so the RoboHAT port scanner never probes
+    the GPS port (which wastes 8s waiting for a RoboHAT response that will
+    never come).
+    """
+    gps_candidates = ["/dev/lawnberry-gps", "/dev/gps_rtk"]
+    excluded: set[str] = set()
+    for path in gps_candidates:
+        try:
+            real = os.path.realpath(path)
+            if os.path.exists(real):
+                excluded.add(real)
+                excluded.add(path)
+        except OSError:
+            pass
+    return excluded
+
+
 def _candidate_serial_ports(explicit: Optional[str] = None) -> list[str]:
     """Build an ordered list of serial ports to try for RoboHAT."""
 
     seen: set[str] = set()
     ordered: list[str] = []
+    gps_devices = _known_gps_devices()
 
     def add(port: Optional[str], *, require_exists: bool = False) -> None:
         if port is None:
@@ -917,6 +939,9 @@ def _candidate_serial_ports(explicit: Optional[str] = None) -> list[str]:
         if not value or value in seen:
             return
         if require_exists and value.startswith("/dev/") and not os.path.exists(value):
+            return
+        # Never probe the GPS receiver — it won't respond as RoboHAT firmware.
+        if value in gps_devices or os.path.realpath(value) in gps_devices:
             return
         seen.add(value)
         ordered.append(value)
