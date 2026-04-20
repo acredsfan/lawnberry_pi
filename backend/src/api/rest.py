@@ -1314,6 +1314,7 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
     max_effort = float(cmd.get("max_effort", 1.0))
     
     # Start or continue test
+    heading_delta_out = 0.0  # Default value for initial request
     if not nav_service._stiffness_test_active:
         nav_service._stiffness_test_active = True
         nav_service._stiffness_test_start_time = time.time()
@@ -1334,7 +1335,7 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
             if heading_delta < nav_service._stiffness_test_stuck_threshold:
                 # Motor is stuck - cease test
                 nav_service._stiffness_test_active = False
-                await robohat.send_drive_command(0.0, 0.0)
+                await robohat.send_motor_command(0.0, 0.0)
                 test_status = "stuck"
                 heading_delta_out = heading_delta
             else:
@@ -1345,7 +1346,7 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
                 )
                 if nav_service._stiffness_test_effort >= max_effort:
                     nav_service._stiffness_test_active = False
-                    await robohat.send_drive_command(0.0, 0.0)
+                    await robohat.send_motor_command(0.0, 0.0)
                     test_status = "completed"
                 else:
                     test_status = "testing"
@@ -1358,12 +1359,14 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
         nav_service._stiffness_test_last_check = elapsed
     
     # Apply current effort in requested direction
+    # Convert throttle/turn to left/right speeds using arcade math
     if nav_service._stiffness_test_active:
         effort = nav_service._stiffness_test_effort
-        if direction == "right":
-            await robohat.send_drive_command(throttle=0.3, turn=effort)
-        else:
-            await robohat.send_drive_command(throttle=0.3, turn=-effort)
+        throttle = 0.3
+        turn = effort if direction == "right" else -effort
+        left_speed = throttle + turn
+        right_speed = throttle - turn
+        await robohat.send_motor_command(left_speed, right_speed)
     
     return {
         "ok": True,
@@ -1410,8 +1413,8 @@ async def diagnose_heading_validation(cmd: dict, request: Request):
     distance_m = float(cmd.get("distance_m", 5.0))
     samples = int(cmd.get("samples", 10))
     
-    # Start forward movement
-    await robohat.send_drive_command(throttle=0.5, turn=0.0)
+    # Start forward movement (pure forward, no turn)
+    await robohat.send_motor_command(0.5, 0.5)
     
     gps_headings = []
     imu_headings = []
@@ -1429,7 +1432,7 @@ async def diagnose_heading_validation(cmd: dict, request: Request):
             await asyncio.sleep(0.2)
     finally:
         # Stop movement
-        await robohat.send_drive_command(0.0, 0.0)
+        await robohat.send_motor_command(0.0, 0.0)
     
     if not gps_headings or not imu_headings:
         return {

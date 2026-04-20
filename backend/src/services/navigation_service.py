@@ -186,6 +186,9 @@ class NavigationService:
         self._stiffness_test_effort_step = 0.05  # Increase by 5% every step
         self._stiffness_test_max_effort = 1.0  # Max 100% turn effort
         self._stiffness_test_stuck_threshold = 0.3  # Heading change < 0.3° in 2 seconds = stuck
+        self._stiffness_test_direction: str = "left"
+        self._stiffness_test_last_heading: Optional[float] = None
+        self._stiffness_test_last_check: Optional[float] = None
         
     _instance: Optional["NavigationService"] = None
 
