@@ -86,9 +86,14 @@ class RoboHATStatus:
 class RoboHATService:
     """RoboHAT RP2040 serial bridge service"""
 
-    _PROBE_STARTUP_SETTLE_SECONDS = 3.0
+    _PROBE_STARTUP_SETTLE_SECONDS = 3.0  # USB CDC resets on open; wait for CircuitPython to boot
+    _PROBE_UART_SETTLE_SECONDS = 0.3     # Hardware UART doesn't reset on open; brief drain only
     _RECONNECT_DELAY_SECONDS = 5.0
     _MAX_RECONNECT_ATTEMPTS = 12  # ~1 minute of retries
+
+    # Hardware UART port patterns — opening these does NOT trigger a CircuitPython reset,
+    # so the long USB CDC settle delay is not needed.
+    _UART_PORT_PATTERNS = ("ttyAMA", "ttyS", "serial0", "ttyMFD", "ttySC", "ttyO")
 
     def __init__(self, serial_port: str = "/dev/ttyACM0", baud_rate: int = 115200):
         self.serial_port = serial_port
@@ -118,6 +123,10 @@ class RoboHATService:
         # counter avoids the race where a [STATUS] message overwrites
         # last_watchdog_echo between the PWM send and the ack-poll iteration.
         self._pwm_ack_count: int = 0
+        # Reconnect coordination — prevents concurrent reconnect tasks and enables
+        # periodic retry after the initial attempt window is exhausted.
+        self._reconnecting: bool = False
+        self._last_reconnect_attempt: float = 0.0
         # Encoder enabled flag — False when hall sensors are missing/unreliable.
         # Loaded from config/hardware.yaml encoders.enabled (default True).
         self._encoder_enabled: bool = True
@@ -138,12 +147,19 @@ class RoboHATService:
             return False
         return (
             text.startswith("[usb]")
+            or text.startswith("[uart]")
+            or text.startswith("[serial]")
+            or text.startswith("[rc-")
             or text.startswith("[status]")
             or text.startswith("[rc]")
             or text.startswith("▶")
             or text.startswith("\u25b6")
             or "robohat" in text
         )
+
+    def _is_uart_port(self, port: str) -> bool:
+        """Return True when the port path looks like a hardware UART (not USB CDC)."""
+        return any(p in port for p in self._UART_PORT_PATTERNS)
 
     async def _probe_firmware_response(self, timeout: float = 2.5) -> bool:
         """Verify the opened serial port actually speaks the RoboHAT protocol."""
@@ -152,10 +168,16 @@ class RoboHATService:
 
         saw_robohat_line = False
 
-        # CircuitPython boards can reset when the CDC port is opened. Give the
-        # interpreter time to reach the main loop so our first probe command is
-        # not fired into the void.
-        settle_deadline = time.monotonic() + self._PROBE_STARTUP_SETTLE_SECONDS
+        # USB CDC ports trigger a CircuitPython reset when opened — wait for the
+        # firmware to reach its main loop before sending commands.
+        # Hardware UART ports do NOT trigger a reset; a short drain window is enough.
+        port_name = str(getattr(self.serial_conn, "name", None) or self.serial_port or "")
+        settle_seconds = (
+            self._PROBE_UART_SETTLE_SECONDS
+            if self._is_uart_port(port_name)
+            else self._PROBE_STARTUP_SETTLE_SECONDS
+        )
+        settle_deadline = time.monotonic() + settle_seconds
         while time.monotonic() < settle_deadline:
             try:
                 if self.serial_conn.in_waiting:
@@ -215,8 +237,14 @@ class RoboHATService:
                 write_timeout=1.0
             )
             
-            # Wait for connection to stabilize
-            await asyncio.sleep(self._PROBE_STARTUP_SETTLE_SECONDS)
+            # Wait for connection to stabilize.
+            # USB CDC ports cause CircuitPython to reset; UART ports do not.
+            settle = (
+                self._PROBE_UART_SETTLE_SECONDS
+                if self._is_uart_port(self.serial_port)
+                else self._PROBE_STARTUP_SETTLE_SECONDS
+            )
+            await asyncio.sleep(settle)
 
             # Flush any banner/boot messages so we begin with a clean buffer
             self._drain_serial_buffer()
@@ -443,57 +471,100 @@ class RoboHATService:
         self.status.last_error = "usb_control_unavailable"
         return False
     
+    async def _send_safe_state_on_reconnect(self) -> None:
+        """Send neutral PWM and blade-off immediately after a successful reconnect.
+
+        This ensures the firmware is in a known-safe state before the backend
+        starts issuing navigation commands, regardless of what the firmware may
+        have been commanded before the disconnect.
+        """
+        try:
+            await self._send_line("pwm,1500,1500")
+            await asyncio.sleep(0.05)
+            await self._send_line("blade=off")
+            logger.info("RoboHAT safe state applied after reconnect")
+        except Exception as exc:
+            logger.warning("Failed to apply safe state after RoboHAT reconnect: %s", exc)
+
     async def _reconnect(self) -> None:
         """Attempt to re-open the serial connection after a disconnect.
 
         Probes all known candidate ports (stable by-id path first) so a
         device renumbering (e.g. ttyACM0 → ttyACM2 after USB replug) is
         handled transparently without a backend restart.
-        """
-        self.status.serial_connected = False
-        if self.serial_conn:
-            try:
-                self.serial_conn.close()
-            except Exception:
-                pass
-            self.serial_conn = None
 
-        for attempt in range(self._MAX_RECONNECT_ATTEMPTS):
-            if not self.running:
-                return
-            await asyncio.sleep(self._RECONNECT_DELAY_SECONDS)
-            candidates = _candidate_serial_ports()
-            for candidate in candidates:
+        Uses self._reconnecting as a guard so only one reconnect task runs at a
+        time.  self._last_reconnect_attempt is updated in the finally block so
+        _read_loop can schedule the next attempt after a back-off interval.
+        """
+        if self._reconnecting:
+            return
+        self._reconnecting = True
+        try:
+            self.status.serial_connected = False
+            if self.serial_conn:
+                try:
+                    self.serial_conn.close()
+                except Exception:
+                    pass
+                self.serial_conn = None
+
+            for attempt in range(self._MAX_RECONNECT_ATTEMPTS):
                 if not self.running:
                     return
-                logger.info("RoboHAT reconnect attempt %d/%d on %s",
-                            attempt + 1, self._MAX_RECONNECT_ATTEMPTS, candidate)
-                try:
-                    conn = serial.Serial(
-                        port=candidate,
-                        baudrate=self.baud_rate,
-                        timeout=1.0,
-                        write_timeout=1.0,
-                    )
-                    self.serial_conn = conn
-                    self.serial_port = candidate
-                    await asyncio.sleep(self._PROBE_STARTUP_SETTLE_SECONDS)
-                    self._drain_serial_buffer()
-                    if await self._probe_firmware_response():
-                        self.status.serial_connected = True
-                        logger.info("RoboHAT reconnected on %s", candidate)
+                await asyncio.sleep(self._RECONNECT_DELAY_SECONDS)
+                candidates = _candidate_serial_ports()
+                for candidate in candidates:
+                    if not self.running:
                         return
-                    conn.close()
-                    self.serial_conn = None
-                except Exception as exc:
-                    logger.debug("RoboHAT reconnect candidate %s failed: %s", candidate, exc)
-                    self.serial_conn = None
+                    logger.info("RoboHAT reconnect attempt %d/%d on %s",
+                                attempt + 1, self._MAX_RECONNECT_ATTEMPTS, candidate)
+                    try:
+                        conn = serial.Serial(
+                            port=candidate,
+                            baudrate=self.baud_rate,
+                            timeout=1.0,
+                            write_timeout=1.0,
+                        )
+                        self.serial_conn = conn
+                        self.serial_port = candidate
+                        settle = (
+                            self._PROBE_UART_SETTLE_SECONDS
+                            if self._is_uart_port(candidate)
+                            else self._PROBE_STARTUP_SETTLE_SECONDS
+                        )
+                        await asyncio.sleep(settle)
+                        self._drain_serial_buffer()
+                        if await self._probe_firmware_response():
+                            # Send safe state BEFORE marking connected so the navigation
+                            # grace loop cannot see serial_connected=True and race with
+                            # the safe-state commands.
+                            await self._send_safe_state_on_reconnect()
+                            self.status.serial_connected = True
+                            logger.info("RoboHAT reconnected on %s", candidate)
+                            return
+                        conn.close()
+                        self.serial_conn = None
+                    except Exception as exc:
+                        logger.debug("RoboHAT reconnect candidate %s failed: %s", candidate, exc)
+                        self.serial_conn = None
 
-        logger.error("RoboHAT reconnect exhausted all attempts; serial remains offline")
+            logger.error("RoboHAT reconnect exhausted all attempts; serial remains offline")
+        finally:
+            self._reconnecting = False
+            self._last_reconnect_attempt = time.monotonic()
 
     async def _read_loop(self):
-        """Continuous read loop for RoboHAT messages, with USB replug recovery."""
-        reconnecting = False
+        """Continuous read loop for RoboHAT messages, with USB replug recovery.
+
+        Reconnect scheduling is centralised here using self._reconnecting and
+        self._last_reconnect_attempt so there is exactly one code path that
+        starts a reconnect task.  When _reconnect() exhausts its initial
+        attempts it sets self._reconnecting = False and updates
+        self._last_reconnect_attempt; this loop then retries every
+        _IDLE_RECONNECT_INTERVAL seconds until the service stops.
+        """
+        _IDLE_RECONNECT_INTERVAL = 60.0
         while self.running:
             try:
                 # Drain ALL lines in the serial buffer before sleeping so that
@@ -504,18 +575,30 @@ class RoboHATService:
                 while self.serial_conn and self.serial_conn.is_open and self.serial_conn.in_waiting:
                     raw = await asyncio.to_thread(self.serial_conn.readline)
                     line = raw.decode("utf-8", errors="ignore").strip()
-                    reconnecting = False
                     if line:
                         self._process_line(line)
+
+                # Periodic retry after initial reconnect attempts are exhausted.
+                # This is the only place that starts a reconnect task so we
+                # never have two competing reconnect coroutines running.
+                if (
+                    not self.status.serial_connected
+                    and not self._reconnecting
+                    and time.monotonic() - self._last_reconnect_attempt >= _IDLE_RECONNECT_INTERVAL
+                ):
+                    logger.info(
+                        "RoboHAT still disconnected after %.0fs; scheduling reconnect",
+                        _IDLE_RECONNECT_INTERVAL,
+                    )
+                    asyncio.create_task(self._reconnect())
 
                 await asyncio.sleep(0.02)
 
             except asyncio.CancelledError:
                 break
             except (serial.SerialException, OSError) as e:
-                if not reconnecting:
+                if not self._reconnecting:
                     logger.warning("RoboHAT serial connection lost (%s); attempting reconnect", e)
-                    reconnecting = True
                     asyncio.create_task(self._reconnect())
                 await asyncio.sleep(1.0)
             except Exception as e:
@@ -904,33 +987,90 @@ def _list_ports_candidates() -> list[str]:
     return matches
 
 
-def _known_gps_devices() -> set[str]:
-    """Return the set of real device paths that are known to be the GPS receiver.
+def _known_excluded_devices() -> set[str]:
+    """Return device paths that must never be probed as a RoboHAT port.
 
-    Resolves the stable GPS symlinks (/dev/lawnberry-gps, /dev/gps_rtk) to
-    their underlying ttyACM paths so the RoboHAT port scanner never probes
-    the GPS port (which wastes 8s waiting for a RoboHAT response that will
-    never come).
+    Includes GPS receivers and the IMU UART (BNO085 on ttyAMA4 by default)
+    so the scanner never wastes time on ports that will never respond as
+    RoboHAT firmware, and never accidentally corrupts the IMU data stream.
     """
-    gps_candidates = ["/dev/lawnberry-gps", "/dev/gps_rtk"]
     excluded: set[str] = set()
-    for path in gps_candidates:
+
+    def _resolve_and_add(path: str) -> None:
+        if not path:
+            return
         try:
             real = os.path.realpath(path)
             if os.path.exists(real):
                 excluded.add(real)
-                excluded.add(path)
+            excluded.add(path)
         except OSError:
             pass
+
+    # GPS receivers
+    for path in ["/dev/lawnberry-gps", "/dev/gps_rtk"]:
+        _resolve_and_add(path)
+
+    # IMU UART — resolve from env, hardware.yaml, then hardcoded default
+    imu_port = os.getenv("BNO085_PORT", "")
+    if not imu_port:
+        try:
+            import yaml
+            hw_cfg_path = os.path.join(os.path.dirname(__file__), "../../../config/hardware.yaml")
+            with open(os.path.realpath(hw_cfg_path)) as f:
+                hw = yaml.safe_load(f) or {}
+            imu_port = (hw.get("imu") or {}).get("port", "")
+        except Exception:
+            pass
+    _resolve_and_add(imu_port or "/dev/ttyAMA4")
+
     return excluded
 
 
+def _read_hardware_yaml_robohat_port() -> Optional[str]:
+    """Read the optional motor_controller_port field from hardware.yaml.
+
+    Returns None when the field is absent so auto-discovery proceeds normally.
+    Allows operators to pin the RoboHAT to a specific UART or USB path without
+    needing environment variables.
+    """
+    try:
+        import yaml
+        hw_cfg_path = os.path.join(os.path.dirname(__file__), "../../../config/hardware.yaml")
+        with open(os.path.realpath(hw_cfg_path)) as f:
+            hw = yaml.safe_load(f) or {}
+        port = hw.get("motor_controller_port", "") or ""
+        return port.strip() or None
+    except Exception:
+        return None
+
+
+def _known_gps_devices() -> set[str]:
+    """Backward-compatible alias; use _known_excluded_devices() for full exclusion."""
+    return _known_excluded_devices()
+
+
 def _candidate_serial_ports(explicit: Optional[str] = None) -> list[str]:
-    """Build an ordered list of serial ports to try for RoboHAT."""
+    """Build an ordered list of serial ports to try for RoboHAT.
+
+    Priority order:
+      1. Explicit argument or ROBOHAT_PORT / LAWN_ROBOHAT_PORT env vars
+      2. motor_controller_port from hardware.yaml
+      3. Stable udev symlink /dev/robohat (USB, by serial number)
+      4. /dev/serial/by-id RP2040/CircuitPython entries (USB, stable)
+      5. /dev/serial0 → ttyAMA0 (GPIO UART header — RoboHAT GPIO connection)
+      6. Additional ttyAMA* UART ports (excluding the IMU on ttyAMA4)
+      7. list_ports descriptors matching RoboHAT/RP2040 keywords
+      8. ttyACM* and ttyUSB* (USB CDC, last resort)
+      9. Historic default /dev/ttyACM0
+
+    GPS and IMU ports are always excluded to avoid wasting probe time or
+    corrupting other devices' data streams.
+    """
 
     seen: set[str] = set()
     ordered: list[str] = []
-    gps_devices = _known_gps_devices()
+    excluded_devices = _known_excluded_devices()
 
     def add(port: Optional[str], *, require_exists: bool = False) -> None:
         if port is None:
@@ -940,10 +1080,18 @@ def _candidate_serial_ports(explicit: Optional[str] = None) -> list[str]:
             return
         if require_exists and value.startswith("/dev/") and not os.path.exists(value):
             return
-        # Never probe the GPS receiver — it won't respond as RoboHAT firmware.
-        if value in gps_devices or os.path.realpath(value) in gps_devices:
+        # Never probe GPS, IMU, or other known non-RoboHAT devices.
+        if value in excluded_devices or os.path.realpath(value) in excluded_devices:
             return
         seen.add(value)
+        # Also register the resolved path so symlinks (e.g. /dev/serial0 →
+        # ttyAMA0) don't get probed a second time as the underlying device.
+        try:
+            real = os.path.realpath(value)
+            if real != value:
+                seen.add(real)
+        except OSError:
+            pass
         ordered.append(value)
 
     add(explicit)
@@ -953,10 +1101,20 @@ def _candidate_serial_ports(explicit: Optional[str] = None) -> list[str]:
 
     add(_read_profile_robohat_port())
 
+    # Explicit hardware.yaml config beats all autodiscovery
+    add(_read_hardware_yaml_robohat_port())
+
     # Stable udev symlink created by 99-robohat-rp2040.rules — always try first.
     add("/dev/robohat", require_exists=True)
 
     for path in _serial_by_id_candidates():
+        add(path, require_exists=True)
+
+    # UART candidates: /dev/serial0 is the primary GPIO UART (→ ttyAMA0).
+    # The RoboHAT connects via the GPIO header over this UART in addition to USB.
+    # ttyAMA4 (IMU) is already in excluded_devices and will be silently skipped.
+    add("/dev/serial0", require_exists=True)
+    for path in sorted(glob.glob("/dev/ttyAMA[0-9]*")):
         add(path, require_exists=True)
 
     for path in _list_ports_candidates():

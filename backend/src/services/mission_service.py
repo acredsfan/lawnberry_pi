@@ -257,10 +257,24 @@ class MissionService:
         return mission
 
     async def start_mission(self, mission_id: str):
+        import os
         from ..api import rest as rest_api
+        from .robohat_service import get_robohat_service
 
         if rest_api._safety_state.get("emergency_stop_active", False):
             raise MissionStateError("Cannot start mission while emergency stop is active.")
+
+        # Pre-flight: verify motor controller is available (skip in simulation)
+        # Only block when a robohat service IS registered but currently disconnected.
+        # None means no service configured (dev / test without hardware) — allow.
+        if os.getenv("SIM_MODE", "0") != "1":
+            robohat = get_robohat_service()
+            if robohat is not None and (not robohat.running or not robohat.status.serial_connected):
+                detail = f" ({robohat.status.last_error})" if robohat.status.last_error else ""
+                raise MissionStateError(
+                    f"Cannot start mission: motor controller is not connected{detail}. "
+                    "Check USB cable and RoboHAT firmware."
+                )
 
         mission = self._require_mission(mission_id)
         status = self._require_status(mission_id)
@@ -358,10 +372,24 @@ class MissionService:
 
 
     async def resume_mission(self, mission_id: str):
+        import os
         from ..api import rest as rest_api
+        from .robohat_service import get_robohat_service
 
         if rest_api._safety_state.get("emergency_stop_active", False):
             raise MissionStateError("Cannot resume mission while emergency stop is active.")
+
+        # Pre-flight: verify motor controller is available (skip in simulation)
+        # Only block when a robohat service IS registered but currently disconnected.
+        # None means no service configured (dev / test without hardware) — allow.
+        if os.getenv("SIM_MODE", "0") != "1":
+            robohat = get_robohat_service()
+            if robohat is not None and (not robohat.running or not robohat.status.serial_connected):
+                detail = f" ({robohat.status.last_error})" if robohat.status.last_error else ""
+                raise MissionStateError(
+                    f"Cannot resume mission: motor controller is not connected{detail}. "
+                    "Check USB cable and RoboHAT firmware."
+                )
 
         mission = self._require_mission(mission_id)
         status = self._require_status(mission_id)

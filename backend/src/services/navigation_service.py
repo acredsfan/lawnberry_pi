@@ -306,6 +306,12 @@ class NavigationService:
         # Hysteresis: prevent TANK/BLEND mode flapping near the 60° boundary.
         # Enter TANK when |error| > 70°, exit TANK when |error| < 50°.
         _in_tank_mode: bool = False
+        # Grace period for motor controller USB reconnect.  When the controller
+        # is transiently unavailable (USB disconnect / replug), the loop continues
+        # checking safety gates rather than failing immediately.  After
+        # _MOTOR_RECONNECT_GRACE_S seconds with no recovery, the mission fails.
+        _motor_unavail_start: float | None = None
+        _MOTOR_RECONNECT_GRACE_S: float = 20.0
 
         while True:
             status = mission_service.mission_statuses.get(mission.id)
@@ -516,6 +522,43 @@ class NavigationService:
             # Clamp speeds
             left_speed = max(-self.max_speed, min(self.max_speed, left_speed))
             right_speed = max(-self.max_speed, min(self.max_speed, right_speed))
+
+            # Motor controller availability check with grace-period reconnect.
+            # When the controller is unavailable (USB drop), the loop continues
+            # iterating — all safety gates above keep running — while the RoboHAT
+            # service attempts to reconnect in the background.  The firmware's
+            # serial-timeout (~5 s) will stop the physical motors if commands
+            # stop arriving.  After _MOTOR_RECONNECT_GRACE_S the mission fails.
+            if os.getenv("SIM_MODE", "0") != "1":
+                _robohat_chk = get_robohat_service()
+                _ctrl_ok = (
+                    _robohat_chk is not None
+                    and _robohat_chk.running
+                    and _robohat_chk.status.serial_connected
+                )
+                if not _ctrl_ok:
+                    if _motor_unavail_start is None:
+                        _motor_unavail_start = time.monotonic()
+                        logger.warning(
+                            "Motor controller unavailable during navigation; "
+                            "waiting up to %.0f s for reconnect "
+                            "(firmware serial-timeout will stop motors ~5 s)",
+                            _MOTOR_RECONNECT_GRACE_S,
+                        )
+                    if time.monotonic() - _motor_unavail_start >= _MOTOR_RECONNECT_GRACE_S:
+                        logger.error(
+                            "Motor controller still unavailable after %.0f s grace period; "
+                            "aborting waypoint",
+                            _MOTOR_RECONNECT_GRACE_S,
+                        )
+                        raise RuntimeError(
+                            "Motor controller unavailable: failed to reconnect "
+                            f"within {_MOTOR_RECONNECT_GRACE_S:.0f} s grace period"
+                        )
+                    await asyncio.sleep(0.2)
+                    continue  # loop back; all safety gates re-run each iteration
+                else:
+                    _motor_unavail_start = None  # reset on confirmed controller presence
 
             # Retry transient motor command failures (e.g. single PWM ack timeout)
             # before aborting the mission.

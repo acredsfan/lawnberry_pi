@@ -6,7 +6,9 @@ Advanced RC Control System with configurable operation modes
   • Motor control: GP12 (blade), GP13 (mode_switch)
   • Wheel encoder : GP8 (A), GP9 (B)
   • Status NeoPixel on GP16
-USB commands
+  • Hardware UART  : GP0 (TX → Pi GPIO15/RX), GP1 (RX ← Pi GPIO14/TX) at 115200 baud
+
+USB/UART commands (accepted on both interfaces simultaneously)
   rc=enable / rc=disable
   rc_mode=<mode>           – set RC control mode (emergency|manual|assisted|training)
   rc_config=<ch>,<func>    – configure channel function
@@ -23,6 +25,7 @@ import time
 import os
 
 import board
+import busio
 import digitalio
 import pwmio
 import supervisor
@@ -51,6 +54,18 @@ class SimpleNeoPixel(adafruit_pixelbuf.PixelBuf):
 
 
 pixel = SimpleNeoPixel(board.GP16, 1, brightness=0.3)
+
+# ---------- Hardware UART (GP0/GP1 = board.TX/RX) ---------- #
+# Wiring: RP2040 GP0 (TX) → Pi GPIO15 (RXD / ttyAMA0 RX)
+#         RP2040 GP1 (RX) ← Pi GPIO14 (TXD / ttyAMA0 TX)
+# This gives a fully independent control path that works even when USB CDC
+# fails (e.g. USB protocol error -71, bad cable, enumeration failure).
+_hw_uart: busio.UART | None = None
+_uart_rx_buf: str = ""
+try:
+    _hw_uart = busio.UART(board.TX, board.RX, baudrate=115200, timeout=0)
+except Exception as _uart_err:  # noqa: BLE001
+    print(f"Warning: hardware UART init failed: {_uart_err}")
 
 # ---------- PWM servos ---------- #
 PWM_FREQ = 50  # Hz
@@ -241,6 +256,33 @@ def read_serial_line() -> str | None:
     return None
 
 
+def read_uart_line() -> str | None:
+    """Drain hardware UART bytes and return a complete line when one is ready."""
+    global _uart_rx_buf  # pylint: disable=global-statement
+    if _hw_uart is None or not _hw_uart.in_waiting:
+        return None
+    while _hw_uart.in_waiting:
+        chunk = _hw_uart.read(_hw_uart.in_waiting)
+        if not chunk:
+            break
+        _uart_rx_buf += chunk.decode("utf-8", errors="ignore")
+    if "\n" in _uart_rx_buf or "\r" in _uart_rx_buf:
+        for sep in ("\r\n", "\n", "\r"):
+            if sep in _uart_rx_buf:
+                line, _, _uart_rx_buf = _uart_rx_buf.partition(sep)
+                return line.strip() if line.strip() else None
+    return None
+
+
+def uart_write(msg: str) -> None:
+    """Send a response line back over hardware UART."""
+    if _hw_uart is not None:
+        try:
+            _hw_uart.write((msg + "\r\n").encode("utf-8"))
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def get_circuitpython_version() -> str:
     """Return best-effort CircuitPython version across CP9/CP10 builds."""
     try:
@@ -273,7 +315,9 @@ def main() -> None:
     # result in accepted USB commands without any actual motor response.
     set_drive_outputs_enabled(True)
     set_led(True, force=True)
-    print(f"▶ RoboHAT Advanced RC Control ready (CircuitPython {get_circuitpython_version()})")
+    startup_msg = f"▶ RoboHAT Advanced RC Control ready (CircuitPython {get_circuitpython_version()})"
+    print(startup_msg)
+    uart_write(startup_msg)
 
     hb_t   = time.monotonic()
     channel_values = {}
@@ -282,29 +326,41 @@ def main() -> None:
         wdt.feed()
         now = time.monotonic()
 
-        # --- USB commands --- #
-        if (line := read_serial_line()):
+        # --- serial commands (USB CDC or hardware UART) --- #
+        usb_line  = read_serial_line()
+        uart_line = read_uart_line()
+
+        for raw_line, source in ((usb_line, "USB"), (uart_line, "UART")):
+            if not raw_line:
+                continue
+            tag = f"[{source}]"
             # Any received command resets the USB-timeout clock so that
             # status queries (get_rc_status, enc=zero, blade=…) do not
             # inadvertently drain the 2 s budget while RC is disabled.
             last_serial_time = now
-            cmd, param1, param2 = parse_cmd(line)
+            cmd, param1, param2 = parse_cmd(raw_line)
+
+            def respond(msg: str) -> None:
+                full = f"{tag} {msg}"
+                print(full)
+                uart_write(full)
+
             if cmd == "rc_enable":
                 rc_enabled = True
                 set_led(rc_enabled)
-                print(f"[USB] RC enabled, mode: {rc_mode}")
+                respond(f"RC enabled, mode: {rc_mode}")
             elif cmd == "rc_disable":
                 rc_enabled = False
                 last_serial_time = now
                 set_led(rc_enabled)
-                print("[USB] RC disabled – USB control")
+                respond("RC disabled – serial control")
             elif cmd == "rc_mode":
                 rc_mode = param1
-                print(f"[USB] RC mode set to: {rc_mode}")
+                respond(f"RC mode set to: {rc_mode}")
             elif cmd == "blade":
                 blade_enabled = (param1 == "on")
                 blade_pwm.duty_cycle = us_to_dc(2000) if blade_enabled else 0
-                print(f"[USB] Blade {'enabled' if blade_enabled else 'disabled'}")
+                respond(f"Blade {'enabled' if blade_enabled else 'disabled'}")
             elif cmd == "get_rc_status":
                 signal_lost = is_rc_signal_lost()
                 status = {
@@ -315,22 +371,24 @@ def main() -> None:
                     "channels": channel_data,
                     "encoder": encoder.position
                 }
-                print(f"[STATUS] {status}")
+                respond(f"STATUS {status}")
             elif cmd == "enc_zero":
                 encoder.position = 0
-                print("[USB] Encoder counter reset")
+                respond("Encoder counter reset")
             elif cmd == "pwm" and not rc_enabled:
                 set_pwm(int(param1), int(param2))
                 last_serial_time = now
-                print(f"[USB] PWM set → steer={param1} µs throttle={param2} µs")
+                respond(f"PWM set → steer={param1} µs throttle={param2} µs")
             else:
-                print(f"[USB] Invalid: {line}")
+                respond(f"Invalid: {raw_line}")
 
-        # --- USB timeout --- #
+        # --- serial timeout (no serial commands for SERIAL_TIMEOUT seconds) --- #
         if not rc_enabled and (now - last_serial_time) > SERIAL_TIMEOUT:
             rc_enabled = True
             set_led(rc_enabled)
-            print(f"[USB] Timeout – back to RC mode: {rc_mode}")
+            timeout_msg = f"[SERIAL] Timeout – back to RC mode: {rc_mode}"
+            print(timeout_msg)
+            uart_write(timeout_msg)
 
         # --- control path --- #
         if rc_enabled:
@@ -374,15 +432,17 @@ def main() -> None:
 
         # --- heartbeat --- #
         if now - hb_t >= 5:
-            control_source = f"RC-{rc_mode}" if rc_enabled else "USB"
+            control_source = f"RC-{rc_mode}" if rc_enabled else "SERIAL"
             signal_status = "LOST" if is_rc_signal_lost() else "OK"
-            print(
+            hb_msg = (
                 f"[{control_source}] signal={signal_status} "
                 f"steer={channel_values.get(1, 1500)} µs "
                 f"thr={channel_values.get(2, 1500)} µs "
                 f"blade={'ON' if blade_enabled else 'OFF'} "
                 f"enc={encoder.position}"
             )
+            print(hb_msg)
+            uart_write(hb_msg)
             hb_t = now
 
         time.sleep(0.02)

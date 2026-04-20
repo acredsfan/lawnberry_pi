@@ -33,6 +33,10 @@ victron:
   prefer_solar: true
   prefer_load: true
 motor_controller: robohat-rp2040
+# Explicit RoboHAT serial port — leave blank for auto-discovery (tries /dev/robohat,
+# /dev/serial0, ttyAMA*, ttyACM* in order; IMU on ttyAMA4 is always excluded).
+# Set to /dev/serial0 to prefer the GPIO UART header over USB, or /dev/ttyACM0 for USB only.
+motor_controller_port: /dev/serial0
 blade_controller: ibt-4
 encoders:
   enabled: false

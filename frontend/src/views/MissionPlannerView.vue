@@ -92,6 +92,9 @@ const mapDisplaySettings = ref<{ provider: 'google' | 'osm' | 'none'; style: 'st
 });
 const restPollTimer = ref<number | null>(null);
 const lastWsUpdateAt = ref<number>(0);
+const creatingMission = ref(false);
+const startingMission = ref(false);
+const missionActionHint = ref('');
 
 let navigationHandler: ((payload: any) => void) | null = null;
 let componentDestroyed = false;
