@@ -15,7 +15,29 @@ tests/
 ```
 
 ## Commands
-cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLOGIES] pytest [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLOGIES] ruff check .
+
+```bash
+# Run tests (non-hardware only — full suite hangs on hardware I/O)
+cd /home/pi/lawnberry && python -m pytest tests/ -x -q -m "not hardware"
+
+# Run a single test file
+python -m pytest tests/test_navigation_service.py -x -q
+
+# Lint
+ruff check backend/src
+
+# Restart backend
+sudo systemctl restart lawnberry-backend
+
+# Tail backend logs
+journalctl -u lawnberry-backend -f --no-pager
+# OR
+tail -f /home/pi/lawnberry/backend/backend.log
+```
+
+⚠️ **Test suite hang warning:** `python -m pytest tests/` without `-m "not hardware"` will hang
+indefinitely because some tests block on hardware I/O (serial ports, I2C). Always filter or
+set a per-test timeout. `pytest-timeout` is NOT installed; add `--timeout=N` only if it is.
 
 ## Code Style
 Python 3.11 (backend), TypeScript + Vue 3 (frontend): Follow standard conventions
@@ -87,6 +109,52 @@ Python 3.11 (backend), TypeScript + Vue 3 (frontend): Follow standard convention
 ## Additional Notes
 - Ensure to follow best practices for both backend and frontend development.
 - Regularly update dependencies to maintain security and performance.
+
+## Serial Port Assignments (FIXED — do not auto-detect)
+
+| Device | Port | Notes |
+|--------|------|-------|
+| RoboHAT RP2040 (USB CDC) | `/dev/robohat` → `/dev/ttyACM0` | Primary motor controller path |
+| BNO085 IMU | `/dev/ttyAMA4` | **NEVER probe/scan this port — corrupts IMU state** |
+| ZED-F9P GPS | `/dev/lawnberry-gps` | USB, RTK |
+| Hardware UART to RP2040 | `/dev/serial0` (ttyAMA0) | Firmware not yet deployed; do NOT confuse with IMU |
+
+**Do NOT auto-detect or probe `/dev/ttyAMA4`** — opening it without the correct baud/protocol
+corrupts the BNO085 sensor state and requires a power cycle.
+
+## BNO085 IMU — Critical Facts
+
+- Driver uses **Game Rotation Vector** (`game_quaternion`): gyro + accelerometer fusion only.
+  **There is NO magnetometer in the heading output.** Motor EMI does NOT affect it.
+- Convention: **ZYX aerospace / right-hand z-up** — positive yaw = CCW rotation.
+  This is **opposite** to compass convention (CW = increasing bearing).
+- The correct heading formula is: `adjusted_yaw = (-raw_yaw + imu_yaw_offset_degrees) % 360.0`
+  (note the **negation** of raw_yaw — without it, CW turns decrease heading and navigation diverges)
+- `imu_yaw_offset_degrees: 180.0` in `config/hardware.yaml` — corrects mounting orientation,
+  not convention. Do not change it when fixing turn direction bugs.
+
+## Motor / Navigation Direction Conventions
+
+- `steer_us > 1500µs` → right turn (CW physically)
+- `steer_us < 1500µs` → left turn (CCW physically)
+- RoboHAT serial command: `pwm,<steer_us>,<throttle_us>`
+- Dead zone: ~80µs around neutral (1500µs). Commands inside ±80µs are too weak to move on grass.
+- When diagnosing motor issues: distinguish *what the code sends* (serial log `[USB]`) from
+  *what the hardware does* (physical observation). `serial_connected: False` in software state
+  does NOT mean the device is physically absent — it may mean USB error -71 (bad cable).
+
+## Python Bytecode Cache
+
+After editing any `.py` file that runs as a **systemd service** (watchdog, backend), clear the
+bytecode cache or the service will keep running old code from `__pycache__`:
+
+```bash
+find /home/pi/lawnberry -name "*.pyc" -delete
+find /home/pi/lawnberry -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+sudo systemctl restart lawnberry-backend
+```
+
+Alternatively, set `PYTHONDONTWRITEBYTECODE=1` in the systemd unit environment.
 
 ## Maintainer handbook usage
 

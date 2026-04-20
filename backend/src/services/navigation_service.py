@@ -162,7 +162,7 @@ class NavigationService:
             self._imu_yaw_offset: float = float(getattr(hardware, "imu_yaw_offset_degrees", 0.0))
             if self._imu_yaw_offset != 0.0:
                 logger.info(
-                    "IMU yaw offset loaded: %.1f° (applied to raw BNO085 yaw before navigation)",
+                    "IMU yaw offset loaded: %.1f° (applied as: adjusted = (-raw + offset) %% 360)",
                     self._imu_yaw_offset,
                 )
         except Exception as exc:
@@ -761,12 +761,14 @@ class NavigationService:
         )
         if imu_valid:
             raw_yaw = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
-            adjusted_yaw = (raw_yaw + self._imu_yaw_offset) % 360.0
-            # Motor EMI glitch rejection: motor winding currents disturb the BNO085
-            # magnetometer, causing sudden heading spikes during tank turns.
+            # BNO085 Game Rotation Vector uses ZYX aerospace convention (right-hand, z-up):
+            # positive yaw = CCW rotation.  Navigation and GPS bearings use compass convention:
+            # North=0°, CW=increasing.  Negate raw_yaw to convert, then apply mounting offset.
+            adjusted_yaw = (-raw_yaw + self._imu_yaw_offset) % 360.0
+            # Glitch rejection: extreme motor vibration can cause momentary gyroscope spikes.
             # Max realistic turn rate: max_speed (0.8 m/s) × 2 / wheel_base (0.5 m) ≈ 183°/s.
             # At 5 Hz updates that is ≈37°/update; reject any jump larger than 60° as a
-            # magnetometer spike so it never corrupts the navigation heading controller.
+            # gyroscope glitch so it never corrupts the navigation heading controller.
             prev_heading = self.navigation_state.heading
             if prev_heading is not None:
                 jump = abs(((adjusted_yaw - prev_heading) + 180.0) % 360.0 - 180.0)
