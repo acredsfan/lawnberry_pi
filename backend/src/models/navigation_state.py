@@ -74,7 +74,8 @@ class NavigationState(BaseModel):
     """Current navigation state and planning information"""
     # Current position and movement
     current_position: Optional[Position] = None
-    heading: Optional[float] = None  # degrees (0-360)
+    heading: Optional[float] = None  # degrees (0-360), IMU yaw converted to compass convention
+    gps_cog: Optional[float] = None  # degrees (0-360), GPS Course-Over-Ground heading
     velocity: Optional[float] = None  # m/s current speed
     target_velocity: Optional[float] = None  # m/s desired speed
     

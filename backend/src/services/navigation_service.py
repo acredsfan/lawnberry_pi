@@ -786,10 +786,13 @@ class NavigationService:
         )
         if imu_valid:
             raw_yaw = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
-            # BNO085 Game Rotation Vector uses ZYX aerospace convention (right-hand, z-up):
-            # positive yaw = CCW rotation.  Navigation and GPS bearings use compass convention:
-            # North=0°, CW=increasing.  Negate raw_yaw to convert, then apply mounting offset.
-            adjusted_yaw = (-raw_yaw + self._imu_yaw_offset) % 360.0
+            # BNO085 Game Rotation Vector uses ZYX aerospace convention (right-hand, z-up).
+            # In this convention, CCW rotation (looking down) increases yaw.
+            # Navigation uses compass convention: North=0°, CW=increasing (East=90°, South=180°, West=270°).
+            # Since both conventions have Z-up and measure the same physical orientation,
+            # the heading should directly map without negation when properly calibrated.
+            # Apply yaw_offset for mechanical mounting (e.g., IMU rotated 180° in enclosure).
+            adjusted_yaw = (raw_yaw + self._imu_yaw_offset) % 360.0
             
             # Log raw and adjusted yaw for diagnostic purposes
             _log_imu_now = time.monotonic()
@@ -845,6 +848,13 @@ class NavigationService:
             # Use GPS course-over-ground as heading fallback while in motion.
             # GPS COG is already in world frame; IMU yaw_offset does NOT apply here.
             self.navigation_state.heading = sensor_data.gps.heading
+        
+        # Always store GPS COG for diagnostic purposes
+        if (
+            sensor_data.gps is not None
+            and sensor_data.gps.heading is not None
+        ):
+            self.navigation_state.gps_cog = sensor_data.gps.heading
 
 
         # Update obstacles

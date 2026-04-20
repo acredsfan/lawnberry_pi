@@ -1372,7 +1372,7 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
         "ok": True,
         "test_active": nav_service._stiffness_test_active,
         "current_effort": nav_service._stiffness_test_effort,
-        "heading": nav_service.navigation_state.current_heading or 0.0,
+        "heading": nav_service.navigation_state.heading or 0.0,
         "heading_delta": heading_delta_out if test_status != "started" else 0.0,
         "status": test_status,
     }
@@ -1422,12 +1422,12 @@ async def diagnose_heading_validation(cmd: dict, request: Request):
     try:
         for _ in range(samples):
             gps_cog = nav_service.navigation_state.gps_cog
-            imu_yaw = nav_service.navigation_state.current_heading
+            imu_heading = nav_service.navigation_state.heading
             
             if gps_cog is not None:
                 gps_headings.append(float(gps_cog))
-            if imu_yaw is not None:
-                imu_headings.append(float(imu_yaw))
+            if imu_heading is not None:
+                imu_headings.append(float(imu_heading))
             
             await asyncio.sleep(0.2)
     finally:

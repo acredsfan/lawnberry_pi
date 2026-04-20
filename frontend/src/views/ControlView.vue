@@ -150,82 +150,84 @@
         </div>
       </div>
 
-      <!-- Live Camera Feed -->
-      <div class="card">
-        <div class="card-header">
-          <h3>Live Camera Feed</h3>
-        </div>
-        <div class="card-body">
-          <div class="camera-feed" :class="{ 'camera-feed-error': cameraError }">
-            <img
-              v-if="cameraDisplaySource"
-              :src="cameraDisplaySource"
-              alt="Live mower camera feed"
-              class="camera-frame"
-              :class="{ 'camera-frame--stream': cameraIsStreaming }"
-              @load="handleCameraStreamLoad"
-              @error="handleCameraStreamError"
-            >
-            <div v-else class="camera-placeholder">
-              <p>{{ cameraStatusMessage }}</p>
-              <button
-                v-if="cameraError"
-                class="btn btn-sm btn-secondary"
-                @click="retryCameraFeed"
-              >
-                Retry
-              </button>
-            </div>
-            <div class="camera-badge" :class="`camera-badge--${cameraModeBadge.tone}`">
-              {{ cameraModeBadge.label }}
-            </div>
+      <!-- Live Camera Feed & Movement Controls Side-by-Side -->
+      <div class="stream-and-control-container">
+        <!-- Camera Feed (Shrunk) -->
+        <div class="card camera-card">
+          <div class="card-header">
+            <h3>Live Camera Feed</h3>
           </div>
-          <div class="camera-meta">
-            <span :class="{ 'camera-meta-active': cameraInfo.active }">
-              {{ cameraIsStreaming ? 'Streaming' : (cameraInfo.active ? 'Snapshots' : 'Idle') }}
-            </span>
-            <span v-if="cameraStreamUnavailable" class="camera-meta-warning">Primary MJPEG stream unavailable</span>
-            <span>FPS: {{ formatCameraFps(cameraInfo.fps) }}</span>
-            <span>Last frame: {{ formatCameraTimestamp(cameraLastFrame) }}</span>
-            <span>Clients: {{ cameraInfo.client_count ?? '0' }}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Movement Controls -->
-      <div class="card">
-        <div class="card-header">
-          <h3>Movement Controls</h3>
-        </div>
-        <div class="card-body">
-          <div class="movement-layout">
-            <div class="joystick-column">
-              <VirtualJoystick
-                ref="joystickRef"
-                class="joystick-component"
-                :disabled="!canMove"
-                :dead-zone="0.12"
-                @change="handleJoystickChange"
-                @end="handleJoystickEnd"
-              />
-              <small class="joystick-hint">Drag to drive • Release or tap stop to halt</small>
-            </div>
-            <div class="movement-actions">
-              <button
-                class="btn btn-danger stop-button"
-                :disabled="!isControlUnlocked"
-                @click="handleStopButton"
+          <div class="card-body">
+            <div class="camera-feed" :class="{ 'camera-feed-error': cameraError }">
+              <img
+                v-if="cameraDisplaySource"
+                :src="cameraDisplaySource"
+                alt="Live mower camera feed"
+                class="camera-frame"
+                :class="{ 'camera-frame--stream': cameraIsStreaming }"
+                @load="handleCameraStreamLoad"
+                @error="handleCameraStreamError"
               >
-                🛑 Stop Motors
-              </button>
-              <div class="movement-readout">
-                <span>Linear: {{ formatCommandValue(activeDriveVector.linear) }}</span>
-                <span>Angular: {{ formatCommandValue(activeDriveVector.angular) }}</span>
+              <div v-else class="camera-placeholder">
+                <p>{{ cameraStatusMessage }}</p>
+                <button
+                  v-if="cameraError"
+                  class="btn btn-sm btn-secondary"
+                  @click="retryCameraFeed"
+                >
+                  Retry
+                </button>
               </div>
-              <div v-if="joystickEngaged" class="movement-status active">Joystick engaged</div>
-              <div v-else class="movement-status">Joystick idle</div>
+              <div class="camera-badge" :class="`camera-badge--${cameraModeBadge.tone}`">
+                {{ cameraModeBadge.label }}
+              </div>
+            </div>
+            <div class="camera-meta">
+              <span :class="{ 'camera-meta-active': cameraInfo.active }">
+                {{ cameraIsStreaming ? 'Streaming' : (cameraInfo.active ? 'Snapshots' : 'Idle') }}
+              </span>
+              <span v-if="cameraStreamUnavailable" class="camera-meta-warning">Primary MJPEG stream unavailable</span>
+              <span>FPS: {{ formatCameraFps(cameraInfo.fps) }}</span>
+              <span>Last frame: {{ formatCameraTimestamp(cameraLastFrame) }}</span>
+              <span>Clients: {{ cameraInfo.client_count ?? '0' }}</span>
             </div>
           </div>
+        </div>
+
+        <!-- Movement Controls (Joystick) -->
+        <div class="card control-card">
+          <div class="card-header">
+            <h3>Movement Controls</h3>
+          </div>
+          <div class="card-body">
+            <div class="movement-layout">
+              <div class="joystick-column">
+                <VirtualJoystick
+                  ref="joystickRef"
+                  class="joystick-component"
+                  :disabled="!canMove"
+                  :dead-zone="0.12"
+                  @change="handleJoystickChange"
+                  @end="handleJoystickEnd"
+                />
+                <small class="joystick-hint">Drag to drive • Release or tap stop to halt</small>
+              </div>
+              <div class="movement-actions">
+                <button
+                  class="btn btn-danger stop-button"
+                  :disabled="!isControlUnlocked"
+                  @click="handleStopButton"
+                >
+                  🛑 Stop Motors
+                </button>
+                <div class="movement-readout">
+                  <span>Linear: {{ formatCommandValue(activeDriveVector.linear) }}</span>
+                  <span>Angular: {{ formatCommandValue(activeDriveVector.angular) }}</span>
+                </div>
+                <div v-if="joystickEngaged" class="movement-status active">Joystick engaged</div>
+                <div v-else class="movement-status">Joystick idle</div>
+              </div>
+            </div>
 
           <div class="speed-control">
             <label>Speed: {{ speedLevel }}%</label>
@@ -237,6 +239,7 @@
               step="10"
               class="speed-slider"
             >
+          </div>
           </div>
         </div>
       </div>
@@ -2093,6 +2096,63 @@ onUnmounted(() => {
   margin-top: 0.5rem;
 }
 
+/* Side-by-side stream and control layout */
+.stream-and-control-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.camera-card {
+  grid-column: 1;
+}
+
+.control-card {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+}
+
+.control-card .card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+/* Responsive: stack on smaller screens */
+@media (max-width: 1400px) {
+  .stream-and-control-container {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .camera-card {
+    grid-column: 1;
+  }
+
+  .control-card {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 768px) {
+  .stream-and-control-container {
+    grid-template-columns: 1fr;
+  }
+
+  .joystick-component {
+    width: 180px;
+    height: 180px;
+  }
+
+  .movement-layout {
+    flex-direction: column;
+    align-items: center;
+  }
+}
+
 .mowing-controls, .system-controls {
   display: flex;
   gap: 1rem;
@@ -2104,7 +2164,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 240px;
+  min-height: 320px;
+  aspect-ratio: 4 / 3;
   background: #000;
   border-radius: 6px;
   overflow: hidden;
