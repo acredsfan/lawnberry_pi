@@ -152,6 +152,9 @@ corrupts the BNO085 sensor state and requires a power cycle.
 
 ## Motor / Navigation Direction Conventions
 
+- **Motor Wiring Note**: Physical motors are wired with left/right swapped at MDDRC10 level.
+  Navigation service swaps left_speed/right_speed assignments to compensate in both blended and tank-turn modes.
+  RoboHAT arcade mix also inverts the sign: `angular = -(left_norm - right_norm) / 2.0`
 - `steer_us > 1500µs` → right turn (CW physically)
 - `steer_us < 1500µs` → left turn (CCW physically)
 - RoboHAT serial command: `pwm,<steer_us>,<throttle_us>`

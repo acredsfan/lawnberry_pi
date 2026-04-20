@@ -519,15 +519,17 @@ class NavigationService:
                     )
                 # TANK TURN: counter-rotate wheels in place to point toward
                 # the waypoint.  One-wheel turns can't overcome grass friction.
-                # Sign convention: steer<1500 → CW turn (increases heading).
-                # turn_sign > 0 means we need CW → left > right → angular < 0 → steer < 1500.
+                # Sign convention: turn_sign > 0 means we need CW (right).
+                # Note: 2026-04-20 motor direction inversion fix - left/right are swapped at motor driver,
+                # so we swap the assignment here to match blended mode.
                 turn_speed = min(self.max_speed, 0.5 + _stall_boost)
-                left_speed = turn_sign * turn_speed
-                right_speed = -turn_sign * turn_speed
+                right_speed = turn_sign * turn_speed
+                left_speed = -turn_sign * turn_speed
             else:
                 _tank_turn_start = None  # reset watchdog when no longer in tank mode
                 # BLENDED: proportional turn with forward movement.
-                # Positive turn_effort → CW needed → left > right (same sign convention as TANK).
+                # Note: 2026-04-20 motor direction inversion fix - left/right are swapped
+                # at the motor driver level, so we compute right_speed and left_speed in opposite order.
                 turn_effort = max(-1.0, min(1.0, heading_error / 45.0))
                 forward_speed = base_speed
                 # Gentle taper: full speed at 0°, 70% at 60°
@@ -543,16 +545,17 @@ class NavigationService:
                 # Floor so motor controller dead zone is always overcome
                 forward_speed = max(forward_speed, 0.3)
 
-                left_speed = forward_speed + turn_effort * forward_speed
-                right_speed = forward_speed - turn_effort * forward_speed
+                # SWAPPED: Due to motor wiring, send left commands to right and vice versa
+                right_speed = forward_speed + turn_effort * forward_speed
+                left_speed = forward_speed - turn_effort * forward_speed
 
                 # In thick grass single-wheel pivots (one wheel stopped) cause
                 # bogging.  Ensure both wheels keep at least 20% forward speed.
                 _inner_min = forward_speed * 0.2
-                if turn_effort > 0:   # CW turn — right is inner wheel
-                    right_speed = max(right_speed, _inner_min)
-                elif turn_effort < 0:  # CCW turn — left is inner wheel
+                if turn_effort > 0:   # CW turn — right is inner wheel (now left due to swap)
                     left_speed = max(left_speed, _inner_min)
+                elif turn_effort < 0:  # CCW turn — left is inner wheel (now right due to swap)
+                    right_speed = max(right_speed, _inner_min)
 
             # Clamp speeds
             left_speed = max(-self.max_speed, min(self.max_speed, left_speed))
