@@ -179,6 +179,14 @@ class NavigationService:
         self.last_position: Optional[Position] = None
         self._mission_execution_active = False
         
+        # Progressive stiffness detection for stuck motor diagnosis
+        self._stiffness_test_active = False
+        self._stiffness_test_start_time: Optional[float] = None
+        self._stiffness_test_effort = 0.1  # Start with 10% turn effort
+        self._stiffness_test_effort_step = 0.05  # Increase by 5% every step
+        self._stiffness_test_max_effort = 1.0  # Max 100% turn effort
+        self._stiffness_test_stuck_threshold = 0.3  # Heading change < 0.3° in 2 seconds = stuck
+        
     _instance: Optional["NavigationService"] = None
 
     @classmethod

@@ -821,14 +821,19 @@ class RoboHATService:
     
     @staticmethod
     def _mix_arcade_to_pwm(left_speed: float, right_speed: float) -> tuple[int, int]:
-        """Convert differential wheel speeds into steer/throttle PWM microseconds."""
+        """Convert differential wheel speeds into steer/throttle PWM microseconds.
+        
+        Note: Navigation service sends left/right variables in swapped order
+        (due to MDDRC10 motor driver physical wiring inversion). This arcade mix
+        inverts the angular calculation to compensate.
+        """
         max_input = max(1.0, abs(left_speed), abs(right_speed))
         left_norm = left_speed / max_input
         right_norm = right_speed / max_input
 
         linear = (left_norm + right_norm) / 2.0
-        # Standard arcade mix formula
-        angular = (left_norm - right_norm) / 2.0
+        # INVERTED arcade formula to match navigation's swapped left/right semantics
+        angular = (right_norm - left_norm) / 2.0
 
         throttle_us = RoboHATService._scale_to_pwm(linear)
         steer_us = RoboHATService._scale_to_pwm(angular, span=350)
