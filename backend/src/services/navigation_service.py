@@ -763,8 +763,8 @@ class NavigationService:
             raw_yaw = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
             # BNO085 Game Rotation Vector uses ZYX aerospace convention (right-hand, z-up):
             # positive yaw = CCW rotation.  Navigation and GPS bearings use compass convention:
-            # North=0°, CW=increasing.  Negate raw_yaw to convert, then apply mounting offset.
-            adjusted_yaw = (-raw_yaw + self._imu_yaw_offset) % 360.0
+            # North=0°, CW=increasing.  Mount offset corrects for 180° physical reversal.
+            adjusted_yaw = (raw_yaw + self._imu_yaw_offset) % 360.0
             # Glitch rejection: extreme motor vibration can cause momentary gyroscope spikes.
             # Max realistic turn rate: max_speed (0.8 m/s) × 2 / wheel_base (0.5 m) ≈ 183°/s.
             # At 5 Hz updates that is ≈37°/update; reject any jump larger than 60° as a

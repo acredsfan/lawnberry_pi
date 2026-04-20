@@ -1,6 +1,6 @@
 {
-  "version": 480,
-  "last_modified": "2026-04-20 01:01:07.952773+00:00",
+  "version": 502,
+  "last_modified": "2026-04-20 02:19:50.663902+00:00",
   "hardware": {
     "sim_mode": true,
     "robohat_port": null
@@ -15,7 +15,7 @@
     "stream_enabled": true,
     "persist_enabled": true,
     "retention_days": 30,
-    "cadence_hz": 7,
+    "cadence_hz": 3,
     "latency_targets": {
       "pi5_ms": 240,
       "pi4b_ms": 340
