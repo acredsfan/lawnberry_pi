@@ -448,6 +448,17 @@ class NavigationService:
                 heading_wait_start = None
 
             heading_error = (heading_to_target - current_heading + 180) % 360 - 180
+            
+            # DEBUG: Log heading control every 2 seconds
+            _now = time.monotonic()
+            if _now - _last_nav_log > 2.0:
+                logger.info(
+                    "NAV_CONTROL: target_bearing=%.1f° current_heading=%.1f° error=%.1f° | "
+                    "tank_mode=%s in_turn=%s",
+                    heading_to_target, current_heading, heading_error,
+                    _in_tank_mode, (abs(heading_error) > 10),
+                )
+                _last_nav_log = _now
 
             # --- Stall detection: if heading barely changes while we command a
             # turn, progressively boost motor power to overcome grass/friction.
@@ -765,6 +776,16 @@ class NavigationService:
             # positive yaw = CCW rotation.  Navigation and GPS bearings use compass convention:
             # North=0°, CW=increasing.  Negate raw_yaw to convert, then apply mounting offset.
             adjusted_yaw = (-raw_yaw + self._imu_yaw_offset) % 360.0
+            
+            # Log raw and adjusted yaw for diagnostic purposes
+            _log_imu_now = time.monotonic()
+            if _log_imu_now - getattr(self, '_last_imu_log', 0) > 5.0:
+                logger.info(
+                    "IMU heading: raw_zyx=%.1f° adjusted_compass=%.1f° offset=%.1f°",
+                    raw_yaw, adjusted_yaw, self._imu_yaw_offset
+                )
+                self._last_imu_log = _log_imu_now
+            
             # Glitch rejection: extreme motor vibration can cause momentary gyroscope spikes.
             # Max realistic turn rate: max_speed (0.8 m/s) × 2 / wheel_base (0.5 m) ≈ 183°/s.
             # At 5 Hz updates that is ≈37°/update; reject any jump larger than 60° as a
