@@ -241,26 +241,33 @@ START: What are you doing?
 
 Skills are shorter-term guidance than agents. Use when you need a **process checklist** or **specialized hardening pass**.
 
-### Navigation Skills
-- `navigation-hardening-pass` — Hardening checklist for navigation work
-- `mission-recovery-pass` — Recovery semantics and persistence validation
+### Navigation & Mission Skills
+- `navigation-hardening-pass` — Hardening checklist for navigation work (feedback audit, waypoint validation, obstacle gating)
+- `mission-recovery-pass` — Recovery semantics and persistence validation (safe restart, paused recovery behavior)
 
 ### Control & Hardware Skills
-- `control-camera-regression-review` — Manual control + camera paths (USB, watchdog, responsiveness)
-- `hardware-safety-reviewer` — Safety audit for hardware-sensitive changes
+- `control-camera-regression-review` — Manual control + camera paths (RoboHAT USB, watchdog, joystick, MJPEG fallback)
+- `hardware-safety-reviewer` — Safety audit for hardware-sensitive changes (motor PWM, blade safety, E-stop, RoboHAT)
 
-### System Skills
-- `runtime-audit-and-fix` — Contract alignment (ports, startup, systemd)
-- `runtime-contract-audit` — Drift detection across ports, scripts, config
-- `subsystem-hardening-orchestration` — Coordinate hardening across nav/mission/control/AI
+### System & Runtime Skills
+- `runtime-audit-and-fix` — Contract alignment (ports, startup behavior, systemd, proxies)
+- `runtime-contract-audit` — Drift detection across ports, scripts, config, and docs
+- `subsystem-hardening-orchestration` — Coordinate hardening across nav/mission/control/AI subsystems
+
+### Documentation & Code Quality Skills
+- `maintainer-doc-sync` — Keep docs synchronized when implementation changes (runtime, hardware scope, subsystem maturity)
+- `maintainer-reentry` — Re-entry workflow after time away (read docs first, runtime ports, hardware baseline)
+- `maintenance-orchestration` — Choose the right specialist workflow for multi-step tasks
 
 ### Development Skills
-- `safe-change-delivery` — Change delivery with re-entry, investigation, sync, validation
+- `safe-change-delivery` — Change delivery with re-entry, investigation, docs sync, and validation (also covers hardware-aware guardrails)
 - `ai-model-quality-pass` — AI/ML result quality without backend contract breaks
-- `sim-hardware-validation` — SIM_MODE validation vs hardware
 
-### Meta Skills
-- `maintenance-orchestration` — Choose specialist workflow for multi-step tasks
+### Testing & Validation Skills
+- `sim-hardware-validation` — SIM_MODE validation vs hardware (check .env and config, test-first workflow, hardware preflight)
+
+**Meta skill:**
+- Use skills in combination: e.g., "Let's use safe-change-delivery for this refactor" guides re-entry → scoped investigation → implementation → doc sync → validation
 
 ---
 
