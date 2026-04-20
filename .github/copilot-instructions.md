@@ -145,8 +145,10 @@ corrupts the BNO085 sensor state and requires a power cycle.
   This is **opposite** to compass convention (CW = increasing bearing).
 - The correct heading formula is: `adjusted_yaw = (-raw_yaw + imu_yaw_offset_degrees) % 360.0`
   (note the **negation** of raw_yaw — without it, CW turns decrease heading and navigation diverges)
-- `imu_yaw_offset_degrees: 180.0` in `config/hardware.yaml` — corrects mounting orientation,
-  not convention. Do not change it when fixing turn direction bugs.
+- `imu_yaw_offset_degrees: 0.0` in `config/hardware.yaml` — the IMU is forward-facing and does
+  not require mounting offset. The formula `(-raw_yaw + offset) % 360` alone handles the ZYX→compass
+  convention conversion. **Do not change this value without understanding the heading oscillation root
+  cause.** A 180° offset would invert all directions and cause navigation convergence failure.
 
 ## Motor / Navigation Direction Conventions
 
