@@ -46,6 +46,21 @@ Python 3.11 (backend), TypeScript + Vue 3 (frontend): Follow standard convention
 - 002-complete-engineering-plan: Added Python 3.11.x (backend), TypeScript (frontend - existing) + FastAPI, Uvicorn, Pydantic v2, asyncio, python-periphery, lgpio, pyserial, websockets, Vue 3 (existing), Vite, Pinia
 - 001-integrate-hardware-and: Added Python 3.11 (backend), TypeScript + Vue 3 (frontend) + FastAPI, Uvicorn, Pydantic v2, websockets, Vue 3 + Vite, Pinia, Leaflet/Google Maps SDK
 
+## Workflow Guidance
+
+**New to this project or returning after time away?**
+Read these in order:
+1. `.github/WORKFLOW_GUIDE.md` — **START HERE** — Maps every task type to the right agent/mode/skill
+2. `docs/developer-toolkit.md` — Architecture, key files, subsystems, runtime ports
+3. `.github/agents/ORCHESTRATOR-QUICK-START.md` — How to use intelligent task routing
+
+**Debugging a specific issue?**
+→ Use `/agent` and select **LawnBerry Workflow Orchestrator**
+→ It auto-detects the problem type and routes to the right specialist
+
+**Writing new code or tests?**
+→ Use `shift+tab` to switch Chat Modes (tests.software, webui.feature, sensors.hardware, etc.)
+
 ## Reasoning for problem solving approach
 - Think like a developer when solving this issue, when you think you know how to attack the problem, think it through before deploying and make targeted/precise edits to avoid unintentionally causing issues with another part of the program.
 - If you are unsure about something, ask for clarification or more information.
