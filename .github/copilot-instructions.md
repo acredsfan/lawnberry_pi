@@ -1,6 +1,6 @@
 # lawnberry Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2025-09-28
+Auto-generated from all feature plans. Last updated: 2026-04-20
 
 ## Active Technologies
 - Python 3.11 (backend), TypeScript + Vue 3 (frontend) + FastAPI, Uvicorn, Pydantic v2, websockets, Vue 3 + Vite, Pinia, Leaflet/Google Maps SDK (001-integrate-hardware-and)
@@ -153,8 +153,15 @@ corrupts the BNO085 sensor state and requires a power cycle.
 ## Motor / Navigation Direction Conventions
 
 - **Motor Wiring Note**: Physical motors are wired with left/right swapped at MDDRC10 level.
-  Navigation service swaps left_speed/right_speed assignments to compensate in both blended and tank-turn modes.
-  RoboHAT arcade mix also inverts the sign: `angular = -(left_norm - right_norm) / 2.0`
+  **Two-part compensation exists:**
+  1. Navigation service swaps left_speed/right_speed assignments in both blended and tank-turn modes (lines 520-560)
+  2. RoboHAT arcade mix inverts the sign: `angular = -(left_norm - right_norm) / 2.0` (line 835 of robohat_service.py)
+  
+  **CRITICAL**: These two pieces work together. Removing or changing only ONE breaks the system:
+  - If you remove arcade inversion but keep navigation swap → joystick turns backward
+  - If you remove navigation swap but keep arcade inversion → navigation turns backward
+  - Both must be kept in sync. Changes to motor call arguments require changes to both
+  
 - `steer_us > 1500µs` → right turn (CW physically)
 - `steer_us < 1500µs` → left turn (CCW physically)
 - RoboHAT serial command: `pwm,<steer_us>,<throttle_us>`
@@ -162,6 +169,100 @@ corrupts the BNO085 sensor state and requires a power cycle.
 - When diagnosing motor issues: distinguish *what the code sends* (serial log `[USB]`) from
   *what the hardware does* (physical observation). `serial_connected: False` in software state
   does NOT mean the device is physically absent — it may mean USB error -71 (bad cable).
+
+## Motor Control Debugging Flowchart
+
+When the mower exhibits incorrect motor behavior (turns backward, asymmetric wheels, wiggling), follow this systematic approach:
+
+**1. Test Joystick Control First (Isolates Code Path)**
+```bash
+# Right turn (should have left_motor > right_motor)
+curl -X POST http://localhost:8081/api/v2/control/drive \
+  -H "Content-Type: application/json" \
+  -d '{"throttle": 0.0, "turn": 0.5}'
+
+# Response should show: {"left_motor_speed":0.5,"right_motor_speed":-0.5,"safety_status":"OK"}
+# If backward: left < right, then problem is in arcade mix or robohat
+
+# Left turn (should have right_motor > left_motor)
+curl -X POST http://localhost:8081/api/v2/control/drive \
+  -H "Content-Type: application/json" \
+  -d '{"throttle": 0.0, "turn": -0.5}'
+```
+
+**2. Test Motor Status (Hardware Connection)**
+```bash
+curl -s http://localhost:8081/api/v2/hardware/robohat | grep -o '"motor_status":"[^"]*"'
+# Should show "idle" or current PWM values, NOT an error
+```
+
+**3. Check Navigation Logs During Mission (Isolated Code Path)**
+```bash
+# Run mission and watch these logs:
+tail -f /home/pi/lawnberry/logs/lawnberry.log | grep "NAV_CONTROL"
+# Look for: "target_bearing=XXX current_heading=YYY error=±Z"
+# If error direction is wrong (turning away from target), navigation path has issue
+```
+
+**4. Diagnose the Root Cause**
+- **Joystick inverted, Navigation correct**: Problem in arcade mix inversion (line 835 robohat_service.py) or RoboHAT
+- **Navigation inverted, Joystick correct**: Problem in navigation's left/right swap (lines 520-560 navigation_service.py)
+- **Both inverted**: Both layers have the wrong sign — look for recent changes that modified both simultaneously
+- **Joystick correct, Mission wiggles**: Navigation swap is wrong but arcade mix is right — asymmetric compensation
+
+**Remember**: Never change one compensation layer without verifying the other still works.
+
+## Backend Startup Gotchas with Motor Changes
+
+Motor control code runs during systemd service startup (navigation service initialization). Changes that cause hangs:
+
+- **Swapping motor argument order** in `send_motor_command()` calls — may break initialization if navigation service calls motor functions during `__init__`
+- **Changing function signatures** in `RoboHATService.send_motor_command()` — lifespan setup may parse or call this before full backend is ready
+- **Adding new motor API endpoints** — ensure they don't require navigation service state that isn't initialized yet
+
+**Safe Pattern for Motor Changes:**
+1. Run `pytest tests/test_robohat_service.py tests/test_navigation_service.py -xvs` first
+2. If tests pass, restart backend: `sudo systemctl restart lawnberry-backend && sleep 5 && curl http://localhost:8081/api/v2/status`
+3. If status endpoint hangs (no response after 5s), backend is stuck in startup — check recent motor changes immediately
+
+## Hardware Diagnostics Quick Reference
+
+**Mower not responding to turn commands?** Use this checklist:
+
+1. **Is the command reaching the hardware?**
+   ```bash
+   # Check motor status shows commands are being sent
+   curl -s http://localhost:8081/api/v2/hardware/robohat | grep -o '"watchdog_latency_ms":[0-9.]*'
+   # If > 1000ms or shows error, RoboHAT is not responding
+   ```
+
+2. **Is the command mathematically correct?**
+   ```bash
+   # Test via API and inspect the calculated speeds
+   curl -s -X POST http://localhost:8081/api/v2/control/drive \
+     -H "Content-Type: application/json" \
+     -d '{"throttle": 0.0, "turn": 0.5}'
+   # For right turn: left_motor_speed should be > right_motor_speed
+   ```
+
+3. **Is the motor physically wired correctly?**
+   - Left wheel should connect to MDDRC10 "right" port
+   - Right wheel should connect to MDDRC10 "left" port
+   - (They are swapped intentionally at the driver level)
+
+4. **Check RoboHAT serial connection:**
+   ```bash
+   ls -l /dev/robohat /dev/ttyACM0
+   # Both should exist and be readable. If missing, RoboHAT USB cable may be loose
+   ```
+
+5. **Check motor logs for delivery errors:**
+   ```bash
+   tail -50 /home/pi/lawnberry/logs/lawnberry.log | grep -i "motor\|pwm\|robohat"
+   # Look for "Failed to deliver motor command" or serial errors
+   ```
+
+**Key distinction**: If API returns correct speeds but motors don't move → hardware issue (cable, driver, or RoboHAT firmware). If API returns inverted speeds → code issue (one of the two compensation layers is wrong).
 
 ## Python Bytecode Cache
 
