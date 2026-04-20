@@ -541,6 +541,10 @@ class RoboHATService:
                             # the safe-state commands.
                             await self._send_safe_state_on_reconnect()
                             self.status.serial_connected = True
+                            # Start watchdog if it was never started (first-connect path
+                            # from a delayed-boot reconnect) or if it died.
+                            if self.watchdog_task is None or self.watchdog_task.done():
+                                self.watchdog_task = asyncio.create_task(self._watchdog_loop())
                             logger.info("RoboHAT reconnected on %s", candidate)
                             return
                         conn.close()
@@ -1169,9 +1173,20 @@ async def initialize_robohat_service(serial_port: Optional[str] = None, baud_rat
             svc.status.last_error or "unknown_error",
         )
 
+    # All candidates failed.  Still register the last service instance and
+    # start its read/reconnect loop so it can recover automatically when the
+    # device appears (e.g. USB enumeration delayed at boot).
     robohat_service = last_attempt
-    if candidates:
-        logger.error("Unable to initialize RoboHAT service; attempted ports: %s", ", ".join(candidates))
+    if robohat_service is not None:
+        robohat_service.running = True
+        robohat_service.read_task = asyncio.create_task(robohat_service._read_loop())
+        logger.warning(
+            "Unable to initialize RoboHAT service on any of [%s]; "
+            "background reconnect loop started — will retry every 60 s",
+            ", ".join(candidates),
+        )
+    else:
+        logger.error("Unable to initialize RoboHAT service; no candidates to try")
     return False
 
 
