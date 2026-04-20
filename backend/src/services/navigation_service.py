@@ -786,13 +786,13 @@ class NavigationService:
         )
         if imu_valid:
             raw_yaw = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
-            # BNO085 Game Rotation Vector uses ZYX aerospace convention (right-hand, z-up).
-            # In this convention, CCW rotation (looking down) increases yaw.
-            # Navigation uses compass convention: North=0°, CW=increasing (East=90°, South=180°, West=270°).
-            # Since both conventions have Z-up and measure the same physical orientation,
-            # the heading should directly map without negation when properly calibrated.
-            # Apply yaw_offset for mechanical mounting (e.g., IMU rotated 180° in enclosure).
-            adjusted_yaw = (raw_yaw + self._imu_yaw_offset) % 360.0
+            # BNO085 Game Rotation Vector uses ZYX aerospace convention (right-hand, z-up):
+            # positive yaw = CCW rotation (counter-clockwise when viewed from above).
+            # Navigation uses compass convention: North=0°, East=90°, South=180°, West=270°.
+            # Compass convention is CW-positive (clockwise: North→East→South→West).
+            # These rotational directions are OPPOSITE, so negate raw_yaw to convert.
+            # Then apply yaw_offset for mechanical mounting (e.g., IMU rotated in enclosure).
+            adjusted_yaw = (-raw_yaw + self._imu_yaw_offset) % 360.0
             
             # Log raw and adjusted yaw for diagnostic purposes
             _log_imu_now = time.monotonic()
