@@ -306,6 +306,11 @@ class NavigationService:
         # Hysteresis: prevent TANK/BLEND mode flapping near the 60° boundary.
         # Enter TANK when |error| > 70°, exit TANK when |error| < 50°.
         _in_tank_mode: bool = False
+        # Tank-turn watchdog: abort the waypoint if we spend too long in pure-rotation
+        # mode without converging.  Motor EMI on the IMU magnetometer can cause heading
+        # to oscillate indefinitely; this guard prevents eternal spinning.
+        _tank_turn_start: float | None = None
+        _TANK_TURN_TIMEOUT_S: float = 30.0
         # Grace period for motor controller USB reconnect.  When the controller
         # is transiently unavailable (USB disconnect / replug), the loop continues
         # checking safety gates rather than failing immediately.  After
@@ -483,6 +488,24 @@ class NavigationService:
                 _in_tank_mode = False
 
             if _in_tank_mode:
+                # Tank-turn watchdog: heading should converge within the timeout.
+                # EMI from motor windings can corrupt the BNO085 magnetometer and
+                # cause the heading to oscillate without ever settling on target.
+                if _tank_turn_start is None:
+                    _tank_turn_start = time.monotonic()
+                elif (time.monotonic() - _tank_turn_start) > _TANK_TURN_TIMEOUT_S:
+                    logger.error(
+                        "Tank-turn watchdog: heading not converging after %.0f s "
+                        "(last err=%.1f°, hdg=%.1f°) — aborting waypoint",
+                        _TANK_TURN_TIMEOUT_S,
+                        heading_error,
+                        current_heading,
+                    )
+                    await self._deliver_stop_command(reason="tank-turn timeout")
+                    raise RuntimeError(
+                        f"Tank-turn timed out after {_TANK_TURN_TIMEOUT_S:.0f} s "
+                        "without heading convergence"
+                    )
                 # TANK TURN: counter-rotate wheels in place to point toward
                 # the waypoint.  One-wheel turns can't overcome grass friction.
                 # Sign convention: steer<1500 → CW turn (increases heading).
@@ -491,6 +514,7 @@ class NavigationService:
                 left_speed = turn_sign * turn_speed
                 right_speed = -turn_sign * turn_speed
             else:
+                _tank_turn_start = None  # reset watchdog when no longer in tank mode
                 # BLENDED: proportional turn with forward movement.
                 # Positive turn_effort → CW needed → left > right (same sign convention as TANK).
                 turn_effort = max(-1.0, min(1.0, heading_error / 45.0))
@@ -738,7 +762,25 @@ class NavigationService:
         if imu_valid:
             raw_yaw = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
             adjusted_yaw = (raw_yaw + self._imu_yaw_offset) % 360.0
-            self.navigation_state.heading = adjusted_yaw
+            # Motor EMI glitch rejection: motor winding currents disturb the BNO085
+            # magnetometer, causing sudden heading spikes during tank turns.
+            # Max realistic turn rate: max_speed (0.8 m/s) × 2 / wheel_base (0.5 m) ≈ 183°/s.
+            # At 5 Hz updates that is ≈37°/update; reject any jump larger than 60° as a
+            # magnetometer spike so it never corrupts the navigation heading controller.
+            prev_heading = self.navigation_state.heading
+            if prev_heading is not None:
+                jump = abs(((adjusted_yaw - prev_heading) + 180.0) % 360.0 - 180.0)
+                if jump > 60.0:
+                    logger.debug(
+                        "IMU heading outlier rejected: prev=%.1f° new=%.1f° (Δ=%.1f°) — "
+                        "keeping previous value",
+                        prev_heading, adjusted_yaw, jump,
+                    )
+                    # Don't update — keep the previous heading value
+                else:
+                    self.navigation_state.heading = adjusted_yaw
+            else:
+                self.navigation_state.heading = adjusted_yaw
             # Log IMU vs GPS COG discrepancy for field validation (only when COG is reliable)
             gps_cog_available = (
                 sensor_data.gps is not None
