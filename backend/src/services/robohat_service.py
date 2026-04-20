@@ -827,9 +827,8 @@ class RoboHATService:
         right_norm = right_speed / max_input
 
         linear = (left_norm + right_norm) / 2.0
-        # Steer sign is inverted to compensate for motor wiring where left/right are swapped.
-        # See navigation_service.py blended mode for the corresponding swap in left_speed/right_speed assignment.
-        angular = -(left_norm - right_norm) / 2.0
+        # Standard arcade mix formula
+        angular = (left_norm - right_norm) / 2.0
 
         throttle_us = RoboHATService._scale_to_pwm(linear)
         steer_us = RoboHATService._scale_to_pwm(angular, span=350)

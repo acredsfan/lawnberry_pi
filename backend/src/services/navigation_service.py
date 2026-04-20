@@ -683,7 +683,7 @@ class NavigationService:
                 return 0.0
             return max(-1.0, min(1.0, v / self.max_speed))
 
-        accepted = await robohat.send_motor_command(_normalize(ls), _normalize(rs), ack_timeout=1.0)
+        accepted = await robohat.send_motor_command(_normalize(rs), _normalize(ls), ack_timeout=1.0)
         if not accepted:
             raise RuntimeError("Motor command not accepted by controller")
 
