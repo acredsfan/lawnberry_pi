@@ -741,11 +741,12 @@ async def control_drive_v2(cmd: dict, request: Request):
             )
             return JSONResponse(status_code=403, content={"detail": "Emergency stop active - drive commands blocked"})
         # Compute motor speeds using arcade drive.
-        # Convention: positive turn = turn right → left wheel faster than right.
+        # RoboHAT service uses INVERTED arcade formula to compensate for MDDRC10 motor wiring.
+        # Convention: positive turn = turn right → right wheel speed < left wheel speed
         throttle = float(cmd.get("throttle", 0.0))
         turn = float(cmd.get("turn", 0.0))
-        left_speed = throttle + turn
-        right_speed = throttle - turn
+        left_speed = throttle - turn
+        right_speed = throttle + turn
         # Clamp
         max_speed_limit = 1.0
         left_speed = max(-max_speed_limit, min(max_speed_limit, left_speed))
@@ -910,9 +911,11 @@ async def control_drive_v2(cmd: dict, request: Request):
     
     if robohat and robohat.status.serial_connected:
         # Calculate differential speeds.
-        # Convention: positive turn = turn right → left wheel faster than right.
-        left_speed = throttle + turn
-        right_speed = throttle - turn
+        # RoboHAT service uses INVERTED arcade formula (right_norm - left_norm)
+        # to compensate for MDDRC10 physical wiring. Use matching formula here.
+        # Convention: positive turn = turn right → right wheel speed < left wheel speed
+        left_speed = throttle - turn
+        right_speed = throttle + turn
         
         # Clamp to max speed limit
         left_speed = max(-speed_limit, min(speed_limit, left_speed))
@@ -1360,12 +1363,13 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
     
     # Apply current effort in requested direction
     # Convert throttle/turn to left/right speeds using arcade math
+    # RoboHAT service uses INVERTED arcade formula to compensate for motor wiring
     if nav_service._stiffness_test_active:
         effort = nav_service._stiffness_test_effort
         throttle = 0.3
         turn = effort if direction == "right" else -effort
-        left_speed = throttle + turn
-        right_speed = throttle - turn
+        left_speed = throttle - turn
+        right_speed = throttle + turn
         await robohat.send_motor_command(left_speed, right_speed)
     
     return {
