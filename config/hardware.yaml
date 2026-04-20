@@ -6,7 +6,7 @@ gps:
 imu:
   type: BNO085
   port: /dev/ttyAMA4
-  yaw_offset_degrees: 180
+  yaw_offset_degrees: 0
 sensors:
   tof:
   - left
