@@ -331,7 +331,15 @@ class NavigationService:
         # mode without converging.  Motor EMI on the IMU magnetometer can cause heading
         # to oscillate indefinitely; this guard prevents eternal spinning.
         _tank_turn_start: float | None = None
-        _TANK_TURN_TIMEOUT_S: float = 30.0
+        _TANK_TURN_TIMEOUT_S: float = 45.0  # raised: inversion detector needs 8 s to fire
+        # IMU inversion detector: if error stays near ±180° during a tank turn,
+        # the IMU booted 180° off.  After _INVERSION_DETECT_S seconds, flip
+        # session_heading_alignment by 180° and reset the watchdog.
+        _error_near_180_start: float | None = None
+        _INVERSION_DETECT_S: float = 8.0
+        # "Definitely stuck" detector: if stall boost is maxed AND heading is
+        # still frozen, the mower is mechanically stuck — abort cleanly.
+        _stall_max_start: float | None = None
         # Grace period for motor controller USB reconnect.  When the controller
         # is transiently unavailable (USB disconnect / replug), the loop continues
         # checking safety gates rather than failing immediately.  After
@@ -493,13 +501,32 @@ class NavigationService:
                     if _hdg_delta < 5.0:
                         # Heading barely moved — ramp up 15% per second, cap at +60%
                         _stall_boost = min(0.6, (time.monotonic() - _stall_start) * 0.15)
+                        # "Definitely stuck": boost is maxed and heading still frozen
+                        if _stall_boost >= 0.59:
+                            if _stall_max_start is None:
+                                _stall_max_start = time.monotonic()
+                            elif (time.monotonic() - _stall_max_start) > 8.0:
+                                logger.error(
+                                    "Mower physically stuck: max turn boost for 8 s, "
+                                    "heading unchanged at %.1f° — stopping mission",
+                                    current_heading,
+                                )
+                                await self._deliver_stop_command(reason="physically stuck")
+                                raise RuntimeError(
+                                    "Mower appears physically stuck: heading did not change "
+                                    "despite maximum turn effort for 8 s"
+                                )
+                        else:
+                            _stall_max_start = None
                     else:
                         # Heading is changing — reset stall tracker
                         _stall_start = time.monotonic()
                         _stall_heading = current_heading
+                        _stall_max_start = None
             else:
                 _stall_start = None
                 _stall_heading = None
+                _stall_max_start = None
 
             # Set speed (scale by waypoint speed preference when provided)
             base_speed = self.cruise_speed
@@ -538,6 +565,34 @@ class NavigationService:
                         f"Tank-turn timed out after {_TANK_TURN_TIMEOUT_S:.0f} s "
                         "without heading convergence"
                     )
+
+                # --- IMU 180° inversion detector ---
+                # Symptom: error stays near ±180° while heading IS physically changing
+                # (stall boost is low).  This means the IMU booted pointing 180° backward.
+                # Fix: flip session_heading_alignment by 180° and reset the watchdog.
+                if abs(abs(heading_error) - 180.0) < 55.0:
+                    if _error_near_180_start is None:
+                        _error_near_180_start = time.monotonic()
+                    elif (time.monotonic() - _error_near_180_start) >= _INVERSION_DETECT_S:
+                        old_align = self._session_heading_alignment
+                        self._session_heading_alignment = (old_align + 180.0) % 360.0
+                        logger.warning(
+                            "IMU 180° inversion auto-corrected during tank turn "
+                            "(error %.1f° near ±180° for %.0f s) — "
+                            "session_align %.1f° → %.1f°",
+                            heading_error, _INVERSION_DETECT_S,
+                            old_align, self._session_heading_alignment,
+                        )
+                        # Reset watchdog and stall tracker so the corrected heading
+                        # gets a fresh convergence window.
+                        _tank_turn_start = time.monotonic()
+                        _error_near_180_start = None
+                        _stall_start = None
+                        _stall_heading = None
+                        _stall_max_start = None
+                else:
+                    _error_near_180_start = None
+
                 # TANK TURN: counter-rotate wheels in place to point toward
                 # the waypoint.  One-wheel turns can't overcome grass friction.
                 # Sign convention: turn_sign > 0 means we need CW (right).
@@ -548,6 +603,7 @@ class NavigationService:
                 left_speed = -turn_sign * turn_speed
             else:
                 _tank_turn_start = None  # reset watchdog when no longer in tank mode
+                _error_near_180_start = None  # reset inversion detector
                 # BLENDED: proportional turn with forward movement.
                 # Note: 2026-04-20 motor direction inversion fix - left/right are swapped
                 # at the motor driver level, so we compute right_speed and left_speed in opposite order.
