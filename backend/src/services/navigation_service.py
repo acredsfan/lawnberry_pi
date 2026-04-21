@@ -189,7 +189,17 @@ class NavigationService:
         self._stiffness_test_direction: str = "left"
         self._stiffness_test_last_heading: Optional[float] = None
         self._stiffness_test_last_check: Optional[float] = None
-        
+
+        # GPS-based session heading alignment (runtime-only, resets each boot).
+        # The BNO085 Game Rotation Vector uses gyro+accel only (no magnetometer);
+        # its yaw zero is arbitrary at power-on.  _imu_yaw_offset is the persistent
+        # mounting offset from hardware.yaml.  _session_heading_alignment is computed
+        # from GPS COG while driving straight and converges to remove the boot-relative
+        # yaw error.  It is NOT persisted — recomputed each session.
+        self._session_heading_alignment: float = 0.0
+        self._heading_alignment_sample_count: int = 0
+        self._gps_cog_history: list = []  # recent GPS COG values for straight-motion gate
+
     _instance: Optional["NavigationService"] = None
 
     @classmethod
@@ -792,14 +802,14 @@ class NavigationService:
             # Compass convention is CW-positive (clockwise: North→East→South→West).
             # These rotational directions are OPPOSITE, so negate raw_yaw to convert.
             # Then apply yaw_offset for mechanical mounting (e.g., IMU rotated in enclosure).
-            adjusted_yaw = (-raw_yaw + self._imu_yaw_offset) % 360.0
-            
+            adjusted_yaw = (-raw_yaw + self._imu_yaw_offset + self._session_heading_alignment) % 360.0
+
             # Log raw and adjusted yaw for diagnostic purposes
             _log_imu_now = time.monotonic()
             if _log_imu_now - getattr(self, '_last_imu_log', 0) > 5.0:
                 logger.info(
-                    "IMU heading: raw_zyx=%.1f° adjusted_compass=%.1f° offset=%.1f°",
-                    raw_yaw, adjusted_yaw, self._imu_yaw_offset
+                    "IMU heading: raw_zyx=%.1f° adjusted_compass=%.1f° mounting_offset=%.1f° session_align=%.1f°",
+                    raw_yaw, adjusted_yaw, self._imu_yaw_offset, self._session_heading_alignment,
                 )
                 self._last_imu_log = _log_imu_now
             
@@ -821,7 +831,7 @@ class NavigationService:
                     self.navigation_state.heading = adjusted_yaw
             else:
                 self.navigation_state.heading = adjusted_yaw
-            # Log IMU vs GPS COG discrepancy for field validation (only when COG is reliable)
+            # GPS COG comparison and session heading alignment update
             gps_cog_available = (
                 sensor_data.gps is not None
                 and sensor_data.gps.heading is not None
@@ -829,17 +839,48 @@ class NavigationService:
             )
             if gps_cog_available:
                 cog = float(sensor_data.gps.heading)  # type: ignore[union-attr]
-                delta = (adjusted_yaw - cog + 180.0) % 360.0 - 180.0
+                # delta = how much alignment needs to increase (positive = IMU reads too low)
+                delta = (cog - adjusted_yaw + 180.0) % 360.0 - 180.0
                 logger.debug(
-                    "HDG: raw_imu=%.1f° adjusted=%.1f° gps_cog=%.1f° delta=%.1f°",
-                    raw_yaw, adjusted_yaw, cog, delta,
+                    "HDG: raw_imu=%.1f° adjusted=%.1f° gps_cog=%.1f° delta=%.1f° session_align=%.1f°",
+                    raw_yaw, adjusted_yaw, cog, delta, self._session_heading_alignment,
                 )
-                if abs(delta) > 45.0:
+                if abs(delta) > 45.0 and self._heading_alignment_sample_count < 10:
                     logger.warning(
                         "HDG mismatch: adjusted IMU=%.1f° vs GPS COG=%.1f° (delta=%.1f°) — "
-                        "check imu_yaw_offset_degrees in hardware.yaml",
-                        adjusted_yaw, cog, delta,
+                        "session alignment converging (samples=%d)",
+                        adjusted_yaw, cog, delta, self._heading_alignment_sample_count,
                     )
+
+                # Track GPS COG stability for straight-motion detection.
+                # Alignment is only valid when GPS COG is stable (not turning).
+                self._gps_cog_history.append(cog)
+                if len(self._gps_cog_history) > 5:
+                    self._gps_cog_history.pop(0)
+
+                going_straight = False
+                if len(self._gps_cog_history) >= 3:
+                    sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
+                    cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
+                    cog_mean = math.degrees(math.atan2(sin_c, cos_c))
+                    max_dev = max(
+                        abs(((c - cog_mean) + 180) % 360 - 180) for c in self._gps_cog_history
+                    )
+                    going_straight = max_dev < 8.0
+
+                if going_straight:
+                    # Clamp delta to ±90° to prevent GPS glitches from corrupting alignment
+                    clamped_delta = max(-90.0, min(90.0, delta))
+                    # Slow EMA update; converges in ~20 straight-line samples for 180° error
+                    self._session_heading_alignment += 0.1 * clamped_delta
+                    self._heading_alignment_sample_count += 1
+                    if self._heading_alignment_sample_count % 10 == 0:
+                        logger.info(
+                            "HDG session alignment: %.1f° (delta=%.1f°, samples=%d)",
+                            self._session_heading_alignment,
+                            clamped_delta,
+                            self._heading_alignment_sample_count,
+                        )
         elif (
             sensor_data.gps is not None
             and sensor_data.gps.heading is not None
