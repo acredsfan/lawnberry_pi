@@ -80,10 +80,8 @@ async def test_send_motor_command_forces_rc_disable(monkeypatch):
         svc._rc_enabled = False
         return True
 
-    async def fake_wait_for_pwm_ack(timeout: float = 0.35) -> bool:  # noqa: ARG001
+    async def fake_wait_for_pwm_ack(timeout: float = 0.35, _baseline: int | None = None) -> bool:  # noqa: ARG001
         return True
-
-    # Prevent the maintain loop from interfering
     svc._usb_control_requested = True
     monkeypatch.setattr(svc, "_send_line", fake_send_line)
     monkeypatch.setattr(svc, "_wait_for_usb_control", fake_wait_for_usb_control)
@@ -109,7 +107,7 @@ async def test_send_motor_command_fails_when_pwm_ack_rejected(monkeypatch):
     async def fake_wait_for_usb_control(timeout: float = 0.75) -> bool:  # noqa: ARG001
         return True
 
-    async def fake_wait_for_pwm_ack(timeout: float = 0.35) -> bool:  # noqa: ARG001
+    async def fake_wait_for_pwm_ack(timeout: float = 0.35, _baseline: int | None = None) -> bool:  # noqa: ARG001
         svc.status.last_error = "[USB] Invalid: pwm,1500,1500"
         return False
 
@@ -541,6 +539,7 @@ async def test_wait_for_pwm_ack_uses_count_not_watchdog_echo(monkeypatch):
     async def inject_ack_then_status() -> None:
         await asyncio.sleep(0.05)
         svc._pwm_ack_count += 1
+        svc._pwm_ack_event.set()  # mirrors what _process_line does
         svc.status.last_watchdog_echo = "status"  # STATUS arrives after ack
 
     import asyncio

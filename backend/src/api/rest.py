@@ -35,6 +35,11 @@ legacy_router.add_api_route("/ws/control", telemetry.websocket_control_handshake
 _planning_jobs_store: list[dict[str, Any]] = []
 _planning_job_counter = 0
 
+# Rate-limit for high-frequency drive audit logs (accepted commands only).
+# Blocked / fault logs are always written synchronously regardless of this gate.
+_last_drive_audit_at: float = 0.0
+_DRIVE_AUDIT_SAMPLE_INTERVAL_S: float = 1.0
+
 
 class SystemSettings(BaseModel):
     timezone: str = "UTC"
@@ -808,11 +813,16 @@ async def control_drive_v2(cmd: dict, request: Request):
 
     if motion_requested and robohat and robohat.status.serial_connected and os.getenv("SIM_MODE", "0") == "0":
         try:
-            from ..core.config_loader import ConfigLoader
             from ..services.navigation_service import NavigationService
 
             telemetry_snapshot = await websocket_hub.get_last_telemetry(max_age_s=0.5)
-            _, limits = ConfigLoader().get()
+            # Use the shared app.state loader so hot-reloaded limits are always fresh.
+            # Fall back to constructing a loader (test environments that skip startup lifespan).
+            _loader = getattr(request.app.state, "config_loader", None)
+            if _loader is None:
+                from ..core.config_loader import ConfigLoader
+                _loader = ConfigLoader()
+            _, limits = _loader.get()
             max_position_accuracy_m = NavigationService.get_instance().max_waypoint_accuracy_m
 
             source = telemetry_snapshot.get("source")
@@ -963,7 +973,10 @@ async def control_drive_v2(cmd: dict, request: Request):
             timestamp=timestamp.isoformat()
         )
     
-    # Audit the command
+    # Audit the command — sampled at 1 Hz for accepted drive commands to avoid
+    # blocking the event loop with a synchronous SQLite write on every 120 ms
+    # joystick pulse.  Blocked / fault audit entries are always written (see above).
+    global _last_drive_audit_at
     try:
         details_cmd = cmd if isinstance(cmd, dict) else cmd.model_dump()
     except Exception:
@@ -976,7 +989,13 @@ async def control_drive_v2(cmd: dict, request: Request):
         if principal and "principal" not in details_cmd:
             details_cmd["principal"] = principal
         details_cmd["max_speed_limit"] = speed_limit
-    persistence.add_audit_log("control.drive.v2", details={"command": details_cmd, "response": response.model_dump(mode="json")})
+    _now = time.monotonic()
+    if _now - _last_drive_audit_at >= _DRIVE_AUDIT_SAMPLE_INTERVAL_S:
+        _last_drive_audit_at = _now
+        _audit_details = {"command": details_cmd, "response": response.model_dump(mode="json")}
+        asyncio.create_task(
+            asyncio.to_thread(persistence.add_audit_log, "control.drive.v2", None, None, _audit_details)
+        )
     
     return response
 

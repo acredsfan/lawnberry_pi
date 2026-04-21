@@ -123,6 +123,10 @@ class RoboHATService:
         # counter avoids the race where a [STATUS] message overwrites
         # last_watchdog_echo between the PWM send and the ack-poll iteration.
         self._pwm_ack_count: int = 0
+        # Event set by _process_line when a PWM ack arrives; cleared in
+        # send_motor_command before each new command so _wait_for_pwm_ack can
+        # await notification instead of polling at a fixed 20 ms interval.
+        self._pwm_ack_event: asyncio.Event = asyncio.Event()
         # Reconnect coordination — prevents concurrent reconnect tasks and enables
         # periodic retry after the initial attempt window is exhausted.
         self._reconnecting: bool = False
@@ -297,19 +301,36 @@ class RoboHATService:
             self.status.last_error = str(exc)
             return False
 
-    async def _wait_for_pwm_ack(self, *, timeout: float = 1.0) -> bool:
-        """Wait for the firmware to acknowledge or reject the last PWM command."""
+    async def _wait_for_pwm_ack(self, *, timeout: float = 1.0, _baseline: Optional[int] = None) -> bool:
+        """Wait for the firmware to acknowledge or reject the last PWM command.
+
+        Uses asyncio.Event notification (set by _process_line on ack) instead of
+        fixed-interval polling so response latency equals the actual serial round-trip
+        rather than the poll interval.  _baseline should be the _pwm_ack_count value
+        captured (in send_motor_command) AFTER clearing the event and BEFORE sending
+        the command, so stale acks from previous commands are not counted.
+        """
         deadline = time.monotonic() + timeout
         starting_errors = self.status.error_count
-        starting_count = self._pwm_ack_count
+        starting_count = self._pwm_ack_count if _baseline is None else _baseline
 
-        while time.monotonic() < deadline:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             last_error = (self.status.last_error or "").lower()
             if self.status.error_count > starting_errors and "pwm" in last_error:
                 return False
             if self._pwm_ack_count > starting_count:
                 return True
-            await asyncio.sleep(0.02)
+            # Clear then re-check to close the TOCTOU window before waiting.
+            self._pwm_ack_event.clear()
+            if self._pwm_ack_count > starting_count:
+                return True
+            try:
+                await asyncio.wait_for(self._pwm_ack_event.wait(), timeout=min(remaining, 0.5))
+            except asyncio.TimeoutError:
+                pass
 
         self.status.last_error = self.status.last_error or "pwm_ack_timeout"
         logger.warning("Timed out waiting for RoboHAT PWM acknowledgement")
@@ -596,7 +617,7 @@ class RoboHATService:
                     )
                     asyncio.create_task(self._reconnect())
 
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(0.005)  # 5 ms — lower floor for ack detection
 
             except asyncio.CancelledError:
                 break
@@ -683,6 +704,7 @@ class RoboHATService:
         if line_lower.startswith("[usb] pwm"):
             self._last_status_at = time.monotonic()
             self._pwm_ack_count += 1
+            self._pwm_ack_event.set()
             self.status.motor_controller_ok = True
             self.status.last_watchdog_echo = "pwm_ack"
             self.status.last_error = None
@@ -739,9 +761,13 @@ class RoboHATService:
             return False
 
         steer_us, throttle_us = self._mix_arcade_to_pwm(left_speed, right_speed)
+        # Clear ack event and capture baseline BEFORE sending so _wait_for_pwm_ack
+        # only counts acks that arrive in response to this specific command.
+        self._pwm_ack_event.clear()
+        _ack_baseline = self._pwm_ack_count
         ok = await self._send_line(f"pwm,{steer_us},{throttle_us}")
         if ok:
-            ok = await self._wait_for_pwm_ack(timeout=ack_timeout)
+            ok = await self._wait_for_pwm_ack(timeout=ack_timeout, _baseline=_ack_baseline)
 
         if ok:
             self.status.motor_controller_ok = True
