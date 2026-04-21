@@ -4,11 +4,13 @@ Path planning, navigation, and sensor fusion with safety constraints
 """
 
 import asyncio
+import json
 import logging
 import math
 import os
 import time
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core.config_loader import ConfigLoader
@@ -190,15 +192,17 @@ class NavigationService:
         self._stiffness_test_last_heading: Optional[float] = None
         self._stiffness_test_last_check: Optional[float] = None
 
-        # GPS-based session heading alignment (runtime-only, resets each boot).
+        # GPS-based session heading alignment.
         # The BNO085 Game Rotation Vector uses gyro+accel only (no magnetometer);
         # its yaw zero is arbitrary at power-on.  _imu_yaw_offset is the persistent
         # mounting offset from hardware.yaml.  _session_heading_alignment is computed
-        # from GPS COG while driving straight and converges to remove the boot-relative
-        # yaw error.  It is NOT persisted — recomputed each session.
+        # from GPS COG while driving straight and from inversion auto-detection.
+        # It IS persisted to data/imu_alignment.json so subsequent reboots start
+        # from the last-known good offset rather than requiring re-convergence.
         self._session_heading_alignment: float = 0.0
         self._heading_alignment_sample_count: int = 0
         self._gps_cog_history: list = []  # recent GPS COG values for straight-motion gate
+        self._load_alignment_from_disk()
 
     _instance: Optional["NavigationService"] = None
 
@@ -590,6 +594,8 @@ class NavigationService:
                         _stall_start = None
                         _stall_heading = None
                         _stall_max_start = None
+                        # Persist so next boot starts with the corrected offset
+                        self._save_alignment_to_disk("inversion_detect")
                 else:
                     _error_near_180_start = None
 
@@ -937,6 +943,13 @@ class NavigationService:
                             clamped_delta,
                             self._heading_alignment_sample_count,
                         )
+                    # Persist every 20 samples (and only once converged past 10 samples)
+                    # so the learned offset survives the next reboot.
+                    if (
+                        self._heading_alignment_sample_count >= 10
+                        and self._heading_alignment_sample_count % 20 == 0
+                    ):
+                        self._save_alignment_to_disk("gps_cog")
         elif (
             sensor_data.gps is not None
             and sensor_data.gps.heading is not None
@@ -1228,6 +1241,57 @@ class NavigationService:
         logger.info("Navigation resumed")
         return True
     
+    # ------------------------------------------------------------------
+    # IMU alignment persistence
+    # ------------------------------------------------------------------
+    _ALIGNMENT_FILE = Path(__file__).resolve().parent.parent.parent.parent / "data" / "imu_alignment.json"
+
+    def _load_alignment_from_disk(self) -> None:
+        """Load persisted IMU alignment offset from data/imu_alignment.json.
+
+        Called once during __init__.  A missing or corrupt file is silently ignored
+        and the alignment starts at 0.0 (boot-time default).
+        """
+        try:
+            if not self._ALIGNMENT_FILE.exists():
+                return
+            data = json.loads(self._ALIGNMENT_FILE.read_text())
+            saved = float(data.get("session_heading_alignment", 0.0))
+            samples = int(data.get("sample_count", 0))
+            source = data.get("source", "unknown")
+            self._session_heading_alignment = saved % 360.0
+            self._heading_alignment_sample_count = samples
+            logger.info(
+                "IMU alignment loaded from disk: %.1f° (source=%s, samples=%d)",
+                self._session_heading_alignment, source, samples,
+            )
+        except Exception as exc:
+            logger.warning("Could not load IMU alignment file: %s", exc)
+            self._session_heading_alignment = 0.0
+
+    def _save_alignment_to_disk(self, source: str) -> None:
+        """Persist current session heading alignment to data/imu_alignment.json.
+
+        Uses an atomic write (write to tmp then rename) to avoid partial files.
+        Silently swallows errors so a filesystem issue never crashes navigation.
+        """
+        try:
+            payload = {
+                "session_heading_alignment": round(self._session_heading_alignment, 3),
+                "sample_count": self._heading_alignment_sample_count,
+                "source": source,
+                "last_updated": datetime.now(timezone.utc).isoformat(),
+            }
+            tmp = self._ALIGNMENT_FILE.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload, indent=2))
+            tmp.replace(self._ALIGNMENT_FILE)
+            logger.info(
+                "IMU alignment saved: %.1f° (source=%s, samples=%d)",
+                self._session_heading_alignment, source, self._heading_alignment_sample_count,
+            )
+        except Exception as exc:
+            logger.warning("Could not save IMU alignment to disk: %s", exc)
+
     async def stop_navigation(self) -> bool:
         """Stop navigation and return to idle"""
         self.navigation_state.navigation_mode = NavigationMode.IDLE
@@ -1241,6 +1305,11 @@ class NavigationService:
             logger.info("Navigation stopped")
         else:
             logger.error("Navigation stop requested but controller stop could not be confirmed")
+
+        # Persist alignment if GPS COG has had a chance to refine it this session
+        if self._heading_alignment_sample_count >= 10:
+            self._save_alignment_to_disk("stop_navigation")
+
         return stop_confirmed
     
     async def emergency_stop(self, reason: str = "emergency stop") -> bool:
