@@ -12,7 +12,6 @@ from datetime import UTC, datetime
 from typing import Any, Callable, Optional
 
 from ..core.observability import observability
-from ..api.rest import websocket_hub
 from ..models.safety_interlock import SafetyInterlock, InterlockState
 
 
@@ -24,9 +23,14 @@ class SafetyEvent:
 
 
 class SafetyMonitor:
-    def __init__(self) -> None:
+    def __init__(self, websocket_hub: Any = None) -> None:
         self._events: list[SafetyEvent] = []
         self._lock = asyncio.Lock()
+        self._websocket_hub = websocket_hub
+
+    def set_websocket_hub(self, hub: Any) -> None:
+        """Inject or replace the WebSocket hub after construction."""
+        self._websocket_hub = hub
 
     async def handle_interlock_event(self, action: str, interlock: SafetyInterlock) -> None:
         evt = SafetyEvent(
@@ -46,18 +50,19 @@ class SafetyMonitor:
             origin="safety.monitor",
             metadata={"action": action, "interlock": interlock.model_dump()},
         )
-        try:
-            await websocket_hub.broadcast_to_topic(
-                "system.safety",
-                {
-                    "action": action,
-                    "interlock": interlock.model_dump(),
-                    "timestamp": evt.timestamp,
-                },
-            )
-        except Exception:
-            # Best-effort broadcast
-            pass
+        if self._websocket_hub is not None:
+            try:
+                await self._websocket_hub.broadcast_to_topic(
+                    "system.safety",
+                    {
+                        "action": action,
+                        "interlock": interlock.model_dump(),
+                        "timestamp": evt.timestamp,
+                    },
+                )
+            except Exception:
+                # Best-effort broadcast
+                pass
 
     async def snapshot(self) -> dict[str, Any]:
         async with self._lock:

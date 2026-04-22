@@ -103,6 +103,7 @@ async def lifespan(app: FastAPI):
 
     # Initialize safety monitor and wire interlock event bridge
     monitor = get_safety_monitor()
+    monitor.set_websocket_hub(websocket_hub)  # inject hub — breaks circular import
     async def _event_bridge(action, interlock):
         try:
             await monitor.handle_interlock_event(action, interlock)
