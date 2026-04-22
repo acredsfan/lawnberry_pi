@@ -706,7 +706,7 @@ class CameraStreamService:
                 draw.text((20, 40), f"SIM MODE: {timestamp}", font=font, fill='yellow')
                 draw.text((20, height-60), f"Frame: {self.stream.statistics.frames_captured}", 
                          font=font, fill='white')
-            except:
+            except Exception:
                 # Fallback if font not available
                 pass
             

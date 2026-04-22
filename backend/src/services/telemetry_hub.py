@@ -293,7 +293,7 @@ class TelemetryHubService:
         # Close WebSocket
         try:
             await client.websocket.close()
-        except:
+        except Exception:
             pass
         
         # Clean up

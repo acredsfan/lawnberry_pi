@@ -300,7 +300,7 @@ class RoboHATService:
             self._last_cmd_sent_at = time.monotonic()
             return True
         except Exception as exc:  # pragma: no cover - hardware error path
-            logger.error(f"Failed to send RoboHAT command line '%s': %s", line, exc)
+            logger.error("Failed to send RoboHAT command line '%s': %s", line, exc)
             self.status.error_count += 1
             self.status.last_error = str(exc)
             return False

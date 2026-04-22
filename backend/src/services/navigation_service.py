@@ -345,7 +345,7 @@ class NavigationService:
         # mode without converging.  Motor EMI on the IMU magnetometer can cause heading
         # to oscillate indefinitely; this guard prevents eternal spinning.
         _tank_turn_start: float | None = None
-        _TANK_TURN_TIMEOUT_S: float = 30.0
+        _TANK_TURN_TIMEOUT_S: float = 8.0
         # "Definitely stuck" detector: if stall boost is maxed AND heading is
         # still frozen, the mower is mechanically stuck — abort cleanly.
         _stall_max_start: float | None = None
@@ -487,10 +487,9 @@ class NavigationService:
 
             heading_error = (heading_to_target - current_heading + 180) % 360 - 180
             
-            # DEBUG: Log heading control every 2 seconds
             _now = time.monotonic()
             if _now - _last_nav_log > 2.0:
-                logger.info(
+                logger.debug(
                     "NAV_CONTROL: target_bearing=%.1f° current_heading=%.1f° error=%.1f° | "
                     "tank_mode=%s in_turn=%s",
                     heading_to_target, current_heading, heading_error,
