@@ -9,9 +9,7 @@ import json
 import logging
 import os
 import signal
-import socket
 import stat
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 
 from ..models.camera_stream import (
     CameraStream, CameraFrame, CameraMode, FrameFormat,
-    StreamQuality, CameraConfiguration, FrameMetadata,
+    StreamQuality, FrameMetadata,
     StreamStatistics,
 )
 from ..core.observability import observability
@@ -702,7 +700,7 @@ class CameraStreamService:
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             try:
                 font = ImageFont.load_default()
-                draw.text((20, 20), f"LawnBerry Pi Camera", font=font, fill='white')
+                draw.text((20, 20), "LawnBerry Pi Camera", font=font, fill='white')
                 draw.text((20, 40), f"SIM MODE: {timestamp}", font=font, fill='yellow')
                 draw.text((20, height-60), f"Frame: {self.stream.statistics.frames_captured}", 
                          font=font, fill='white')

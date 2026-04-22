@@ -9,10 +9,10 @@ to observability + WebSocket topics. This module has no direct hardware control.
 import asyncio
 from dataclasses import dataclass, asdict
 from datetime import UTC, datetime
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from ..core.observability import observability
-from ..models.safety_interlock import SafetyInterlock, InterlockState
+from ..models.safety_interlock import SafetyInterlock
 
 
 @dataclass

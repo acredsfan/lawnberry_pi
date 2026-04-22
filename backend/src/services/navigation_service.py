@@ -11,7 +11,7 @@ import os
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from ..core.config_loader import ConfigLoader
 from ..nav.geoutils import haversine_m, point_in_polygon

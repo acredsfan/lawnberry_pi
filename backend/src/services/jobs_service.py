@@ -1,10 +1,9 @@
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 
 from ..core.observability import observability
 from ..models.job import Job, JobStatus, JobType, JobPriority
-from ..models.zone import Zone
 
 
 logger = observability.get_logger(__name__)
