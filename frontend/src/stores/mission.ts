@@ -146,7 +146,7 @@ export const useMissionStore = defineStore('mission', () => {
     }
   };
 
-  const pauseCurrentMission = async () => {
+  const pauseCurrentMission = async (): Promise<void> => {
     if (!currentMission.value) return;
     try {
       await apiService.post(`/api/v2/missions/${currentMission.value.id}/pause`, {});
@@ -155,12 +155,12 @@ export const useMissionStore = defineStore('mission', () => {
       stopStatusPolling();
     } catch (error) {
       console.error('Error pausing mission:', error);
-      statusDetail.value = extractMissionErrorMessage(error, 'Unable to pause mission.');
-      throw error;
+      statusDetail.value = 'Failed to pause mission';
+      // missionStatus is NOT changed — caller sees current state, error surfaced via statusDetail
     }
   };
 
-  const resumeCurrentMission = async () => {
+  const resumeCurrentMission = async (): Promise<void> => {
     if (!currentMission.value) return;
     try {
       await apiService.post(`/api/v2/missions/${currentMission.value.id}/resume`, {});
@@ -169,8 +169,8 @@ export const useMissionStore = defineStore('mission', () => {
       startStatusPolling();
     } catch (error) {
       console.error('Error resuming mission:', error);
-      statusDetail.value = extractMissionErrorMessage(error, 'Unable to resume mission.');
-      throw error;
+      statusDetail.value = 'Failed to resume mission';
+      // missionStatus is NOT changed — caller sees current state, error surfaced via statusDetail
     }
   };
 
