@@ -831,13 +831,33 @@ class NavigationService:
         return accuracy <= self.max_waypoint_accuracy_m
 
     def _global_emergency_active(self) -> bool:
-        """Return True when API-level emergency stop is currently latched."""
+        """Return True when the API-level emergency stop is latched OR any active
+        hardware safety interlock (tilt, obstacle, geofence, etc.) is present.
+
+        Previously only checked rest_api._safety_state which is only set by the
+        explicit /emergency-stop endpoint — hardware interlocks activated by
+        SafetyTriggerManager never reached this check (ARCH-001).
+        """
         try:
             from ..api import rest as rest_api
-
-            return bool(rest_api._safety_state.get("emergency_stop_active", False))
+            if rest_api._safety_state.get("emergency_stop_active", False):
+                return True
         except Exception:
-            return False
+            pass
+
+        # Check hardware-triggered interlocks via RobotStateManager — these are
+        # set by SafetyTriggerManager._activate() but NOT reflected in rest_api state.
+        try:
+            from ..core.robot_state_manager import get_robot_state_manager
+            from ..models.safety_interlock import InterlockState
+
+            active = get_robot_state_manager().get_state().active_interlocks
+            if any(il.state == InterlockState.ACTIVE for il in active):
+                return True
+        except Exception:
+            pass
+
+        return False
 
     def _latch_global_emergency_state(self) -> None:
         """Mirror the control API emergency latch for non-HTTP emergency paths."""
