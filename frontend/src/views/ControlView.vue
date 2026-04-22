@@ -84,7 +84,7 @@
             </div>
           </div>
 
-          <div class="auth-actions" v-if="securityConfig.auth_level !== 'cloudflare'">
+          <div v-if="securityConfig.auth_level !== 'cloudflare'" class="auth-actions">
             <button 
               class="btn btn-primary" 
               :disabled="authenticating || !canAuthenticate"
@@ -229,17 +229,17 @@
               </div>
             </div>
 
-          <div class="speed-control">
-            <label>Speed: {{ speedLevel }}%</label>
-            <input 
-              v-model.number="speedLevel"
-              type="range" 
-              min="10" 
-              max="100" 
-              step="10"
-              class="speed-slider"
-            >
-          </div>
+            <div class="speed-control">
+              <label>Speed: {{ speedLevel }}%</label>
+              <input 
+                v-model.number="speedLevel"
+                type="range" 
+                min="10" 
+                max="100" 
+                step="10"
+                class="speed-slider"
+              >
+            </div>
           </div>
         </div>
       </div>

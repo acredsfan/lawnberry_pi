@@ -126,7 +126,7 @@ export class WebSocketService {
           this.ws.onerror = (error) => {
             // Reduce console noise by rate-limiting error logs
             try {
-              ;(window as any).__ws_last_err ||= 0
+              (window as any).__ws_last_err ||= 0
               const now = Date.now()
               if (now - (window as any).__ws_last_err > 15000) {
                 console.error('WebSocket error:', error)
@@ -232,7 +232,7 @@ export class WebSocketService {
       const jitter = Math.floor(Math.random() * 250)
       // Throttle reconnection log chatter
       try {
-        ;(window as any).__ws_last_reconnect_log ||= 0
+        (window as any).__ws_last_reconnect_log ||= 0
         const now = Date.now()
         if (now - (window as any).__ws_last_reconnect_log > 10000) {
           console.log(`Attempting to reconnect... (#${this.reconnectAttempts}) in ${backoff + jitter}ms`)

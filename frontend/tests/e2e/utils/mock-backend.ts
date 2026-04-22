@@ -342,7 +342,7 @@ export class MockBackend {
         }
       }
 
-      ;(window as any).WebSocket = FakeWebSocket
+      (window as any).WebSocket = FakeWebSocket
     }, { messages: this.wsScript, handshakeDelayMs: 25 })
 
     await page.route('**/api/**', (route, request) => this.handleRequest(route, request))

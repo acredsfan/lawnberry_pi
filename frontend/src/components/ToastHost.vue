@@ -6,15 +6,14 @@
       class="toast"
       :class="t.type"
       role="status"
-      @click="dismiss(t.id)"
       tabindex="0"
+      @click="dismiss(t.id)"
     >
       <span class="icon">{{ iconFor(t.type) }}</span>
       <span class="msg">{{ t.message }}</span>
-      <button class="close" @click.stop="dismiss(t.id)" aria-label="Dismiss">×</button>
+      <button class="close" aria-label="Dismiss" @click.stop="dismiss(t.id)">×</button>
     </div>
   </div>
-  
 </template>
 
 <script setup lang="ts">

@@ -1,5 +1,5 @@
 <template>
-  <div class="top-progress" v-show="visible">
+  <div v-show="visible" class="top-progress">
     <div class="bar" :style="{ width: width + '%' }" />
   </div>
 </template>

@@ -1,6 +1,13 @@
 <template>
-  <div v-if="open" class="cmd-overlay" @click.self="close" role="dialog" aria-modal="true" aria-label="Command Palette">
-    <div class="cmd-modal" ref="modalRef">
+  <div
+    v-if="open"
+    class="cmd-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Command Palette"
+    @click.self="close"
+  >
+    <div ref="modalRef" class="cmd-modal">
       <input
         ref="inputRef"
         v-model="query"
@@ -11,10 +18,15 @@
         @keydown.down.prevent="move(1)"
         @keydown.up.prevent="move(-1)"
         @keydown.enter.prevent="selectActive()"
-      />
+      >
       <ul class="cmd-list" role="listbox">
-        <li v-for="(item, idx) in filtered" :key="item.path" :class="{active: idx === activeIndex}" role="option" @click="go(item.path)"
-            @mouseenter="activeIndex = idx"
+        <li
+          v-for="(item, idx) in filtered"
+          :key="item.path"
+          :class="{active: idx === activeIndex}"
+          role="option"
+          @click="go(item.path)"
+          @mouseenter="activeIndex = idx"
         >
           <span class="cmd-name">{{ item.name }}</span>
           <span class="cmd-path">{{ item.path }}</span>

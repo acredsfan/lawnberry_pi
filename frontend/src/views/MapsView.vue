@@ -153,7 +153,7 @@
 
           <div class="form-group form-switch">
             <label class="toggle-label">
-              <input type="checkbox" v-model="pinForm.isHome">
+              <input v-model="pinForm.isHome" type="checkbox">
               Designate as home location
             </label>
             <small class="form-text text-muted">Home is the default return spot when other conditions are not met.</small>
@@ -207,13 +207,13 @@
             <div class="form-group">
               <label>Time Windows</label>
               <div
-                class="time-window-row"
                 v-for="(window, idx) in pinForm.schedule.windows"
                 :key="`tw-${idx}`"
+                class="time-window-row"
               >
-                <input type="time" class="form-control-sm" v-model="window.start">
+                <input v-model="window.start" type="time" class="form-control-sm">
                 <span>to</span>
-                <input type="time" class="form-control-sm" v-model="window.end">
+                <input v-model="window.end" type="time" class="form-control-sm">
                 <button
                   v-if="pinForm.schedule.windows.length > 1"
                   class="btn btn-xs btn-danger"
@@ -247,15 +247,15 @@
             <div class="form-group">
               <label>Triggers</label>
               <label class="form-check-inline">
-                <input type="checkbox" v-model="pinForm.schedule.triggers.needs_charge">
+                <input v-model="pinForm.schedule.triggers.needs_charge" type="checkbox">
                 Needs charge
               </label>
               <label class="form-check-inline">
-                <input type="checkbox" v-model="pinForm.schedule.triggers.precipitation">
+                <input v-model="pinForm.schedule.triggers.precipitation" type="checkbox">
                 Dry weather
               </label>
               <label class="form-check-inline">
-                <input type="checkbox" v-model="pinForm.schedule.triggers.manual_override">
+                <input v-model="pinForm.schedule.triggers.manual_override" type="checkbox">
                 Manual
               </label>
             </div>

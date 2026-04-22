@@ -5,7 +5,7 @@
       <div class="actions">
         <button class="btn" @click="refreshNow">Refresh</button>
         <label class="poll-label">
-          <input type="checkbox" v-model="autoRefresh" /> Auto-refresh
+          <input v-model="autoRefresh" type="checkbox"> Auto-refresh
         </label>
       </div>
     </div>
@@ -29,15 +29,15 @@
         <div class="kv"><span>RTK status</span><strong :class="statusClass(gps?.rtk_status)">{{ gps?.rtk_status || 'unknown' }}</strong></div>
         <div class="kv"><span>HDOP</span><span>{{ fmtNum(gps?.last_hdop) }}</span></div>
         <div class="kv"><span>Satellites</span><span>{{ gps?.satellites ?? '—' }}</span></div>
-        <div class="kv" v-if="gps?.reading">
+        <div v-if="gps?.reading" class="kv">
           <span>Lat, Lon</span>
           <code>{{ fmtNum(gps.reading.latitude) }}, {{ fmtNum(gps.reading.longitude) }}</code>
         </div>
-        <div class="kv" v-if="gps?.reading">
+        <div v-if="gps?.reading" class="kv">
           <span>Altitude</span>
           <span>{{ fmtNum(gps.reading.altitude) }} m</span>
         </div>
-        <div class="kv" v-if="gps?.reading">
+        <div v-if="gps?.reading" class="kv">
           <span>Accuracy</span>
           <span>{{ fmtNum(gps.reading.accuracy) }} m</span>
         </div>

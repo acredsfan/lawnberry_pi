@@ -2,7 +2,7 @@
   <div class="mission-planner-view">
     <h1>Mission Planner</h1>
     <div class="map-toolbar">
-      <label class="follow-toggle"><input type="checkbox" v-model="followMower" /> Follow mower</label>
+      <label class="follow-toggle"><input v-model="followMower" type="checkbox"> Follow mower</label>
       <label class="map-style-toggle">
         Map style
         <select v-model="mapStyle" @change="handleMapStyleChange">
@@ -12,17 +12,17 @@
           <option value="terrain">Terrain</option>
         </select>
       </label>
-      <button class="btn" @click="recenterToMower" :disabled="!mowerLatLng">🎯 Recenter</button>
-      <button class="btn" @click="undoLastWaypoint" :disabled="missionStore.waypoints.length === 0">↩️ Undo last</button>
-      <button class="btn btn-danger" @click="clearAllWaypoints" :disabled="missionStore.waypoints.length === 0">🗑️ Clear all</button>
+      <button class="btn" :disabled="!mowerLatLng" @click="recenterToMower">🎯 Recenter</button>
+      <button class="btn" :disabled="missionStore.waypoints.length === 0" @click="undoLastWaypoint">↩️ Undo last</button>
+      <button class="btn btn-danger" :disabled="missionStore.waypoints.length === 0" @click="clearAllWaypoints">🗑️ Clear all</button>
     </div>
     <div class="map-container">
       <MissionMap
         ref="missionMapRef"
         :waypoints="missionStore.waypoints"
-        :mowerPosition="mowerPosition"
-        :followMower="followMower"
-        :mapSettings="mapDisplaySettings"
+        :mower-position="mowerPosition"
+        :follow-mower="followMower"
+        :map-settings="mapDisplaySettings"
         @add-waypoint="handleAddWaypoint"
         @update-waypoint="handleUpdateWaypoint"
         @remove-waypoint="handleRemoveWaypoint"
@@ -30,16 +30,16 @@
     </div>
     <MissionWaypointList />
     <div class="mission-controls">
-      <input v-model="missionName" placeholder="Mission Name" />
-      <button @click="createMission" :disabled="creatingMission || !missionName || missionStore.waypoints.length === 0">
+      <input v-model="missionName" placeholder="Mission Name">
+      <button :disabled="creatingMission || !missionName || missionStore.waypoints.length === 0" @click="createMission">
         {{ creatingMission ? 'Creating…' : 'Create Mission' }}
       </button>
-      <button @click="startMission" :disabled="startingMission || !missionStore.currentMission">
+      <button :disabled="startingMission || !missionStore.currentMission" @click="startMission">
         {{ startingMission ? 'Starting…' : 'Start Mission' }}
       </button>
-      <button @click="pauseMission" :disabled="missionStore.missionStatus !== 'running'">Pause</button>
-      <button @click="resumeMission" :disabled="missionStore.missionStatus !== 'paused'">Resume</button>
-      <button @click="abortMission" :disabled="!missionStore.currentMission">Abort</button>
+      <button :disabled="missionStore.missionStatus !== 'running'" @click="pauseMission">Pause</button>
+      <button :disabled="missionStore.missionStatus !== 'paused'" @click="resumeMission">Resume</button>
+      <button :disabled="!missionStore.currentMission" @click="abortMission">Abort</button>
     </div>
     <p v-if="missionActionHint" class="mission-action-hint">{{ missionActionHint }}</p>
     <div v-if="missionStore.currentMission" class="mission-status-panel">
@@ -59,7 +59,6 @@
       </p>
     </div>
   </div>
-  
 </template>
 
 <script setup lang="ts">

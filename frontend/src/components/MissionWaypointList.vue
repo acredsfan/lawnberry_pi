@@ -2,7 +2,7 @@
   <div class="waypoint-list">
     <div class="header-row">
       <h2>Waypoints</h2>
-      <div class="list-actions" v-if="missionStore.waypoints.length">
+      <div v-if="missionStore.waypoints.length" class="list-actions">
         <button class="btn btn-xs" @click="undoLast">Undo last</button>
         <button class="btn btn-xs btn-danger" @click="clearAll">Clear all</button>
       </div>
@@ -12,8 +12,14 @@
         <li class="waypoint-item">
           <span>Waypoint {{ index + 1 }}: ({{ waypoint.lat.toFixed(4) }}, {{ waypoint.lon.toFixed(4) }})</span>
           <div class="waypoint-controls">
-            <label>Blade On: <input type="checkbox" v-model="waypoint.blade_on" @change="updateWaypoint(waypoint)"></label>
-            <label>Speed: <input type="range" min="0" max="100" v-model.number="waypoint.speed" @change="updateWaypoint(waypoint)"> {{ waypoint.speed }}%</label>
+            <label>Blade On: <input v-model="waypoint.blade_on" type="checkbox" @change="updateWaypoint(waypoint)"></label>
+            <label>Speed: <input
+              v-model.number="waypoint.speed"
+              type="range"
+              min="0"
+              max="100"
+              @change="updateWaypoint(waypoint)"
+            > {{ waypoint.speed }}%</label>
             <button @click="removeWaypoint(waypoint.id)">Remove</button>
           </div>
         </li>

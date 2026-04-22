@@ -15,9 +15,9 @@
     @contextmenu.prevent
   >
     <div class="virtual-joystick__surface">
-      <div class="virtual-joystick__ring virtual-joystick__ring--outer"></div>
-      <div class="virtual-joystick__ring virtual-joystick__ring--inner"></div>
-      <div class="virtual-joystick__knob" :style="knobStyle"></div>
+      <div class="virtual-joystick__ring virtual-joystick__ring--outer" />
+      <div class="virtual-joystick__ring virtual-joystick__ring--inner" />
+      <div class="virtual-joystick__knob" :style="knobStyle" />
     </div>
   </div>
 </template>

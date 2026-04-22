@@ -9,7 +9,7 @@
       :aria-live="t.type === 'error' ? 'assertive' : 'polite'"
     >
       <span class="toast-msg">{{ t.message }}</span>
-      <button class="toast-close" @click="dismiss(t.id)" aria-label="Dismiss">×</button>
+      <button class="toast-close" aria-label="Dismiss" @click="dismiss(t.id)">×</button>
     </div>
   </div>
 </template>

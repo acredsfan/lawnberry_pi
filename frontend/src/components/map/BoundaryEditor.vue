@@ -42,11 +42,11 @@
         📌 Marker
       </button>
       
-      <div class="toolbar-spacer"></div>
+      <div class="toolbar-spacer" />
       
       <!-- Follow and recenter controls -->
       <label class="follow-toggle">
-        <input type="checkbox" v-model="followMower" />
+        <input v-model="followMower" type="checkbox">
         Follow
       </label>
       <button class="btn btn-sm btn-secondary" @click="recenterToMower">
@@ -56,18 +56,18 @@
       <button 
         v-if="currentPolygon.length >= 5" 
         class="btn btn-sm btn-secondary"
-        @click="simplifyCurrent()"
         title="Simplify polygon to reduce vertices"
+        @click="simplifyCurrent()"
       >
         🧹 Simplify
       </button>
       
       <label class="follow-toggle">
-        <input type="checkbox" v-model="showCoveragePlan" @change="toggleCoveragePlan" />
+        <input v-model="showCoveragePlan" type="checkbox" @change="toggleCoveragePlan">
         Preview Coverage
       </label>
       <label class="follow-toggle" title="Snap new/dragged vertices to boundary">
-        <input type="checkbox" v-model="snapToBoundary" />
+        <input v-model="snapToBoundary" type="checkbox">
         Snap to Boundary
       </label>
       
@@ -88,7 +88,7 @@
       </button>
     </div>
 
-  <div class="editor-canvas" ref="canvasContainer" :class="{'cursor-crosshair': mode==='boundary' || mode==='exclusion' || mode==='mowing', 'cursor-pin': mode==='marker', 'google-active': useGoogleMutant}">
+    <div ref="canvasContainer" class="editor-canvas" :class="{'cursor-crosshair': mode==='boundary' || mode==='exclusion' || mode==='mowing', 'cursor-pin': mode==='marker', 'google-active': useGoogleMutant}">
       <div v-if="mode === 'boundary'" class="editor-instructions">
         Click on the map to add boundary points. Close the polygon by clicking near the first point.
       </div>
@@ -143,11 +143,11 @@
       </div>
 
       <!-- Tile transition overlay -->
-      <div v-if="tileLoadingState === 'loading'" class="tile-transition-overlay"></div>
+      <div v-if="tileLoadingState === 'loading'" class="tile-transition-overlay" />
 
       <!-- Tile loading indicator -->
       <div v-if="tileLoadingState === 'loading'" class="tile-loading-indicator">
-        <div class="loading-spinner"></div>
+        <div class="loading-spinner" />
         <span>{{ loadingMessage }}</span>
       </div>
 
@@ -161,17 +161,17 @@
       </div>
 
       <!-- Leaflet Map -->
-      <l-map
+      <LMap
+        ref="mapRef"
         :zoom="zoom"
         :center="centerLatLng"
         :use-global-leaflet="useGlobalLeaflet"
         :options="leafletOptions"
         style="height: 100%; width: 100%"
         @click="onMapClick"
-        ref="mapRef"
       >
         <!-- Dynamic tiles based on provider/style -->
-        <l-tile-layer
+        <LTileLayer
           v-if="showTiles && tileLayerConfig && !googleLayerActive"
           :key="`base-${tileLayerKey}`"
           :url="tileLayerConfig.url"
@@ -183,7 +183,7 @@
           @load="onTileLoaded"
           @tileerror="onTileError"
         />
-        <l-tile-layer
+        <LTileLayer
           v-if="showTiles && tileLayerConfig?.overlay && !googleLayerActive"
           :key="`overlay-${tileLayerKey}`"
           :url="tileLayerConfig.overlay.url"
@@ -198,7 +198,7 @@
         />
 
         <!-- Existing boundary polygon -->
-        <l-polygon
+        <LPolygon
           v-if="boundaryPolygon.length > 0"
           :lat-lngs="boundaryPolygon"
           :color="'#00FF92'"
@@ -210,7 +210,7 @@
         />
 
         <!-- Existing exclusion zones -->
-        <l-polygon
+        <LPolygon
           v-for="zone in exclusionPolygons"
           :key="zone.id"
           :lat-lngs="zone.points"
@@ -224,7 +224,7 @@
         />
 
         <!-- Existing mowing zones -->
-        <l-polygon
+        <LPolygon
           v-for="zone in mowingPolygons"
           :key="zone.id"
           :lat-lngs="zone.points"
@@ -237,7 +237,7 @@
         />
 
         <!-- In-progress polygon (only for polygon edit modes) -->
-        <l-polygon
+        <LPolygon
           v-if="currentPolygonLatLng.length > 0 && (mode === 'boundary' || mode === 'exclusion' || mode === 'mowing')"
           :lat-lngs="currentPolygonLatLng"
           :color="mode === 'boundary' ? '#00FF92' : '#ffb703'"
@@ -247,7 +247,7 @@
         />
 
         <!-- Vertex handles for editing current polygon (hidden in marker mode) -->
-        <l-marker
+        <LMarker
           v-for="(pt, idx) in currentPolygon"
           v-if="mode === 'boundary' || mode === 'exclusion' || mode === 'mowing'"
           :key="`vtx-${idx}`"
@@ -257,7 +257,7 @@
         />
 
         <!-- Markers -->
-        <l-marker
+        <LMarker
           v-for="m in markers"
           :key="m.marker_id"
           :lat-lng="[m.position.latitude, m.position.longitude]"
@@ -267,14 +267,14 @@
         />
 
         <!-- Live mower location marker -->
-        <l-marker
+        <LMarker
           v-if="mowerLatLng && mowerIcon"
           :lat-lng="mowerLatLng"
           :icon="mowerIcon"
         />
 
         <!-- GPS accuracy circle (approximate with polygon points) -->
-        <l-polygon
+        <LPolygon
           v-if="mowerLatLng && gpsAccuracyMeters && gpsAccuracyMeters > 0 && accuracyCircleLatLngs.length > 0"
           :lat-lngs="accuracyCircleLatLngs"
           :color="'#3399ff'"
@@ -284,14 +284,14 @@
         />
 
         <!-- Coverage plan polyline -->
-        <l-polyline
+        <LPolyline
           v-if="coverageLatLngs.length > 1"
           :lat-lngs="coverageLatLngs"
           :color="'#ffaa00'"
           :weight="2"
           :dash-array="'8 6'"
         />
-      </l-map>
+      </LMap>
       <div v-if="!showTiles" class="offline-overlay">Offline: drawing without tiles</div>
     </div>
 

@@ -19,7 +19,7 @@
           <router-link to="/settings" class="nav-link">Settings</router-link>
         </div>
         <div class="nav-user">
-          <button class="theme-toggle" @click="toggleTheme" :title="`Theme: ${theme}`">
+          <button class="theme-toggle" :title="`Theme: ${theme}`" @click="toggleTheme">
             {{ theme === 'pro' ? '🌗 Pro' : '💾 Retro' }}
           </button>
           <UserMenu v-if="user" />

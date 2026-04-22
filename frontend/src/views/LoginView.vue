@@ -2,7 +2,7 @@
   <div class="login-container">
     <div class="login-card">
       <div class="login-header">
-  <img :src="iconUrl" alt="LawnBerry Pi" class="login-logo">
+        <img :src="iconUrl" alt="LawnBerry Pi" class="login-logo">
         <h1>LawnBerry Pi v2</h1>
         <p>Autonomous Lawn Care System</p>
       </div>
