@@ -69,7 +69,11 @@ async def test_execute_mission_waits_while_paused(monkeypatch):
         nav.navigation_state.current_waypoint_index = len(nav.navigation_state.planned_path)
         return True
 
+    async def fake_bootstrap():
+        pass
+
     monkeypatch.setattr(nav, "go_to_waypoint", fake_go_to_waypoint)
+    monkeypatch.setattr(nav, "_bootstrap_heading_from_gps_cog", fake_bootstrap)
 
     task = asyncio.create_task(nav.execute_mission(mission))
     await asyncio.sleep(0.2)
@@ -278,8 +282,12 @@ async def test_execute_mission_marks_navigation_failed_on_waypoint_error(monkeyp
         stop_reasons.append(reason)
         return True
 
+    async def fake_bootstrap():
+        pass
+
     monkeypatch.setattr(nav, "go_to_waypoint", fake_go_to_waypoint)
     monkeypatch.setattr(nav, "_deliver_stop_command", fake_deliver_stop_command)
+    monkeypatch.setattr(nav, "_bootstrap_heading_from_gps_cog", fake_bootstrap)
 
     with pytest.raises(RuntimeError, match="Heading unavailable while navigating waypoint"):
         await nav.execute_mission(mission)
