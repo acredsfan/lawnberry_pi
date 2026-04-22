@@ -151,6 +151,9 @@ config/secrets.json
 config/maps_settings.json
 config/*.key
 config/*.pem
+config/hardware.json
+config/network.json
+config/system.json
 
 # =============================================================
 # Temporary files
