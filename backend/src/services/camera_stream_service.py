@@ -131,7 +131,31 @@ class CameraStreamService:
             return False
 
     async def _initialize_camera(self) -> bool:
-        """Initialize camera hardware."""
+        """Initialize camera hardware.
+
+        All blocking libcamera/V4L2 calls are offloaded to a thread-pool executor so they
+        cannot stall the asyncio event loop. A hard 15-second timeout ensures startup never
+        hangs indefinitely even if the camera device is unresponsive.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, self._initialize_camera_sync),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "Camera hardware initialization timed out after 15 s; falling back to sim mode"
+            )
+            self.hardware_available = False
+            return False
+        except Exception as exc:
+            logger.error("Camera initialization error: %s", exc)
+            self.hardware_available = False
+            return False
+
+    def _initialize_camera_sync(self) -> bool:
+        """Synchronous camera setup — runs in a thread-pool executor (never call from event loop)."""
         try:
             if PICAMERA_AVAILABLE:
                 try:

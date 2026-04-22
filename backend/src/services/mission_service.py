@@ -177,21 +177,60 @@ class MissionService:
         )
         self._persist_mission_status(mission_id)
 
+    def _load_state_from_db(self) -> tuple[list[dict], list[dict]]:
+        """Load all persisted missions and execution states. Runs in executor thread."""
+        with persistence.get_connection() as conn:
+            mission_rows = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT id, name, waypoints_json, created_at FROM missions ORDER BY created_at"
+                ).fetchall()
+            ]
+            state_rows = [
+                dict(r)
+                for r in conn.execute(
+                    """
+                    SELECT mission_id, status, current_waypoint_index, completion_percentage,
+                           total_waypoints, detail
+                    FROM mission_execution_state
+                    """
+                ).fetchall()
+            ]
+        return mission_rows, state_rows
+
+    def _flush_changed_states(self, mission_ids: list[str]) -> None:
+        """Write mission statuses for only the given IDs. Runs in executor thread."""
+        for mission_id in mission_ids:
+            self._persist_mission_status(mission_id)
+
+    def _prune_old_terminal_missions(self, retention_days: int = 30) -> None:
+        """Delete terminal missions older than retention_days to cap DB growth."""
+        with persistence.get_connection() as conn:
+            conn.execute(
+                """
+                DELETE FROM missions
+                WHERE id IN (
+                    SELECT m.id FROM missions m
+                    JOIN mission_execution_state mes ON m.id = mes.mission_id
+                    WHERE mes.status IN ('completed', 'aborted', 'failed')
+                    AND date(m.created_at) < date('now', ?)
+                )
+                """,
+                (f"-{retention_days} days",),
+            )
+            conn.execute(
+                "DELETE FROM mission_execution_state WHERE mission_id NOT IN (SELECT id FROM missions)"
+            )
+            conn.commit()
+
     async def recover_persisted_missions(self) -> None:
+        loop = asyncio.get_running_loop()
+
+        # Load from DB in a thread so the event loop stays unblocked.
+        mission_rows, state_rows = await loop.run_in_executor(None, self._load_state_from_db)
+
         recovered_missions: dict[str, Mission] = {}
         persisted_states: dict[str, dict] = {}
-
-        with persistence.get_connection() as conn:
-            mission_rows = conn.execute(
-                "SELECT id, name, waypoints_json, created_at FROM missions ORDER BY created_at"
-            ).fetchall()
-            state_rows = conn.execute(
-                """
-                SELECT mission_id, status, current_waypoint_index, completion_percentage,
-                       total_waypoints, detail
-                FROM mission_execution_state
-                """
-            ).fetchall()
 
         for row in mission_rows:
             mission = Mission.model_validate(
@@ -205,7 +244,7 @@ class MissionService:
             recovered_missions[mission.id] = mission
 
         for row in state_rows:
-            persisted_states[row["mission_id"]] = dict(row)
+            persisted_states[row["mission_id"]] = row
 
         self.missions = recovered_missions
         self.mission_statuses = {}
@@ -235,12 +274,15 @@ class MissionService:
         self.nav_service.navigation_state.current_waypoint_index = 0
         self.nav_service.navigation_state.path_status = PathStatus.INTERRUPTED
 
+        # Only write back missions whose status actually changed.
+        changed_mission_ids: list[str] = []
+
         for mission_id, mission in self.missions.items():
             persisted = persisted_states.get(mission_id)
             if persisted is None:
                 status = self._build_status(mission_id, MissionLifecycleStatus.IDLE)
                 self.mission_statuses[mission_id] = status
-                self._persist_mission_status(mission_id)
+                changed_mission_ids.append(mission_id)
                 continue
 
             raw_status = persisted.get("status", MissionLifecycleStatus.IDLE.value)
@@ -282,7 +324,15 @@ class MissionService:
                 detail=detail,
             )
             self.mission_statuses[mission_id] = status
-            self._persist_mission_status(mission_id)
+
+            if lifecycle_status.value != raw_status:
+                changed_mission_ids.append(mission_id)
+
+        if changed_mission_ids:
+            await loop.run_in_executor(None, self._flush_changed_states, changed_mission_ids)
+
+        # Prune old terminal missions to prevent unbounded DB growth.
+        await loop.run_in_executor(None, self._prune_old_terminal_missions)
 
     async def create_mission(self, name: str, waypoints: list[MissionWaypoint]) -> Mission:
         clean_name = (name or "").strip()

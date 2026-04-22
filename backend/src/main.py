@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -143,7 +144,9 @@ async def lifespan(app: FastAPI):
         mission_service = get_mission_service(
             NavigationService.get_instance(), websocket_hub=websocket_hub
         )
-        await mission_service.recover_persisted_missions()
+        await asyncio.wait_for(mission_service.recover_persisted_missions(), timeout=30.0)
+    except asyncio.TimeoutError:
+        _log.error("Mission recovery timed out after 30 s; continuing startup")
     except Exception:
         _log.exception("Mission recovery failed during startup")
     try:
