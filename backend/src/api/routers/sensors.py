@@ -395,9 +395,9 @@ async def inject_tof(req: InjectToFRequest):
     # Trigger obstacle interlock if threshold breached
     safety_hint = None
     try:
-        from ..core.config_loader import ConfigLoader
+        from ..core.config_loader import get_config_loader
         from ..safety.safety_triggers import get_safety_trigger_manager
-        limits = ConfigLoader().get()[1]
+        limits = get_config_loader().get()[1]
         safety = get_safety_trigger_manager()
         if safety.trigger_obstacle(req.distance_m, limits.tof_obstacle_distance_meters):
             safety_hint = {"interlock": "obstacle_detected", "threshold_m": limits.tof_obstacle_distance_meters}
@@ -421,9 +421,9 @@ async def inject_tilt(req: InjectTiltRequest):
     # Determine if tilt exceeds safety threshold and trigger interlock
     over_threshold = False
     try:
-        from ..core.config_loader import ConfigLoader
+        from ..core.config_loader import get_config_loader
         from ..safety.safety_triggers import get_safety_trigger_manager
-        limits = ConfigLoader().get()[1]
+        limits = get_config_loader().get()[1]
         safety = get_safety_trigger_manager()
         if safety.trigger_obstacle(req.roll_deg, limits.tilt_threshold_degrees) or safety.trigger_obstacle(req.pitch_deg, limits.tilt_threshold_degrees):
              # Note: The original code in rest.py called safety.trigger_tilt(roll, pitch, limits.tilt_threshold_degrees)

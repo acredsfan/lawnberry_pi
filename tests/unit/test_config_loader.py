@@ -2,7 +2,20 @@ import threading
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
+
+import backend.src.core.config_loader as _cl_mod
 from backend.src.core.config_loader import ConfigLoader, get_config_loader
+
+
+@pytest.fixture(autouse=True)
+def _reset_config_loader_singleton():
+    """Reset the module-level singleton before and after every test in this
+    file so that tests that call get_config_loader() cannot bleed state into
+    later tests and always exercise the first-construction code path."""
+    _cl_mod._config_loader_instance = None
+    yield
+    _cl_mod._config_loader_instance = None
 
 
 def test_config_loader_minimal(tmp_path: Path):
@@ -77,10 +90,15 @@ def test_get_config_loader_returns_same_instance():
 
 
 def test_get_config_loader_thread_safe():
-    """All threads must receive the identical singleton instance."""
+    """All threads must receive the identical singleton instance even when
+    they all race to construct it at the same time."""
+    _cl_mod._config_loader_instance = None  # ensure fresh construction under contention
+
+    barrier = threading.Barrier(10)
     results: list = []
 
     def _fetch():
+        barrier.wait()  # all 10 threads release together to maximise lock contention
         results.append(get_config_loader())
 
     threads = [threading.Thread(target=_fetch) for _ in range(10)]

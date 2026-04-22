@@ -835,10 +835,10 @@ async def update_telemetry_settings(settings: dict[str, Any]):
 @router.get("/settings/safety")
 async def get_safety_settings():
     """Return the current safety limits from limits.yaml."""
-    from ...core.config_loader import ConfigLoader
+    from ...core.config_loader import get_config_loader
 
     try:
-        _, limits = ConfigLoader().get()
+        _, limits = get_config_loader().get()
         return limits.model_dump()
     except Exception as exc:
         logger.error("Failed to load safety limits: %s", exc)
@@ -851,14 +851,14 @@ async def put_safety_settings(request: Request):
 
     Accepts a partial JSON object — only supplied keys are changed.
     """
-    from ...core.config_loader import ConfigLoader
+    from ...core.config_loader import get_config_loader
     from ...services.navigation_service import NavigationService
 
     body = await request.json()
     if not isinstance(body, dict):
         raise HTTPException(status_code=422, detail="Body must be a JSON object")
 
-    loader = ConfigLoader()
+    loader = get_config_loader()
     try:
         updated = loader.update_limits(body)
     except Exception as exc:

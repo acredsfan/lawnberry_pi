@@ -23,7 +23,7 @@ from .api.rest_v1 import router as rest_v1_router
 from .api.safety import router as safety_router
 from .api.status import router as status_router
 from .api.mission import router as mission_router
-from .core.config_loader import ConfigLoader, get_config_loader
+from .core.config_loader import get_config_loader
 from .nav.gps_degradation import GPSDegradationMonitor
 from .services.robohat_service import initialize_robohat_service, shutdown_robohat_service
 from .services.camera_stream_service import camera_service
@@ -59,10 +59,9 @@ _log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    # Prime the ConfigLoader singleton before any service uses it.
-    get_config_loader()
-    # Load configuration (hardware + safety limits) and attach to app.state
-    loader = ConfigLoader()
+    # Load configuration via the singleton — app.state.config_loader IS the
+    # singleton so update_limits() correctly busts its cache on PUT /settings/safety.
+    loader = get_config_loader()
     hardware_cfg, safety_limits = loader.get()
     app.state.config_loader = loader
     app.state.hardware_config = hardware_cfg
