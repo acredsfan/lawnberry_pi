@@ -1,7 +1,8 @@
+import threading
 from pathlib import Path
 from textwrap import dedent
 
-from backend.src.core.config_loader import ConfigLoader
+from backend.src.core.config_loader import ConfigLoader, get_config_loader
 
 
 def test_config_loader_minimal(tmp_path: Path):
@@ -66,3 +67,27 @@ def test_config_loader_local_override(tmp_path: Path):
     assert hardware.victron_config.encryption_key == "super-secret"
     assert limits.estop_latency_ms == 90
     assert limits.tilt_cutoff_latency_ms == 180
+
+
+def test_get_config_loader_returns_same_instance():
+    """get_config_loader() must always return the exact same object."""
+    first = get_config_loader()
+    second = get_config_loader()
+    assert first is second
+
+
+def test_get_config_loader_thread_safe():
+    """All threads must receive the identical singleton instance."""
+    results: list = []
+
+    def _fetch():
+        results.append(get_config_loader())
+
+    threads = [threading.Thread(target=_fetch) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(results) == 10
+    assert all(inst is results[0] for inst in results)

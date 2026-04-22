@@ -138,8 +138,8 @@ class RoboHATService:
         # Loaded from config/hardware.yaml encoders.enabled (default True).
         self._encoder_enabled: bool = True
         try:
-            from backend.src.core.config_loader import ConfigLoader
-            hw, _ = ConfigLoader().get()
+            from backend.src.core.config_loader import get_config_loader
+            hw, _ = get_config_loader().get()
             self._encoder_enabled = bool(getattr(hw, "encoder_enabled", True))
             if not self._encoder_enabled:
                 logger.info("Encoder feedback disabled via hardware config (encoders.enabled: false)")

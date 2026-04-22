@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 """Configuration loader for hardware and safety limits (T003).
 
 Loads YAML from config/hardware.yaml and config/limits.yaml, validates via
@@ -280,4 +282,21 @@ class ConfigLoader:
         return merged
 
 
-__all__ = ["ConfigLoader"]
+__all__ = ["ConfigLoader", "get_config_loader"]
+
+_config_loader_lock = threading.Lock()
+_config_loader_instance: ConfigLoader | None = None
+
+
+def get_config_loader() -> ConfigLoader:
+    """Return the module-level ConfigLoader singleton.
+
+    Uses double-checked locking so the instance is created at most once even
+    when called concurrently from multiple threads at startup.
+    """
+    global _config_loader_instance
+    if _config_loader_instance is None:
+        with _config_loader_lock:
+            if _config_loader_instance is None:
+                _config_loader_instance = ConfigLoader()
+    return _config_loader_instance
