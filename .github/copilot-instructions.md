@@ -17,17 +17,23 @@ tests/
 ## Commands
 
 ```bash
-# Run tests (non-hardware only — full suite hangs on hardware I/O)
-cd /home/pi/lawnberry && python -m pytest tests/ -x -q -m "not hardware"
+# Run unit tests only (fast, safe — no hardware I/O)
+cd /home/pi/lawnberry && python -m pytest tests/unit/ -x -q -m "not hardware"
 
-# Run a single test file
-python -m pytest tests/test_navigation_service.py -x -q
+# Run a specific unit test file — NOTE: unit tests live in tests/unit/, NOT tests/
+python -m pytest tests/unit/test_navigation_service.py -x -q
+python -m pytest tests/unit/test_robohat_service.py -x -q
+
+# Broader test run (may include integration tests — use the hardware filter)
+python -m pytest tests/ -x -q -m "not hardware"
 
 # Lint
 ruff check backend/src
 
-# Restart backend
+# Restart backend — NOTE: startup takes ~90 seconds (camera/AI init). Wait for health.
 sudo systemctl restart lawnberry-backend
+# Poll until the API responds (up to 2 min):
+for i in $(seq 1 24); do sleep 5; curl -sf http://localhost:8081/api/v2/status && echo "UP" && break; echo "waiting... ($((i*5))s)"; done
 
 # Tail backend logs
 journalctl -u lawnberry-backend -f --no-pager
@@ -38,6 +44,17 @@ tail -f /home/pi/lawnberry/backend/backend.log
 ⚠️ **Test suite hang warning:** `python -m pytest tests/` without `-m "not hardware"` will hang
 indefinitely because some tests block on hardware I/O (serial ports, I2C). Always filter or
 set a per-test timeout. `pytest-timeout` is NOT installed; add `--timeout=N` only if it is.
+
+**Test directory layout:**
+- `tests/unit/` — fast unit tests (no hardware, always safe to run)
+  - `tests/unit/test_navigation_service.py` — navigation unit tests (12 tests)
+  - `tests/unit/test_robohat_service.py` — motor controller unit tests
+- `tests/test_nav_coverage_patterns.py` — coverage/path algorithm tests (root level)
+- `tests/test_nav_path_planner.py` — path planner tests (root level)
+- `tests/test_mission_api.py` etc. — API integration tests (root level)
+
+⚠️ **Wrong path anti-pattern:** `tests/test_navigation_service.py` does NOT exist — it is
+at `tests/unit/test_navigation_service.py`. This mistake has caused repeated wasted runs.
 
 ## Code Style
 Python 3.11 (backend), TypeScript + Vue 3 (frontend): Follow standard conventions
@@ -148,7 +165,14 @@ corrupts the BNO085 sensor state and requires a power cycle.
 - `imu_yaw_offset_degrees: 0.0` in `config/hardware.yaml` — the IMU is forward-facing and does
   not require mounting offset. The formula `(-raw_yaw + offset) % 360` alone handles the ZYX→compass
   convention conversion. **Do not change this value without understanding the heading oscillation root
-  cause.** A 180° offset would invert all directions and cause navigation convergence failure.
+  cause.**
+  **Why 0.0 is correct and 180° is WRONG**: The `-raw_yaw` negation IS the ZYX→compass conversion
+  (it flips CCW-positive → CW-positive). Adding `imu_yaw_offset_degrees = 180` on top of the
+  negation applies the correction twice, which fully inverts all headings and causes the mower to
+  drive away from every waypoint. This mistake has been made and reverted three times (commits
+  `055635a` → `0dde5bc` → `17bfedc`). Do NOT change this to 180°. If you think the heading is
+  ~180° off, the bug is elsewhere — check `_session_heading_alignment` in `data/imu_alignment.json`
+  or verify the GPS COG bootstrap fired correctly.
 
 ## Motor / Navigation Direction Conventions
 
@@ -210,7 +234,24 @@ tail -f /home/pi/lawnberry/logs/lawnberry.log | grep "NAV_CONTROL"
 - **Both inverted**: Both layers have the wrong sign — look for recent changes that modified both simultaneously
 - **Joystick correct, Mission wiggles**: Navigation swap is wrong but arcade mix is right — asymmetric compensation
 
-**Remember**: Never change one compensation layer without verifying the other still works.
+**REQUIRED post-change validation — run BOTH paths before committing any motor change:**
+
+```bash
+# 1. Unit tests first
+python -m pytest tests/unit/test_robohat_service.py tests/unit/test_navigation_service.py -xvs -m "not hardware"
+
+# 2. Joystick path — right turn response: left_motor_speed MUST be > 0, right_motor_speed MUST be < 0
+curl -X POST http://localhost:8081/api/v2/control/drive \
+  -H "Content-Type: application/json" \
+  -d '{"throttle":0.0,"turn":0.5}'
+
+# 3. Navigation path — start a short 2-waypoint mission; mower MUST turn toward the first waypoint
+#    Watch: tail -f logs/lawnberry.log | grep "NAV_CONTROL"
+#    If mower turns AWAY from target bearing → navigation compensation layer is wrong
+```
+
+If joystick is correct but mission turns wrong (or vice versa), the two layers are out of sync.
+Fix the failing layer — **never change one without re-validating the other**.
 
 ## Backend Startup Gotchas with Motor Changes
 
@@ -221,9 +262,19 @@ Motor control code runs during systemd service startup (navigation service initi
 - **Adding new motor API endpoints** — ensure they don't require navigation service state that isn't initialized yet
 
 **Safe Pattern for Motor Changes:**
-1. Run `pytest tests/test_robohat_service.py tests/test_navigation_service.py -xvs` first
-2. If tests pass, restart backend: `sudo systemctl restart lawnberry-backend && sleep 5 && curl http://localhost:8081/api/v2/status`
-3. If status endpoint hangs (no response after 5s), backend is stuck in startup — check recent motor changes immediately
+1. Run unit tests first (fast, no hardware):
+   ```bash
+   python -m pytest tests/unit/test_robohat_service.py tests/unit/test_navigation_service.py -xvs -m "not hardware"
+   ```
+2. If tests pass, restart backend and poll until healthy — **startup takes ~90 seconds** (camera + AI service init):
+   ```bash
+   sudo systemctl restart lawnberry-backend
+   for i in $(seq 1 24); do sleep 5; curl -sf http://localhost:8081/api/v2/status && echo "UP" && break; echo "waiting... ($((i*5))s)"; done
+   ```
+3. After backend is UP, validate BOTH motor code paths before committing:
+   - **Joystick** (manual): `curl -X POST http://localhost:8081/api/v2/control/drive -H "Content-Type: application/json" -d '{"throttle":0.0,"turn":0.5}'` → `left_motor_speed` > 0, `right_motor_speed` < 0
+   - **Navigation** (mission): start a 2-waypoint test mission; mower must turn *toward* the first waypoint bearing, not away
+4. If EITHER path is wrong, the two compensation layers are out of sync — do NOT commit until both pass
 
 ## Hardware Diagnostics Quick Reference
 
@@ -263,6 +314,37 @@ Motor control code runs during systemd service startup (navigation service initi
    ```
 
 **Key distinction**: If API returns correct speeds but motors don't move → hardware issue (cable, driver, or RoboHAT firmware). If API returns inverted speeds → code issue (one of the two compensation layers is wrong).
+
+## GPS COG Heading Bootstrap (Mission Start Behavior)
+
+At the start of every mission, `_bootstrap_heading_from_gps_cog()` drives the mower ~1-2m forward
+to acquire a GPS Course-Over-Ground (COG) reading and snap the IMU heading alignment to it.
+
+**This is intentional behavior** — the mower WILL move forward a short distance before navigating
+to the first waypoint. Ensure the area directly in front is clear before starting a mission.
+
+**Verifying the bootstrap fired correctly** — watch for these log lines:
+```
+INFO  Heading bootstrap: driving forward to acquire GPS COG snap...
+INFO  HDG snap-calibrated from GPS COG: delta=X° new_align=Y°
+```
+If you see the second line with a `delta` close to 0°, the IMU was already well-aligned.
+If `delta` is large (>30°), it means the IMU had significant heading error that was corrected.
+
+**If the bootstrap does NOT fire or shows no COG snap:**
+```
+WARN  GPS COG bootstrap timed out — no valid COG acquired
+```
+Check:
+1. GPS fix quality: `curl -s http://localhost:8081/api/v2/sensors/gps` — needs RTK_FIXED or GPS_3D
+2. Speed threshold: mower must reach ≥0.3 m/s for COG to be valid — check for obstacles or motor issues
+3. `data/imu_alignment.json` — if `source` is `"mission_start_reset"` and `alignment` is 0.0, the
+   bootstrap did not complete; if `source` is `"gps_cog_snap"`, it succeeded
+
+**After a successful mission start**, `data/imu_alignment.json` will contain:
+```json
+{"alignment": <degrees>, "source": "gps_cog_snap", "samples": 1, "timestamp": "..."}
+```
 
 ## Python Bytecode Cache
 
