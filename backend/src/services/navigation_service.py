@@ -195,10 +195,11 @@ class NavigationService:
         # GPS-based session heading alignment.
         # The BNO085 Game Rotation Vector uses gyro+accel only (no magnetometer);
         # its yaw zero is arbitrary at power-on.  _imu_yaw_offset is the persistent
-        # mounting offset from hardware.yaml.  _session_heading_alignment is computed
-        # from GPS COG while driving straight and from inversion auto-detection.
+        # mounting offset from hardware.yaml.  _session_heading_alignment is snapped
+        # from GPS COG on the first straight-motion sample each mission, then fine-tuned.
         # It IS persisted to data/imu_alignment.json so subsequent reboots start
-        # from the last-known good offset rather than requiring re-convergence.
+        # from the last-known good offset; however, it is reset at each mission start
+        # and re-derived from GPS COG via the bootstrap drive.
         self._session_heading_alignment: float = 0.0
         self._heading_alignment_sample_count: int = 0
         self._gps_cog_history: list = []  # recent GPS COG values for straight-motion gate
@@ -242,6 +243,15 @@ class NavigationService:
         self.navigation_state.current_waypoint_index = max(0, min(requested_index or 0, max_index))
         self.navigation_state.operation_start_time = datetime.now(timezone.utc)
         self._mission_execution_active = True
+
+        # Reset heading alignment for each mission so the bootstrap drive gets a
+        # clean GPS COG snap.  IMU Game Rotation Vector yaw is relative to boot
+        # orientation and must be re-calibrated before the first tank turn.
+        self._session_heading_alignment = 0.0
+        self._heading_alignment_sample_count = 0
+        self._gps_cog_history.clear()
+        self._save_alignment_to_disk("mission_start_reset")
+        await self._bootstrap_heading_from_gps_cog()
 
         # Load yard boundary from map zones so geofence enforcement is active for this mission
         self._load_boundaries_from_zones()
@@ -335,12 +345,7 @@ class NavigationService:
         # mode without converging.  Motor EMI on the IMU magnetometer can cause heading
         # to oscillate indefinitely; this guard prevents eternal spinning.
         _tank_turn_start: float | None = None
-        _TANK_TURN_TIMEOUT_S: float = 45.0  # raised: inversion detector needs 8 s to fire
-        # IMU inversion detector: if error stays near ±180° during a tank turn,
-        # the IMU booted 180° off.  After _INVERSION_DETECT_S seconds, flip
-        # session_heading_alignment by 180° and reset the watchdog.
-        _error_near_180_start: float | None = None
-        _INVERSION_DETECT_S: float = 8.0
+        _TANK_TURN_TIMEOUT_S: float = 30.0
         # "Definitely stuck" detector: if stall boost is maxed AND heading is
         # still frozen, the mower is mechanically stuck — abort cleanly.
         _stall_max_start: float | None = None
@@ -570,35 +575,6 @@ class NavigationService:
                         "without heading convergence"
                     )
 
-                # --- IMU 180° inversion detector ---
-                # Symptom: error stays near ±180° while heading IS physically changing
-                # (stall boost is low).  This means the IMU booted pointing 180° backward.
-                # Fix: flip session_heading_alignment by 180° and reset the watchdog.
-                if abs(abs(heading_error) - 180.0) < 55.0:
-                    if _error_near_180_start is None:
-                        _error_near_180_start = time.monotonic()
-                    elif (time.monotonic() - _error_near_180_start) >= _INVERSION_DETECT_S:
-                        old_align = self._session_heading_alignment
-                        self._session_heading_alignment = (old_align + 180.0) % 360.0
-                        logger.warning(
-                            "IMU 180° inversion auto-corrected during tank turn "
-                            "(error %.1f° near ±180° for %.0f s) — "
-                            "session_align %.1f° → %.1f°",
-                            heading_error, _INVERSION_DETECT_S,
-                            old_align, self._session_heading_alignment,
-                        )
-                        # Reset watchdog and stall tracker so the corrected heading
-                        # gets a fresh convergence window.
-                        _tank_turn_start = time.monotonic()
-                        _error_near_180_start = None
-                        _stall_start = None
-                        _stall_heading = None
-                        _stall_max_start = None
-                        # Persist so next boot starts with the corrected offset
-                        self._save_alignment_to_disk("inversion_detect")
-                else:
-                    _error_near_180_start = None
-
                 # TANK TURN: counter-rotate wheels in place to point toward
                 # the waypoint.  One-wheel turns can't overcome grass friction.
                 # Sign convention: turn_sign > 0 means we need CW (right).
@@ -609,7 +585,6 @@ class NavigationService:
                 left_speed = -turn_sign * turn_speed
             else:
                 _tank_turn_start = None  # reset watchdog when no longer in tank mode
-                _error_near_180_start = None  # reset inversion detector
                 # BLENDED: proportional turn with forward movement.
                 # Note: 2026-04-20 motor direction inversion fix - left/right are swapped
                 # at the motor driver level, so we compute right_speed and left_speed in opposite order.
@@ -770,6 +745,42 @@ class NavigationService:
         if not accepted:
             raise RuntimeError("Motor command not accepted by controller")
 
+    async def _bootstrap_heading_from_gps_cog(self) -> None:
+        """Drive briefly forward so GPS COG snaps the heading alignment.
+
+        IMU Game Rotation Vector yaw is relative to boot orientation (arbitrary zero).
+        This method drives at ~75% throttle for up to 3 seconds.  As soon as
+        update_navigation_state() fires the GPS COG snap (sample_count 0→1), motion
+        stops and the alignment is correct for the mission.
+
+        If GPS COG is not available within 3 s the method logs a warning and returns
+        without calibrating — the mission loop will attempt to use whatever heading
+        data is available.
+        """
+        logger.info("Heading bootstrap: driving forward to acquire GPS COG snap...")
+        deadline = time.monotonic() + 3.0
+        try:
+            await self.set_speed(0.6, 0.6)
+            while time.monotonic() < deadline:
+                await asyncio.sleep(0.2)
+                if self._global_emergency_active():
+                    logger.warning("Heading bootstrap aborted: emergency stop active")
+                    return
+                if self._heading_alignment_sample_count >= 1:
+                    logger.info(
+                        "Heading bootstrap complete: session_align=%.1f°",
+                        self._session_heading_alignment,
+                    )
+                    break
+            else:
+                logger.warning(
+                    "Heading bootstrap: GPS COG not available in 3 s — "
+                    "proceeding with uncalibrated heading"
+                )
+        finally:
+            await self._deliver_stop_command(reason="heading bootstrap")
+            await asyncio.sleep(0.3)
+
     async def _deliver_stop_command(
         self,
         *,
@@ -897,7 +908,7 @@ class NavigationService:
             gps_cog_available = (
                 sensor_data.gps is not None
                 and sensor_data.gps.heading is not None
-                and (sensor_data.gps.speed or 0.0) >= 0.5
+                and (sensor_data.gps.speed or 0.0) >= 0.3
             )
             if gps_cog_available:
                 cog = float(sensor_data.gps.heading)  # type: ignore[union-attr]
@@ -931,25 +942,31 @@ class NavigationService:
                     going_straight = max_dev < 8.0
 
                 if going_straight:
-                    # Clamp delta to ±90° to prevent GPS glitches from corrupting alignment
-                    clamped_delta = max(-90.0, min(90.0, delta))
-                    # Slow EMA update; converges in ~20 straight-line samples for 180° error
-                    self._session_heading_alignment += 0.1 * clamped_delta
-                    self._heading_alignment_sample_count += 1
-                    if self._heading_alignment_sample_count % 10 == 0:
+                    if self._heading_alignment_sample_count == 0:
+                        # First sample: snap immediately to GPS COG — corrects full boot offset.
+                        clamped_delta = max(-180.0, min(180.0, delta))
+                        self._session_heading_alignment = (
+                            self._session_heading_alignment + clamped_delta
+                        ) % 360.0
+                        self._heading_alignment_sample_count = 1
                         logger.info(
-                            "HDG session alignment: %.1f° (delta=%.1f°, samples=%d)",
-                            self._session_heading_alignment,
-                            clamped_delta,
-                            self._heading_alignment_sample_count,
+                            "HDG snap-calibrated from GPS COG: delta=%.1f° new_align=%.1f°",
+                            clamped_delta, self._session_heading_alignment,
                         )
-                    # Persist every 20 samples (and only once converged past 10 samples)
-                    # so the learned offset survives the next reboot.
-                    if (
-                        self._heading_alignment_sample_count >= 10
-                        and self._heading_alignment_sample_count % 20 == 0
-                    ):
-                        self._save_alignment_to_disk("gps_cog")
+                        self._save_alignment_to_disk("gps_cog_snap")
+                    else:
+                        # Fine-tune with gentle EMA after the initial snap.
+                        clamped_delta = max(-45.0, min(45.0, delta))
+                        self._session_heading_alignment += 0.1 * clamped_delta
+                        self._heading_alignment_sample_count += 1
+                        if self._heading_alignment_sample_count % 20 == 0:
+                            logger.info(
+                                "HDG fine-tune: align=%.1f° delta=%.1f° samples=%d",
+                                self._session_heading_alignment,
+                                clamped_delta,
+                                self._heading_alignment_sample_count,
+                            )
+                            self._save_alignment_to_disk("gps_cog")
         elif (
             sensor_data.gps is not None
             and sensor_data.gps.heading is not None
