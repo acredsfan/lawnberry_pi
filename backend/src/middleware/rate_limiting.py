@@ -46,7 +46,7 @@ class GlobalRateLimiter(BaseHTTPMiddleware):
         # List of (prefix, rate, burst) to override defaults per path
         self._overrides = tuple(strict_prefix_overrides or ())
         self._buckets: Dict[str, Bucket] = {}
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
 
     async def dispatch(self, request: Request, call_next) -> Response:
         path = request.url.path
@@ -89,6 +89,8 @@ class GlobalRateLimiter(BaseHTTPMiddleware):
 
     async def _consume_token(self, key: str, rate: float, burst: int) -> Tuple[bool, int]:
         now = time.time()
+        if self._lock is None:
+            self._lock = asyncio.Lock()
         async with self._lock:
             bucket = self._buckets.get(key)
             if bucket is None:

@@ -106,10 +106,7 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
     expected_secret = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL", "operator123")
     credential = payload.credential
     if credential is None and payload.username and payload.password:
-        if payload.username == "admin" and payload.password == "admin":
-            credential = expected_secret
-        else:
-            credential = ""
+        credential = ""
 
     if credential != expected_secret:
         raise HTTPException(status_code=401, detail="Authentication failed")

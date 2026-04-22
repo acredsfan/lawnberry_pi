@@ -6,6 +6,7 @@ Manages camera capture, streaming, and IPC communication
 import asyncio
 import io
 import json
+import logging
 import os
 import signal
 import socket
@@ -1018,13 +1019,14 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # Handle shutdown signals
-    def signal_handler(sig, frame):
+    loop = asyncio.get_running_loop()
+
+    def signal_handler(sig):
         logger.info(f"Received signal {sig}, shutting down...")
-        asyncio.create_task(camera_service.shutdown())
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+        loop.create_task(camera_service.shutdown())
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, signal_handler, sig)
     
     try:
         # Initialize and start camera service
