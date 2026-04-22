@@ -62,8 +62,7 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
 
       await store.pauseCurrentMission()
 
-      expect(store.statusDetail).toBeTruthy()
-      expect(typeof store.statusDetail).toBe('string')
+      expect(store.statusDetail).toBe('Failed to pause mission')
     })
 
     it('clears statusDetail after a successful pause', async () => {
@@ -74,8 +73,7 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
 
       await store.pauseCurrentMission()
 
-      // statusDetail should be reset (null or an operator-facing message — not an error)
-      expect(store.statusDetail).not.toContain('Failed')
+      expect(store.statusDetail).toBe('Paused by operator')
     })
 
     it('does nothing when there is no active mission', async () => {
@@ -122,8 +120,7 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
 
       await store.resumeCurrentMission()
 
-      expect(store.statusDetail).toBeTruthy()
-      expect(typeof store.statusDetail).toBe('string')
+      expect(store.statusDetail).toBe('Failed to resume mission')
     })
 
     it('clears statusDetail after a successful resume', async () => {

@@ -146,32 +146,46 @@ export const useMissionStore = defineStore('mission', () => {
     }
   };
 
+  /**
+   * Pauses the current mission.
+   * On API failure, sets statusDetail to an error message but does NOT throw —
+   * callers should watch statusDetail rather than catching rejections.
+   * (Contrast with startCurrentMission / abortCurrentMission which do throw.)
+   */
   const pauseCurrentMission = async (): Promise<void> => {
     if (!currentMission.value) return;
     try {
       await apiService.post(`/api/v2/missions/${currentMission.value.id}/pause`, {});
-      missionStatus.value = 'paused';
-      statusDetail.value = 'Paused by operator';
-      stopStatusPolling();
     } catch (error) {
       console.error('Error pausing mission:', error);
       statusDetail.value = 'Failed to pause mission';
-      // missionStatus is NOT changed — caller sees current state, error surfaced via statusDetail
+      return; // missionStatus is NOT changed — error surfaced via statusDetail
     }
+    // Only reached when the API call succeeded:
+    missionStatus.value = 'paused';
+    statusDetail.value = 'Paused by operator';
+    stopStatusPolling();
   };
 
+  /**
+   * Resumes the current mission after a pause.
+   * On API failure, sets statusDetail to an error message but does NOT throw —
+   * callers should watch statusDetail rather than catching rejections.
+   * (Contrast with startCurrentMission / abortCurrentMission which do throw.)
+   */
   const resumeCurrentMission = async (): Promise<void> => {
     if (!currentMission.value) return;
     try {
       await apiService.post(`/api/v2/missions/${currentMission.value.id}/resume`, {});
-      missionStatus.value = 'running';
-      statusDetail.value = null;
-      startStatusPolling();
     } catch (error) {
       console.error('Error resuming mission:', error);
       statusDetail.value = 'Failed to resume mission';
-      // missionStatus is NOT changed — caller sees current state, error surfaced via statusDetail
+      return; // missionStatus is NOT changed — error surfaced via statusDetail
     }
+    // Only reached when the API call succeeded:
+    missionStatus.value = 'running';
+    statusDetail.value = null;
+    startStatusPolling();
   };
 
   const abortCurrentMission = async () => {
