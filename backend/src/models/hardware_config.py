@@ -119,6 +119,7 @@ class HardwareConfig(BaseModel):
 
     gps_type: Optional[GPSType] = Field(default=None)
     gps_ntrip_enabled: bool = Field(default=False)
+    gps_usb_device: Optional[str] = Field(default=None, description="Serial device for GPS (e.g. /dev/lawnberry-gps)")
     imu_type: Optional[IMUType] = Field(default=None)
     imu_port: Optional[str] = Field(default=None, description="Serial port for IMU (e.g. /dev/ttyAMA4)")
     imu_yaw_offset_degrees: float = Field(

@@ -192,6 +192,9 @@ class ConfigLoader:
         if isinstance(gps, dict) and "ntrip_enabled" in gps and "gps_ntrip_enabled" not in mapped:
             mapped["gps_ntrip_enabled"] = bool(gps.get("ntrip_enabled"))
 
+        if isinstance(gps, dict) and "usb_device" in gps and "gps_usb_device" not in mapped:
+            mapped["gps_usb_device"] = str(gps["usb_device"])
+
         imu = cfg.get("imu") or {}
         if isinstance(imu, dict) and "type" in imu and "imu_type" not in mapped:
             t = str(imu.get("type")).strip().lower()

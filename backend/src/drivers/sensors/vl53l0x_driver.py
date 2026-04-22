@@ -293,17 +293,21 @@ async def _try_pair_init_adafruit(left_gpio: Optional[int], right_gpio: Optional
         import adafruit_vl53l0x  # type: ignore
         if _adafruit_i2c is None:
             _adafruit_i2c = busio.I2C(board.SCL, board.SDA)
-        # Create sensor at default 0x29 and change address
-        sensor = adafruit_vl53l0x.VL53L0X(_adafruit_i2c)
-        # Adafruit API provides set_address(new_addr)
-        sensor.set_address(right_addr)
-        # Apply timing budget from env/config if supported
-        try:
-            if hasattr(sensor, "measurement_timing_budget"):
-                tb = int(os.environ.get("TOF_TIMING_BUDGET_US", "0")) or 66000
-                sensor.measurement_timing_budget = tb
-        except Exception:
-            pass
+        _i2c = _adafruit_i2c
+        _raddr = right_addr
+
+        def _do_pair_init() -> object:
+            s = adafruit_vl53l0x.VL53L0X(_i2c)
+            s.set_address(_raddr)
+            try:
+                if hasattr(s, "measurement_timing_budget"):
+                    tb = int(os.environ.get("TOF_TIMING_BUDGET_US", "0")) or 66000
+                    s.measurement_timing_budget = tb
+            except Exception:
+                pass
+            return s
+
+        await asyncio.to_thread(_do_pair_init)
     except Exception:
         return False
 
@@ -335,14 +339,20 @@ async def _try_prepare_adafruit_instance(address: int) -> tuple[object | None, O
     try:
         if _adafruit_i2c is None:
             _adafruit_i2c = busio.I2C(board.SCL, board.SDA)
-        sensor = adafruit_vl53l0x.VL53L0X(_adafruit_i2c, address=address)
-        # Apply timing budget if provided via env
-        try:
-            tb_env = os.environ.get("TOF_TIMING_BUDGET_US")
-            if tb_env:
-                sensor.measurement_timing_budget = int(tb_env)
-        except Exception:
-            pass
+        _i2c = _adafruit_i2c
+        _addr = address
+        _tb_env = os.environ.get("TOF_TIMING_BUDGET_US")
+
+        def _do_init() -> object:
+            s = adafruit_vl53l0x.VL53L0X(_i2c, address=_addr)
+            try:
+                if _tb_env:
+                    s.measurement_timing_budget = int(_tb_env)
+            except Exception:
+                pass
+            return s
+
+        sensor = await asyncio.to_thread(_do_init)
         return sensor, "adafruit"
     except Exception:
         return None, None

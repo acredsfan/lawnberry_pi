@@ -51,7 +51,7 @@ class TelemetryService:
             # Hint GPS device — prefer explicit config, fall back to port scan
             gps_usb_device: str | None = None
             if hw_cfg:
-                _usb = getattr(hw_cfg, "usb_device", None)
+                _usb = getattr(hw_cfg, "gps_usb_device", None)
                 if isinstance(_usb, str) and _usb:
                     gps_usb_device = _usb
             if gps_usb_device:
