@@ -81,3 +81,60 @@ async def test_mission_without_hub_does_not_raise():
     await svc.start_mission(mission.id)  # Must not raise
     await svc.abort_mission(mission.id)  # Must not raise
 
+
+@pytest.mark.asyncio
+async def test_mission_completed_callback_broadcasts_aborted():
+    """Done callback CancelledError branch schedules a _broadcast_status via ensure_future."""
+    from backend.src.services.mission_service import MissionService
+
+    hub = MagicMock()
+    hub.broadcast_to_topic = AsyncMock()
+
+    class _SlowNav(_DummyNav):
+        async def execute_mission(self, mission, mission_service=None):
+            # Long-running so task.cancel() actually delivers CancelledError
+            await asyncio.sleep(60)
+
+    svc = MissionService(navigation_service=_SlowNav(), websocket_hub=hub)
+    mission = await svc.create_mission("Test Mission", _WAYPOINTS)
+    await svc.start_mission(mission.id)
+    hub.reset_mock()  # clear the "Mission started" broadcast; isolate abort/callback calls
+
+    await svc.abort_mission(mission.id)
+    # abort_mission calls _broadcast_status directly (at least 1 call already).
+    # One extra sleep drains any ensure_future queued by the done callback.
+    await asyncio.sleep(0)
+
+    assert hub.broadcast_to_topic.called
+
+
+@pytest.mark.asyncio
+async def test_mission_completed_callback_broadcasts_failed():
+    """Done callback Exception branch schedules a _broadcast_status via ensure_future."""
+    from backend.src.services.mission_service import MissionService
+
+    hub = MagicMock()
+    hub.broadcast_to_topic = AsyncMock()
+
+    class _FailingNav(_DummyNav):
+        async def execute_mission(self, mission, mission_service=None):
+            raise RuntimeError("nav blew up")
+
+    svc = MissionService(navigation_service=_FailingNav(), websocket_hub=hub)
+    mission = await svc.create_mission("Test Mission", _WAYPOINTS)
+
+    # start_mission broadcasts "Mission started" (call #1) then returns.
+    # AsyncMock does not yield, so the failing nav-task hasn't run yet.
+    await svc.start_mission(mission.id)
+
+    # Three sleep(0) iterations are needed:
+    #   sleep #1: nav-task runs → raises RuntimeError → done-callback call_soon'd
+    #   sleep #2: done-callback runs → asyncio.ensure_future(_broadcast_status) scheduled
+    #   sleep #3: ensure_future task runs → hub.broadcast_to_topic called (call #2)
+    for _ in range(3):
+        await asyncio.sleep(0)
+
+    # 1 call from start_mission + 1 from exception-branch ensure_future
+    assert hub.broadcast_to_topic.call_count >= 2
+
+
