@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import apiService from '@/services/api';
+import { useWebSocket } from '@/services/websocket';
 
 export interface Waypoint {
   id: string;
@@ -64,6 +65,8 @@ export const useMissionStore = defineStore('mission', () => {
     return missionStatus.value === 'paused' && /recover/i.test(statusDetail.value ?? '');
   });
   let statusPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  const { subscribe, unsubscribe } = useWebSocket();
 
   const applyMissionStatus = (status: MissionStatusResponse) => {
     missionStatus.value = status.status;
@@ -202,13 +205,39 @@ export const useMissionStore = defineStore('mission', () => {
 
   const startStatusPolling = () => {
     if (statusPollInterval) return;
-    statusPollInterval = setInterval(pollMissionStatus, 2000);
+    // Subscribe to real-time WebSocket push events for this mission
+    subscribe('mission.status', handleMissionStatusWsEvent);
+    // 30 s reconciliation fallback poll (replaces the previous 2 s poll)
+    statusPollInterval = setInterval(pollMissionStatus, 30000);
   };
 
   const stopStatusPolling = () => {
     if (statusPollInterval) {
       clearInterval(statusPollInterval);
       statusPollInterval = null;
+    }
+    unsubscribe('mission.status', handleMissionStatusWsEvent);
+  };
+
+  const handleMissionStatusWsEvent = (data: any) => {
+    // Guard: only process events for the currently tracked mission
+    if (!currentMission.value) return;
+    const payload = data?.data ?? data;
+    if (payload?.mission_id && payload.mission_id !== currentMission.value.id) return;
+
+    if (payload?.status) {
+      missionStatus.value = payload.status as MissionLifecycleStatus;
+    }
+    if (payload?.progress_pct !== undefined) {
+      progress.value = payload.progress_pct;
+    }
+    if (payload?.detail !== undefined) {
+      statusDetail.value = payload.detail ?? null;
+    }
+
+    const terminal: MissionLifecycleStatus[] = ['completed', 'aborted', 'failed'];
+    if (terminal.includes(missionStatus.value)) {
+      stopStatusPolling();
     }
   };
 

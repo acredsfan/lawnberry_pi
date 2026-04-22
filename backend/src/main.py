@@ -126,7 +126,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
-        mission_service = get_mission_service(NavigationService.get_instance())
+        mission_service = get_mission_service(NavigationService.get_instance(), websocket_hub=websocket_hub)
         await mission_service.recover_persisted_missions()
     except Exception:
         _log.exception("Mission recovery failed during startup")

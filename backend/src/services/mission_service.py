@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import asyncio
 import datetime
 import json
 import logging
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List
 
 from fastapi import Depends
+
+if TYPE_CHECKING:
+    from .websocket_hub import WebSocketHub
 
 from ..core.persistence import persistence
 from ..models import NavigationMode, PathStatus
@@ -42,8 +47,13 @@ class MissionStateError(MissionError):
 
 
 class MissionService:
-    def __init__(self, navigation_service: NavigationService):
-        self.nav_service = navigation_service
+    def __init__(
+        self,
+        navigation_service: NavigationService | None = None,
+        websocket_hub: "WebSocketHub | None" = None,
+    ):
+        self.nav_service = navigation_service  # type: ignore[assignment]
+        self._websocket_hub = websocket_hub
         self.missions: Dict[str, Mission] = {}
         self.mission_statuses: Dict[str, MissionStatus] = {}
         self.mission_tasks: Dict[str, asyncio.Task] = {}
@@ -128,6 +138,26 @@ class MissionService:
             status.completion_percentage = 0.0
 
         self._persist_mission_status(mission_id)
+
+    async def _broadcast_status(self, mission_id: str, detail: str = "") -> None:
+        """Emit mission.status event over WebSocket to all subscribers."""
+        if self._websocket_hub is None:
+            return
+        status = self.mission_statuses.get(mission_id)
+        if status is None:
+            return
+        try:
+            await self._websocket_hub.broadcast_to_topic(
+                "mission.status",
+                {
+                    "mission_id": mission_id,
+                    "status": status.status.value if hasattr(status.status, "value") else status.status,
+                    "progress_pct": status.completion_percentage,
+                    "detail": detail,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed to broadcast mission status: %s", exc)
 
     async def update_waypoint_progress(self, mission_id: str, waypoint_index: int) -> None:
         """Update waypoint progress in mission status (MissionStatusReader protocol method).
@@ -313,6 +343,7 @@ class MissionService:
 
         # Monitor task completion
         task.add_done_callback(self._mission_completed_callback(mission_id))
+        await self._broadcast_status(mission_id, "Mission started")
 
     def _mission_completed_callback(self, mission_id: str):
         def callback(task: asyncio.Task):
@@ -376,6 +407,7 @@ class MissionService:
                 else "Pause requested but neither stop nor emergency stop could be confirmed"
             )
             self._persist_mission_status(mission_id)
+            await self._broadcast_status(mission_id, status.detail)
             return
 
         status.status = MissionLifecycleStatus.PAUSED
@@ -386,6 +418,7 @@ class MissionService:
         )
         self.nav_service.navigation_state.navigation_mode = NavigationMode.PAUSED
         self._persist_mission_status(mission_id)
+        await self._broadcast_status(mission_id, "Mission paused")
 
 
     async def resume_mission(self, mission_id: str):
@@ -427,6 +460,7 @@ class MissionService:
         self.nav_service.navigation_state.current_waypoint_index = status.current_waypoint_index
         self.nav_service.navigation_state.navigation_mode = NavigationMode.AUTO
         self._persist_mission_status(mission_id)
+        await self._broadcast_status(mission_id, "Mission resumed")
 
 
     async def abort_mission(self, mission_id: str):
@@ -460,6 +494,7 @@ class MissionService:
         status.status = final_status
         status.detail = detail
         self._persist_mission_status(mission_id)
+        await self._broadcast_status(mission_id, detail)
 
     async def get_mission_status(self, mission_id: str) -> MissionStatus:
         mission = self._require_mission(mission_id)
@@ -557,11 +592,21 @@ class MissionService:
             )
 
 # Dependency injection
-_mission_service_instance = None
+_mission_service_instance: "MissionService | None" = None
 
-def get_mission_service(nav_service: NavigationService = Depends(NavigationService.get_instance)) -> "MissionService":
+
+def get_mission_service(
+    nav_service: NavigationService = Depends(NavigationService.get_instance),
+    websocket_hub: "WebSocketHub | None" = None,
+) -> "MissionService":
     global _mission_service_instance
     if _mission_service_instance is None:
-        _mission_service_instance = MissionService(nav_service)
+        _mission_service_instance = MissionService(
+            navigation_service=nav_service,
+            websocket_hub=websocket_hub,
+        )
+    elif websocket_hub is not None and _mission_service_instance._websocket_hub is None:
+        # Allow the hub to be injected after first construction (lifespan priming)
+        _mission_service_instance._websocket_hub = websocket_hub
     return _mission_service_instance
 
