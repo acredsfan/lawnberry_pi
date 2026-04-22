@@ -1,19 +1,19 @@
-from fastapi import APIRouter, HTTPException, status, Request
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Any
-import time
 import logging
-from datetime import datetime, timezone
+import time
+from typing import Any
 
-from ...services.hw_selftest import run_selftest
-from ...services.timezone_service import detect_system_timezone
+from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, Field
+
 from ...core.persistence import persistence
-from ...services.websocket_hub import websocket_hub
 from ...services.calibration_service import (
-    imu_calibration_service,
     CalibrationInProgressError,
     DriveControllerUnavailableError,
+    imu_calibration_service,
 )
+from ...services.hw_selftest import run_selftest
+from ...services.timezone_service import detect_system_timezone
+from ...services.websocket_hub import websocket_hub
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -22,30 +22,42 @@ _app_start_time = time.time()
 
 # ------------------------ Models ------------------------
 
+
 class IMUCalibrationResultPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
     status: str = Field(..., description="High-level outcome for the calibration run.")
-    calibration_status: str | None = Field(default=None, description="Raw status reported by the IMU.")
+    calibration_status: str | None = Field(
+        default=None, description="Raw status reported by the IMU."
+    )
     calibration_score: int = Field(default=0, ge=0, le=3, description="Normalized score from 0-3.")
-    steps: list[dict[str, Any]] = Field(default_factory=list, description="Diagnostic step snapshots captured during calibration.")
+    steps: list[dict[str, Any]] = Field(
+        default_factory=list, description="Diagnostic step snapshots captured during calibration."
+    )
     timestamp: str = Field(..., description="Completion timestamp (ISO 8601).")
-    started_at: str | None = Field(default=None, description="Timestamp when the calibration routine began.")
+    started_at: str | None = Field(
+        default=None, description="Timestamp when the calibration routine began."
+    )
     notes: str | None = Field(default=None, description="Additional guidance for the operator.")
 
 
 class IMUCalibrationStatusResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    in_progress: bool = Field(..., description="True when a calibration routine is currently executing.")
+    in_progress: bool = Field(
+        ..., description="True when a calibration routine is currently executing."
+    )
     last_result: IMUCalibrationResultPayload | None = Field(
         default=None,
         description="Most recent calibration summary if available.",
     )
 
+
 class TimezoneResponse(BaseModel):
     timezone: str
     source: str
 
+
 # ------------------------ Hardware Self-Test ------------------------
+
 
 @router.get("/system/selftest")
 def system_selftest():
@@ -56,7 +68,9 @@ def system_selftest():
     report = run_selftest()
     return report
 
+
 # ------------------------ Health Endpoints ------------------------
+
 
 @router.get("/health/liveness")
 def health_liveness():
@@ -67,6 +81,7 @@ def health_liveness():
         "service": "lawnberry-backend",
         "uptime_seconds": uptime,
     }
+
 
 @router.get("/health/readiness")
 def health_readiness():
@@ -91,7 +106,9 @@ def health_readiness():
         "ready": ready,
     }
 
+
 # -------------------- System Timezone --------------------
+
 
 @router.get("/system/timezone", response_model=TimezoneResponse)
 def get_system_timezone() -> TimezoneResponse:
@@ -103,7 +120,9 @@ def get_system_timezone() -> TimezoneResponse:
     info = detect_system_timezone()
     return TimezoneResponse(timezone=info.timezone, source=info.source)
 
+
 # -------------------- IMU Calibration --------------------
+
 
 @router.post("/maintenance/imu/calibrate", response_model=IMUCalibrationResultPayload)
 async def post_calibrate_imu(request: Request) -> IMUCalibrationResultPayload:
@@ -126,7 +145,9 @@ async def post_calibrate_imu(request: Request) -> IMUCalibrationResultPayload:
         try:
             result = await imu_calibration_service.run(sensor_manager)
         except CalibrationInProgressError:
-            raise HTTPException(status.HTTP_409_CONFLICT, detail="IMU calibration already in progress")
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, detail="IMU calibration already in progress"
+            )
         except DriveControllerUnavailableError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
         except Exception as exc:  # pragma: no cover - hardware dependent

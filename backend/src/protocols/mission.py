@@ -17,9 +17,7 @@ class MissionStatusReader(Protocol):
 
     mission_statuses: Mapping[str, Any]  # read-only access: mission_id → MissionStatus
 
-    async def update_waypoint_progress(
-        self, mission_id: str, waypoint_index: int
-    ) -> None: ...
+    async def update_waypoint_progress(self, mission_id: str, waypoint_index: int) -> None: ...
 
     async def mark_mission_complete(self, mission_id: str) -> None: ...
 

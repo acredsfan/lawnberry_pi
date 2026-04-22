@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional, List
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class JobState(str, Enum):
@@ -33,13 +32,13 @@ class ScheduledJob(BaseModel):
     # 6-field cron with seconds, or @every syntax
     cron_schedule: str = Field(..., description="6-field cron with seconds, or @every syntax")
     state: JobState = JobState.SCHEDULED
-    scheduled_start_time_us: Optional[int] = None
-    last_run_time_us: Optional[int] = None
-    error_message: Optional[str] = None
+    scheduled_start_time_us: int | None = None
+    last_run_time_us: int | None = None
+    error_message: str | None = None
 
     # Optional fields for compatibility with broader data model
-    cron_expression: Optional[str] = None
-    zone_assignments: List[str] = Field(default_factory=list)
+    cron_expression: str | None = None
+    zone_assignments: list[str] = Field(default_factory=list)
     weather_check_enabled: bool = True
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
 

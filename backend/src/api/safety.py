@@ -7,7 +7,11 @@ from pydantic import BaseModel, Field
 
 # Reuse safety/blade state used by existing v2 control endpoints
 from . import rest as rest_api
-from .rest import _blade_state, _client_emergency, _safety_state  # minimal coupling to keep behavior consistent
+from .rest import (
+    _blade_state,
+    _client_emergency,
+    _safety_state,
+)  # minimal coupling to keep behavior consistent
 
 router = APIRouter()
 

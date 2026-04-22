@@ -4,15 +4,16 @@ This module provides thread-safe configuration management for the LawnBerry Pi v
 supporting JSON-based configuration files with atomic writes, validation, and fallback
 to default values when configuration is missing or invalid.
 """
+
 import json
 import logging
-import tempfile
 import shutil
+import tempfile
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Dict, Any, Optional, Union
-from datetime import datetime, timezone
-from dataclasses import dataclass, asdict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SystemConfigDefaults:
     """Default system configuration values."""
+
     mowing_height_mm: int = 30
     cutting_speed: float = 0.8
     edge_cutting_enabled: bool = True
@@ -40,6 +42,7 @@ class SystemConfigDefaults:
 @dataclass
 class NetworkConfig:
     """Network configuration."""
+
     wifi_ssid: str = ""
     wifi_password: str = ""
     webui_port: int = 8080
@@ -53,7 +56,8 @@ class NetworkConfig:
 @dataclass
 class HardwareConfig:
     """Hardware configuration and calibration."""
-    imu_calibration_offset: Dict[str, float] = None
+
+    imu_calibration_offset: dict[str, float] = None
     motor_left_max_pwm: int = 255
     motor_right_max_pwm: int = 255
     blade_motor_max_pwm: int = 255
@@ -62,7 +66,7 @@ class HardwareConfig:
     gps_baud_rate: int = 9600
     i2c_bus: int = 1
     spi_bus: int = 0
-    
+
     def __post_init__(self):
         if self.imu_calibration_offset is None:
             self.imu_calibration_offset = {"x": 0.0, "y": 0.0, "z": 0.0}
@@ -70,33 +74,33 @@ class HardwareConfig:
 
 class ConfigurationManager:
     """Thread-safe configuration management with atomic writes."""
-    
+
     def __init__(self, config_dir: str = "./config"):
         self.config_dir = Path(config_dir)
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self._lock = Lock()
-        self._config_cache: Dict[str, Dict[str, Any]] = {}
+        self._config_cache: dict[str, dict[str, Any]] = {}
         self._load_all_configs()
-    
+
     def _load_all_configs(self):
         """Load all configuration files into cache."""
         config_files = {
             "system": "system.json",
-            "network": "network.json", 
-            "hardware": "hardware.json"
+            "network": "network.json",
+            "hardware": "hardware.json",
         }
-        
+
         for config_name, filename in config_files.items():
             self._load_config_file(config_name, filename)
-    
+
     def _load_config_file(self, config_name: str, filename: str):
         """Load a specific configuration file."""
         config_path = self.config_dir / filename
-        
+
         try:
             if config_path.exists():
-                with open(config_path, 'r') as f:
+                with open(config_path) as f:
                     config_data = json.load(f)
                 self._config_cache[config_name] = config_data
                 logger.info(f"Loaded {config_name} configuration from {filename}")
@@ -106,44 +110,38 @@ class ConfigurationManager:
                 self._config_cache[config_name] = default_config
                 self._save_config_file(config_name, filename, default_config)
                 logger.info(f"Created default {config_name} configuration")
-                
-        except (json.JSONDecodeError, IOError) as e:
+
+        except (OSError, json.JSONDecodeError) as e:
             logger.error(f"Error loading {config_name} config: {e}")
             # Fall back to defaults
             self._config_cache[config_name] = self._get_default_config(config_name)
-    
-    def _get_default_config(self, config_name: str) -> Dict[str, Any]:
+
+    def _get_default_config(self, config_name: str) -> dict[str, Any]:
         """Get default configuration for a given config type."""
         defaults = {
             "system": asdict(SystemConfigDefaults()),
             "network": asdict(NetworkConfig()),
-            "hardware": asdict(HardwareConfig())
+            "hardware": asdict(HardwareConfig()),
         }
         return defaults.get(config_name, {})
-    
-    def _save_config_file(self, config_name: str, filename: str, config_data: Dict[str, Any]):
+
+    def _save_config_file(self, config_name: str, filename: str, config_data: dict[str, Any]):
         """Atomically save configuration file."""
         config_path = self.config_dir / filename
-        
+
         # Add metadata
         config_with_metadata = {
             "config": config_data,
-            "metadata": {
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-                "version": "2.0.0"
-            }
+            "metadata": {"updated_at": datetime.now(UTC).isoformat(), "version": "2.0.0"},
         }
-        
+
         # Atomic write using temporary file
         with tempfile.NamedTemporaryFile(
-            mode='w', 
-            dir=self.config_dir, 
-            delete=False,
-            suffix='.tmp'
+            mode="w", dir=self.config_dir, delete=False, suffix=".tmp"
         ) as temp_file:
             json.dump(config_with_metadata, temp_file, indent=2)
             temp_path = Path(temp_file.name)
-        
+
         try:
             # Atomic move
             shutil.move(str(temp_path), str(config_path))
@@ -153,49 +151,49 @@ class ConfigurationManager:
             if temp_path.exists():
                 temp_path.unlink()
             raise e
-    
-    def get_config(self, config_name: str) -> Dict[str, Any]:
+
+    def get_config(self, config_name: str) -> dict[str, Any]:
         """Get configuration by name (thread-safe)."""
         with self._lock:
             return self._config_cache.get(config_name, {}).copy()
-    
-    def update_config(self, config_name: str, updates: Dict[str, Any]) -> bool:
+
+    def update_config(self, config_name: str, updates: dict[str, Any]) -> bool:
         """Update configuration with partial updates (thread-safe)."""
         with self._lock:
             try:
                 current_config = self._config_cache.get(config_name, {}).copy()
-                
+
                 # Apply updates
                 current_config.update(updates)
-                
+
                 # Validate configuration
                 if not self._validate_config(config_name, current_config):
                     logger.error(f"Configuration validation failed for {config_name}")
                     return False
-                
+
                 # Save to file
                 filename = self._get_filename(config_name)
                 self._save_config_file(config_name, filename, current_config)
-                
+
                 # Update cache
                 self._config_cache[config_name] = current_config
-                
+
                 return True
-                
+
             except Exception as e:
                 logger.error(f"Error updating {config_name} config: {e}")
                 return False
-    
+
     def _get_filename(self, config_name: str) -> str:
         """Get filename for configuration type."""
         filenames = {
             "system": "system.json",
             "network": "network.json",
-            "hardware": "hardware.json"
+            "hardware": "hardware.json",
         }
         return filenames.get(config_name, f"{config_name}.json")
-    
-    def _validate_config(self, config_name: str, config_data: Dict[str, Any]) -> bool:
+
+    def _validate_config(self, config_name: str, config_data: dict[str, Any]) -> bool:
         """Validate configuration data."""
         if config_name == "system":
             return self._validate_system_config(config_data)
@@ -204,38 +202,38 @@ class ConfigurationManager:
         elif config_name == "hardware":
             return self._validate_hardware_config(config_data)
         return True
-    
-    def _validate_system_config(self, config: Dict[str, Any]) -> bool:
+
+    def _validate_system_config(self, config: dict[str, Any]) -> bool:
         """Validate system configuration."""
         try:
             # Validate numeric ranges
             if "mowing_height_mm" in config:
                 if not (10 <= config["mowing_height_mm"] <= 100):
                     return False
-            
+
             if "cutting_speed" in config:
                 if not (0.1 <= config["cutting_speed"] <= 2.0):
                     return False
-            
+
             if "telemetry_cadence_hz" in config:
                 if not (1.0 <= config["telemetry_cadence_hz"] <= 10.0):
                     return False
-            
+
             # Validate enum values
             if "obstacle_detection_sensitivity" in config:
                 if config["obstacle_detection_sensitivity"] not in ["low", "medium", "high"]:
                     return False
-            
+
             if "log_level" in config:
                 if config["log_level"] not in ["DEBUG", "INFO", "WARNING", "ERROR"]:
                     return False
-            
+
             return True
-            
+
         except (TypeError, ValueError):
             return False
-    
-    def _validate_network_config(self, config: Dict[str, Any]) -> bool:
+
+    def _validate_network_config(self, config: dict[str, Any]) -> bool:
         """Validate network configuration."""
         try:
             # Validate port ranges
@@ -245,18 +243,18 @@ class ConfigurationManager:
                     port = config[port_key]
                     if not (1024 <= port <= 65535):
                         return False
-            
+
             # Validate WiFi settings if provided
             if "wifi_ssid" in config and config["wifi_ssid"]:
                 if len(config["wifi_ssid"]) > 32:
                     return False
-            
+
             return True
-            
+
         except (TypeError, ValueError):
             return False
-    
-    def _validate_hardware_config(self, config: Dict[str, Any]) -> bool:
+
+    def _validate_hardware_config(self, config: dict[str, Any]) -> bool:
         """Validate hardware configuration."""
         try:
             # Validate PWM values
@@ -265,21 +263,21 @@ class ConfigurationManager:
                 if pwm_key in config:
                     if not (0 <= config[pwm_key] <= 255):
                         return False
-            
+
             # Validate bus numbers
             if "i2c_bus" in config:
                 if not (0 <= config["i2c_bus"] <= 10):
                     return False
-            
+
             if "spi_bus" in config:
                 if not (0 <= config["spi_bus"] <= 2):
                     return False
-            
+
             return True
-            
+
         except (TypeError, ValueError):
             return False
-    
+
     def reload_config(self, config_name: str) -> bool:
         """Reload configuration from disk."""
         with self._lock:
@@ -290,24 +288,24 @@ class ConfigurationManager:
             except Exception as e:
                 logger.error(f"Error reloading {config_name} config: {e}")
                 return False
-    
+
     def backup_config(self, backup_dir: str) -> bool:
         """Create backup of all configuration files."""
         try:
             backup_path = Path(backup_dir)
             backup_path.mkdir(parents=True, exist_ok=True)
-            
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_subdir = backup_path / f"config_backup_{timestamp}"
             backup_subdir.mkdir()
-            
+
             # Copy all config files
             for config_file in self.config_dir.glob("*.json"):
                 shutil.copy2(config_file, backup_subdir)
-            
+
             logger.info(f"Configuration backup created at {backup_subdir}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error creating config backup: {e}")
             return False

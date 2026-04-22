@@ -5,8 +5,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
-
+from typing import Any
 
 DEFAULT_CACHE_FILE = Path("./data/weather_cache.json")
 SIX_HOURS_S = 6 * 60 * 60
@@ -17,7 +16,7 @@ class WeatherCache:
     path: Path = DEFAULT_CACHE_FILE
     ttl_s: int = SIX_HOURS_S
 
-    def read(self) -> Optional[Dict[str, Any]]:
+    def read(self) -> dict[str, Any] | None:
         try:
             if not self.path.exists():
                 return None
@@ -32,7 +31,7 @@ class WeatherCache:
         except Exception:
             return None
 
-    def write(self, forecast: Dict[str, Any]) -> None:
+    def write(self, forecast: dict[str, Any]) -> None:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             payload = {"timestamp_s": time.time(), "forecast": forecast}
@@ -53,17 +52,17 @@ class WeatherAPI:
     None, this falls back to cached data if available and fresh.
     """
 
-    def __init__(self, cache: Optional[WeatherCache] = None):
+    def __init__(self, cache: WeatherCache | None = None):
         self.cache = cache or WeatherCache()
 
     def get_forecast(
         self,
         latitude: float,
         longitude: float,
-        provider: Optional[callable] = None,
-    ) -> Optional[Dict[str, Any]]:
+        provider: callable | None = None,
+    ) -> dict[str, Any] | None:
         # Try provider first (if any)
-        forecast: Optional[Dict[str, Any]] = None
+        forecast: dict[str, Any] | None = None
         if provider is not None:
             try:
                 forecast = provider(latitude, longitude)

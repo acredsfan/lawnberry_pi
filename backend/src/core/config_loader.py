@@ -14,7 +14,7 @@ Acceptance (FR-003, FR-004):
 
 import os
 from copy import deepcopy
-from typing import Optional, Tuple, Dict, Any
+from typing import Any
 
 import yaml
 from pydantic import ValidationError
@@ -41,10 +41,10 @@ class ConfigLoader:
 
     def __init__(
         self,
-        config_dir: Optional[str] = None,
-        hardware_path: Optional[str] = None,
-        limits_path: Optional[str] = None,
-        hardware_local_path: Optional[str] = None,
+        config_dir: str | None = None,
+        hardware_path: str | None = None,
+        limits_path: str | None = None,
+        hardware_local_path: str | None = None,
     ) -> None:
         self.config_dir = config_dir or _default_config_dir()
         self.hardware_path = hardware_path or os.path.join(self.config_dir, "hardware.yaml")
@@ -55,11 +55,11 @@ class ConfigLoader:
             or env_local_path
             or os.path.join(self.config_dir, "hardware.local.yaml")
         )
-        self._cache: Optional[Tuple[HardwareConfig, SafetyLimits]] = None
+        self._cache: tuple[HardwareConfig, SafetyLimits] | None = None
 
-    def _read_yaml(self, path: str) -> Dict[str, Any]:
+    def _read_yaml(self, path: str) -> dict[str, Any]:
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
                 if not isinstance(data, dict):
                     raise ValueError(f"YAML at {path} must be a mapping/object")
@@ -67,7 +67,7 @@ class ConfigLoader:
         except FileNotFoundError:
             return {}
 
-    def load(self) -> Tuple[HardwareConfig, SafetyLimits]:
+    def load(self) -> tuple[HardwareConfig, SafetyLimits]:
         """Load and validate configuration; caches the result.
 
         Raises:
@@ -103,18 +103,18 @@ class ConfigLoader:
         self._cache = (hardware, limits)
         return self._cache
 
-    def get(self) -> Tuple[HardwareConfig, SafetyLimits]:
+    def get(self) -> tuple[HardwareConfig, SafetyLimits]:
         """Return cached configs, loading if necessary."""
         if self._cache is None:
             return self.load()
         return self._cache
 
-    def reload(self) -> Tuple[HardwareConfig, SafetyLimits]:
+    def reload(self) -> tuple[HardwareConfig, SafetyLimits]:
         """Force reloading configs from disk."""
         self._cache = None
         return self.load()
 
-    def update_limits(self, patch: Dict[str, Any]) -> SafetyLimits:
+    def update_limits(self, patch: dict[str, Any]) -> SafetyLimits:
         """Merge *patch* into limits.yaml, validate, write back, and reload.
 
         Only keys present in SafetyLimits are accepted; unknown keys are
@@ -144,7 +144,7 @@ class ConfigLoader:
         return updated
 
     @staticmethod
-    def _normalize_hardware_yaml(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_hardware_yaml(cfg: dict[str, Any]) -> dict[str, Any]:
         """Map YAML structure to HardwareConfig fields.
 
         Supports both flat and nested forms used by tests and docs.
@@ -155,7 +155,7 @@ class ConfigLoader:
         if not cfg:
             return {}
 
-        mapped: Dict[str, Any] = {}
+        mapped: dict[str, Any] = {}
 
         # Flat mapping passthrough
         for key in (
@@ -206,7 +206,11 @@ class ConfigLoader:
                 mapped["imu_type"] = imu.get("type")
         if isinstance(imu, dict) and "port" in imu and "imu_port" not in mapped:
             mapped["imu_port"] = imu["port"]
-        if isinstance(imu, dict) and "yaw_offset_degrees" in imu and "imu_yaw_offset_degrees" not in mapped:
+        if (
+            isinstance(imu, dict)
+            and "yaw_offset_degrees" in imu
+            and "imu_yaw_offset_degrees" not in mapped
+        ):
             mapped["imu_yaw_offset_degrees"] = float(imu["yaw_offset_degrees"])
 
         encoders = cfg.get("encoders") or {}
@@ -262,17 +266,17 @@ class ConfigLoader:
         return mapped
 
     @staticmethod
-    def _normalize_limits_yaml(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_limits_yaml(cfg: dict[str, Any]) -> dict[str, Any]:
         return cfg or {}
 
     @staticmethod
-    def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
         """Merge override dict into base dict recursively without mutating inputs."""
 
         if not base and not override:
             return {}
 
-        merged: Dict[str, Any] = deepcopy(base) if base else {}
+        merged: dict[str, Any] = deepcopy(base) if base else {}
         for key, value in (override or {}).items():
             existing = merged.get(key)
             if isinstance(existing, dict) and isinstance(value, dict):

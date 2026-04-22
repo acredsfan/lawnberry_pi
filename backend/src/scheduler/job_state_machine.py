@@ -5,7 +5,6 @@ from typing import Final
 
 from backend.src.models.scheduled_job import JobState, ScheduledJob
 
-
 _ALLOWED: Final[dict[JobState, set[JobState]]] = {
     JobState.IDLE: {JobState.SCHEDULED},
     JobState.SCHEDULED: {JobState.RUNNING, JobState.FAILED},
@@ -41,7 +40,9 @@ class JobStateMachine:
         cur_raw = self._job.state
         cur = self._as_state(cur_raw)
         if target not in _ALLOWED.get(cur, set()):
-            raise ValueError(f"Invalid transition: {self._state_name(cur)} -> {self._state_name(target)}")
+            raise ValueError(
+                f"Invalid transition: {self._state_name(cur)} -> {self._state_name(target)}"
+            )
 
     def schedule(self) -> None:
         self._ensure(JobState.SCHEDULED)
@@ -52,6 +53,7 @@ class JobStateMachine:
         self._job.state = JobState.RUNNING
         # capture last_run_time_us when entering RUNNING
         import time
+
         self._job.last_run_time_us = int(time.time() * 1_000_000)
 
     def pause(self) -> None:

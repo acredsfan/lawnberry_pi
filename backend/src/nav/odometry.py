@@ -5,6 +5,7 @@ SIM_MODE-safe and does not access hardware directly; it consumes wheel encoder
 tick deltas (if available) or integrates commanded velocities for short
 intervals as a fallback. It is intentionally lightweight for Raspberry Pi 4/5.
 """
+
 from __future__ import annotations
 
 import math
@@ -14,7 +15,7 @@ from dataclasses import dataclass
 @dataclass
 class WheelParams:
     wheel_radius_m: float = 0.05  # 10cm diameter wheel
-    wheel_base_m: float = 0.30    # distance between wheels
+    wheel_base_m: float = 0.30  # distance between wheels
     ticks_per_rev: int = 1024
 
 

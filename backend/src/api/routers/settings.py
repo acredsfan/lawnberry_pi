@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
 from hashlib import sha256
 from pathlib import Path
@@ -117,7 +117,7 @@ def _default_sections() -> dict[str, Any]:
         "remote_access": RemoteAccessSectionResponse().model_dump(),
         "maps": MapsSectionResponse().model_dump(),
         "gps_policy": GpsPolicySectionResponse().model_dump(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -236,7 +236,7 @@ def _profile_payload() -> dict[str, Any]:
         "simulation_mode": bool(stored.get("simulation_mode", service_profile.hardware.sim_mode)),
         "ai_acceleration": str(stored.get("ai_acceleration") or "cpu_only"),
         "branding_checksum": branding_checksum,
-        "updated_at": str(stored.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+        "updated_at": str(stored.get("updated_at") or datetime.now(UTC).isoformat()),
         "theme": legacy.get("theme", "dark"),
         "units": unit_system,
         "unit_system": unit_system,
@@ -257,7 +257,9 @@ def _save_profile_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail="Failed to save settings") from exc
 
 
-def _sync_profile_update(settings: dict[str, Any], current_payload: dict[str, Any]) -> dict[str, Any]:
+def _sync_profile_update(
+    settings: dict[str, Any], current_payload: dict[str, Any]
+) -> dict[str, Any]:
     current_version = str(current_payload.get("profile_version") or "1.0.0")
     requested_version = str(settings.get("profile_version") or current_version)
     if _compare_semver(requested_version, current_version) < 0:
@@ -272,7 +274,9 @@ def _sync_profile_update(settings: dict[str, Any], current_payload: dict[str, An
             )
         }
 
-    telemetry_payload = settings.get("telemetry") if isinstance(settings.get("telemetry"), dict) else {}
+    telemetry_payload = (
+        settings.get("telemetry") if isinstance(settings.get("telemetry"), dict) else {}
+    )
     latency_targets = telemetry_payload.get("latency_targets")
     if isinstance(latency_targets, dict):
         pi5 = latency_targets.get("pi5_ms")
@@ -303,7 +307,9 @@ def _sync_profile_update(settings: dict[str, Any], current_payload: dict[str, An
                 )
             }
     else:
-        normalized_checksum = current_payload.get("branding_checksum") or _compute_branding_checksum()
+        normalized_checksum = (
+            current_payload.get("branding_checksum") or _compute_branding_checksum()
+        )
 
     service_profile = _settings_service().load_profile()
     if "cadence_hz" in telemetry_payload:
@@ -325,7 +331,13 @@ def _sync_profile_update(settings: dict[str, Any], current_payload: dict[str, An
         legacy_payload = _load_legacy_settings()
     maps_patch = {
         key: settings[key]
-        for key in ("google_api_key", "google_billing_warnings", "style", "zoom_level", "bypass_external")
+        for key in (
+            "google_api_key",
+            "google_billing_warnings",
+            "style",
+            "zoom_level",
+            "bypass_external",
+        )
         if key in settings
     }
     mission_planner = settings.get("mission_planner")
@@ -336,8 +348,10 @@ def _sync_profile_update(settings: dict[str, Any], current_payload: dict[str, An
     updated_payload = _profile_payload()
     updated_payload["profile_version"] = requested_version
     updated_payload["branding_checksum"] = normalized_checksum
-    updated_payload["simulation_mode"] = bool(settings.get("simulation_mode", updated_payload.get("simulation_mode")))
-    updated_payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    updated_payload["simulation_mode"] = bool(
+        settings.get("simulation_mode", updated_payload.get("simulation_mode"))
+    )
+    updated_payload["updated_at"] = datetime.now(UTC).isoformat()
     _save_profile_payload(updated_payload)
     return {"payload": updated_payload}
 
@@ -353,7 +367,9 @@ def _load_legacy_settings() -> dict[str, Any]:
                     merged.get("unit_system") or merged.get("units"),
                     default=defaults["units"],
                 )
-                map_provider = str(merged.get("map_provider") or defaults["map_provider"]).strip().lower()
+                map_provider = (
+                    str(merged.get("map_provider") or defaults["map_provider"]).strip().lower()
+                )
                 if map_provider == "openstreetmap":
                     map_provider = "osm"
                 merged["map_provider"] = map_provider
@@ -361,7 +377,9 @@ def _load_legacy_settings() -> dict[str, Any]:
                     "theme": str(merged.get("theme") or defaults["theme"]),
                     "units": merged["units"],
                     "language": str(merged.get("language") or defaults["language"]),
-                    "notifications_enabled": bool(merged.get("notifications_enabled", defaults["notifications_enabled"])),
+                    "notifications_enabled": bool(
+                        merged.get("notifications_enabled", defaults["notifications_enabled"])
+                    ),
                     "map_provider": map_provider,
                 }
     except Exception as exc:
@@ -410,7 +428,7 @@ def _load_ui_settings() -> dict[str, Any]:
 def _save_ui_settings(data: dict[str, Any]) -> dict[str, Any]:
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        payload = {**data, "updated_at": datetime.now(timezone.utc).isoformat()}
+        payload = {**data, "updated_at": datetime.now(UTC).isoformat()}
         UI_SETTINGS_FILE.write_text(json.dumps(payload, indent=2, sort_keys=True))
         return payload
     except Exception as exc:
@@ -429,7 +447,9 @@ def _response_headers(payload: Any, last_modified: datetime | None = None) -> di
     return headers
 
 
-def _maybe_not_modified(request: Request, payload: Any, last_modified: datetime | None = None) -> Response | None:
+def _maybe_not_modified(
+    request: Request, payload: Any, last_modified: datetime | None = None
+) -> Response | None:
     headers = _response_headers(payload, last_modified)
     inm = request.headers.get("if-none-match")
     ims = request.headers.get("if-modified-since")
@@ -439,7 +459,7 @@ def _maybe_not_modified(request: Request, payload: Any, last_modified: datetime 
         try:
             ims_dt = parsedate_to_datetime(ims)
             if ims_dt.tzinfo is None:
-                ims_dt = ims_dt.replace(tzinfo=timezone.utc)
+                ims_dt = ims_dt.replace(tzinfo=UTC)
             if ims_dt >= last_modified.replace(microsecond=0):
                 return Response(status_code=304, headers=headers)
         except Exception:
@@ -478,8 +498,15 @@ def _auth_level_to_security_level(value: str) -> SecurityLevel:
 
 def _security_section_payload(stored: dict[str, Any] | None = None) -> dict[str, Any]:
     section = stored or {}
-    auth_level = _coerce_auth_level(section.get("auth_level") or getattr(_security_settings, "security_level", SecurityLevel.PASSWORD).name)
-    session_timeout = int(section.get("session_timeout_minutes") or getattr(_security_settings, "session_timeout_minutes", 60) or 60)
+    auth_level = _coerce_auth_level(
+        section.get("auth_level")
+        or getattr(_security_settings, "security_level", SecurityLevel.PASSWORD).name
+    )
+    session_timeout = int(
+        section.get("session_timeout_minutes")
+        or getattr(_security_settings, "session_timeout_minutes", 60)
+        or 60
+    )
     require_https = bool(section.get("require_https", False))
     auto_lock_manual_control = bool(section.get("auto_lock_manual_control", True))
     security_level = _auth_level_to_security_level(auth_level)
@@ -510,7 +537,11 @@ def _security_section_payload(stored: dict[str, Any] | None = None) -> dict[str,
 
 def _normalize_remote_section(payload: dict[str, Any]) -> dict[str, Any]:
     data = RemoteAccessSectionResponse.model_validate(payload).model_dump()
-    provider = str(payload.get("provider") or payload.get("method") or data["provider"] or data["method"]).strip().lower()
+    provider = (
+        str(payload.get("provider") or payload.get("method") or data["provider"] or data["method"])
+        .strip()
+        .lower()
+    )
     provider_map = {
         "disabled": "disabled",
         "none": "disabled",
@@ -550,13 +581,17 @@ def _normalize_maps_section(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="provider must be one of google, osm, none")
     style = str(data.get("style") or "standard").strip().lower()
     if style not in {"standard", "satellite", "hybrid", "terrain"}:
-        raise HTTPException(status_code=422, detail="style must be one of standard, satellite, hybrid, terrain")
+        raise HTTPException(
+            status_code=422, detail="style must be one of standard, satellite, hybrid, terrain"
+        )
 
     mission_planner_raw = data.get("mission_planner")
     if mission_planner_raw is None:
         mission_planner_raw = {}
     if not isinstance(mission_planner_raw, dict):
-        raise HTTPException(status_code=422, detail="mission_planner must be an object when provided")
+        raise HTTPException(
+            status_code=422, detail="mission_planner must be an object when provided"
+        )
 
     mission_planner_provider = str(mission_planner_raw.get("provider") or provider).strip().lower()
     if mission_planner_provider not in {"google", "osm", "none"}:
@@ -613,7 +648,9 @@ def _maps_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if style not in {"standard", "satellite", "hybrid", "terrain"}:
         style = "standard"
 
-    mission_planner_raw = data.get("mission_planner") if isinstance(data.get("mission_planner"), dict) else {}
+    mission_planner_raw = (
+        data.get("mission_planner") if isinstance(data.get("mission_planner"), dict) else {}
+    )
     mission_planner_provider = str(mission_planner_raw.get("provider") or provider).strip().lower()
     if mission_planner_provider not in {"google", "osm", "none"}:
         mission_planner_provider = provider
@@ -667,8 +704,12 @@ async def update_settings(settings: dict[str, Any]):
 async def get_system_settings(request: Request):
     sections = _load_ui_settings()
     payload = SystemSectionResponse.model_validate(sections.get("system", {})).model_dump()
-    payload["ui"]["unit_system"] = payload.get("unit_system") or payload["ui"].get("unit_system", "metric")
-    last_modified = datetime.fromisoformat(sections.get("updated_at", datetime.now(timezone.utc).isoformat()))
+    payload["ui"]["unit_system"] = payload.get("unit_system") or payload["ui"].get(
+        "unit_system", "metric"
+    )
+    last_modified = datetime.fromisoformat(
+        sections.get("updated_at", datetime.now(UTC).isoformat())
+    )
     not_modified = _maybe_not_modified(request, payload, last_modified)
     if not_modified is not None:
         return not_modified
@@ -681,7 +722,12 @@ async def update_system_settings(settings: dict[str, Any]):
     current = {**sections.get("system", {})}
     merged = {**current, **settings}
     merged_ui = {**current.get("ui", {}), **(settings.get("ui") or {})}
-    unit_system = merged_ui.get("unit_system") or merged.get("unit_system") or current.get("unit_system") or "metric"
+    unit_system = (
+        merged_ui.get("unit_system")
+        or merged.get("unit_system")
+        or current.get("unit_system")
+        or "metric"
+    )
     unit_system = str(unit_system).strip().lower()
     if unit_system not in {"metric", "imperial"}:
         raise HTTPException(status_code=422, detail="unit_system must be metric or imperial")
@@ -698,7 +744,7 @@ async def update_system_settings(settings: dict[str, Any]):
     }
     current_profile["units"] = unit_system
     current_profile["unit_system"] = unit_system
-    current_profile["updated_at"] = datetime.now(timezone.utc).isoformat()
+    current_profile["updated_at"] = datetime.now(UTC).isoformat()
     _save_profile_payload(current_profile)
     persistence.add_audit_log("settings.update", details={"scope": "system", "settings": settings})
     return validated
@@ -717,15 +763,28 @@ async def update_security_settings(settings: dict[str, Any]):
     sections = _load_ui_settings()
     current = {**sections.get("security", {})}
     merged = {**current, **settings}
-    auth_level = _coerce_auth_level(settings.get("level") or settings.get("security_level") or settings.get("auth_level") or merged.get("auth_level"))
-    session_timeout = int(merged.get("session_timeout_minutes") or getattr(_security_settings, "session_timeout_minutes", 60) or 60)
+    auth_level = _coerce_auth_level(
+        settings.get("level")
+        or settings.get("security_level")
+        or settings.get("auth_level")
+        or merged.get("auth_level")
+    )
+    session_timeout = int(
+        merged.get("session_timeout_minutes")
+        or getattr(_security_settings, "session_timeout_minutes", 60)
+        or 60
+    )
     if session_timeout < 5 or session_timeout > 1440:
-        raise HTTPException(status_code=422, detail="session_timeout_minutes must be between 5 and 1440")
+        raise HTTPException(
+            status_code=422, detail="session_timeout_minutes must be between 5 and 1440"
+        )
 
     _security_settings.security_level = _auth_level_to_security_level(auth_level)
     _security_settings.session_timeout_minutes = session_timeout
-    _security_settings.tunnel_auth_enabled = _security_settings.security_level == SecurityLevel.TUNNEL_AUTH
-    _security_last_modified = datetime.now(timezone.utc)
+    _security_settings.tunnel_auth_enabled = (
+        _security_settings.security_level == SecurityLevel.TUNNEL_AUTH
+    )
+    _security_last_modified = datetime.now(UTC)
 
     sections["security"] = {
         "auth_level": auth_level,
@@ -743,7 +802,9 @@ async def update_security_settings(settings: dict[str, Any]):
 async def get_remote_access_settings(request: Request):
     sections = _load_ui_settings()
     payload = _normalize_remote_section(sections.get("remote_access", {}))
-    last_modified = datetime.fromisoformat(sections.get("updated_at", datetime.now(timezone.utc).isoformat()))
+    last_modified = datetime.fromisoformat(
+        sections.get("updated_at", datetime.now(UTC).isoformat())
+    )
     not_modified = _maybe_not_modified(request, payload, last_modified)
     if not_modified is not None:
         return not_modified
@@ -764,7 +825,9 @@ async def update_remote_access_settings(settings: dict[str, Any]):
 async def get_maps_settings(request: Request):
     sections = _load_ui_settings()
     payload = _maps_response_payload(sections.get("maps", {}))
-    last_modified = datetime.fromisoformat(sections.get("updated_at", datetime.now(timezone.utc).isoformat()))
+    last_modified = datetime.fromisoformat(
+        sections.get("updated_at", datetime.now(UTC).isoformat())
+    )
     not_modified = _maybe_not_modified(request, payload, last_modified)
     if not_modified is not None:
         return not_modified
@@ -785,7 +848,9 @@ async def update_maps_settings(settings: dict[str, Any]):
 async def get_gps_policy_settings(request: Request):
     sections = _load_ui_settings()
     payload = GpsPolicySectionResponse.model_validate(sections.get("gps_policy", {})).model_dump()
-    last_modified = datetime.fromisoformat(sections.get("updated_at", datetime.now(timezone.utc).isoformat()))
+    last_modified = datetime.fromisoformat(
+        sections.get("updated_at", datetime.now(UTC).isoformat())
+    )
     not_modified = _maybe_not_modified(request, payload, last_modified)
     if not_modified is not None:
         return not_modified
@@ -831,6 +896,7 @@ async def update_telemetry_settings(settings: dict[str, Any]):
 # ---------------------------------------------------------------------------
 # Safety limits settings  (reads/writes config/limits.yaml)
 # ---------------------------------------------------------------------------
+
 
 @router.get("/settings/safety")
 async def get_safety_settings():

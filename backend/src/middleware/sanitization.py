@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Set
+from typing import Any
 
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -17,7 +17,7 @@ from starlette.responses import JSONResponse, Response
 
 logger = logging.getLogger(__name__)
 
-SENSITIVE_KEYS: Set[str] = {
+SENSITIVE_KEYS: set[str] = {
     "password",
     "pass",
     "secret",
@@ -33,7 +33,10 @@ SENSITIVE_KEYS: Set[str] = {
 
 def _redact(obj: Any) -> Any:
     if isinstance(obj, dict):
-        return {k: ("***REDACTED***" if k.lower() in SENSITIVE_KEYS else _redact(v)) for k, v in obj.items()}
+        return {
+            k: ("***REDACTED***" if k.lower() in SENSITIVE_KEYS else _redact(v))
+            for k, v in obj.items()
+        }
     if isinstance(obj, list):
         return [_redact(x) for x in obj]
     return obj
@@ -57,9 +60,7 @@ class SanitizationMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: FastAPI, *, max_process_bytes: int = 256_000) -> None:
         super().__init__(app)
         self._max = max(1024, int(max_process_bytes))
-        self._skip_response_redaction = (
-            "/api/v2/settings/maps",
-        )
+        self._skip_response_redaction = ("/api/v2/settings/maps",)
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)

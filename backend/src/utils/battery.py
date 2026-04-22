@@ -6,8 +6,6 @@ with piecewise linear interpolation. Configure battery specs in hardware.yaml
 under the `battery:` section.
 """
 
-from typing import Optional
-
 # LiFePO4 4S OCV (Open Circuit Voltage) vs SOC lookup table.
 # Breakpoints represent *resting* pack voltage after equilibration.
 # Notes:
@@ -22,20 +20,20 @@ from typing import Optional
 #     in the standard LawnBerry Pi build.
 # Source: standard LiFePO4 4S cell datasheet OCV characteristics.
 _LIFEPO4_4S_OCV_TABLE: list[tuple[float, float]] = [
-    (10.0,   0.0),
-    (11.0,   1.0),
-    (12.0,   5.0),
-    (12.5,  10.0),
-    (12.8,  15.0),
+    (10.0, 0.0),
+    (11.0, 1.0),
+    (12.0, 5.0),
+    (12.5, 10.0),
+    (12.8, 15.0),
     (12.88, 20.0),
     (12.96, 30.0),
     (13.04, 40.0),
     (13.08, 50.0),
     (13.12, 60.0),
-    (13.2,  70.0),
+    (13.2, 70.0),
     (13.28, 80.0),
-    (13.4,  90.0),
-    (13.6,  98.0),
+    (13.4, 90.0),
+    (13.6, 98.0),
     # 13.6 V is the practical "full charge resting" point.
     # 14.6 V is only seen during active absorption charging — it is handled
     # via the max_voltage clamp above the table rather than as an OCV entry.
@@ -105,11 +103,11 @@ def linear_voltage_to_soc(
 
 
 def voltage_to_soc(
-    voltage: Optional[float],
+    voltage: float | None,
     chemistry: str = "lifepo4",
     min_voltage: float = 10.0,
     max_voltage: float = 14.6,
-) -> Optional[float]:
+) -> float | None:
     """Estimate battery SOC (%) from voltage, dispatching by chemistry.
 
     Args:

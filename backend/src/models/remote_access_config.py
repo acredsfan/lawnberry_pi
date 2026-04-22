@@ -1,6 +1,6 @@
 from enum import Enum
-from typing import Optional, Dict
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RemoteAccessProvider(str, Enum):
@@ -11,21 +11,21 @@ class RemoteAccessProvider(str, Enum):
 
 
 class CloudflareConfig(BaseModel):
-    account_id: Optional[str] = None
-    tunnel_name: Optional[str] = None
-    credentials_file: Optional[str] = None  # path to JSON credentials
-    hostname: Optional[str] = None
+    account_id: str | None = None
+    tunnel_name: str | None = None
+    credentials_file: str | None = None  # path to JSON credentials
+    hostname: str | None = None
 
 
 class NgrokConfig(BaseModel):
-    authtoken: Optional[str] = None
-    region: Optional[str] = None  # e.g., us, eu, ap
-    edge: Optional[str] = None    # reserved domain or edge config
+    authtoken: str | None = None
+    region: str | None = None  # e.g., us, eu, ap
+    edge: str | None = None  # reserved domain or edge config
 
 
 class CustomTunnelConfig(BaseModel):
-    command: Optional[str] = None
-    env: Dict[str, str] = Field(default_factory=dict)
+    command: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
 
 
 class RemoteAccessConfig(BaseModel):

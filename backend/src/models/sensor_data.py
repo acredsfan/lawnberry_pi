@@ -3,14 +3,16 @@ SensorData model for LawnBerry Pi v2
 Hardware sensor readings and status information
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SensorType(str, Enum):
     """Available sensor types"""
+
     GPS = "gps"
     IMU = "imu"
     TOF_LEFT = "tof_left"
@@ -22,6 +24,7 @@ class SensorType(str, Enum):
 
 class SensorStatus(str, Enum):
     """Sensor operational status"""
+
     ONLINE = "online"
     OFFLINE = "offline"
     ERROR = "error"
@@ -31,6 +34,7 @@ class SensorStatus(str, Enum):
 
 class GpsMode(str, Enum):
     """GPS module configuration"""
+
     F9P_USB = "f9p_usb"  # u-blox ZED-F9P via USB with RTK
     F9P_UART = "f9p_uart"  # u-blox ZED-F9P via UART with RTK
     NEO8M_UART = "neo8m_uart"  # u-blox Neo-8M via UART
@@ -38,92 +42,99 @@ class GpsMode(str, Enum):
 
 class SensorReading(BaseModel):
     """Individual sensor data reading"""
+
     sensor_type: SensorType
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    value: Dict[str, Any]
-    unit: Optional[str] = None
-    accuracy: Optional[float] = None
-    confidence: Optional[float] = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    value: dict[str, Any]
+    unit: str | None = None
+    accuracy: float | None = None
+    confidence: float | None = None
     status: SensorStatus = SensorStatus.ONLINE
 
 
 class GpsReading(BaseModel):
     """GPS-specific sensor reading"""
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    altitude: Optional[float] = None
-    accuracy: Optional[float] = None  # meters
-    heading: Optional[float] = None  # degrees
-    speed: Optional[float] = None  # m/s
-    satellites: Optional[int] = None
-    hdop: Optional[float] = None  # horizontal dilution of precision
+
+    latitude: float | None = None
+    longitude: float | None = None
+    altitude: float | None = None
+    accuracy: float | None = None  # meters
+    heading: float | None = None  # degrees
+    speed: float | None = None  # m/s
+    satellites: int | None = None
+    hdop: float | None = None  # horizontal dilution of precision
     mode: GpsMode = GpsMode.NEO8M_UART
-    rtk_status: Optional[str] = None  # RTK correction status
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    rtk_status: str | None = None  # RTK correction status
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ImuReading(BaseModel):
     """IMU (BNO085) sensor reading"""
-    roll: Optional[float] = None  # degrees
-    pitch: Optional[float] = None  # degrees
-    yaw: Optional[float] = None  # degrees
-    accel_x: Optional[float] = None  # m/s²
-    accel_y: Optional[float] = None  # m/s²
-    accel_z: Optional[float] = None  # m/s²
-    gyro_x: Optional[float] = None  # rad/s
-    gyro_y: Optional[float] = None  # rad/s
-    gyro_z: Optional[float] = None  # rad/s
-    mag_x: Optional[float] = None  # µT
-    mag_y: Optional[float] = None  # µT
-    mag_z: Optional[float] = None  # µT
-    calibration_status: Optional[str] = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    roll: float | None = None  # degrees
+    pitch: float | None = None  # degrees
+    yaw: float | None = None  # degrees
+    accel_x: float | None = None  # m/s²
+    accel_y: float | None = None  # m/s²
+    accel_z: float | None = None  # m/s²
+    gyro_x: float | None = None  # rad/s
+    gyro_y: float | None = None  # rad/s
+    gyro_z: float | None = None  # rad/s
+    mag_x: float | None = None  # µT
+    mag_y: float | None = None  # µT
+    mag_z: float | None = None  # µT
+    calibration_status: str | None = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class TofReading(BaseModel):
     """Time-of-Flight sensor reading"""
-    distance: Optional[float] = None  # millimeters
-    signal_strength: Optional[float] = None
-    ambient_light: Optional[float] = None
-    range_status: Optional[str] = None  # "valid", "wrap_around", "signal_fail", etc.
+
+    distance: float | None = None  # millimeters
+    signal_strength: float | None = None
+    ambient_light: float | None = None
+    range_status: str | None = None  # "valid", "wrap_around", "signal_fail", etc.
     sensor_side: str  # "left" or "right"
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class EnvironmentalReading(BaseModel):
     """Environmental sensor (BME280) reading"""
-    temperature: Optional[float] = None  # °C
-    humidity: Optional[float] = None  # %RH
-    pressure: Optional[float] = None  # hPa
-    altitude: Optional[float] = None  # meters (calculated from pressure)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    temperature: float | None = None  # °C
+    humidity: float | None = None  # %RH
+    pressure: float | None = None  # hPa
+    altitude: float | None = None  # meters (calculated from pressure)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class PowerReading(BaseModel):
     """Power monitoring (INA3221) reading"""
-    battery_voltage: Optional[float] = None  # V
-    battery_current: Optional[float] = None  # A
-    battery_power: Optional[float] = None  # W
-    solar_voltage: Optional[float] = None  # V
-    solar_current: Optional[float] = None  # A
-    solar_power: Optional[float] = None  # W
-    solar_yield_today_wh: Optional[float] = None  # Wh (daily yield from Victron)
-    battery_consumed_today_wh: Optional[float] = None  # Wh (accumulated load consumption today)
-    load_voltage: Optional[float] = None  # V (if applicable)
-    load_current: Optional[float] = None  # A (if applicable)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    battery_voltage: float | None = None  # V
+    battery_current: float | None = None  # A
+    battery_power: float | None = None  # W
+    solar_voltage: float | None = None  # V
+    solar_current: float | None = None  # A
+    solar_power: float | None = None  # W
+    solar_yield_today_wh: float | None = None  # Wh (daily yield from Victron)
+    battery_consumed_today_wh: float | None = None  # Wh (accumulated load consumption today)
+    load_voltage: float | None = None  # V (if applicable)
+    load_current: float | None = None  # A (if applicable)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class SensorData(BaseModel):
     """Complete sensor data snapshot"""
-    gps: Optional[GpsReading] = None
-    imu: Optional[ImuReading] = None
-    tof_left: Optional[TofReading] = None
-    tof_right: Optional[TofReading] = None
-    environmental: Optional[EnvironmentalReading] = None
-    power: Optional[PowerReading] = None
-    sensor_health: Dict[SensorType, SensorStatus] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    hardware_baseline_id: Optional[str] = None  # Reference to hardware configuration
-    
+
+    gps: GpsReading | None = None
+    imu: ImuReading | None = None
+    tof_left: TofReading | None = None
+    tof_right: TofReading | None = None
+    environmental: EnvironmentalReading | None = None
+    power: PowerReading | None = None
+    sensor_health: dict[SensorType, SensorStatus] = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    hardware_baseline_id: str | None = None  # Reference to hardware configuration
+
     model_config = ConfigDict(use_enum_values=True)

@@ -5,14 +5,15 @@ orientations the BNO085 expects during its calibration sequence. The routine
 is safe to call in SIM_MODE (returns a simulated success) and guards against
 concurrent executions so operators cannot stack conflicting calibration runs.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import math
 import os
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from .robohat_service import get_robohat_service
 
@@ -42,8 +43,8 @@ _CALIBRATION_STATE_TO_SCORE = {
 
 
 def _compute_gps_heading_validation(
-    pre: Dict[str, Any], post: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
+    pre: dict[str, Any], post: dict[str, Any]
+) -> dict[str, Any] | None:
     """Compare GPS trajectory bearing to raw IMU yaw from forward-sweep snapshots.
 
     Returns a dict with the GPS bearing, raw IMU yaw, and the suggested
@@ -99,15 +100,14 @@ def _compute_gps_heading_validation(
     }
 
 
-
 class IMUCalibrationService:
     """Coordinate IMU calibration manoeuvres and telemetry sampling."""
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
-        self._last_result: Optional[Dict[str, Any]] = None
+        self._last_result: dict[str, Any] | None = None
 
-    async def run(self, sensor_manager=None) -> Dict[str, Any]:
+    async def run(self, sensor_manager=None) -> dict[str, Any]:
         """Execute the calibration routine and return a status payload."""
         if self._lock.locked():
             raise CalibrationInProgressError("Calibration already in progress")
@@ -117,11 +117,11 @@ class IMUCalibrationService:
             self._last_result = result
             return result
 
-    async def _execute(self, sensor_manager=None) -> Dict[str, Any]:
+    async def _execute(self, sensor_manager=None) -> dict[str, Any]:
         # Short-circuit in simulation to avoid hardware requirements.
         if os.getenv("SIM_MODE", "0") == "1":
             await asyncio.sleep(0.5)
-            ts = datetime.now(timezone.utc).isoformat()
+            ts = datetime.now(UTC).isoformat()
             return {
                 "status": "simulated",
                 "calibration_status": "fully_calibrated",
@@ -132,7 +132,11 @@ class IMUCalibrationService:
             }
 
         robohat = get_robohat_service()
-        if robohat is None or not robohat.running or not getattr(robohat.status, "serial_connected", False):
+        if (
+            robohat is None
+            or not robohat.running
+            or not getattr(robohat.status, "serial_connected", False)
+        ):
             raise DriveControllerUnavailableError("RoboHAT drive controller is offline")
 
         from .sensor_manager import SensorManager  # local import to avoid circular deps
@@ -173,10 +177,10 @@ class IMUCalibrationService:
             },
         ]
 
-        step_results: List[Dict[str, Any]] = []
-        start_ts = datetime.now(timezone.utc)
+        step_results: list[dict[str, Any]] = []
+        start_ts = datetime.now(UTC)
 
-        async def _capture_snapshot() -> Optional[Dict[str, Any]]:
+        async def _capture_snapshot() -> dict[str, Any] | None:
             try:
                 snapshot = await manager.read_all_sensors()  # type: ignore[union-attr]
             except Exception as exc:  # pragma: no cover - hardware dependent
@@ -202,7 +206,7 @@ class IMUCalibrationService:
         try:
             for step in sequence:
                 # For forward_sweep: capture GPS position before driving for heading validation
-                pre_sweep_snapshot: Optional[Dict[str, Any]] = None
+                pre_sweep_snapshot: dict[str, Any] | None = None
                 if step["name"] == "forward_sweep":
                     pre_sweep_snapshot = await _capture_snapshot()
 
@@ -211,7 +215,7 @@ class IMUCalibrationService:
                 await asyncio.sleep(step["duration"])
                 sample = await _capture_snapshot()
 
-                step_result: Dict[str, Any] = {
+                step_result: dict[str, Any] = {
                     "name": step["name"],
                     "description": step["description"],
                     "duration_s": step["duration"],
@@ -246,7 +250,7 @@ class IMUCalibrationService:
             final_score = int(final_snapshot.get("calibration_score") or 0)
 
         # Extract GPS heading validation from forward_sweep (if available)
-        gps_heading_info: Optional[Dict[str, Any]] = None
+        gps_heading_info: dict[str, Any] | None = None
         for sr in step_results:
             if sr["name"] == "forward_sweep" and "gps_heading_validation" in sr:
                 gps_heading_info = sr["gps_heading_validation"]
@@ -257,14 +261,16 @@ class IMUCalibrationService:
             "calibration_status": final_status,
             "calibration_score": final_score,
             "steps": step_results,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "started_at": start_ts.isoformat(),
             "gps_heading_validation": gps_heading_info,
-            "notes": None if final_score >= 2 else "Continue moving mower gently until status improves.",
+            "notes": None
+            if final_score >= 2
+            else "Continue moving mower gently until status improves.",
         }
         return result
 
-    def last_result(self) -> Optional[Dict[str, Any]]:
+    def last_result(self) -> dict[str, Any] | None:
         """Return the most recent result, if one exists."""
         return self._last_result
 

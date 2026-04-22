@@ -5,19 +5,21 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import uuid
-from datetime import datetime, timezone
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any
 
 import httpx
 
 from ..core.persistence import persistence as default_persistence
 from ..models.maps import (
-    MapConfiguration as ContractMapConfiguration,
     ExclusionZone as ContractExclusionZone,
 )
-from ..models.zone import MapConfiguration as ZoneMapConfiguration, Zone
+from ..models.maps import (
+    MapConfiguration as ContractMapConfiguration,
+)
+from ..models.zone import MapConfiguration as ZoneMapConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -47,19 +49,19 @@ class MapsService:
     def __init__(
         self,
         provider: str = "leaflet",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         bypass_external: bool = False,
         persistence: Any | None = None,
     ) -> None:
         self._default_persistence = _resolve_persistence(persistence)
-        self._tile_cache: Dict[str, bytes] = {}
-        self.usage_stats: Dict[str, int | str | bool] = {
+        self._tile_cache: dict[str, bytes] = {}
+        self.usage_stats: dict[str, int | str | bool] = {
             "google_requests": 0,
             "osm_requests": 0,
             "cached_requests": 0,
             "failed_requests": 0,
         }
-        self.google_api_key: Optional[str] = None
+        self.google_api_key: str | None = None
         self.bypass_external = bypass_external
         self.current_provider: str = "leaflet"
         self._provider_enum = MapProvider.OSM
@@ -69,7 +71,7 @@ class MapsService:
     # Provider configuration
     # ------------------------------------------------------------------
     @staticmethod
-    def _normalize_provider(value: str) -> Tuple[MapProvider, str]:
+    def _normalize_provider(value: str) -> tuple[MapProvider, str]:
         normalized = value.replace("_", "-").lower()
         if normalized in {"google", "google-maps"}:
             return MapProvider.GOOGLE, "google"
@@ -77,7 +79,7 @@ class MapsService:
             return MapProvider.OSM, "leaflet"
         raise ValueError(f"Invalid provider: {value}")
 
-    def _set_provider(self, provider: str, api_key: Optional[str]) -> None:
+    def _set_provider(self, provider: str, api_key: str | None) -> None:
         enum_value, label = self._normalize_provider(provider)
         if enum_value == MapProvider.GOOGLE and not api_key:
             raise ValueError("Google Maps requires an API key")
@@ -94,8 +96,8 @@ class MapsService:
     def configure(
         self,
         provider: str,
-        api_key: Optional[str] = None,
-        bypass_external: Optional[bool] = None,
+        api_key: str | None = None,
+        bypass_external: bool | None = None,
     ) -> None:
         """Configure provider, API key, and optional bypass flag."""
 
@@ -108,7 +110,7 @@ class MapsService:
 
         return bool(api_key and api_key.startswith("AIza"))
 
-    def get_usage_stats(self) -> Dict[str, Any]:
+    def get_usage_stats(self) -> dict[str, Any]:
         """Return high-level usage information for diagnostics."""
 
         return {
@@ -127,7 +129,7 @@ class MapsService:
     # ------------------------------------------------------------------
     # Tile + geocode helpers
     # ------------------------------------------------------------------
-    async def get_map_tile(self, zoom: int, x: int, y: int) -> Optional[bytes]:
+    async def get_map_tile(self, zoom: int, x: int, y: int) -> bytes | None:
         if self.bypass_external:
             return self._get_minimal_tile()
 
@@ -156,7 +158,7 @@ class MapsService:
                     pass
             return self._get_minimal_tile()
 
-    async def geocode(self, address: str) -> Optional[Dict[str, Any]]:
+    async def geocode(self, address: str) -> dict[str, Any] | None:
         if self.bypass_external:
             return None
         try:
@@ -168,7 +170,7 @@ class MapsService:
             self.usage_stats["failed_requests"] += 1
             return None
 
-    async def reverse_geocode(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
+    async def reverse_geocode(self, lat: float, lng: float) -> dict[str, Any] | None:
         if self.bypass_external:
             return None
         try:
@@ -209,7 +211,7 @@ class MapsService:
             self.usage_stats["osm_requests"] += 1
             return response.content
 
-    async def _google_geocode(self, address: str) -> Optional[Dict[str, Any]]:
+    async def _google_geocode(self, address: str) -> dict[str, Any] | None:
         url = "https://maps.googleapis.com/maps/api/geocode/json"
         params = {"address": address, "key": self.google_api_key}
         async with httpx.AsyncClient() as client:
@@ -226,7 +228,7 @@ class MapsService:
                 }
         return None
 
-    async def _osm_geocode(self, address: str) -> Optional[Dict[str, Any]]:
+    async def _osm_geocode(self, address: str) -> dict[str, Any] | None:
         url = "https://nominatim.openstreetmap.org/search"
         params = {"q": address, "format": "json", "limit": 1}
         async with httpx.AsyncClient() as client:
@@ -246,7 +248,7 @@ class MapsService:
                 }
         return None
 
-    async def _google_reverse_geocode(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
+    async def _google_reverse_geocode(self, lat: float, lng: float) -> dict[str, Any] | None:
         url = "https://maps.googleapis.com/maps/api/geocode/json"
         params = {"latlng": f"{lat},{lng}", "key": self.google_api_key}
         async with httpx.AsyncClient() as client:
@@ -261,7 +263,7 @@ class MapsService:
                 }
         return None
 
-    async def _osm_reverse_geocode(self, lat: float, lng: float) -> Optional[Dict[str, Any]]:
+    async def _osm_reverse_geocode(self, lat: float, lng: float) -> dict[str, Any] | None:
         url = "https://nominatim.openstreetmap.org/reverse"
         params = {"lat": lat, "lon": lng, "format": "json"}
         async with httpx.AsyncClient() as client:
@@ -281,10 +283,10 @@ class MapsService:
         return b"minimal_tile_placeholder"
 
     @staticmethod
-    def _tile_to_lat_lng(zoom: int, x: int, y: int) -> Tuple[float, float]:
+    def _tile_to_lat_lng(zoom: int, x: int, y: int) -> tuple[float, float]:
         import math
 
-        n = 2.0 ** zoom
+        n = 2.0**zoom
         lon_deg = x / n * 360.0 - 180.0
         lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * y / n)))
         lat_deg = math.degrees(lat_rad)
@@ -305,13 +307,15 @@ class MapsService:
             )
 
     @staticmethod
-    def _serialize_contract(config: ContractMapConfiguration, mode: str = "python") -> Dict[str, Any]:
+    def _serialize_contract(
+        config: ContractMapConfiguration, mode: str = "python"
+    ) -> dict[str, Any]:
         if mode == "json":
             return config.model_dump(mode="json")
         return config.model_dump(mode="python")
 
     @staticmethod
-    def _contract_from_payload(payload: Dict[str, Any]) -> ContractMapConfiguration:
+    def _contract_from_payload(payload: dict[str, Any]) -> ContractMapConfiguration:
         return ContractMapConfiguration(**payload)
 
     def save_map_configuration(
@@ -346,7 +350,7 @@ class MapsService:
         self,
         config_id: str,
         persistence: Any = None,
-    ) -> Optional[ContractMapConfiguration]:
+    ) -> ContractMapConfiguration | None:
         persistence = _resolve_persistence(persistence) or self._default_persistence
         handler = getattr(persistence, "load_map_configuration", None)
         if handler is None:
@@ -389,7 +393,7 @@ class MapsService:
         if not config.validate_configuration():
             raise ValueError(f"Invalid map configuration: {config.validation_errors}")
         config.config_version += 1
-        config.last_modified = datetime.now(timezone.utc)
+        config.last_modified = datetime.now(UTC)
         await persistence.save_map_configuration(
             config.config_id,
             config.model_dump_json(),
@@ -401,7 +405,7 @@ class MapsService:
         self,
         config_id: str,
         persistence: Any | None = None,
-    ) -> Optional[ZoneMapConfiguration | ContractMapConfiguration]:
+    ) -> ZoneMapConfiguration | ContractMapConfiguration | None:
         persistence = _resolve_persistence(persistence) or self._default_persistence
 
         config_json = await persistence.load_map_configuration(config_id)
@@ -424,13 +428,13 @@ class MapsService:
     # Geometry helpers for contract tests
     # ------------------------------------------------------------------
     @staticmethod
-    def _zone_to_coords(zone: ContractExclusionZone) -> List[Tuple[float, float]]:
+    def _zone_to_coords(zone: ContractExclusionZone) -> list[tuple[float, float]]:
         return [(point.lng, point.lat) for point in zone.polygon]
 
     def validate_geojson_zone(
         self,
         zone: ContractExclusionZone,
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         points = zone.polygon
         if len(points) < 3:
             return False, "Polygon must have at least 3 points"
@@ -484,7 +488,7 @@ class MapsService:
         return False
 
     @staticmethod
-    def _bounding_box(zone: ContractExclusionZone) -> Tuple[float, float, float, float]:
+    def _bounding_box(zone: ContractExclusionZone) -> tuple[float, float, float, float]:
         lats = [pt.lat for pt in zone.polygon]
         lngs = [pt.lng for pt in zone.polygon]
         return min(lngs), min(lats), max(lngs), max(lats)

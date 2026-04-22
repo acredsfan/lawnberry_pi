@@ -5,18 +5,18 @@ optionally subtracting obstacle polygons. Uses shapely for robust clipping.
 
 All public functions are pure and typed to ease testing.
 """
+
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Iterable, List, Sequence, Tuple
 
 # Shapely is a required dependency in production, but we avoid importing at
 # module import time to keep test environments without Shapely importable.
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:  # pragma: no cover - import only for type checking
-    from shapely.affinity import rotate as _rotate  # type: ignore
-    from shapely.geometry import LineString as _LineString, Polygon as _Polygon  # type: ignore
-    from shapely.ops import unary_union as _unary_union  # type: ignore
+    pass  # type: ignore
 
 from ..models import Position, Waypoint
 
@@ -41,13 +41,13 @@ def _deg_lon_m_at_lat(lat: float) -> float:
     return 111_000.0 * cos(radians(lat))
 
 
-def _to_xy(lat: float, lon: float, origin_lat: float, origin_lon: float) -> Tuple[float, float]:
+def _to_xy(lat: float, lon: float, origin_lat: float, origin_lon: float) -> tuple[float, float]:
     mx = (lon - origin_lon) * _deg_lon_m_at_lat(origin_lat)
     my = (lat - origin_lat) * _deg_lat_m()
     return (mx, my)
 
 
-def _to_ll(x: float, y: float, origin_lat: float, origin_lon: float) -> Tuple[float, float]:
+def _to_ll(x: float, y: float, origin_lat: float, origin_lon: float) -> tuple[float, float]:
     lat = origin_lat + y / _deg_lat_m()
     lon = origin_lon + x / _deg_lon_m_at_lat(origin_lat)
     return (lat, lon)
@@ -55,6 +55,7 @@ def _to_ll(x: float, y: float, origin_lat: float, origin_lon: float) -> Tuple[fl
 
 def _poly_from_positions(boundary: Sequence[Position]):
     from shapely.geometry import Polygon  # type: ignore
+
     if len(boundary) < 3:
         raise ValueError("boundary must have at least 3 vertices")
     origin_lat = boundary[0].latitude
@@ -71,12 +72,15 @@ def _poly_from_positions(boundary: Sequence[Position]):
     return poly
 
 
-def _obstacles_union(obstacles: Iterable[Sequence[Position]] | None, origin_lat: float, origin_lon: float):
-    from shapely.ops import unary_union  # type: ignore
+def _obstacles_union(
+    obstacles: Iterable[Sequence[Position]] | None, origin_lat: float, origin_lon: float
+):
     from shapely.geometry import Polygon  # type: ignore
+    from shapely.ops import unary_union  # type: ignore
+
     if not obstacles:
         return None
-    polys: List[Polygon] = []
+    polys: list[Polygon] = []
     for obs in obstacles:
         if len(obs) < 3:
             continue
@@ -94,7 +98,7 @@ def generate_lawnmower(
     *,
     config: CoverageConfig | None = None,
     obstacles: Iterable[Sequence[Position]] | None = None,
-) -> List[Waypoint]:
+) -> list[Waypoint]:
     """Generate lawnmower coverage waypoints within a boundary.
 
     - Boundary is a polygon in lat/lon Positions (not closed).
@@ -116,6 +120,7 @@ def generate_lawnmower(
 
     # Align stripes by rotating so that stripes are axis-aligned in local frame
     from shapely.affinity import rotate  # type: ignore
+
     rotated = rotate(cover_area, -cfg.heading_deg, origin=(0, 0), use_radians=False)
 
     effective_width = max(0.01, cfg.swath_width_m * (1.0 - cfg.overlap))
@@ -124,10 +129,11 @@ def generate_lawnmower(
     y = miny + effective_width / 2.0
     direction = 1
 
-    waypoints: List[Waypoint] = []
+    waypoints: list[Waypoint] = []
 
     while y <= maxy:
         from shapely.geometry import LineString  # type: ignore
+
         line = LineString([(minx - 1.0, y), (maxx + 1.0, y)])
         segs = rotated.intersection(line)
         if segs.is_empty:
@@ -154,7 +160,12 @@ def generate_lawnmower(
                 ls = rotate(ls, cfg.heading_deg, origin=(0, 0), use_radians=False)
                 xx, yy = list(ls.coords)[-1]
                 lat, lon = _to_ll(xx, yy, origin_lat, origin_lon)
-                waypoints.append(Waypoint(position=Position(latitude=lat, longitude=lon), target_speed=cfg.waypoint_speed_ms))
+                waypoints.append(
+                    Waypoint(
+                        position=Position(latitude=lat, longitude=lon),
+                        target_speed=cfg.waypoint_speed_ms,
+                    )
+                )
         direction *= -1
         y += effective_width
 

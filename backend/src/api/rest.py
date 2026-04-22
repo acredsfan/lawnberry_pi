@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Request, status, Query
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Any, Dict
+from typing import Optional, Any
 import json
 import hashlib
 import logging
@@ -14,8 +14,13 @@ from email.utils import format_datetime, parsedate_to_datetime
 
 from ..core.persistence import persistence
 from ..core.globals import (
-    _blade_state, _safety_state, _emergency_until, _client_emergency, 
-    _legacy_motors_active, _manual_control_sessions, _security_settings
+    _blade_state,
+    _safety_state,
+    _emergency_until,
+    _client_emergency,
+    _legacy_motors_active,
+    _manual_control_sessions,
+    _security_settings,
 )
 from .routers import telemetry
 from .routers.auth import _resolve_manual_session
@@ -29,7 +34,9 @@ legacy_router = APIRouter()
 # Legacy WebSocket paths
 legacy_router.add_websocket_route("/ws/telemetry", telemetry.ws_telemetry)
 legacy_router.add_websocket_route("/ws/control", telemetry.ws_control)
-legacy_router.add_api_route("/ws/telemetry", telemetry.websocket_telemetry_handshake, methods=["GET"])
+legacy_router.add_api_route(
+    "/ws/telemetry", telemetry.websocket_telemetry_handshake, methods=["GET"]
+)
 legacy_router.add_api_route("/ws/control", telemetry.websocket_control_handshake, methods=["GET"])
 
 _planning_jobs_store: list[dict[str, Any]] = []
@@ -78,11 +85,14 @@ def get_settings_system(request: Request):
         },
     )
 
+
 # ----------------------- Map Zones -----------------------
+
 
 class Point(BaseModel):
     latitude: float
     longitude: float
+
 
 class Zone(BaseModel):
     id: str
@@ -91,8 +101,10 @@ class Zone(BaseModel):
     priority: int = 0
     exclusion_zone: bool = False
 
+
 _zones_store: list[Zone] = []
 _zones_last_modified: datetime = datetime.now(timezone.utc)
+
 
 @router.get("/map/zones", response_model=list[Zone])
 def get_map_zones(request: Request):
@@ -119,6 +131,7 @@ def get_map_zones(request: Request):
     }
     return JSONResponse(content=data, headers=headers)
 
+
 @router.post("/map/zones", response_model=list[Zone])
 def post_map_zones(zones: list[Zone]):
     global _zones_store
@@ -127,7 +140,9 @@ def post_map_zones(zones: list[Zone]):
     _zones_last_modified = datetime.now(timezone.utc)
     return _zones_store
 
+
 # --------------------- Map Locations ---------------------
+
 
 class Position(BaseModel):
     latitude: float | None = None
@@ -136,13 +151,16 @@ class Position(BaseModel):
     accuracy: float | None = None
     gps_mode: str | None = None
 
+
 class MapLocations(BaseModel):
     home: Optional[Position] = None
     am_sun: Optional[Position] = None
     pm_sun: Optional[Position] = None
 
+
 _locations_store = MapLocations()
 _locations_last_modified: datetime = datetime.now(timezone.utc)
+
 
 @router.get("/map/locations", response_model=MapLocations)
 def get_map_locations(request: Request):
@@ -168,6 +186,7 @@ def get_map_locations(request: Request):
         "Cache-Control": "public, max-age=30",
     }
     return JSONResponse(content=data, headers=headers)
+
 
 @router.put("/map/locations", response_model=MapLocations)
 def put_map_locations(locations: MapLocations):
@@ -301,7 +320,11 @@ def _geometry_conflicts(
         if geometry.get("type") != "Polygon":
             continue
         coordinates = geometry.get("coordinates")
-        if not isinstance(coordinates, list) or not coordinates or not isinstance(coordinates[0], list):
+        if (
+            not isinstance(coordinates, list)
+            or not coordinates
+            or not isinstance(coordinates[0], list)
+        ):
             continue
         ring: list[tuple[float, float]] = []
         for point in coordinates[0]:
@@ -312,7 +335,12 @@ def _geometry_conflicts(
             except (TypeError, ValueError):
                 continue
         if len(ring) >= 3:
-            boundary_polygons.append((str(zone.get("zone_id") or zone.get("id") or current_zone_type or "boundary"), ring))
+            boundary_polygons.append(
+                (
+                    str(zone.get("zone_id") or zone.get("id") or current_zone_type or "boundary"),
+                    ring,
+                )
+            )
 
     if len(boundary_polygons) < 2:
         return []
@@ -336,6 +364,7 @@ def _geometry_conflicts(
                     conflicts.add(zone_id)
                     conflicts.add(other_zone_id)
     except Exception:
+
         def _bbox(ring: list[tuple[float, float]]) -> tuple[float, float, float, float]:
             xs = [point[0] for point in ring]
             ys = [point[1] for point in ring]
@@ -387,7 +416,12 @@ def _legacy_polygon_zones(entries: Any, *, zone_type: str) -> list[dict[str, Any
             continue
         if ring[0] != ring[-1]:
             ring.append(ring[0])
-        zone_id = str(entry.get("zone_id") or entry.get("name") or entry.get("zone_type") or f"{zone_type}-{index + 1}")
+        zone_id = str(
+            entry.get("zone_id")
+            or entry.get("name")
+            or entry.get("zone_type")
+            or f"{zone_type}-{index + 1}"
+        )
         zones.append(
             {
                 "zone_id": zone_id,
@@ -454,7 +488,9 @@ async def put_map_configuration(
         raise HTTPException(status_code=422, detail="markers must be a list or object")
 
     legacy_boundaries = _legacy_polygon_zones(envelope.get("boundaries"), zone_type="boundary")
-    legacy_exclusions = _legacy_polygon_zones(envelope.get("exclusion_zones"), zone_type="exclusion")
+    legacy_exclusions = _legacy_polygon_zones(
+        envelope.get("exclusion_zones"), zone_type="exclusion"
+    )
     zone_list = zones if isinstance(zones, list) else [*legacy_boundaries, *legacy_exclusions]
 
     conflicts = _geometry_conflicts(
@@ -474,7 +510,11 @@ async def put_map_configuration(
 
     saved = await _save_map_configuration_envelope(
         config_id,
-        {**envelope, "zones": zone_list, "markers": markers if markers is not None else envelope.get("markers", [])},
+        {
+            **envelope,
+            "zones": zone_list,
+            "markers": markers if markers is not None else envelope.get("markers", []),
+        },
         updated_by=str(envelope.get("updated_by") or "api"),
     )
     _persist_map_provider_setting(saved["provider"])
@@ -513,7 +553,9 @@ async def trigger_map_provider_fallback(config_id: str = Query("default")):
         },
     }
 
+
 # ------------------------ Control V2 Endpoints ------------------------
+
 
 class ControlCommandV2(BaseModel):
     throttle: Optional[float] = Field(None, ge=-1.0, le=1.0)
@@ -522,6 +564,7 @@ class ControlCommandV2(BaseModel):
     max_speed_limit: float = Field(0.8, ge=0.0, le=1.0)
     timeout_ms: int = Field(1000, ge=100, le=10000)
     confirmation_token: Optional[str] = None
+
 
 class ControlResponseV2(BaseModel):
     accepted: bool
@@ -537,6 +580,7 @@ class ControlResponseV2(BaseModel):
     until: Optional[str] = None
     timestamp: str
 
+
 def _emergency_active() -> bool:
     try:
         if bool(_safety_state.get("emergency_stop_active", False)):
@@ -546,7 +590,9 @@ def _emergency_active() -> bool:
         return False
 
 
-def _latch_emergency_state(request: Request | None = None, reason: str = "Manual emergency stop") -> None:
+def _latch_emergency_state(
+    request: Request | None = None, reason: str = "Manual emergency stop"
+) -> None:
     """Latch emergency state until explicitly cleared by /control/emergency_clear."""
     _safety_state["emergency_stop_active"] = True
     _safety_state["estop_reason"] = reason
@@ -563,6 +609,7 @@ def _latch_emergency_state(request: Request | None = None, reason: str = "Manual
             _client_emergency[_client_key(request)] = time.time() + 0.3
     except Exception:
         pass
+
 
 def _client_key(request: Request) -> str:
     auth = request.headers.get("authorization") or request.headers.get("Authorization")
@@ -584,6 +631,7 @@ def _client_key(request: Request) -> str:
     except Exception:
         # As a last resort, return a fresh anon id each time
         return "anon-" + uuid.uuid4().hex
+
 
 def _client_emergency_active(request: Request | None) -> bool:
     """Return True if this client's emergency flag is active; expire stale entries.
@@ -617,8 +665,12 @@ def _control_navigation_snapshot(nav_service: Any) -> dict[str, Any]:
     planned_path = getattr(state, "planned_path", None) if state is not None else None
     return {
         "mode": _enum_value(getattr(state, "navigation_mode", None)) if state is not None else None,
-        "path_status": _enum_value(getattr(state, "path_status", None)) if state is not None else None,
-        "current_waypoint_index": getattr(state, "current_waypoint_index", None) if state is not None else None,
+        "path_status": _enum_value(getattr(state, "path_status", None))
+        if state is not None
+        else None,
+        "current_waypoint_index": getattr(state, "current_waypoint_index", None)
+        if state is not None
+        else None,
         "waypoints_total": len(planned_path) if isinstance(planned_path, list) else 0,
         "emergency_stop_active": bool(_safety_state.get("emergency_stop_active", False)),
     }
@@ -643,8 +695,10 @@ def _manual_drive_status_reason(active_interlocks: list[str]) -> str:
         return "TELEMETRY_UNAVAILABLE"
     return "SAFETY_LOCKOUT"
 
+
 # Import helper from auth router for session resolution
 from .routers.auth import _resolve_manual_session
+
 
 @router.get("/hardware/robohat")
 async def get_robohat_status():
@@ -654,7 +708,9 @@ async def get_robohat_status():
     robohat = get_robohat_service()
 
     # Determine safety state summary for this snapshot
-    safety_state = "emergency_stop" if _safety_state.get("emergency_stop_active", False) else "nominal"
+    safety_state = (
+        "emergency_stop" if _safety_state.get("emergency_stop_active", False) else "nominal"
+    )
 
     if robohat is None:
         # Minimal payload when service not initialized yet
@@ -710,9 +766,11 @@ async def get_robohat_status():
 
     return payload
 
+
 class Vector2D(BaseModel):
     linear: float
     angular: float
+
 
 class DriveContractIn(BaseModel):
     session_id: str
@@ -720,16 +778,17 @@ class DriveContractIn(BaseModel):
     duration_ms: int
     reason: Optional[str] = None
 
+
 @router.post("/control/drive", response_model=ControlResponseV2, status_code=202)
 async def control_drive_v2(cmd: dict, request: Request):
     """Execute drive command with safety checks and audit logging"""
     import uuid
     from ..services.robohat_service import get_robohat_service
     from ..services.motor_service import MotorService
-    
+
     audit_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc)
-    
+
     # Legacy behavior for integration tests: when payload is legacy style (mode/command),
     # return 200 with calculated motor speeds, unless emergency stop is active (then 403).
     is_legacy = "session_id" not in cmd
@@ -742,9 +801,12 @@ async def control_drive_v2(cmd: dict, request: Request):
                 cmd_details = {}
             persistence.add_audit_log(
                 "control.drive.blocked",
-                details={"reason": "emergency_stop_active", "command": cmd_details}
+                details={"reason": "emergency_stop_active", "command": cmd_details},
             )
-            return JSONResponse(status_code=403, content={"detail": "Emergency stop active - drive commands blocked"})
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Emergency stop active - drive commands blocked"},
+            )
         # Compute motor speeds using arcade drive.
         # RoboHAT service uses INVERTED arcade formula to compensate for MDDRC10 motor wiring.
         # Convention: positive turn = turn right → right wheel speed < left wheel speed
@@ -779,19 +841,26 @@ async def control_drive_v2(cmd: dict, request: Request):
             cmd_details["session_id"] = "***"
         persistence.add_audit_log(
             "control.drive.blocked",
-            details={"reason": "emergency_stop_active", "command": cmd_details}
+            details={"reason": "emergency_stop_active", "command": cmd_details},
         )
-        return JSONResponse(status_code=403, content={"detail": "Emergency stop active - drive commands blocked"})
+        return JSONResponse(
+            status_code=403, content={"detail": "Emergency stop active - drive commands blocked"}
+        )
 
     session_context = _resolve_manual_session(cmd.get("session_id"))
 
     try:
         duration_ms = int(cmd.get("duration_ms", 0))
     except (TypeError, ValueError):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="duration_ms must be an integer")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, detail="duration_ms must be an integer"
+        )
 
     if duration_ms < 0 or duration_ms > 5000:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="duration_ms must be between 0 and 5000 milliseconds")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="duration_ms must be between 0 and 5000 milliseconds",
+        )
 
     # Extract vector and convert to differential speeds (arcade)
     # Contract-style payload
@@ -800,10 +869,12 @@ async def control_drive_v2(cmd: dict, request: Request):
     try:
         speed_limit = float(cmd.get("max_speed_limit", 0.8))
     except (TypeError, ValueError):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="max_speed_limit must be numeric")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, detail="max_speed_limit must be numeric"
+        )
     speed_limit = max(0.0, min(1.0, speed_limit))
     motion_requested = abs(throttle) > 1e-3 or abs(turn) > 1e-3
-    
+
     # Send command to RoboHAT
 
     robohat = get_robohat_service()
@@ -811,7 +882,12 @@ async def control_drive_v2(cmd: dict, request: Request):
     telemetry_snapshot: dict[str, Any] | None = None
     manual_active_interlocks: list[str] = []
 
-    if motion_requested and robohat and robohat.status.serial_connected and os.getenv("SIM_MODE", "0") == "0":
+    if (
+        motion_requested
+        and robohat
+        and robohat.status.serial_connected
+        and os.getenv("SIM_MODE", "0") == "0"
+    ):
         try:
             from ..services.navigation_service import NavigationService
 
@@ -821,6 +897,7 @@ async def control_drive_v2(cmd: dict, request: Request):
             _loader = getattr(request.app.state, "config_loader", None)
             if _loader is None:
                 from ..core.config_loader import ConfigLoader
+
                 _loader = ConfigLoader()
             _, limits = _loader.get()
             max_position_accuracy_m = NavigationService.get_instance().max_waypoint_accuracy_m
@@ -875,7 +952,11 @@ async def control_drive_v2(cmd: dict, request: Request):
         # Determine auto-expiry for transient vs persistent faults.
         # Obstacle faults clear only when the obstacle actually moves — no time-based expiry.
         # Telemetry/location faults are transient and auto-expire so the UI unlocks once sensors recover.
-        _transient_interlocks = {"telemetry_unavailable", "telemetry_stale", "location_awareness_unavailable"}
+        _transient_interlocks = {
+            "telemetry_unavailable",
+            "telemetry_stale",
+            "location_awareness_unavailable",
+        }
         _has_only_transient = all(i in _transient_interlocks for i in manual_active_interlocks)
         lockout_until_str: str | None = None
         if _has_only_transient:
@@ -918,7 +999,7 @@ async def control_drive_v2(cmd: dict, request: Request):
             },
         )
         return JSONResponse(status_code=423, content=blocked_response.model_dump(mode="json"))
-    
+
     if robohat and robohat.status.serial_connected:
         # Calculate differential speeds.
         # RoboHAT service uses INVERTED arcade formula (right_norm - left_norm)
@@ -926,22 +1007,24 @@ async def control_drive_v2(cmd: dict, request: Request):
         # Convention: positive turn = turn right → right wheel speed < left wheel speed
         left_speed = throttle - turn
         right_speed = throttle + turn
-        
+
         # Clamp to max speed limit
         left_speed = max(-speed_limit, min(speed_limit, left_speed))
         right_speed = max(-speed_limit, min(speed_limit, right_speed))
-        
+
         # Send to RoboHAT
         success = await robohat.send_motor_command(left_speed, right_speed)
-        
+
         watchdog_end = datetime.now(timezone.utc)
         watchdog_latency = (watchdog_end - watchdog_start).total_seconds() * 1000
-        
+
         response = ControlResponseV2(
             accepted=success,
             audit_id=audit_id,
             result="accepted" if success else "rejected",
-            status_reason=None if success else (robohat.status.last_error or "robohat_communication_failed"),
+            status_reason=None
+            if success
+            else (robohat.status.last_error or "robohat_communication_failed"),
             watchdog_echo=robohat.status.last_watchdog_echo,
             watchdog_latency_ms=watchdog_latency,
             safety_checks=["emergency_stop_check", "command_validation"],
@@ -952,7 +1035,7 @@ async def control_drive_v2(cmd: dict, request: Request):
                 "latency_ms": round(watchdog_latency, 2),
                 "speed_limit": speed_limit,
             },
-            timestamp=timestamp.isoformat()
+            timestamp=timestamp.isoformat(),
         )
     else:
         # Contract allows "queued" acknowledgement even if hardware not connected
@@ -970,9 +1053,9 @@ async def control_drive_v2(cmd: dict, request: Request):
                 "latency_ms": 0.0,
                 "speed_limit": speed_limit,
             },
-            timestamp=timestamp.isoformat()
+            timestamp=timestamp.isoformat(),
         )
-    
+
     # Audit the command — sampled at 1 Hz for accepted drive commands to avoid
     # blocking the event loop with a synchronous SQLite write on every 120 ms
     # joystick pulse.  Blocked / fault audit entries are always written (see above).
@@ -994,15 +1077,19 @@ async def control_drive_v2(cmd: dict, request: Request):
         _last_drive_audit_at = _now
         _audit_details = {"command": details_cmd, "response": response.model_dump(mode="json")}
         asyncio.create_task(
-            asyncio.to_thread(persistence.add_audit_log, "control.drive.v2", None, None, _audit_details)
+            asyncio.to_thread(
+                persistence.add_audit_log, "control.drive.v2", None, None, _audit_details
+            )
         )
-    
+
     return response
+
 
 class BladeContractIn(BaseModel):
     session_id: str
     action: str
     reason: Optional[str] = None
+
 
 @router.post("/control/blade")
 async def control_blade_v2(cmd: dict, request: Request):
@@ -1032,21 +1119,30 @@ async def control_blade_v2(cmd: dict, request: Request):
         desired = False
 
     if desired is None:
-        body = {"detail": "Invalid blade command — provide 'active' (bool) or 'action' (enable/disable)"}
+        body = {
+            "detail": "Invalid blade command — provide 'active' (bool) or 'action' (enable/disable)"
+        }
         return JSONResponse(status_code=422, content=body)
 
     if desired is True and _legacy_motors_active:
-        body = {"detail": "safety_interlock: motors_active — blade enable blocked while motors running"}
-        persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
+        body = {
+            "detail": "safety_interlock: motors_active — blade enable blocked while motors running"
+        }
+        persistence.add_audit_log(
+            "control.blade.blocked", details={"command": cmd, "response": body}
+        )
         return JSONResponse(status_code=403, content=body)
 
     if desired is True and (_emergency_active() or _client_emergency_active(request)):
         body = {"detail": "safety_interlock: emergency_stop_active — blade commands blocked"}
-        persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
+        persistence.add_audit_log(
+            "control.blade.blocked", details={"command": cmd, "response": body}
+        )
         return JSONResponse(status_code=409, content=body)
 
     try:
         from ..services.blade_service import get_blade_service
+
         bs = get_blade_service()
         await bs.initialize()
         ok = await bs.set_active(desired)
@@ -1065,12 +1161,13 @@ async def control_blade_v2(cmd: dict, request: Request):
         persistence.add_audit_log("control.blade.error", details={"command": cmd, "response": body})
         return JSONResponse(status_code=500, content=body)
 
+
 @router.post("/control/emergency", response_model=ControlResponseV2, status_code=202)
 async def control_emergency_v2(body: Optional[dict] = None, request: Request = None):
     """Trigger emergency stop with immediate hardware shutdown"""
     import uuid
     from ..services.robohat_service import get_robohat_service
-    
+
     audit_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc)
 
@@ -1079,16 +1176,16 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
     session_context = None
     if not is_legacy:
         session_context = _resolve_manual_session(payload.get("session_id"))
-    
+
     # Set emergency state (latched until explicit clear)
     _latch_emergency_state(request, reason="Operator-triggered emergency stop")
-    
+
     # Send emergency stop to RoboHAT
     robohat = get_robohat_service()
     emergency_confirmed = True
     if robohat and robohat.status.serial_connected:
         emergency_confirmed = await robohat.emergency_stop()
-    
+
     # If legacy payload with command field was sent, return 200 with integration-expected shape
     if is_legacy:
         legacy_payload = {
@@ -1105,31 +1202,31 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
         accepted=emergency_confirmed,
         audit_id=audit_id,
         result="accepted" if emergency_confirmed else "rejected",
-        status_reason="EMERGENCY_STOP_TRIGGERED" if emergency_confirmed else "EMERGENCY_STOP_DELIVERY_FAILED",
+        status_reason="EMERGENCY_STOP_TRIGGERED"
+        if emergency_confirmed
+        else "EMERGENCY_STOP_DELIVERY_FAILED",
         safety_checks=["immediate_stop"],
         active_interlocks=["emergency_stop_override"],
         remediation={
             "message": "Emergency stop activated - all motors stopped",
-            "docs_link": "/docs/OPERATIONS.md#emergency-stop-recovery"
+            "docs_link": "/docs/OPERATIONS.md#emergency-stop-recovery",
         },
         telemetry_snapshot={
             "component_id": "drive_left",
             "status": "fault",
             "latency_ms": 0.0,
         },
-        timestamp=timestamp.isoformat()
+        timestamp=timestamp.isoformat(),
     )
-    
+
     # Audit the emergency stop
     audit_details: dict[str, Any] = {"response": response.model_dump(mode="json")}
     if session_context and session_context.get("principal"):
         audit_details["principal"] = session_context["principal"]
-    persistence.add_audit_log(
-        "control.emergency.triggered",
-        details=audit_details
-    )
-    
+    persistence.add_audit_log("control.emergency.triggered", details=audit_details)
+
     return response
+
 
 @router.post("/control/emergency-stop")
 async def control_emergency_stop_alias(request: Request = None):
@@ -1150,8 +1247,8 @@ async def control_emergency_stop_alias(request: Request = None):
         "blade_disabled": True,
         "remediation": {
             "message": "Emergency stop activated - all motors stopped",
-            "docs_link": "/docs/OPERATIONS.md#emergency-stop-recovery"
-        }
+            "docs_link": "/docs/OPERATIONS.md#emergency-stop-recovery",
+        },
     }
     persistence.add_audit_log(
         "control.emergency_stop",
@@ -1301,7 +1398,7 @@ async def control_navigation_status():
 @router.post("/control/diagnose/stiffness")
 async def diagnose_stiffness_progressive(cmd: dict, request: Request):
     """Start progressive stiffness detection test (slowly increase turn effort until stuck).
-    
+
     POST /api/v2/control/diagnose/stiffness
     Body: {
         "session_id": "<session>",
@@ -1310,7 +1407,7 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
         "step": 0.05,            # Increase by 5% each iteration, optional
         "max_effort": 1.0        # Stop at 100%, optional
     }
-    
+
     Returns:
     {
         "ok": true,
@@ -1323,18 +1420,18 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
     """
     from ..services.navigation_service import NavigationService
     from ..services.robohat_service import get_robohat_service
-    
+
     nav_service = NavigationService.get_instance()
     robohat = get_robohat_service()
-    
+
     if _emergency_active():
         return JSONResponse(status_code=403, content={"detail": "Emergency stop active"})
-    
+
     direction = cmd.get("direction", "left")
     initial_effort = float(cmd.get("initial_effort", 0.1))
     step = float(cmd.get("step", 0.05))
     max_effort = float(cmd.get("max_effort", 1.0))
-    
+
     # Start or continue test
     heading_delta_out = 0.0  # Default value for initial request
     if not nav_service._stiffness_test_active:
@@ -1350,7 +1447,7 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
     else:
         elapsed = time.time() - nav_service._stiffness_test_start_time
         heading = nav_service.navigation_state.current_heading or 0.0
-        
+
         # Check if stuck (heading barely changed in last 2 seconds)
         if nav_service._stiffness_test_last_heading is not None and elapsed > 2.0:
             heading_delta = abs(heading - nav_service._stiffness_test_last_heading)
@@ -1363,8 +1460,7 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
             else:
                 # Not stuck yet, increase effort
                 nav_service._stiffness_test_effort = min(
-                    max_effort,
-                    nav_service._stiffness_test_effort + step
+                    max_effort, nav_service._stiffness_test_effort + step
                 )
                 if nav_service._stiffness_test_effort >= max_effort:
                     nav_service._stiffness_test_active = False
@@ -1376,10 +1472,10 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
         else:
             test_status = "testing"
             heading_delta_out = 0.0
-        
+
         nav_service._stiffness_test_last_heading = heading
         nav_service._stiffness_test_last_check = elapsed
-    
+
     # Apply current effort in requested direction
     # Convert throttle/turn to left/right speeds using arcade math
     # RoboHAT service uses INVERTED arcade formula to compensate for motor wiring
@@ -1390,7 +1486,7 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
         left_speed = throttle - turn
         right_speed = throttle + turn
         await robohat.send_motor_command(left_speed, right_speed)
-    
+
     return {
         "ok": True,
         "test_active": nav_service._stiffness_test_active,
@@ -1404,14 +1500,14 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
 @router.post("/control/diagnose/heading-validation")
 async def diagnose_heading_validation(cmd: dict, request: Request):
     """Validate heading by comparing GPS Course-Over-Ground vs IMU yaw.
-    
+
     POST /api/v2/control/diagnose/heading-validation
     Body: {
         "session_id": "<session>",
         "distance_m": 5.0,       # Drive forward this far
         "samples": 10            # Collect this many GPS/IMU samples
     }
-    
+
     Returns:
     {
         "ok": true,
@@ -1425,38 +1521,38 @@ async def diagnose_heading_validation(cmd: dict, request: Request):
     """
     from ..services.navigation_service import NavigationService
     from ..services.robohat_service import get_robohat_service
-    
+
     nav_service = NavigationService.get_instance()
     robohat = get_robohat_service()
-    
+
     if _emergency_active():
         return JSONResponse(status_code=403, content={"detail": "Emergency stop active"})
-    
+
     # Collect GPS and IMU heading data while driving forward
     distance_m = float(cmd.get("distance_m", 5.0))
     samples = int(cmd.get("samples", 10))
-    
+
     # Start forward movement (pure forward, no turn)
     await robohat.send_motor_command(0.5, 0.5)
-    
+
     gps_headings = []
     imu_headings = []
-    
+
     try:
         for _ in range(samples):
             gps_cog = nav_service.navigation_state.gps_cog
             imu_heading = nav_service.navigation_state.heading
-            
+
             if gps_cog is not None:
                 gps_headings.append(float(gps_cog))
             if imu_heading is not None:
                 imu_headings.append(float(imu_heading))
-            
+
             await asyncio.sleep(0.2)
     finally:
         # Stop movement
         await robohat.send_motor_command(0.0, 0.0)
-    
+
     if not gps_headings or not imu_headings:
         return {
             "ok": False,
@@ -1464,15 +1560,15 @@ async def diagnose_heading_validation(cmd: dict, request: Request):
             "gps_samples": len(gps_headings),
             "imu_samples": len(imu_headings),
         }
-    
+
     # Compute average headings
     avg_gps = sum(gps_headings) / len(gps_headings)
     avg_imu = sum(imu_headings) / len(imu_headings)
-    
+
     # Normalize angle difference to [-180, 180]
     diff = (avg_imu - avg_gps + 180) % 360 - 180
     abs_diff = abs(diff)
-    
+
     # Determine heading source and recommendation
     if abs_diff < 5.0:
         heading_source = "gps"  # GPS and IMU agree
@@ -1486,7 +1582,7 @@ async def diagnose_heading_validation(cmd: dict, request: Request):
         heading_source = "conflict"  # Significant mismatch
         recommendation = f"Heading conflict detected ({abs_diff:.1f}°). Verify GPS fix quality and IMU calibration"
         confidence = max(0.0, 1.0 - (abs_diff / 90.0))
-    
+
     return {
         "ok": True,
         "heading_source": heading_source,

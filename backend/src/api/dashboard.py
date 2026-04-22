@@ -6,14 +6,14 @@ services are unavailable.
 """
 
 import datetime as dt
-from typing import Any, Tuple
+from typing import Any
 
 from fastapi import APIRouter, Request
 
-from ..models.operational_data import OperationalData
 from ..models import SensorData
+from ..models.operational_data import OperationalData
 from ..services.sensor_manager import SensorManager  # type: ignore
-from ..utils.battery import voltage_to_soc, battery_health_label
+from ..utils.battery import battery_health_label, voltage_to_soc
 
 router = APIRouter()
 
@@ -22,7 +22,9 @@ def _now_iso() -> str:
     return dt.datetime.now(dt.UTC).isoformat()
 
 
-async def _ensure_sensor_snapshot(request: Request) -> Tuple[SensorManager | None, SensorData | None]:
+async def _ensure_sensor_snapshot(
+    request: Request,
+) -> tuple[SensorManager | None, SensorData | None]:
     """Return an initialized SensorManager and its latest SensorData snapshot."""
     sensor_manager: SensorManager | None = None
 
@@ -53,6 +55,7 @@ async def _ensure_sensor_snapshot(request: Request) -> Tuple[SensorManager | Non
         snapshot = None
 
     return sensor_manager, snapshot
+
 
 def _estimate_soc_from_voltage(voltage: float | None) -> float:
     """Estimate SOC from pack voltage using the shared battery utility."""
@@ -156,7 +159,9 @@ async def get_dashboard_metrics(request: Request) -> dict[str, Any]:
             op_data = None
 
     sm, sensor_snapshot = await _ensure_sensor_snapshot(request)
-    telemetry_source = "hardware" if _has_live_data(sensor_snapshot) else ("initializing" if sm else "unavailable")
+    telemetry_source = (
+        "hardware" if _has_live_data(sensor_snapshot) else ("initializing" if sm else "unavailable")
+    )
 
     return {
         "battery": _battery_block(sensor_snapshot, sm),

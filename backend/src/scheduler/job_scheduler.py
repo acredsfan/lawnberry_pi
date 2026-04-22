@@ -4,12 +4,11 @@ import asyncio
 import re
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Awaitable, Callable, Dict, Optional
 
 from backend.src.models.scheduled_job import ScheduledJob
-
 
 Callback = Callable[[str], Awaitable[None]]
 
@@ -19,7 +18,7 @@ class _EverySpec:
     seconds: float
 
 
-def _parse_every(schedule: str) -> Optional[_EverySpec]:
+def _parse_every(schedule: str) -> _EverySpec | None:
     # Supports forms: "@every 1s", "@every 500ms"
     m = re.match(r"^@every\s+(\d+)(ms|s)$", schedule.strip())
     if not m:
@@ -74,11 +73,11 @@ class JobScheduler:
     """
 
     def __init__(self, tick_interval: float = 0.5):
-        self._jobs: Dict[str, tuple[ScheduledJob, Callback, Optional[_EverySpec], Optional[str]]] = {}
-        self._task: Optional[asyncio.Task] = None
+        self._jobs: dict[str, tuple[ScheduledJob, Callback, _EverySpec | None, str | None]] = {}
+        self._task: asyncio.Task | None = None
         self._running = asyncio.Event()
         self._tick_interval = max(0.05, float(tick_interval))
-        self._weather_suitable: Optional[Callable[[], bool]] = None
+        self._weather_suitable: Callable[[], bool] | None = None
 
     async def add_job(self, name: str, schedule: str, callback: Callback) -> str:
         job_id = str(uuid.uuid4())
@@ -89,7 +88,7 @@ class JobScheduler:
         self._jobs[job_id] = (job, callback, every_spec, last_run_key)
         return job_id
 
-    async def start(self, weather_suitable: Optional[Callable[[], bool]] = None) -> None:
+    async def start(self, weather_suitable: Callable[[], bool] | None = None) -> None:
         if self._task and not self._task.done():
             return
         self._weather_suitable = weather_suitable
@@ -108,7 +107,7 @@ class JobScheduler:
         self._task = None
 
     async def _run_loop(self) -> None:
-        last_every_run: Dict[str, float] = {}
+        last_every_run: dict[str, float] = {}
         try:
             while self._running.is_set():
                 now = datetime.now()

@@ -4,11 +4,11 @@ Blade service for IBT-4 control.
 Provides a simple async wrapper around IBT4BladeDriver with a process-wide
 singleton accessor. Safe in SIM mode; hardware access is lazy and guarded.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 from ..drivers.blade.ibt4_gpio import IBT4BladeDriver
 
@@ -54,7 +54,7 @@ class BladeService:
             pass
 
 
-_blade_service: Optional[BladeService] = None
+_blade_service: BladeService | None = None
 
 
 def get_blade_service() -> BladeService:

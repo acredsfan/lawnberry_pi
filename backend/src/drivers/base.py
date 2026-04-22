@@ -4,6 +4,7 @@ Implements T021 requirements: async init/start/stop/health_check with
 minimal typing and docstrings. Drivers for sensors, motors, GPS, etc. must
 inherit from this base class to ensure consistent behavior and safety.
 """
+
 from __future__ import annotations
 
 import abc

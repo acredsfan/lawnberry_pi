@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -23,9 +23,9 @@ class HealthStatus(str, Enum):
 class DriverInstance(BaseModel):
     driver_id: str
     driver_class: str
-    hardware_resource: List[str] = Field(default_factory=list)
+    hardware_resource: list[str] = Field(default_factory=list)
     simulation_mode: bool = False
     lifecycle_state: LifecycleState = LifecycleState.UNINITIALIZED
     health_status: HealthStatus = HealthStatus.UNHEALTHY
-    last_health_check_ts: Optional[int] = None
-    error_message: Optional[str] = None
+    last_health_check_ts: int | None = None
+    error_message: str | None = None

@@ -18,13 +18,14 @@ Platform / Constitution Notes:
     TOF_LEFT_ADDR / TOF_RIGHT_ADDR (hex or int), TOF_BUS, TOF_RANGING_MODE.
 - Keeps fast execution for health_check/read; actual I/O delegated to thread.
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
 import random
 import time
-from typing import Any, Optional
+from typing import Any
 
 from ...core.simulation import is_simulation_mode
 from ..base import HardwareDriver
@@ -67,11 +68,19 @@ class VL53L0XDriver(HardwareDriver):
             or (0x29 if sensor_side == "left" else 0x30)
         )
         self._i2c_bus = int(cfg.get("bus") or os.environ.get("TOF_BUS", 1))
-        self._ranging_mode = (cfg.get("ranging_mode") or os.environ.get("TOF_RANGING_MODE") or "better_accuracy").lower()
+        self._ranging_mode = (
+            cfg.get("ranging_mode") or os.environ.get("TOF_RANGING_MODE") or "better_accuracy"
+        ).lower()
         # Optional XSHUT pins (BCM numbering) for address assignment using Adafruit backend
-        self._xshut_gpio: Optional[int] = None
-        env_x = os.environ.get("TOF_LEFT_SHUTDOWN_GPIO" if sensor_side == "left" else "TOF_RIGHT_SHUTDOWN_GPIO")
-        val_x = cfg.get("shutdown_gpio") if cfg.get("shutdown_gpio") is not None else (int(env_x) if env_x else None)
+        self._xshut_gpio: int | None = None
+        env_x = os.environ.get(
+            "TOF_LEFT_SHUTDOWN_GPIO" if sensor_side == "left" else "TOF_RIGHT_SHUTDOWN_GPIO"
+        )
+        val_x = (
+            cfg.get("shutdown_gpio")
+            if cfg.get("shutdown_gpio") is not None
+            else (int(env_x) if env_x else None)
+        )
         if isinstance(val_x, int):
             self._xshut_gpio = val_x
         self._sim_distance_cycle: int = 0
@@ -82,7 +91,9 @@ class VL53L0XDriver(HardwareDriver):
         # Optional timing budget (microseconds) for Adafruit backend
         try:
             tb_env = os.environ.get("TOF_TIMING_BUDGET_US")
-            self._timing_budget_us: Optional[int] = int(cfg.get("timing_budget_us") or (int(tb_env) if tb_env else 0)) or None
+            self._timing_budget_us: int | None = (
+                int(cfg.get("timing_budget_us") or (int(tb_env) if tb_env else 0)) or None
+            )
         except Exception:
             self._timing_budget_us = None
 
@@ -214,23 +225,21 @@ __all__ = ["VL53L0XDriver", "ensure_pair_addressing", "TOF_SENSOR_MAX_VALID_MM"]
 
 # -------------------------- Private helpers ---------------------------
 
-async def _ensure_gpio_provider() -> Optional[str]:
+
+async def _ensure_gpio_provider() -> str | None:
     global _gpio_provider
     if _gpio_provider is not None:
         return _gpio_provider
     # Try lgpio (fast on Pi 5), then periphery, then RPi.GPIO
     try:
-        import lgpio  # type: ignore
         _gpio_provider = "lgpio"
         return _gpio_provider
     except Exception:
         try:
-            from periphery import GPIO  # type: ignore
             _gpio_provider = "periphery"
             return _gpio_provider
         except Exception:
             try:
-                import RPi.GPIO as GPIO  # type: ignore
                 _gpio_provider = "rpi_gpio"
                 return _gpio_provider
             except Exception:
@@ -247,24 +256,29 @@ def _gpio_set(pin: int, value: int) -> None:
     global _lgpio_chip, _periphery_pins
     if _gpio_provider == "lgpio":
         import lgpio  # type: ignore
+
         if _lgpio_chip is None:
             _lgpio_chip = lgpio.gpiochip_open(0)
         lgpio.gpio_claim_output(_lgpio_chip, pin, 0)
         lgpio.gpio_write(_lgpio_chip, pin, 1 if value else 0)
     elif _gpio_provider == "periphery":
         from periphery import GPIO  # type: ignore
+
         if pin not in _periphery_pins:
             _periphery_pins[pin] = GPIO(pin, "out")
         _periphery_pins[pin].write(bool(value))
     elif _gpio_provider == "rpi_gpio":
         import RPi.GPIO as GPIO  # type: ignore
+
         GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(pin, GPIO.OUT)
         GPIO.output(pin, GPIO.HIGH if value else GPIO.LOW)
 
 
-async def _try_pair_init_adafruit(left_gpio: Optional[int], right_gpio: Optional[int], right_addr: int) -> bool:
+async def _try_pair_init_adafruit(
+    left_gpio: int | None, right_gpio: int | None, right_addr: int
+) -> bool:
     """Initialize both sensors with unique addresses using XSHUT pins.
 
     Sequence (addresses reset at power-on):
@@ -288,9 +302,10 @@ async def _try_pair_init_adafruit(left_gpio: Optional[int], right_gpio: Optional
     _gpio_set(right_gpio, 1)
     await asyncio.sleep(0.02)
     try:
+        import adafruit_vl53l0x  # type: ignore
         import board  # type: ignore
         import busio  # type: ignore
-        import adafruit_vl53l0x  # type: ignore
+
         if _adafruit_i2c is None:
             _adafruit_i2c = busio.I2C(board.SCL, board.SDA)
         _i2c = _adafruit_i2c
@@ -318,7 +333,9 @@ async def _try_pair_init_adafruit(left_gpio: Optional[int], right_gpio: Optional
     return True
 
 
-async def ensure_pair_addressing(left_gpio: Optional[int], right_gpio: Optional[int], right_addr: int = 0x30) -> bool:
+async def ensure_pair_addressing(
+    left_gpio: int | None, right_gpio: int | None, right_addr: int = 0x30
+) -> bool:
     """Public helper to set up dual VL53L0X sensors with unique addresses via XSHUT.
 
     Returns True if addressing sequence executed (or already initialized), False otherwise.
@@ -327,13 +344,13 @@ async def ensure_pair_addressing(left_gpio: Optional[int], right_gpio: Optional[
     return await _try_pair_init_adafruit(left_gpio, right_gpio, right_addr)
 
 
-async def _try_prepare_adafruit_instance(address: int) -> tuple[object | None, Optional[str]]:
+async def _try_prepare_adafruit_instance(address: int) -> tuple[object | None, str | None]:
     """Create Adafruit VL53L0X instance bound to a specific address."""
     global _adafruit_i2c
     try:
+        import adafruit_vl53l0x  # type: ignore
         import board  # type: ignore
         import busio  # type: ignore
-        import adafruit_vl53l0x  # type: ignore
     except Exception:
         return None, None
     try:
@@ -424,14 +441,24 @@ async def _try_init_adafruit(self: VL53L0XDriver) -> bool:
         # If XSHUT pins exist, attempt pair init then try again
         # Prefer env, fall back to instance-configured shutdown pin for this side
         try:
-            lpin = int(os.environ.get("TOF_LEFT_SHUTDOWN_GPIO")) if os.environ.get("TOF_LEFT_SHUTDOWN_GPIO") else (self._xshut_gpio if self.sensor_side == "left" else None)
+            lpin = (
+                int(os.environ.get("TOF_LEFT_SHUTDOWN_GPIO"))
+                if os.environ.get("TOF_LEFT_SHUTDOWN_GPIO")
+                else (self._xshut_gpio if self.sensor_side == "left" else None)
+            )
         except Exception:
             lpin = self._xshut_gpio if self.sensor_side == "left" else None
         try:
-            rpin = int(os.environ.get("TOF_RIGHT_SHUTDOWN_GPIO")) if os.environ.get("TOF_RIGHT_SHUTDOWN_GPIO") else (self._xshut_gpio if self.sensor_side == "right" else None)
+            rpin = (
+                int(os.environ.get("TOF_RIGHT_SHUTDOWN_GPIO"))
+                if os.environ.get("TOF_RIGHT_SHUTDOWN_GPIO")
+                else (self._xshut_gpio if self.sensor_side == "right" else None)
+            )
         except Exception:
             rpin = self._xshut_gpio if self.sensor_side == "right" else None
-        if await _try_pair_init_adafruit(lpin, rpin, right_addr=int(os.environ.get("TOF_RIGHT_ADDR", "0x30"), 0)):
+        if await _try_pair_init_adafruit(
+            lpin, rpin, right_addr=int(os.environ.get("TOF_RIGHT_ADDR", "0x30"), 0)
+        ):
             sensor, backend = await _try_prepare_adafruit_instance(self._i2c_address)
         else:
             return False

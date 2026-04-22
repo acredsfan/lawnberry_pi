@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter
 
+from ..core.simulation import is_simulation_mode
 from ..fusion.ekf import SimpleEKF
 from ..fusion.sensor_health import SensorHealthMonitor
-from ..core.simulation import is_simulation_mode
-
 
 router = APIRouter()
 
@@ -19,7 +18,7 @@ _health = SensorHealthMonitor()
 
 
 @router.get("/api/v2/fusion/state")
-async def get_fused_state() -> Dict[str, Any]:
+async def get_fused_state() -> dict[str, Any]:
     """Return a fused navigation state (SIM_MODE-friendly scaffold).
 
     In SIM_MODE, advance the model slightly each call to emulate motion and set

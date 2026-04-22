@@ -8,12 +8,9 @@ Designed to be safe on CI and devices without hardware enabled:
 
 from __future__ import annotations
 
-import os
-import time
-import json
 import grp
-from typing import Dict, Any, List
-
+import os
+from typing import Any
 
 EXPECTED_I2C = {
     "bme280": [0x76, 0x77],
@@ -29,7 +26,7 @@ SERIAL_CANDIDATES = [
 ]
 
 
-def _group_names() -> List[str]:
+def _group_names() -> list[str]:
     try:
         gids = os.getgroups()
         names = []
@@ -43,8 +40,8 @@ def _group_names() -> List[str]:
         return []
 
 
-def i2c_probe(bus_num: int = 1) -> Dict[str, Any]:
-    report: Dict[str, Any] = {
+def i2c_probe(bus_num: int = 1) -> dict[str, Any]:
+    report: dict[str, Any] = {
         "available": False,
         "bus": f"/dev/i2c-{bus_num}",
         "error": None,
@@ -65,9 +62,9 @@ def i2c_probe(bus_num: int = 1) -> Dict[str, Any]:
         with SMBus(bus_num) as bus:
             report["available"] = True
             # Probe only expected addresses to keep it fast/safe
-            present: Dict[str, List[str]] = {}
+            present: dict[str, list[str]] = {}
             for name, addrs in EXPECTED_I2C.items():
-                found: List[str] = []
+                found: list[str] = []
                 for addr in addrs:
                     try:
                         # Use read_byte to probe; many devices NACK -> catch
@@ -85,8 +82,8 @@ def i2c_probe(bus_num: int = 1) -> Dict[str, Any]:
     return report
 
 
-def serial_probe(paths: List[str] | None = None) -> Dict[str, Any]:
-    report: Dict[str, Any] = {
+def serial_probe(paths: list[str] | None = None) -> dict[str, Any]:
+    report: dict[str, Any] = {
         "available": False,
         "candidates": [],
         "opened": None,
@@ -121,7 +118,7 @@ def serial_probe(paths: List[str] | None = None) -> Dict[str, Any]:
     return report
 
 
-def run_selftest() -> Dict[str, Any]:
+def run_selftest() -> dict[str, Any]:
     groups = _group_names()
     i2c = i2c_probe(bus_num=1)
     serial = serial_probe()

@@ -3,6 +3,7 @@
 Implements T024 minimal contract: GET /api/v2/status returns current state
 and a WebSocket at /api/v2/ws/status streams updates at ~5Hz.
 """
+
 from __future__ import annotations
 # ruff: noqa: I001
 
@@ -14,7 +15,6 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from .rest import websocket_hub, _safety_state
 from ..core.robot_state_manager import get_robot_state_manager
-from ..models.safety_interlock import SafetyInterlock
 
 
 router = APIRouter()
@@ -61,12 +61,14 @@ async def ws_status(websocket: WebSocket):
             telemetry: dict[str, Any] = await websocket_hub._generate_telemetry()
             mgr.update_from_telemetry(telemetry)
             st = mgr.get_state()
-            await websocket.send_json({
-                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-                "battery_percentage": st.battery.percentage,
-                "navigation_state": st.navigation_mode.value,
-                "position": st.position.model_dump(),
-            })
+            await websocket.send_json(
+                {
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                    "battery_percentage": st.battery.percentage,
+                    "navigation_state": st.navigation_mode.value,
+                    "position": st.position.model_dump(),
+                }
+            )
             await asyncio.sleep(1.0 / cadence_hz)
     except WebSocketDisconnect:
         return

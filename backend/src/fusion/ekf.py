@@ -8,12 +8,12 @@ IMU yaw. This is SIM_MODE-safe and avoids heavy numerics; it is sufficient to
 support a placeholder fused state endpoint and future tests. Real fusion will
 replace the prediction and measurement models and handle lat/lon conversions.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional, Tuple
 import math
 import time
+from dataclasses import dataclass
 
 
 @dataclass
@@ -23,7 +23,7 @@ class FusedState:
     heading_deg: float
     timestamp_s: float
     quality: str = "unknown"
-    sources: Tuple[str, ...] = ()
+    sources: tuple[str, ...] = ()
 
 
 class SimpleEKF:

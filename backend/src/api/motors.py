@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
-from typing import Dict
-
 
 router = APIRouter()
 
@@ -25,7 +23,7 @@ def _clamp_pwm(v: int) -> int:
 
 
 @router.post("/motors/drive")
-def drive(cmd: DriveCommand) -> Dict[str, Dict[str, int]]:
+def drive(cmd: DriveCommand) -> dict[str, dict[str, int]]:
     # Compute left/right PWM using arcade mix (dry-run, no hardware)
     left = _clamp_pwm(int((cmd.throttle + cmd.turn) * 255))
     right = _clamp_pwm(int((cmd.throttle - cmd.turn) * 255))

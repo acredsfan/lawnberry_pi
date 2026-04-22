@@ -16,6 +16,7 @@ Notes:
 """
 
 from datetime import datetime
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -41,4 +42,3 @@ class NavigationWaypoint(BaseModel):
         if not (-180.0 <= v <= 180.0):
             raise ValueError("longitude must be between -180 and 180")
         return v
-

@@ -25,14 +25,14 @@ logger = logging.getLogger(__name__)
 
 class SettingsService:
     """Service for managing settings profiles and configuration persistence"""
-    
+
     def __init__(self, persistence=None, config_dir: Path = Path("./config")):
         # Default to module-level persistence if not provided (tests patch this symbol)
         self.persistence = persistence if persistence is not None else globals().get("persistence")
         self.config_dir = config_dir
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self._current_profile: SettingsProfile | None = None
-    
+
     def load_profile(self, profile_id: str = "default") -> SettingsProfile:
         """Load settings profile from persistence"""
         # Try a dedicated settings profile loader if available
@@ -61,7 +61,7 @@ class SettingsService:
             logger.info(f"Loaded settings profile {profile_id} from database")
             self._current_profile = profile
             return profile
-        
+
         # Fall back to config files
         config_file = self.config_dir / f"{profile_id}.json"
         if config_file.exists():
@@ -70,13 +70,13 @@ class SettingsService:
             logger.info(f"Loaded settings profile {profile_id} from config file")
             self._current_profile = profile
             return profile
-        
+
         # Create default profile
         logger.info(f"Creating default settings profile {profile_id}")
         profile = SettingsProfile()
         self._current_profile = profile
         return profile
-    
+
     def save_profile(
         self,
         profile: SettingsProfile,
@@ -90,7 +90,7 @@ class SettingsService:
         except Exception:
             profile.version = 2
         profile.last_modified = datetime.now(UTC)
-        
+
         # Save to SQLite
         if persist_to_db:
             if hasattr(self.persistence, "save_settings_profile"):
@@ -105,7 +105,7 @@ class SettingsService:
                     logger.info("Saved profile to system_config store")
                 except Exception as e:
                     logger.error(f"Failed to save profile to system_config: {e}")
-        
+
         # Save to config file
         if persist_to_file:
             try:
@@ -115,9 +115,9 @@ class SettingsService:
                 logger.info("Saved profile to config file")
             except Exception as e:
                 logger.error(f"Failed to save profile to config file: {e}")
-        
+
         self._current_profile = profile
-    
+
     def update_setting(self, setting_path: str, value: Any) -> SettingsProfile:
         """Update a single setting in the profile"""
         profile = self.load_profile()
@@ -125,7 +125,7 @@ class SettingsService:
             raise ValueError("Invalid setting path")
         self.save_profile(profile)
         return profile
-    
+
     def validate_profile(self, profile: SettingsProfile) -> list[str]:
         """Validate settings profile and return list of error strings."""
         issues = profile.validate_settings()
@@ -149,11 +149,11 @@ class SettingsService:
             # Non-fatal
             pass
         return issues
-    
+
     def get_current_profile(self) -> SettingsProfile | None:
         """Get currently loaded profile"""
         return self._current_profile
-    
+
     def check_version_conflict(self, expected_version: int) -> bool:
         """Check if stored profile version conflicts with expected_version.
         Returns True when there is a conflict (versions differ)."""
@@ -171,33 +171,34 @@ class SettingsService:
             return False
         # No profile in DB -> no conflict
         return False
-    
+
     def export_profile(self, profile_id: str, export_path: Path) -> None:
         """Export profile to a file for backup or migration"""
         profile = self.load_profile(profile_id)
-        
-        with open(export_path, 'w') as f:
+
+        with open(export_path, "w") as f:
             json.dump(profile.model_dump(), f, indent=2, default=str)
-        
+
         logger.info(f"Exported profile {profile_id} to {export_path}")
-    
+
     def import_profile(self, import_path: Path, profile_id: str | None = None) -> SettingsProfile:
         """Import profile from a file"""
         with open(import_path) as f:
             data = json.load(f)
-        
+
         profile = SettingsProfile.model_validate(data)
-        
+
         if profile_id:
             profile.profile_id = profile_id
-        
+
         self.save_profile(profile)
         logger.info(f"Imported profile {profile.profile_id} from {import_path}")
-        
+
         return profile
 
 
 # Back-compat helpers removed for tests; tests use SettingsService directly
+
 
 # REST adapter and factory for compatibility with existing API layer
 class _AdapterProfile:

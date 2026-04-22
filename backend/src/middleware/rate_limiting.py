@@ -15,8 +15,8 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple
 
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -37,7 +37,7 @@ class GlobalRateLimiter(BaseHTTPMiddleware):
         refill_rate_per_sec: float = 2.0,  # tokens per second
         burst: int = 20,
         exempt_prefixes: Sequence[str] | None = None,
-        strict_prefix_overrides: Sequence[Tuple[str, float, int]] | None = None,
+        strict_prefix_overrides: Sequence[tuple[str, float, int]] | None = None,
     ) -> None:
         super().__init__(app)
         self._rate = max(0.1, float(refill_rate_per_sec))
@@ -45,7 +45,7 @@ class GlobalRateLimiter(BaseHTTPMiddleware):
         self._exempt = tuple(exempt_prefixes or ("/health", "/metrics", "/docs", "/openapi.json"))
         # List of (prefix, rate, burst) to override defaults per path
         self._overrides = tuple(strict_prefix_overrides or ())
-        self._buckets: Dict[str, Bucket] = {}
+        self._buckets: dict[str, Bucket] = {}
         self._lock: asyncio.Lock | None = None
 
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -71,7 +71,7 @@ class GlobalRateLimiter(BaseHTTPMiddleware):
     def _is_exempt(self, path: str) -> bool:
         return any(path.startswith(p) for p in self._exempt)
 
-    def _match_override(self, path: str) -> Optional[Tuple[float, int]]:
+    def _match_override(self, path: str) -> tuple[float, int] | None:
         for prefix, rate, burst in self._overrides:
             if path.startswith(prefix):
                 return (max(0.1, float(rate)), max(1, int(burst)))
@@ -87,7 +87,7 @@ class GlobalRateLimiter(BaseHTTPMiddleware):
             return f"ip:{client.host}"
         return "anon"
 
-    async def _consume_token(self, key: str, rate: float, burst: int) -> Tuple[bool, int]:
+    async def _consume_token(self, key: str, rate: float, burst: int) -> tuple[bool, int]:
         now = time.time()
         if self._lock is None:
             self._lock = asyncio.Lock()

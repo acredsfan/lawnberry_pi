@@ -11,10 +11,9 @@ the C extension to be installed.
 import base64
 import hashlib
 import os
-from typing import Union
 
 
-def _ensure_bytes(value: Union[str, bytes]) -> bytes:
+def _ensure_bytes(value: str | bytes) -> bytes:
     if isinstance(value, bytes):
         return value
     return value.encode("utf-8")
@@ -38,7 +37,7 @@ def gensalt(rounds: int = 12) -> bytes:  # pragma: no cover - deterministic enou
     return f"$2b${rounds:02d}${salt_body}".encode("ascii")
 
 
-def hashpw(password: Union[str, bytes], salt: Union[str, bytes]) -> bytes:  # pragma: no cover
+def hashpw(password: str | bytes, salt: str | bytes) -> bytes:  # pragma: no cover
     salt_str = _ensure_bytes(salt).decode("ascii")
     if not salt_str.startswith("$2b$"):
         raise ValueError("Invalid salt format")
@@ -52,12 +51,14 @@ def hashpw(password: Union[str, bytes], salt: Union[str, bytes]) -> bytes:  # pr
         raise ValueError("Salt too short")
 
     password_bytes = _ensure_bytes(password)
-    digest = hashlib.sha256(f"{cost_str}:{salt_body}".encode("ascii") + b":" + password_bytes).digest()
+    digest = hashlib.sha256(
+        f"{cost_str}:{salt_body}".encode("ascii") + b":" + password_bytes
+    ).digest()
     hash_body = _bcrypt64(digest, 31)
     return f"$2b${cost_str}${salt_body}{hash_body}".encode("ascii")
 
 
-def checkpw(password: Union[str, bytes], hashed: Union[str, bytes]) -> bool:  # pragma: no cover
+def checkpw(password: str | bytes, hashed: str | bytes) -> bool:  # pragma: no cover
     hashed_bytes = _ensure_bytes(hashed)
     try:
         recalculated = hashpw(password, hashed_bytes[:29])  # salt is first 29 bytes

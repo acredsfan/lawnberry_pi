@@ -6,6 +6,7 @@ from typing import Any
 
 try:
     import typer  # type: ignore
+
     _HAS_TYPER = True
 except Exception:  # keep CLI optional in tests
     typer = None  # type: ignore
@@ -16,6 +17,7 @@ async def _collect_snapshot() -> dict[str, Any]:
     # For now, pull from debug overrides and health endpoint patterns
     # In future, integrate with SensorManager.
     from ..api.rest import _debug_overrides
+
     snapshot = {
         "tof_left": {
             "value": _debug_overrides.get("tof_left_distance_m"),
@@ -64,6 +66,7 @@ async def sensors_live_loop(interval_s: float = 1.0) -> None:
 
 
 if _HAS_TYPER:
+
     @typer.command()
     def test(live: bool = True):
         """Run sensor diagnostics live table (1 Hz)."""

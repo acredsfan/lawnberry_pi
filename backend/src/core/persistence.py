@@ -4,15 +4,17 @@ This module provides a lightweight persistence layer for the LawnBerry Pi v2 sys
 handling database schema creation, migrations, and basic CRUD operations for
 persistent data like job schedules, configuration, and telemetry history.
 """
-import sqlite3
+
 import json
 import logging
+import sqlite3
 import threading
-from pathlib import Path
+from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Generator
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Migration:
     """Database migration definition."""
+
     version: int
     description: str
     sql: str
@@ -27,9 +30,9 @@ class Migration:
 
 class PersistenceLayer:
     """SQLite-based persistence layer for LawnBerry Pi v2."""
-    
+
     SCHEMA_VERSION = 5
-    
+
     MIGRATIONS = [
         Migration(
             version=1,
@@ -90,9 +93,8 @@ class PersistenceLayer:
             
             -- Insert initial schema version
             INSERT OR REPLACE INTO schema_version (version) VALUES (1);
-            """
-        )
-        ,
+            """,
+        ),
         Migration(
             version=2,
             description="Add audit_logs table",
@@ -107,9 +109,8 @@ class PersistenceLayer:
             );
 
             INSERT OR REPLACE INTO schema_version (version) VALUES (2);
-            """
-        )
-        ,
+            """,
+        ),
         Migration(
             version=3,
             description="Ensure telemetry streams table exists",
@@ -128,9 +129,8 @@ class PersistenceLayer:
             CREATE INDEX IF NOT EXISTS idx_telemetry_timestamp ON hardware_telemetry_streams(timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_telemetry_component ON hardware_telemetry_streams(component_id);
             INSERT OR REPLACE INTO schema_version (version) VALUES (3);
-            """
-        )
-        ,
+            """,
+        ),
         Migration(
             version=4,
             description="Add map_config table for map configuration storage",
@@ -142,7 +142,7 @@ class PersistenceLayer:
             );
 
             INSERT OR REPLACE INTO schema_version (version) VALUES (4);
-            """
+            """,
         ),
         Migration(
             version=5,
@@ -170,16 +170,16 @@ class PersistenceLayer:
                 ON mission_execution_state(status);
 
             INSERT OR REPLACE INTO schema_version (version) VALUES (5);
-            """
-        )
+            """,
+        ),
     ]
-    
+
     def __init__(self, db_path: str = "data/lawnberry.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._init_database()
-    
+
     def _init_database(self):
         """Initialize database and run migrations."""
         with self.get_connection() as conn:
@@ -188,14 +188,14 @@ class PersistenceLayer:
             conn.execute("PRAGMA wal_autocheckpoint=1000")
             # Get current schema version
             current_version = self._get_schema_version(conn)
-            
+
             # Apply migrations
             for migration in self.MIGRATIONS:
                 if migration.version > current_version:
                     logger.info(f"Applying migration {migration.version}: {migration.description}")
                     conn.executescript(migration.sql)
                     conn.commit()
-    
+
     def _get_schema_version(self, conn: sqlite3.Connection) -> int:
         """Get current database schema version."""
         try:
@@ -204,7 +204,7 @@ class PersistenceLayer:
             return result[0] if result and result[0] is not None else 0
         except sqlite3.OperationalError:
             return 0
-    
+
     @contextmanager
     def get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """Get database connection with proper cleanup.
@@ -213,29 +213,25 @@ class PersistenceLayer:
         tasks (and any background threads) don't collide on the same WAL
         database connection.
         """
-        conn = sqlite3.connect(
-            str(self.db_path),
-            timeout=30.0,
-            check_same_thread=False
-        )
+        conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         try:
             with self._lock:
                 yield conn
         finally:
             conn.close()
-    
+
     # System Configuration
-    def save_system_config(self, config: Dict[str, Any]) -> None:
+    def save_system_config(self, config: dict[str, Any]) -> None:
         """Save system configuration to database."""
         with self.get_connection() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO system_config (id, config_json, updated_at) VALUES (1, ?, ?)",
-                (json.dumps(config), datetime.now(timezone.utc))
+                (json.dumps(config), datetime.now(UTC)),
             )
             conn.commit()
-    
-    def load_system_config(self) -> Optional[Dict[str, Any]]:
+
+    def load_system_config(self) -> dict[str, Any] | None:
         """Load system configuration from database."""
         with self.get_connection() as conn:
             cursor = conn.execute("SELECT config_json FROM system_config WHERE id = 1")
@@ -243,29 +239,32 @@ class PersistenceLayer:
             if result:
                 return json.loads(result["config_json"])
             return None
-    
+
     # Planning Jobs
-    def save_planning_job(self, job_data: Dict[str, Any]) -> None:
+    def save_planning_job(self, job_data: dict[str, Any]) -> None:
         """Save planning job to database."""
         with self.get_connection() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO planning_jobs 
                 (id, name, schedule, zones_json, priority, enabled, created_at, last_run, status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                job_data["id"],
-                job_data["name"],
-                job_data["schedule"],
-                json.dumps(job_data["zones"]),
-                job_data.get("priority", 1),
-                job_data.get("enabled", True),
-                job_data.get("created_at"),
-                job_data.get("last_run"),
-                job_data.get("status", "pending")
-            ))
+            """,
+                (
+                    job_data["id"],
+                    job_data["name"],
+                    job_data["schedule"],
+                    json.dumps(job_data["zones"]),
+                    job_data.get("priority", 1),
+                    job_data.get("enabled", True),
+                    job_data.get("created_at"),
+                    job_data.get("last_run"),
+                    job_data.get("status", "pending"),
+                ),
+            )
             conn.commit()
-    
-    def load_planning_jobs(self) -> List[Dict[str, Any]]:
+
+    def load_planning_jobs(self) -> list[dict[str, Any]]:
         """Load all planning jobs from database."""
         with self.get_connection() as conn:
             cursor = conn.execute("SELECT * FROM planning_jobs ORDER BY created_at")
@@ -276,36 +275,39 @@ class PersistenceLayer:
                 del job["zones_json"]
                 jobs.append(job)
             return jobs
-    
+
     def delete_planning_job(self, job_id: str) -> bool:
         """Delete planning job from database."""
         with self.get_connection() as conn:
             cursor = conn.execute("DELETE FROM planning_jobs WHERE id = ?", (job_id,))
             conn.commit()
             return cursor.rowcount > 0
-    
+
     # Map Zones
-    def save_map_zones(self, zones: List[Dict[str, Any]]) -> None:
+    def save_map_zones(self, zones: list[dict[str, Any]]) -> None:
         """Save map zones to database."""
         with self.get_connection() as conn:
             # Clear existing zones
             conn.execute("DELETE FROM map_zones")
-            
+
             # Insert new zones
             for zone in zones:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO map_zones (id, name, polygon_json, priority, exclusion_zone)
                     VALUES (?, ?, ?, ?, ?)
-                """, (
-                    zone["id"],
-                    zone.get("name"),
-                    json.dumps(zone["polygon"]),
-                    zone.get("priority", 0),
-                    zone.get("exclusion_zone", False)
-                ))
+                """,
+                    (
+                        zone["id"],
+                        zone.get("name"),
+                        json.dumps(zone["polygon"]),
+                        zone.get("priority", 0),
+                        zone.get("exclusion_zone", False),
+                    ),
+                )
             conn.commit()
-    
-    def load_map_zones(self) -> List[Dict[str, Any]]:
+
+    def load_map_zones(self) -> list[dict[str, Any]]:
         """Load map zones from database."""
         with self.get_connection() as conn:
             cursor = conn.execute("SELECT * FROM map_zones ORDER BY priority DESC")
@@ -316,45 +318,44 @@ class PersistenceLayer:
                 del zone["polygon_json"]
                 zones.append(zone)
             return zones
-    
+
     # Telemetry History
-    def save_telemetry_snapshot(self, data: Dict[str, Any]) -> None:
+    def save_telemetry_snapshot(self, data: dict[str, Any]) -> None:
         """Save telemetry snapshot for historical analysis."""
         with self.get_connection() as conn:
             conn.execute(
                 "INSERT INTO telemetry_snapshots (timestamp, data_json) VALUES (?, ?)",
-                (datetime.now(timezone.utc), json.dumps(data))
+                (datetime.now(UTC), json.dumps(data)),
             )
             conn.commit()
-    
-    def load_telemetry_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+
+    def load_telemetry_history(self, limit: int = 100) -> list[dict[str, Any]]:
         """Load recent telemetry history."""
         with self.get_connection() as conn:
             cursor = conn.execute(
-                "SELECT * FROM telemetry_snapshots ORDER BY timestamp DESC LIMIT ?",
-                (limit,)
+                "SELECT * FROM telemetry_snapshots ORDER BY timestamp DESC LIMIT ?", (limit,)
             )
             snapshots = []
             for row in cursor.fetchall():
                 snapshot = {
                     "id": row["id"],
                     "timestamp": row["timestamp"],
-                    "data": json.loads(row["data_json"])
+                    "data": json.loads(row["data_json"]),
                 }
                 snapshots.append(snapshot)
             return snapshots
-    
+
     def cleanup_old_telemetry(self, days_to_keep: int = 7) -> int:
         """Clean up old telemetry data to manage disk space."""
-        cutoff = datetime.now(timezone.utc).timestamp() - (days_to_keep * 24 * 3600)
+        cutoff = datetime.now(UTC).timestamp() - (days_to_keep * 24 * 3600)
         with self.get_connection() as conn:
             cursor = conn.execute(
                 "DELETE FROM telemetry_snapshots WHERE timestamp < datetime(?, 'unixepoch')",
-                (cutoff,)
+                (cutoff,),
             )
             conn.commit()
             return cursor.rowcount
-    
+
     # Map Configuration
     async def save_map_configuration(self, config_id: str, config_json: str) -> None:
         """Save map configuration to database."""
@@ -364,12 +365,12 @@ class PersistenceLayer:
                 INSERT OR REPLACE INTO map_config (id, config_json, updated_at)
                 VALUES (?, ?, ?)
                 """,
-                (config_id, config_json, datetime.now(timezone.utc)),
+                (config_id, config_json, datetime.now(UTC)),
             )
             conn.commit()
             logger.info(f"Saved map configuration {config_id} to persistence")
-    
-    async def load_map_configuration(self, config_id: str) -> Optional[str]:
+
+    async def load_map_configuration(self, config_id: str) -> str | None:
         """Load map configuration from database."""
         with self.get_connection() as conn:
             cursor = conn.execute(
@@ -383,77 +384,93 @@ class PersistenceLayer:
             return None
 
     # Audit Logs
-    def add_audit_log(self, action: str, client_id: Optional[str] = None, resource: Optional[str] = None, details: Optional[Dict[str, Any]] = None) -> None:
+    def add_audit_log(
+        self,
+        action: str,
+        client_id: str | None = None,
+        resource: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         with self.get_connection() as conn:
             conn.execute(
                 "INSERT INTO audit_logs (client_id, action, resource, details_json) VALUES (?, ?, ?, ?)",
-                (client_id, action, resource, json.dumps(details or {}))
+                (client_id, action, resource, json.dumps(details or {})),
             )
             conn.commit()
 
-    def load_audit_logs(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def load_audit_logs(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.get_connection() as conn:
             cursor = conn.execute(
                 "SELECT id, timestamp, client_id, action, resource, details_json FROM audit_logs ORDER BY id DESC LIMIT ?",
-                (limit,)
+                (limit,),
             )
             rows = []
             for r in cursor.fetchall():
-                rows.append({
-                    "id": r["id"],
-                    "timestamp": r["timestamp"],
-                    "client_id": r["client_id"],
-                    "action": r["action"],
-                    "resource": r["resource"],
-                    "details": json.loads(r["details_json"]) if r["details_json"] else {}
-                })
+                rows.append(
+                    {
+                        "id": r["id"],
+                        "timestamp": r["timestamp"],
+                        "client_id": r["client_id"],
+                        "action": r["action"],
+                        "resource": r["resource"],
+                        "details": json.loads(r["details_json"]) if r["details_json"] else {},
+                    }
+                )
             return rows
-    
+
     # Hardware Telemetry Streams
-    def save_telemetry_streams(self, streams: List[Dict[str, Any]]) -> None:
+    def save_telemetry_streams(self, streams: list[dict[str, Any]]) -> None:
         """Save hardware telemetry streams to database."""
         with self.get_connection() as conn:
             for stream in streams:
                 try:
-                    conn.execute("""
+                    conn.execute(
+                        """
                         INSERT OR REPLACE INTO hardware_telemetry_streams
                         (timestamp, component_id, value, status, latency_ms, stream_json, verification_artifact_id)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        stream.get("timestamp"),
-                        stream.get("component_id"),
-                        str(stream.get("value", "")),
-                        stream.get("status"),
-                        stream.get("latency_ms", 0.0),
-                        json.dumps(stream),
-                        stream.get("verification_artifact_id")
-                    ))
+                    """,
+                        (
+                            stream.get("timestamp"),
+                            stream.get("component_id"),
+                            str(stream.get("value", "")),
+                            stream.get("status"),
+                            stream.get("latency_ms", 0.0),
+                            json.dumps(stream),
+                            stream.get("verification_artifact_id"),
+                        ),
+                    )
                 except Exception as e:
                     logger.error(f"Failed to save telemetry stream: {e}")
             conn.commit()
-    
-    def load_telemetry_streams(self, limit: int = 100, component_id: Optional[str] = None,
-                               start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict[str, Any]]:
+
+    def load_telemetry_streams(
+        self,
+        limit: int = 100,
+        component_id: str | None = None,
+        start_time: str | None = None,
+        end_time: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Load hardware telemetry streams from database with optional filters."""
         with self.get_connection() as conn:
             query = "SELECT * FROM hardware_telemetry_streams WHERE 1=1"
             params = []
-            
+
             if component_id:
                 query += " AND component_id = ?"
                 params.append(component_id)
-            
+
             if start_time:
                 query += " AND timestamp >= ?"
                 params.append(start_time)
-            
+
             if end_time:
                 query += " AND timestamp <= ?"
                 params.append(end_time)
-            
+
             query += " ORDER BY timestamp DESC LIMIT ?"
             params.append(limit)
-            
+
             cursor = conn.execute(query, params)
             streams = []
             for row in cursor.fetchall():
@@ -461,10 +478,13 @@ class PersistenceLayer:
                 stream["db_id"] = row["id"]
                 streams.append(stream)
             return streams
-    
-    def compute_telemetry_latency_stats(self, component_id: Optional[str] = None,
-                                       start_time: Optional[str] = None,
-                                       end_time: Optional[str] = None) -> Dict[str, Any]:
+
+    def compute_telemetry_latency_stats(
+        self,
+        component_id: str | None = None,
+        start_time: str | None = None,
+        end_time: str | None = None,
+    ) -> dict[str, Any]:
         """Compute latency statistics for telemetry streams."""
         with self.get_connection() as conn:
             query = """
@@ -478,24 +498,24 @@ class PersistenceLayer:
                 WHERE 1=1
             """
             params = []
-            
+
             if component_id:
                 query += " AND component_id = ?"
                 params.append(component_id)
-            
+
             if start_time:
                 query += " AND timestamp >= ?"
                 params.append(start_time)
-            
+
             if end_time:
                 query += " AND timestamp <= ?"
                 params.append(end_time)
-            
+
             if not component_id:
                 query += " GROUP BY component_id"
-            
+
             cursor = conn.execute(query, params)
-            
+
             if component_id:
                 row = cursor.fetchone()
                 if row:
@@ -504,77 +524,80 @@ class PersistenceLayer:
                         "count": row["count"],
                         "avg_latency_ms": row["avg_latency"],
                         "min_latency_ms": row["min_latency"],
-                        "max_latency_ms": row["max_latency"]
+                        "max_latency_ms": row["max_latency"],
                     }
                 return {}
             else:
                 results = []
                 for row in cursor.fetchall():
-                    results.append({
-                        "component_id": row["component_id"],
-                        "count": row["count"],
-                        "avg_latency_ms": row["avg_latency"],
-                        "min_latency_ms": row["min_latency"],
-                        "max_latency_ms": row["max_latency"]
-                    })
+                    results.append(
+                        {
+                            "component_id": row["component_id"],
+                            "count": row["count"],
+                            "avg_latency_ms": row["avg_latency"],
+                            "min_latency_ms": row["min_latency"],
+                            "max_latency_ms": row["max_latency"],
+                        }
+                    )
                 return {"by_component": results}
-    
+
     def cleanup_old_telemetry_streams(self, days_to_keep: int = 7) -> int:
         """Clean up old telemetry stream data to manage disk space."""
-        cutoff = datetime.now(timezone.utc).timestamp() - (days_to_keep * 24 * 3600)
+        cutoff = datetime.now(UTC).timestamp() - (days_to_keep * 24 * 3600)
         with self.get_connection() as conn:
             cursor = conn.execute(
                 "DELETE FROM hardware_telemetry_streams WHERE timestamp < datetime(?, 'unixepoch')",
-                (cutoff,)
+                (cutoff,),
             )
             conn.commit()
             return cursor.rowcount
-    
-    def export_telemetry_diagnostic(self, component_id: Optional[str] = None,
-                                   start_time: Optional[str] = None,
-                                   end_time: Optional[str] = None) -> Dict[str, Any]:
+
+    def export_telemetry_diagnostic(
+        self,
+        component_id: str | None = None,
+        start_time: str | None = None,
+        end_time: str | None = None,
+    ) -> dict[str, Any]:
         """Export telemetry diagnostic data including power metrics and status."""
         streams = self.load_telemetry_streams(
-            limit=1000,
-            component_id=component_id,
-            start_time=start_time,
-            end_time=end_time
+            limit=1000, component_id=component_id, start_time=start_time, end_time=end_time
         )
-        
+
         stats = self.compute_telemetry_latency_stats(
-            component_id=component_id,
-            start_time=start_time,
-            end_time=end_time
+            component_id=component_id, start_time=start_time, end_time=end_time
         )
-        
+
         return {
-            "export_timestamp": datetime.now(timezone.utc).isoformat(),
+            "export_timestamp": datetime.now(UTC).isoformat(),
             "filters": {
                 "component_id": component_id,
                 "start_time": start_time,
-                "end_time": end_time
+                "end_time": end_time,
             },
             "statistics": stats,
             "stream_count": len(streams),
-            "streams": streams
+            "streams": streams,
         }
 
     # Test helper: seed minimal simulated streams when SIM_MODE enabled
     def seed_simulated_streams(self, count: int = 10) -> None:
         import os
+
         if os.environ.get("SIM_MODE") != "1":
             return
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         rows = []
         for i in range(count):
             ts = (now).isoformat()
-            rows.append({
-                "timestamp": ts,
-                "component_id": "power",
-                "value": {"voltage": 12.5, "percentage": 80},
-                "status": "healthy",
-                "latency_ms": 0.0,
-            })
+            rows.append(
+                {
+                    "timestamp": ts,
+                    "component_id": "power",
+                    "value": {"voltage": 12.5, "percentage": 80},
+                    "status": "healthy",
+                    "latency_ms": 0.0,
+                }
+            )
         try:
             self.save_telemetry_streams(rows)
         except Exception:

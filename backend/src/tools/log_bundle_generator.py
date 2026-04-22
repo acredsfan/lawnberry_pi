@@ -15,6 +15,7 @@ DEFAULT_LOG_DIRS = [
     Path("./logs"),
 ]
 
+
 def generate_log_bundle(time_range_minutes: int | None = None) -> tuple[str, bytes, int, list[str]]:
     """Create a tar.gz bundle in-memory.
 
@@ -51,6 +52,7 @@ def generate_log_bundle(time_range_minutes: int | None = None) -> tuple[str, byt
             "host": os.uname().nodename if hasattr(os, "uname") else "unknown",
         }
         import json
+
         meta_bytes = json.dumps(meta, indent=2).encode()
         ti = tarfile.TarInfo(name="metadata.json")
         ti.size = len(meta_bytes)

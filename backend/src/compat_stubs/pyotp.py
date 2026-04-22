@@ -14,8 +14,8 @@ import hmac
 import secrets
 import struct
 import time
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable
 
 __all__ = ["TOTP", "random_base32", "utils"]
 
@@ -58,7 +58,7 @@ class TOTP:  # pragma: no cover - exercised via higher-level unit tests
         secret: str,
         digits: int = 6,
         interval: int = 30,
-        digest: Callable[[bytes], "hashlib._Hash"] = hashlib.sha1,
+        digest: Callable[[bytes], hashlib._Hash] = hashlib.sha1,
     ) -> None:
         if digits <= 0:
             raise ValueError("digits must be positive")
@@ -94,7 +94,7 @@ class TOTP:  # pragma: no cover - exercised via higher-level unit tests
             | ((digest[offset + 2] & 0xFF) << 8)
             | (digest[offset + 3] & 0xFF)
         )
-        code = truncated % (10 ** self.digits)
+        code = truncated % (10**self.digits)
         return str(code).zfill(self.digits)
 
     def at(self, for_time: float | int | datetime, counter_offset: int = 0) -> str:

@@ -1,4 +1,5 @@
 """Health evaluation helpers for LawnBerry Pi backend."""
+
 from __future__ import annotations
 
 import asyncio
@@ -82,14 +83,10 @@ class HealthService:
     def evaluate(self) -> dict[str, Any]:
         now = datetime.now(UTC)
 
-        observability.update_error_metrics_for_testing(
-            window_seconds=self.error_window_seconds
-        )
+        observability.update_error_metrics_for_testing(window_seconds=self.error_window_seconds)
 
         rates, counts = observability.calculate_error_rates(self.error_window_seconds)
-        recent_errors = observability.get_recent_errors(
-            within_seconds=self.error_window_seconds
-        )
+        recent_errors = observability.get_recent_errors(within_seconds=self.error_window_seconds)
         alerts = observability.get_recent_events(
             event_type="alert", within_seconds=self.error_window_seconds, limit=5
         )
@@ -218,6 +215,7 @@ class HealthService:
         # regardless of when websocket_hub.bind_app_state() ran at startup.
         try:
             from ..core.state_manager import AppState as _AppState  # type: ignore
+
             existing_manager = _AppState.get_instance().sensor_manager
         except Exception:
             existing_manager = None
@@ -300,9 +298,7 @@ class HealthService:
             # Use .value for Enum members — Python 3.11 changed str(StrEnum) to
             # return "ClassName.MEMBER" instead of the plain string value, which
             # broke downstream membership checks like {"online", "ok", ...}.
-            component_status = (
-                value.value if hasattr(value, "value") else str(value)
-            ).lower()
+            component_status = (value.value if hasattr(value, "value") else str(value)).lower()
             component_level = self._map_sensor_status_to_health(component_status)
             components[component_name] = {
                 "status": component_status,
@@ -333,7 +329,14 @@ class HealthService:
         # not a running system that has faulted.  Keep it out of CRITICAL so an absent
         # optional peripheral (e.g. power monitor) does not drag the whole robot to
         # critical when GPS/IMU/ToF are all healthy.
-        if normalized in {"offline", "calibrating", "initializing", "unknown", "standby", "warning"}:
+        if normalized in {
+            "offline",
+            "calibrating",
+            "initializing",
+            "unknown",
+            "standby",
+            "warning",
+        }:
             return HealthLevel.DEGRADED
         if normalized in {"error", "fault", "timeout", "failed"}:
             return HealthLevel.CRITICAL
@@ -564,21 +567,15 @@ class HealthService:
     ) -> dict[str, Any]:
         subsystems: dict[str, Any] = {}
 
-        subsystems["api"] = self._status_from_errors(
-            "http_request", rates, counts, recent_errors
-        )
-        subsystems["metrics"] = self._status_from_errors(
-            "metrics", rates, counts, recent_errors
-        )
+        subsystems["api"] = self._status_from_errors("http_request", rates, counts, recent_errors)
+        subsystems["metrics"] = self._status_from_errors("metrics", rates, counts, recent_errors)
         subsystems["job_scheduler"] = self._status_from_errors(
             "job_scheduler", rates, counts, recent_errors
         )
         subsystems["telemetry"] = self._status_from_errors(
             "telemetry", rates, counts, recent_errors
         )
-        subsystems["acme"] = self._status_from_errors(
-            "acme", rates, counts, recent_errors
-        )
+        subsystems["acme"] = self._status_from_errors("acme", rates, counts, recent_errors)
         # TLS/HTTPS certificate status
         try:
             tls = get_tls_status()

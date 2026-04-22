@@ -15,9 +15,8 @@ import os
 import secrets
 import stat
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 from .context import get_correlation_id
 
@@ -32,11 +31,11 @@ class SecretRecord:
 
 
 class SecretsManager:
-    def __init__(self, store_path: Optional[str] = None) -> None:
+    def __init__(self, store_path: str | None = None) -> None:
         # Default to project config directory
         default_path = "./config/secrets.json"
         self._path = Path(store_path or os.getenv("LAWN_SECRETS_PATH", default_path))
-        self._cache: Dict[str, SecretRecord] = {}
+        self._cache: dict[str, SecretRecord] = {}
         self._loaded = False
 
     def _ensure_permissions(self) -> None:
@@ -66,7 +65,7 @@ class SecretsManager:
             _log.exception("Failed to load secrets file")
             self._loaded = True
 
-    def get(self, key: str, *, default: Optional[str] = None, purpose: str = "") -> Optional[str]:
+    def get(self, key: str, *, default: str | None = None, purpose: str = "") -> str | None:
         # Prefer environment variables to allow containerization and CI
         env_key = os.getenv(key)
         if env_key is not None:
@@ -93,7 +92,7 @@ class SecretsManager:
     def set(self, key: str, value: str) -> None:
         self._load()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         rec = self._cache.get(key)
         version = 1 if rec is None else rec.version + 1
         self._cache[key] = SecretRecord(value=value, updated_at=now, version=version)
@@ -117,7 +116,8 @@ class SecretsManager:
     def _persist(self) -> None:
         try:
             data = {
-                k: {"value": v.value, "updated_at": v.updated_at, "version": v.version} for k, v in self._cache.items()
+                k: {"value": v.value, "updated_at": v.updated_at, "version": v.version}
+                for k, v in self._cache.items()
             }
             tmp = self._path.with_suffix(".tmp")
             with tmp.open("w") as f:

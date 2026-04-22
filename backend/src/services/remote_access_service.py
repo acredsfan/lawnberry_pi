@@ -5,21 +5,22 @@ import json
 import logging
 import os
 import shutil
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any
 
 import httpx
 import yaml
 
+from ..core.observability import observability
 from ..models.remote_access_config import (
     CloudflareConfig,
     NgrokConfig,
     RemoteAccessConfig,
     RemoteAccessProvider,
 )
-from ..core.observability import observability
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +34,14 @@ HEALTH_FAILURE_THRESHOLD = 3
 HEALTH_TIMEOUT_SECONDS = 6.0
 
 
-def _atomic_json_dump(path: Path, payload: Dict[str, Any]) -> None:
+def _atomic_json_dump(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
     os.replace(tmp_path, path)
 
 
-def _load_json(path: Path) -> Dict[str, Any]:
+def _load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
@@ -51,7 +52,7 @@ def _load_json(path: Path) -> Dict[str, Any]:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass
@@ -60,23 +61,23 @@ class RemoteAccessStatus:
     configured_provider: str
     enabled: bool
     active: bool
-    url: Optional[str] = None
-    message: Optional[str] = None
-    last_error: Optional[str] = None
-    last_checked: Optional[datetime] = None
-    fallback_provider: Optional[str] = None
+    url: str | None = None
+    message: str | None = None
+    last_error: str | None = None
+    last_checked: datetime | None = None
+    fallback_provider: str | None = None
     health: str = "unknown"
     version: int = 1
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["last_checked"] = self.last_checked.isoformat() if self.last_checked else None
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> RemoteAccessStatus:
+    def from_dict(cls, data: dict[str, Any]) -> RemoteAccessStatus:
         value = data.get("last_checked")
-        last_checked: Optional[datetime] = None
+        last_checked: datetime | None = None
         if isinstance(value, str):
             try:
                 last_checked = datetime.fromisoformat(value)
@@ -113,7 +114,7 @@ class RemoteAccessService:
         self,
         config_path: Path = CONFIG_PATH,
         status_path: Path = STATUS_PATH,
-        process_factory: Optional[ProcessFactory] = None,
+        process_factory: ProcessFactory | None = None,
         metrics_port: int = DEFAULT_CLOUDFLARE_METRICS_PORT,
         ngrok_api_port: int = DEFAULT_NGROK_API_PORT,
     ) -> None:
@@ -129,12 +130,12 @@ class RemoteAccessService:
             configured_provider=self._config.provider,
             enabled=self._config.enabled,
         )
-        self._process: Optional[asyncio.subprocess.Process] = None
-        self._stdout_task: Optional[asyncio.Task[Any]] = None
-        self._stderr_task: Optional[asyncio.Task[Any]] = None
-        self._monitor_task: Optional[asyncio.Task[Any]] = None
+        self._process: asyncio.subprocess.Process | None = None
+        self._stdout_task: asyncio.Task[Any] | None = None
+        self._stderr_task: asyncio.Task[Any] | None = None
+        self._monitor_task: asyncio.Task[Any] | None = None
         self._health_failures: int = 0
-        self._fallback_active: Optional[str] = None
+        self._fallback_active: str | None = None
         self._config_digest: str = self._digest_config(self._config)
 
         # Persist initial status for consumers on boot
@@ -274,14 +275,16 @@ class RemoteAccessService:
 
         process = self._process
         if process is None or process.returncode is not None:
-            logger.warning("Tunnel process for %s is not running; attempting restart", provider_value)
+            logger.warning(
+                "Tunnel process for %s is not running; attempting restart", provider_value
+            )
             self._status.active = False
             self._status.health = "restarting"
             await self.enable()
             return
 
         healthy = True
-        new_url: Optional[str] = self._status.url
+        new_url: str | None = self._status.url
         try:
             if provider is RemoteAccessProvider.CLOUDFLARE:
                 healthy = await self._check_cloudflare_health()
@@ -308,13 +311,15 @@ class RemoteAccessService:
             self._status.active = self._health_failures < HEALTH_FAILURE_THRESHOLD
             self._status.message = f"{provider_value} health probe failed ({self._health_failures})"
             if self._health_failures >= HEALTH_FAILURE_THRESHOLD:
-                logger.warning("Health failure threshold reached; restarting %s tunnel", provider_value)
+                logger.warning(
+                    "Health failure threshold reached; restarting %s tunnel", provider_value
+                )
                 self._health_failures = 0
                 await self.enable()
                 return
         self._persist_status()
 
-    def record_error(self, message: str, exc: Optional[Exception] = None) -> None:
+    def record_error(self, message: str, exc: Exception | None = None) -> None:
         logger.error(message, exc_info=exc)
         observability.record_error(
             origin="remote_access",
@@ -338,7 +343,10 @@ class RemoteAccessService:
         if provider is RemoteAccessProvider.CLOUDFLARE and cfg.enabled:
             if not cfg.cloudflare or not cfg.cloudflare.tunnel_name:
                 raise RemoteAccessError("Cloudflare tunnel_name is required when enabled")
-            if cfg.cloudflare.credentials_file and not Path(cfg.cloudflare.credentials_file).exists():
+            if (
+                cfg.cloudflare.credentials_file
+                and not Path(cfg.cloudflare.credentials_file).exists()
+            ):
                 raise RemoteAccessError("Cloudflare credentials file not found")
         if provider is RemoteAccessProvider.NGROK and cfg.enabled:
             if not cfg.ngrok or not cfg.ngrok.authtoken:
@@ -350,7 +358,14 @@ class RemoteAccessService:
 
     async def _start_cloudflare(self, cfg: CloudflareConfig) -> None:
         binary = self._ensure_binary("cloudflared")
-        cmd = [binary, "tunnel", "--no-autoupdate", "--metrics", f"127.0.0.1:{self._metrics_port}", "run"]
+        cmd = [
+            binary,
+            "tunnel",
+            "--no-autoupdate",
+            "--metrics",
+            f"127.0.0.1:{self._metrics_port}",
+            "run",
+        ]
         if cfg.credentials_file:
             cmd.extend(["--cred-file", cfg.credentials_file])
         if cfg.tunnel_name:
@@ -388,7 +403,7 @@ class RemoteAccessService:
         self._status.health = "starting"
         # URL will be refreshed via health check once ngrok publishes tunnels
 
-    async def _start_custom(self, command: Optional[str], env_map: Dict[str, str]) -> None:
+    async def _start_custom(self, command: str | None, env_map: dict[str, str]) -> None:
         if not command:
             raise RemoteAccessError("Custom tunnel command missing")
         env = os.environ.copy()
@@ -411,7 +426,7 @@ class RemoteAccessService:
         if not cfg.authtoken:
             raise RemoteAccessError("ngrok authtoken missing")
         NGROK_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        config_data: Dict[str, Any] = {
+        config_data: dict[str, Any] = {
             "version": "2",
             "authtoken": cfg.authtoken,
             "web_addr": f"127.0.0.1:{self._ngrok_api_port}",
@@ -445,7 +460,7 @@ class RemoteAccessService:
         self,
         provider: RemoteAccessProvider,
         command: list[str],
-        env: Optional[Dict[str, str]],
+        env: dict[str, str] | None,
     ) -> None:
         await self._stop_process()
         logger.info("Starting %s tunnel: %s", provider.value, " ".join(command))
@@ -457,9 +472,13 @@ class RemoteAccessService:
         )
         self._process = process
         if process.stdout:
-            self._stdout_task = asyncio.create_task(self._stream_output(process.stdout, logging.INFO, provider.value))
+            self._stdout_task = asyncio.create_task(
+                self._stream_output(process.stdout, logging.INFO, provider.value)
+            )
         if process.stderr:
-            self._stderr_task = asyncio.create_task(self._stream_output(process.stderr, logging.WARNING, provider.value))
+            self._stderr_task = asyncio.create_task(
+                self._stream_output(process.stderr, logging.WARNING, provider.value)
+            )
         self._monitor_task = asyncio.create_task(self._monitor_process(provider))
         self._status.provider = provider.value
 
@@ -471,7 +490,7 @@ class RemoteAccessService:
         try:
             proc.terminate()
             await asyncio.wait_for(proc.wait(), timeout=10)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Tunnel process did not exit in time; killing")
             proc.kill()
             await proc.wait()
@@ -519,7 +538,7 @@ class RemoteAccessService:
             response = await client.get(url)
         return response.status_code == 200 and b"cloudflare_tunnel_connected" in response.content
 
-    async def _check_ngrok_health(self) -> tuple[bool, Optional[str]]:
+    async def _check_ngrok_health(self) -> tuple[bool, str | None]:
         url = f"http://127.0.0.1:{self._ngrok_api_port}/api/tunnels"
         async with httpx.AsyncClient(timeout=httpx.Timeout(HEALTH_TIMEOUT_SECONDS)) as client:
             response = await client.get(url)
@@ -556,7 +575,7 @@ class RemoteAccessService:
         *args: str,
         stdout: Any = asyncio.subprocess.PIPE,
         stderr: Any = asyncio.subprocess.PIPE,
-        env: Optional[Dict[str, str]] = None,
+        env: dict[str, str] | None = None,
     ) -> asyncio.subprocess.Process:
         return await asyncio.create_subprocess_exec(*args, stdout=stdout, stderr=stderr, env=env)
 

@@ -145,7 +145,11 @@ def _zone_polygons_from_envelope(
         if geometry.get("type") != "Polygon":
             continue
         coordinates = geometry.get("coordinates")
-        if not isinstance(coordinates, list) or not coordinates or not isinstance(coordinates[0], list):
+        if (
+            not isinstance(coordinates, list)
+            or not coordinates
+            or not isinstance(coordinates[0], list)
+        ):
             continue
         polygon: list[tuple[float, float]] = []
         for point in coordinates[0]:

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import Any, Dict, Optional
-from pydantic import BaseModel, Field, field_validator
+from typing import Any
 
+from pydantic import BaseModel, Field, field_validator
 
 TOPIC_RE = re.compile(r"^[a-z]+(\.[a-z_]+)+$")
 
@@ -17,9 +17,9 @@ class PersistenceTier(str, Enum):
 class MessageBusEvent(BaseModel):
     topic: str
     timestamp_us: int
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     source_service: str
-    message_id: Optional[str] = Field(default=None)
+    message_id: str | None = Field(default=None)
     persistence_tier: PersistenceTier = Field(default=PersistenceTier.BEST_EFFORT)
 
     @field_validator("topic")

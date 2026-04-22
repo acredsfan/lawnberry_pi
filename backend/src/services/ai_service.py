@@ -9,24 +9,24 @@ preserved for status reporting but does not block CPU inference.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
 import time
 import uuid
-import base64
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
 from ..models import (
+    AcceleratorStatus,
     AIAccelerator,
     AIProcessing,
-    AcceleratorStatus,
     BoundingBox,
     DetectedObject,
     InferenceResult,
@@ -61,9 +61,9 @@ class AIService:
 
     def __init__(
         self,
-        model_path: Optional[str] = None,
-        confidence_threshold: Optional[float] = None,
-        max_detections: Optional[int] = None,
+        model_path: str | None = None,
+        confidence_threshold: float | None = None,
+        max_detections: int | None = None,
     ):
         env_confidence = self._read_float_env("AI_CONFIDENCE_THRESHOLD", 0.5)
         env_max_detections = self._read_int_env("AI_MAX_DETECTIONS", 10)
@@ -75,14 +75,12 @@ class AIService:
             max_detections=max_detections if max_detections is not None else env_max_detections,
         )
         self.initialized = False
-        self.last_error: Optional[str] = None
+        self.last_error: str | None = None
         self.model_path = Path(
-            model_path
-            or os.getenv("AI_MODEL_PATH")
-            or "config/ai_heuristic_model.json"
+            model_path or os.getenv("AI_MODEL_PATH") or "config/ai_heuristic_model.json"
         )
-        self.model_definition: Optional[Dict[str, Any]] = None
-        self.active_model_name: Optional[str] = None
+        self.model_definition: dict[str, Any] | None = None
+        self.active_model_name: str | None = None
 
     async def initialize(self) -> bool:
         """Initialize AI service"""
@@ -123,7 +121,7 @@ class AIService:
         self.initialized = True
         return True
 
-    async def get_ai_status(self) -> Dict[str, Any]:
+    async def get_ai_status(self) -> dict[str, Any]:
         """Get current AI processing status"""
         if not self.initialized:
             await self.initialize()
@@ -142,8 +140,9 @@ class AIService:
                 for name, model in self.ai_processing.active_models.items()
             },
             "accelerators": {
-                accelerator.value if hasattr(accelerator, "value") else str(accelerator):
-                status.model_dump(mode="json")
+                accelerator.value
+                if hasattr(accelerator, "value")
+                else str(accelerator): status.model_dump(mode="json")
                 for accelerator, status in self.ai_processing.accelerator_status.items()
             },
             "performance": self.ai_processing.get_inference_performance(),
@@ -156,8 +155,8 @@ class AIService:
         image_bytes: bytes,
         *,
         task: InferenceTask = InferenceTask.OBSTACLE_DETECTION,
-        frame_id: Optional[str] = None,
-        confidence_threshold: Optional[float] = None,
+        frame_id: str | None = None,
+        confidence_threshold: float | None = None,
     ) -> InferenceResult:
         """Run inference on uploaded image bytes."""
         if not image_bytes:
@@ -220,14 +219,14 @@ class AIService:
         self,
         *,
         task: InferenceTask = InferenceTask.OBSTACLE_DETECTION,
-        confidence_threshold: Optional[float] = None,
+        confidence_threshold: float | None = None,
     ) -> InferenceResult:
         """Run inference on the latest available camera frame."""
         frame = await camera_service.get_current_frame()
         if frame is None:
             raise AINoFrameAvailableError("No camera frame available for inference")
 
-        frame_bytes: Optional[bytes] = None
+        frame_bytes: bytes | None = None
         if hasattr(frame, "get_frame_data"):
             frame_bytes = frame.get_frame_data()
         elif isinstance(getattr(frame, "data", None), bytes):
@@ -263,15 +262,11 @@ class AIService:
             raise AIModelNotReadyError("AI inference is disabled by configuration")
 
         if self.active_model_name is None or self.model_definition is None:
-            raise AIModelNotReadyError(
-                f"No AI model is loaded from '{self.model_path}'"
-            )
+            raise AIModelNotReadyError(f"No AI model is loaded from '{self.model_path}'")
 
         model_task = self.model_definition.get("task", InferenceTask.OBSTACLE_DETECTION.value)
         if model_task != task.value:
-            raise AIInferenceInputError(
-                f"Loaded model supports '{model_task}', not '{task.value}'"
-            )
+            raise AIInferenceInputError(f"Loaded model supports '{model_task}', not '{task.value}'")
 
     async def _load_configured_model(self) -> None:
         """Load the configured local model definition if present."""
@@ -284,7 +279,7 @@ class AIService:
             payload = json.loads(self.model_path.read_text(encoding="utf-8"))
             model_info = self._build_model_info(payload)
             model_info.status = ModelStatus.LOADED
-            model_info.load_time = model_info.load_time or datetime.now(timezone.utc)
+            model_info.load_time = model_info.load_time or datetime.now(UTC)
             self.ai_processing.active_models[model_info.model_name] = model_info
             self.ai_processing.primary_accelerator = AIAccelerator.CPU
             self.active_model_name = model_info.model_name
@@ -294,7 +289,7 @@ class AIService:
             self.last_error = f"Failed to load AI model definition: {exc}"
             logger.exception(self.last_error)
 
-    def _build_model_info(self, payload: Dict[str, Any]) -> ModelInfo:
+    def _build_model_info(self, payload: dict[str, Any]) -> ModelInfo:
         """Translate JSON model metadata into ModelInfo."""
         required = ["model_name", "input_width", "input_height", "class_labels", "task", "rules"]
         missing = [field for field in required if field not in payload]
@@ -361,17 +356,17 @@ class AIService:
         detected.sort(key=lambda item: item.confidence, reverse=True)
         return detected[:max_detections]
 
-    def _rule_mask(self, rgb_image: np.ndarray, rule: Dict[str, Any]) -> np.ndarray:
+    def _rule_mask(self, rgb_image: np.ndarray, rule: dict[str, Any]) -> np.ndarray:
         """Build a boolean mask for a single RGB threshold rule."""
         min_rgb = np.array(rule.get("min_rgb", [0, 0, 0]), dtype=np.uint8)
         max_rgb = np.array(rule.get("max_rgb", [255, 255, 255]), dtype=np.uint8)
         return np.all(rgb_image >= min_rgb, axis=2) & np.all(rgb_image <= max_rgb, axis=2)
 
-    def _extract_components(self, mask: np.ndarray) -> list[Dict[str, Any]]:
+    def _extract_components(self, mask: np.ndarray) -> list[dict[str, Any]]:
         """Extract connected components from a binary mask."""
         height, width = mask.shape
         visited = np.zeros_like(mask, dtype=bool)
-        components: list[Dict[str, Any]] = []
+        components: list[dict[str, Any]] = []
 
         for y in range(height):
             for x in range(width):
@@ -403,10 +398,12 @@ class AIService:
                                 visited[next_y, next_x] = True
                                 stack.append((next_x, next_y))
 
-                components.append({
-                    "area": area,
-                    "bbox": (min_x, min_y, max_x, max_y),
-                })
+                components.append(
+                    {
+                        "area": area,
+                        "bbox": (min_x, min_y, max_x, max_y),
+                    }
+                )
 
         components.sort(key=lambda item: item["area"], reverse=True)
         return components
@@ -440,7 +437,7 @@ class AIService:
             return default
 
 
-_ai_service_instance: Optional[AIService] = None
+_ai_service_instance: AIService | None = None
 
 
 def get_ai_service() -> AIService:

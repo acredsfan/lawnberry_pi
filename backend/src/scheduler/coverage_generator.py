@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable, List, Tuple
+from collections.abc import Iterable
 
 
 def _meters_per_degree_lat() -> float:
@@ -16,11 +16,11 @@ def _meters_per_degree_lon(lat: float) -> float:
 
 def generate_parallel_lines(
     *,
-    geofence_vertices: Iterable[Tuple[float, float]],
+    geofence_vertices: Iterable[tuple[float, float]],
     cutting_width_m: float,
     overlap_m: float,
     heading_degrees: float = 0.0,
-) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     """Generate a simple parallel-line coverage pattern inside a geofence bbox.
 
     Notes:
@@ -41,7 +41,7 @@ def generate_parallel_lines(
 
     spacing_m = max(1e-3, float(cutting_width_m) - float(overlap_m))
 
-    lines: List[Tuple[Tuple[float, float], Tuple[float, float]]] = []
+    lines: list[tuple[tuple[float, float], tuple[float, float]]] = []
 
     # Normalize heading to [0, 180) since 180 mirrors 0, etc.
     h = heading_degrees % 180.0

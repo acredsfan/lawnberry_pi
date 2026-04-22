@@ -7,9 +7,9 @@ to observability + WebSocket topics. This module has no direct hardware control.
 """
 
 import asyncio
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from ..core.observability import observability
 from ..models.safety_interlock import SafetyInterlock
@@ -71,7 +71,7 @@ class SafetyMonitor:
             }
 
 
-_monitor: Optional[SafetyMonitor] = None
+_monitor: SafetyMonitor | None = None
 
 
 def get_safety_monitor() -> SafetyMonitor:

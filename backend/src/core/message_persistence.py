@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 
 class PersistenceLayer:
@@ -18,14 +18,14 @@ class PersistenceLayer:
         )
         self._conn.commit()
 
-    def save(self, topic: str, timestamp_us: int, payload: Dict[str, Any]) -> None:
+    def save(self, topic: str, timestamp_us: int, payload: dict[str, Any]) -> None:
         self._conn.execute(
             "INSERT INTO messages(topic, timestamp_us, payload) VALUES(?,?,?)",
             (topic, timestamp_us, json.dumps(payload)),
         )
         self._conn.commit()
 
-    def load(self, topic: str) -> List[Tuple[int, Dict[str, Any]]]:
+    def load(self, topic: str) -> list[tuple[int, dict[str, Any]]]:
         cur = self._conn.execute(
             "SELECT timestamp_us, payload FROM messages WHERE topic=? ORDER BY timestamp_us ASC",
             (topic,),

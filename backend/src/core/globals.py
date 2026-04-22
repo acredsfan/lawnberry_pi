@@ -1,5 +1,6 @@
+from datetime import UTC, datetime
 from typing import Any
-from datetime import datetime, timezone
+
 from ..models.auth_security_config import AuthSecurityConfig
 
 # Global shared state
@@ -23,4 +24,4 @@ _manual_control_sessions: dict[str, dict[str, Any]] = {}
 
 # Security settings (auth levels, MFA options)
 _security_settings = AuthSecurityConfig()
-_security_last_modified: datetime = datetime.now(timezone.utc)
+_security_last_modified: datetime = datetime.now(UTC)

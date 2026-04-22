@@ -4,7 +4,7 @@ import json
 import os
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
 from hashlib import sha256
 from pathlib import Path
@@ -77,7 +77,7 @@ def _doc_title(path: Path) -> str:
 
 
 def _doc_version(path: Path) -> str:
-    modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    modified = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
     return modified.strftime("%Y.%m.%d")
 
 
@@ -91,7 +91,7 @@ def _docs_bundle_items() -> list[dict[str, Any]]:
         return []
     items: list[dict[str, Any]] = []
     for path in sorted(docs_dir.rglob("*.md")):
-        modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        modified = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
         items.append(
             {
                 "doc_id": path.stem,
@@ -135,17 +135,19 @@ def get_docs_checksums() -> dict[str, Any]:
 @router.get("/api/v2/docs/freshness")
 def get_docs_freshness() -> dict[str, Any]:
     docs_dir = _docs_root()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     docs = []
     for path in sorted(docs_dir.rglob("*.md")):
-        modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        modified = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
         age_days = (now - modified).days
-        docs.append({
-            "path": path.relative_to(docs_dir).as_posix(),
-            "age_days": age_days,
-            "stale": age_days > 90,
-            "last_updated": modified.isoformat(),
-        })
+        docs.append(
+            {
+                "path": path.relative_to(docs_dir).as_posix(),
+                "age_days": age_days,
+                "stale": age_days > 90,
+                "last_updated": modified.isoformat(),
+            }
+        )
     return {"docs": docs}
 
 
@@ -177,7 +179,9 @@ def get_docs_bundle(simulate_checksum_mismatch: str | None = Query(default=None)
 
 @router.post("/api/v2/verification-artifacts", status_code=201)
 def create_verification_artifact(payload: VerificationArtifactCreateRequest) -> JSONResponse:
-    linked_requirements = [req.strip().upper() for req in payload.linked_requirements if req and req.strip()]
+    linked_requirements = [
+        req.strip().upper() for req in payload.linked_requirements if req and req.strip()
+    ]
     if not linked_requirements:
         return JSONResponse(
             status_code=422,
@@ -199,7 +203,7 @@ def create_verification_artifact(payload: VerificationArtifactCreateRequest) -> 
             },
         )
 
-    created_at = datetime.now(timezone.utc).isoformat()
+    created_at = datetime.now(UTC).isoformat()
     artifact_id = str(uuid.uuid4())
     record = {
         "artifact_id": artifact_id,

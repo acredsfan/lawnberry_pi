@@ -1,52 +1,54 @@
+import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from .api.ai import router as ai_router
 from .api.dashboard import router as dashboard_router
 from .api.docs import router as docs_router
 from .api.fusion import router as fusion_router
 from .api.health import router as health_router
-from .api.ai import router as ai_router
 from .api.metrics import router as metrics_router
+from .api.mission import router as mission_router
 from .api.motors import router as motors_router
 from .api.navigation import router as navigation_router
-from .api.rest import router as rest_router, legacy_router as rest_legacy_router
-from .services.websocket_hub import websocket_hub
-from .api.routers import auth as auth_router
-from .api.routers import telemetry as telemetry_router
-from .api.routers import sensors as sensors_router
-from .api.routers import maintenance as maintenance_router
-from .api.routers import camera as camera_router
-from .api.routers import weather as weather_router
-from .api.routers import settings as settings_router
+from .api.rest import legacy_router as rest_legacy_router
+from .api.rest import router as rest_router
 from .api.rest_v1 import router as rest_v1_router
+from .api.routers import auth as auth_router
+from .api.routers import camera as camera_router
+from .api.routers import maintenance as maintenance_router
+from .api.routers import sensors as sensors_router
+from .api.routers import settings as settings_router
+from .api.routers import telemetry as telemetry_router
+from .api.routers import weather as weather_router
 from .api.safety import router as safety_router
 from .api.status import router as status_router
-from .api.mission import router as mission_router
 from .core.config_loader import get_config_loader
-from .nav.gps_degradation import GPSDegradationMonitor
-from .services.robohat_service import initialize_robohat_service, shutdown_robohat_service
-from .services.camera_stream_service import camera_service
-from .services.ai_service import get_ai_service
-from .services.mission_service import get_mission_service
-from .services.navigation_service import NavigationService
-from .middleware.correlation import register_correlation_middleware
-from .middleware.security import register_security_middleware
-from .middleware.rate_limiting import register_global_rate_limiter
-from .middleware.input_validation import register_input_validation_middleware
-from .middleware.sanitization import register_sanitization_middleware
-from .middleware.api_key_auth import register_api_key_auth_middleware
 from .core.env_validation import validate_environment
 from .core.state_manager import AppState
-from .safety.safety_validator import validate_on_start
+from .middleware.api_key_auth import register_api_key_auth_middleware
+from .middleware.correlation import register_correlation_middleware
+from .middleware.input_validation import register_input_validation_middleware
+from .middleware.rate_limiting import register_global_rate_limiter
+from .middleware.sanitization import register_sanitization_middleware
+from .middleware.security import register_security_middleware
+from .nav.gps_degradation import GPSDegradationMonitor
 from .safety.safety_monitor import get_safety_monitor
 from .safety.safety_triggers import set_safety_event_handler
-import os
-import logging
+from .safety.safety_validator import validate_on_start
+from .services.ai_service import get_ai_service
+from .services.camera_stream_service import camera_service
+from .services.mission_service import get_mission_service
+from .services.navigation_service import NavigationService
+from .services.robohat_service import initialize_robohat_service, shutdown_robohat_service
+from .services.websocket_hub import websocket_hub
 
 # Load .env early so secrets like NTRIP_* are available under systemd
 try:
     from dotenv import load_dotenv
+
     # Load from project root working directory
     load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"), override=False)
 except Exception:
@@ -74,12 +76,21 @@ async def lifespan(app: FastAPI):
     try:
         if os.getenv("SIM_MODE", "0") == "0":
             tc = getattr(hardware_cfg, "tof_config", None)
-            if tc and getattr(tc, "left_shutdown_gpio", None) is not None and getattr(tc, "right_shutdown_gpio", None) is not None:
+            if (
+                tc
+                and getattr(tc, "left_shutdown_gpio", None) is not None
+                and getattr(tc, "right_shutdown_gpio", None) is not None
+            ):
                 try:
                     # Lazy import to keep CI SIM-safe
-                    from .drivers.sensors.vl53l0x_driver import ensure_pair_addressing  # type: ignore
+                    from .drivers.sensors.vl53l0x_driver import (
+                        ensure_pair_addressing,  # type: ignore
+                    )
+
                     right_addr = getattr(tc, "right_address", 0x30) or 0x30
-                    ok = await ensure_pair_addressing(tc.left_shutdown_gpio, tc.right_shutdown_gpio, right_addr=int(right_addr))
+                    ok = await ensure_pair_addressing(
+                        tc.left_shutdown_gpio, tc.right_shutdown_gpio, right_addr=int(right_addr)
+                    )
                     _log.info(
                         "ToF XSHUT pair addressing %s (left_gpio=%s right_gpio=%s right_addr=0x%x)",
                         "completed" if ok else "skipped",
@@ -105,6 +116,7 @@ async def lifespan(app: FastAPI):
     # Initialize safety monitor and wire interlock event bridge
     monitor = get_safety_monitor()
     monitor.set_websocket_hub(websocket_hub)  # inject hub — breaks circular import
+
     async def _event_bridge(action, interlock):
         try:
             await monitor.handle_interlock_event(action, interlock)
@@ -114,6 +126,7 @@ async def lifespan(app: FastAPI):
     # wrap event bridge to work with sync trigger calls
     def _handler(action, interlock):
         import asyncio as _asyncio
+
         try:
             loop = _asyncio.get_running_loop()
             loop.create_task(monitor.handle_interlock_event(action, interlock))
@@ -127,7 +140,9 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
-        mission_service = get_mission_service(NavigationService.get_instance(), websocket_hub=websocket_hub)
+        mission_service = get_mission_service(
+            NavigationService.get_instance(), websocket_hub=websocket_hub
+        )
         await mission_service.recover_persisted_missions()
     except Exception:
         _log.exception("Mission recovery failed during startup")
@@ -161,13 +176,15 @@ app = FastAPI(
     title="LawnBerry Pi v2",
     description="Autonomous robotic lawn mower backend API",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Validate environment early
 try:
     if not validate_environment():
-        _log.error("Environment validation failed; service will continue but endpoints may be restricted")
+        _log.error(
+            "Environment validation failed; service will continue but endpoints may be restricted"
+        )
 except Exception:
     _log.exception("Environment validation crashed")
 
@@ -215,13 +232,13 @@ def root():
         "api_endpoints": {
             "health": "/health",
             "api_v2": "/api/v2",
-            "websocket_telemetry": "/api/v2/ws/telemetry"
+            "websocket_telemetry": "/api/v2/ws/telemetry",
         },
         "key_endpoints": [
             "/api/v2/health/liveness",
             "/api/v2/health/readiness",
             "/api/v2/dashboard/status",
             "/api/v2/dashboard/telemetry",
-            "/api/v2/docs/list"
-        ]
+            "/api/v2/docs/list",
+        ],
     }

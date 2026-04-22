@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Sequence
 
 
 @dataclass
@@ -24,7 +24,9 @@ class SafetyValidator:
         # No active interlocks
         interlocks = list(active_interlocks() or [])
         if len(interlocks) > 0:
-            return SafetyCheckResult(ok=False, reason=f"Active interlocks present: {', '.join(interlocks)}")
+            return SafetyCheckResult(
+                ok=False, reason=f"Active interlocks present: {', '.join(interlocks)}"
+            )
         # GPS available (basic check)
         if not gps_available():
             return SafetyCheckResult(ok=False, reason="GPS unavailable")

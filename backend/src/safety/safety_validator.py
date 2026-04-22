@@ -10,11 +10,11 @@ Responsibilities:
 SIM-first: no hardware side effects. This module must not actuate.
 """
 
-from dataclasses import dataclass, asdict
-from typing import Any, Tuple
+from dataclasses import dataclass
+from typing import Any
 
-from ..core.observability import observability
 from ..core.config_loader import ConfigLoader
+from ..core.observability import observability
 from ..models.safety_limits import SafetyLimits
 
 
@@ -35,9 +35,7 @@ def validate_limits(limits: SafetyLimits) -> SafetyValidationReport:
 
     # Example cross-check: watchdog must be >= e-stop latency (gives time budget)
     if limits.watchdog_timeout_ms < limits.estop_latency_ms:
-        problems.append(
-            "watchdog_timeout_ms must be >= estop_latency_ms"
-        )
+        problems.append("watchdog_timeout_ms must be >= estop_latency_ms")
 
     ok = not problems
     detail = "ok" if ok else "; ".join(problems)
@@ -58,7 +56,7 @@ def validate_limits(limits: SafetyLimits) -> SafetyValidationReport:
     return SafetyValidationReport(ok=ok, detail=detail, limits=limits.model_dump())
 
 
-def validate_on_start(loader: ConfigLoader | None = None) -> Tuple[bool, SafetyValidationReport]:
+def validate_on_start(loader: ConfigLoader | None = None) -> tuple[bool, SafetyValidationReport]:
     """Load limits via ConfigLoader and validate; returns (ok, report)."""
     loader = loader or ConfigLoader()
     _hw, limits = loader.get()

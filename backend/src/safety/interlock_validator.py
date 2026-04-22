@@ -5,8 +5,6 @@ from __future__ import annotations
 Tracks active interlocks and provides assertion helper to block unsafe ops.
 """
 
-from typing import Dict
-
 
 class InterlockActiveError(RuntimeError):
     pass
@@ -14,7 +12,7 @@ class InterlockActiveError(RuntimeError):
 
 class InterlockValidator:
     def __init__(self) -> None:
-        self._active: Dict[str, bool] = {}
+        self._active: dict[str, bool] = {}
 
     def set_interlock(self, name: str, active: bool) -> None:
         self._active[name] = bool(active)

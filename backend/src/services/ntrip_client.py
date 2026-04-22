@@ -1,4 +1,5 @@
 """Async NTRIP client for forwarding RTK corrections to the rover GPS."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +8,6 @@ import logging
 import os
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Optional
 
 try:  # pyserial is optional in CI/staging environments
     import serial  # type: ignore
@@ -26,9 +26,9 @@ class NtripSettings:
     mountpoint: str
     serial_device: str
     baudrate: int
-    username: Optional[str] = None
-    password: Optional[str] = None
-    gga_sentence: Optional[bytes] = None
+    username: str | None = None
+    password: str | None = None
+    gga_sentence: bytes | None = None
     gga_interval: float = 10.0
 
 
@@ -43,7 +43,7 @@ class NtripForwarder:
 
     def __init__(self, settings: NtripSettings):
         self._settings = settings
-        self._task: Optional[asyncio.Task[None]] = None
+        self._task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         self._serial = None
         self._serial_lock = asyncio.Lock()
@@ -56,7 +56,7 @@ class NtripForwarder:
         self._connected: bool = False
 
     @classmethod
-    def from_environment(cls, gps_mode: GpsMode | None = None) -> Optional["NtripForwarder"]:
+    def from_environment(cls, gps_mode: GpsMode | None = None) -> NtripForwarder | None:
         host = os.getenv("NTRIP_HOST")
         mountpoint = os.getenv("NTRIP_MOUNTPOINT")
         if not host or not mountpoint:
@@ -71,9 +71,7 @@ class NtripForwarder:
         username = os.getenv("NTRIP_USERNAME")
         password = os.getenv("NTRIP_PASSWORD")
         serial_device = (
-            os.getenv("NTRIP_SERIAL_DEVICE")
-            or os.getenv("GPS_DEVICE")
-            or "/dev/ttyAMA0"
+            os.getenv("NTRIP_SERIAL_DEVICE") or os.getenv("GPS_DEVICE") or "/dev/ttyAMA0"
         )
         default_baud = 115200 if gps_mode in {GpsMode.F9P_USB, GpsMode.F9P_UART} else 9600
         _baud_raw = os.getenv("NTRIP_SERIAL_BAUD", str(default_baud))
@@ -106,7 +104,7 @@ class NtripForwarder:
         return cls(settings)
 
     @staticmethod
-    def _build_gga_from_env() -> Optional[str]:
+    def _build_gga_from_env() -> str | None:
         lat_str = os.getenv("NTRIP_GGA_LAT")
         lon_str = os.getenv("NTRIP_GGA_LON")
         if not lat_str or not lon_str:
@@ -124,6 +122,7 @@ class NtripForwarder:
         # Timestamp (UTC hhmmss) improves caster acceptance vs. 000000
         try:
             import datetime as _dt
+
             ts = _dt.datetime.utcnow()
             time_str = f"{ts.hour:02d}{ts.minute:02d}{ts.second:02d}"
         except Exception:
@@ -226,10 +225,12 @@ class NtripForwarder:
         if b"200" not in header:
             writer.close()
             await writer.wait_closed()
-            raise RuntimeError(f"NTRIP caster rejected connection: {header.decode('ascii', errors='ignore').strip()}")
+            raise RuntimeError(
+                f"NTRIP caster rejected connection: {header.decode('ascii', errors='ignore').strip()}"
+            )
 
         await self._open_serial()
-        gga_task: Optional[asyncio.Task[None]] = None
+        gga_task: asyncio.Task[None] | None = None
         if self._settings.gga_sentence:
             gga_task = asyncio.create_task(self._send_gga(writer))
 
@@ -278,7 +279,7 @@ class NtripForwarder:
             "User-Agent: LawnBerry-NTRIP/1.0",
         ]
         if self._settings.username and self._settings.password:
-            auth_raw = f"{self._settings.username}:{self._settings.password}".encode("utf-8")
+            auth_raw = f"{self._settings.username}:{self._settings.password}".encode()
             headers.append("Authorization: Basic " + base64.b64encode(auth_raw).decode("ascii"))
         headers.append("Connection: keep-alive")
         headers.append("")
@@ -336,15 +337,27 @@ class NtripForwarder:
             now = asyncio.get_running_loop().time()
         except Exception:
             now = None
-        window_secs = (now - self._last_log_ts) if (now is not None and self._last_log_ts is not None) else None
+        window_secs = (
+            (now - self._last_log_ts)
+            if (now is not None and self._last_log_ts is not None)
+            else None
+        )
         rate_bps = None
         if window_secs and window_secs > 0:
             try:
                 rate_bps = float(self._bytes_forwarded) / float(window_secs)
             except Exception:
                 rate_bps = None
-        uptime_s = (now - self._started_monotonic) if (now is not None and self._started_monotonic is not None) else None
-        last_fwd_age_s = (now - self._last_forward_monotonic) if (now is not None and self._last_forward_monotonic is not None) else None
+        uptime_s = (
+            (now - self._started_monotonic)
+            if (now is not None and self._started_monotonic is not None)
+            else None
+        )
+        last_fwd_age_s = (
+            (now - self._last_forward_monotonic)
+            if (now is not None and self._last_forward_monotonic is not None)
+            else None
+        )
         return {
             "enabled": True,
             "connected": bool(self._connected),

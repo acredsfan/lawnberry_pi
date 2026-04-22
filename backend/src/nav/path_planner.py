@@ -2,11 +2,11 @@
 
 Provides a stable API used by NavigationService.
 """
+
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import Iterable, List, Sequence
+from collections.abc import Iterable, Sequence
 
 from ..models import Position, Waypoint
 from .coverage_patterns import CoverageConfig, generate_lawnmower
@@ -26,10 +26,7 @@ class PathPlanner:
         lat2 = math.radians(pos2.latitude)
         dlat = lat2 - lat1
         dlon = math.radians(pos2.longitude - pos1.longitude)
-        a = (
-            math.sin(dlat / 2) ** 2
-            + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-        )
+        a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         return 6_371_000.0 * c
 
@@ -47,16 +44,18 @@ class PathPlanner:
     @staticmethod
     def generate_parallel_lines_path(
         boundaries: Sequence[Position], *, cutting_width: float = 0.3, overlap: float = 0.1
-    ) -> List[Waypoint]:
+    ) -> list[Waypoint]:
         cfg = CoverageConfig(swath_width_m=cutting_width, overlap=overlap)
         return generate_lawnmower(boundaries, config=cfg)
 
     # Boundary following
     @staticmethod
-    def boundary_follow(boundary: Sequence[Position], *, waypoint_speed_ms: float = 0.3) -> List[Waypoint]:
+    def boundary_follow(
+        boundary: Sequence[Position], *, waypoint_speed_ms: float = 0.3
+    ) -> list[Waypoint]:
         if len(boundary) < 2:
             return []
-        wps: List[Waypoint] = []
+        wps: list[Waypoint] = []
         for p in boundary + boundary[:1]:  # close loop implicitly
             wps.append(Waypoint(position=p, target_speed=waypoint_speed_ms, action="edge"))
         return wps
@@ -70,7 +69,7 @@ class PathPlanner:
         *,
         obstacles: Iterable[Sequence[Position]] | None = None,
         grid_resolution_m: float = 0.25,
-    ) -> List[Waypoint]:
+    ) -> list[Waypoint]:
         cfg = AStarConfig(grid_resolution_m=grid_resolution_m)
         return plan_path_astar(start, goal, boundary, obstacles=obstacles, config=cfg)
 
@@ -81,11 +80,13 @@ class PathPlanner:
         home: Position,
         boundary: Sequence[Position] | None,
         obstacles: Iterable[Sequence[Position]] | None = None,
-    ) -> List[Waypoint]:
+    ) -> list[Waypoint]:
         if boundary is None or len(boundary) < 3:
             # Direct path fallback
             return [Waypoint(position=home, target_speed=0.5, action="dock")]
-        path = PathPlanner.find_path(current, home, boundary, obstacles=obstacles, grid_resolution_m=0.3)
+        path = PathPlanner.find_path(
+            current, home, boundary, obstacles=obstacles, grid_resolution_m=0.3
+        )
         if not path:
             return [Waypoint(position=home, target_speed=0.5, action="dock")]
         # Ensure final docking action

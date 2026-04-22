@@ -1,30 +1,31 @@
 from __future__ import annotations
 
-import asyncio
 import time
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from backend.src.models.message_bus_event import MessageBusEvent, PersistenceTier
 
-
-Handler = Callable[[Dict[str, Any]], Awaitable[None]]
+Handler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class MessageBus:
-    def __init__(self, persistence: Optional[Any] = None) -> None:
-        self._subscriptions: Dict[str, List[Handler]] = {}
+    def __init__(self, persistence: Any | None = None) -> None:
+        self._subscriptions: dict[str, list[Handler]] = {}
         self._persistence = persistence
 
     async def subscribe(self, topic: str, handler: Handler, persistent: bool = False) -> None:
         self._subscriptions.setdefault(topic, []).append(handler)
 
-    async def publish(self, topic: str, payload: Dict[str, Any], persistent: bool = False) -> None:
+    async def publish(self, topic: str, payload: dict[str, Any], persistent: bool = False) -> None:
         evt = MessageBusEvent(
             topic=topic,
             timestamp_us=int(time.time() * 1_000_000),
             payload=payload,
             source_service="backend",
-            persistence_tier=PersistenceTier.CRITICAL if persistent else PersistenceTier.BEST_EFFORT,
+            persistence_tier=PersistenceTier.CRITICAL
+            if persistent
+            else PersistenceTier.BEST_EFFORT,
         )
 
         # persist if requested and persistence available

@@ -1,6 +1,5 @@
-from enum import Enum
-from typing import List, Optional
 import uuid
+from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -13,13 +12,19 @@ class MissionLifecycleStatus(str, Enum):
     ABORTED = "aborted"
     FAILED = "failed"
 
+
 class MissionWaypoint(BaseModel):
     """A single waypoint in a mission."""
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     lat: float = Field(..., description="Latitude of the waypoint.")
     lon: float = Field(..., description="Longitude of the waypoint.")
-    blade_on: bool = Field(default=False, description="Whether the blade is active for this waypoint.")
-    speed: int = Field(default=50, ge=0, le=100, description="Mower speed at this waypoint (0-100%).")
+    blade_on: bool = Field(
+        default=False, description="Whether the blade is active for this waypoint."
+    )
+    speed: int = Field(
+        default=50, ge=0, le=100, description="Mower speed at this waypoint (0-100%)."
+    )
 
     @field_validator("lat")
     @classmethod
@@ -35,11 +40,15 @@ class MissionWaypoint(BaseModel):
             raise ValueError("lon must be between -180 and 180")
         return value
 
+
 class Mission(BaseModel):
     """Represents a sequence of waypoints for the mower to follow."""
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = Field(..., description="Name of the mission.")
-    waypoints: List[MissionWaypoint] = Field(default_factory=list, description="List of waypoints in the mission.")
+    waypoints: list[MissionWaypoint] = Field(
+        default_factory=list, description="List of waypoints in the mission."
+    )
     created_at: str = Field(description="ISO 8601 timestamp of when the mission was created.")
 
     @field_validator("name")
@@ -49,10 +58,11 @@ class Mission(BaseModel):
         if not cleaned:
             raise ValueError("Mission name cannot be empty")
         return cleaned
-    
+
+
 class MissionCreationRequest(BaseModel):
     name: str
-    waypoints: List[MissionWaypoint] = Field(min_length=1)
+    waypoints: list[MissionWaypoint] = Field(min_length=1)
 
     @field_validator("name")
     @classmethod
@@ -62,10 +72,11 @@ class MissionCreationRequest(BaseModel):
             raise ValueError("Mission name cannot be empty")
         return cleaned
 
+
 class MissionStatus(BaseModel):
     mission_id: str
     status: MissionLifecycleStatus
-    current_waypoint_index: Optional[int] = None
+    current_waypoint_index: int | None = None
     completion_percentage: float = 0.0
     total_waypoints: int = 0
-    detail: Optional[str] = None
+    detail: str | None = None

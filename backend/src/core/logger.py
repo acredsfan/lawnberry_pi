@@ -3,8 +3,11 @@
 Backed by core.observability and privacy filter; this module provides a
 stable import path for other modules and tests.
 """
+
 from __future__ import annotations
+
 import logging
+
 from .observability import observability
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -25,8 +25,8 @@ class SafetyInterlock(BaseModel):
     interlock_id: str
     interlock_type: InterlockType
     triggered_at_us: int
-    cleared_at_us: Optional[int] = None
-    acknowledged_at_us: Optional[int] = None
+    cleared_at_us: int | None = None
+    acknowledged_at_us: int | None = None
     state: InterlockState = Field(default=InterlockState.ACTIVE)
-    trigger_value: Optional[float] = None
+    trigger_value: float | None = None
     description: str = ""

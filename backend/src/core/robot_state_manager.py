@@ -3,6 +3,7 @@
 Maintains canonical RobotState and provides methods to update from
 subsystem inputs. Minimal implementation for Phase 1 (T023).
 """
+
 from __future__ import annotations
 
 import datetime

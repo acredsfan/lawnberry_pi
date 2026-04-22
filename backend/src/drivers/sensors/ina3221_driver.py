@@ -7,6 +7,7 @@ Channel 2 unused. Uses smbus2 to read shunt/bus voltage registers and compute
 approximate currents with configurable shunt resistors. Falls back to the last
 known reading if hardware access fails so higher layers remain resilient.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -29,7 +30,7 @@ class _Ina3221Config:
     #  - Solar side: 30 A / 75 mV -> R = 0.075 V / 30 A = 0.0025 ohm
     #  - Battery side: 50 A / 75 mV -> R = 0.075 V / 50 A = 0.0015 ohm
     shunt_ohms_ch1: float = 0.0025  # Solar input (default for new hardware)
-    shunt_ohms_ch2: float = 0.01    # Reserved
+    shunt_ohms_ch2: float = 0.01  # Reserved
     shunt_ohms_ch3: float = 0.0015  # Battery pack (default for new hardware)
 
 
@@ -53,7 +54,11 @@ class INA3221Driver(HardwareDriver):
                 f_val = float(stripped)
                 return f_val if f_val > 0 else None
             except ValueError:
-                match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*A\s*/\s*([0-9]+(?:\.[0-9]+)?)\s*mV", stripped, re.IGNORECASE)
+                match = re.search(
+                    r"([0-9]+(?:\.[0-9]+)?)\s*A\s*/\s*([0-9]+(?:\.[0-9]+)?)\s*mV",
+                    stripped,
+                    re.IGNORECASE,
+                )
                 if not match:
                     return None
                 amps = float(match.group(1))
@@ -171,14 +176,16 @@ class INA3221Driver(HardwareDriver):
             return self._last_power
 
         try:
+
             def _read_all() -> dict[str, float]:
                 with SMBus(self._cfg.bus) as bus:
+
                     def _read_word(register: int) -> int:
                         raw = bus.read_word_data(self._cfg.address, register)
                         return ((raw & 0xFF) << 8) | (raw >> 8)
 
                     def _decode_bus(raw: int) -> float:
-                        return ((raw >> 3) * 0.008)  # 8 mV per bit
+                        return (raw >> 3) * 0.008  # 8 mV per bit
 
                     def _decode_shunt(raw: int) -> float:
                         if raw & 0x8000:
@@ -186,7 +193,9 @@ class INA3221Driver(HardwareDriver):
                         return raw * 0.00004  # 40 µV per bit
 
                     bus_voltages = [_decode_bus(_read_word(reg)) for reg in self._REG_BUS_VOLTAGES]
-                    shunt_voltages = [_decode_shunt(_read_word(reg)) for reg in self._REG_SHUNT_VOLTAGES]
+                    shunt_voltages = [
+                        _decode_shunt(_read_word(reg)) for reg in self._REG_SHUNT_VOLTAGES
+                    ]
 
                 currents = []
                 shunts = [
@@ -208,17 +217,20 @@ class INA3221Driver(HardwareDriver):
                 return {
                     "battery_voltage": battery_voltage,
                     "battery_current_amps": battery_current,
-                    "battery_power_w": (battery_voltage * battery_current) if battery_current is not None else None,
+                    "battery_power_w": (battery_voltage * battery_current)
+                    if battery_current is not None
+                    else None,
                     "solar_voltage": solar_voltage,
                     "solar_current_amps": solar_current,
-                    "solar_power_w": (solar_voltage * solar_current) if solar_current is not None else None,
+                    "solar_power_w": (solar_voltage * solar_current)
+                    if solar_current is not None
+                    else None,
                 }
 
             result = await asyncio.to_thread(_read_all)
             if result:
                 self._last_power = {
-                    k: (round(v, 3) if isinstance(v, float) else v)
-                    for k, v in result.items()
+                    k: (round(v, 3) if isinstance(v, float) else v) for k, v in result.items()
                 }
                 self._last_read_ts = time.time()
             return self._last_power

@@ -28,6 +28,7 @@ Safety Requirement (FR-022): Tilt >30 degrees must trigger blade stop
 within 200ms.  Enforcement occurs in safety triggers (T051); this driver
 only supplies data.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -251,9 +252,7 @@ class BNO085Driver(HardwareDriver):
             "valid_frames": self._valid_frames,
             "consecutive_errors": self._consecutive_errors,
             "last_orientation": self._last_orientation,
-            "last_read_age_s": (time.time() - self._last_read_ts)
-            if self._last_read_ts
-            else None,
+            "last_read_age_s": (time.time() - self._last_read_ts) if self._last_read_ts else None,
             "simulation": is_simulation_mode(),
         }
 
@@ -323,15 +322,17 @@ class BNO085Driver(HardwareDriver):
                     )
                 # After many consecutive failures, attempt re-init
                 if self._consecutive_errors >= 10:
-                    logger.warning("BNO085: %d consecutive errors, attempting re-init", self._consecutive_errors)
+                    logger.warning(
+                        "BNO085: %d consecutive errors, attempting re-init",
+                        self._consecutive_errors,
+                    )
                     await self._attempt_reinit()
                 return self._stale_or_placeholder()
 
         if result is not None:
             if self._valid_frames == 0:
                 logger.info(
-                    "BNO085 first SHTP frame on %s "
-                    "(yaw=%.1f° pitch=%.1f° roll=%.1f° cal=%s)",
+                    "BNO085 first SHTP frame on %s (yaw=%.1f° pitch=%.1f° roll=%.1f° cal=%s)",
                     self._cfg.port,
                     result["yaw"],
                     result["pitch"],

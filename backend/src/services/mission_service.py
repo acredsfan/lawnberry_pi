@@ -4,7 +4,7 @@ import asyncio
 import datetime
 import json
 import logging
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING
 
 from fastapi import Depends
 
@@ -21,7 +21,6 @@ from ..models.mission import (
 )
 from ..nav.geoutils import point_in_polygon
 from ..services.navigation_service import NavigationService
-
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +49,13 @@ class MissionService:
     def __init__(
         self,
         navigation_service: NavigationService | None = None,
-        websocket_hub: "WebSocketHub | None" = None,
+        websocket_hub: WebSocketHub | None = None,
     ):
         self.nav_service = navigation_service  # type: ignore[assignment]
         self._websocket_hub = websocket_hub
-        self.missions: Dict[str, Mission] = {}
-        self.mission_statuses: Dict[str, MissionStatus] = {}
-        self.mission_tasks: Dict[str, asyncio.Task] = {}
+        self.missions: dict[str, Mission] = {}
+        self.mission_statuses: dict[str, MissionStatus] = {}
+        self.mission_tasks: dict[str, asyncio.Task] = {}
 
     def _clamp_waypoint_index(self, mission: Mission, current_waypoint_index: int | None) -> int:
         if not mission.waypoints:
@@ -112,7 +111,7 @@ class MissionService:
                     status.completion_percentage,
                     status.total_waypoints,
                     status.detail,
-                    datetime.datetime.now(datetime.timezone.utc),
+                    datetime.datetime.now(datetime.UTC),
                 ),
             )
             conn.commit()
@@ -151,7 +150,9 @@ class MissionService:
                 "mission.status",
                 {
                     "mission_id": mission_id,
-                    "status": status.status.value if hasattr(status.status, "value") else status.status,
+                    "status": status.status.value
+                    if hasattr(status.status, "value")
+                    else status.status,
                     "progress_pct": status.completion_percentage,
                     "detail": detail,
                 },
@@ -177,8 +178,8 @@ class MissionService:
         self._persist_mission_status(mission_id)
 
     async def recover_persisted_missions(self) -> None:
-        recovered_missions: Dict[str, Mission] = {}
-        persisted_states: Dict[str, dict] = {}
+        recovered_missions: dict[str, Mission] = {}
+        persisted_states: dict[str, dict] = {}
 
         with persistence.get_connection() as conn:
             mission_rows = conn.execute(
@@ -213,7 +214,8 @@ class MissionService:
         active_like_states = {
             mission_id
             for mission_id, row in persisted_states.items()
-            if row.get("status") in {
+            if row.get("status")
+            in {
                 MissionLifecycleStatus.RUNNING.value,
                 MissionLifecycleStatus.PAUSED.value,
             }
@@ -247,7 +249,9 @@ class MissionService:
             except ValueError:
                 lifecycle_status = MissionLifecycleStatus.FAILED
 
-            clamped_index = self._clamp_waypoint_index(mission, persisted.get("current_waypoint_index"))
+            clamped_index = self._clamp_waypoint_index(
+                mission, persisted.get("current_waypoint_index")
+            )
             detail = persisted.get("detail")
 
             if lifecycle_status == MissionLifecycleStatus.RUNNING:
@@ -280,14 +284,16 @@ class MissionService:
             self.mission_statuses[mission_id] = status
             self._persist_mission_status(mission_id)
 
-    async def create_mission(self, name: str, waypoints: List[MissionWaypoint]) -> Mission:
+    async def create_mission(self, name: str, waypoints: list[MissionWaypoint]) -> Mission:
         clean_name = (name or "").strip()
         if not clean_name:
             raise MissionValidationError("Mission name cannot be empty.")
         if not waypoints:
             raise MissionValidationError("Mission must contain at least one waypoint.")
         normalized_waypoints = [
-            waypoint if isinstance(waypoint, MissionWaypoint) else MissionWaypoint.model_validate(waypoint)
+            waypoint
+            if isinstance(waypoint, MissionWaypoint)
+            else MissionWaypoint.model_validate(waypoint)
             for waypoint in waypoints
         ]
         self._validate_waypoints_in_geofence(normalized_waypoints)
@@ -295,16 +301,19 @@ class MissionService:
         mission = Mission(
             name=clean_name,
             waypoints=normalized_waypoints,
-            created_at=datetime.datetime.now(datetime.timezone.utc).isoformat()
+            created_at=datetime.datetime.now(datetime.UTC).isoformat(),
         )
         self.missions[mission.id] = mission
-        self.mission_statuses[mission.id] = self._build_status(mission.id, MissionLifecycleStatus.IDLE)
+        self.mission_statuses[mission.id] = self._build_status(
+            mission.id, MissionLifecycleStatus.IDLE
+        )
         self._persist_mission(mission)
         self._persist_mission_status(mission.id)
         return mission
 
     async def start_mission(self, mission_id: str):
         import os
+
         from ..api import rest as rest_api
         from .robohat_service import get_robohat_service
 
@@ -352,7 +361,9 @@ class MissionService:
                 status = self.mission_statuses.get(mission_id)
                 if status and status.status == MissionLifecycleStatus.RUNNING:
                     status.status = MissionLifecycleStatus.COMPLETED
-                    status.current_waypoint_index = max(0, status.total_waypoints - 1) if status.total_waypoints else 0
+                    status.current_waypoint_index = (
+                        max(0, status.total_waypoints - 1) if status.total_waypoints else 0
+                    )
                     status.completion_percentage = 100
                     status.detail = None
                     self._persist_mission_status(mission_id)
@@ -391,8 +402,8 @@ class MissionService:
                 logger.exception("Mission %s failed", mission_id)
             finally:
                 self.mission_tasks.pop(mission_id, None)
-        return callback
 
+        return callback
 
     async def pause_mission(self, mission_id: str):
         status = self._require_status(mission_id)
@@ -440,9 +451,9 @@ class MissionService:
         self._persist_mission_status(mission_id)
         await self._broadcast_status(mission_id, "Mission paused")
 
-
     async def resume_mission(self, mission_id: str):
         import os
+
         from ..api import rest as rest_api
         from .robohat_service import get_robohat_service
 
@@ -476,12 +487,13 @@ class MissionService:
 
         status.status = MissionLifecycleStatus.RUNNING
         status.detail = None
-        status.current_waypoint_index = self._clamp_waypoint_index(mission, status.current_waypoint_index)
+        status.current_waypoint_index = self._clamp_waypoint_index(
+            mission, status.current_waypoint_index
+        )
         self.nav_service.navigation_state.current_waypoint_index = status.current_waypoint_index
         self.nav_service.navigation_state.navigation_mode = NavigationMode.AUTO
         self._persist_mission_status(mission_id)
         await self._broadcast_status(mission_id, "Mission resumed")
-
 
     async def abort_mission(self, mission_id: str):
         self._require_mission(mission_id)
@@ -497,7 +509,9 @@ class MissionService:
                 detail = "Mission aborted by operator after stop failure; emergency stop activated"
             else:
                 final_status = MissionLifecycleStatus.FAILED
-                detail = "Mission abort requested, but stop and emergency stop could not be confirmed"
+                detail = (
+                    "Mission abort requested, but stop and emergency stop could not be confirmed"
+                )
 
         if task and not task.done():
             task.cancel()
@@ -505,10 +519,12 @@ class MissionService:
                 await asyncio.wait_for(task, timeout=1.0)
             except asyncio.CancelledError:
                 pass
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning("Mission %s task did not cancel cleanly within timeout", mission_id)
             except Exception:
-                logger.debug("Mission %s task raised during abort handling", mission_id, exc_info=True)
+                logger.debug(
+                    "Mission %s task raised during abort handling", mission_id, exc_info=True
+                )
 
         self.mission_tasks.pop(mission_id, None)
         status.status = final_status
@@ -536,7 +552,9 @@ class MissionService:
                 status.current_waypoint_index,
             )
         elif status.status == MissionLifecycleStatus.COMPLETED:
-            status.current_waypoint_index = max(0, len(mission.waypoints) - 1) if mission.waypoints else 0
+            status.current_waypoint_index = (
+                max(0, len(mission.waypoints) - 1) if mission.waypoints else 0
+            )
             status.completion_percentage = 100
         elif status.current_waypoint_index is None:
             status.current_waypoint_index = 0
@@ -545,7 +563,7 @@ class MissionService:
         self._persist_mission_status(mission_id)
         return status
 
-    async def list_missions(self) -> List[Mission]:
+    async def list_missions(self) -> list[Mission]:
         return list(self.missions.values())
 
     def _require_mission(self, mission_id: str) -> Mission:
@@ -573,7 +591,9 @@ class MissionService:
             mission_id=mission_id,
             status=status,
             current_waypoint_index=current_waypoint_index,
-            completion_percentage=self._calculate_completion_percentage(mission, current_waypoint_index),
+            completion_percentage=self._calculate_completion_percentage(
+                mission, current_waypoint_index
+            ),
             total_waypoints=total_waypoints,
             detail=detail,
         )
@@ -590,7 +610,7 @@ class MissionService:
         bounded_index = max(0, min(current_waypoint_index, len(mission.waypoints)))
         return round((bounded_index / len(mission.waypoints)) * 100, 2)
 
-    def _validate_waypoints_in_geofence(self, waypoints: List[MissionWaypoint]) -> None:
+    def _validate_waypoints_in_geofence(self, waypoints: list[MissionWaypoint]) -> None:
         boundaries = getattr(self.nav_service.navigation_state, "safety_boundaries", None) or []
         if not boundaries:
             return
@@ -611,14 +631,15 @@ class MissionService:
                 f"Waypoint(s) {joined} fall outside the configured safety boundary."
             )
 
+
 # Dependency injection
-_mission_service_instance: "MissionService | None" = None
+_mission_service_instance: MissionService | None = None
 
 
 def get_mission_service(
     nav_service: NavigationService = Depends(NavigationService.get_instance),
-    websocket_hub: "WebSocketHub | None" = None,
-) -> "MissionService":
+    websocket_hub: WebSocketHub | None = None,
+) -> MissionService:
     global _mission_service_instance
     if _mission_service_instance is None:
         _mission_service_instance = MissionService(
@@ -630,4 +651,3 @@ def get_mission_service(
         _mission_service_instance._websocket_hub = websocket_hub
     # else: singleton already has a hub; new hub is ignored
     return _mission_service_instance
-

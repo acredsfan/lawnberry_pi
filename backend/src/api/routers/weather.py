@@ -1,16 +1,17 @@
-from fastapi import APIRouter, HTTPException, Query
-from typing import Optional
 import logging
+
+from fastapi import APIRouter, HTTPException, Query
 
 from ...services.weather_service import weather_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
 @router.get("/weather/current")
 async def get_current_weather(
-    latitude: Optional[float] = Query(None),
-    longitude: Optional[float] = Query(None),
+    latitude: float | None = Query(None),
+    longitude: float | None = Query(None),
 ):
     """Get current weather data from sensors or external API."""
     try:
@@ -23,10 +24,11 @@ async def get_current_weather(
         logger.error(f"Failed to get current weather: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/weather/planning")
 async def get_planning_advice(
-    latitude: Optional[float] = Query(None),
-    longitude: Optional[float] = Query(None),
+    latitude: float | None = Query(None),
+    longitude: float | None = Query(None),
 ):
     """Get mowing planning advice based on current weather."""
     try:
@@ -46,8 +48,8 @@ async def get_planning_advice(
 
 @router.get("/weather/planning-advice")
 async def get_planning_advice_contract(
-    latitude: Optional[float] = Query(None),
-    longitude: Optional[float] = Query(None),
+    latitude: float | None = Query(None),
+    longitude: float | None = Query(None),
 ):
     """Contract-friendly planning advice payload."""
     try:

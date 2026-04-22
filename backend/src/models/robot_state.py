@@ -4,6 +4,7 @@ Follows Phase 1 T016 requirements with platform-agnostic fields and
 Pydantic v2 conventions. All fields are optional unless otherwise required
 by downstream contracts. This model is intended for REST/WS serialization.
 """
+
 from __future__ import annotations
 
 import datetime

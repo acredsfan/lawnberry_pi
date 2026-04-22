@@ -22,6 +22,7 @@ except Exception:  # pragma: no cover - typer not required for tests
 
 async def _get_client(base_url: str, app=None):
     import httpx
+
     if app is not None:
         transport = httpx.ASGITransport(app=app)
         return httpx.AsyncClient(transport=transport, base_url=base_url)
@@ -62,6 +63,7 @@ def build_app():  # pragma: no cover - only used when typer available
     @app.command("status")
     def cmd_status(base_url: str = typer.Option("http://localhost:8081", help="API base URL")):
         from backend.src.main import app as fastapi_app
+
         res = _run(safety_status(app=fastapi_app, base_url=base_url))
         if not res.get("ok"):
             typer.echo(f"ERROR: {res}")
@@ -77,6 +79,7 @@ def build_app():  # pragma: no cover - only used when typer available
             typer.echo("Refusing to clear E-stop without --force")
             raise typer.Exit(code=2)
         from backend.src.main import app as fastapi_app
+
         res = _run(clear_estop(app=fastapi_app, force=force, base_url=base_url))
         if res["status_code"] >= 400:
             typer.echo(f"ERROR: {res}")

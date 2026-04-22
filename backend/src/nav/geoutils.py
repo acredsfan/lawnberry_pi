@@ -33,10 +33,9 @@ def point_in_polygon(lat: float, lon: float, polygon: Iterable[tuple[float, floa
         lat1, lon1 = pts[i]
         lat2, lon2 = pts[(i + 1) % n]
         # Check if point is on vertex/edge (approx) - treat as inside
-        if (
-            abs(lat - lat1) < 1e-12
-            and abs(lon - lon1) < 1e-12
-        ) or _on_segment(lat, lon, lat1, lon1, lat2, lon2):
+        if (abs(lat - lat1) < 1e-12 and abs(lon - lon1) < 1e-12) or _on_segment(
+            lat, lon, lat1, lon1, lat2, lon2
+        ):
             return True
         # Ray cast to the east
         intersects = ((lon1 > lon) != (lon2 > lon)) and (

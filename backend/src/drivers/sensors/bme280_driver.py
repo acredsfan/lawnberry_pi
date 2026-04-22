@@ -4,14 +4,14 @@ Uses smbus2 for hardware access while keeping deterministic behaviour in
 SIM_MODE for CI. Provides temperature (°C), humidity (%RH), and pressure (hPa)
 with standard Bosch compensation formulas.
 """
+
 from __future__ import annotations
 
 import asyncio
 import math
-import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any
 
 from ...core.simulation import is_simulation_mode
 from ..base import HardwareDriver
@@ -102,9 +102,24 @@ class BME280Driver(HardwareDriver):
                 dig_H6 = _s8(calib3[6])
 
                 return _Bme280Calibration(
-                    dig_T1, dig_T2, dig_T3,
-                    dig_P1, dig_P2, dig_P3, dig_P4, dig_P5, dig_P6, dig_P7, dig_P8, dig_P9,
-                    dig_H1, dig_H2, dig_H3, dig_H4, dig_H5, dig_H6,
+                    dig_T1,
+                    dig_T2,
+                    dig_T3,
+                    dig_P1,
+                    dig_P2,
+                    dig_P3,
+                    dig_P4,
+                    dig_P5,
+                    dig_P6,
+                    dig_P7,
+                    dig_P8,
+                    dig_P9,
+                    dig_H1,
+                    dig_H2,
+                    dig_H3,
+                    dig_H4,
+                    dig_H5,
+                    dig_H6,
                 )
 
             self._calibration = await asyncio.to_thread(_load)
@@ -171,7 +186,8 @@ class BME280Driver(HardwareDriver):
             return self._last_env
 
         try:
-            def _read_raw() -> Dict[str, int]:
+
+            def _read_raw() -> dict[str, int]:
                 with SMBus(self._bus_num) as bus:
                     data = bus.read_i2c_block_data(self._address, self._DATA_START, 8)
                 adc_p = (data[0] << 12) | (data[1] << 4) | (data[2] >> 4)
@@ -188,7 +204,7 @@ class BME280Driver(HardwareDriver):
         except Exception:
             return self._last_env
 
-    def _compensate(self, raw: Dict[str, int]) -> dict[str, float] | None:
+    def _compensate(self, raw: dict[str, int]) -> dict[str, float] | None:
         if self._calibration is None:
             return None
 
@@ -203,7 +219,7 @@ class BME280Driver(HardwareDriver):
         var1 = (adc_T / 16384.0 - cal.dig_T1 / 1024.0) * cal.dig_T2
         var2 = ((adc_T / 131072.0 - cal.dig_T1 / 8192.0) ** 2) * cal.dig_T3
         self._t_fine = var1 + var2
-        temperature = (self._t_fine / 5120.0)
+        temperature = self._t_fine / 5120.0
 
         var1 = self._t_fine / 2.0 - 64000.0
         var2 = var1 * var1 * cal.dig_P6 / 32768.0
@@ -225,7 +241,8 @@ class BME280Driver(HardwareDriver):
         if self._t_fine is not None:
             var_h = self._t_fine - 76800.0
             var_h = (adc_H - (cal.dig_H4 * 64.0 + cal.dig_H5 / 16384.0 * var_h)) * (
-                cal.dig_H2 / 65536.0
+                cal.dig_H2
+                / 65536.0
                 * (1.0 + cal.dig_H6 / 67108864.0 * var_h * (1.0 + cal.dig_H3 / 67108864.0 * var_h))
             )
             var_h *= 1.0 - cal.dig_H1 * var_h / 524288.0

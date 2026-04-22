@@ -12,7 +12,8 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Any, Dict, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 __all__ = [
     "encode",
@@ -39,11 +40,11 @@ def _b64url_decode(segment: str) -> bytes:
     return base64.urlsafe_b64decode(segment + padding)
 
 
-def _json_dumps(data: Dict[str, Any]) -> str:
+def _json_dumps(data: dict[str, Any]) -> str:
     return json.dumps(data, separators=(",", ":"), sort_keys=True)
 
 
-def encode(payload: Dict[str, Any], key: str, algorithm: str = "HS256") -> str:
+def encode(payload: dict[str, Any], key: str, algorithm: str = "HS256") -> str:
     if algorithm != "HS256":
         raise InvalidTokenError(f"Unsupported algorithm: {algorithm}")
 
@@ -61,9 +62,9 @@ def encode(payload: Dict[str, Any], key: str, algorithm: str = "HS256") -> str:
 def decode(
     token: str,
     key: str,
-    algorithms: Optional[Iterable[str]] = None,
-    options: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    algorithms: Iterable[str] | None = None,
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     algorithms = list(algorithms or ["HS256"])
     if "HS256" not in algorithms:
         raise InvalidTokenError("HS256 algorithm must be allowed")
@@ -73,7 +74,7 @@ def decode(
         raise InvalidTokenError("Invalid token format")
 
     header_segment, payload_segment, signature_segment = parts
-    signing_input = f"{header_segment}.{payload_segment}".encode("utf-8")
+    signing_input = f"{header_segment}.{payload_segment}".encode()
 
     try:
         header = json.loads(_b64url_decode(header_segment))

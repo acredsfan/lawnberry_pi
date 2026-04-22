@@ -8,15 +8,16 @@ falling back to the Raspberry Pi's configured system timezone.
 We also allow dependency-free unit testing by passing an alternate base_path
 or GPS lookup so tests can simulate environments without hardware.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Callable, Optional, Tuple
 
 from timezonefinder import TimezoneFinder
 
@@ -33,13 +34,13 @@ _TZ_FINDER = TimezoneFinder(in_memory=True)
 _CACHE_TTL = timedelta(minutes=30)
 _COORD_CACHE_TTL = timedelta(minutes=5)
 
-_timezone_cache: Optional[tuple[datetime, TimezoneInfo]] = None
-_coordinate_cache: Optional[tuple[datetime, Tuple[float, float]]] = None
+_timezone_cache: tuple[datetime, TimezoneInfo] | None = None
+_coordinate_cache: tuple[datetime, tuple[float, float]] | None = None
 
 
-def _read_text_file(path: str) -> Optional[str]:
+def _read_text_file(path: str) -> str | None:
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return f.read().strip()
     except Exception:
         return None
@@ -73,7 +74,7 @@ def _detect_os_timezone(base_path: str) -> TimezoneInfo:
     return TimezoneInfo(timezone="UTC", source="default")
 
 
-def _timezone_from_coordinates(lat: float, lon: float) -> Optional[str]:
+def _timezone_from_coordinates(lat: float, lon: float) -> str | None:
     try:
         lat_f = float(lat)
         lon_f = float(lon)
@@ -118,7 +119,7 @@ def _run_coro_sync(coro):
             loop.close()
 
 
-def _default_gps_lookup(timeout: float = 2.5) -> Optional[Tuple[float, float]]:
+def _default_gps_lookup(timeout: float = 2.5) -> tuple[float, float] | None:
     global _coordinate_cache
 
     if os.environ.get("LAWN_BERRY_DISABLE_GPS_TZ", "").lower() in {"1", "true", "yes"}:
@@ -128,7 +129,7 @@ def _default_gps_lookup(timeout: float = 2.5) -> Optional[Tuple[float, float]]:
     if _coordinate_cache and (now - _coordinate_cache[0]) < _COORD_CACHE_TTL:
         return _coordinate_cache[1]
 
-    async def _read() -> Optional[Tuple[float, float]]:
+    async def _read() -> tuple[float, float] | None:
         from .sensor_manager import SensorManager  # type: ignore
 
         manager = SensorManager()
@@ -149,7 +150,7 @@ def _default_gps_lookup(timeout: float = 2.5) -> Optional[Tuple[float, float]]:
 
     try:
         coords = _run_coro_sync(_read())
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.debug("GPS timezone lookup timed out")
         return None
     except Exception as exc:
@@ -162,8 +163,8 @@ def _default_gps_lookup(timeout: float = 2.5) -> Optional[Tuple[float, float]]:
 
 
 def _detect_timezone_from_gps(
-    gps_lookup: Optional[Callable[[], Optional[Tuple[float, float]]]]
-) -> Optional[TimezoneInfo]:
+    gps_lookup: Callable[[], tuple[float, float] | None] | None,
+) -> TimezoneInfo | None:
     lookup = gps_lookup or _default_gps_lookup
     if lookup is None:
         return None
@@ -185,7 +186,7 @@ def _detect_timezone_from_gps(
 
 def detect_system_timezone(
     base_path: str = "/",
-    gps_lookup: Optional[Callable[[], Optional[Tuple[float, float]]]] = None,
+    gps_lookup: Callable[[], tuple[float, float] | None] | None = None,
     cache: bool = True,
 ) -> TimezoneInfo:
     global _timezone_cache

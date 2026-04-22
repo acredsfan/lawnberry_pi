@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -25,7 +25,9 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._logger = observability.get_logger("middleware.correlation")
 
-    async def dispatch(self, request: Request, call_next: Callable[[Request], Response]) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Response]
+    ) -> Response:
         correlation_id = self._get_or_generate_correlation_id(request)
         set_correlation_id(correlation_id)
         request.state.correlation_id = correlation_id
@@ -46,13 +48,16 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
                 },
             )
             self._logger.exception(
-                "Unhandled request error", extra={"method": request.method, "path": request.url.path}
+                "Unhandled request error",
+                extra={"method": request.method, "path": request.url.path},
             )
             reset_correlation_id()
             raise
 
         duration_ms = (time.perf_counter() - start) * 1000
-        observability.log_api_request(request.method, request.url.path, response.status_code, duration_ms)
+        observability.log_api_request(
+            request.method, request.url.path, response.status_code, duration_ms
+        )
 
         response.headers.setdefault("X-Correlation-ID", correlation_id)
         reset_correlation_id()

@@ -11,18 +11,19 @@ Platform notes:
 - Real hardware access is guarded by lazy imports and not exercised in tests.
 - UART/USB device paths are configurable via config or environment variables.
 """
+
 from __future__ import annotations
 
 import asyncio
+import glob
+import json
+import math
 import os
+import socket
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
-import math
-import glob
-import socket
-import json
+from typing import Any
 
 from ...core.simulation import is_simulation_mode
 from ...models.sensor_data import GpsMode, GpsReading
@@ -162,7 +163,7 @@ class GPSDriver(HardwareDriver):
         except Exception:
             return self._last_read
 
-    def _read_hardware_blocking(self) -> "GpsReading | None":
+    def _read_hardware_blocking(self) -> GpsReading | None:
         """Blocking hardware read — must only be called via asyncio.to_thread."""
         if not self._read_thread_lock.acquire(blocking=False):
             # Another thread is already scanning; return last known position.
@@ -179,21 +180,30 @@ class GPSDriver(HardwareDriver):
                     candidates.append(env_dev)
                 # Configured default
                 default_dev = (
-                    self.cfg.usb_device if self.cfg.mode == GpsMode.F9P_USB else self.cfg.uart_device
+                    self.cfg.usb_device
+                    if self.cfg.mode == GpsMode.F9P_USB
+                    else self.cfg.uart_device
                 )
                 candidates.append(default_dev)
                 # Common fallbacks on Raspberry Pi
-                candidates.extend([
-                    "/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1",
-                    "/dev/ttyAMA0", "/dev/ttyS0", "/dev/serial0",
-                ])
+                candidates.extend(
+                    [
+                        "/dev/ttyACM0",
+                        "/dev/ttyACM1",
+                        "/dev/ttyUSB0",
+                        "/dev/ttyUSB1",
+                        "/dev/ttyAMA0",
+                        "/dev/ttyS0",
+                        "/dev/serial0",
+                    ]
+                )
                 # Add ACM/USB globbed devices if present
                 for pat in ("/dev/ttyACM*", "/dev/ttyUSB*"):
                     for p in glob.glob(pat):
                         if p not in candidates:
                             candidates.append(p)
 
-                last_err: Optional[Exception] = None
+                last_err: Exception | None = None
                 for dev in candidates:
                     for baud in self._baud_candidates:
                         try:
@@ -238,16 +248,16 @@ class GPSDriver(HardwareDriver):
             deadline = time.time() + (1.5 if not self._first_read_done else 0.75)
             got_lat = got_lon = False
             got_gga = False  # track GGA specifically; it carries fix quality + satellites
-            acc: Optional[float] = None
-            acc_source: Optional[str] = None  # 'gst' | 'hdop'
-            hdop_val: Optional[float] = None
-            sats: Optional[int] = None
-            alt: Optional[float] = None
-            spd: Optional[float] = None
-            hdg: Optional[float] = None
-            lat: Optional[float] = None
-            lon: Optional[float] = None
-            rtk_status: Optional[str] = None
+            acc: float | None = None
+            acc_source: str | None = None  # 'gst' | 'hdop'
+            hdop_val: float | None = None
+            sats: int | None = None
+            alt: float | None = None
+            spd: float | None = None
+            hdg: float | None = None
+            lat: float | None = None
+            lon: float | None = None
+            rtk_status: str | None = None
 
             while time.time() < deadline:
                 raw = self._serial.readline().decode("ascii", errors="ignore")  # type: ignore
@@ -381,7 +391,7 @@ class GPSDriver(HardwareDriver):
             return {}
 
     @staticmethod
-    def _parse_nmea_coord(val: str, hemi: str) -> Optional[float]:
+    def _parse_nmea_coord(val: str, hemi: str) -> float | None:
         """Convert NMEA ddmm.mmmm (lat) / dddmm.mmmm (lon) to decimal degrees.
 
         hemi is 'N'/'S' or 'E'/'W'. Returns None if invalid.
@@ -405,7 +415,9 @@ class GPSDriver(HardwareDriver):
 
     def _parse_gga(
         self, line: str
-    ) -> Optional[tuple[Optional[float], Optional[float], Optional[float], Optional[int], Optional[float], Optional[int]]]:
+    ) -> (
+        tuple[float | None, float | None, float | None, int | None, float | None, int | None] | None
+    ):
         """Parse GGA: returns (lat, lon, altitude_m, satellites, hdop, fix_quality)."""
         try:
             parts = line.split(",")
@@ -427,7 +439,9 @@ class GPSDriver(HardwareDriver):
         except Exception:
             return None
 
-    def _parse_rmc(self, line: str) -> Optional[tuple[Optional[float], Optional[float], Optional[float], Optional[float]]]:
+    def _parse_rmc(
+        self, line: str
+    ) -> tuple[float | None, float | None, float | None, float | None] | None:
         """Parse RMC: returns (lat, lon, speed_knots, course_deg)."""
         try:
             parts = line.split(",")
@@ -440,7 +454,7 @@ class GPSDriver(HardwareDriver):
         except Exception:
             return None
 
-    def _parse_gst(self, line: str) -> Optional[float]:
+    def _parse_gst(self, line: str) -> float | None:
         """Parse GST sentence to estimate horizontal accuracy (1-sigma meters)."""
         try:
             parts = line.split(",")
@@ -456,7 +470,7 @@ class GPSDriver(HardwareDriver):
             return None
 
     @staticmethod
-    def _map_fix_quality(fix_quality: Optional[int]) -> Optional[str]:
+    def _map_fix_quality(fix_quality: int | None) -> str | None:
         if fix_quality is None:
             return None
         mapping = {
@@ -471,7 +485,7 @@ class GPSDriver(HardwareDriver):
         }
         return mapping.get(fix_quality)
 
-    def _read_from_gpsd(self, timeout_sec: float = 0.5) -> Optional[GpsReading]:
+    def _read_from_gpsd(self, timeout_sec: float = 0.5) -> GpsReading | None:
         """Try reading a TPV report from gpsd if available.
 
         Uses a raw TCP socket to 127.0.0.1:2947 to avoid external deps.
@@ -505,10 +519,26 @@ class GPSDriver(HardwareDriver):
                             lat = obj.get("lat")
                             lon = obj.get("lon")
                             if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-                                alt = obj.get("alt") if isinstance(obj.get("alt"), (int, float)) else None
-                                spd = obj.get("speed") if isinstance(obj.get("speed"), (int, float)) else None
-                                crs = obj.get("track") if isinstance(obj.get("track"), (int, float)) else None
-                                eph = obj.get("eph") if isinstance(obj.get("eph"), (int, float)) else None
+                                alt = (
+                                    obj.get("alt")
+                                    if isinstance(obj.get("alt"), (int, float))
+                                    else None
+                                )
+                                spd = (
+                                    obj.get("speed")
+                                    if isinstance(obj.get("speed"), (int, float))
+                                    else None
+                                )
+                                crs = (
+                                    obj.get("track")
+                                    if isinstance(obj.get("track"), (int, float))
+                                    else None
+                                )
+                                eph = (
+                                    obj.get("eph")
+                                    if isinstance(obj.get("eph"), (int, float))
+                                    else None
+                                )
                                 return GpsReading(
                                     latitude=float(lat),
                                     longitude=float(lon),

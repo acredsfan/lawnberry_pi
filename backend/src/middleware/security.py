@@ -12,7 +12,7 @@ import os
 import time
 import uuid
 from collections import deque
-from typing import Deque, Dict, Iterable, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,9 +42,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         self._lockout_seconds = max(1, lockout_seconds)
         self._protected_prefixes = tuple(protected_prefixes or ("/api/v2/auth", "/api/v1/auth"))
 
-        self._attempts: Dict[str, Deque[float]] = {}
-        self._failures: Dict[str, int] = {}
-        self._lockout_until: Dict[str, float] = {}
+        self._attempts: dict[str, deque[float]] = {}
+        self._failures: dict[str, int] = {}
+        self._lockout_until: dict[str, float] = {}
         self._lock = asyncio.Lock()
 
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -110,7 +110,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     def _is_protected_path(self, path: str) -> bool:
         return any(path.startswith(prefix) for prefix in self._protected_prefixes)
 
-    async def _preprocess_rate_limit(self, client_token: str) -> Optional[Response]:
+    async def _preprocess_rate_limit(self, client_token: str) -> Response | None:
         now = time.time()
         async with self._lock:
             lock_until = self._lockout_until.get(client_token)
@@ -166,12 +166,14 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 self._lockout_until.pop(client_token, None)
                 self._attempts.pop(client_token, None)
 
-    def _validate_request_content(self, request: Request) -> Optional[Response]:
+    def _validate_request_content(self, request: Request) -> Response | None:
         content_type = request.headers.get("Content-Type", "").lower()
         if request.headers.get("Content-Length") in {None, "0"} and not content_type:
             return None
         if "application/json" not in content_type:
-            return JSONResponse(status_code=415, content={"detail": "Content-Type must be application/json"})
+            return JSONResponse(
+                status_code=415, content={"detail": "Content-Type must be application/json"}
+            )
         return None
 
     def _apply_security_headers(self, response: Response) -> None:
@@ -199,7 +201,9 @@ def _default_allowed_origins() -> list[str]:
     ]
 
 
-def register_security_middleware(app: FastAPI, *, allowed_origins: Iterable[str] | None = None) -> None:
+def register_security_middleware(
+    app: FastAPI, *, allowed_origins: Iterable[str] | None = None
+) -> None:
     """Attach security middleware stack to the FastAPI application."""
     origins = list(allowed_origins or _default_allowed_origins())
     app.add_middleware(

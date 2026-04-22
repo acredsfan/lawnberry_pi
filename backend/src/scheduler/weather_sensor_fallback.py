@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
 class EnvSnapshot:
-    temperature_c: Optional[float]
-    humidity_percent: Optional[float]
-    pressure_hpa: Optional[float]
+    temperature_c: float | None
+    humidity_percent: float | None
+    pressure_hpa: float | None
 
 
 @dataclass

@@ -7,33 +7,47 @@ import asyncio
 import logging
 import math
 import time
-from datetime import datetime, timezone, date as _date
-from typing import Dict, Optional, List, Any
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from datetime import date as _date
+from typing import Any
 
 from ..models import (
-    SensorData, GpsReading, ImuReading, TofReading, EnvironmentalReading,
-    PowerReading, SensorType, SensorStatus, GpsMode,
-    HardwareTelemetryStream, ComponentId, ComponentStatus, RtkFixType,
-    GPSData, IMUData, PowerData, ToFData
+    ComponentId,
+    ComponentStatus,
+    EnvironmentalReading,
+    GPSData,
+    GpsMode,
+    GpsReading,
+    HardwareTelemetryStream,
+    IMUData,
+    ImuReading,
+    PowerData,
+    PowerReading,
+    RtkFixType,
+    SensorData,
+    SensorStatus,
+    SensorType,
+    ToFData,
+    TofReading,
 )
-from ..utils.battery import voltage_to_soc, battery_health_label
+from ..utils.battery import battery_health_label, voltage_to_soc
 
 logger = logging.getLogger(__name__)
 
 
 class SensorCoordinator:
     """Coordinates access to shared I2C/UART resources"""
-    
+
     def __init__(self):
         self._i2c_lock = asyncio.Lock()
         self._uart_locks = {
             "UART0": asyncio.Lock(),
-            "UART1": asyncio.Lock(), 
-            "UART4": asyncio.Lock()
+            "UART1": asyncio.Lock(),
+            "UART4": asyncio.Lock(),
         }
         self._active_sensors = set()
-    
+
     @asynccontextmanager
     async def acquire_i2c(self, sensor_name: str):
         """Acquire I2C bus access"""
@@ -43,13 +57,13 @@ class SensorCoordinator:
                 yield
             finally:
                 self._active_sensors.discard(sensor_name)
-    
+
     @asynccontextmanager
     async def acquire_uart(self, uart_port: str, sensor_name: str):
         """Acquire UART port access"""
         if uart_port not in self._uart_locks:
             raise ValueError(f"Unknown UART port: {uart_port}")
-        
+
         async with self._uart_locks[uart_port]:
             self._active_sensors.add(sensor_name)
             try:
@@ -60,22 +74,25 @@ class SensorCoordinator:
 
 class GPSSensorInterface:
     """GPS sensor interface supporting multiple modules"""
-    
-    def __init__(self, gps_mode: GpsMode, coordinator: SensorCoordinator, usb_device: str | None = None):
+
+    def __init__(
+        self, gps_mode: GpsMode, coordinator: SensorCoordinator, usb_device: str | None = None
+    ):
         self.gps_mode = gps_mode
         self.coordinator = coordinator
-        self.last_reading: Optional[GpsReading] = None
+        self.last_reading: GpsReading | None = None
         self.status = SensorStatus.OFFLINE
         # Concrete driver (lazy, SIM-safe)
         try:
             from ..drivers.sensors.gps_driver import GPSDriver  # type: ignore
+
             driver_cfg: dict = {"mode": gps_mode}
             if usb_device:
                 driver_cfg["usb_device"] = usb_device
             self._driver = GPSDriver(driver_cfg)
         except Exception:  # pragma: no cover - keep SIM-safe
             self._driver = None
-        
+
     async def initialize(self) -> bool:
         """Initialize GPS sensor"""
         try:
@@ -87,17 +104,17 @@ class GPSSensorInterface:
                 # Fallback placeholder
                 self.status = SensorStatus.ONLINE
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize GPS: {e}")
             self.status = SensorStatus.ERROR
             return False
-    
-    async def read_gps(self) -> Optional[GpsReading]:
+
+    async def read_gps(self) -> GpsReading | None:
         """Read GPS data"""
         if self.status != SensorStatus.ONLINE:
             return None
-        
+
         try:
             if getattr(self, "_driver", None) is not None:
                 reading = await self._driver.read_position()
@@ -112,12 +129,12 @@ class GPSSensorInterface:
                     altitude=10.0,
                     accuracy=3.0,
                     satellites=8,
-                    mode=self.gps_mode
+                    mode=self.gps_mode,
                 )
 
             self.last_reading = reading
             return reading
-            
+
         except Exception as e:
             logger.error(f"GPS reading failed: {e}")
             self.status = SensorStatus.ERROR
@@ -129,14 +146,15 @@ class IMUSensorInterface:
 
     def __init__(self, coordinator: SensorCoordinator, imu_config: dict | None = None):
         self.coordinator = coordinator
-        self.last_reading: Optional[ImuReading] = None
+        self.last_reading: ImuReading | None = None
         self.status = SensorStatus.OFFLINE
         try:
             from ..drivers.sensors.bno085_driver import BNO085Driver  # type: ignore
+
             self._driver = BNO085Driver(imu_config or {})
         except Exception:  # pragma: no cover
             self._driver = None
-        
+
     async def initialize(self) -> bool:
         """Initialize BNO085 IMU"""
         try:
@@ -148,17 +166,17 @@ class IMUSensorInterface:
             else:
                 self.status = SensorStatus.ONLINE
                 return True
-                
+
         except Exception as e:
             logger.error(f"Failed to initialize IMU: {e}")
             self.status = SensorStatus.ERROR
             return False
-    
-    async def read_imu(self) -> Optional[ImuReading]:
+
+    async def read_imu(self) -> ImuReading | None:
         """Read IMU data"""
         if self.status != SensorStatus.ONLINE:
             return None
-        
+
         try:
             if getattr(self, "_driver", None) is not None:
                 o = await self._driver.read_orientation()
@@ -181,7 +199,9 @@ class IMUSensorInterface:
             else:
                 # Driver unavailable but interface is ONLINE -- report
                 # "uncalibrated" rather than "unknown".
-                reading = ImuReading(roll=0.0, pitch=0.0, yaw=0.0, calibration_status="uncalibrated")
+                reading = ImuReading(
+                    roll=0.0, pitch=0.0, yaw=0.0, calibration_status="uncalibrated"
+                )
 
             if reading is not None:
                 self.last_reading = reading
@@ -198,11 +218,12 @@ class ToFSensorInterface:
 
     def __init__(self, coordinator: SensorCoordinator, tof_config: dict | None = None):
         self.coordinator = coordinator
-        self.left_reading: Optional[TofReading] = None
-        self.right_reading: Optional[TofReading] = None
+        self.left_reading: TofReading | None = None
+        self.right_reading: TofReading | None = None
         self.status = SensorStatus.OFFLINE
         try:
             from ..drivers.sensors.vl53l0x_driver import VL53L0XDriver  # type: ignore
+
             cfg = tof_config or {}
             left_cfg = {
                 "bus": cfg.get("bus"),
@@ -221,7 +242,7 @@ class ToFSensorInterface:
         except Exception:  # pragma: no cover
             self._left = None
             self._right = None
-        
+
     async def initialize(self) -> bool:
         """Initialize VL53L0X sensors"""
         try:
@@ -235,17 +256,17 @@ class ToFSensorInterface:
             else:
                 self.status = SensorStatus.ONLINE
                 return True
-                
+
         except Exception as e:
             logger.error(f"Failed to initialize ToF sensors: {e}")
             self.status = SensorStatus.ERROR
             return False
-    
-    async def read_tof_sensors(self) -> tuple[Optional[TofReading], Optional[TofReading]]:
+
+    async def read_tof_sensors(self) -> tuple[TofReading | None, TofReading | None]:
         """Read both ToF sensors"""
         if self.status != SensorStatus.ONLINE:
             return None, None
-        
+
         try:
             if self._left is not None and self._right is not None:
                 # Coordinate I2C access across sensors
@@ -275,7 +296,7 @@ class ToFSensorInterface:
                 return left_reading, right_reading
             else:
                 return self.left_reading, self.right_reading
-                
+
         except Exception as e:
             logger.error(f"ToF reading failed: {e}")
             self.status = SensorStatus.ERROR
@@ -284,17 +305,18 @@ class ToFSensorInterface:
 
 class EnvironmentalSensorInterface:
     """BME280 environmental sensor interface"""
-    
+
     def __init__(self, coordinator: SensorCoordinator):
         self.coordinator = coordinator
-        self.last_reading: Optional[EnvironmentalReading] = None
+        self.last_reading: EnvironmentalReading | None = None
         self.status = SensorStatus.OFFLINE
         try:
             from ..drivers.sensors.bme280_driver import BME280Driver  # type: ignore
+
             self._driver = BME280Driver({})
         except Exception:  # pragma: no cover
             self._driver = None
-        
+
     async def initialize(self) -> bool:
         """Initialize BME280 sensor"""
         try:
@@ -306,17 +328,17 @@ class EnvironmentalSensorInterface:
             else:
                 self.status = SensorStatus.ONLINE
                 return True
-                
+
         except Exception as e:
             logger.error(f"Failed to initialize BME280: {e}")
             self.status = SensorStatus.ERROR
             return False
-    
-    async def read_environmental(self) -> Optional[EnvironmentalReading]:
+
+    async def read_environmental(self) -> EnvironmentalReading | None:
         """Read environmental data"""
         if self.status != SensorStatus.ONLINE:
             return None
-        
+
         try:
             if getattr(self, "_driver", None) is not None:
                 env = await self._driver.read_environment()
@@ -344,10 +366,10 @@ class EnvironmentalSensorInterface:
 
 class PowerSensorInterface:
     """Aggregated power monitoring interface (INA3221 + optional Victron)."""
-    
+
     def __init__(self, coordinator: SensorCoordinator, driver_config: dict[str, Any] | None = None):
         self.coordinator = coordinator
-        self.last_reading: Optional[PowerReading] = None
+        self.last_reading: PowerReading | None = None
         self.status = SensorStatus.OFFLINE
         self._driver_config = driver_config or {}
         self._ina_driver = None
@@ -358,8 +380,8 @@ class PowerSensorInterface:
 
         # Battery consumption accumulator (reset daily at midnight)
         self._battery_consumed_today_wh: float = 0.0
-        self._last_power_read_dt: Optional[datetime] = None
-        self._last_accumulation_date: Optional[_date] = None
+        self._last_power_read_dt: datetime | None = None
+        self._last_accumulation_date: _date | None = None
 
         ina_cfg = self._extract_ina_config(self._driver_config)
         victron_cfg = self._extract_victron_config(self._driver_config)
@@ -386,7 +408,7 @@ class PowerSensorInterface:
                 self._victron_driver = None
 
         self._drivers = [d for d in (self._ina_driver, self._victron_driver) if d is not None]
-        
+
     async def initialize(self) -> bool:
         """Initialize INA3221 power monitor"""
         if not self._drivers:
@@ -400,16 +422,18 @@ class PowerSensorInterface:
                 await driver.start()
                 any_success = True
             except Exception as exc:  # pragma: no cover - hardware dependent
-                logger.error("Failed to initialize power driver %s: %s", driver.__class__.__name__, exc)
+                logger.error(
+                    "Failed to initialize power driver %s: %s", driver.__class__.__name__, exc
+                )
 
         self.status = SensorStatus.ONLINE if any_success else SensorStatus.ERROR
         return any_success
-    
-    async def read_power(self) -> Optional[PowerReading]:
+
+    async def read_power(self) -> PowerReading | None:
         """Read power monitoring data"""
         if self.status != SensorStatus.ONLINE:
             return None
-        
+
         try:
             ina_payload: dict[str, Any] | None = None
             victron_payload: dict[str, Any] | None = None
@@ -448,23 +472,35 @@ class PowerSensorInterface:
                         reading.solar_voltage = self.last_reading.solar_voltage
                     if reading.solar_current is None:
                         reading.solar_current = self.last_reading.solar_current
-                    if reading.battery_power is None and self.last_reading.battery_power is not None:
+                    if (
+                        reading.battery_power is None
+                        and self.last_reading.battery_power is not None
+                    ):
                         reading.battery_power = self.last_reading.battery_power
                     if reading.solar_power is None and self.last_reading.solar_power is not None:
                         reading.solar_power = self.last_reading.solar_power
 
             # Accumulate battery consumption (load_current * battery_voltage * elapsed) only for fresh readings
             if merged is not None and reading is not None:
-                now_dt = datetime.now(timezone.utc)
+                now_dt = datetime.now(UTC)
                 now_date = now_dt.date()
-                if self._last_accumulation_date is not None and now_date != self._last_accumulation_date:
+                if (
+                    self._last_accumulation_date is not None
+                    and now_date != self._last_accumulation_date
+                ):
                     self._battery_consumed_today_wh = 0.0
                 self._last_accumulation_date = now_date
                 if self._last_power_read_dt is not None:
                     elapsed_s = (now_dt - self._last_power_read_dt).total_seconds()
                     lc = reading.load_current
                     bv = reading.battery_voltage
-                    if lc is not None and bv is not None and abs(lc) > 0.01 and bv > 0 and 0 < elapsed_s < 300:
+                    if (
+                        lc is not None
+                        and bv is not None
+                        and abs(lc) > 0.01
+                        and bv > 0
+                        and 0 < elapsed_s < 300
+                    ):
                         self._battery_consumed_today_wh += abs(lc) * bv * elapsed_s / 3600
                 self._last_power_read_dt = now_dt
             if reading is not None:
@@ -472,14 +508,14 @@ class PowerSensorInterface:
 
             self.last_reading = reading
             return reading
-                
+
         except Exception as e:
             logger.error(f"Power reading failed: {e}")
             self.status = SensorStatus.ERROR
             return None
 
     @staticmethod
-    def _extract_ina_config(config: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def _extract_ina_config(config: dict[str, Any]) -> dict[str, Any] | None:
         if not config:
             return None
         direct_keys = {
@@ -500,10 +536,12 @@ class PowerSensorInterface:
         return None
 
     @staticmethod
-    def _extract_victron_config(config: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def _extract_victron_config(config: dict[str, Any]) -> dict[str, Any] | None:
         if not config:
             return None
-        candidate = config.get("victron") or config.get("victron_vedirect") or config.get("victron_config")
+        candidate = (
+            config.get("victron") or config.get("victron_vedirect") or config.get("victron_config")
+        )
         if isinstance(candidate, dict):
             return candidate
         return None
@@ -519,7 +557,7 @@ class PowerSensorInterface:
         return False
 
     @classmethod
-    def _pick(cls, *values: Any, min_abs: float | None = None) -> Optional[float]:
+    def _pick(cls, *values: Any, min_abs: float | None = None) -> float | None:
         for value in values:
             if cls._valid_number(value):
                 numeric = float(value)
@@ -531,13 +569,13 @@ class PowerSensorInterface:
     @classmethod
     def _merge_power_payload(
         cls,
-        ina: Optional[dict[str, Any]],
-        victron: Optional[dict[str, Any]],
+        ina: dict[str, Any] | None,
+        victron: dict[str, Any] | None,
         *,
         prefer_battery: bool = False,
         prefer_solar: bool = False,
         prefer_load: bool = False,
-    ) -> Optional[PowerReading]:
+    ) -> PowerReading | None:
         if not ina and not victron:
             return None
 
@@ -574,12 +612,8 @@ class PowerSensorInterface:
             min_abs=0.05,
         )
         # Capture per-source solar current/power to avoid cross-source derivations
-        victron_solar_current = (
-            victron.get("solar_current_amps") if victron else None
-        )
-        ina_solar_current = (
-            ina.get("solar_current_amps") if ina else None
-        )
+        victron_solar_current = victron.get("solar_current_amps") if victron else None
+        ina_solar_current = ina.get("solar_current_amps") if ina else None
         solar_current_sources: list[Any] = []
         # Prefer Victron for PV-side semantics when present
         solar_current_sources.append(victron_solar_current)
@@ -587,13 +621,11 @@ class PowerSensorInterface:
         solar_current = cls._pick(*solar_current_sources)
 
         victron_solar_power = (
-            victron.get("solar_power_w") if victron else None
-        ) if victron else None
+            (victron.get("solar_power_w") if victron else None) if victron else None
+        )
         if victron_solar_power is None and victron:
             victron_solar_power = victron.get("solar_power")
-        ina_solar_power = (
-            ina.get("solar_power_w") if ina else None
-        )
+        ina_solar_power = ina.get("solar_power_w") if ina else None
         solar_power_sources: list[Any] = []
         # Prefer Victron for PV-side power as well
         solar_power_sources.append(victron_solar_power)
@@ -627,9 +659,18 @@ class PowerSensorInterface:
             try:
                 same_origin = (
                     # Both from Victron
-                    (victron is not None and victron.get("solar_voltage") is not None and victron_solar_current is not None)
+                    (
+                        victron is not None
+                        and victron.get("solar_voltage") is not None
+                        and victron_solar_current is not None
+                    )
                     # Or both from INA
-                    or (victron is None and ina is not None and ina.get("solar_voltage") is not None and ina_solar_current is not None)
+                    or (
+                        victron is None
+                        and ina is not None
+                        and ina.get("solar_voltage") is not None
+                        and ina_solar_current is not None
+                    )
                 )
             except Exception:
                 same_origin = False
@@ -697,6 +738,7 @@ class PowerSensorInterface:
 
 class SensorManager:
     """Main sensor manager coordinating all sensor interfaces"""
+
     # BNO085 uses SHTP Game Rotation Vector (1.0s per-read); GPS F9P_USB is fast.
     # 2.5 s is ample for all non-BLE sensors.
     SENSOR_READ_TIMEOUT_SECONDS = 2.5
@@ -731,35 +773,35 @@ class SensorManager:
         # Serialize concurrent reads: only one real hardware read at a time.
         # Rapid callers get the cached result if it is fresh enough.
         self._read_lock: asyncio.Lock = asyncio.Lock()
-        self._read_cache: Optional["SensorData"] = None
+        self._read_cache: SensorData | None = None
         self._read_cache_ts: float = 0.0
         # 180 ms — slightly less than the 200 ms telemetry-loop period so the
         # loop always gets a fresh read while HTTP bursts are served from cache.
         _CACHE_TTL_S: float = 0.18
         self._CACHE_TTL_S = _CACHE_TTL_S
-        
+
     async def initialize(self) -> bool:
         """Initialize all sensors"""
         logger.info("Initializing sensor manager")
-        
+
         results = await asyncio.gather(
             self.gps.initialize(),
             self.imu.initialize(),
             self.tof.initialize(),
             self.environmental.initialize(),
             self.power.initialize(),
-            return_exceptions=True
+            return_exceptions=True,
         )
-        
+
         success_count = sum(1 for result in results if result is True)
         total_sensors = len(results)
-        
+
         logger.info(f"Sensor initialization: {success_count}/{total_sensors} successful")
-        
+
         # Consider initialized if at least core sensors are working
         self.initialized = success_count >= 3
         return self.initialized
-    
+
     async def read_all_sensors(self) -> SensorData:
         """Read data from all sensors.
 
@@ -789,7 +831,7 @@ class SensorManager:
             t = timeout if timeout is not None else self.SENSOR_READ_TIMEOUT_SECONDS
             try:
                 return await asyncio.wait_for(coro, timeout=t)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "Timed out reading %s after %.1fs; continuing with partial telemetry",
                     name,
@@ -803,17 +845,19 @@ class SensorManager:
             _read_with_timeout("imu", self.imu.read_imu()),
             _read_with_timeout("tof", self.tof.read_tof_sensors()),
             _read_with_timeout("environmental", self.environmental.read_environmental()),
-            _read_with_timeout("power", self.power.read_power(), timeout=self.POWER_READ_TIMEOUT_SECONDS),
+            _read_with_timeout(
+                "power", self.power.read_power(), timeout=self.POWER_READ_TIMEOUT_SECONDS
+            ),
         ]
-        
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         gps_data = results[0] if not isinstance(results[0], Exception) else None
         imu_data = results[1] if not isinstance(results[1], Exception) else None
         tof_data = results[2] if not isinstance(results[2], Exception) else (None, None)
         env_data = results[3] if not isinstance(results[3], Exception) else None
         power_data = results[4] if not isinstance(results[4], Exception) else None
-        
+
         # Create sensor health status
         sensor_health = {
             SensorType.GPS: self.gps.status,
@@ -821,9 +865,9 @@ class SensorManager:
             SensorType.TOF_LEFT: self.tof.status,
             SensorType.TOF_RIGHT: self.tof.status,
             SensorType.ENVIRONMENTAL: self.environmental.status,
-            SensorType.POWER: self.power.status
+            SensorType.POWER: self.power.status,
         }
-        
+
         sensor_data = SensorData(
             gps=gps_data,
             imu=imu_data,
@@ -831,14 +875,14 @@ class SensorManager:
             tof_right=tof_data[1] if tof_data else None,
             environmental=env_data,
             power=power_data,
-            sensor_health=sensor_health
+            sensor_health=sensor_health,
         )
-        
+
         if self.validation_enabled:
             self._validate_sensor_data(sensor_data)
-        
+
         return sensor_data
-    
+
     def _validate_sensor_data(self, sensor_data: SensorData):
         """Validate sensor data for consistency and reasonable values"""
         # GPS validation
@@ -850,7 +894,7 @@ class SensorManager:
                 logger.warning(f"Invalid GPS longitude: {gps.longitude}")
             if gps.accuracy and gps.accuracy > 50.0:
                 logger.warning(f"Poor GPS accuracy: {gps.accuracy}m")
-        
+
         # Power validation
         if sensor_data.power:
             power = sensor_data.power
@@ -858,14 +902,14 @@ class SensorManager:
                 logger.warning(f"Low battery voltage: {power.battery_voltage}V")
             if power.battery_voltage and power.battery_voltage > 16.0:
                 logger.warning(f"High battery voltage: {power.battery_voltage}V")
-        
+
         # Environmental validation
         if sensor_data.environmental:
             env = sensor_data.environmental
             if env.temperature and (env.temperature < -40 or env.temperature > 80):
                 logger.warning(f"Extreme temperature: {env.temperature}°C")
-    
-    async def get_sensor_status(self) -> Dict[str, Any]:
+
+    async def get_sensor_status(self) -> dict[str, Any]:
         """Get status of all sensors"""
         return {
             "initialized": self.initialized,
@@ -876,29 +920,29 @@ class SensorManager:
             "environmental_status": self.environmental.status,
             "power_status": self.power.status,
             "active_sensors": list(self.coordinator._active_sensors),
-            "validation_enabled": self.validation_enabled
+            "validation_enabled": self.validation_enabled,
         }
-    
+
     async def shutdown(self):
         """Shutdown sensor manager"""
         logger.info("Shutting down sensor manager")
         # Sensor shutdown logic would go here
         self.initialized = False
-    
-    async def generate_telemetry_streams(self) -> List[HardwareTelemetryStream]:
+
+    async def generate_telemetry_streams(self) -> list[HardwareTelemetryStream]:
         """Generate HardwareTelemetryStream objects from current sensor readings"""
         if not self.initialized:
             logger.warning("Sensor manager not initialized")
             return []
-        
+
         streams = []
-        start_time = datetime.now(timezone.utc)
-        
+        start_time = datetime.now(UTC)
+
         # Read all sensors
         sensor_data = await self.read_all_sensors()
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.now(UTC)
         latency_ms = (end_time - start_time).total_seconds() * 1000
-        
+
         # GPS stream
         if sensor_data.gps:
             gps_reading = sensor_data.gps
@@ -913,17 +957,19 @@ class SensorManager:
                 hdop=gps_reading.hdop or 99.9,
                 satellites=gps_reading.satellites or 0,
                 fix_type=self._map_rtk_fix_type(gps_reading),
-                rtk_status_message=self._get_rtk_status_message(gps_reading)
+                rtk_status_message=self._get_rtk_status_message(gps_reading),
             )
-            streams.append(HardwareTelemetryStream(
-                timestamp=start_time,
-                component_id=ComponentId.GPS,
-                value=f"{gps_data.latitude},{gps_data.longitude}",
-                status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.GPS)),
-                latency_ms=latency_ms,
-                gps_data=gps_data
-            ))
-        
+            streams.append(
+                HardwareTelemetryStream(
+                    timestamp=start_time,
+                    component_id=ComponentId.GPS,
+                    value=f"{gps_data.latitude},{gps_data.longitude}",
+                    status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.GPS)),
+                    latency_ms=latency_ms,
+                    gps_data=gps_data,
+                )
+            )
+
         # IMU stream
         if sensor_data.imu:
             imu_reading = sensor_data.imu
@@ -950,17 +996,19 @@ class SensorManager:
                 gyro_x=imu_reading.gyro_x,
                 gyro_y=imu_reading.gyro_y,
                 gyro_z=imu_reading.gyro_z,
-                calibration_sys=cal_sys
+                calibration_sys=cal_sys,
             )
-            streams.append(HardwareTelemetryStream(
-                timestamp=start_time,
-                component_id=ComponentId.IMU,
-                value=f"{imu_data.roll_deg:.2f},{imu_data.pitch_deg:.2f},{imu_data.yaw_deg:.2f}",
-                status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.IMU)),
-                latency_ms=latency_ms,
-                imu_data=imu_data
-            ))
-        
+            streams.append(
+                HardwareTelemetryStream(
+                    timestamp=start_time,
+                    component_id=ComponentId.IMU,
+                    value=f"{imu_data.roll_deg:.2f},{imu_data.pitch_deg:.2f},{imu_data.yaw_deg:.2f}",
+                    status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.IMU)),
+                    latency_ms=latency_ms,
+                    imu_data=imu_data,
+                )
+            )
+
         if sensor_data.power:
             power_reading = sensor_data.power
             bc = self._battery_config
@@ -972,8 +1020,10 @@ class SensorManager:
             )
             health_str = battery_health_label(power_reading.battery_voltage)
             health_status = (
-                ComponentStatus.HEALTHY if health_str == "healthy"
-                else ComponentStatus.WARNING if health_str == "warning"
+                ComponentStatus.HEALTHY
+                if health_str == "healthy"
+                else ComponentStatus.WARNING
+                if health_str == "warning"
                 else ComponentStatus.FAULT
             )
             power_data = PowerData(
@@ -986,54 +1036,64 @@ class SensorManager:
                 battery_soc_percent=soc,
                 battery_health=health_status,
             )
-            streams.append(HardwareTelemetryStream(
-                timestamp=start_time,
-                component_id=ComponentId.POWER,
-                value=power_data.battery_voltage,
-                status=power_data.battery_health,
-                latency_ms=latency_ms,
-                power_data=power_data
-            ))
-        
+            streams.append(
+                HardwareTelemetryStream(
+                    timestamp=start_time,
+                    component_id=ComponentId.POWER,
+                    value=power_data.battery_voltage,
+                    status=power_data.battery_health,
+                    latency_ms=latency_ms,
+                    power_data=power_data,
+                )
+            )
+
         # ToF left stream
         if sensor_data.tof_left:
             tof_left = sensor_data.tof_left
             tof_data = ToFData(
                 distance_mm=int(tof_left.distance) if tof_left.distance is not None else None,
                 range_status=tof_left.range_status or "no_target",
-                signal_rate=tof_left.signal_strength or 0.0
+                signal_rate=tof_left.signal_strength or 0.0,
             )
-            streams.append(HardwareTelemetryStream(
-                timestamp=start_time,
-                component_id=ComponentId.TOF_LEFT,
-                value=tof_data.distance_mm if tof_data.distance_mm is not None else 0,
-                status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.TOF_LEFT)),
-                latency_ms=latency_ms,
-                tof_data=tof_data
-            ))
-        
+            streams.append(
+                HardwareTelemetryStream(
+                    timestamp=start_time,
+                    component_id=ComponentId.TOF_LEFT,
+                    value=tof_data.distance_mm if tof_data.distance_mm is not None else 0,
+                    status=self._map_sensor_status(
+                        sensor_data.sensor_health.get(SensorType.TOF_LEFT)
+                    ),
+                    latency_ms=latency_ms,
+                    tof_data=tof_data,
+                )
+            )
+
         # ToF right stream
         if sensor_data.tof_right:
             tof_right = sensor_data.tof_right
             tof_data = ToFData(
                 distance_mm=int(tof_right.distance) if tof_right.distance is not None else None,
                 range_status=tof_right.range_status or "no_target",
-                signal_rate=tof_right.signal_strength or 0.0
+                signal_rate=tof_right.signal_strength or 0.0,
             )
-            streams.append(HardwareTelemetryStream(
-                timestamp=start_time,
-                component_id=ComponentId.TOF_RIGHT,
-                value=tof_data.distance_mm if tof_data.distance_mm is not None else 0,
-                status=self._map_sensor_status(sensor_data.sensor_health.get(SensorType.TOF_RIGHT)),
-                latency_ms=latency_ms,
-                tof_data=tof_data
-            ))
-        
+            streams.append(
+                HardwareTelemetryStream(
+                    timestamp=start_time,
+                    component_id=ComponentId.TOF_RIGHT,
+                    value=tof_data.distance_mm if tof_data.distance_mm is not None else 0,
+                    status=self._map_sensor_status(
+                        sensor_data.sensor_health.get(SensorType.TOF_RIGHT)
+                    ),
+                    latency_ms=latency_ms,
+                    tof_data=tof_data,
+                )
+            )
+
         return streams
-    
+
     def _map_rtk_fix_type(self, gps_reading: GpsReading) -> RtkFixType:
         """Map GPS reading to RTK fix type"""
-        if hasattr(gps_reading, 'rtk_status'):
+        if hasattr(gps_reading, "rtk_status"):
             status = gps_reading.rtk_status.upper() if gps_reading.rtk_status else ""
             if "FIXED" in status or "RTK_FIXED" in status:
                 return RtkFixType.RTK_FIXED
@@ -1041,18 +1101,18 @@ class SensorManager:
                 return RtkFixType.RTK_FLOAT
             elif "DGPS" in status:
                 return RtkFixType.DGPS_FIX
-        
+
         # Fallback to satellites count
         if gps_reading.satellites and gps_reading.satellites >= 6:
             return RtkFixType.GPS_FIX
         return RtkFixType.NO_FIX
-    
+
     def _get_rtk_status_message(self, gps_reading: GpsReading) -> str:
         """Generate human-readable RTK status message"""
         fix_type = self._map_rtk_fix_type(gps_reading)
         satellites = gps_reading.satellites or 0
         accuracy = gps_reading.accuracy or 99.9
-        
+
         if fix_type == RtkFixType.RTK_FIXED:
             return f"RTK Fixed - {satellites} satellites, {accuracy:.1f}m accuracy"
         elif fix_type == RtkFixType.RTK_FLOAT:
@@ -1063,8 +1123,8 @@ class SensorManager:
             return f"DGPS Fix - {satellites} satellites, {accuracy:.1f}m accuracy"
         else:
             return f"No GPS fix - {satellites} satellites visible"
-    
-    def _map_sensor_status(self, status: Optional[SensorStatus]) -> ComponentStatus:
+
+    def _map_sensor_status(self, status: SensorStatus | None) -> ComponentStatus:
         """Map SensorStatus to ComponentStatus"""
         if status == SensorStatus.ONLINE:
             return ComponentStatus.HEALTHY
@@ -1072,8 +1132,8 @@ class SensorManager:
             return ComponentStatus.FAULT
         else:
             return ComponentStatus.WARNING
-    
-    def _estimate_battery_soc(self, voltage: Optional[float]) -> Optional[float]:
+
+    def _estimate_battery_soc(self, voltage: float | None) -> float | None:
         """Estimate SOC using the shared battery utility (LiFePO4 OCV table by default)."""
         bc = self._battery_config
         return voltage_to_soc(

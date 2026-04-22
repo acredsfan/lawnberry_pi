@@ -10,20 +10,22 @@ This module keeps the async façade expected by the FastAPI endpoints while
 performing the minimal blocking serial I/O in tiny, protected critical sections.
 """
 
-import asyncio
 import ast
+import asyncio
 import glob
 import json
 import logging
 import os
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
 import serial
+
 try:  # Best-effort optional import for USB device enumeration.
     from serial.tools import list_ports  # type: ignore
 except Exception:  # pragma: no cover - serial.tools may be unavailable in CI
@@ -35,24 +37,25 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RoboHATStatus:
     """RoboHAT firmware status"""
+
     firmware_version: str = "unknown"
     uptime_seconds: int = 0
     watchdog_active: bool = False
-    last_watchdog_echo: Optional[str] = None
+    last_watchdog_echo: str | None = None
     watchdog_latency_ms: float = 0.0
     serial_connected: bool = False
     error_count: int = 0
-    last_error: Optional[str] = None
+    last_error: str | None = None
     motor_controller_ok: bool = False
     encoder_feedback_ok: bool = False
     encoder_position: int = 0
     timestamp: datetime = None
-    
+
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.now(timezone.utc)
-    
-    def to_dict(self) -> Dict[str, Any]:
+            self.timestamp = datetime.now(UTC)
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses"""
         return {
             "firmware_version": self.firmware_version,
@@ -67,9 +70,9 @@ class RoboHATStatus:
             "encoder_feedback_ok": self.encoder_feedback_ok,
             "encoder_position": self.encoder_position,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
-            "health_status": self.get_health_status()
+            "health_status": self.get_health_status(),
         }
-    
+
     def get_health_status(self) -> str:
         """Get overall health status"""
         if not self.serial_connected:
@@ -87,7 +90,7 @@ class RoboHATService:
     """RoboHAT RP2040 serial bridge service"""
 
     _PROBE_STARTUP_SETTLE_SECONDS = 3.0  # USB CDC resets on open; wait for CircuitPython to boot
-    _PROBE_UART_SETTLE_SECONDS = 0.3     # Hardware UART doesn't reset on open; brief drain only
+    _PROBE_UART_SETTLE_SECONDS = 0.3  # Hardware UART doesn't reset on open; brief drain only
     _RECONNECT_DELAY_SECONDS = 5.0
     _MAX_RECONNECT_ATTEMPTS = 12  # ~1 minute of retries
 
@@ -98,15 +101,15 @@ class RoboHATService:
     def __init__(self, serial_port: str = "/dev/ttyACM0", baud_rate: int = 115200):
         self.serial_port = serial_port
         self.baud_rate = baud_rate
-        self.serial_conn: Optional[serial.Serial] = None
+        self.serial_conn: serial.Serial | None = None
         self.status = RoboHATStatus()
         self.running = False
-        self.watchdog_task: Optional[asyncio.Task] = None
-        self.read_task: Optional[asyncio.Task] = None
+        self.watchdog_task: asyncio.Task | None = None
+        self.read_task: asyncio.Task | None = None
         self._serial_lock = asyncio.Lock()
         self._rc_enabled = True
         self._usb_control_requested = False
-        self._pending_rc_state: Optional[bool] = None
+        self._pending_rc_state: bool | None = None
         self._pending_rc_since: float = 0.0
         self._last_status_at: float = 0.0
         # Track the last time we SENT any command to the firmware.  The firmware
@@ -139,10 +142,13 @@ class RoboHATService:
         self._encoder_enabled: bool = True
         try:
             from backend.src.core.config_loader import get_config_loader
+
             hw, _ = get_config_loader().get()
             self._encoder_enabled = bool(getattr(hw, "encoder_enabled", True))
             if not self._encoder_enabled:
-                logger.info("Encoder feedback disabled via hardware config (encoders.enabled: false)")
+                logger.info(
+                    "Encoder feedback disabled via hardware config (encoders.enabled: false)"
+                )
         except Exception:
             pass  # non-fatal; fall back to enabled (safe default)
 
@@ -230,20 +236,19 @@ class RoboHATService:
 
         self.status.last_error = "robohat_unresponsive"
         return False
-        
+
     async def initialize(self) -> bool:
         """Initialize RoboHAT serial connection"""
         try:
-            logger.info(f"Initializing RoboHAT service on {self.serial_port} at {self.baud_rate} baud")
-            
+            logger.info(
+                f"Initializing RoboHAT service on {self.serial_port} at {self.baud_rate} baud"
+            )
+
             # Open serial connection
             self.serial_conn = serial.Serial(
-                port=self.serial_port,
-                baudrate=self.baud_rate,
-                timeout=1.0,
-                write_timeout=1.0
+                port=self.serial_port, baudrate=self.baud_rate, timeout=1.0, write_timeout=1.0
             )
-            
+
             # Wait for connection to stabilize.
             # USB CDC ports cause CircuitPython to reset; UART ports do not.
             settle = (
@@ -257,7 +262,9 @@ class RoboHATService:
             self._drain_serial_buffer()
 
             if not await self._probe_firmware_response():
-                logger.warning("Serial device %s did not respond like RoboHAT firmware", self.serial_port)
+                logger.warning(
+                    "Serial device %s did not respond like RoboHAT firmware", self.serial_port
+                )
                 try:
                     self.serial_conn.close()
                 finally:
@@ -275,7 +282,7 @@ class RoboHATService:
 
             logger.info("RoboHAT service initialized successfully")
             return True
-            
+
         except serial.SerialException as e:
             logger.error(f"Failed to initialize RoboHAT service: {e}")
             self.status.serial_connected = False
@@ -285,7 +292,7 @@ class RoboHATService:
             logger.error(f"Unexpected error initializing RoboHAT: {e}")
             self.status.last_error = str(e)
             return False
-    
+
     async def _send_line(self, line: str) -> bool:
         """Send a raw line to the RoboHAT firmware."""
         if not self.serial_conn or not self.serial_conn.is_open:
@@ -305,7 +312,9 @@ class RoboHATService:
             self.status.last_error = str(exc)
             return False
 
-    async def _wait_for_pwm_ack(self, *, timeout: float = 1.0, _baseline: Optional[int] = None) -> bool:
+    async def _wait_for_pwm_ack(
+        self, *, timeout: float = 1.0, _baseline: int | None = None
+    ) -> bool:
         """Wait for the firmware to acknowledge or reject the last PWM command.
 
         Uses asyncio.Event notification (set by _process_line on ack) instead of
@@ -333,7 +342,7 @@ class RoboHATService:
                 return True
             try:
                 await asyncio.wait_for(self._pwm_ack_event.wait(), timeout=min(remaining, 0.5))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
         self.status.last_error = self.status.last_error or "pwm_ack_timeout"
@@ -396,7 +405,7 @@ class RoboHATService:
         else:
             self._pending_rc_state = None
             self._pending_rc_since = 0.0
-    
+
     async def _watchdog_loop(self):
         """Periodic watchdog ping loop"""
         while self.running:
@@ -432,8 +441,13 @@ class RoboHATService:
             return
 
         if self._rc_enabled:
-            if self._pending_rc_state is False and (time.monotonic() - self._pending_rc_since) > 1.0:
-                logger.warning("RoboHAT RC disable acknowledgement still pending while RC remains active; retrying command")
+            if (
+                self._pending_rc_state is False
+                and (time.monotonic() - self._pending_rc_since) > 1.0
+            ):
+                logger.warning(
+                    "RoboHAT RC disable acknowledgement still pending while RC remains active; retrying command"
+                )
                 await self._set_rc_enabled(False, force=True)
                 return
             await self._set_rc_enabled(False)
@@ -495,7 +509,7 @@ class RoboHATService:
         self.status.motor_controller_ok = False
         self.status.last_error = "usb_control_unavailable"
         return False
-    
+
     async def _send_safe_state_on_reconnect(self) -> None:
         """Send neutral PWM and blade-off immediately after a successful reconnect.
 
@@ -542,8 +556,12 @@ class RoboHATService:
                 for candidate in candidates:
                     if not self.running:
                         return
-                    logger.info("RoboHAT reconnect attempt %d/%d on %s",
-                                attempt + 1, self._MAX_RECONNECT_ATTEMPTS, candidate)
+                    logger.info(
+                        "RoboHAT reconnect attempt %d/%d on %s",
+                        attempt + 1,
+                        self._MAX_RECONNECT_ATTEMPTS,
+                        candidate,
+                    )
                     try:
                         conn = serial.Serial(
                             port=candidate,
@@ -633,9 +651,9 @@ class RoboHATService:
             except Exception as e:
                 logger.error(f"Read loop error: {e}")
                 await asyncio.sleep(0.1)
-    
+
     @staticmethod
-    def _parse_encoder_from_line(line: str) -> Optional[int]:
+    def _parse_encoder_from_line(line: str) -> int | None:
         """Extract encoder tick count from a firmware heartbeat/status line.
 
         Matches ``enc=N`` or ``"encoder": N`` patterns in lines such as::
@@ -688,7 +706,12 @@ class RoboHATService:
                 self.status.last_error = None
             return
 
-        if "rc enabled" in line_lower or "back to rc" in line_lower or "timeout" in line_lower and "rc mode" in line_lower:
+        if (
+            "rc enabled" in line_lower
+            or "back to rc" in line_lower
+            or "timeout" in line_lower
+            and "rc mode" in line_lower
+        ):
             self._mark_rc_state(True)
             self._last_status_at = time.monotonic()
             logger.info("RoboHAT reported RC mode active")
@@ -755,8 +778,10 @@ class RoboHATService:
 
         # For everything else, keep a debug breadcrumb without polluting logs.
         logger.debug("RoboHAT: %s", line)
-    
-    async def send_motor_command(self, left_speed: float, right_speed: float, ack_timeout: float = 0.35) -> bool:
+
+    async def send_motor_command(
+        self, left_speed: float, right_speed: float, ack_timeout: float = 0.35
+    ) -> bool:
         """Send motor command to RoboHAT"""
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
             return False
@@ -789,7 +814,7 @@ class RoboHATService:
             self.status.motor_controller_ok = False
             self.status.last_error = self.status.last_error or "pwm_send_failed"
         return ok
-    
+
     async def send_blade_command(self, active: bool, speed: float = 1.0) -> bool:
         """Send blade motor command to RoboHAT"""
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
@@ -807,7 +832,7 @@ class RoboHATService:
         else:
             self.status.last_error = "blade_command_failed"
         return ok
-    
+
     async def emergency_stop(self) -> bool:
         """Send emergency stop command to RoboHAT"""
         logger.critical("Sending emergency stop to RoboHAT")
@@ -834,7 +859,7 @@ class RoboHATService:
         else:
             self.status.last_error = None
         return ok
-    
+
     async def clear_emergency(self) -> bool:
         """Clear emergency stop on RoboHAT"""
         logger.info("Clearing emergency stop on RoboHAT")
@@ -849,10 +874,10 @@ class RoboHATService:
         else:
             self.status.last_error = None
         return ok
-    
+
     def get_status(self) -> RoboHATStatus:
         """Get current RoboHAT status"""
-        self.status.timestamp = datetime.now(timezone.utc)
+        self.status.timestamp = datetime.now(UTC)
         return self.status
 
     async def _apply_estop_if_pending(self) -> None:
@@ -865,11 +890,11 @@ class RoboHATService:
         self._last_pwm = (1500, 1500)
         self._last_pwm_at = time.monotonic()
         self._estop_pending = False
-    
+
     @staticmethod
     def _mix_arcade_to_pwm(left_speed: float, right_speed: float) -> tuple[int, int]:
         """Convert differential wheel speeds into steer/throttle PWM microseconds.
-        
+
         Note: Navigation service sends left/right variables in swapped order
         (due to MDDRC10 motor driver physical wiring inversion). This arcade mix
         inverts the angular calculation to compensate.
@@ -887,8 +912,9 @@ class RoboHATService:
         return steer_us, throttle_us
 
     @staticmethod
-    def _scale_to_pwm(value: float, span: int = 450, center: int = 1500,
-                       dead_zone: int = 80) -> int:
+    def _scale_to_pwm(
+        value: float, span: int = 450, center: int = 1500, dead_zone: int = 80
+    ) -> int:
         """Convert a [-1, 1] value to PWM microseconds.
 
         ``dead_zone`` is the minimum µs offset from *center* that the motor
@@ -908,7 +934,7 @@ class RoboHATService:
     async def shutdown(self):
         """Shutdown RoboHAT service"""
         logger.info("Shutting down RoboHAT service")
-        
+
         self.running = False
 
         # Try to hand control back to RC so that the mower is safe even if the
@@ -917,7 +943,7 @@ class RoboHATService:
             await self._set_rc_enabled(True)
         except Exception:
             pass
-        
+
         # Cancel background tasks
         if self.watchdog_task:
             self.watchdog_task.cancel()
@@ -925,27 +951,27 @@ class RoboHATService:
                 await self.watchdog_task
             except asyncio.CancelledError:
                 pass
-        
+
         if self.read_task:
             self.read_task.cancel()
             try:
                 await self.read_task
             except asyncio.CancelledError:
                 pass
-        
+
         # Close serial connection
         if self.serial_conn and self.serial_conn.is_open:
             self.serial_conn.close()
-        
+
         self.status.serial_connected = False
         logger.info("RoboHAT service shutdown complete")
 
 
 # Global RoboHAT service instance
-robohat_service: Optional[RoboHATService] = None
+robohat_service: RoboHATService | None = None
 
 
-def get_robohat_service() -> Optional[RoboHATService]:
+def get_robohat_service() -> RoboHATService | None:
     """Get global RoboHAT service instance"""
     return robohat_service
 
@@ -983,7 +1009,7 @@ def _settings_profile_paths() -> Iterable[Path]:
     yield project_base / "settings.json"
 
 
-def _read_profile_robohat_port() -> Optional[str]:
+def _read_profile_robohat_port() -> str | None:
     """Extract RoboHAT serial port override from persisted settings if present."""
 
     for path in _settings_profile_paths():
@@ -1071,6 +1097,7 @@ def _known_excluded_devices() -> set[str]:
     if not imu_port:
         try:
             import yaml
+
             hw_cfg_path = os.path.join(os.path.dirname(__file__), "../../../config/hardware.yaml")
             with open(os.path.realpath(hw_cfg_path)) as f:
                 hw = yaml.safe_load(f) or {}
@@ -1082,7 +1109,7 @@ def _known_excluded_devices() -> set[str]:
     return excluded
 
 
-def _read_hardware_yaml_robohat_port() -> Optional[str]:
+def _read_hardware_yaml_robohat_port() -> str | None:
     """Read the optional motor_controller_port field from hardware.yaml.
 
     Returns None when the field is absent so auto-discovery proceeds normally.
@@ -1091,6 +1118,7 @@ def _read_hardware_yaml_robohat_port() -> Optional[str]:
     """
     try:
         import yaml
+
         hw_cfg_path = os.path.join(os.path.dirname(__file__), "../../../config/hardware.yaml")
         with open(os.path.realpath(hw_cfg_path)) as f:
             hw = yaml.safe_load(f) or {}
@@ -1105,7 +1133,7 @@ def _known_gps_devices() -> set[str]:
     return _known_excluded_devices()
 
 
-def _candidate_serial_ports(explicit: Optional[str] = None) -> list[str]:
+def _candidate_serial_ports(explicit: str | None = None) -> list[str]:
     """Build an ordered list of serial ports to try for RoboHAT.
 
     Priority order:
@@ -1127,7 +1155,7 @@ def _candidate_serial_ports(explicit: Optional[str] = None) -> list[str]:
     ordered: list[str] = []
     excluded_devices = _known_excluded_devices()
 
-    def add(port: Optional[str], *, require_exists: bool = False) -> None:
+    def add(port: str | None, *, require_exists: bool = False) -> None:
         if port is None:
             return
         value = str(port).strip()
@@ -1186,7 +1214,9 @@ def _candidate_serial_ports(explicit: Optional[str] = None) -> list[str]:
     return ordered
 
 
-async def initialize_robohat_service(serial_port: Optional[str] = None, baud_rate: int = 115200) -> bool:
+async def initialize_robohat_service(
+    serial_port: str | None = None, baud_rate: int = 115200
+) -> bool:
     """Initialize global RoboHAT service, probing common serial ports when needed."""
     global robohat_service
 
@@ -1209,7 +1239,7 @@ async def initialize_robohat_service(serial_port: Optional[str] = None, baud_rat
     if not candidates:
         candidates = [serial_port or "/dev/ttyACM0"]
 
-    last_attempt: Optional[RoboHATService] = None
+    last_attempt: RoboHATService | None = None
     for candidate in candidates:
         svc = RoboHATService(candidate, baud_rate)
         ok = await svc.initialize()
@@ -1244,7 +1274,7 @@ async def initialize_robohat_service(serial_port: Optional[str] = None, baud_rat
 async def shutdown_robohat_service():
     """Shutdown global RoboHAT service"""
     global robohat_service
-    
+
     if robohat_service:
         await robohat_service.shutdown()
         robohat_service = None

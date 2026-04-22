@@ -1,23 +1,21 @@
 from __future__ import annotations
 
 import uuid
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from ..models import InferenceResult, InferenceTask
 from ..core.persistence import persistence
+from ..models import InferenceResult, InferenceTask
 from ..services.ai_service import (
-    AINoFrameAvailableError,
     AIInferenceInputError,
     AIModelNotReadyError,
+    AINoFrameAvailableError,
     AIService,
     AIServiceError,
     get_ai_service,
 )
-
 
 router = APIRouter()
 
@@ -99,7 +97,7 @@ async def get_ai_status(
         _raise_ai_http_error(exc)
 
 
-@router.get("/api/v2/ai/results/recent", response_model=List[InferenceResult])
+@router.get("/api/v2/ai/results/recent", response_model=list[InferenceResult])
 async def get_recent_results(
     limit: int = Query(default=10, ge=1, le=50),
     ai_service: AIService = Depends(get_ai_service),
@@ -115,8 +113,8 @@ async def get_recent_results(
 async def run_uploaded_inference(
     request: Request,
     task: InferenceTask = Query(default=InferenceTask.OBSTACLE_DETECTION),
-    confidence_threshold: Optional[float] = Query(default=None, ge=0.0, le=1.0),
-    frame_id: Optional[str] = Query(default=None),
+    confidence_threshold: float | None = Query(default=None, ge=0.0, le=1.0),
+    frame_id: str | None = Query(default=None),
     ai_service: AIService = Depends(get_ai_service),
 ):
     """Run AI inference against an uploaded image."""
@@ -135,7 +133,7 @@ async def run_uploaded_inference(
 @router.post("/api/v2/ai/inference/latest", response_model=InferenceResult)
 async def run_latest_frame_inference(
     task: InferenceTask = Query(default=InferenceTask.OBSTACLE_DETECTION),
-    confidence_threshold: Optional[float] = Query(default=None, ge=0.0, le=1.0),
+    confidence_threshold: float | None = Query(default=None, ge=0.0, le=1.0),
     ai_service: AIService = Depends(get_ai_service),
 ):
     """Run AI inference against the latest camera frame."""

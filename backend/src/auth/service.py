@@ -1,8 +1,8 @@
 from __future__ import annotations
-import time
+
 import hashlib
+import time
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -22,7 +22,7 @@ class AuthService:
     def __init__(self):
         self._default_user = User(id="admin", username="admin")
 
-    def authenticate(self, username: str, password: str) -> Optional[User]:
+    def authenticate(self, username: str, password: str) -> User | None:
         if username == "admin" and password == "admin":
             return self._default_user
         return None

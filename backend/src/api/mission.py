@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
-from typing import List
+
+from ..models.mission import Mission, MissionCreationRequest, MissionStatus
 from ..services.mission_service import (
     MissionConflictError,
     MissionNotFoundError,
@@ -8,7 +9,6 @@ from ..services.mission_service import (
     MissionValidationError,
     get_mission_service,
 )
-from ..models.mission import Mission, MissionCreationRequest, MissionStatus
 
 router = APIRouter()
 
@@ -22,6 +22,7 @@ def _raise_mission_http_error(error: Exception) -> None:
         raise HTTPException(status_code=409, detail=str(error))
     raise HTTPException(status_code=500, detail=str(error))
 
+
 @router.post("/api/v2/missions/create", response_model=Mission)
 async def create_mission(
     request: MissionCreationRequest,
@@ -33,6 +34,7 @@ async def create_mission(
         return mission
     except Exception as e:
         _raise_mission_http_error(e)
+
 
 @router.post("/api/v2/missions/{mission_id}/start")
 async def start_mission(
@@ -46,6 +48,7 @@ async def start_mission(
     except Exception as e:
         _raise_mission_http_error(e)
 
+
 @router.post("/api/v2/missions/{mission_id}/pause")
 async def pause_mission(
     mission_id: str,
@@ -57,6 +60,7 @@ async def pause_mission(
         return {"status": "Mission paused"}
     except Exception as e:
         _raise_mission_http_error(e)
+
 
 @router.post("/api/v2/missions/{mission_id}/resume")
 async def resume_mission(
@@ -70,6 +74,7 @@ async def resume_mission(
     except Exception as e:
         _raise_mission_http_error(e)
 
+
 @router.post("/api/v2/missions/{mission_id}/abort")
 async def abort_mission(
     mission_id: str,
@@ -81,6 +86,7 @@ async def abort_mission(
         return {"status": "Mission aborted"}
     except Exception as e:
         _raise_mission_http_error(e)
+
 
 @router.get("/api/v2/missions/{mission_id}/status", response_model=MissionStatus)
 async def get_mission_status(
@@ -94,7 +100,8 @@ async def get_mission_status(
     except Exception as e:
         _raise_mission_http_error(e)
 
-@router.get("/api/v2/missions/list", response_model=List[Mission])
+
+@router.get("/api/v2/missions/list", response_model=list[Mission])
 async def list_missions(
     mission_service: MissionService = Depends(get_mission_service),
 ):

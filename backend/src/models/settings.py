@@ -7,20 +7,20 @@ system_configuration models continue to serve the internal configuration.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, List
+
 from pydantic import BaseModel, Field
 
 
 class HardwareSettings(BaseModel):
     sim_mode: bool = False
-    robohat_port: Optional[str] = None
+    robohat_port: str | None = None
 
 
 class NetworkSettings(BaseModel):
-    wifi_ssid: Optional[str] = None
-    wifi_password: Optional[str] = None
+    wifi_ssid: str | None = None
+    wifi_password: str | None = None
     ap_enabled: bool = False
-    ap_ssid: Optional[str] = None
+    ap_ssid: str | None = None
 
 
 class TelemetrySettings(BaseModel):
@@ -39,7 +39,7 @@ class ControlSettings(BaseModel):
 
 class MapsSettings(BaseModel):
     provider: str = "leaflet"
-    api_key: Optional[str] = None
+    api_key: str | None = None
     fallback_enabled: bool = True
     cache_tiles: bool = True
 
@@ -61,8 +61,10 @@ class SystemSettings(BaseModel):
     log_level: str = "INFO"
     auto_updates: bool = False
     remote_access: bool = False
-    branding_checksum: Optional[str] = None
-    unit_system: str = Field(default="metric", description="Preferred measurement system: metric or imperial.")
+    branding_checksum: str | None = None
+    unit_system: str = Field(
+        default="metric", description="Preferred measurement system: metric or imperial."
+    )
 
 
 class SettingsProfile(BaseModel):
@@ -98,9 +100,9 @@ class SettingsProfile(BaseModel):
         self.bump_version()
         return True
 
-    def validate_settings(self) -> List[str]:
+    def validate_settings(self) -> list[str]:
         """Basic validation aligned with unit tests expectations."""
-        issues: List[str] = []
+        issues: list[str] = []
         # Camera resolution validation: expect WIDTHxHEIGHT format
         res = self.camera.resolution
         if isinstance(res, str):
@@ -132,8 +134,10 @@ class SettingsProfile(BaseModel):
             issues.append("Invalid unit_system")
         return issues
 
-    def compute_branding_checksum(self, required_assets: List[str]) -> str:
-        import hashlib, os
+    def compute_branding_checksum(self, required_assets: list[str]) -> str:
+        import hashlib
+        import os
+
         hasher = hashlib.sha256()
         for p in sorted(required_assets):
             if os.path.exists(p):
@@ -143,6 +147,7 @@ class SettingsProfile(BaseModel):
         self.system.branding_checksum = checksum
         return checksum
 
-    def validate_branding_assets(self, required_assets: List[str]) -> bool:
+    def validate_branding_assets(self, required_assets: list[str]) -> bool:
         import os
+
         return all(os.path.exists(p) for p in required_assets)

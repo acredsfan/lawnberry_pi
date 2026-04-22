@@ -4,6 +4,7 @@ This module provides comprehensive logging, metrics collection, and observabilit
 features for the robotic lawn mower system, including structured JSON logging,
 performance metrics, system health monitoring, and log rotation.
 """
+
 import json
 import logging
 import logging.handlers
@@ -75,6 +76,7 @@ class ObservabilityEvent:
 @dataclass
 class SystemMetrics:
     """System performance metrics."""
+
     timestamp: float
     cpu_usage: float = 0.0
     memory_usage_mb: float = 0.0
@@ -89,7 +91,7 @@ class SystemMetrics:
 
 class StructuredFormatter(logging.Formatter):
     """Custom formatter for structured JSON logging."""
-    
+
     def format(self, record: logging.LogRecord) -> str:
         log_entry = {
             "timestamp": datetime.now(UTC).isoformat(),
@@ -201,7 +203,7 @@ class MetricsCollector:
             if use_psutil:
                 cpu_usage = float(psutil.cpu_percent(interval=None))
                 try:
-                    memory_usage_mb = float(psutil.virtual_memory().used) / (1024 ** 2)
+                    memory_usage_mb = float(psutil.virtual_memory().used) / (1024**2)
                 except Exception:  # pragma: no cover - psutil fallback
                     memory_usage_mb = 0.0
                 disk_usage_percent = float(psutil.disk_usage("/").percent)

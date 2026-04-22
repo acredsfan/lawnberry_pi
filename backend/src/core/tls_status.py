@@ -13,6 +13,7 @@ Notes:
   setfacl); a PermissionError produces a logged warning rather than silently
   falling through.
 """
+
 # ruff: noqa: I001
 from __future__ import annotations
 
@@ -118,8 +119,7 @@ def _detect_le_cert_path(domain_hint: str | None) -> tuple[Path | None, str | No
                 )
     except PermissionError:
         logger.warning(
-            "PermissionError iterating %s — "
-            "verify setfacl ACLs on /etc/letsencrypt/",
+            "PermissionError iterating %s — verify setfacl ACLs on /etc/letsencrypt/",
             LE_LIVE_DIR,
         )
     except Exception:
@@ -181,7 +181,7 @@ def _fetch_pem_from_endpoint(
         stop = output.find(end_marker)
         if start == -1 or stop == -1:
             return None
-        return output[start: stop + len(end_marker)]
+        return output[start : stop + len(end_marker)]
     except Exception:
         return None
 
@@ -225,9 +225,12 @@ def _probe_cert_via_tls(
     try:
         proc_sc = subprocess.run(
             [
-                "openssl", "s_client",
-                "-connect", f"{host}:{port}",
-                "-servername", "localhost",
+                "openssl",
+                "s_client",
+                "-connect",
+                f"{host}:{port}",
+                "-servername",
+                "localhost",
             ],
             input=b"",
             capture_output=True,

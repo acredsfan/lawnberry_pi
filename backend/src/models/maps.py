@@ -8,10 +8,10 @@ path continues to use the richer Zone-based models stored in
 fixtures lightweight while still allowing the service to bridge the two
 representations when necessary.
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import List, Optional, Dict
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -38,12 +38,12 @@ class LatLng(BaseModel):
 class WorkingBoundary(BaseModel):
     """Closed polygon describing the working area."""
 
-    polygon: List[LatLng]
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_modified: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    polygon: list[LatLng]
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_modified: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("polygon")
-    def _validate_polygon(cls, value: List[LatLng]) -> List[LatLng]:
+    def _validate_polygon(cls, value: list[LatLng]) -> list[LatLng]:
         if len(value) < 3:
             raise ValueError("Boundary polygon must contain at least 3 points")
         return value
@@ -54,10 +54,10 @@ class ExclusionZone(BaseModel):
 
     zone_id: str
     name: str
-    polygon: List[LatLng]
-    metadata: Dict[str, str] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_modified: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    polygon: list[LatLng]
+    metadata: dict[str, str] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_modified: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class Marker(BaseModel):
@@ -66,10 +66,10 @@ class Marker(BaseModel):
     marker_id: str
     name: str
     position: LatLng
-    icon: Optional[str] = None
-    metadata: Dict[str, str] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_modified: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    icon: str | None = None
+    metadata: dict[str, str] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_modified: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class MapConfiguration(BaseModel):
@@ -77,17 +77,17 @@ class MapConfiguration(BaseModel):
 
     config_id: str
     provider: str = "leaflet"
-    api_key: Optional[str] = None
-    working_boundary: Optional[WorkingBoundary] = None
-    exclusion_zones: List[ExclusionZone] = Field(default_factory=list)
-    markers: List[Marker] = Field(default_factory=list)
-    last_modified: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    api_key: str | None = None
+    working_boundary: WorkingBoundary | None = None
+    exclusion_zones: list[ExclusionZone] = Field(default_factory=list)
+    markers: list[Marker] = Field(default_factory=list)
+    last_modified: datetime = Field(default_factory=lambda: datetime.now(UTC))
     validated: bool = False
     config_version: int = 1
 
     def touch(self) -> None:
         """Update the modification timestamp."""
-        self.last_modified = datetime.now(timezone.utc)
+        self.last_modified = datetime.now(UTC)
 
     def add_exclusion_zone(self, zone: ExclusionZone) -> None:
         self.exclusion_zones.append(zone)

@@ -1,15 +1,17 @@
 from __future__ import annotations
+
 import asyncio
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from ..core.weather_client import OpenWeatherClient
 
 
 class WeatherService:
-    def __init__(self, ow_client: Optional[OpenWeatherClient] = None):
+    def __init__(self, ow_client: OpenWeatherClient | None = None):
         self.ow_client = ow_client or OpenWeatherClient()
-        self._sensor_manager_getter: Optional[Callable[[], Any]] = None
+        self._sensor_manager_getter: Callable[[], Any] | None = None
 
     def register_sensor_manager(self, getter: Callable[[], Any]) -> None:
         """Attach a callable that returns the active SensorManager.
@@ -19,7 +21,7 @@ class WeatherService:
         """
         self._sensor_manager_getter = getter
 
-    async def _get_environmental_snapshot_async(self) -> Optional[Dict[str, Any]]:
+    async def _get_environmental_snapshot_async(self) -> dict[str, Any] | None:
         if self._sensor_manager_getter is None:
             return None
         try:
@@ -55,7 +57,9 @@ class WeatherService:
             "altitude_m": altitude,
         }
 
-    async def get_current_async(self, latitude: Optional[float] = None, longitude: Optional[float] = None) -> Dict[str, Any]:
+    async def get_current_async(
+        self, latitude: float | None = None, longitude: float | None = None
+    ) -> dict[str, Any]:
         # Try external client (disabled by default)
         ext = None
         if latitude is not None and longitude is not None:
@@ -64,7 +68,7 @@ class WeatherService:
             except Exception:
                 ext = None
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         sensor_snapshot = await self._get_environmental_snapshot_async()
         if sensor_snapshot:
             sensor_snapshot["timestamp"] = now
@@ -85,7 +89,9 @@ class WeatherService:
             "pressure_hpa": None,
         }
 
-    def get_current(self, latitude: Optional[float] = None, longitude: Optional[float] = None) -> Dict[str, Any]:
+    def get_current(
+        self, latitude: float | None = None, longitude: float | None = None
+    ) -> dict[str, Any]:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -94,7 +100,7 @@ class WeatherService:
             raise RuntimeError("Call get_current_async() when inside an event loop")
         return asyncio.run(self.get_current_async(latitude=latitude, longitude=longitude))
 
-    def get_planning_advice(self, current: Dict[str, Any]) -> Dict[str, Any]:
+    def get_planning_advice(self, current: dict[str, Any]) -> dict[str, Any]:
         # Simple rule: if we lack data, return insufficient-data; else proceed
         reasons = []
         if current.get("temperature_c") is None or current.get("humidity_percent") is None:
