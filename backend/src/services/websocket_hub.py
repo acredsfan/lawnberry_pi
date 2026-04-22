@@ -140,7 +140,7 @@ class WebSocketHub:
     async def broadcast_to_topic(self, topic: str, data: dict):
         if topic not in self.subscriptions:
             return
-        
+
         payload = {
             "event": "telemetry.data",
             "topic": topic,
@@ -148,17 +148,24 @@ class WebSocketHub:
             "data": data
         }
         message = json.dumps(jsonable_encoder(payload), default=str)
-        
-        disconnected_clients = []
-        for client_id in self.subscriptions[topic]:
-            if client_id in self.clients:
-                try:
-                    await self.clients[client_id].send_text(message)
-                except Exception:
-                    disconnected_clients.append(client_id)
-                    
-        for client_id in disconnected_clients:
-            self.disconnect(client_id)
+
+        async def _send_one(client_id: str) -> str | None:
+            if client_id not in self.clients:
+                return client_id
+            try:
+                await asyncio.wait_for(
+                    self.clients[client_id].send_text(message),
+                    timeout=2.0,
+                )
+                return None
+            except Exception:
+                return client_id
+
+        client_ids = list(self.subscriptions[topic])
+        results = await asyncio.gather(*(_send_one(cid) for cid in client_ids))
+        for client_id in results:
+            if client_id is not None:
+                self.disconnect(client_id)
             
     async def start_telemetry_loop(self):
         if self._telemetry_task is not None:
