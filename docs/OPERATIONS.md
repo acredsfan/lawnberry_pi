@@ -162,7 +162,7 @@ Mission creation/start can succeed before the mower has enough verified autonomy
 watch the mission status contract instead of assuming `running` alone means the rover is moving.
 
 - Autonomous obstacle gating now uses the same configured ToF clearance threshold as manual drive:
-  `config/limits.yaml` → `tof_obstacle_distance_meters` (currently `0.2` m).
+  `config/limits.yaml` → `tof_obstacle_distance_meters` (currently ~0.1 m; see file for exact value).
 - If waypoint traversal cannot begin safely after the bounded verification window, the mission now fails with explicit detail
   instead of remaining indefinitely `running` / `executing` with no progress.
 - RoboHAT drive commands now wait for an explicit firmware PWM acknowledgement before the backend reports them accepted; if

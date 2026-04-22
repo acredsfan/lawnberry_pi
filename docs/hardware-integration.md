@@ -70,8 +70,17 @@ Verification steps:
 - Pi 5: /dev/ttyAMA4 → GPIO 12 (TXD4), GPIO 13 (RXD4)
 - Pi 4B: Alternative pins may be required; map to rpi4_alt_pin as specified (e.g., TXD4 on GPIO 24, RXD4 on GPIO 21). Verify with `dtoverlay=uart4` and `gpioinfo`.
 
+**IMU heading formula** (from `backend/src/services/navigation_service.py`):
+```
+adjusted_yaw = (-raw_yaw + imu_yaw_offset_degrees + session_heading_alignment) % 360.0
+```
+- `imu_yaw_offset_degrees`: static mechanical mounting offset from `config/hardware.yaml` (`imu.yaw_offset_degrees`). Must be `0.0` unless the IMU is physically rotated in its enclosure — derive the correct value using the calibration service, not by guessing.
+- `session_heading_alignment`: dynamic per-mission offset derived from GPS Course Over Ground (COG) during the heading bootstrap drive at mission start. Resets at each new mission.
+
+**GPS COG heading bootstrap**: At each mission start, the navigation service drives briefly forward at ~75% throttle for up to 3 seconds. As soon as a valid GPS COG reading is available, `session_heading_alignment` is set and the bootstrap drive stops. This compensates for the BNO085's arbitrary yaw zero at power-on.
+
 ### GPS
-- Preferred: USB (ZED-F9P RTK) → /dev/ttyACM*
+- Preferred: USB (ZED-F9P RTK) → `/dev/lawnberry-gps` (udev symlink; configured via `gps.usb_device` in `config/hardware.yaml`)
 - Alternative: UART0 for NEO-8M → /dev/serial0 at 115200 baud
 
 #### RTK Positioning with NTRIP Corrections
@@ -105,7 +114,8 @@ curl http://localhost:8081/api/v2/sensors/health | jq '.gps'
 ```
 
 ### Drive Controller: RoboHAT RP2040 → Cytron MDDRC10 (preferred)
-- Serial link: /dev/serial0 or /dev/ttyACM0
+- Serial link (auto-discovery order when `motor_controller_port` is blank): `/dev/robohat` (udev symlink → `/dev/ttyACM0`), `/dev/serial0`, then `ttyAMA*` / `ttyACM*`; `/dev/ttyAMA4` (IMU) is always excluded
+- Explicit port override: set `motor_controller_port` in `config/hardware.yaml` (current default: `/dev/serial0`)
 - PWM and direction handled on RoboHAT; Pi communicates via serial API
 - Encoders wired to RoboHAT for real-time counting
 

@@ -56,8 +56,8 @@ initialization. On a non-Pi machine this usually degrades gracefully, but it is 
 - Hardware Integration: `docs/hardware-integration.md`
 - Operations Guide: `docs/OPERATIONS.md`
 - Contributing Guide: `CONTRIBUTING.md` (includes TODO policy)
-- Feature Specifications: `specs/004-lawnberry-pi-v2/`
-- System Architecture: See `memory/agent_journal.md` for technical details
+- Feature Specifications: `spec/hardware.yaml` (canonical hardware baseline), `spec/agent_rules.md`
+- System Architecture: See `docs/code_structure_overview.md` for subsystem and callable-interface orientation
 - Testing: `tests/` (unit, integration, contract tests)
 
 ### Access Points

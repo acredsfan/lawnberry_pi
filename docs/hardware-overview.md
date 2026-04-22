@@ -42,7 +42,7 @@ For canonical device lists, pins, and supported alternatives, refer first to `sp
     │  └─ SSD1306 Display     - 0x3C              │           │
     │                                             │           │
     │  Serial/UART:                               │           │
-    │  ├─ GPS RTK Module   - /dev/ttyACM1         │           │
+    │  ├─ GPS RTK Module   - /dev/lawnberry-gps      │           │
     │  ├─ BNO085 IMU       - /dev/ttyAMA4         │           │ <----(Pi 5 UART4, GPIO12/13)
     │  └─ RoboHAT Comms    - /dev/serial0         │           │
     │                                             │           │
@@ -96,7 +96,7 @@ Raspberry Pi 4B (4–8GB) remains a supported fallback platform, but Pi 5 is the
 - PWM generation for motor control
 - Hall effect sensor monitoring
 - I2C communication with Raspberry Pi
-- Serial bridge to main compute via /dev/ttyACM0 or /dev/serial0
+- Serial bridge to main compute via `/dev/robohat` (udev symlink → `/dev/ttyACM0`) or `/dev/serial0`
 
 **Key Responsibilities**:
 - Drive motor PWM control and direction
@@ -123,7 +123,7 @@ The RoboHAT provides a serial API specifically for drive motor control. The back
 - u-blox ZED-F9P GNSS receiver
 - Multi-constellation support (GPS, GLONASS, Galileo, BeiDou)
 - RTK corrections for centimeter-level accuracy
-- USB interface to Raspberry Pi (typically `/dev/ttyACM*`)
+- USB interface to Raspberry Pi via `/dev/lawnberry-gps` (udev symlink; configured in `config/hardware.yaml`)
 - External antenna for optimal satellite reception
 
 **Accuracy Levels**:
