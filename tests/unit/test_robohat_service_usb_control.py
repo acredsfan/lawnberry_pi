@@ -592,3 +592,45 @@ async def test_initialize_robohat_service_attempts_candidates(monkeypatch):
     assert attempts == ["/dev/ttyACM0", "/dev/ttyACM1"]
     assert robohat_module.robohat_service is not None
     assert robohat_module.robohat_service.serial_port == "/dev/ttyACM1"
+
+
+@pytest.mark.asyncio
+async def test_estop_pending_set_when_serial_disconnected():
+    """emergency_stop() when serial is None must set _estop_pending."""
+    from unittest.mock import MagicMock
+
+    svc = RoboHATService.__new__(RoboHATService)
+    svc.serial_conn = None
+    svc.running = False
+    svc._estop_pending = False
+    svc.status = MagicMock()
+
+    result = await svc.emergency_stop()
+
+    assert svc._estop_pending is True
+    assert result is False  # serial not available, can't send yet
+
+
+@pytest.mark.asyncio
+async def test_estop_pending_sends_neutral_on_reconnect():
+    """On serial reconnect, if _estop_pending, neutral PWM sent before any other command."""
+    from unittest.mock import AsyncMock
+
+    svc = RoboHATService.__new__(RoboHATService)
+    svc._estop_pending = True
+    sent_lines = []
+
+    async def _fake_send_line(line):
+        sent_lines.append(line)
+        return True
+
+    svc._send_line = _fake_send_line
+    svc._last_pwm = (1500, 1500)
+    import time
+    svc._last_pwm_at = time.monotonic()
+
+    await svc._apply_estop_if_pending()
+
+    assert sent_lines[0] == "pwm,1500,1500"
+    assert sent_lines[1] == "blade=off"
+    assert svc._estop_pending is False

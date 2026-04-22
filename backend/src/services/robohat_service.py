@@ -119,6 +119,9 @@ class RoboHATService:
         # Track last PWM sent so we can refresh it to avoid firmware USB timeout
         self._last_pwm: tuple[int, int] = (1500, 1500)
         self._last_pwm_at: float = 0.0
+        # Set True when emergency_stop() is called while serial is unavailable;
+        # cleared once neutral PWM is delivered after reconnect.
+        self._estop_pending: bool = False
         # Counter incremented each time the firmware acks a PWM command.  Using a
         # counter avoids the race where a [STATUS] message overwrites
         # last_watchdog_echo between the PWM send and the ack-poll iteration.
@@ -264,6 +267,7 @@ class RoboHATService:
 
             self.status.serial_connected = True
             self.running = True
+            await self._apply_estop_if_pending()  # honour any e-stop received while disconnected
 
             # Start background tasks
             self.watchdog_task = asyncio.create_task(self._watchdog_loop())
@@ -757,6 +761,10 @@ class RoboHATService:
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
             return False
 
+        if self._estop_pending:
+            logger.warning("Motor command refused: emergency stop pending")
+            return False
+
         if not await self._ensure_usb_control(timeout=0.9, retries=2):
             return False
 
@@ -804,6 +812,8 @@ class RoboHATService:
         """Send emergency stop command to RoboHAT"""
         logger.critical("Sending emergency stop to RoboHAT")
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
+            self._estop_pending = True
+            logger.critical("Serial not available; e-stop queued for next reconnect")
             return False
 
         usb_ready = await self._ensure_usb_control(timeout=0.6, retries=2)
@@ -844,6 +854,17 @@ class RoboHATService:
         """Get current RoboHAT status"""
         self.status.timestamp = datetime.now(timezone.utc)
         return self.status
+
+    async def _apply_estop_if_pending(self) -> None:
+        """Send queued emergency stop if one was requested while disconnected."""
+        if not self._estop_pending:
+            return
+        logger.critical("Applying queued emergency stop after serial reconnect")
+        await self._send_line("pwm,1500,1500")
+        await self._send_line("blade=off")
+        self._last_pwm = (1500, 1500)
+        self._last_pwm_at = time.monotonic()
+        self._estop_pending = False
     
     @staticmethod
     def _mix_arcade_to_pwm(left_speed: float, right_speed: float) -> tuple[int, int]:
