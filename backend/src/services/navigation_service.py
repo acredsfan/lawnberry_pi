@@ -226,7 +226,6 @@ class NavigationService:
     
     async def execute_mission(self, mission: "Mission", mission_service: "MissionStatusReader"):
         """Execute a mission by navigating to each waypoint."""
-
         logger.info(f"Starting mission execution: {mission.id} - {mission.name}")
         self.navigation_state.navigation_mode = NavigationMode.AUTO
         self.navigation_state.path_status = PathStatus.EXECUTING
@@ -293,7 +292,9 @@ class NavigationService:
                         self.navigation_state.navigation_mode = NavigationMode.IDLE
                         return
                 else:
-                    mission_service._sync_status_with_navigation(mission.id)
+                    await mission_service.update_waypoint_progress(
+                        mission.id, self.navigation_state.current_waypoint_index
+                    )
 
                 # The go_to_waypoint method is blocking until the waypoint is reached or interrupted.
                 # The loop will then proceed to the next waypoint.

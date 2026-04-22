@@ -31,6 +31,7 @@ class DummyNavigationService:
         self.execute_exception: Exception | None = None
 
     async def execute_mission(self, mission, mission_service=None):
+        # mission_service intentionally unused in this test stub
         if self._mission_gate is not None:
             await self._mission_gate.wait()
         if self.execute_exception is not None:

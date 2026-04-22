@@ -30,6 +30,7 @@ class DummyNavigationService:
         self._mission_gate: asyncio.Event | None = None
 
     async def execute_mission(self, mission, mission_service=None):
+        # mission_service intentionally unused in this test stub
         if self._mission_gate is not None:
             await self._mission_gate.wait()
         return None

@@ -129,6 +129,23 @@ class MissionService:
 
         self._persist_mission_status(mission_id)
 
+    async def update_waypoint_progress(self, mission_id: str, waypoint_index: int) -> None:
+        """Update waypoint progress in mission status (MissionStatusReader protocol method).
+
+        Called by NavigationService after each waypoint is reached, passing the
+        current waypoint index directly so this method has no back-reference to
+        NavigationService.
+        """
+        mission = self.missions.get(mission_id)
+        status = self.mission_statuses.get(mission_id)
+        if mission is None or status is None:
+            return
+        status.current_waypoint_index = self._clamp_waypoint_index(mission, waypoint_index)
+        status.completion_percentage = self._calculate_completion_percentage(
+            mission, status.current_waypoint_index
+        )
+        self._persist_mission_status(mission_id)
+
     async def recover_persisted_missions(self) -> None:
         recovered_missions: Dict[str, Mission] = {}
         persisted_states: Dict[str, dict] = {}
