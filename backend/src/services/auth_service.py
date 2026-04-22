@@ -166,14 +166,22 @@ class RateLimiter:
 class AuthService:
     """Main authentication service"""
     
-    def __init__(self, operator_credential: str = "operator123"):
+    def __init__(self, operator_credential: str = ""):  # ignored — env var required in non-SIM_MODE
         # Managers
         self.password_manager = PasswordManager()
         self.jwt_manager = JWTManager()
         self.rate_limiter = RateLimiter(failure_limit=5, lockout_seconds=30)
 
         # Single shared operator credential (per constitutional requirement)
-        default_secret = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL", operator_credential)
+        self._simulation_mode = os.getenv("SIM_MODE", "0") == "1"
+        _raw_cred = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL")
+        if not _raw_cred and not self._simulation_mode:
+            raise RuntimeError(
+                "LAWN_BERRY_OPERATOR_CREDENTIAL is required. "
+                "Set it in /etc/lawnberry.env or the systemd unit Environment= directive. "
+                "Example: LAWN_BERRY_OPERATOR_CREDENTIAL=your-secret-passphrase"
+            )
+        default_secret = _raw_cred or "sim-mode-credential"
         self.operator_credential_hash = self._hash_credential(default_secret)
 
         # Active sessions
@@ -183,7 +191,7 @@ class AuthService:
         self.session_timeout_hours = 8
         self.require_https = False  # Would be True in production
         self.audit_logging_enabled = True
-        self._simulation_mode = os.getenv("SIM_MODE", "0") == "1"
+        # _simulation_mode is set above (before credential check — do not duplicate)
         
     def _hash_credential(self, credential: str) -> str:
         """Hash the operator credential"""

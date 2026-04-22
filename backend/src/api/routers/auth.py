@@ -348,7 +348,11 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
     credential = payload.credential
     if credential is None and payload.username is not None and payload.password is not None:
         if payload.username == "admin" and payload.password == "admin":
-            credential = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL", "operator123")
+            credential = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL")
+            if not credential:
+                raise RuntimeError(
+                    "LAWN_BERRY_OPERATOR_CREDENTIAL is required — cannot authenticate without it."
+                )
         else:
             credential = ""
 
