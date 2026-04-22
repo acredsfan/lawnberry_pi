@@ -290,7 +290,7 @@ class MissionService:
             current_waypoint_index=0,
         )
 
-        task = asyncio.create_task(self.nav_service.execute_mission(mission))
+        task = asyncio.create_task(self.nav_service.execute_mission(mission, self))
         self.mission_tasks[mission_id] = task
         self._persist_mission_status(mission_id)
 
@@ -398,7 +398,7 @@ class MissionService:
 
         active_task = self.mission_tasks.get(mission_id)
         if active_task is None or active_task.done():
-            task = asyncio.create_task(self.nav_service.execute_mission(mission))
+            task = asyncio.create_task(self.nav_service.execute_mission(mission, self))
             self.mission_tasks[mission_id] = task
             task.add_done_callback(self._mission_completed_callback(mission_id))
         else:

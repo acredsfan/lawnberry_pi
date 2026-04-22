@@ -30,7 +30,7 @@ class DummyNavigationService:
         self.set_speed_failures_remaining = 0
         self.execute_exception: Exception | None = None
 
-    async def execute_mission(self, mission):
+    async def execute_mission(self, mission, mission_service=None):
         if self._mission_gate is not None:
             await self._mission_gate.wait()
         if self.execute_exception is not None:

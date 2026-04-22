@@ -64,7 +64,7 @@ async def test_execute_mission_waits_while_paused(monkeypatch):
 
     go_to_waypoint_called = asyncio.Event()
 
-    async def fake_go_to_waypoint(_mission, _waypoint):
+    async def fake_go_to_waypoint(_mission, _waypoint, _ms):
         go_to_waypoint_called.set()
         nav.navigation_state.current_waypoint_index = len(nav.navigation_state.planned_path)
         return True
@@ -75,7 +75,7 @@ async def test_execute_mission_waits_while_paused(monkeypatch):
     monkeypatch.setattr(nav, "go_to_waypoint", fake_go_to_waypoint)
     monkeypatch.setattr(nav, "_bootstrap_heading_from_gps_cog", fake_bootstrap)
 
-    task = asyncio.create_task(nav.execute_mission(mission))
+    task = asyncio.create_task(nav.execute_mission(mission, mission_service))
     await asyncio.sleep(0.2)
 
     assert go_to_waypoint_called.is_set() is False
@@ -114,7 +114,7 @@ async def test_go_to_waypoint_holds_until_fresh_gps_fix(monkeypatch):
 
     monkeypatch.setattr(nav, "set_speed", fake_set_speed)
 
-    task = asyncio.create_task(nav.go_to_waypoint(mission, mission.waypoints[0]))
+    task = asyncio.create_task(nav.go_to_waypoint(mission, mission.waypoints[0], mission_service))
 
     await asyncio.sleep(0.3)
     assert task.done() is False
@@ -256,7 +256,7 @@ async def test_go_to_waypoint_fails_when_heading_missing_too_long(monkeypatch):
     monkeypatch.setattr(nav, "set_speed", fake_set_speed)
 
     with pytest.raises(RuntimeError, match="Heading unavailable while navigating waypoint"):
-        await nav.go_to_waypoint(mission, mission.waypoints[0])
+        await nav.go_to_waypoint(mission, mission.waypoints[0], mission_service)
 
 
 @pytest.mark.asyncio
@@ -275,7 +275,7 @@ async def test_execute_mission_marks_navigation_failed_on_waypoint_error(monkeyp
 
     stop_reasons: list[str] = []
 
-    async def fake_go_to_waypoint(_mission, _waypoint):
+    async def fake_go_to_waypoint(_mission, _waypoint, _ms):
         raise RuntimeError("Heading unavailable while navigating waypoint")
 
     async def fake_deliver_stop_command(*, reason: str, retries: int = 3, initial_delay: float = 0.1):
@@ -290,7 +290,7 @@ async def test_execute_mission_marks_navigation_failed_on_waypoint_error(monkeyp
     monkeypatch.setattr(nav, "_bootstrap_heading_from_gps_cog", fake_bootstrap)
 
     with pytest.raises(RuntimeError, match="Heading unavailable while navigating waypoint"):
-        await nav.execute_mission(mission)
+        await nav.execute_mission(mission, mission_service)
 
     assert nav.navigation_state.path_status == PathStatus.FAILED
     assert nav.navigation_state.navigation_mode == NavigationMode.IDLE
@@ -404,3 +404,25 @@ async def test_bootstrap_geofence_violation_aborts_mission():
         await nav._run_bootstrap_and_check_geofence()
 
     nav._latch_global_emergency_state.assert_called_once()
+
+
+def test_navigation_service_accepts_mission_status_reader_protocol():
+    """NavigationService must accept any object satisfying MissionStatusReader, not MissionService."""
+    from backend.src.protocols.mission import MissionStatusReader
+    from unittest.mock import AsyncMock
+
+    class FakeMissionService:
+        async def update_waypoint_progress(self, mission_id: str, waypoint_index: int) -> None:
+            pass
+        async def mark_mission_complete(self, mission_id: str) -> None:
+            pass
+        async def mark_mission_failed(self, mission_id: str, reason: str) -> None:
+            pass
+        # Extra attribute not in protocol — protocol is structural, this is fine
+        mission_statuses: dict = {}
+
+    fake = FakeMissionService()
+    # If this import works, the protocol module exists
+    from backend.src.protocols.mission import MissionStatusReader
+    # Protocol structural check (runtime)
+    assert isinstance(fake, MissionStatusReader)

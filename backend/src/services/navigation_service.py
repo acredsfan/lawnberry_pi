@@ -3,6 +3,8 @@ NavigationService for LawnBerry Pi v2
 Path planning, navigation, and sensor fusion with safety constraints
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -11,7 +13,7 @@ import os
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ..core.config_loader import ConfigLoader
 from ..nav.geoutils import haversine_m, point_in_polygon
@@ -26,6 +28,9 @@ from ..models import (
     Waypoint,
 )
 from .robohat_service import get_robohat_service
+
+if TYPE_CHECKING:
+    from ..protocols.mission import MissionStatusReader
 
 logger = logging.getLogger(__name__)
 
@@ -219,10 +224,8 @@ class NavigationService:
         self.navigation_state.navigation_mode = NavigationMode.IDLE
         return True
     
-    async def execute_mission(self, mission: "Mission"):
+    async def execute_mission(self, mission: "Mission", mission_service: "MissionStatusReader"):
         """Execute a mission by navigating to each waypoint."""
-        from .mission_service import get_mission_service
-        mission_service = get_mission_service()
 
         logger.info(f"Starting mission execution: {mission.id} - {mission.name}")
         self.navigation_state.navigation_mode = NavigationMode.AUTO
@@ -282,7 +285,7 @@ class NavigationService:
                     self.navigation_state.navigation_mode = NavigationMode.AUTO
 
                 current_mission_waypoint = mission.waypoints[self.navigation_state.current_waypoint_index]
-                waypoint_reached = await self.go_to_waypoint(mission, current_mission_waypoint)
+                waypoint_reached = await self.go_to_waypoint(mission, current_mission_waypoint, mission_service)
                 if not waypoint_reached:
                     status = mission_service.mission_statuses.get(mission.id)
                     if not status or status.status != "running":
@@ -313,10 +316,8 @@ class NavigationService:
         finally:
             self._mission_execution_active = False
 
-    async def go_to_waypoint(self, mission: "Mission", waypoint: "MissionWaypoint") -> bool:
+    async def go_to_waypoint(self, mission: "Mission", waypoint: "MissionWaypoint", mission_service: "MissionStatusReader") -> bool:
         """Navigate to a single waypoint and block until arrival."""
-        from .mission_service import get_mission_service
-        mission_service = get_mission_service()
         
         target_pos = Position(latitude=waypoint.lat, longitude=waypoint.lon)
         logger.info(f"Navigating to waypoint: {target_pos.latitude}, {target_pos.longitude}")

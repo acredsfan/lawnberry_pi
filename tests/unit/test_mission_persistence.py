@@ -29,7 +29,7 @@ class DummyNavigationService:
         self.stop_navigation_results: list[bool] = []
         self._mission_gate: asyncio.Event | None = None
 
-    async def execute_mission(self, mission):
+    async def execute_mission(self, mission, mission_service=None):
         if self._mission_gate is not None:
             await self._mission_gate.wait()
         return None
