@@ -143,6 +143,20 @@ class HealthService:
                     return self._normalize_sensor_health(payload)
         return self._default_sensor_health()
 
+    async def _async_evaluate_sensor_health(self) -> dict[str, Any]:
+        """Async variant — use from async callers to avoid asyncio.run() inside event loop."""
+        if self._sensor_health_provider:
+            try:
+                payload = self._sensor_health_provider()
+                if asyncio.iscoroutine(payload):
+                    payload = await payload
+            except Exception as exc:
+                logger.debug("Custom sensor health provider failed: %s", exc, exc_info=exc)
+            else:
+                if isinstance(payload, dict):
+                    return self._normalize_sensor_health(payload)
+        return await self._async_sensor_health_probe()
+
     def _normalize_sensor_health(self, payload: dict[str, Any]) -> dict[str, Any]:
         components = payload.get("components")
         if not isinstance(components, dict):

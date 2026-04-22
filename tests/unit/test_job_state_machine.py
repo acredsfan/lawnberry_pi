@@ -66,3 +66,39 @@ def test_job_state_machine_fail_records_reason():
     fsm.fail("low battery")
     assert job.state == JobState.FAILED
     assert job.error_message == "low battery"
+
+
+@pytest.mark.asyncio
+async def test_job_task_exception_logged(caplog):
+    """Exceptions from _execute_job must be logged, not silently discarded."""
+    import logging
+    import asyncio
+    from backend.src.services.jobs_service import JobsService, JobStatus
+    from backend.src.models.job import Job, JobType, JobPriority
+    from datetime import datetime, timezone
+
+    svc = JobsService()
+
+    async def _raise(_job):
+        raise ValueError("test job failure")
+
+    svc._execute_job = _raise  # monkey-patch to force unhandled exception
+
+    job = Job(
+        id="j1",
+        name="bad",
+        job_type=JobType.SCHEDULED_MOW,
+        status=JobStatus.PENDING,
+        priority=JobPriority.NORMAL,
+        zones=[],
+        created_at=datetime.now(timezone.utc),
+    )
+    svc.jobs["j1"] = job
+
+    with caplog.at_level(logging.ERROR, logger="backend.src.services.jobs_service"):
+        svc.start_job("j1")
+        await asyncio.sleep(0.2)
+
+    all_messages = " ".join(r.message for r in caplog.records)
+    assert "test job failure" in all_messages or "Unhandled" in all_messages, \
+        f"Expected error log for failed job task; caplog: {all_messages}"

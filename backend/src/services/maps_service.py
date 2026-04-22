@@ -335,8 +335,11 @@ class MapsService:
             result = handler(config.config_id, json_payload)
 
         if asyncio.iscoroutine(result):
-            self._ensure_not_running_loop()
-            asyncio.run(result)
+            logger.error(
+                "save_map_configuration: persistence returned a coroutine unexpectedly; "
+                "use an async persistence layer instead of asyncio.run()"
+            )
+            result.close()  # suppress ResourceWarning without running the coroutine
         return config
 
     def load_map_configuration(
@@ -351,8 +354,12 @@ class MapsService:
 
         result = handler(config_id)
         if asyncio.iscoroutine(result):
-            self._ensure_not_running_loop()
-            result = asyncio.run(result)
+            logger.error(
+                "load_map_configuration: persistence returned a coroutine unexpectedly; "
+                "returning None"
+            )
+            result.close()
+            return None
 
         if not result:
             return None

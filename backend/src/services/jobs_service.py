@@ -18,6 +18,7 @@ class JobsService:
         self.job_counter = 0
         self.scheduler_running = False
         self._scheduler_task: Optional[asyncio.Task] = None
+        self._running_tasks: set[asyncio.Task] = set()
         
     def create_job(self, name: str, job_type: JobType = JobType.SCHEDULED_MOW, 
                    zones: List[str] = None, priority: JobPriority = JobPriority.NORMAL,
@@ -88,10 +89,20 @@ class JobsService:
             
         job.status = JobStatus.RUNNING
         job.started_at = datetime.now(timezone.utc)
-        
-        # Start job execution (placeholder)
-        asyncio.create_task(self._execute_job(job))
+
+        task = asyncio.create_task(self._execute_job(job))
+        self._running_tasks.add(task)
+        task.add_done_callback(self._running_tasks.discard)
+        task.add_done_callback(self._on_job_task_done)
         return True
+
+    def _on_job_task_done(self, task: asyncio.Task) -> None:
+        """Log any unhandled exception from a job task."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("Unhandled exception in job task: %s", exc, exc_info=exc)
         
     def pause_job(self, job_id: str) -> bool:
         """Pause a running job."""
@@ -154,6 +165,15 @@ class JobsService:
             except asyncio.CancelledError:
                 pass
             self._scheduler_task = None
+
+    async def shutdown(self) -> None:
+        """Cancel all running job tasks and stop the scheduler."""
+        await self.stop_scheduler()
+        for task in list(self._running_tasks):
+            task.cancel()
+        if self._running_tasks:
+            await asyncio.gather(*self._running_tasks, return_exceptions=True)
+        self._running_tasks.clear()
             
     async def _scheduler_loop(self):
         """Main scheduler loop."""

@@ -266,3 +266,14 @@ def test_sensor_status_rollup_with_plain_strings(tmp_path: Path):
 
     assert payload["status"] == "healthy"
     assert payload["components"]["gps"]["status"] == "online"
+
+
+@pytest.mark.asyncio
+async def test_async_evaluate_sensor_health_works_inside_event_loop():
+    """_async_evaluate_sensor_health must not call asyncio.run() inside running loop."""
+    from backend.src.core.health import HealthService
+
+    monitor = HealthService()
+    result = await monitor._async_evaluate_sensor_health()
+    assert isinstance(result, dict)
+    assert "status" in result
