@@ -251,7 +251,7 @@ class NavigationService:
         self._heading_alignment_sample_count = 0
         self._gps_cog_history.clear()
         self._save_alignment_to_disk("mission_start_reset")
-        await self._bootstrap_heading_from_gps_cog()
+        await self._run_bootstrap_and_check_geofence()
 
         # Load yard boundary from map zones so geofence enforcement is active for this mission
         self._load_boundaries_from_zones()
@@ -780,6 +780,30 @@ class NavigationService:
         finally:
             await self._deliver_stop_command(reason="heading bootstrap")
             await asyncio.sleep(0.3)
+
+    async def _run_bootstrap_and_check_geofence(self) -> None:
+        """Run heading bootstrap then abort if mower is outside geofence boundary.
+
+        Called once at mission start after reset. Raises RuntimeError and latches
+        the global emergency state if the position is outside the safety boundary.
+        """
+        await self._bootstrap_heading_from_gps_cog()
+
+        if (
+            self.navigation_state.safety_boundaries
+            and self.navigation_state.current_position
+        ):
+            outer_boundary = self.navigation_state.safety_boundaries[0]
+            polygon = [(p.latitude, p.longitude) for p in outer_boundary]
+            cur = self.navigation_state.current_position
+            if not point_in_polygon(cur.latitude, cur.longitude, polygon):
+                self._latch_global_emergency_state()
+                logger.error(
+                    "Bootstrap drive exited geofence at (%.6f, %.6f) — mission aborted",
+                    cur.latitude,
+                    cur.longitude,
+                )
+                raise RuntimeError("Bootstrap drive exited geofence — mission aborted")
 
     async def _deliver_stop_command(
         self,

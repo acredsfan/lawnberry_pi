@@ -376,3 +376,31 @@ async def test_gps_reacquisition_no_mismatch_warning_when_within_threshold(caplo
         if "gps re-acquired" in r.message.lower() and r.levelno == logging.INFO
     ]
     assert info_resync, "Expected an INFO re-sync log on clean GPS re-acquisition"
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_geofence_violation_aborts_mission():
+    """Bootstrap drive that exits geofence must latch emergency and abort."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    nav = NavigationService.__new__(NavigationService)
+    from backend.src.models import NavigationState
+    state = NavigationState()
+    # Position outside boundary square (0,0)-(1,1)
+    state.current_position = Position(latitude=5.0, longitude=5.0)
+    state.safety_boundaries = [[
+        Position(latitude=0.0, longitude=0.0),
+        Position(latitude=0.0, longitude=1.0),
+        Position(latitude=1.0, longitude=1.0),
+        Position(latitude=1.0, longitude=0.0),
+    ]]
+    nav.navigation_state = state
+    nav._global_emergency_active = MagicMock(return_value=False)
+    nav._latch_global_emergency_state = MagicMock()
+    nav._bootstrap_heading_from_gps_cog = AsyncMock()
+    nav._load_boundaries_from_zones = MagicMock()
+
+    with pytest.raises(RuntimeError, match="Bootstrap drive exited geofence"):
+        await nav._run_bootstrap_and_check_geofence()
+
+    nav._latch_global_emergency_state.assert_called_once()
