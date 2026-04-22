@@ -7,6 +7,7 @@ persistent data like job schedules, configuration, and telemetry history.
 import sqlite3
 import json
 import logging
+import threading
 from pathlib import Path
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -176,11 +177,15 @@ class PersistenceLayer:
     def __init__(self, db_path: str = "data/lawnberry.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
         self._init_database()
     
     def _init_database(self):
         """Initialize database and run migrations."""
         with self.get_connection() as conn:
+            # Enable WAL mode for concurrent read/write access
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA wal_autocheckpoint=1000")
             # Get current schema version
             current_version = self._get_schema_version(conn)
             
@@ -202,7 +207,12 @@ class PersistenceLayer:
     
     @contextmanager
     def get_connection(self) -> Generator[sqlite3.Connection, None, None]:
-        """Get database connection with proper cleanup."""
+        """Get database connection with proper cleanup.
+
+        A threading.Lock serialises write operations so concurrent asyncio
+        tasks (and any background threads) don't collide on the same WAL
+        database connection.
+        """
         conn = sqlite3.connect(
             str(self.db_path),
             timeout=30.0,
@@ -210,7 +220,8 @@ class PersistenceLayer:
         )
         conn.row_factory = sqlite3.Row
         try:
-            yield conn
+            with self._lock:
+                yield conn
         finally:
             conn.close()
     
