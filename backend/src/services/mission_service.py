@@ -356,18 +356,36 @@ class MissionService:
                     status.completion_percentage = 100
                     status.detail = None
                     self._persist_mission_status(mission_id)
+                    # Schedule broadcast on the running event loop (safe fire-and-forget from sync callback)
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(
+                            self._broadcast_status(mission_id, "Mission completed")
+                        )
             except asyncio.CancelledError:
                 status = self.mission_statuses.get(mission_id)
                 if status:
                     status.status = MissionLifecycleStatus.ABORTED
                     status.detail = "Mission execution cancelled"
                     self._persist_mission_status(mission_id)
+                    # Schedule broadcast on the running event loop (safe fire-and-forget from sync callback)
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(
+                            self._broadcast_status(mission_id, getattr(status, "detail", "") or "")
+                        )
             except Exception as e:
                 status = self.mission_statuses.get(mission_id)
                 if status:
                     status.status = MissionLifecycleStatus.FAILED
                     status.detail = str(e)
                     self._persist_mission_status(mission_id)
+                    # Schedule broadcast on the running event loop (safe fire-and-forget from sync callback)
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(
+                            self._broadcast_status(mission_id, getattr(status, "detail", "") or "")
+                        )
                 logger.exception("Mission %s failed", mission_id)
             finally:
                 self.mission_tasks.pop(mission_id, None)
@@ -608,5 +626,6 @@ def get_mission_service(
     elif websocket_hub is not None and _mission_service_instance._websocket_hub is None:
         # Allow the hub to be injected after first construction (lifespan priming)
         _mission_service_instance._websocket_hub = websocket_hub
+    # else: singleton already has a hub; new hub is ignored
     return _mission_service_instance
 
