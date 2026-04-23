@@ -426,3 +426,137 @@ def test_navigation_service_accepts_mission_status_reader_protocol():
     from backend.src.protocols.mission import MissionStatusReader
     # Protocol structural check (runtime)
     assert isinstance(fake, MissionStatusReader)
+
+
+@pytest.mark.asyncio
+async def test_set_speed_swaps_args_to_send_motor_command(monkeypatch):
+    """set_speed(left, right) must call send_motor_command(right_norm, left_norm).
+
+    This cross-service contract test guards against future double-inversion regressions.
+    Layer 1 (set_speed swap) combined with Layer 2 (RoboHAT arcade inversion):
+      angular = (left_norm - right_norm) / 2
+    For CW (right) turn: set_speed(left>0, right<0) → angular > 0 → steer_us > 1500 → CW.
+    """
+    nav = NavigationService()
+    nav.max_speed = 1.0
+
+    captured: list[tuple[float, float]] = []
+
+    class FakeRoboHAT:
+        running = True
+        status = type("Status", (), {"serial_connected": True})()
+
+        async def send_motor_command(
+            self, left_speed: float, right_speed: float, ack_timeout: float = 0.35
+        ) -> bool:
+            captured.append((left_speed, right_speed))
+            return True
+
+    monkeypatch.setenv("SIM_MODE", "0")
+    monkeypatch.setattr(navigation_service_module, "get_robohat_service", lambda: FakeRoboHAT())
+
+    # Call with left=0.5 (CW intent), right=-0.5
+    await nav.set_speed(0.5, -0.5)
+
+    assert len(captured) == 1, "send_motor_command should be called exactly once"
+    left_arg, right_arg = captured[0]
+    # set_speed(ls=0.5, rs=-0.5) → send_motor_command(_normalize(rs)=-0.5, _normalize(ls)=0.5)
+    assert abs(left_arg - (-0.5)) < 0.01, (
+        f"first arg (robohat left) must be nav right -0.5, got {left_arg}"
+    )
+    assert abs(right_arg - 0.5) < 0.01, (
+        f"second arg (robohat right) must be nav left 0.5, got {right_arg}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_tank_turn_cw_calls_set_speed_left_positive_right_negative(monkeypatch):
+    """Tank-turn needing CW (right) rotation must call set_speed with left>0, right<0.
+
+    Setup: heading=0° (North), waypoint bearing≈90° (East) → heading_error=90° → tank-turn.
+    After fix: left_speed=turn_sign*turn_speed>0, right_speed=-turn_sign*turn_speed<0.
+    Combined with set_speed swap: angular=(left_norm - right_norm)/2 > 0 → CW ✓
+    """
+    nav = NavigationService()
+    mission_service = MissionService(nav)
+    mission_service_module._mission_service_instance = mission_service
+
+    # Waypoint bearing ≈ 90° East from (0,0)
+    mission = await mission_service.create_mission(
+        "Tank-turn CW direction",
+        [{"lat": 0.0, "lon": 0.001, "blade_on": False, "speed": 50}],
+    )
+    mission_service.mission_statuses[mission.id].status = MissionLifecycleStatus.RUNNING
+
+    current = Position(latitude=0.0, longitude=0.0, accuracy=1.0)
+    nav.navigation_state.current_position = current
+    nav.navigation_state.last_gps_fix = current.timestamp
+    nav.navigation_state.dead_reckoning_active = False
+    nav.navigation_state.heading = 0.0  # North → heading_error ≈ 90° → tank-turn mode
+    nav.navigation_state.planned_path = [Waypoint(position=Position(latitude=0.0, longitude=0.001))]
+
+    set_speed_calls: list[tuple[float, float]] = []
+
+    async def fake_set_speed(left_speed: float, right_speed: float) -> None:
+        set_speed_calls.append((left_speed, right_speed))
+
+    monkeypatch.setattr(nav, "set_speed", fake_set_speed)
+
+    task = asyncio.create_task(nav.go_to_waypoint(mission, mission.waypoints[0], mission_service))
+    await asyncio.sleep(0.3)
+    mission_service.mission_statuses[mission.id].status = MissionLifecycleStatus.ABORTED
+    await asyncio.wait_for(task, timeout=1.0)
+
+    # Filter out stop commands (0, 0) — only look at motion commands
+    motor_commands = [(l, r) for l, r in set_speed_calls if l != 0.0 or r != 0.0]
+    assert motor_commands, "set_speed must have been called with non-zero speeds during tank-turn"
+    first_left, first_right = motor_commands[0]
+    assert first_left > 0, f"CW tank-turn: left_speed must be > 0, got {first_left:.3f}"
+    assert first_right < 0, f"CW tank-turn: right_speed must be < 0, got {first_right:.3f}"
+
+
+@pytest.mark.asyncio
+async def test_blended_mode_right_turn_left_speed_greater_than_right(monkeypatch):
+    """Blended mode needing CW (right) turn must call set_speed with left_speed > right_speed.
+
+    Setup: heading=0° (North), waypoint bearing≈31° → heading_error≈31° → blended mode.
+    After fix: left_speed = forward + turn_effort*forward > right_speed = forward - turn_effort*forward.
+    """
+    nav = NavigationService()
+    mission_service = MissionService(nav)
+    mission_service_module._mission_service_instance = mission_service
+
+    # Bearing from (0,0) to (0.001, 0.0006) ≈ 31° (NNE) — blended mode threshold is 70°
+    mission = await mission_service.create_mission(
+        "Blended CW direction",
+        [{"lat": 0.001, "lon": 0.0006, "blade_on": False, "speed": 50}],
+    )
+    mission_service.mission_statuses[mission.id].status = MissionLifecycleStatus.RUNNING
+
+    current = Position(latitude=0.0, longitude=0.0, accuracy=1.0)
+    nav.navigation_state.current_position = current
+    nav.navigation_state.last_gps_fix = current.timestamp
+    nav.navigation_state.dead_reckoning_active = False
+    nav.navigation_state.heading = 0.0  # North → heading_error ≈ 31° → blended mode
+    nav.navigation_state.planned_path = [
+        Waypoint(position=Position(latitude=0.001, longitude=0.0006))
+    ]
+
+    set_speed_calls: list[tuple[float, float]] = []
+
+    async def fake_set_speed(left_speed: float, right_speed: float) -> None:
+        set_speed_calls.append((left_speed, right_speed))
+
+    monkeypatch.setattr(nav, "set_speed", fake_set_speed)
+
+    task = asyncio.create_task(nav.go_to_waypoint(mission, mission.waypoints[0], mission_service))
+    await asyncio.sleep(0.3)
+    mission_service.mission_statuses[mission.id].status = MissionLifecycleStatus.ABORTED
+    await asyncio.wait_for(task, timeout=1.0)
+
+    motor_commands = [(l, r) for l, r in set_speed_calls if l != 0.0 or r != 0.0]
+    assert motor_commands, "set_speed must have been called with non-zero speeds during blended mode"
+    first_left, first_right = motor_commands[0]
+    assert first_left > first_right, (
+        f"Blended CW turn: left ({first_left:.3f}) must be > right ({first_right:.3f})"
+    )

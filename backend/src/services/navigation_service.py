@@ -376,6 +376,9 @@ class NavigationService:
         # _MOTOR_RECONNECT_GRACE_S seconds with no recovery, the mission fails.
         _motor_unavail_start: float | None = None
         _MOTOR_RECONNECT_GRACE_S: float = 20.0
+        # Position-hold diagnostic logging: log on first entry then every 5 s.
+        _pos_hold_start: float | None = None
+        _pos_hold_log_last: float = -5.0  # -5.0 so first log fires immediately
 
         while True:
             status = mission_service.mission_statuses.get(mission.id)
@@ -423,6 +426,30 @@ class NavigationService:
                 obstacle_wait_start = None
                 self.navigation_state.target_velocity = 0.0
                 await self._deliver_stop_command(reason="position verification hold")
+                _now_mono = time.monotonic()
+                if _pos_hold_start is None:
+                    _pos_hold_start = _now_mono
+                if _now_mono - _pos_hold_log_last >= 5.0:
+                    _pos_hold_log_last = _now_mono
+                    _elapsed = _now_mono - _pos_hold_start
+                    _pos = self.navigation_state.current_position
+                    _acc = _pos.accuracy if _pos else None
+                    if self.navigation_state.dead_reckoning_active:
+                        _hold_reason = "dead reckoning active — GPS unavailable"
+                    elif not self._gps_fix_is_fresh():
+                        _hold_reason = "GPS fix stale — no recent position update"
+                    elif _acc is None:
+                        _hold_reason = "GPS accuracy unknown (accuracy field missing)"
+                    else:
+                        _hold_reason = (
+                            f"GPS accuracy {_acc:.1f} m > threshold "
+                            f"{self.max_waypoint_accuracy_m:.1f} m — waiting for RTK/DGPS fix"
+                        )
+                    logger.info(
+                        "Position verification hold active for %.0f s: %s",
+                        _elapsed,
+                        _hold_reason,
+                    )
                 if (
                     time.monotonic() - verification_wait_start
                 ) >= self.position_verification_timeout_seconds:
@@ -435,6 +462,8 @@ class NavigationService:
                 continue
 
             verification_wait_start = time.monotonic()
+            _pos_hold_start = None
+            _pos_hold_log_last = -5.0  # reset so next hold logs immediately
 
             distance_to_target = self.path_planner.calculate_distance(
                 self.navigation_state.current_position, target_pos
@@ -623,16 +652,16 @@ class NavigationService:
                 # TANK TURN: counter-rotate wheels in place to point toward
                 # the waypoint.  One-wheel turns can't overcome grass friction.
                 # Sign convention: turn_sign > 0 means we need CW (right).
-                # Note: 2026-04-20 motor direction inversion fix - left/right are swapped at motor driver,
-                # so we swap the assignment here to match blended mode.
+                # Combined motor chain: set_speed(ls, rs) → send_motor_command(rs_norm, ls_norm)
+                # → arcade angular = (ls_norm - rs_norm) / 2.  For CW: need ls > rs.
                 turn_speed = min(self.max_speed, 0.5 + _stall_boost)
-                right_speed = turn_sign * turn_speed
-                left_speed = -turn_sign * turn_speed
+                left_speed = turn_sign * turn_speed
+                right_speed = -turn_sign * turn_speed
             else:
                 _tank_turn_start = None  # reset watchdog when no longer in tank mode
                 # BLENDED: proportional turn with forward movement.
-                # Note: 2026-04-20 motor direction inversion fix - left/right are swapped
-                # at the motor driver level, so we compute right_speed and left_speed in opposite order.
+                # Motor chain: set_speed(ls, rs) → send_motor_command(rs_norm, ls_norm)
+                # → angular = (ls_norm - rs_norm) / 2.  CW (turn_effort > 0): need ls > rs.
                 turn_effort = max(-1.0, min(1.0, heading_error / 45.0))
                 forward_speed = base_speed
                 # Gentle taper: full speed at 0°, 70% at 60°
@@ -648,17 +677,17 @@ class NavigationService:
                 # Floor so motor controller dead zone is always overcome
                 forward_speed = max(forward_speed, 0.3)
 
-                # SWAPPED: Due to motor wiring, send left commands to right and vice versa
-                right_speed = forward_speed + turn_effort * forward_speed
-                left_speed = forward_speed - turn_effort * forward_speed
+                # SWAPPED: left gets more speed when turning right (CW/positive turn_effort)
+                left_speed = forward_speed + turn_effort * forward_speed
+                right_speed = forward_speed - turn_effort * forward_speed
 
                 # In thick grass single-wheel pivots (one wheel stopped) cause
                 # bogging.  Ensure both wheels keep at least 20% forward speed.
                 _inner_min = forward_speed * 0.2
-                if turn_effort > 0:  # CW turn — right is inner wheel (now left due to swap)
-                    left_speed = max(left_speed, _inner_min)
-                elif turn_effort < 0:  # CCW turn — left is inner wheel (now right due to swap)
+                if turn_effort > 0:  # CW turn — right is inner wheel
                     right_speed = max(right_speed, _inner_min)
+                elif turn_effort < 0:  # CCW turn — left is inner wheel
+                    left_speed = max(left_speed, _inner_min)
 
             # Clamp speeds
             left_speed = max(-self.max_speed, min(self.max_speed, left_speed))
