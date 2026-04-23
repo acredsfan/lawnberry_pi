@@ -891,7 +891,7 @@ async def control_drive_v2(cmd: dict, request: Request):
         try:
             from ..services.navigation_service import NavigationService
 
-            telemetry_snapshot = await websocket_hub.get_last_telemetry(max_age_s=0.5)
+            telemetry_snapshot = await websocket_hub.get_cached_telemetry()
             # Use the shared app.state loader so hot-reloaded limits are always fresh.
             # Fall back to constructing a loader (test environments that skip startup lifespan).
             _loader = getattr(request.app.state, "config_loader", None)

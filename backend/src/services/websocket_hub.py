@@ -295,6 +295,26 @@ class WebSocketHub:
                 return dict(self._last_telemetry_snapshot)
         return await self._generate_telemetry()
 
+    async def get_cached_telemetry(self) -> dict[str, Any]:
+        """Return the most recent cached telemetry snapshot without blocking.
+
+        Unlike ``get_last_telemetry``, this method never triggers a live sensor
+        read.  The telemetry broadcast loop keeps the cache fresh independently.
+
+        - If a cached snapshot exists, it is returned immediately regardless of age.
+          The drive endpoint's safety gate enforces a 2.5 s staleness limit, so
+          returning a moderately stale snapshot is safe — the gate will fire and
+          block motion if the data is too old.
+        - If no snapshot has been captured yet (first seconds after startup),
+          returns ``{"source": "unavailable"}`` so the safety gate fails closed.
+
+        Use this on latency-sensitive paths (e.g. manual drive commands) where
+        blocking on sensor I/O would cause noticeable control delay.
+        """
+        if self._last_telemetry_snapshot is not None:
+            return dict(self._last_telemetry_snapshot)
+        return {"source": "unavailable"}
+
     # Helper for legacy external access if needed (e.g. by routers)
     async def _generate_telemetry(self) -> dict:
         import os

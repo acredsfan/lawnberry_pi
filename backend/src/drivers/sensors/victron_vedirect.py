@@ -40,6 +40,10 @@ class VictronVeDirectDriver(HardwareDriver):
 
     _DEFAULT_CLI = "victron-ble"
 
+    # Victron SmartSolar BLE advertises roughly every 10–30 s. Refresh the
+    # cache in the background on this interval so callers never block on BLE I/O.
+    _DEFAULT_BG_REFRESH_INTERVAL_S = 30.0
+
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config=config)
         cfg = config or {}
@@ -51,13 +55,18 @@ class VictronVeDirectDriver(HardwareDriver):
         self._adapter = cfg.get("adapter")
         self._read_timeout = float(cfg.get("read_timeout_s", 8.0))
         self._sample_limit = int(cfg.get("sample_limit", 1) or 1)
+        self._bg_refresh_interval_s = float(
+            cfg.get("bg_refresh_interval_s", self._DEFAULT_BG_REFRESH_INTERVAL_S)
+        )
         self._adapter_warned = False
         self._last_payload: dict[str, Any] | None = None
         self._last_timestamp: float | None = None
         self._read_lock: asyncio.Lock | None = None
+        self._refresh_task: asyncio.Task[None] | None = None
 
     async def initialize(self) -> None:
         self._read_lock = asyncio.Lock()
+        self._refresh_task = None
         self.initialized = True
 
     async def start(self) -> None:
@@ -65,6 +74,13 @@ class VictronVeDirectDriver(HardwareDriver):
 
     async def stop(self) -> None:
         self.running = False
+        if self._refresh_task is not None and not self._refresh_task.done():
+            self._refresh_task.cancel()
+            try:
+                await self._refresh_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._refresh_task = None
 
     async def health_check(self) -> dict[str, Any]:  # noqa: D401
         return {
@@ -95,30 +111,43 @@ class VictronVeDirectDriver(HardwareDriver):
             self._last_timestamp = now
             return payload
 
+        # Lazy-create lock if initialize() was not awaited (defensive for tests).
+        if self._read_lock is None:
+            self._read_lock = asyncio.Lock()
+
+        now = time.time()
+        cache_age = now - (self._last_timestamp or 0)
+
+        # Cache is fresh — return immediately without scheduling another refresh.
+        if self._last_payload is not None and cache_age < self._bg_refresh_interval_s:
+            return self._last_payload
+
+        # Cache is stale or empty.  If no refresh is in flight, schedule one.
+        # The caller receives the current cache immediately and the refresh runs
+        # in the background so BLE I/O never blocks the telemetry loop.
+        if self._refresh_task is None or self._refresh_task.done():
+            self._refresh_task = asyncio.create_task(self._do_bg_refresh())
+
+        return self._last_payload
+
+    async def _do_bg_refresh(self) -> None:
+        """Background BLE read — updates _last_payload when done, never blocks callers."""
+        if self._read_lock is None:
+            self._read_lock = asyncio.Lock()
+        if self._read_lock.locked():
+            return
         try:
-            # Lazy-create lock if initialize() was not awaited (defensive for tests).
-            if self._read_lock is None:
-                self._read_lock = asyncio.Lock()
-            # If a BLE read is already in flight, return stale data immediately so
-            # we never queue a second blocking thread behind the in-flight one.
-            if self._read_lock.locked():
-                return self._last_payload
             loop = asyncio.get_running_loop()
             async with self._read_lock:
                 frame = await loop.run_in_executor(_VICTRON_EXECUTOR, self._read_victron_cli_frame)
-        except Exception:
-            return self._last_payload
-
-        if not frame:
-            return self._last_payload
-
-        parsed = self._convert_frame(frame)
-        if not parsed:
-            return self._last_payload
-
-        self._last_payload = parsed
-        self._last_timestamp = time.time()
-        return parsed
+            if frame:
+                parsed = self._convert_frame(frame)
+                if parsed:
+                    self._last_payload = parsed
+                    self._last_timestamp = time.time()
+                    logger.debug("Victron BLE cache refreshed: %s", list(parsed.keys()))
+        except Exception as exc:
+            logger.debug("Victron background BLE refresh failed: %s", exc)
 
     def _resolve_port(self) -> str | None:
         # Deprecated for BLE-based flow
