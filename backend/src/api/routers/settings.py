@@ -908,7 +908,7 @@ async def get_safety_settings():
         return limits.model_dump()
     except Exception as exc:
         logger.error("Failed to load safety limits: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to load safety limits")
+        raise HTTPException(status_code=500, detail="Failed to load safety limits") from exc
 
 
 @router.put("/settings/safety")
@@ -929,7 +929,7 @@ async def put_safety_settings(request: Request):
         updated = loader.update_limits(body)
     except Exception as exc:
         logger.error("Failed to update safety limits: %s", exc)
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Hot-reload the live NavigationService obstacle threshold
     try:

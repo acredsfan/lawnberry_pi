@@ -86,9 +86,9 @@ class ConfigLoader:
             raise ValidationError.from_exception_data(
                 title=f"Invalid hardware.yaml at {self.hardware_path}",
                 line_errors=e.errors(),
-            )
+            ) from e
         except ValueError as e:
-            raise ValueError(f"Invalid hardware.yaml at {self.hardware_path}: {e}")
+            raise ValueError(f"Invalid hardware.yaml at {self.hardware_path}: {e}") from e
 
         try:
             limits = SafetyLimits(**self._normalize_limits_yaml(limits_raw))
@@ -96,9 +96,9 @@ class ConfigLoader:
             raise ValidationError.from_exception_data(
                 title=f"Invalid limits.yaml at {self.limits_path}",
                 line_errors=e.errors(),
-            )
+            ) from e
         except ValueError as e:
-            raise ValueError(f"Invalid limits.yaml at {self.limits_path}: {e}")
+            raise ValueError(f"Invalid limits.yaml at {self.limits_path}: {e}") from e
 
         self._cache = (hardware, limits)
         return self._cache

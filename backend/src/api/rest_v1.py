@@ -112,7 +112,10 @@ def get_status():
 @router.post("/auth/login", response_model=AuthResponse, deprecated=True)
 async def auth_login(payload: AuthLoginRequest, request: Request):
     """Start login flow (MFA compatible)."""
-    expected_secret = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL", "operator123")
+    expected_secret = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL")
+    if not expected_secret:
+        raise HTTPException(status_code=503, detail="Operator credential not configured")
+
     credential = payload.credential
     if credential is None and payload.username and payload.password:
         credential = ""
@@ -128,7 +131,7 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
             user_agent=request.headers.get("User-Agent"),
         )
     except AuthenticationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail, headers=exc.headers)
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail, headers=exc.headers) from exc
 
     session = result.session
     user = UserResponse(
@@ -204,7 +207,7 @@ def create_job(job_data: dict):
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             raise ValueError()
     except (ValueError, IndexError):
-        raise HTTPException(status_code=422, detail="Invalid schedule format (use HH:MM)")
+        raise HTTPException(status_code=422, detail="Invalid schedule format (use HH:MM)") from None
 
     # Create job
     _job_counter += 1

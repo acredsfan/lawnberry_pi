@@ -1076,10 +1076,15 @@ async def control_drive_v2(cmd: dict, request: Request):
     if _now - _last_drive_audit_at >= _DRIVE_AUDIT_SAMPLE_INTERVAL_S:
         _last_drive_audit_at = _now
         _audit_details = {"command": details_cmd, "response": response.model_dump(mode="json")}
-        asyncio.create_task(
+        _task = asyncio.create_task(
             asyncio.to_thread(
                 persistence.add_audit_log, "control.drive.v2", None, None, _audit_details
             )
+        )
+        _task.add_done_callback(
+            lambda t: logger.warning("Drive audit log failed: %s", t.exception())
+            if not t.cancelled() and t.exception()
+            else None
         )
 
     return response

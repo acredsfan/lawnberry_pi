@@ -69,7 +69,7 @@ async def start_camera(payload: dict | None = None):
         return {"status": "started", "streaming": camera_service.stream.is_active}
     except Exception as e:
         logger.error(f"Failed to start camera: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/camera/stop")
@@ -81,7 +81,7 @@ async def stop_camera(payload: dict | None = None):
         return {"status": "stopped", "streaming": camera_service.stream.is_active}
     except Exception as e:
         logger.error(f"Failed to stop camera: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/camera/frame")
@@ -109,7 +109,7 @@ async def get_current_frame():
         raise
     except Exception as e:
         logger.error(f"Failed to get current frame: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/camera/stream.mjpeg")
@@ -165,4 +165,4 @@ async def stream_mjpeg(
         )
     except Exception as e:
         logger.error(f"Failed to start MJPEG stream: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

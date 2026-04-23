@@ -429,7 +429,7 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
             user_agent=request.headers.get("User-Agent"),
         )
     except AuthenticationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail, headers=exc.headers)
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail, headers=exc.headers) from exc
 
     session = result.session
     user = UserOut(

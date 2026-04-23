@@ -22,7 +22,7 @@ async def get_current_weather(
         return weather_data
     except Exception as e:
         logger.error(f"Failed to get current weather: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/weather/planning")
@@ -43,7 +43,7 @@ async def get_planning_advice(
         }
     except Exception as e:
         logger.error(f"Failed to get planning advice: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/weather/planning-advice")
@@ -65,4 +65,4 @@ async def get_planning_advice_contract(
         }
     except Exception as e:
         logger.error(f"Failed to get contract planning advice: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

@@ -147,9 +147,9 @@ async def post_calibrate_imu(request: Request) -> IMUCalibrationResultPayload:
         except CalibrationInProgressError:
             raise HTTPException(
                 status.HTTP_409_CONFLICT, detail="IMU calibration already in progress"
-            )
+            ) from None
         except DriveControllerUnavailableError as exc:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
         except Exception as exc:  # pragma: no cover - hardware dependent
             logger.exception("IMU calibration routine failed: %s", exc)
             raise HTTPException(
