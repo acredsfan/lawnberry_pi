@@ -410,14 +410,9 @@ async def _authorize_websocket(websocket: WebSocket) -> UserSession:
 async def auth_login(payload: AuthLoginRequest, request: Request):
     credential = payload.credential
     if credential is None and payload.username is not None and payload.password is not None:
-        if payload.username == "admin" and payload.password == "admin":
-            credential = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL")
-            if not credential:
-                raise RuntimeError(
-                    "LAWN_BERRY_OPERATOR_CREDENTIAL is required — cannot authenticate without it."
-                )
-        else:
-            credential = ""
+        # username/password path: credential is not used; callers must supply the
+        # LAWN_BERRY_OPERATOR_CREDENTIAL directly via the `credential` field.
+        credential = ""
 
     client_identifier = _client_identifier(request)
 
