@@ -91,7 +91,7 @@ def _quaternion_to_euler(i: float, j: float, k: float, real: float) -> tuple[flo
 
     # Yaw (Z axis rotation)
     siny_cosp = 2.0 * (real * k + i * j)
-    cosy_cosp = 1.0 - 2.0 * (j * j + k * k)
+    cosy_cosp = 1.0 - 2.0 * (i * i + k * k)
     yaw = math.atan2(siny_cosp, cosy_cosp)
 
     yaw_deg = math.degrees(yaw) % 360.0  # normalize to [0, 360)
