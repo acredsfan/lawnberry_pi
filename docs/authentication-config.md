@@ -12,7 +12,8 @@ This guide covers setting up and configuring the multi-level authentication syst
 6. [Cloudflare Tunnel Authentication](#cloudflare-tunnel-authentication)
 7. [Session Management](#session-management)
 8. [Security Best Practices](#security-best-practices)
-9. [Troubleshooting](#troubleshooting)
+9. [Developer Guidance](#developer-guidance)
+10. [Troubleshooting](#troubleshooting)
 
 ## Overview
 
@@ -104,6 +105,94 @@ sudo lawnberry-pi auth reset-password --user admin
 # View password policy
 lawnberry-pi config auth --show-policy
 ```
+
+### Programmatic Password Configuration
+
+Users can configure custom login credentials via an authenticated API endpoint. This allows creating custom username/password combinations without requiring physical access or system-level permissions.
+
+#### API Endpoint
+
+```
+POST /api/v2/auth/configure/password
+Authorization: Bearer <valid-session-token>
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "new_secure_password_12345",
+  "password_confirm": "new_secure_password_12345"
+}
+```
+
+#### Requirements
+
+- **Authentication**: Caller must have a valid authenticated session (Bearer token)
+- **Username**: Desired login username (typically `admin` or your preferred username)
+- **Password**: New password (must match `password_confirm`)
+- **Password Confirm**: Verification field (must match `password`)
+
+#### Response
+
+**Success (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Password configured successfully",
+  "security_level": "password"
+}
+```
+
+**Error (400 Bad Request)**:
+```json
+{
+  "detail": "Passwords do not match"
+}
+```
+
+**Error (401 Unauthorized)**:
+```json
+{
+  "detail": "Not authenticated"
+}
+```
+
+#### Example Usage
+
+```bash
+# Step 1: Authenticate with default credentials to get a session token
+SESSION=$(curl -s -X POST http://localhost:8081/api/v2/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin",
+    "password": "default_admin_password"
+  }' | jq -r '.token')
+
+# Step 2: Configure a new custom password
+curl -X POST http://localhost:8081/api/v2/auth/configure/password \
+  -H "Authorization: Bearer $SESSION" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin",
+    "password": "MyNewSecure@123",
+    "password_confirm": "MyNewSecure@123"
+  }'
+
+# Step 3: Use the new credentials for subsequent logins
+curl -X POST http://localhost:8081/api/v2/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin",
+    "password": "MyNewSecure@123"
+  }'
+```
+
+#### Important Notes
+
+1. **Session Persistence**: The new password is stored in `data/settings.json` and persists across service restarts
+2. **Global Availability**: Once configured, the password works from any client accessing the LawnBerry API
+3. **Backward Compatibility**: Existing Cloudflare Access and OAuth authentication methods continue to work
+4. **Default Credentials**: If using default credentials, change them as soon as possible via this endpoint
+5. **Security**: Passwords are hashed using bcrypt before storage; plain text passwords are never logged
 
 ### Example Configuration
 
@@ -522,6 +611,165 @@ lawnberry-pi config security --monitoring \
 # Set up email alerts
 lawnberry-pi config security --email-alerts admin@yourdomain.com
 ```
+
+## Developer Guidance
+
+### Architecture Overview
+
+The LawnBerry authentication system is built with clear separation of concerns across multiple layers:
+
+1. **AuthService** (`backend/src/services/auth_service.py`): Core authentication logic, session management, credential validation
+2. **Auth Endpoints** (`backend/src/api/routers/auth.py`): FastAPI endpoints that expose authentication APIs
+3. **Session Storage**: Uses `active_sessions` dictionary keyed by `session_id` (not username)
+4. **Security Settings**: Stored in three synchronized locations:
+   - `primary_auth_service.config` (the source of truth)
+   - `global_state._security_settings` (module-level reference)
+   - `rest_api._security_settings` (legacy import for backward compatibility)
+
+### Critical Implementation Details
+
+#### Session Storage Pattern
+
+**DO**: Store sessions by `session_id`:
+```python
+self.active_sessions[session_id] = session_object
+```
+
+**DON'T**: Store sessions by username:
+```python
+# WRONG - causes verify_token to fail
+self.active_sessions[username] = [session_list]
+```
+
+Session lookups in `verify_token()` use `session_id` as the key. Mixing storage patterns causes authentication failures where newly created sessions are invisible to token verification.
+
+#### Global State Synchronization
+
+When updating authentication configuration (e.g., password hashes), update all three references:
+
+```python
+# Update password in all three places
+primary_auth_service.config.password_hash = hash
+global_state._security_settings.password_hash = hash
+rest_module._security_settings.password_hash = hash  # Legacy reference
+```
+
+If only some references are updated:
+- Login endpoint may see old password (because `_current_security_settings()` checks rest module first)
+- Subsequent authentication requests fail with "invalid credentials"
+- Issue appears intermittent depending on request routing
+
+#### Cloudflare Access Integration
+
+The login endpoint has two authentication paths:
+
+1. **Cloudflare Bypass** (when `security_level == TUNNEL_AUTH`):
+   - Checks for `CF-Access-Jwt-Assertion` header
+   - If valid, calls `authenticate_tunnel()` and skips local password check
+   - Returns session token without login screen
+
+2. **Local Authentication** (all other security levels):
+   - Requires username and password in request body
+   - Validates via `authenticate_password()`
+   - Returns session token on success
+
+**Important**: The security level check comes FIRST. If it's not `TUNNEL_AUTH`, Cloudflare headers are ignored entirely, even if present.
+
+### Common Pitfalls and How to Avoid Them
+
+#### Pitfall 1: Breaking Session Validation After Code Changes
+
+**Symptom**: After modifying authentication code, users report "valid credentials don't work" or "login flashes then returns to login screen"
+
+**Root Cause**: Session storage format mismatch between creation and validation
+
+**Prevention**:
+- Never change how `session_id` is used as the dictionary key
+- Always verify `verify_token()` and `create_session()` use the same storage pattern
+- Run `tests/unit/test_auth_security_levels_unit.py::TestAuthServiceIntegration::test_end_to_end_authentication_flow` after any session-related changes
+- This test exercises the full create → validate → logout cycle
+
+#### Pitfall 2: Configurations Not Taking Effect
+
+**Symptom**: After updating password via API, login still uses old credentials
+
+**Root Cause**: Updated only one of the three password storage locations
+
+**Prevention**:
+- When modifying auth configuration, use the `configure_password` endpoint as a reference
+- It explicitly updates all three locations (see `auth.py` lines 553-591)
+- Search for `_security_settings` and `config.password_hash` in your code
+- If you modify either one, update all three
+
+#### Pitfall 3: Cloudflare Bypass Not Working
+
+**Symptom**: Cloudflare-authenticated users still see the app login screen
+
+**Root Cause**: 
+- Security level is not set to `TUNNEL_AUTH`
+- OR Cloudflare headers are not being passed through the request
+- OR JWT verification is failing
+
+**Prevention**:
+- Verify `security_level == SecurityLevel.TUNNEL_AUTH` in application configuration
+- Check that nginx/proxy is forwarding Cloudflare headers (not stripping them)
+- Verify `CF-Access-Jwt-Assertion` header is present in the request
+- Test with: `curl -H "CF-Access-Authenticated-User-Email: test@example.com" http://localhost:8081/api/v2/auth/login`
+
+#### Pitfall 4: Test Failures After Refactoring Auth Code
+
+**Symptom**: Tests pass locally but fail in CI/CD
+
+**Root Cause**: Test fixtures don't properly reset auth state between tests
+
+**Prevention**:
+- Use the `reset_control_safety_state` fixture (defined in `conftest.py`)
+- It resets:
+  - `auth_service._failed_attempts`
+  - `auth_service._invalidated_session_ids`
+  - `auth_service.active_sessions`
+  - `global_state._security_settings`
+  - `rest_module._security_settings`
+- See `tests/conftest.py` lines 103-167 for the complete fixture
+
+### Testing Before Committing Auth Changes
+
+Run this test suite after any authentication code changes:
+
+```bash
+# Run all authentication tests
+python -m pytest tests/ -k auth -v
+
+# Run specific integration tests
+python -m pytest tests/integration/test_auth_custom_password.py -xvs
+python -m pytest tests/contract/test_auth_login.py -xvs
+
+# Run end-to-end auth flow
+python -m pytest tests/unit/test_auth_security_levels_unit.py::TestAuthServiceIntegration::test_end_to_end_authentication_flow -xvs
+
+# Run with rate limiting (if changed rate limit logic)
+RATE_LIMIT_MAX_ATTEMPTS=5 RATE_LIMIT_WINDOW_SECONDS=60 \
+  python -m pytest tests/unit/test_auth_security_levels_unit.py -xvs
+```
+
+### Important Files to Review Before Auth Changes
+
+1. **`backend/src/services/auth_service.py`**:
+   - Lines 189-217: `AuthService.__init__()` — all required fields
+   - Lines 327-345: `verify_token()` — session lookup logic
+   - Lines 504-527: `create_session()` real AuthService — session storage
+   - Lines 529-575: `authenticate_password()`, `authenticate_totp()` — credential validation
+
+2. **`backend/src/api/routers/auth.py`**:
+   - Lines 456-503: Login endpoint (both Cloudflare and password paths)
+   - Lines 553-591: `configure_password` endpoint (three-way sync)
+
+3. **`tests/conftest.py`**:
+   - Lines 103-167: `reset_control_safety_state` fixture (fixture must reset all three security settings references)
+
+4. **`backend/src/api/rest.py`**:
+   - Check how `_security_settings` is used in the login endpoint
+   - This is a legacy reference that must stay in sync with auth service config
 
 ## Troubleshooting
 
