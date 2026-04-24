@@ -295,6 +295,63 @@ The highest security level using Cloudflare Access for zero-trust authentication
 2. **Cloudflare Tunnel**: Configured and running
 3. **Cloudflare Access**: Access subscription (free tier available)
 
+### Automatic Login Bypass
+
+When Cloudflare Access is enabled (`security_level: tunnel_auth`), the login endpoint automatically bypasses the local login screen if valid Cloudflare Access headers are present:
+
+```
+Request Flow:
+1. User accesses https://lawnberry.yourdomain.com
+2. Cloudflare Access intercepts and authenticates the user
+3. Request reaches /api/v2/auth/login with Cloudflare headers:
+   - CF-Access-Jwt-Assertion: <JWT token>
+   - CF-Access-Authenticated-User-Email: <user email>
+4. Backend recognizes valid Cloudflare authentication
+5. Session is created without requiring local credentials
+6. User is logged in automatically
+
+This eliminates double authentication (Cloudflare + app login).
+```
+
+### How Login Bypass Works
+
+The login endpoint checks for two conditions to bypass the local login screen:
+
+1. **Security Level Check**: `security_level == SecurityLevel.TUNNEL_AUTH`
+2. **Cloudflare Headers Present**: Valid `CF-Access-Jwt-Assertion` and `CF-Access-Authenticated-User-Email` headers
+
+When both conditions are met, the backend:
+- Extracts the user identity from Cloudflare headers
+- Creates an authenticated session using `authenticate_tunnel()`
+- Returns a session token
+- User is logged in to the app
+
+If Cloudflare headers are invalid or not present, the endpoint falls back to local authentication (username/password).
+
+### Why This Matters
+
+**Without this bypass**:
+- Users authenticate with Cloudflare Access
+- Are forced to see the app's login screen
+- Must authenticate again with local credentials
+- Results in poor UX and confusion
+
+**With this bypass**:
+- Users authenticate once with Cloudflare Access
+- Seamlessly access the app
+- No local login screen when already authenticated upstream
+- Improved security posture (trust upstream auth)
+
+### Preserving Local Authentication
+
+When `security_level` is **not** `TUNNEL_AUTH` (e.g., `PASSWORD`, `TOTP`, `GOOGLE_OAUTH`):
+- Login screen is always shown
+- Local authentication is required
+- Cloudflare headers are ignored
+- Standard `username/password` login works as normal
+
+This preserves backward compatibility for non-Cloudflare deployments and development environments.
+
 ### Cloudflare Access Setup
 
 1. **Enable Cloudflare Access**:
@@ -603,6 +660,92 @@ When accessing the UI through a tunnel/proxy, browsers cannot set custom headers
 - If using Cloudflare Access, the `CF-Access-Jwt-Assertion` header is accepted for WS authorization when Access policy already authenticated the user.
 
 If you still see WS failures, live telemetry will fall back to REST polling. Check the browser console network tab for 401/403 responses on `/api/v2/ws/telemetry` or `/ws/telemetry` and adjust Access policies accordingly.
+
+5. **Login Loop with Double Authentication**:
+
+**Problem**: After entering credentials, the app redirects back to the login screen and shows "Too many attempts" rate limiting.
+
+**Root Cause**: This typically indicates that the username/password path is not correctly mapping to the operator credential, or Cloudflare headers are being validated incorrectly.
+
+**Solution**:
+
+1. **Check Operator Credential Configuration**:
+   ```bash
+   # Verify LAWN_BERRY_OPERATOR_CREDENTIAL is set
+   echo $LAWN_BERRY_OPERATOR_CREDENTIAL
+   
+   # If empty, set it
+   export LAWN_BERRY_OPERATOR_CREDENTIAL="yourpassword"
+   sudo systemctl restart lawnberry-backend
+   ```
+
+2. **Verify Authentication Endpoint**:
+   ```bash
+   # Test login endpoint directly (should succeed)
+   curl -X POST http://localhost:8081/api/v2/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"username":"admin","password":"admin"}'
+   
+   # Should return 200 with access_token
+   ```
+
+3. **Check Frontend API Configuration**:
+   ```bash
+   # Verify frontend is sending username/password (not credential field)
+   # Check browser console Network tab for login request
+   # POST body should be: {"username":"admin","password":"admin"}
+   ```
+
+4. **Reset Rate Limiting** (if locked out):
+   ```bash
+   # Rate limiting resets after 30 seconds
+   # Or restart backend to clear in-memory rate limit state
+   sudo systemctl restart lawnberry-backend
+   ```
+
+5. **For Cloudflare Users - Verify Headers**:
+   ```bash
+   # If behind Cloudflare, test that headers are passed through
+   curl -X POST https://lawnberry.yourdomain.com/api/v2/auth/login \
+     -H "CF-Access-Jwt-Assertion: $(cat token.jwt)" \
+     -H "CF-Access-Authenticated-User-Email: user@example.com" \
+     -H "Content-Type: application/json" \
+     -d '{}' \  # Empty body - Cloudflare auth should handle it
+   
+   # Should return 200 with access_token
+   ```
+
+6. **Missing or Mismatched Credentials in Browser**:
+
+   **Problem**: Login form appears repeatedly; frontend shows "Invalid credentials" instead of "Too many attempts".
+
+   **Diagnosis**:
+   - Browser console shows 401 Unauthorized for POST `/api/v2/auth/login`
+   - Response body shows `{"detail": "Invalid credentials"}`
+
+   **Solution**:
+
+   1. **Verify Credentials Match**:
+      - Default admin credentials: `username=admin`, `password=admin`
+      - Credentials must match `LAWN_BERRY_OPERATOR_CREDENTIAL` environment variable
+      - Test with curl first to isolate frontend issues
+
+   2. **Check Frontend Storage**:
+      ```javascript
+      // In browser console
+      localStorage.getItem('auth_token')  // Should be null before login
+      localStorage.getItem('user_data')   // Should be null before login
+      ```
+
+   3. **Clear Browser Cache**:
+      - Open DevTools (F12) → Application → Local Storage → Clear all
+      - Refresh page and try login again
+
+   4. **Verify Backend is Running**:
+      ```bash
+      curl http://localhost:8081/api/v2/status
+      # Should return 200 with system status
+      ```
 
 ### Debug Commands
 

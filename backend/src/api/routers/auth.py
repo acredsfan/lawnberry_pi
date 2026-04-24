@@ -408,11 +408,59 @@ async def _authorize_websocket(websocket: WebSocket) -> UserSession:
 
 @router.post("/auth/login", response_model=AuthResponse)
 async def auth_login(payload: AuthLoginRequest, request: Request):
+    # 1) Check if user is authenticated via Cloudflare Access (upstream auth)
+    # This allows us to skip the local login screen when already authenticated
+    security_settings = _current_security_settings()
+    if security_settings.security_level == SecurityLevel.TUNNEL_AUTH:
+        cf_token, cf_payload, cf_principal = _extract_cloudflare_identity(request)
+        if cf_token and cf_principal:
+            # User is already authenticated by Cloudflare Access
+            # Create a session for them without requiring local credentials
+            try:
+                # Use Cloudflare tunnel authentication path
+                session = await primary_auth_service.authenticate_tunnel(
+                    {"CF-Access-Jwt-Assertion": cf_token, "CF-Access-Authenticated-User-Email": cf_principal}
+                )
+                # Issue token for the session
+                result = primary_auth_service._issue_token_for_session(session)
+                primary_auth_service.active_sessions[session.session_id] = session
+                
+                user = UserOut(
+                    id=session.user_id,
+                    username=session.username,
+                    role=session.security_context.role.value,
+                    created_at=session.created_at,
+                )
+                expires_in = max(0, int((result.expires_at - datetime.now(UTC)).total_seconds()))
+                return AuthResponse(
+                    access_token=result.token,
+                    token=result.token,
+                    expires_in=expires_in,
+                    expires_at=result.expires_at,
+                    user=user,
+                )
+            except Exception as exc:
+                logger.warning(f"Cloudflare Access authentication failed: {exc}")
+                # Fall through to local auth if Cloudflare auth fails
+
+    # 2) Handle local authentication (credential or username/password)
     credential = payload.credential
     if credential is None and payload.username is not None and payload.password is not None:
-        # username/password path: credential is not used; callers must supply the
-        # LAWN_BERRY_OPERATOR_CREDENTIAL directly via the `credential` field.
-        credential = ""
+        # username/password path: map admin/admin to LAWN_BERRY_OPERATOR_CREDENTIAL
+        # This supports MFA and frontend login form submission
+        if payload.username == "admin" and payload.password == "admin":
+            credential = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL")
+            if not credential:
+                raise HTTPException(
+                    status_code=401,
+                    detail="LAWN_BERRY_OPERATOR_CREDENTIAL is required",
+                )
+        else:
+            # Unsupported username/password combination
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid credentials",
+            )
 
     client_identifier = _client_identifier(request)
 

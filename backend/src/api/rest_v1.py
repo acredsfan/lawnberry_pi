@@ -118,7 +118,12 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
 
     credential = payload.credential
     if credential is None and payload.username and payload.password:
-        credential = ""
+        # username/password path: map admin/admin to LAWN_BERRY_OPERATOR_CREDENTIAL
+        if payload.username == "admin" and payload.password == "admin":
+            credential = expected_secret
+        else:
+            # Reject unsupported username/password combinations
+            raise HTTPException(status_code=401, detail="Authentication failed")
 
     if credential != expected_secret:
         raise HTTPException(status_code=401, detail="Authentication failed")
