@@ -519,6 +519,8 @@ class RoboHATService:
         """
         try:
             await self._send_line("pwm,1500,1500")
+            self._last_pwm = (1500, 1500)
+            self._last_pwm_at = time.monotonic()
             await asyncio.sleep(0.05)
             await self._send_line("blade=off")
             logger.info("RoboHAT safe state applied after reconnect")
@@ -583,6 +585,7 @@ class RoboHATService:
                             # grace loop cannot see serial_connected=True and race with
                             # the safe-state commands.
                             await self._send_safe_state_on_reconnect()
+                            await self._apply_estop_if_pending()
                             self.status.serial_connected = True
                             # Start watchdog if it was never started (first-connect path
                             # from a delayed-boot reconnect) or if it died.
@@ -844,6 +847,9 @@ class RoboHATService:
         usb_ready = await self._ensure_usb_control(timeout=0.6, retries=2)
         if not usb_ready:
             logger.critical("Emergency stop failed closed: USB control acknowledgement unavailable")
+            self._estop_pending = True
+            self._last_pwm = (1500, 1500)
+            self._last_pwm_at = time.monotonic()
             self.status.motor_controller_ok = False
             self.status.last_error = self.status.last_error or "usb_control_unavailable"
             return False
@@ -869,10 +875,11 @@ class RoboHATService:
         if not await self._ensure_usb_control(timeout=0.9, retries=2):
             return False
         ok = await self._send_line("rc=disable")
-        if not ok:
-            self.status.last_error = "clear_emergency_failed"
-        else:
+        if ok:
+            self._estop_pending = False
             self.status.last_error = None
+        else:
+            self.status.last_error = "clear_emergency_failed"
         return ok
 
     def get_status(self) -> RoboHATStatus:

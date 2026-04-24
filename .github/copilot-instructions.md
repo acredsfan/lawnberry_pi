@@ -56,6 +56,108 @@ set a per-test timeout. `pytest-timeout` is NOT installed; add `--timeout=N` onl
 ⚠️ **Wrong path anti-pattern:** `tests/test_navigation_service.py` does NOT exist — it is
 at `tests/unit/test_navigation_service.py`. This mistake has caused repeated wasted runs.
 
+## ⚠️ CRITICAL: Code Change Deployment Checklist
+
+**After ANY commits to motor control, navigation, or driver code:**
+
+This is **NOT optional** — changes to these systems do not become active until the backend is restarted and verified healthy. Skipping this step leads to debugging confusion (code is "fixed" but old code still running).
+
+```bash
+# 1. Clear Python bytecode cache (prevents stale .pyc from running)
+find /home/pi/lawnberry -name "*.pyc" -delete
+find /home/pi/lawnberry -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
+# 2. Restart the backend service
+sudo systemctl restart lawnberry-backend
+
+# 3. Poll until backend is healthy (startup takes ~90s, REQUIRED before testing)
+for i in $(seq 1 24); do sleep 5; curl -sf http://localhost:8081/api/v2/status >/dev/null 2>&1 && echo "✓ Backend UP" && break; echo "waiting... ($((i*5))s)"; done
+
+# 4. Verify full health (not just responsive)
+curl -s http://localhost:8081/api/v2/status | jq '.safety_status'
+```
+
+**Do NOT claim a fix works until this checklist is complete.** If you get confused about whether a bug persists, first check: "Is the backend running my new code?"
+
+---
+
+## Motor Control Change Validation Pattern
+
+⚠️ **CRITICAL: Two-Part Compensation System**
+
+The LawnBerry motor control has **two interlocking compensation layers** that MUST be kept in sync:
+
+1. **Navigation Service** (`backend/src/services/navigation_service.py:520-560`): Swaps left/right speed assignments
+2. **RoboHAT Service** (`backend/src/services/robohat_service.py:835`): Inverts arcade mix sign
+
+**If you modify ONLY ONE layer, the system breaks silently:**
+- Remove arcade inversion but keep nav swap → joystick turns backward
+- Remove nav swap but keep arcade inversion → navigation turns backward
+
+**Validation Pattern (REQUIRED after any motor change):**
+
+```bash
+# Step 1: Unit tests first (fast, safe in SIM_MODE)
+python -m pytest tests/unit/test_robohat_service.py tests/unit/test_navigation_service.py -xvs -m "not hardware"
+
+# Step 2: If tests pass, restart backend (from checklist above)
+
+# Step 3: Test joystick RIGHT TURN (left_motor must be POSITIVE, right_motor must be NEGATIVE)
+curl -X POST http://localhost:8081/api/v2/control/drive \
+  -H "Content-Type: application/json" \
+  -d '{"throttle": 0.0, "turn": 0.5}'
+# Expected: left_motor_speed > 0, right_motor_speed < 0
+
+# Step 4: Test LEFT TURN (right_motor must be POSITIVE, left_motor must be NEGATIVE)
+curl -X POST http://localhost:8081/api/v2/control/drive \
+  -H "Content-Type: application/json" \
+  -d '{"throttle": 0.0, "turn": -0.5}'
+# Expected: right_motor_speed > 0, left_motor_speed < 0
+
+# Step 5: Run a 2-waypoint test mission — mower MUST turn TOWARD first waypoint, not AWAY
+# (Watch logs: tail -f logs/lawnberry.log | grep "NAV_CONTROL")
+# If mower turns backward or joystick inverted, the two layers are out of sync.
+```
+
+**If joystick is correct but mission turns wrong (or vice versa):**
+- The two compensation layers are out of sync
+- Do NOT commit until BOTH pass
+- Check recent changes — did you modify only one layer?
+
+---
+
+## Hardware vs. SIM_MODE Testing Boundaries
+
+**SIM_MODE is safe for unit tests but has important limitations.** Know what each covers:
+
+### What SIM_MODE SAFELY Covers ✅
+- Navigation path planning and waypoint logic
+- Motor compensation layer swaps
+- API endpoint request/response contracts
+- GPS/IMU data flow
+- State machine transitions
+
+Run safely: `pytest tests/unit/ -x -q -m "not hardware"`
+
+### What SIM_MODE DOES NOT Cover ❌
+- USB reconnect behavior during active motor commands
+- E-stop responsiveness with transient serial drops
+- Manual drive timeout enforcement under network stalls
+- GPS autoprobe DTR-reset hazards
+- Watchdog refresh timing constraints
+- Actual motor acceleration curves
+
+### Hardware Validation Required For:
+- Any changes to `robohat_service.py` (USB communication, e-stop, watchdog)
+- Any changes to `rest.py` drive endpoint (timeout enforcement)
+- Any changes to `gps_driver.py` (autoprobe safety)
+- Transient disconnect behavior (USB jiggle, cable flex)
+- E-stop delivered during active motion
+
+**When in doubt: "Does this change affect USB communication, timing constraints, or hardware state?" → Requires hardware validation before shipping.**
+
+---
+
 ## Code Style
 Python 3.11 (backend), TypeScript + Vue 3 (frontend): Follow standard conventions
 

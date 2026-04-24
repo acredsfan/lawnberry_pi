@@ -231,3 +231,6 @@ tests/unit/test_manual_control_unlock.py
 
 # External tools (adjacent repos)
 ../lawnberry-mcp/
+
+# Auto-added by pre-commit-gitignore-guard: Large file (4594 KB ≥ 2048 KB threshold)
+data/lawnberry.db-wal

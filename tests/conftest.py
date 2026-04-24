@@ -118,6 +118,13 @@ def reset_control_safety_state():
     except Exception:
         # Keep fixture fail-safe for import-order edge cases in isolated tests.
         pass
+    
+    # Reset traction control global singleton
+    try:
+        import backend.src.services.traction_control_service as tc_module
+        tc_module._instance = None
+    except Exception:
+        pass
 
     yield
 
@@ -129,6 +136,13 @@ def reset_control_safety_state():
         rest_api._emergency_until = 0.0
         rest_api._client_emergency.clear()
         rest_api._legacy_motors_active = False
+    except Exception:
+        pass
+    
+    # Reset traction control global singleton
+    try:
+        import backend.src.services.traction_control_service as tc_module
+        tc_module._instance = None
     except Exception:
         pass
 

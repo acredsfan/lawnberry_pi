@@ -203,6 +203,20 @@ class GPSDriver(HardwareDriver):
                         if p not in candidates:
                             candidates.append(p)
 
+                # Exclude RoboHAT and other system ports to prevent DTR-reset mid-mission.
+                # The RoboHAT RP2040 resets when DTR is asserted on its USB CDC port.
+                excluded = {"/dev/robohat", "/dev/ttyACM0"}  # hardcoded fallback
+                try:
+                    from ..services.robohat_service import _known_excluded_devices
+                    excluded |= _known_excluded_devices()
+                except (ImportError, ModuleNotFoundError, RuntimeError):
+                    pass  # Fallback if circular import or service unavailable
+
+                candidates = [
+                    c for c in candidates
+                    if c not in excluded and os.path.realpath(c) not in excluded
+                ]
+
                 last_err: Exception | None = None
                 for dev in candidates:
                     for baud in self._baud_candidates:

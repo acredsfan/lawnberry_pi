@@ -392,6 +392,7 @@ async def test_maintain_usb_control_waits_for_pending_ack(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_emergency_stop_fails_closed_without_usb_control(monkeypatch):
+    """When USB control times out, e-stop must queue and zero PWM to prevent watchdog resume (Issue #4)."""
     svc = RoboHATService()
     svc.serial_conn = _StubSerial()
     svc.running = True
@@ -411,9 +412,10 @@ async def test_emergency_stop_fails_closed_without_usb_control(monkeypatch):
     ok = await svc.emergency_stop()
 
     assert ok is False
-    assert svc._last_pwm == (1600, 1400)
-    assert svc._last_pwm_at == 123.0
-    assert svc.status.last_watchdog_echo == "previous"
+    # Issue #4 fix: must queue e-stop and zero PWM to prevent watchdog from resuming stale motion
+    assert svc._estop_pending is True, "E-stop must be queued when USB control fails"
+    assert svc._last_pwm == (1500, 1500), "PWM cache must reset to neutral when USB control fails"
+    assert svc.status.motor_controller_ok is False
 
 
 def test_candidate_serial_ports_prioritize_env_and_settings(monkeypatch, tmp_path):
@@ -634,3 +636,126 @@ async def test_estop_pending_sends_neutral_on_reconnect():
     assert sent_lines[0] == "pwm,1500,1500"
     assert sent_lines[1] == "blade=off"
     assert svc._estop_pending is False
+
+
+@pytest.mark.asyncio
+async def test_reconnect_resets_last_pwm_cache():
+    """Verify _send_safe_state_on_reconnect resets _last_pwm to neutral (Issue #1)."""
+    from unittest.mock import AsyncMock
+    
+    svc = RoboHATService.__new__(RoboHATService)
+    svc.status = types.SimpleNamespace(serial_connected=False)
+    sent_lines = []
+    
+    async def fake_send_line(line: str) -> bool:
+        sent_lines.append(line)
+        return True
+    
+    svc._send_line = fake_send_line
+    # Simulate pre-disconnect motion state
+    svc._last_pwm = (1675, 1675)
+    
+    # Act
+    await svc._send_safe_state_on_reconnect()
+    
+    # Assert
+    assert svc._last_pwm == (1500, 1500), "PWM cache should reset to neutral after reconnect"
+    assert sent_lines == ["pwm,1500,1500", "blade=off"]
+
+
+@pytest.mark.asyncio
+async def test_estop_pending_applied_on_reconnect():
+    """Verify queued e-stop is applied when serial reconnects (Issue #3 Part A)."""
+    from unittest.mock import AsyncMock, MagicMock
+    
+    svc = RoboHATService()
+    svc._estop_pending = True
+    
+    # Mock serial connection
+    svc.serial_conn = MagicMock()
+    svc.serial_conn.is_open = True
+    svc.running = True
+    
+    # Track whether _apply_estop_if_pending was called
+    apply_estop_called = False
+    original_apply = svc._apply_estop_if_pending
+    
+    async def tracked_apply():
+        nonlocal apply_estop_called
+        apply_estop_called = True
+        await original_apply()
+    
+    svc._apply_estop_if_pending = tracked_apply
+    
+    # Mock other required methods
+    svc._probe_firmware_response = AsyncMock(return_value=True)
+    svc._send_safe_state_on_reconnect = AsyncMock()
+    svc._watchdog_task = None
+    svc._is_uart_port = lambda x: False
+    svc._drain_serial_buffer = lambda: None
+    
+    # Act - simulate the reconnect path
+    await svc._reconnect()
+    
+    # Assert
+    assert apply_estop_called, "_apply_estop_if_pending should be called during reconnect"
+
+
+@pytest.mark.asyncio
+async def test_clear_emergency_resets_estop_pending_flag():
+    """Verify clear_emergency resets _estop_pending flag (Issue #3 Part B)."""
+    from unittest.mock import AsyncMock, MagicMock
+    
+    svc = RoboHATService()
+    svc._estop_pending = True
+    
+    # Mock serial connection
+    svc.serial_conn = MagicMock()
+    svc.serial_conn.is_open = True
+    svc.running = True
+    
+    # Mock the methods
+    svc._ensure_usb_control = AsyncMock(return_value=True)
+    svc._send_line = AsyncMock(return_value=True)
+    svc.status = types.SimpleNamespace(last_error=None)
+    
+    # Act
+    result = await svc.clear_emergency()
+    
+    # Assert
+    assert result is True, "clear_emergency should return True on success"
+    assert svc._estop_pending is False, "_estop_pending flag should be cleared"
+
+
+@pytest.mark.asyncio
+async def test_estop_queued_when_usb_control_timeout():
+    """Verify e-stop queues and PWM zeros when USB control acknowledgement times out (Issue #4)."""
+    from unittest.mock import AsyncMock, MagicMock
+    
+    svc = RoboHATService()
+    
+    # Setup: serial is connected but USB control will timeout
+    svc.serial_conn = MagicMock()
+    svc.serial_conn.is_open = True
+    svc.running = True
+    
+    # Mock _ensure_usb_control to timeout (return False)
+    svc._ensure_usb_control = AsyncMock(return_value=False)
+    
+    svc.status = types.SimpleNamespace(
+        motor_controller_ok=True,
+        last_error=None,
+        last_watchdog_echo=None
+    )
+    
+    # Pre-set some non-neutral PWM to verify it gets zeroed
+    svc._last_pwm = (1600, 1400)
+    
+    # Act
+    result = await svc.emergency_stop()
+    
+    # Assert
+    assert result is False, "emergency_stop should return False when USB control fails"
+    assert svc._estop_pending is True, "E-stop should be queued for retry"
+    assert svc._last_pwm == (1500, 1500), "PWM cache should reset to neutral"
+    assert svc.status.motor_controller_ok is False

@@ -47,6 +47,10 @@ _planning_job_counter = 0
 _last_drive_audit_at: float = 0.0
 _DRIVE_AUDIT_SAMPLE_INTERVAL_S: float = 1.0
 
+# Manual drive auto-stop task tracking (Issue #2).
+# Must be retained at module scope to prevent garbage collection mid-flight.
+_drive_timeout_task: asyncio.Task | None = None
+
 
 class SystemSettings(BaseModel):
     timezone: str = "UTC"
@@ -812,8 +816,8 @@ async def control_drive_v2(cmd: dict, request: Request):
         # Convention: positive turn = turn right → right wheel speed < left wheel speed
         throttle = float(cmd.get("throttle", 0.0))
         turn = float(cmd.get("turn", 0.0))
-        left_speed = throttle - turn
-        right_speed = throttle + turn
+        left_speed = throttle + turn
+        right_speed = throttle - turn
         # Clamp
         max_speed_limit = 1.0
         left_speed = max(-max_speed_limit, min(max_speed_limit, left_speed))
@@ -1014,6 +1018,25 @@ async def control_drive_v2(cmd: dict, request: Request):
 
         # Send to RoboHAT
         success = await robohat.send_motor_command(left_speed, right_speed)
+
+        # Auto-stop enforcement: if client goes silent, kill motors after duration_ms (Issue #2)
+        if success:
+            global _drive_timeout_task
+            if _drive_timeout_task and not _drive_timeout_task.done():
+                _drive_timeout_task.cancel()
+            
+            # duration_ms == 0 means "use client-side tick" — clamp to hard ceiling anyway
+            auto_stop_ms = duration_ms if duration_ms > 0 else 500
+            
+            async def _auto_stop():
+                try:
+                    await asyncio.sleep(auto_stop_ms / 1000.0)
+                    await robohat.send_motor_command(0.0, 0.0)
+                    logger.warning("Manual drive duration expired (%d ms); motors stopped", auto_stop_ms)
+                except asyncio.CancelledError:
+                    pass
+            
+            _drive_timeout_task = asyncio.create_task(_auto_stop())
 
         watchdog_end = datetime.now(timezone.utc)
         watchdog_latency = (watchdog_end - watchdog_start).total_seconds() * 1000
