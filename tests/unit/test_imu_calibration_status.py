@@ -225,30 +225,27 @@ async def test_bno085_driver_not_initialized_returns_none(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_bno085_driver_sim_calibrating_then_fully_calibrated():
+async def test_bno085_driver_sim_calibrating_then_fully_calibrated(monkeypatch):
     """SIM path: first 80 reads -> 'calibrating'; cycle 80+ -> 'fully_calibrated'."""
-    import os
-    os.environ["SIM_MODE"] = "1"
-    try:
-        from backend.src.drivers.sensors.bno085_driver import BNO085Driver
-        drv = BNO085Driver({})
-        await drv.initialize()
-        await drv.start()
+    monkeypatch.setenv("SIM_MODE", "1")
+    
+    from backend.src.drivers.sensors.bno085_driver import BNO085Driver
+    drv = BNO085Driver({})
+    await drv.initialize()
+    await drv.start()
 
-        r1 = await drv.read_orientation()
-        assert r1 is not None
-        assert r1["calibration_status"] == "calibrating"
+    r1 = await drv.read_orientation()
+    assert r1 is not None
+    assert r1["calibration_status"] == "calibrating"
 
-        for _ in range(80):
-            await drv.read_orientation()
+    for _ in range(80):
+        await drv.read_orientation()
 
-        r2 = await drv.read_orientation()
-        assert r2 is not None
-        assert r2["calibration_status"] == "fully_calibrated"
+    r2 = await drv.read_orientation()
+    assert r2 is not None
+    assert r2["calibration_status"] == "fully_calibrated"
 
-        await drv.stop()
-    finally:
-        os.environ.pop("SIM_MODE", None)
+    await drv.stop()
 
 
 # ---------------------------------------------------------------------------
