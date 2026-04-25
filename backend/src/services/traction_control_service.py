@@ -66,6 +66,7 @@ class TractionControlService:
                  min_speed_for_detection: float = 0.2,  # Don't test when creeping
                  slip_sample_required: int = 3,  # Require 3 cycles to confirm slip
                  slip_timeout_s: float = 5.0,  # Give up after 5s of max boost
+                 counter_rotation_threshold_s: float = 8.0,  # Activate Stage 2 after this long
                  boost_ramp_rate: float = 0.05):  # Increase by 5% per control cycle
         """
         Initialize traction control.
@@ -75,6 +76,7 @@ class TractionControlService:
             min_speed_for_detection: Ignore slip when commanded speed is very low
             slip_sample_required: Consecutive samples needed to confirm slip
             slip_timeout_s: Time before giving up on slip recovery
+            counter_rotation_threshold_s: Time before activating Stage 2 counter-rotation
             boost_ramp_rate: Rate at which to increase motor boost (per cycle)
         """
         self.slip_threshold = slip_threshold
@@ -84,6 +86,7 @@ class TractionControlService:
         self.boost_ramp_rate = boost_ramp_rate
         
         self.state = TractionControlState()
+        self.state.counter_rotation_threshold_s = counter_rotation_threshold_s
         self.enabled = True
     
     def update_motor_feedback(self, left_rpm: float, right_rpm: float) -> None:
@@ -224,7 +227,7 @@ class TractionControlService:
             # Stage 2: Check if counter-rotation has been active too long (give up)
             if self.state.counter_rotation_active and self.state.counter_rotation_start_time:
                 counter_elapsed = time.monotonic() - self.state.counter_rotation_start_time
-                if counter_elapsed > 10.0:  # 10s of counter-rotation attempt
+                if counter_elapsed > self.slip_timeout_s:
                     logger.error(
                         "Traction loss persisted %.1f s despite boost + counter-rotation; "
                         "likely mechanical issue or stalled motor — raising error",

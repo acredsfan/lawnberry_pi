@@ -178,7 +178,8 @@ class TestTractionControlService:
         svc = TractionControlService(
             slip_threshold=5.0, 
             slip_sample_required=1,
-            slip_timeout_s=0.1  # Short timeout for testing
+            slip_timeout_s=0.1,  # Short timeout for testing
+            counter_rotation_threshold_s=0.05  # Activate Stage 2 quickly for testing
         )
         svc.record_motor_command(0.5, 0.5)
         
@@ -186,13 +187,15 @@ class TestTractionControlService:
         start = time.monotonic()
         
         # Simulate persistent slip beyond timeout
-        while time.monotonic() - start < 0.5:
+        # Need to call many times per second to accumulate samples and ramp boost
+        while time.monotonic() - start < 1.0:
             svc.update_motor_feedback(left_rpm=5.0, right_rpm=50.0)
             try:
                 svc.compute_boost()
             except RuntimeError as e:
                 assert "traction loss" in str(e).lower()
                 return  # Success: error was raised
+            time.sleep(0.001)  # Small sleep to simulate control cycle timing
         
         pytest.fail("Expected RuntimeError for persistent slip timeout")
 
