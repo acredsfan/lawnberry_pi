@@ -866,7 +866,7 @@ class NavigationService:
         data is available.
         """
         logger.info("Heading bootstrap: driving forward to acquire GPS COG snap...")
-        deadline = time.monotonic() + 3.0
+        deadline = time.monotonic() + 5.0  # Extended from 3s to give more time for GPS COG stability
         try:
             await self.set_speed(0.6, 0.6)
             while time.monotonic() < deadline:
@@ -1105,7 +1105,7 @@ class NavigationService:
                     max_dev = max(
                         abs(((c - cog_mean) + 180) % 360 - 180) for c in self._gps_cog_history
                     )
-                    going_straight = max_dev < 8.0
+                    going_straight = max_dev < 15.0  # Relaxed from 8.0° to 15.0° to allow GPS noise during bootstrap
 
                 if going_straight:
                     if self._heading_alignment_sample_count == 0:
