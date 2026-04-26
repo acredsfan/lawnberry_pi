@@ -234,3 +234,8 @@ tests/unit/test_manual_control_unlock.py
 
 # Auto-added by pre-commit-gitignore-guard: Large file (4594 KB ≥ 2048 KB threshold)
 data/lawnberry.db-wal
+
+# =============================================================
+# Git worktrees (local development workspaces)
+# =============================================================
+.worktrees/
