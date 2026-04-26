@@ -25,6 +25,19 @@ each record. A crash or power loss leaves a valid prefix on disk.
 Capture is opt-in. Unset or empty `LAWNBERRY_CAPTURE_PATH` disables it
 entirely; navigation behavior is byte-identical to the no-capture path.
 
+### Confirming capture is active
+
+On startup, the backend logs one of:
+
+- INFO: `Telemetry capture enabled: <path>` — capture is attached and writing.
+- WARNING: `Failed to enable telemetry capture at <path>: <error>` — typically a permissions or path-not-writable issue. Capture is not active.
+
+If you see neither, the env var is unset. Check by `grep -E 'Telemetry capture' <backend log>`.
+
+### Disabling capture
+
+Unset `LAWNBERRY_CAPTURE_PATH` and restart the backend. On a systemd-managed deployment, that means removing or commenting out the line in the dropin (e.g. `/etc/systemd/system/lawnberry-backend.service.d/override.conf`) and running `systemctl daemon-reload && systemctl restart lawnberry-backend`. Existing JSONL files are not deleted; rotate or remove them manually.
+
 ## Replaying a capture
 
 ```bash
