@@ -1352,7 +1352,7 @@ class NavigationService:
                     )
                 )
             except Exception as exc:  # pragma: no cover - safety net
-                logger.debug("Telemetry capture record failed: %s", exc)
+                logger.warning("Telemetry capture record failed: %s", exc)
         return self.navigation_state
 
     def _apply_gps_antenna_offset(self, gps_position: Position) -> Position:
