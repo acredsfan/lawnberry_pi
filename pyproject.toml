@@ -42,7 +42,7 @@ hardware = [
     # Adafruit Blinka + CircuitPython VL53L0X for ToF (preferred on Pi)
     "adafruit-blinka>=8.8.0",
     "adafruit-circuitpython-bno08x>=1.3.2",
-    "adafruit-circuitpython-vl53l0x>=3.7.3",
+    "adafruit-circuitpython-vl53l0x>=3.6.19",
     # GPIO providers (any one is sufficient)
     "lgpio>=0.2.2; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
     "python-periphery>=2.4.1",
@@ -81,7 +81,18 @@ ignore = []
 ]
 
 [tool.uv]
-# Primary index remains PyPI; add piwheels as extra index to prefer ARM64 wheels on Raspberry Pi.
-# uv will honor the lockfile (uv.lock) when using `uv sync --frozen`.
+# Use PyPI only. Modern packages publish manylinux wheels for aarch64
+# (Pi 4/5 64-bit OS) on PyPI, so the historical piwheels detour is no
+# longer needed and previously caused cross-platform breakage:
+#   - piwheels splits ARM into armv6l/armv7l/aarch64 wheel sets, and the
+#     resolver picked armv7l-only entries for Pi 4/5 (aarch64), failing.
+#   - piwheels has no x86_64 wheels, so CI on Ubuntu x86 failed on every
+#     piwheels-pinned package.
+# Resolve for the platforms we actually run on so the lockfile contains
+# wheels valid on each.
 index-url = "https://pypi.org/simple"
-extra-index-url = ["https://www.piwheels.org/simple"]
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "sys_platform == 'linux' and platform_machine == 'armv7l'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
