@@ -72,3 +72,69 @@ def test_navigation_state_snapshot_excludes_path_lists():
     assert "obstacle_map" not in dumped
     assert "coverage_grid" not in dumped
     assert "safety_boundaries" not in dumped
+
+
+import json
+from pathlib import Path
+
+from backend.src.diagnostics.capture import TelemetryCapture
+
+
+def test_telemetry_capture_writes_one_line_per_record(tmp_path: Path):
+    capture = TelemetryCapture(tmp_path / "run.jsonl")
+    record = CaptureRecord(
+        capture_version=CAPTURE_SCHEMA_VERSION,
+        record_type="nav_step",
+        sensor_data=_sample_sensor_data(),
+        navigation_state_after=_sample_snapshot(),
+    )
+    capture.record(record)
+    capture.record(record)
+    capture.close()
+
+    lines = (tmp_path / "run.jsonl").read_text().splitlines()
+    assert len(lines) == 2
+    parsed = [json.loads(line) for line in lines]
+    assert parsed[0]["capture_version"] == CAPTURE_SCHEMA_VERSION
+    assert parsed[0]["record_type"] == "nav_step"
+
+
+def test_telemetry_capture_creates_parent_directory(tmp_path: Path):
+    target = tmp_path / "nested" / "dir" / "run.jsonl"
+    capture = TelemetryCapture(target)
+    capture.record(
+        CaptureRecord(
+            capture_version=CAPTURE_SCHEMA_VERSION,
+            record_type="nav_step",
+            sensor_data=_sample_sensor_data(),
+            navigation_state_after=_sample_snapshot(),
+        )
+    )
+    capture.close()
+    assert target.exists()
+    assert target.parent.is_dir()
+
+
+def test_telemetry_capture_flushes_each_record(tmp_path: Path):
+    """A crash between records must leave a valid prefix on disk."""
+    target = tmp_path / "run.jsonl"
+    capture = TelemetryCapture(target)
+    capture.record(
+        CaptureRecord(
+            capture_version=CAPTURE_SCHEMA_VERSION,
+            record_type="nav_step",
+            sensor_data=_sample_sensor_data(),
+            navigation_state_after=_sample_snapshot(),
+        )
+    )
+    # Without close(), the bytes should still be on disk because we flush per record.
+    contents = target.read_text()
+    assert contents.endswith("\n")
+    json.loads(contents.strip())  # parses cleanly
+    capture.close()
+
+
+def test_telemetry_capture_close_is_idempotent(tmp_path: Path):
+    capture = TelemetryCapture(tmp_path / "run.jsonl")
+    capture.close()
+    capture.close()  # must not raise
