@@ -59,6 +59,25 @@ except Exception:
 _log = logging.getLogger(__name__)
 
 
+def _maybe_attach_telemetry_capture(nav_service) -> None:
+    """If LAWNBERRY_CAPTURE_PATH is set, attach a JSONL telemetry capture.
+
+    No-op when the env var is unset or empty. Errors during attach are logged
+    but do not abort startup — capture is a diagnostic, not a safety dependency.
+    """
+    path = os.environ.get("LAWNBERRY_CAPTURE_PATH", "").strip()
+    if not path:
+        return
+    try:
+        from .diagnostics.capture import TelemetryCapture
+
+        capture = TelemetryCapture(path)
+        nav_service.attach_capture(capture)
+        _log.info("Telemetry capture enabled: %s", path)
+    except Exception as exc:
+        _log.warning("Failed to enable telemetry capture at %s: %s", path, exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -141,8 +160,10 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
+        nav_service = NavigationService.get_instance()
+        _maybe_attach_telemetry_capture(nav_service)
         mission_service = get_mission_service(
-            NavigationService.get_instance(), websocket_hub=websocket_hub
+            nav_service, websocket_hub=websocket_hub
         )
         await asyncio.wait_for(mission_service.recover_persisted_missions(), timeout=30.0)
     except TimeoutError:
