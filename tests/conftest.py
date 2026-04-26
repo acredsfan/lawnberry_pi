@@ -234,3 +234,32 @@ def isolate_ui_settings_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(settings_router, "DATA_DIR", data_dir)
     monkeypatch.setattr(settings_router, "SETTINGS_FILE", settings_file)
     monkeypatch.setattr(settings_router, "UI_SETTINGS_FILE", ui_settings_file)
+
+
+@pytest.fixture(autouse=True)
+def reset_app_state_runtime_and_overrides():
+    """Reset app.dependency_overrides between tests.
+
+    Without this, a test that sets `app.dependency_overrides[get_runtime] = ...`
+    leaks the override into every subsequent test in the session. We clear
+    after each test, regardless of whether the test cleared it explicitly.
+
+    `app.state.runtime` is NOT cleared here — lifespan rebuilds it on the
+    next TestClient startup, but if a test ran without TestClient (just
+    imports `app`), there is nothing to rebuild and clearing here would
+    just hide bugs.
+    """
+    try:
+        from backend.src.main import app
+    except Exception:
+        # If main.py fails to import (e.g. during very early collection),
+        # the other reset fixtures will surface that; this one is a no-op.
+        yield
+        return
+
+    yield
+
+    try:
+        app.dependency_overrides.clear()
+    except Exception:
+        pass
