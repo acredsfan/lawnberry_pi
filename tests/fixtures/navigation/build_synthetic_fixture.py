@@ -12,6 +12,15 @@ The fixture is committed to the repository. Tests load it via ReplayLoader and
 replay through the current code path to verify parity. If a navigation change
 intentionally alters the output for this scenario, regenerate the fixture and
 review the diff carefully — every committed fixture change is a behavior change.
+
+Determinism note: NavigationService writes wall-clock datetime.now(UTC) into
+three fields that surface in the snapshot (NavigationState.timestamp,
+NavigationState.last_gps_fix, and Position.timestamp via default factory).
+For a fixture to be byte-reproducible, those fields must be normalized to a
+deterministic clock before the record is written. The _DeterministicCapture
+wrapper below does that. Until NavigationService accepts an injected clock
+(see architecture plan §3 — real pose pipeline), this generator-side
+normalization is the load-bearing contract for fixture reproducibility.
 """
 from __future__ import annotations
 
@@ -21,6 +30,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from backend.src.diagnostics.capture import TelemetryCapture
+from backend.src.models.diagnostics_capture import CaptureRecord
 from backend.src.models.sensor_data import GpsReading, ImuReading, SensorData
 from backend.src.services.navigation_service import NavigationService
 
@@ -33,18 +43,50 @@ LAT_STEP = 0.0001  # ~11 m at 42°N
 YAW_DEG = 90.0
 
 
+class _DeterministicCapture:
+    """Wraps TelemetryCapture and rewrites snapshot timestamps to a fixed clock.
+
+    NavigationService stamps wall-clock time into NavigationState.timestamp,
+    NavigationState.last_gps_fix, and the default-factory timestamp on
+    Position. For a reproducible fixture, those three fields must be replaced
+    with the synthetic step time before the record hits disk.
+    """
+
+    def __init__(self, inner: TelemetryCapture) -> None:
+        self._inner = inner
+        self.next_ts: datetime | None = None
+
+    def record(self, record: CaptureRecord) -> None:
+        if self.next_ts is not None:
+            snap = record.navigation_state_after
+            snap.timestamp = self.next_ts
+            if snap.current_position is not None:
+                snap.current_position.timestamp = self.next_ts
+            if snap.last_gps_fix is not None:
+                snap.last_gps_fix = self.next_ts
+        self._inner.record(record)
+
+    def close(self) -> None:
+        self._inner.close()
+
+
 async def _build() -> None:
-    # Force SIM mode so navigation does not attempt hardware access.
-    os.environ.setdefault("SIM_MODE", "1")
+    # Force SIM mode so navigation does not attempt hardware access. Use a
+    # hard set (not setdefault) because this is a fixture generator: an
+    # external SIM_MODE=0 in the shell must not silently change what we
+    # capture.
+    os.environ["SIM_MODE"] = "1"
 
     # Fresh service — do not pollute the singleton.
     nav = NavigationService()
     capture = TelemetryCapture(FIXTURE_PATH)
-    nav.attach_capture(capture)
+    deterministic = _DeterministicCapture(capture)
+    nav.attach_capture(deterministic)
 
     base_time = datetime(2026, 4, 26, 12, 0, 0, tzinfo=UTC)
     for i in range(NUM_STEPS):
         ts = base_time + timedelta(seconds=i)
+        deterministic.next_ts = ts
         sensor_data = SensorData(
             gps=GpsReading(
                 latitude=LAT_START + i * LAT_STEP,
