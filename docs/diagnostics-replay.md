@@ -39,8 +39,17 @@ The CLI prints a tolerance banner, a summary line, and any deltas. Pass
 `--verbose` (or `-v`) to also print one line per replay step — useful when
 investigating a specific step's behavior.
 
-Tolerances are tunable. The defaults are loose for ad-hoc debugging
-(captures may have come from a previous code version with expected drift):
+Tolerances are tunable. The defaults are deliberately loose for ad-hoc
+debugging (captures may have come from a previous code version with
+expected drift):
+
+| Flag             | Default | Units   |
+| ---------------- | ------- | ------- |
+| `--heading-tol`  | `0.01`  | degrees |
+| `--latlon-tol`   | `1e-7`  | degrees |
+| `--velocity-tol` | `0.001` | m/s     |
+
+Override with explicit values, e.g. for a stricter check:
 
 ```bash
 python scripts/replay_navigation.py run.jsonl \
