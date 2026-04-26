@@ -74,14 +74,25 @@ Verification steps:
 ```
 adjusted_yaw = (-raw_yaw + imu_yaw_offset_degrees + session_heading_alignment) % 360.0
 ```
-- `imu_yaw_offset_degrees`: static mechanical mounting offset from `config/hardware.yaml` (`imu.yaw_offset_degrees`). Must be `0.0` unless the IMU is physically rotated in its enclosure — derive the correct value using the calibration service, not by guessing.
+- `imu_yaw_offset_degrees`: static mechanical mounting offset from `config/hardware.yaml`
+  (`imu.yaw_offset_degrees`). Must be `0.0` unless the IMU is physically rotated in its
+  enclosure; do not use this as a heading-error correction knob.
+- Do not use GPS movement from the calibration endpoint to set `imu.yaw_offset_degrees`; BNO085 Game Rotation Vector yaw is boot-relative, so mission startup owns dynamic GPS alignment.
 - `session_heading_alignment`: dynamic per-mission offset derived from GPS Course Over Ground (COG) during the heading bootstrap drive at mission start. Resets at each new mission.
 
-**GPS COG heading bootstrap**: At each mission start, the navigation service drives briefly forward at ~75% throttle for up to 3 seconds. As soon as a valid GPS COG reading is available, `session_heading_alignment` is set and the bootstrap drive stops. This compensates for the BNO085's arbitrary yaw zero at power-on.
+**GPS COG heading bootstrap**: At each mission start, the navigation service drives briefly forward at ~75% throttle for up to 5 seconds. It polls the shared sensor manager and derives GPS COG from receiver course or actual coordinate deltas. As soon as stable COG is available, `session_heading_alignment` is set and the bootstrap drive stops. This compensates for the BNO085's arbitrary yaw zero at power-on.
 
 ### GPS
 - Preferred: USB (ZED-F9P RTK) → `/dev/lawnberry-gps` (udev symlink; configured via `gps.usb_device` in `config/hardware.yaml`)
 - Alternative: UART0 for NEO-8M → /dev/serial0 at 115200 baud
+- GPS coordinates are corrected for antenna placement when `gps.antenna_offset_forward_m` or
+  `gps.antenna_offset_right_m` is set. These values describe the antenna location relative to the
+  mower navigation point/body center: positive is forward/right, negative is behind/left. Example:
+  if the antenna is 1.5 ft behind the point the mower should navigate from, set
+  `gps.antenna_offset_forward_m: -0.46`.
+- `gps.map_display_offset_north_m` and `gps.map_display_offset_east_m` are fixed display-only
+  nudges for local satellite imagery alignment. Use them only when the map imagery is offset in a
+  consistent world direction; they do not affect navigation.
 
 #### RTK Positioning with NTRIP Corrections
 

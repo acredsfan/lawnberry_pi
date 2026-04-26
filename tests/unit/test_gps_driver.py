@@ -66,6 +66,32 @@ def test_gps_driver_parse_gst_accuracy():
     assert accuracy == pytest.approx((0.02 ** 2 + 0.03 ** 2) ** 0.5)
 
 
+def test_gps_hardware_read_keeps_reading_after_gga_to_capture_rmc_course():
+    drv = GPSDriver({"mode": GpsMode.F9P_USB.value})
+
+    class FakeSerial:
+        def __init__(self):
+            self.lines = [
+                b"$GNGGA,123519,4807.038,N,01131.000,E,4,12,0.7,545.4,M,46.9,M,,*5B\r\n",
+                b"$GNRMC,123520,A,4807.039,N,01131.001,E,1.50,45.0,230394,003.1,W*6A\r\n",
+            ]
+
+        def readline(self):
+            if self.lines:
+                return self.lines.pop(0)
+            return b""
+
+    drv._serial = FakeSerial()
+    drv._first_read_done = True
+
+    reading = drv._read_hardware_blocking()
+
+    assert reading is not None
+    assert reading.heading == pytest.approx(45.0)
+    assert reading.speed == pytest.approx(1.50 * 0.514444)
+    assert reading.rtk_status == "RTK_FIXED"
+
+
 def test_gps_driver_fix_quality_mapping_handles_unknown():
     drv = GPSDriver({"mode": GpsMode.NEO8M_UART.value})
     assert drv._map_fix_quality(None) is None
@@ -140,5 +166,4 @@ def test_gps_autoprobe_skips_dev_robohat_symlink():
     assert "/dev/robohat" not in filtered, "/dev/robohat should be excluded"
     assert "/dev/ttyACM0" not in filtered, "/dev/ttyACM0 should be excluded"
     assert "/dev/ttyACM1" in filtered, "/dev/ttyACM1 should NOT be excluded"
-
 

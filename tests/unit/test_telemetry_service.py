@@ -1,10 +1,12 @@
-import pytest
 import asyncio
 from unittest.mock import MagicMock, patch
-from backend.src.services.telemetry_service import TelemetryService
-from backend.src.core.state_manager import AppState
+
+import pytest
+
 from backend.src.models.hardware_config import HardwareConfig
-from backend.src.models.sensor_data import GpsMode
+from backend.src.models.sensor_data import GpsMode, GpsReading, SensorData
+from backend.src.services.telemetry_service import TelemetryService
+
 
 @pytest.mark.asyncio
 async def test_telemetry_service_initialization():
@@ -70,6 +72,47 @@ async def test_get_telemetry_hardware():
     assert telemetry["source"] == "hardware"
     assert telemetry["battery"]["voltage"] == 12.5
     assert telemetry["position"]["latitude"] == 40.0
+
+
+def test_format_telemetry_applies_gps_antenna_offset_to_displayed_position():
+    service = TelemetryService()
+    mock_app_state = MagicMock()
+    mock_app_state.hardware_config = HardwareConfig(
+        gps_antenna_offset_forward_m=-0.46,
+        gps_antenna_offset_right_m=0.0,
+    )
+    service.app_state = mock_app_state
+    service._get_navigation_heading = lambda: 0.0
+
+    telemetry = service._format_telemetry(
+        SensorData(gps=GpsReading(latitude=40.0, longitude=-75.0, accuracy=0.03)),
+        sim_mode=False,
+    )
+
+    assert telemetry["raw_position"]["latitude"] == pytest.approx(40.0)
+    assert telemetry["position"]["latitude"] == pytest.approx(40.0 + 0.46 / 111_320.0)
+    assert telemetry["position"]["longitude"] == pytest.approx(-75.0)
+    assert telemetry["position_correction"]["applied"] == ["gps_antenna_offset"]
+
+
+def test_format_telemetry_applies_map_display_offset_without_navigation_heading():
+    service = TelemetryService()
+    mock_app_state = MagicMock()
+    mock_app_state.hardware_config = HardwareConfig(
+        gps_map_display_offset_north_m=0.0,
+        gps_map_display_offset_east_m=0.5,
+    )
+    service.app_state = mock_app_state
+    service._get_navigation_heading = lambda: None
+
+    telemetry = service._format_telemetry(
+        SensorData(gps=GpsReading(latitude=40.0, longitude=-75.0, accuracy=0.03)),
+        sim_mode=False,
+    )
+
+    assert telemetry["position"]["latitude"] == pytest.approx(40.0)
+    assert telemetry["position"]["longitude"] > -75.0
+    assert telemetry["position_correction"]["applied"] == ["map_display_offset"]
 
 
 @pytest.mark.asyncio

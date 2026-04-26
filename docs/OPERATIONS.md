@@ -161,6 +161,12 @@ clear nearby obstacles and restore fresh hardware telemetry before retrying.
 Mission creation/start can succeed before the mower has enough verified autonomy feedback to traverse the first waypoint, so
 watch the mission status contract instead of assuming `running` alone means the rover is moving.
 
+- Mission-start heading alignment is an explicit bootstrap step: the mower drives straight, polls the shared sensor manager,
+  derives GPS course-over-ground from receiver course or actual coordinate deltas, then snaps the relative BNO085 yaw to
+  that GPS movement vector before trusting IMU heading for waypoint turns.
+- During normal waypoint pursuit, GPS course-over-ground is treated as a movement vector/fallback rather than a continuous
+  IMU calibration source. This avoids corrupting chassis heading while the mower is arcing, tank-turning, slipping, or
+  maneuvering around obstacles.
 - Autonomous obstacle gating now uses the same configured ToF clearance threshold as manual drive:
   `config/limits.yaml` → `tof_obstacle_distance_meters` (currently ~0.1 m; see file for exact value).
 - If waypoint traversal cannot begin safely after the bounded verification window, the mission now fails with explicit detail
@@ -260,6 +266,13 @@ For best orientation accuracy, calibrate the IMU after installation:
 
 ## GPS Setup
 - Preferred: ZED-F9P via USB; alternative: Neo-8M via UART
+- If the displayed/navigation point is offset because the GPS antenna is not at the mower body
+  center, set `gps.antenna_offset_forward_m` and `gps.antenna_offset_right_m` in
+  `config/hardware.yaml`. Use meters; positive is forward/right from the mower point to the antenna.
+  For an antenna 1.5 ft behind the desired mower point, use `gps.antenna_offset_forward_m: -0.46`.
+- If only the satellite imagery is shifted, use the display-only
+  `gps.map_display_offset_north_m` / `gps.map_display_offset_east_m` values instead; those do not
+  change navigation.
 - NTRIP corrections:
   - If the rover already receives corrections directly (configured in u-center), no further changes are needed on the Pi.
   - When letting the Pi forward RTCM data, ensure `gps_ntrip_enabled: true` in `config/hardware.yaml` and update the `.env` file with the required `NTRIP_*` caster settings (host, mountpoint, credentials, serial device).

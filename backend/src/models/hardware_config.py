@@ -140,6 +140,35 @@ class HardwareConfig(BaseModel):
     gps_usb_device: str | None = Field(
         default=None, description="Serial device for GPS (e.g. /dev/lawnberry-gps)"
     )
+    gps_antenna_offset_forward_m: float = Field(
+        default=0.0,
+        description=(
+            "GPS antenna offset from the mower navigation point in meters. "
+            "Positive is forward; negative is behind. Applied with heading to navigate "
+            "from the mower point instead of the antenna point."
+        ),
+    )
+    gps_antenna_offset_right_m: float = Field(
+        default=0.0,
+        description=(
+            "GPS antenna offset from the mower navigation point in meters. "
+            "Positive is right; negative is left."
+        ),
+    )
+    gps_map_display_offset_north_m: float = Field(
+        default=0.0,
+        description=(
+            "Fixed north/south display-only offset in meters for local map imagery alignment. "
+            "Does not change navigation state."
+        ),
+    )
+    gps_map_display_offset_east_m: float = Field(
+        default=0.0,
+        description=(
+            "Fixed east/west display-only offset in meters for local map imagery alignment. "
+            "Does not change navigation state."
+        ),
+    )
     imu_type: IMUType | None = Field(default=None)
     imu_port: str | None = Field(
         default=None, description="Serial port for IMU (e.g. /dev/ttyAMA4)"

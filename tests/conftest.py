@@ -125,6 +125,27 @@ def reset_control_safety_state():
         tc_module._instance = None
     except Exception:
         pass
+    
+    # Reset auth state (active sessions, password hash)
+    try:
+        from backend.src.services.auth_service import primary_auth_service
+        from backend.src.models.auth_security_config import AuthSecurityConfig
+        from backend.src.core import globals as global_state
+        from backend.src.api import rest as rest_api
+        
+        primary_auth_service.active_sessions.clear()
+        primary_auth_service.config = AuthSecurityConfig()  # Reset to defaults (no password_hash)
+        primary_auth_service._failed_attempts.clear()
+        primary_auth_service._invalidated_session_ids.clear()
+        
+        # Also reset the global state copy
+        global_state._security_settings = AuthSecurityConfig()
+        
+        # Also update the rest module's reference if it has one
+        if hasattr(rest_api, '_security_settings'):
+            rest_api._security_settings = AuthSecurityConfig()
+    except Exception:
+        pass
 
     yield
 
@@ -143,6 +164,27 @@ def reset_control_safety_state():
     try:
         import backend.src.services.traction_control_service as tc_module
         tc_module._instance = None
+    except Exception:
+        pass
+    
+    # Reset auth state after test
+    try:
+        from backend.src.services.auth_service import primary_auth_service
+        from backend.src.models.auth_security_config import AuthSecurityConfig
+        from backend.src.core import globals as global_state
+        from backend.src.api import rest as rest_api
+        
+        primary_auth_service.active_sessions.clear()
+        primary_auth_service.config = AuthSecurityConfig()  # Reset to defaults (no password_hash)
+        primary_auth_service._failed_attempts.clear()
+        primary_auth_service._invalidated_session_ids.clear()
+        
+        # Also reset the global state copy
+        global_state._security_settings = AuthSecurityConfig()
+        
+        # Also update the rest module's reference if it has one
+        if hasattr(rest_api, '_security_settings'):
+            rest_api._security_settings = AuthSecurityConfig()
     except Exception:
         pass
 

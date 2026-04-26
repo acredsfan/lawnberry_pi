@@ -46,6 +46,30 @@ def test_config_loader_minimal(tmp_path: Path):
     assert limits.tilt_cutoff_latency_ms == 200
 
 
+def test_config_loader_maps_gps_position_offsets(tmp_path: Path):
+    (tmp_path / "hardware.yaml").write_text(
+        dedent(
+            """\
+            gps:
+              type: ZED-F9P
+              antenna_offset_forward_m: -0.46
+              antenna_offset_right_m: 0.08
+              map_display_offset_north_m: 0.2
+              map_display_offset_east_m: -0.1
+            """
+        )
+    )
+    (tmp_path / "limits.yaml").write_text("")
+
+    loader = ConfigLoader(config_dir=str(tmp_path))
+    hardware, _limits = loader.load()
+
+    assert hardware.gps_antenna_offset_forward_m == pytest.approx(-0.46)
+    assert hardware.gps_antenna_offset_right_m == pytest.approx(0.08)
+    assert hardware.gps_map_display_offset_north_m == pytest.approx(0.2)
+    assert hardware.gps_map_display_offset_east_m == pytest.approx(-0.1)
+
+
 def test_config_loader_local_override(tmp_path: Path):
     (tmp_path / "hardware.yaml").write_text(
         dedent(

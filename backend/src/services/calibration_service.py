@@ -47,10 +47,10 @@ def _compute_gps_heading_validation(
 ) -> dict[str, Any] | None:
     """Compare GPS trajectory bearing to raw IMU yaw from forward-sweep snapshots.
 
-    Returns a dict with the GPS bearing, raw IMU yaw, and the suggested
-    ``imu_yaw_offset_degrees`` value (= gps_bearing + raw_yaw) that would
-    make the navigation heading match the GPS heading.  Returns None if GPS
-    data is unavailable or the trajectory was too short for a reliable bearing.
+    Returns a validation-only diagnostic. BNO085 Game Rotation Vector yaw has an
+    arbitrary boot-relative zero, so GPS trajectory comparison must not be used
+    to recommend a persistent ``imu.yaw_offset_degrees`` value. Mission startup
+    performs the real per-session GPS COG snap used for navigation.
     """
     pre_lat = pre.get("gps_lat")
     pre_lon = pre.get("gps_lon")
@@ -81,21 +81,25 @@ def _compute_gps_heading_validation(
     y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
     gps_bearing = (math.degrees(math.atan2(x, y)) + 360) % 360
 
-    # Suggested total yaw offset:
-    # heading formula:  adjusted = (-raw_yaw + offset) % 360
-    # for adjusted == gps_bearing:  offset = gps_bearing + raw_yaw (mod 360)
-    suggested_offset = (gps_bearing + float(imu_raw_yaw)) % 360
+    # Validation-only comparison against the same raw-yaw convention used by
+    # NavigationService. This delta is useful for field diagnostics, but it is
+    # not a persistent mounting offset because raw_yaw is boot-relative.
+    boot_relative_heading = (-float(imu_raw_yaw)) % 360
+    heading_delta = (gps_bearing - boot_relative_heading + 180.0) % 360.0 - 180.0
 
     return {
         "reliable": True,
         "distance_m": round(dist_m, 3),
         "gps_bearing_degrees": round(gps_bearing, 1),
         "imu_raw_yaw_degrees": round(float(imu_raw_yaw), 1),
-        "suggested_imu_yaw_offset_degrees": round(suggested_offset, 1),
+        "imu_boot_relative_heading_degrees": round(boot_relative_heading, 1),
+        "heading_delta_degrees": round(heading_delta, 1),
+        "persistent_offset_recommendation": None,
         "note": (
-            f"Set imu.yaw_offset_degrees={round(suggested_offset, 1)} in config/hardware.yaml "
-            f"for correct persistent heading (based on {round(dist_m, 2)} m GPS trajectory). "
-            f"Runtime session alignment will converge automatically while driving."
+            "Validation only: do not write this delta to imu.yaw_offset_degrees. "
+            "BNO085 Game Rotation Vector yaw is boot-relative; mission startup "
+            "snaps session_heading_alignment from GPS course-over-ground. Keep "
+            "imu.yaw_offset_degrees for physical mounting offset only."
         ),
     }
 

@@ -217,7 +217,6 @@ class GPSDriver(HardwareDriver):
                     if c not in excluded and os.path.realpath(c) not in excluded
                 ]
 
-                last_err: Exception | None = None
                 for dev in candidates:
                     for baud in self._baud_candidates:
                         try:
@@ -244,8 +243,7 @@ class GPSDriver(HardwareDriver):
                                     ser.close()
                                 except Exception:
                                     pass
-                        except Exception as e:  # pragma: no cover - hardware dependent
-                            last_err = e
+                        except Exception:  # pragma: no cover - hardware dependent
                             try:
                                 ser.close()  # type: ignore
                             except Exception:
@@ -272,6 +270,10 @@ class GPSDriver(HardwareDriver):
             lat: float | None = None
             lon: float | None = None
             rtk_status: str | None = None
+
+            read_started_at = time.time()
+            min_sentence_window_s = 0.25 if self._first_read_done else 0.5
+            got_rmc = False
 
             while time.time() < deadline:
                 raw = self._serial.readline().decode("ascii", errors="ignore")  # type: ignore
@@ -302,10 +304,12 @@ class GPSDriver(HardwareDriver):
                             # Approximate accuracy from HDOP (rough scale)
                             if hdop is not None:
                                 hdop_val = hdop
-                                # HDOP is a dilution-of-precision multiplier, not an accuracy by itself.
-                                # Historically we used "max(0.5, hdop)" which masked RTK improvements
-                                # (HDOP ~0.5) even when the fix was RTK_FIXED. Keep an HDOP-derived fallback
-                                # but allow heuristics/real accuracy sources (GST/UBX) to override it later.
+                                # HDOP is a dilution-of-precision multiplier, not an
+                                # accuracy by itself. Historically we used
+                                # "max(0.5, hdop)" which masked RTK improvements
+                                # (HDOP ~0.5) even when the fix was RTK_FIXED.
+                                # Keep an HDOP-derived fallback but allow
+                                # heuristics/real accuracy sources to override it.
                                 hdop_based = max(0.2, hdop * 1.0)
                                 if acc is None or hdop_based < acc:
                                     acc = hdop_based
@@ -329,6 +333,7 @@ class GPSDriver(HardwareDriver):
                             spd = spd_knots * 0.514444  # knots -> m/s
                         if course is not None:
                             hdg = course
+                        got_rmc = True
                 elif raw.startswith(("$GPGST", "$GNGST")):
                     try:
                         self._last_nmea["GST"] = raw
@@ -340,9 +345,13 @@ class GPSDriver(HardwareDriver):
                             acc = max(0.005, gst_accuracy)
                             acc_source = "gst"
 
-                # Break once we have position AND fix quality from GGA.
-                # Do not break on RMC alone — it lacks fix quality and satellite data.
-                if got_lat and got_lon and got_gga:
+                # Break once we have position/fix quality from GGA and have given the
+                # serial stream a short chance to provide RMC speed/course. Returning
+                # immediately on GGA causes mission heading bootstrap to miss GPS COG
+                # on modules that emit GGA before RMC in each NMEA cycle.
+                if got_lat and got_lon and got_gga and (
+                    got_rmc or (time.time() - read_started_at) >= min_sentence_window_s
+                ):
                     break
 
             if got_lat and got_lon:

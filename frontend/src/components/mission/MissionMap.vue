@@ -5,9 +5,10 @@
       :zoom="zoom"
       :center="center"
       :max-zoom="mapMaxZoom"
-      :zoom-snap="0.5"
-      :zoom-delta="0.5"
+      :zoom-snap="1"
+      :zoom-delta="1"
       :use-global-leaflet="useGlobalLeaflet"
+      :options="leafletOptions"
       style="height: 100%; width: 100%"
       @ready="onMapReady"
       @click="onMapClick"
@@ -111,6 +112,15 @@ const providerBadge = ref('');
 const tileErrorMessage = ref<string | null>(null);
 let googleLayer: any = null;
 const useGlobalLeaflet = computed(() => props.mapSettings?.provider === 'google');
+const leafletOptions = {
+  zoomSnap: 1,
+  zoomDelta: 1,
+  wheelPxPerZoomLevel: 80,
+  zoomAnimation: false,
+  fadeAnimation: false,
+  markerZoomAnimation: false,
+};
+let resizeObserver: ResizeObserver | null = null;
 
 // Computed properties for rendering
 const waypointLatLngs = computed(() => props.waypoints.map(wp => [wp.lat, wp.lon]));
@@ -166,9 +176,19 @@ onMounted(async () => {
     center.value = [configCenter.latitude, configCenter.longitude];
     zoom.value = mapStore.configuration?.zoom_level || 18;
   }
+
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(() => invalidateMapSize());
+    const element = mapRef.value?.leafletObject?.getContainer?.();
+    if (element) {
+      resizeObserver.observe(element);
+    }
+  }
 });
 
 onUnmounted(() => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
   if (googleLayer && map) {
     map.removeLayer(googleLayer);
   }
@@ -180,6 +200,8 @@ onUnmounted(() => {
 async function onMapReady() {
   if (!mapRef.value) return;
   map = mapRef.value.leafletObject;
+  attachResizeObserver();
+  invalidateMapSize();
   await initializeBaseLayer();
 }
 
@@ -212,7 +234,10 @@ async function initializeBaseLayer() {
       const leafletRef: any = (window as any).L || L;
 
       // @ts-ignore - Leaflet.GoogleMutant is loaded globally
-      googleLayer = leafletRef.gridLayer.googleMutant({ type: gmType, maxZoom: EXTENDED_MAP_MAX_ZOOM });
+      googleLayer = leafletRef.gridLayer.googleMutant({
+        type: gmType,
+        maxZoom: EXTENDED_MAP_MAX_ZOOM,
+      });
       googleLayer.addTo(map);
     } catch (error) {
       console.warn('Failed to load Google Maps, falling back to OSM.', error);
@@ -251,6 +276,8 @@ async function initializeBaseLayer() {
   }
   map.setMaxZoom(mapMaxZoom.value);
   tileLayerKey.value++;
+  await nextTick();
+  invalidateMapSize();
 }
 
 function resolveMapMaxZoom(style: string, usingGoogle: boolean, layerConfig: TileLayerConfig | null): number {
@@ -288,6 +315,21 @@ function loadScriptOnce(src: string): Promise<void> {
     script.onload = () => resolve();
     script.onerror = () => reject(new Error(`Failed to load ${src}`));
     document.head.appendChild(script);
+  });
+}
+
+function attachResizeObserver() {
+  if (resizeObserver || typeof ResizeObserver === 'undefined' || !map) return;
+  const element = map.getContainer();
+  resizeObserver = new ResizeObserver(() => invalidateMapSize());
+  resizeObserver.observe(element);
+}
+
+function invalidateMapSize() {
+  if (!map) return;
+  window.requestAnimationFrame(() => {
+    if (!map) return;
+    map.invalidateSize({ animate: false, pan: false });
   });
 }
 
@@ -329,12 +371,14 @@ function onWaypointContextMenu(waypoint: Waypoint) {
 watch(() => props.followMower, (isFollowing) => {
   if (isFollowing && mowerLatLng.value) {
     center.value = [mowerLatLng.value[0], mowerLatLng.value[1]];
+    invalidateMapSize();
   }
 });
 
 watch(mowerLatLng, (newPosition) => {
   if (props.followMower && newPosition) {
     center.value = [newPosition[0], newPosition[1]];
+    invalidateMapSize();
   }
 });
 
@@ -355,6 +399,10 @@ function recenter(lat: number, lon: number, z?: number) {
   if (z) {
     zoom.value = z;
   }
+  nextTick(() => {
+    invalidateMapSize();
+    map?.setView([lat, lon], z ?? zoom.value, { animate: false });
+  });
 }
 
 defineExpose({ recenter });

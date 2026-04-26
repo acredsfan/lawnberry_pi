@@ -6,6 +6,7 @@ from typing import Any
 
 from ..core.state_manager import AppState
 from ..models.sensor_data import SensorData
+from ..nav.geoutils import body_offset_to_north_east, offset_lat_lon
 from ..utils.battery import voltage_to_soc
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,91 @@ class TelemetryService:
         self.app_state = AppState.get_instance()
         self._last_position: dict[str, Any] = {}
         self._gps_warm_done = False
+
+    @staticmethod
+    def _numeric(value: Any) -> float | None:
+        if isinstance(value, (int, float)):
+            return float(value)
+        return None
+
+    def _get_navigation_heading(self) -> float | None:
+        try:
+            from .navigation_service import NavigationService
+
+            nav_svc = NavigationService.get_instance()
+            nav_state = getattr(nav_svc, "navigation_state", None)
+            heading = getattr(nav_state, "heading", None) if nav_state is not None else None
+            return float(heading) if isinstance(heading, (int, float)) else None
+        except Exception:
+            return None
+
+    def _apply_position_offsets(
+        self,
+        position: dict[str, Any],
+        *,
+        nav_heading: float | None,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+        latitude = self._numeric(position.get("latitude"))
+        longitude = self._numeric(position.get("longitude"))
+        if latitude is None or longitude is None:
+            return position, None, None
+
+        hardware = getattr(self.app_state, "hardware_config", None)
+        antenna_forward_m = float(getattr(hardware, "gps_antenna_offset_forward_m", 0.0) or 0.0)
+        antenna_right_m = float(getattr(hardware, "gps_antenna_offset_right_m", 0.0) or 0.0)
+        display_north_m = float(getattr(hardware, "gps_map_display_offset_north_m", 0.0) or 0.0)
+        display_east_m = float(getattr(hardware, "gps_map_display_offset_east_m", 0.0) or 0.0)
+
+        if (
+            antenna_forward_m == 0.0
+            and antenna_right_m == 0.0
+            and display_north_m == 0.0
+            and display_east_m == 0.0
+        ):
+            return position, None, None
+
+        corrected = dict(position)
+        raw_position = dict(position)
+        applied: list[str] = []
+        pending: list[str] = []
+
+        if antenna_forward_m != 0.0 or antenna_right_m != 0.0:
+            if nav_heading is None:
+                pending.append("gps_antenna_offset_heading_unavailable")
+            else:
+                antenna_north_m, antenna_east_m = body_offset_to_north_east(
+                    forward_m=antenna_forward_m,
+                    right_m=antenna_right_m,
+                    heading_degrees=nav_heading,
+                )
+                latitude, longitude = offset_lat_lon(
+                    latitude,
+                    longitude,
+                    north_m=-antenna_north_m,
+                    east_m=-antenna_east_m,
+                )
+                applied.append("gps_antenna_offset")
+
+        if display_north_m != 0.0 or display_east_m != 0.0:
+            latitude, longitude = offset_lat_lon(
+                latitude,
+                longitude,
+                north_m=display_north_m,
+                east_m=display_east_m,
+            )
+            applied.append("map_display_offset")
+
+        corrected["latitude"] = latitude
+        corrected["longitude"] = longitude
+        correction = {
+            "applied": applied,
+            "pending": pending,
+            "antenna_offset_forward_m": antenna_forward_m,
+            "antenna_offset_right_m": antenna_right_m,
+            "map_display_offset_north_m": display_north_m,
+            "map_display_offset_east_m": display_east_m,
+        }
+        return corrected, raw_position, correction
 
     async def initialize_sensors(self):
         """Initialize the sensor manager."""
@@ -228,6 +314,12 @@ class TelemetryService:
             elif k in self._last_position:
                 current_pos[k] = self._last_position[k]
 
+        nav_heading = self._get_navigation_heading()
+        current_pos, raw_position, position_correction = self._apply_position_offsets(
+            current_pos,
+            nav_heading=nav_heading,
+        )
+
         # IMU Calibration
         cal_status = getattr(imu, "calibration_status", None)
         cal_score = 0
@@ -267,15 +359,11 @@ class TelemetryService:
         }
 
         # Add fused navigation heading from NavigationService (IMU yaw preferred, GPS COG fallback)
-        try:
-            from .navigation_service import NavigationService
-
-            nav_svc = NavigationService.get_instance()
-            nav_state = getattr(nav_svc, "navigation_state", None)
-            if nav_state is not None:
-                telemetry["nav_heading"] = getattr(nav_state, "heading", None)
-        except Exception:
-            telemetry["nav_heading"] = None
+        telemetry["nav_heading"] = nav_heading
+        if raw_position is not None:
+            telemetry["raw_position"] = raw_position
+        if position_correction is not None:
+            telemetry["position_correction"] = position_correction
 
         # Add Power Data
         if data and data.power:

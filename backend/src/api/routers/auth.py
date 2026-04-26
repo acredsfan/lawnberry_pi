@@ -96,6 +96,16 @@ class RefreshResponse(BaseModel):
     expires_at: datetime
 
 
+class SetPasswordRequest(BaseModel):
+    username: str
+    password: str
+
+
+class SetPasswordResponse(BaseModel):
+    ok: bool
+    message: str = "Password configured successfully"
+
+
 # Helpers
 def _decode_jwt_payload(token: str) -> dict[str, Any]:
     try:
@@ -423,7 +433,6 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
                 )
                 # Issue token for the session
                 result = primary_auth_service._issue_token_for_session(session)
-                primary_auth_service.active_sessions[session.session_id] = session
                 
                 user = UserOut(
                     id=session.user_id,
@@ -446,21 +455,50 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
     # 2) Handle local authentication (credential or username/password)
     credential = payload.credential
     if credential is None and payload.username is not None and payload.password is not None:
-        # username/password path: map admin/admin to LAWN_BERRY_OPERATOR_CREDENTIAL
-        # This supports MFA and frontend login form submission
-        if payload.username == "admin" and payload.password == "admin":
-            credential = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL")
-            if not credential:
+        # username/password path
+        security_settings = _current_security_settings()
+        
+        # Check if a custom password has been configured
+        if security_settings.password_hash:
+            # Custom password is set - authenticate against it
+            try:
+                session = await primary_auth_service.authenticate_password(
+                    payload.username,
+                    payload.password
+                )
+                user = UserOut(
+                    id=session.user_id,
+                    username=session.username,
+                    role=session.security_context.role.value,
+                    created_at=session.created_at,
+                )
+                result = primary_auth_service._issue_token_for_session(session)
+                
+                expires_in = max(0, int((result.expires_at - datetime.now(UTC)).total_seconds()))
+                return AuthResponse(
+                    access_token=result.token,
+                    token=result.token,
+                    expires_in=expires_in,
+                    expires_at=result.expires_at,
+                    user=user,
+                )
+            except AuthenticationError as exc:
+                raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        else:
+            # No custom password - fall back to admin/admin mapping
+            if payload.username == "admin" and payload.password == "admin":
+                credential = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL")
+                if not credential:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="LAWN_BERRY_OPERATOR_CREDENTIAL is required",
+                    )
+            else:
+                # Unsupported username/password combination
                 raise HTTPException(
                     status_code=401,
-                    detail="LAWN_BERRY_OPERATOR_CREDENTIAL is required",
+                    detail="Invalid credentials",
                 )
-        else:
-            # Unsupported username/password combination
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid credentials",
-            )
 
     client_identifier = _client_identifier(request)
 
@@ -510,6 +548,56 @@ async def auth_logout(request: Request):
     session = await _require_session(request)
     await primary_auth_service.terminate_session(session.session_id, "user_logout")
     return {"ok": True}
+
+
+@router.post("/auth/configure/password", response_model=SetPasswordResponse)
+async def configure_password(payload: SetPasswordRequest, request: Request):
+    """Configure a custom username/password for local authentication.
+    
+    Requires an active authenticated session (admin).
+    Generates a bcrypt hash and stores it in the security config.
+    """
+    session = await _require_session(request)
+    
+    # Validate inputs
+    if not payload.username or len(payload.username) < 1:
+        raise HTTPException(status_code=400, detail="Username cannot be empty")
+    if not payload.password or len(payload.password) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 6 characters"
+        )
+    
+    # Hash the password with bcrypt
+    hashed = bcrypt.hashpw(payload.password.encode("utf-8"), bcrypt.gensalt(rounds=12))
+    hashed_str = hashed.decode("utf-8")
+    
+    # Update the auth service config with new password hash
+    primary_auth_service.config.password_hash = hashed_str
+    
+    # Also update the global security settings so login checks will see it
+    from ...core import globals as global_state
+    global_state._security_settings.password_hash = hashed_str
+    
+    # Also update rest module's reference if it has one (for backward compatibility)
+    import sys
+    rest_module = sys.modules.get("backend.src.api.rest")
+    if rest_module is not None and hasattr(rest_module, '_security_settings'):
+        rest_module._security_settings.password_hash = hashed_str
+    
+    logger.info(
+        "Password configured",
+        extra={
+            "correlation_id": request.headers.get("X-Correlation-ID", "unknown"),
+            "username": payload.username,
+            "operator": session.username,
+        },
+    )
+    
+    return SetPasswordResponse(
+        ok=True,
+        message=f"Password configured successfully for username '{payload.username}'"
+    )
 
 
 @router.get("/auth/profile", response_model=UserOut)

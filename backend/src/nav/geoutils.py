@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 
+METERS_PER_DEGREE_LATITUDE = 111_320.0
+
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Return great-circle distance in meters between two WGS84 coords."""
@@ -14,6 +16,37 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
+
+
+def offset_lat_lon(
+    latitude: float,
+    longitude: float,
+    *,
+    north_m: float = 0.0,
+    east_m: float = 0.0,
+) -> tuple[float, float]:
+    """Apply a small local tangent-plane offset to a WGS84 coordinate."""
+    meters_per_degree_lon = METERS_PER_DEGREE_LATITUDE * math.cos(math.radians(latitude))
+    latitude += north_m / METERS_PER_DEGREE_LATITUDE
+    if abs(meters_per_degree_lon) > 1.0:
+        longitude += east_m / meters_per_degree_lon
+    return latitude, longitude
+
+
+def body_offset_to_north_east(
+    *,
+    forward_m: float,
+    right_m: float,
+    heading_degrees: float,
+) -> tuple[float, float]:
+    """Convert mower body-frame offset to north/east meters.
+
+    Heading uses navigation compass convention: north=0°, east=90°.
+    """
+    heading_rad = math.radians(heading_degrees)
+    north_m = forward_m * math.cos(heading_rad) - right_m * math.sin(heading_rad)
+    east_m = forward_m * math.sin(heading_rad) + right_m * math.cos(heading_rad)
+    return north_m, east_m
 
 
 def point_in_polygon(lat: float, lon: float, polygon: Iterable[tuple[float, float]]) -> bool:

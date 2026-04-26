@@ -25,12 +25,13 @@ from ..models import (
     SensorData,
     Waypoint,
 )
-from ..nav.geoutils import haversine_m, point_in_polygon
+from ..nav.geoutils import body_offset_to_north_east, haversine_m, offset_lat_lon, point_in_polygon
 from ..nav.path_planner import PathPlanner
 from .robohat_service import get_robohat_service
 from .traction_control_service import get_traction_control_service
 
 if TYPE_CHECKING:
+    from ..models.mission import Mission, MissionWaypoint
     from ..protocols.mission import MissionStatusReader
 
 logger = logging.getLogger(__name__)
@@ -167,18 +168,37 @@ class NavigationService:
         # Warn when GPS position diverges from dead-reckoning estimate by more
         # than this distance (metres) on re-acquisition after a GPS outage.
         self.position_mismatch_warn_threshold_m = 5.0
+        self._gps_antenna_offset_forward_m = 0.0
+        self._gps_antenna_offset_right_m = 0.0
 
         try:
             hardware, limits = ConfigLoader().get()
             self.obstacle_avoidance_distance = float(limits.tof_obstacle_distance_meters)
             self._imu_yaw_offset: float = float(getattr(hardware, "imu_yaw_offset_degrees", 0.0))
+            self._gps_antenna_offset_forward_m = float(
+                getattr(hardware, "gps_antenna_offset_forward_m", 0.0) or 0.0
+            )
+            self._gps_antenna_offset_right_m = float(
+                getattr(hardware, "gps_antenna_offset_right_m", 0.0) or 0.0
+            )
             if self._imu_yaw_offset != 0.0:
                 logger.info(
                     "IMU yaw offset loaded: %.1f° (applied as: adjusted = (-raw + offset) %% 360)",
                     self._imu_yaw_offset,
                 )
+            if (
+                self._gps_antenna_offset_forward_m != 0.0
+                or self._gps_antenna_offset_right_m != 0.0
+            ):
+                logger.info(
+                    "GPS antenna offset loaded: forward=%.2fm right=%.2fm",
+                    self._gps_antenna_offset_forward_m,
+                    self._gps_antenna_offset_right_m,
+                )
         except Exception as exc:
             self._imu_yaw_offset = 0.0
+            self._gps_antenna_offset_forward_m = 0.0
+            self._gps_antenna_offset_right_m = 0.0
             logger.warning(
                 "Failed to load navigation config from hardware/safety limits: %s",
                 exc,
@@ -213,6 +233,11 @@ class NavigationService:
         self._session_heading_alignment: float = 0.0
         self._heading_alignment_sample_count: int = 0
         self._gps_cog_history: list = []  # recent GPS COG values for straight-motion gate
+        # Track when bootstrap begins for lenient GPS snap criteria.
+        self._bootstrap_start_time: float | None = None
+        self._require_gps_heading_alignment: bool = False
+        self._last_gps_track_position: Position | None = None
+        self._last_gps_track_time: datetime | None = None
         self._load_alignment_from_disk()
 
     _instance: NavigationService | None = None
@@ -257,6 +282,11 @@ class NavigationService:
         self._session_heading_alignment = 0.0
         self._heading_alignment_sample_count = 0
         self._gps_cog_history.clear()
+        self._require_gps_heading_alignment = True
+        self._last_gps_track_position = None
+        self._last_gps_track_time = None
+        self.navigation_state.heading = None
+        self.navigation_state.gps_cog = None
         self._save_alignment_to_disk("mission_start_reset")
         await self._run_bootstrap_and_check_geofence()
 
@@ -270,7 +300,9 @@ class NavigationService:
                 status = mission_service.mission_statuses.get(mission.id)
                 if not status:
                     logger.warning(
-                        f"Mission {mission.id} interrupted. Status: {status.status if status else 'N/A'}"
+                        "Mission %s interrupted. Status: %s",
+                        mission.id,
+                        status.status if status else "N/A",
                     )
                     self.navigation_state.path_status = PathStatus.INTERRUPTED
                     self.navigation_state.navigation_mode = NavigationMode.IDLE
@@ -309,9 +341,9 @@ class NavigationService:
                         mission.id, self.navigation_state.current_waypoint_index
                     )
 
-                # The go_to_waypoint method is blocking until the waypoint is reached or interrupted.
+                # go_to_waypoint blocks until the waypoint is reached or interrupted.
                 # The loop will then proceed to the next waypoint.
-                # We add a small sleep to prevent a tight loop if go_to_waypoint returns immediately.
+                # Sleep briefly if go_to_waypoint returns immediately.
                 await asyncio.sleep(0.1)
 
             if self.navigation_state.navigation_mode == NavigationMode.AUTO:
@@ -477,7 +509,8 @@ class NavigationService:
                     raise RuntimeError("Failed to stop safely at waypoint")
                 if self.navigation_state.advance_waypoint():
                     logger.info(
-                        f"Advanced to next waypoint index: {self.navigation_state.current_waypoint_index}"
+                        "Advanced to next waypoint index: %s",
+                        self.navigation_state.current_waypoint_index,
                     )
                 else:
                     logger.info("Final waypoint in path reached.")
@@ -517,7 +550,8 @@ class NavigationService:
                     await self._deliver_stop_command(reason="outside geofence boundary")
                     nearest = self._nearest_boundary_point(cur, outer_boundary)
                     logger.warning(
-                        "Mower outside geofence boundary at (%.6f, %.6f); returning to boundary (%.6f, %.6f)",
+                        "Mower outside geofence boundary at (%.6f, %.6f); "
+                        "returning to boundary (%.6f, %.6f)",
                         cur.latitude,
                         cur.longitude,
                         nearest.latitude,
@@ -542,7 +576,8 @@ class NavigationService:
                 if heading_wait_start is None:
                     heading_wait_start = time.monotonic()
                     logger.warning(
-                        "No heading data available; assuming bearing %.1f° to target to start motion.",
+                        "No heading data available; assuming bearing %.1f° "
+                        "to target to start motion.",
                         heading_to_target,
                     )
                 if (
@@ -671,9 +706,9 @@ class NavigationService:
                     forward_speed *= taper
 
                 # During heading bootstrap, enforce minimum forward speed so GPS
-                # COG activates quickly (COG gate is 0.3 m/s; 0.4 m/s for margin).
+                # COG activates quickly (COG gate is 0.1 m/s during bootstrap; 0.15 m/s for margin).
                 if _in_heading_bootstrap:
-                    forward_speed = max(forward_speed, 0.4)
+                    forward_speed = max(forward_speed, 0.15)
 
                 # Floor so motor controller dead zone is always overcome
                 forward_speed = max(forward_speed, 0.3)
@@ -765,7 +800,8 @@ class NavigationService:
                 _last_nav_log = _now
                 _mode = "TANK" if _in_tank_mode else "BLEND"
                 logger.info(
-                    "NAV %s → wp(%.6f,%.6f) dist=%.1fm hdg=%.1f° err=%.1f° spd=L%.2f/R%.2f boost=%.0f%%",
+                    "NAV %s → wp(%.6f,%.6f) dist=%.1fm hdg=%.1f° err=%.1f° "
+                    "spd=L%.2f/R%.2f boost=%.0f%%",
                     _mode,
                     target_pos.latitude,
                     target_pos.longitude,
@@ -857,16 +893,22 @@ class NavigationService:
         """Drive briefly forward so GPS COG snaps the heading alignment.
 
         IMU Game Rotation Vector yaw is relative to boot orientation (arbitrary zero).
-        This method drives at ~75% throttle for up to 3 seconds.  As soon as
+        This method drives at ~75% throttle for up to 5 seconds. As soon as
         update_navigation_state() fires the GPS COG snap (sample_count 0→1), motion
         stops and the alignment is correct for the mission.
 
-        If GPS COG is not available within 3 s the method logs a warning and returns
+        CRITICAL: During the bootstrap drive, we must actively poll sensor data and
+        call update_navigation_state() to process GPS COG snaps. The snap cannot fire
+        unless telemetry data reaches update_navigation_state().
+
+        If GPS COG is not available within 5 s the method logs a warning and returns
         without calibrating — the mission loop will attempt to use whatever heading
         data is available.
         """
         logger.info("Heading bootstrap: driving forward to acquire GPS COG snap...")
-        deadline = time.monotonic() + 5.0  # Extended from 3s to give more time for GPS COG stability
+        self._bootstrap_start_time = time.monotonic()
+        # Extended from 3s to give more time for GPS COG stability.
+        deadline = time.monotonic() + 5.0
         try:
             await self.set_speed(0.6, 0.6)
             while time.monotonic() < deadline:
@@ -874,6 +916,26 @@ class NavigationService:
                 if self._global_emergency_active():
                     logger.warning("Heading bootstrap aborted: emergency stop active")
                     return
+
+                # CRITICAL: Poll telemetry and update navigation state during bootstrap.
+                # The GPS COG snap only fires when valid GPS data reaches navigation state.
+                try:
+                    from ..core.state_manager import get_sensor_manager
+
+                    manager = get_sensor_manager()
+                    if manager is None:
+                        from ..services.telemetry_service import telemetry_service
+
+                        await telemetry_service.initialize_sensors()
+                        manager = get_sensor_manager()
+                    if manager is None:
+                        continue
+                    sensor_data = await manager.read_all_sensors()
+                    if sensor_data:
+                        await self.update_navigation_state(sensor_data)
+                except Exception as e:
+                    logger.debug(f"Bootstrap telemetry update failed: {e}")
+
                 if self._heading_alignment_sample_count >= 1:
                     logger.info(
                         "Heading bootstrap complete: session_align=%.1f°",
@@ -882,10 +944,11 @@ class NavigationService:
                     break
             else:
                 logger.warning(
-                    "Heading bootstrap: GPS COG not available in 3 s — "
+                    "Heading bootstrap: GPS COG not available in 5 s — "
                     "proceeding with uncalibrated heading"
                 )
         finally:
+            self._bootstrap_start_time = None
             await self._deliver_stop_command(reason="heading bootstrap")
             await asyncio.sleep(0.3)
 
@@ -1003,6 +1066,90 @@ class NavigationService:
                 "Unable to mirror global emergency state from navigation service", exc_info=True
             )
 
+    @staticmethod
+    def _heading_delta(target: float, current: float) -> float:
+        """Return signed shortest heading delta from current to target."""
+        return (target - current + 180.0) % 360.0 - 180.0
+
+    def _resolve_gps_course_over_ground(
+        self,
+        sensor_data: SensorData,
+        current_position: Position | None,
+        *,
+        speed_threshold: float,
+    ) -> tuple[float | None, float | None, str | None]:
+        """Resolve usable GPS COG from receiver course or coordinate deltas.
+
+        The ZED-F9P/NMEA path does not always provide RMC course in the same read
+        as GGA position. During mission bootstrap, deriving COG from actual GPS
+        coordinate movement gives us an independent heading check before trusting
+        relative IMU yaw.
+        """
+        gps = sensor_data.gps
+        if gps is None or current_position is None:
+            return None, None, None
+
+        now = getattr(gps, "timestamp", None)
+        if not isinstance(now, datetime):
+            now = datetime.now(UTC)
+
+        derived_cog: float | None = None
+        derived_speed: float | None = None
+        previous_position = self._last_gps_track_position
+        previous_time = self._last_gps_track_time
+
+        if previous_position is not None and previous_time is not None:
+            elapsed_s = max(0.0, (now - previous_time).total_seconds())
+            if elapsed_s >= 0.2:
+                distance_m = self.path_planner.calculate_distance(
+                    previous_position,
+                    current_position,
+                )
+                accuracy = max(
+                    float(previous_position.accuracy or 0.0),
+                    float(current_position.accuracy or 0.0),
+                )
+                min_distance_m = max(0.25, min(1.0, accuracy * 0.5))
+                if distance_m >= min_distance_m:
+                    derived_speed = distance_m / elapsed_s
+                    if derived_speed >= speed_threshold:
+                        derived_cog = self.path_planner.calculate_bearing(
+                            previous_position,
+                            current_position,
+                        )
+
+        self._last_gps_track_position = current_position
+        self._last_gps_track_time = now
+
+        receiver_heading = getattr(gps, "heading", None)
+        receiver_speed = getattr(gps, "speed", None)
+        if isinstance(receiver_heading, (int, float)):
+            speed = float(receiver_speed) if isinstance(receiver_speed, (int, float)) else None
+            if speed is not None and speed >= speed_threshold:
+                return float(receiver_heading) % 360.0, speed, "receiver"
+
+        if derived_cog is not None:
+            return derived_cog, derived_speed, "position_delta"
+
+        return None, None, None
+
+    def _set_navigation_heading(self, heading: float, *, allow_large_jump: bool = False) -> None:
+        """Set navigation heading with vibration/outlier rejection."""
+        heading = heading % 360.0
+        previous_heading = self.navigation_state.heading
+        if previous_heading is not None and not allow_large_jump:
+            jump = abs(self._heading_delta(heading, previous_heading))
+            if jump > 60.0:
+                logger.debug(
+                    "IMU heading outlier rejected: prev=%.1f° new=%.1f° (Δ=%.1f°) — "
+                    "keeping previous value",
+                    previous_heading,
+                    heading,
+                    jump,
+                )
+                return
+        self.navigation_state.heading = heading
+
     async def update_navigation_state(self, sensor_data: SensorData) -> NavigationState:
         """Update navigation state with sensor fusion"""
 
@@ -1011,14 +1158,28 @@ class NavigationService:
         if current_position:
             self.navigation_state.current_position = current_position
 
-        # Update heading: prefer IMU yaw, fall back to GPS course-over-ground when moving.
-        # Reject IMU placeholder value (yaw=0.0 with calibration_status="uncalibrated")
-        # so stale defaults don't corrupt the navigation heading controller.
+        # Update heading. During mission bootstrap, do not trust BNO085 Game Rotation
+        # Vector yaw as an absolute compass until GPS COG has snapped the session
+        # alignment. Its yaw zero is relative to power-on, not true north.
+        speed_threshold = 0.1 if self._bootstrap_start_time else 0.3
+        gps_cog, gps_cog_speed, gps_cog_source = self._resolve_gps_course_over_ground(
+            sensor_data,
+            current_position,
+            speed_threshold=speed_threshold,
+        )
+        if gps_cog is not None:
+            self.navigation_state.gps_cog = gps_cog
+
         imu_valid = (
             sensor_data.imu is not None
             and sensor_data.imu.yaw is not None
             and sensor_data.imu.calibration_status != "uncalibrated"
         )
+        imu_alignment_ready = (
+            not self._require_gps_heading_alignment
+            or self._heading_alignment_sample_count > 0
+        )
+
         if imu_valid:
             raw_yaw = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
             # BNO085 Game Rotation Vector uses ZYX aerospace convention (right-hand, z-up):
@@ -1035,53 +1196,47 @@ class NavigationService:
             _log_imu_now = time.monotonic()
             if _log_imu_now - getattr(self, "_last_imu_log", 0) > 5.0:
                 logger.info(
-                    "IMU heading: raw_zyx=%.1f° adjusted_compass=%.1f° mounting_offset=%.1f° session_align=%.1f°",
+                    "IMU heading: raw_zyx=%.1f° adjusted_compass=%.1f° "
+                    "mounting_offset=%.1f° session_align=%.1f° alignment_ready=%s",
                     raw_yaw,
                     adjusted_yaw,
                     self._imu_yaw_offset,
                     self._session_heading_alignment,
+                    imu_alignment_ready,
                 )
                 self._last_imu_log = _log_imu_now
 
-            # Glitch rejection: extreme motor vibration can cause momentary gyroscope spikes.
-            # Max realistic turn rate: max_speed (0.8 m/s) × 2 / wheel_base (0.5 m) ≈ 183°/s.
-            # At 5 Hz updates that is ≈37°/update; reject any jump larger than 60° as a
-            # gyroscope glitch so it never corrupts the navigation heading controller.
-            prev_heading = self.navigation_state.heading
-            if prev_heading is not None:
-                jump = abs(((adjusted_yaw - prev_heading) + 180.0) % 360.0 - 180.0)
-                if jump > 60.0:
-                    logger.debug(
-                        "IMU heading outlier rejected: prev=%.1f° new=%.1f° (Δ=%.1f°) — "
-                        "keeping previous value",
-                        prev_heading,
-                        adjusted_yaw,
-                        jump,
-                    )
-                    # Don't update — keep the previous heading value
-                else:
-                    self.navigation_state.heading = adjusted_yaw
+            if imu_alignment_ready:
+                self._set_navigation_heading(adjusted_yaw)
+            elif gps_cog is not None:
+                self.navigation_state.heading = gps_cog
             else:
-                self.navigation_state.heading = adjusted_yaw
-            # GPS COG comparison and session heading alignment update
-            gps_cog_available = (
-                sensor_data.gps is not None
-                and sensor_data.gps.heading is not None
-                and (sensor_data.gps.speed or 0.0) >= 0.3
-            )
-            if gps_cog_available:
-                cog = float(sensor_data.gps.heading)  # type: ignore[union-attr]
+                self.navigation_state.heading = None
+
+            # GPS COG comparison and session heading alignment update.
+            # Only mutate IMU alignment during the explicit straight bootstrap drive.
+            # During normal waypoint pursuit, GPS COG is the motion vector and can differ
+            # from chassis heading during arcs, tank turns, slip, or obstacle maneuvers.
+            if gps_cog is not None:
+                cog = gps_cog
                 # delta = how much alignment needs to increase (positive = IMU reads too low)
-                delta = (cog - adjusted_yaw + 180.0) % 360.0 - 180.0
+                delta = self._heading_delta(cog, adjusted_yaw)
                 logger.debug(
-                    "HDG: raw_imu=%.1f° adjusted=%.1f° gps_cog=%.1f° delta=%.1f° session_align=%.1f°",
+                    "HDG: raw_imu=%.1f° adjusted=%.1f° gps_cog=%.1f° "
+                    "source=%s speed=%.2f delta=%.1f° session_align=%.1f°",
                     raw_yaw,
                     adjusted_yaw,
                     cog,
+                    gps_cog_source,
+                    gps_cog_speed if gps_cog_speed is not None else -1.0,
                     delta,
                     self._session_heading_alignment,
                 )
-                if abs(delta) > 45.0 and self._heading_alignment_sample_count < 10:
+                if (
+                    self._bootstrap_start_time is not None
+                    and abs(delta) > 45.0
+                    and self._heading_alignment_sample_count < 10
+                ):
                     logger.warning(
                         "HDG mismatch: adjusted IMU=%.1f° vs GPS COG=%.1f° (delta=%.1f°) — "
                         "session alignment converging (samples=%d)",
@@ -1091,61 +1246,47 @@ class NavigationService:
                         self._heading_alignment_sample_count,
                     )
 
-                # Track GPS COG stability for straight-motion detection.
-                # Alignment is only valid when GPS COG is stable (not turning).
-                self._gps_cog_history.append(cog)
-                if len(self._gps_cog_history) > 5:
-                    self._gps_cog_history.pop(0)
+                if self._bootstrap_start_time is not None:
+                    # Track GPS COG stability for straight-motion detection.
+                    self._gps_cog_history.append(cog)
+                    if len(self._gps_cog_history) > 5:
+                        self._gps_cog_history.pop(0)
 
-                going_straight = False
-                if len(self._gps_cog_history) >= 3:
-                    sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
-                    cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
-                    cog_mean = math.degrees(math.atan2(sin_c, cos_c))
-                    max_dev = max(
-                        abs(((c - cog_mean) + 180) % 360 - 180) for c in self._gps_cog_history
-                    )
-                    going_straight = max_dev < 15.0  # Relaxed from 8.0° to 15.0° to allow GPS noise during bootstrap
+                    going_straight = False
+                    if len(self._gps_cog_history) >= 3:
+                        sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
+                        cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
+                        cog_mean = math.degrees(math.atan2(sin_c, cos_c)) % 360.0
+                        max_dev = max(
+                            abs(self._heading_delta(c, cog_mean))
+                            for c in self._gps_cog_history
+                        )
+                        going_straight = max_dev < 15.0
 
-                if going_straight:
-                    if self._heading_alignment_sample_count == 0:
-                        # First sample: snap immediately to GPS COG — corrects full boot offset.
+                    if going_straight and self._heading_alignment_sample_count == 0:
+                        # First stable bootstrap sample: snap immediately to GPS COG.
                         clamped_delta = max(-180.0, min(180.0, delta))
                         self._session_heading_alignment = (
                             self._session_heading_alignment + clamped_delta
                         ) % 360.0
                         self._heading_alignment_sample_count = 1
+                        self._require_gps_heading_alignment = False
+                        adjusted_yaw = (
+                            -raw_yaw + self._imu_yaw_offset + self._session_heading_alignment
+                        ) % 360.0
+                        self._set_navigation_heading(adjusted_yaw, allow_large_jump=True)
                         logger.info(
-                            "HDG snap-calibrated from GPS COG: delta=%.1f° new_align=%.1f°",
+                            "HDG snap-calibrated from GPS COG: delta=%.1f° "
+                            "new_align=%.1f° source=%s",
                             clamped_delta,
                             self._session_heading_alignment,
+                            gps_cog_source,
                         )
                         self._save_alignment_to_disk("gps_cog_snap")
-                    else:
-                        # Fine-tune with gentle EMA after the initial snap.
-                        clamped_delta = max(-45.0, min(45.0, delta))
-                        self._session_heading_alignment += 0.1 * clamped_delta
-                        self._heading_alignment_sample_count += 1
-                        if self._heading_alignment_sample_count % 20 == 0:
-                            logger.info(
-                                "HDG fine-tune: align=%.1f° delta=%.1f° samples=%d",
-                                self._session_heading_alignment,
-                                clamped_delta,
-                                self._heading_alignment_sample_count,
-                            )
-                            self._save_alignment_to_disk("gps_cog")
-        elif (
-            sensor_data.gps is not None
-            and sensor_data.gps.heading is not None
-            and (sensor_data.gps.speed or 0.0) >= 0.3  # COG valid only when moving
-        ):
+        elif gps_cog is not None:
             # Use GPS course-over-ground as heading fallback while in motion.
             # GPS COG is already in world frame; IMU yaw_offset does NOT apply here.
-            self.navigation_state.heading = sensor_data.gps.heading
-
-        # Always store GPS COG for diagnostic purposes
-        if sensor_data.gps is not None and sensor_data.gps.heading is not None:
-            self.navigation_state.gps_cog = sensor_data.gps.heading
+            self.navigation_state.heading = gps_cog
 
         # Update obstacles
         obstacles = self.obstacle_detector.update_obstacles_from_sensors(sensor_data)
@@ -1171,6 +1312,32 @@ class NavigationService:
 
         return self.navigation_state
 
+    def _apply_gps_antenna_offset(self, gps_position: Position) -> Position:
+        forward_m = self._gps_antenna_offset_forward_m
+        right_m = self._gps_antenna_offset_right_m
+        if forward_m == 0.0 and right_m == 0.0:
+            return gps_position
+
+        heading = self.navigation_state.heading
+        if not isinstance(heading, (int, float)):
+            logger.debug(
+                "GPS antenna offset configured but heading is unavailable; using antenna position"
+            )
+            return gps_position
+
+        antenna_north_m, antenna_east_m = body_offset_to_north_east(
+            forward_m=forward_m,
+            right_m=right_m,
+            heading_degrees=float(heading),
+        )
+        latitude, longitude = offset_lat_lon(
+            gps_position.latitude,
+            gps_position.longitude,
+            north_m=-antenna_north_m,
+            east_m=-antenna_east_m,
+        )
+        return gps_position.model_copy(update={"latitude": latitude, "longitude": longitude})
+
     async def _update_position(self, sensor_data: SensorData) -> Position | None:
         """Update position using sensor fusion"""
 
@@ -1182,6 +1349,7 @@ class NavigationService:
                 altitude=sensor_data.gps.altitude,
                 accuracy=sensor_data.gps.accuracy,
             )
+            gps_position = self._apply_gps_antenna_offset(gps_position)
 
             # When dead reckoning was active, compare the DR estimate to the
             # incoming GPS fix.  A large divergence means the internal position

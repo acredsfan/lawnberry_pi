@@ -325,14 +325,17 @@ class TestAuthSecurityLevels:
             )
             
             # Third session should fail or invalidate oldest
-            with patch.object(auth_service, 'active_sessions', {"admin": [session1, session2]}):
+            # New storage format: keyed by session_id instead of username
+            with patch.object(auth_service, 'active_sessions', {session1.session_id: session1, session2.session_id: session2}):
                 _session3 = await auth_service.create_session(
                     "admin",
                     SecurityLevel.PASSWORD,
                 )
                 
-                # Should have exactly max_concurrent_sessions
-                assert len(auth_service.active_sessions.get("admin", [])) <= 2
+                # Should have exactly max_concurrent_sessions active (non-terminated) sessions
+                from backend.src.models.user_session import SessionStatus
+                admin_sessions = [s for s in auth_service.active_sessions.values() if s.username == "admin" and s.status != SessionStatus.TERMINATED]
+                assert len(admin_sessions) <= 2
 
     def test_security_level_hierarchy(self):
         """Test security level hierarchy validation."""

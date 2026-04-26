@@ -161,6 +161,10 @@ class ConfigLoader:
         for key in (
             "gps_type",
             "gps_ntrip_enabled",
+            "gps_antenna_offset_forward_m",
+            "gps_antenna_offset_right_m",
+            "gps_map_display_offset_north_m",
+            "gps_map_display_offset_east_m",
             "imu_type",
             "tof_sensors",
             "env_sensor",
@@ -196,6 +200,17 @@ class ConfigLoader:
 
         if isinstance(gps, dict) and "usb_device" in gps and "gps_usb_device" not in mapped:
             mapped["gps_usb_device"] = str(gps["usb_device"])
+
+        gps_float_keys = {
+            "antenna_offset_forward_m": "gps_antenna_offset_forward_m",
+            "antenna_offset_right_m": "gps_antenna_offset_right_m",
+            "map_display_offset_north_m": "gps_map_display_offset_north_m",
+            "map_display_offset_east_m": "gps_map_display_offset_east_m",
+        }
+        if isinstance(gps, dict):
+            for source_key, target_key in gps_float_keys.items():
+                if source_key in gps and target_key not in mapped:
+                    mapped[target_key] = float(gps[source_key])
 
         imu = cfg.get("imu") or {}
         if isinstance(imu, dict) and "type" in imu and "imu_type" not in mapped:

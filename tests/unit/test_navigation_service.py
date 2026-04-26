@@ -1,9 +1,11 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 import backend.src.services.mission_service as mission_service_module
 import backend.src.services.navigation_service as navigation_service_module
+from backend.src.core.state_manager import AppState, set_sensor_manager
 from backend.src.models import (
     GpsReading,
     ImuReading,
@@ -220,6 +222,110 @@ async def test_update_navigation_state_uses_configured_tof_threshold(monkeypatch
     )
     await nav.update_navigation_state(blocked_path_data)
     assert nav.navigation_state.obstacle_avoidance_active is True
+
+
+@pytest.mark.asyncio
+async def test_update_position_applies_configured_gps_antenna_offset():
+    nav = NavigationService()
+    nav._gps_antenna_offset_forward_m = -0.46
+    nav._gps_antenna_offset_right_m = 0.0
+    nav.navigation_state.heading = 0.0
+
+    state = await nav.update_navigation_state(
+        SensorData(gps=GpsReading(latitude=40.0, longitude=-75.0, accuracy=0.03))
+    )
+
+    assert state.current_position is not None
+    assert state.current_position.latitude == pytest.approx(40.0 + 0.46 / 111_320.0)
+    assert state.current_position.longitude == pytest.approx(-75.0)
+
+
+@pytest.mark.asyncio
+async def test_mission_alignment_requirement_does_not_trust_unsnapped_imu():
+    nav = NavigationService()
+    nav._require_gps_heading_alignment = True
+    nav._heading_alignment_sample_count = 0
+    nav.navigation_state.heading = None
+
+    state = await nav.update_navigation_state(
+        SensorData(imu=ImuReading(yaw=90.0, calibration_status="fully_calibrated"))
+    )
+
+    assert state.heading is None
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_heading_snap_uses_position_delta_gps_cog():
+    nav = NavigationService()
+    nav._require_gps_heading_alignment = True
+    nav._heading_alignment_sample_count = 0
+    nav._session_heading_alignment = 0.0
+    nav._bootstrap_start_time = 1.0
+    nav.navigation_state.heading = None
+    nav._gps_cog_history.clear()
+    nav._last_gps_track_position = None
+    nav._last_gps_track_time = None
+
+    started_at = datetime.now(UTC)
+    for index in range(4):
+        await nav.update_navigation_state(
+            SensorData(
+                gps=GpsReading(
+                    latitude=37.0 + index * 0.000005,
+                    longitude=-122.0,
+                    accuracy=0.03,
+                    timestamp=started_at + timedelta(seconds=index),
+                ),
+                imu=ImuReading(yaw=90.0, calibration_status="fully_calibrated"),
+            )
+        )
+
+    assert nav._heading_alignment_sample_count == 1
+    assert nav._require_gps_heading_alignment is False
+    assert nav._session_heading_alignment == pytest.approx(90.0, abs=1.0)
+    assert nav.navigation_state.heading == pytest.approx(0.0, abs=1.0)
+    assert nav.navigation_state.gps_cog == pytest.approx(0.0, abs=1.0)
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
+    nav = NavigationService()
+    calls = 0
+
+    class FakeSensorManager:
+        async def read_all_sensors(self):
+            nonlocal calls
+            calls += 1
+            return SensorData()
+
+    async def fake_set_speed(_left: float, _right: float) -> None:
+        pass
+
+    async def fake_deliver_stop_command(
+        *,
+        reason: str,
+        retries: int = 3,
+        initial_delay: float = 0.1,
+    ):
+        return True
+
+    async def fake_update_navigation_state(_sensor_data: SensorData):
+        nav._heading_alignment_sample_count = 1
+        return nav.navigation_state
+
+    original_manager = AppState.get_instance().sensor_manager
+    set_sensor_manager(FakeSensorManager())
+    monkeypatch.setattr(nav, "set_speed", fake_set_speed)
+    monkeypatch.setattr(nav, "_deliver_stop_command", fake_deliver_stop_command)
+    monkeypatch.setattr(nav, "_global_emergency_active", lambda: False)
+    monkeypatch.setattr(nav, "update_navigation_state", fake_update_navigation_state)
+
+    try:
+        await nav._bootstrap_heading_from_gps_cog()
+    finally:
+        set_sensor_manager(original_manager)
+
+    assert calls == 1
 
 
 @pytest.mark.asyncio

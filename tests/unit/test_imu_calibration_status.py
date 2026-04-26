@@ -426,3 +426,48 @@ def test_calibration_score_unknown_not_in_map():
     assert "rvc_active" in _CALIBRATION_STATE_TO_SCORE
     assert "uncalibrated" in _CALIBRATION_STATE_TO_SCORE
     assert "fully_calibrated" in _CALIBRATION_STATE_TO_SCORE
+
+
+def test_gps_heading_validation_does_not_recommend_persistent_yaw_offset():
+    """GPS/IMU comparison is validation-only because BNO085 yaw is boot-relative."""
+    from backend.src.services.calibration_service import _compute_gps_heading_validation
+
+    result = _compute_gps_heading_validation(
+        {
+            "gps_lat": 37.0,
+            "gps_lon": -122.0,
+            "yaw": 15.0,
+        },
+        {
+            "gps_lat": 37.00001,
+            "gps_lon": -122.0,
+            "yaw": 15.0,
+        },
+    )
+
+    assert result is not None
+    assert result["reliable"] is True
+    assert "suggested_imu_yaw_offset_degrees" not in result
+    assert result["persistent_offset_recommendation"] is None
+    assert "do not write" in result["note"].lower()
+
+
+def test_gps_heading_validation_reports_short_trajectory_unreliable():
+    from backend.src.services.calibration_service import _compute_gps_heading_validation
+
+    result = _compute_gps_heading_validation(
+        {
+            "gps_lat": 37.0,
+            "gps_lon": -122.0,
+            "yaw": 15.0,
+        },
+        {
+            "gps_lat": 37.0,
+            "gps_lon": -122.0,
+            "yaw": 15.0,
+        },
+    )
+
+    assert result is not None
+    assert result["reliable"] is False
+    assert "suggested_imu_yaw_offset_degrees" not in result
