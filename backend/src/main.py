@@ -180,6 +180,33 @@ async def lifespan(app: FastAPI):
     except Exception:
         _log.exception("AI service initialization failed")
     await websocket_hub.start_telemetry_loop()
+    # Build the typed RuntimeContext once all services are up. This is
+    # consumed by safety-critical routers via Depends(get_runtime).
+    # See docs/superpowers/plans/2026-04-26-runtime-context.md.
+    from backend.src.core import globals as global_state
+    from backend.src.core.persistence import persistence
+    from backend.src.core.runtime import RuntimeContext
+    from backend.src.services.robohat_service import get_robohat_service
+
+    app.state.runtime = RuntimeContext(
+        config_loader=loader,
+        hardware_config=hardware_cfg,
+        safety_limits=safety_limits,
+        sensor_manager=shared_state.sensor_manager,
+        navigation=nav_service,
+        mission_service=mission_service,
+        safety_state=global_state._safety_state,
+        blade_state=global_state._blade_state,
+        robohat=get_robohat_service(),
+        websocket_hub=websocket_hub,
+        persistence=persistence,
+    )
+    _log.info(
+        "RuntimeContext ready: navigation=%s mission=%s robohat=%s",
+        type(app.state.runtime.navigation).__name__,
+        type(app.state.runtime.mission_service).__name__,
+        type(app.state.runtime.robohat).__name__ if app.state.runtime.robohat else "none",
+    )
     yield
     # Shutdown
     set_safety_event_handler(None)
