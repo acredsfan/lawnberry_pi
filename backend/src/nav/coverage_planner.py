@@ -117,9 +117,7 @@ def plan_coverage(
         return ([], 0, 0.0)
 
     ys = [p[0] for p in boundary]
-    xs = [p[1] for p in boundary]
     y_min, y_max = min(ys), max(ys)
-    x_min, x_max = min(xs), max(xs)
 
     # Convert spacing (m) to degrees latitude (approx 111320 m per deg)
     if spacing_m <= 0:

@@ -229,7 +229,6 @@ async def get_tof_status() -> ToFStatusResponse:
 
 @router.get("/sensors/gps/status", response_model=GPSSummary)
 async def get_gps_status() -> GPSSummary:
-    sim_mode = os.getenv("SIM_MODE", "0") != "0"
     try:
         sm = await websocket_hub._ensure_sensor_manager()
         gps = getattr(sm, "gps", None)

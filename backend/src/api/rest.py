@@ -701,7 +701,6 @@ def _manual_drive_status_reason(active_interlocks: list[str]) -> str:
 
 
 # Import helper from auth router for session resolution
-from .routers.auth import _resolve_manual_session
 
 
 @router.get("/hardware/robohat")
@@ -1557,7 +1556,6 @@ async def diagnose_heading_validation(cmd: dict, request: Request):
         return JSONResponse(status_code=403, content={"detail": "Emergency stop active"})
 
     # Collect GPS and IMU heading data while driving forward
-    distance_m = float(cmd.get("distance_m", 5.0))
     samples = int(cmd.get("samples", 10))
 
     # Start forward movement (pure forward, no turn)

@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from ...core.globals import _security_last_modified, _security_settings
+from ...core.globals import _security_settings
 from ...core.persistence import persistence
 from ...models.auth_security_config import SecurityLevel
 from ...services.settings_service import SettingsService

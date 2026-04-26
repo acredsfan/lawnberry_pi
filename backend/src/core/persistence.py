@@ -587,7 +587,7 @@ class PersistenceLayer:
             return
         now = datetime.now(UTC)
         rows = []
-        for i in range(count):
+        for _ in range(count):
             ts = (now).isoformat()
             rows.append(
                 {

@@ -143,7 +143,7 @@ class CameraStreamService:
                 loop.run_in_executor(None, self._initialize_camera_sync),
                 timeout=15.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 "Camera hardware initialization timed out after 15 s; falling back to sim mode"
             )

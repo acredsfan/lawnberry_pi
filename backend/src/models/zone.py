@@ -255,7 +255,6 @@ class MapConfiguration(BaseModel):
         # Simplified: check if all zone points are roughly within boundary
         # Real implementation would use shapely or similar library
         try:
-            from shapely.geometry import Point as ShapelyPoint
             from shapely.geometry import Polygon as ShapelyPolygon
 
             boundary_coords = [(p.longitude, p.latitude) for p in self.boundary_zone.polygon]

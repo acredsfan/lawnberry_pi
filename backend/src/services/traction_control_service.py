@@ -3,10 +3,9 @@ TractionControlService for LawnBerry Pi v2
 Detects motor slipping and traction loss, applies dynamic compensation.
 """
 
-import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)

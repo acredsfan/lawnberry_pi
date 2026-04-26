@@ -61,7 +61,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             return False
         # simple constant-time compare
         result = 0
-        for x, y in zip(a.encode(), b.encode()):
+        for x, y in zip(a.encode(), b.encode(), strict=False):
             result |= x ^ y
         return result == 0
 

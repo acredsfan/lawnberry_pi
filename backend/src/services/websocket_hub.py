@@ -43,7 +43,7 @@ class WebSocketHub:
         if ntrip_forwarder is not None:
             self._app_state.ntrip_forwarder = ntrip_forwarder
             self._ntrip_forwarder = ntrip_forwarder
-        setattr(state, "websocket_hub", self)
+        state.websocket_hub = self
 
     async def _ensure_sensor_manager(self):
         manager = self._app_state.sensor_manager

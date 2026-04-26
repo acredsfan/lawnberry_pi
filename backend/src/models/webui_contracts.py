@@ -457,7 +457,7 @@ class DocumentationBundle(BaseModel):
 
             return True
 
-        except Exception as e:
+        except Exception:
             return False
 
     def get_freshness_alerts(self) -> list[str]:
@@ -493,7 +493,7 @@ class DocumentationBundle(BaseModel):
 
         bundle = cls(bundle_id=str(uuid.uuid4()), bundle_name=bundle_name)
 
-        for root, dirs, files in os.walk(docs_dir):
+        for root, _dirs, files in os.walk(docs_dir):
             for filename in files:
                 if filename.endswith((".md", ".html", ".pdf")):
                     file_path = os.path.join(root, filename)

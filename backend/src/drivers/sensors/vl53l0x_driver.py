@@ -176,7 +176,7 @@ class VL53L0XDriver(HardwareDriver):
                     # Adafruit property `.range` returns mm. Access in a thread to avoid blocking loop.
                     def _read_range():
                         try:
-                            return getattr(self._driver, "range")
+                            return self._driver.range
                         except Exception:
                             return None
 

@@ -145,7 +145,7 @@ async def lifespan(app: FastAPI):
             NavigationService.get_instance(), websocket_hub=websocket_hub
         )
         await asyncio.wait_for(mission_service.recover_persisted_missions(), timeout=30.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _log.error("Mission recovery timed out after 30 s; continuing startup")
     except Exception:
         _log.exception("Mission recovery failed during startup")
