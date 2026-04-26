@@ -239,6 +239,8 @@ class NavigationService:
         self._last_gps_track_position: Position | None = None
         self._last_gps_track_time: datetime | None = None
         self._load_alignment_from_disk()
+        # Optional telemetry capture. Set via attach_capture(); default is no-op.
+        self._capture = None
 
     _instance: NavigationService | None = None
 
@@ -247,6 +249,13 @@ class NavigationService:
         if cls._instance is None:
             cls._instance = NavigationService(weather=weather)
         return cls._instance
+
+    def attach_capture(self, capture) -> None:
+        """Attach a TelemetryCapture for diagnostic replay.
+
+        See backend/src/diagnostics/capture.py. Pass None to detach.
+        """
+        self._capture = capture
 
     async def initialize(self) -> bool:
         """Initialize navigation service"""
@@ -1310,6 +1319,40 @@ class NavigationService:
         self.last_position = current_position
         self.navigation_state.timestamp = datetime.now(UTC)
 
+        # Optional capture for replay diagnostics. Failures must never break
+        # navigation, so swallow any exception and log at debug.
+        if self._capture is not None:
+            try:
+                from backend.src.models.diagnostics_capture import (
+                    CAPTURE_SCHEMA_VERSION,
+                    CaptureRecord,
+                    NavigationStateSnapshot,
+                )
+
+                snapshot = NavigationStateSnapshot(
+                    current_position=self.navigation_state.current_position,
+                    heading=self.navigation_state.heading,
+                    gps_cog=self.navigation_state.gps_cog,
+                    velocity=self.navigation_state.velocity,
+                    target_velocity=self.navigation_state.target_velocity,
+                    current_waypoint_index=self.navigation_state.current_waypoint_index,
+                    path_status=self.navigation_state.path_status,
+                    navigation_mode=self.navigation_state.navigation_mode,
+                    dead_reckoning_active=self.navigation_state.dead_reckoning_active,
+                    dead_reckoning_drift=self.navigation_state.dead_reckoning_drift,
+                    last_gps_fix=self.navigation_state.last_gps_fix,
+                    timestamp=self.navigation_state.timestamp,
+                )
+                self._capture.record(
+                    CaptureRecord(
+                        capture_version=CAPTURE_SCHEMA_VERSION,
+                        record_type="nav_step",
+                        sensor_data=sensor_data,
+                        navigation_state_after=snapshot,
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - safety net
+                logger.debug("Telemetry capture record failed: %s", exc)
         return self.navigation_state
 
     def _apply_gps_antenna_offset(self, gps_position: Position) -> Position:
