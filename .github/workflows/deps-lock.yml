@@ -14,9 +14,13 @@ jobs:
         run: test -f uv.lock
       - name: Verify lock is up-to-date
         run: uv lock --locked
-      - name: Ban Windows/x86-only deps
+      - name: Ban Windows-only deps
         run: |
-          ! grep -Ei '(pywin32|win32|msvc)' pyproject.toml
-          ! grep -Ei '(win_amd64|x86_64)'   pyproject.toml
+          # Reject any Windows-tagged wheels in pyproject.toml.
+          ! grep -Ei '(pywin32|win32|msvc|win_amd64)' pyproject.toml
+          # Note: x86_64 used to be banned too, but tool.uv.environments
+          # now legitimately lists 'platform_machine == "x86_64"' so CI
+          # (Intel Linux) can resolve the lockfile. The ban became a
+          # false positive against its own configuration.
       - name: Ban Coral pkgs in main env
         run: "! grep -Ei '\\b(pycoral|edgetpu)\\b' pyproject.toml"
