@@ -5,7 +5,7 @@ Usage:
     python scripts/replay_navigation.py <capture.jsonl> [--heading-tol 0.01]
                                         [--latlon-tol 1e-7]
                                         [--velocity-tol 0.001]
-                                        [--quiet]
+                                        [--verbose]
 
 Reads a JSONL capture produced by TelemetryCapture, replays each captured
 SensorData through a fresh NavigationService (in SIM_MODE), and reports
@@ -49,7 +49,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--latlon-tol", type=float, default=1e-7, help="degrees")
     p.add_argument("--velocity-tol", type=float, default=0.001, help="m/s")
     p.add_argument(
-        "--quiet", action="store_true", help="only print summary, suppress per-step output"
+        "-v", "--verbose", action="store_true",
+        help="print one line per replay step (default: summary + deltas only)",
     )
     return p
 
@@ -59,6 +60,10 @@ async def _run(args: argparse.Namespace) -> int:
         print(f"error: capture file not found: {args.capture}", file=sys.stderr)
         return 2
 
+    print(
+        f"replay tolerances: heading={args.heading_tol}° "
+        f"latlon={args.latlon_tol:g} velocity={args.velocity_tol} m/s"
+    )
     nav = NavigationService()
     deltas: list[str] = []
     step = 0
@@ -94,11 +99,15 @@ async def _run(args: argparse.Namespace) -> int:
                     f"expected {expected.velocity:.6f}"
                 )
 
-        if not args.quiet:
-            print(
-                f"step {step}: heading={result.heading} "
-                f"pos={result.current_position}"
+        if args.verbose:
+            pos = result.current_position
+            pos_str = (
+                f"({pos.latitude:.7f},{pos.longitude:.7f})" if pos else "None"
             )
+            hdg_str = (
+                f"{result.heading:.2f}" if result.heading is not None else "None"
+            )
+            print(f"step {step}: heading={hdg_str} pos={pos_str}")
         step += 1
 
     print(f"replay complete: {step} steps")
