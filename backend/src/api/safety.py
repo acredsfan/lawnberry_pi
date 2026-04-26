@@ -5,9 +5,11 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from . import rest as rest_api
-from .rest import _client_emergency  # noqa: PLC0415  # cross-module map; unified under §4 motor gateway
 from ..core.runtime import RuntimeContext, get_runtime
+from . import rest as rest_api
+from .rest import (
+    _client_emergency,  # noqa: E402  # cross-module map; unified under §4 motor gateway
+)
 
 router = APIRouter()
 
