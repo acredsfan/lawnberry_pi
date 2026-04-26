@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
 from backend.src.core.runtime import RuntimeContext, get_runtime
@@ -31,8 +31,9 @@ def _make_runtime(**overrides: Any) -> RuntimeContext:
 
 
 def test_runtime_context_holds_all_required_fields():
-    runtime = _make_runtime()
-    for field_name in (
+    from dataclasses import fields
+
+    expected = {
         "config_loader",
         "hardware_config",
         "safety_limits",
@@ -44,8 +45,14 @@ def test_runtime_context_holds_all_required_fields():
         "robohat",
         "websocket_hub",
         "persistence",
-    ):
-        assert hasattr(runtime, field_name), f"missing field: {field_name}"
+    }
+    actual = {f.name for f in fields(RuntimeContext)}
+    assert actual == expected, f"field set drift: extra={actual-expected}, missing={expected-actual}"
+
+    # Also check we can construct an instance with all fields populated.
+    runtime = _make_runtime()
+    for name in expected:
+        assert hasattr(runtime, name)
 
 
 def test_runtime_context_safety_state_is_a_live_reference():
@@ -61,7 +68,7 @@ def test_get_runtime_returns_app_state_runtime():
     app.state.runtime = _make_runtime()
 
     @app.get("/probe")
-    def probe(runtime: RuntimeContext = pytest.importorskip("fastapi").Depends(get_runtime)):
+    def probe(runtime: RuntimeContext = Depends(get_runtime)):
         return {"has_navigation": runtime.navigation is not None}
 
     with TestClient(app) as client:
@@ -75,7 +82,7 @@ def test_get_runtime_raises_runtime_error_when_not_initialized():
     # Deliberately do NOT set app.state.runtime.
 
     @app.get("/probe")
-    def probe(runtime: RuntimeContext = pytest.importorskip("fastapi").Depends(get_runtime)):
+    def probe(runtime: RuntimeContext = Depends(get_runtime)):
         return {"ok": True}
 
     # raise_server_exceptions=False required: Starlette >=0.21 TestClient
@@ -92,7 +99,7 @@ def test_dependency_override_replaces_get_runtime():
     app.state.runtime = _make_runtime()
 
     @app.get("/probe")
-    def probe(runtime: RuntimeContext = pytest.importorskip("fastapi").Depends(get_runtime)):
+    def probe(runtime: RuntimeContext = Depends(get_runtime)):
         return {"nav_kind": type(runtime.navigation).__name__}
 
     fake_runtime = _make_runtime(navigation="not-a-mock")
