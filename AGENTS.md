@@ -24,6 +24,7 @@
 - `scripts/` contains setup, validation, diagnostics, backups, TLS, and hook tooling.
 - `tests/` contains backend unit, integration, contract, HIL, and soak tests.
 - `docs/` and `spec/` are part of the product contract; update them when behavior, hardware scope, ports, or public interfaces change.
+- `docs/diagnostics-replay.md` documents the telemetry capture + replay harness used to regression-check navigation refactors.
 
 ## Runtime Contract
 
