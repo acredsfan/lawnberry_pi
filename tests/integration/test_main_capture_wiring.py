@@ -1,7 +1,6 @@
 """Verify main.py attaches a TelemetryCapture when LAWNBERRY_CAPTURE_PATH is set."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
