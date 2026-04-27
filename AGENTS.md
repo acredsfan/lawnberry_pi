@@ -25,6 +25,7 @@
 - `tests/` contains backend unit, integration, contract, HIL, and soak tests.
 - `docs/` and `spec/` are part of the product contract; update them when behavior, hardware scope, ports, or public interfaces change.
 - `docs/diagnostics-replay.md` documents the telemetry capture + replay harness used to regression-check navigation refactors.
+- `docs/runtime-context.md` documents the typed `RuntimeContext` injected via FastAPI's `Depends(get_runtime)` for safety-critical routers (§1).
 
 ## Runtime Contract
 

@@ -2,16 +2,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-# Reuse safety/blade state used by existing v2 control endpoints
+from ..core.runtime import RuntimeContext, get_runtime
 from . import rest as rest_api
 from .rest import (
-    _blade_state,
-    _client_emergency,
-    _safety_state,
-)  # minimal coupling to keep behavior consistent
+    _client_emergency,  # noqa: E402  # cross-module map; unified under §4 motor gateway
+)
 
 router = APIRouter()
 
@@ -22,7 +20,10 @@ class EmergencyClearRequest(BaseModel):
 
 
 @router.post("/control/emergency_clear")
-async def clear_emergency_stop(payload: EmergencyClearRequest):
+async def clear_emergency_stop(
+    payload: EmergencyClearRequest,
+    runtime: RuntimeContext = Depends(get_runtime),
+):
     """Clear emergency stop after explicit operator confirmation.
 
     Behavior:
@@ -36,13 +37,13 @@ async def clear_emergency_stop(payload: EmergencyClearRequest):
         raise HTTPException(status_code=422, detail="Confirmation required to clear emergency stop")
 
     # If already clear, respond idempotently
-    if not _safety_state.get("emergency_stop_active", False):
+    if not runtime.safety_state.get("emergency_stop_active", False):
         return {"status": "EMERGENCY_CLEARED", "idempotent": True}
 
     # Clear local safety state and ensure blade remains off
-    _safety_state["emergency_stop_active"] = False
-    _safety_state["estop_reason"] = None
-    _blade_state["active"] = False
+    runtime.safety_state["emergency_stop_active"] = False
+    runtime.safety_state["estop_reason"] = None
+    runtime.blade_state["active"] = False
     rest_api._emergency_until = 0.0
     _client_emergency.clear()
 
