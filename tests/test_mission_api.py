@@ -136,11 +136,14 @@ def test_create_mission_request_validation(client):
 
 
 def test_mission_endpoints_resolve_via_runtime_dependency():
-    """Confirm mission endpoints accept the runtime override path.
+    """Confirm mission endpoints resolve via the runtime override path.
 
-    After migration to Depends(get_runtime), tests can either override
-    get_runtime (preferred) or continue overriding get_mission_service
-    (legacy path). This test confirms the runtime path works.
+    After this task migrated mission.py from Depends(get_mission_service)
+    to Depends(get_runtime), the only valid test injection path is
+    overriding get_runtime. Overriding get_mission_service no longer has
+    any effect on these endpoints — the router doesn't call that
+    dependency. The factory still exists in services/mission_service.py
+    for non-router callers.
     """
     mock_mission = MagicMock()
     # list_missions is an async endpoint — use AsyncMock so await succeeds.
@@ -165,7 +168,7 @@ def test_mission_endpoints_resolve_via_runtime_dependency():
         with TestClient(app) as client:
             # /api/v2/missions/list is the list-missions endpoint.
             response = client.get("/api/v2/missions/list")
-            assert response.status_code in (200, 401), (
+            assert response.status_code == 200, (
                 f"status={response.status_code} body={response.text}"
             )
     finally:
