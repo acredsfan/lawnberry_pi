@@ -4,13 +4,41 @@ Validates drive commands, blade control, emergency commands, latency budgets,
 audit trails, safety interlocks.
 """
 from datetime import datetime
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from backend.src.core import globals as core_globals
+from backend.src.core.runtime import RuntimeContext, get_runtime
 from backend.src.main import app
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def _override_runtime_for_control_routes():
+    # ASGITransport(app=app) does not run lifespan, so app.state.runtime is
+    # never built. Inject a runtime whose safety_state/blade_state point at the
+    # same module-level dicts that legacy rest.py routes mutate, mirroring how
+    # main.py builds the production runtime. Without shared dicts the lockout
+    # latching test won't observe the cross-router state transition.
+    fake_runtime = RuntimeContext(
+        config_loader=MagicMock(),
+        hardware_config=MagicMock(),
+        safety_limits=MagicMock(),
+        sensor_manager=MagicMock(),
+        navigation=MagicMock(),
+        mission_service=MagicMock(),
+        safety_state=core_globals._safety_state,
+        blade_state=core_globals._blade_state,
+        robohat=MagicMock(),
+        websocket_hub=MagicMock(),
+        persistence=MagicMock(),
+    )
+    app.dependency_overrides[get_runtime] = lambda: fake_runtime
+    yield
+    # conftest's autouse fixture clears app.dependency_overrides after each test
 
 
 @pytest.mark.asyncio
