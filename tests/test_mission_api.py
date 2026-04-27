@@ -1,16 +1,19 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
+
+from backend.src.core.runtime import RuntimeContext, get_runtime
 from backend.src.main import app
+from backend.src.models.mission import Mission, MissionLifecycleStatus, MissionStatus
 from backend.src.services.mission_service import (
     MissionConflictError,
     MissionNotFoundError,
     MissionService,
     MissionStateError,
     MissionValidationError,
-    get_mission_service,
 )
-from backend.src.models.mission import Mission, MissionLifecycleStatus, MissionStatus
-from unittest.mock import AsyncMock
+
 
 # Mock MissionService for testing
 @pytest.fixture
@@ -27,7 +30,20 @@ def mock_mission_service():
 
 @pytest.fixture
 def client(mock_mission_service):
-    app.dependency_overrides[get_mission_service] = lambda: mock_mission_service
+    fake_runtime = RuntimeContext(
+        config_loader=MagicMock(),
+        hardware_config=MagicMock(),
+        safety_limits=MagicMock(),
+        sensor_manager=MagicMock(),
+        navigation=MagicMock(),
+        mission_service=mock_mission_service,
+        safety_state={},
+        blade_state={},
+        robohat=MagicMock(),
+        websocket_hub=MagicMock(),
+        persistence=MagicMock(),
+    )
+    app.dependency_overrides[get_runtime] = lambda: fake_runtime
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
@@ -117,3 +133,40 @@ def test_create_mission_request_validation(client):
     response = client.post("/api/v2/missions/create", json={"name": "", "waypoints": []})
 
     assert response.status_code == 422
+
+
+def test_mission_endpoints_resolve_via_runtime_dependency():
+    """Confirm mission endpoints accept the runtime override path.
+
+    After migration to Depends(get_runtime), tests can either override
+    get_runtime (preferred) or continue overriding get_mission_service
+    (legacy path). This test confirms the runtime path works.
+    """
+    mock_mission = MagicMock()
+    # list_missions is an async endpoint — use AsyncMock so await succeeds.
+    mock_mission.list_missions = AsyncMock(return_value=[])
+
+    fake_runtime = RuntimeContext(
+        config_loader=MagicMock(),
+        hardware_config=MagicMock(),
+        safety_limits=MagicMock(),
+        sensor_manager=MagicMock(),
+        navigation=MagicMock(),
+        mission_service=mock_mission,
+        safety_state={},
+        blade_state={},
+        robohat=MagicMock(),
+        websocket_hub=MagicMock(),
+        persistence=MagicMock(),
+    )
+
+    app.dependency_overrides[get_runtime] = lambda: fake_runtime
+    try:
+        with TestClient(app) as client:
+            # /api/v2/missions/list is the list-missions endpoint.
+            response = client.get("/api/v2/missions/list")
+            assert response.status_code in (200, 401), (
+                f"status={response.status_code} body={response.text}"
+            )
+    finally:
+        app.dependency_overrides.clear()
