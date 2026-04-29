@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..core.config_loader import ConfigLoader
+from ..core.observability import observability
 from ..models import (
     NavigationMode,
     NavigationState,
@@ -1160,7 +1161,20 @@ class NavigationService:
         self.navigation_state.heading = heading
 
     async def update_navigation_state(self, sensor_data: SensorData) -> NavigationState:
-        """Update navigation state with sensor fusion"""
+        """Update navigation state with sensor fusion.
+
+        Wall-time of the tick is recorded as the ``navigation_tick_duration``
+        timer metric (§12 runtime budget baseline).
+        """
+        start = time.perf_counter()
+        try:
+            return await self._update_navigation_state_impl(sensor_data)
+        finally:
+            duration_ms = (time.perf_counter() - start) * 1000.0
+            observability.metrics.record_timer("navigation_tick_duration", duration_ms)
+
+    async def _update_navigation_state_impl(self, sensor_data: SensorData) -> NavigationState:
+        """Original update_navigation_state body — measured by the public wrapper."""
 
         # Update position from GPS or dead reckoning
         current_position = await self._update_position(sensor_data)

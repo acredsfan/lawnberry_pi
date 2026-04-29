@@ -5,6 +5,7 @@ import pytest
 
 import backend.src.services.mission_service as mission_service_module
 import backend.src.services.navigation_service as navigation_service_module
+from backend.src.core.observability import observability
 from backend.src.core.state_manager import AppState, set_sensor_manager
 from backend.src.models import (
     GpsReading,
@@ -672,3 +673,21 @@ async def test_blended_mode_right_turn_left_speed_greater_than_right(monkeypatch
     assert first_left > first_right, (
         f"Blended CW turn: left ({first_left:.3f}) must be > right ({first_right:.3f})"
     )
+
+
+@pytest.mark.asyncio
+async def test_update_navigation_state_records_tick_duration_metric():
+    observability.reset_events_for_testing()
+    nav = NavigationService()
+
+    await nav.update_navigation_state(
+        SensorData(gps=GpsReading(latitude=1.0, longitude=1.0, accuracy=0.5))
+    )
+
+    snapshot = observability.get_metrics_snapshot()
+    timer = snapshot["timers"].get("navigation_tick_duration")
+    assert timer is not None, "navigation_tick_duration timer should be recorded"
+    assert timer["count"] == 1
+    assert timer["avg"] >= 0.0
+    assert timer["min"] >= 0.0
+    assert timer["max"] >= timer["min"]
