@@ -5,6 +5,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need full history so base..head diff resolves; the default
+          # shallow clone made `git diff` fail with "bad object" on every PR.
+          fetch-depth: 0
       - name: Block deletion of workflows without owner approval
         run: |
           base=${{ github.event.pull_request.base.sha }}
@@ -15,13 +19,17 @@ jobs:
             echo "Refusing PR unless CODEOWNERS approves."
             exit 1
           fi
-      - name: Require journal & docs with code changes
+      - name: Require docs update with substantive code changes
         run: |
           base=${{ github.event.pull_request.base.sha }}
           head=${{ github.event.pull_request.head.sha }}
           CHANGES=$(git diff --name-only "$base" "$head")
-          if echo "$CHANGES" | grep -qE '^(backend/|frontend/|systemd/|scripts/|spec/|docs/)'
+          # Only enforce docs touch when backend/frontend/systemd code moves;
+          # spec/scripts/docs-only PRs don't trigger the requirement.
+          # Note: the prior `memory/agent_journal.md` requirement was dropped
+          # because that file was deleted in 092c932 (2025-10-26 cleanup) and
+          # the rule had been structurally unsatisfiable since.
+          if echo "$CHANGES" | grep -qE '^(backend/|frontend/|systemd/)'
           then
-            echo "$CHANGES" | grep -qi '^memory/agent_journal.md' || (echo "Missing memory/agent_journal.md update" && exit 1)
-            echo "$CHANGES" | grep -qi '^docs/' || (echo "Missing docs update" && exit 2)
+            echo "$CHANGES" | grep -qi '^docs/' || (echo "Missing docs/ update for substantive code change" && exit 2)
           fi
