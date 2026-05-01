@@ -89,3 +89,34 @@ def test_safety_endpoints_do_not_import_globals_from_rest():
         "safety.py still imports _safety_state or _blade_state from rest.py "
         "in some import form"
     )
+
+
+def test_navigation_service_does_not_import_state_from_rest():
+    """navigation_service.py must not read/write rest_api._safety_state after Phase C."""
+    import re
+
+    from backend.src.services import navigation_service
+
+    text = open(navigation_service.__file__).read()
+    bad_patterns = [
+        r"rest_api\._safety_state",
+        r"rest_api\._blade_state",
+        r"rest_api\._emergency_until",
+        r"rest_api\._legacy_motors_active",
+    ]
+    for pat in bad_patterns:
+        assert not re.search(pat, text), (
+            f"navigation_service.py still accesses {pat!r} from rest_api"
+        )
+
+
+def test_mission_service_does_not_import_state_from_rest():
+    """mission_service.py must not read rest_api._safety_state after Phase C."""
+    import re
+
+    from backend.src.services import mission_service
+
+    text = open(mission_service.__file__).read()
+    assert not re.search(r"rest_api\._safety_state", text), (
+        "mission_service.py still reads rest_api._safety_state"
+    )

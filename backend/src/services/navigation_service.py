@@ -1036,14 +1036,22 @@ class NavigationService:
         """Return True when the API-level emergency stop is latched OR any active
         hardware safety interlock (tilt, obstacle, geofence, etc.) is present.
 
-        Previously only checked rest_api._safety_state which is only set by the
-        explicit /emergency-stop endpoint — hardware interlocks activated by
-        SafetyTriggerManager never reached this check (ARCH-001).
+        Prefer the gateway if available (Phase C+); fall back to direct state read.
         """
         try:
-            from ..api import rest as rest_api
+            from ..main import app
 
-            if rest_api._safety_state.get("emergency_stop_active", False):
+            gw = getattr(getattr(app.state, "runtime", None), "command_gateway", None)
+            if gw is not None:
+                return gw.is_emergency_active()
+        except Exception:
+            pass
+
+        # Legacy fallback: read the shared dict directly (same dict the gateway holds)
+        try:
+            from ..core import globals as _g
+
+            if _g._safety_state.get("emergency_stop_active", False):
                 return True
         except Exception:
             pass
@@ -1065,15 +1073,33 @@ class NavigationService:
     def _latch_global_emergency_state(self) -> None:
         """Mirror the control API emergency latch for non-HTTP emergency paths."""
         try:
-            from ..api import rest as rest_api
+            from ..control.commands import EmergencyTrigger
+            from ..main import app
 
-            rest_api._safety_state["emergency_stop_active"] = True
-            rest_api._blade_state["active"] = False
-            rest_api._legacy_motors_active = False
-            rest_api._emergency_until = time.time() + 0.2
+            gw = getattr(getattr(app.state, "runtime", None), "command_gateway", None)
+            if gw is not None:
+                import asyncio
+
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.ensure_future(
+                        gw.trigger_emergency(
+                            EmergencyTrigger(reason="Navigation safety trigger", source="navigation")
+                        )
+                    )
+                    return
+        except Exception:
+            pass
+
+        # Legacy fallback when gateway unavailable (unit tests, early startup)
+        try:
+            from ..core import globals as _g
+
+            _g._safety_state["emergency_stop_active"] = True
+            _g._blade_state["active"] = False
         except Exception:
             logger.debug(
-                "Unable to mirror global emergency state from navigation service", exc_info=True
+                "Unable to latch emergency state from navigation service", exc_info=True
             )
 
     @staticmethod
@@ -1741,9 +1767,9 @@ class NavigationService:
 
         # Record reason so the UI can show why the e-stop was activated
         try:
-            import backend.src.api.rest as rest_api
+            from ..core import globals as _g
 
-            rest_api._safety_state["estop_reason"] = reason
+            _g._safety_state["estop_reason"] = reason
         except Exception:
             pass
 

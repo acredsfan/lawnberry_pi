@@ -25,6 +25,24 @@ from ..services.navigation_service import NavigationService
 logger = logging.getLogger(__name__)
 
 
+def _is_emergency_active() -> bool:
+    """Check emergency state via gateway if available, else direct dict read."""
+    try:
+        from ..main import app
+
+        gw = getattr(getattr(app.state, "runtime", None), "command_gateway", None)
+        if gw is not None:
+            return gw.is_emergency_active()
+    except Exception:
+        pass
+    try:
+        from ..core import globals as _g
+
+        return bool(_g._safety_state.get("emergency_stop_active", False))
+    except Exception:
+        return False
+
+
 class MissionError(Exception):
     """Base mission domain error."""
 
@@ -364,10 +382,9 @@ class MissionService:
     async def start_mission(self, mission_id: str):
         import os
 
-        from ..api import rest as rest_api
         from .robohat_service import get_robohat_service
 
-        if rest_api._safety_state.get("emergency_stop_active", False):
+        if _is_emergency_active():
             raise MissionStateError("Cannot start mission while emergency stop is active.")
 
         # Pre-flight: verify motor controller is available (skip in simulation)
@@ -504,10 +521,9 @@ class MissionService:
     async def resume_mission(self, mission_id: str):
         import os
 
-        from ..api import rest as rest_api
         from .robohat_service import get_robohat_service
 
-        if rest_api._safety_state.get("emergency_stop_active", False):
+        if _is_emergency_active():
             raise MissionStateError("Cannot resume mission while emergency stop is active.")
 
         # Pre-flight: verify motor controller is available (skip in simulation)
