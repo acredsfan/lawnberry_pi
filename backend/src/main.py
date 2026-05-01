@@ -185,10 +185,22 @@ async def lifespan(app: FastAPI):
     # See docs/superpowers/plans/2026-04-26-runtime-context.md.
     # `sensor_manager` is a property on RuntimeContext that reads AppState
     # live (Issue #44 / docs/runtime-context.md), so it is not passed here.
+    from backend.src.control.command_gateway import MotorCommandGateway
     from backend.src.core import globals as global_state
     from backend.src.core.persistence import persistence
     from backend.src.core.runtime import RuntimeContext
     from backend.src.services.robohat_service import get_robohat_service
+
+    _robohat = get_robohat_service()
+    _command_gateway = MotorCommandGateway(
+        safety_state=global_state._safety_state,
+        blade_state=global_state._blade_state,
+        client_emergency=global_state._client_emergency,
+        robohat=_robohat,
+        persistence=persistence,
+        websocket_hub=websocket_hub,
+        config_loader=loader,
+    )
 
     app.state.runtime = RuntimeContext(
         config_loader=loader,
@@ -198,9 +210,10 @@ async def lifespan(app: FastAPI):
         mission_service=mission_service,
         safety_state=global_state._safety_state,
         blade_state=global_state._blade_state,
-        robohat=get_robohat_service(),
+        robohat=_robohat,
         websocket_hub=websocket_hub,
         persistence=persistence,
+        command_gateway=_command_gateway,
     )
     _log.info(
         "RuntimeContext ready: navigation=%s mission=%s robohat=%s",

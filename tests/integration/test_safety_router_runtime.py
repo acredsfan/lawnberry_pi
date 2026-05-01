@@ -11,17 +11,30 @@ from backend.src.core.runtime import RuntimeContext, get_runtime
 
 
 def _make_runtime(**overrides: Any) -> RuntimeContext:
+    from backend.src.control.command_gateway import MotorCommandGateway
+    from backend.src.core import globals as _g
+
+    safety = overrides.pop("safety_state", {"emergency_stop_active": True, "estop_reason": "test"})
+    blade = overrides.pop("blade_state", {"active": True})
+    gw = MotorCommandGateway(
+        safety_state=safety,
+        blade_state=blade,
+        client_emergency=_g._client_emergency,
+        robohat=MagicMock(name="robohat", status=MagicMock(serial_connected=False)),
+        persistence=MagicMock(name="persistence"),
+    )
     defaults: dict[str, Any] = {
         "config_loader": MagicMock(name="config_loader"),
         "hardware_config": MagicMock(name="hardware_config"),
         "safety_limits": MagicMock(name="safety_limits"),
         "navigation": MagicMock(name="navigation"),
         "mission_service": MagicMock(name="mission_service"),
-        "safety_state": {"emergency_stop_active": True, "estop_reason": "test"},
-        "blade_state": {"active": True},
+        "safety_state": safety,
+        "blade_state": blade,
         "robohat": MagicMock(name="robohat"),
         "websocket_hub": MagicMock(name="websocket_hub"),
         "persistence": MagicMock(name="persistence"),
+        "command_gateway": gw,
     }
     defaults.update(overrides)
     return RuntimeContext(**defaults)

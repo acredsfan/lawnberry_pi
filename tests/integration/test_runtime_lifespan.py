@@ -60,3 +60,10 @@ def test_lifespan_startup_assigns_runtime_to_app_state():
         from backend.src.core.state_manager import AppState
 
         assert runtime.sensor_manager is AppState.get_instance().sensor_manager
+
+        # command_gateway must be present (Phase A gateway wiring).
+        assert runtime.command_gateway is not None, (
+            "runtime.command_gateway should not be None after lifespan startup"
+        )
+        from backend.src.control.command_gateway import MotorCommandGateway
+        assert isinstance(runtime.command_gateway, MotorCommandGateway)

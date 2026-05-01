@@ -18,11 +18,18 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture(autouse=True)
 def _override_runtime_for_control_routes():
-    # ASGITransport(app=app) does not run lifespan, so app.state.runtime is
-    # never built. Inject a runtime whose safety_state/blade_state point at the
-    # same module-level dicts that legacy rest.py routes mutate, mirroring how
-    # main.py builds the production runtime. Without shared dicts the lockout
-    # latching test won't observe the cross-router state transition.
+    from backend.src.control.command_gateway import MotorCommandGateway
+    from backend.src.core import globals as core_globals_inner
+
+    _gw = MotorCommandGateway(
+        safety_state=core_globals._safety_state,
+        blade_state=core_globals._blade_state,
+        client_emergency=core_globals._client_emergency,
+        robohat=MagicMock(status=MagicMock(serial_connected=False)),
+        persistence=MagicMock(),
+        websocket_hub=MagicMock(),
+        config_loader=MagicMock(),
+    )
     fake_runtime = RuntimeContext(
         config_loader=MagicMock(),
         hardware_config=MagicMock(),
@@ -34,6 +41,7 @@ def _override_runtime_for_control_routes():
         robohat=MagicMock(),
         websocket_hub=MagicMock(),
         persistence=MagicMock(),
+        command_gateway=_gw,
     )
     app.dependency_overrides[get_runtime] = lambda: fake_runtime
     yield
