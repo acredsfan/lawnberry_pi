@@ -9,6 +9,7 @@ import time
 import uuid
 from typing import Any
 
+from ..core.http_util import client_key
 from .commands import (
     BladeCommand,
     BladeOutcome,
@@ -21,26 +22,6 @@ from .commands import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _client_key(request: Any) -> str:
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth:
-        return auth
-    cid = request.headers.get("X-Client-Id") or request.headers.get("x-client-id")
-    if cid:
-        return cid
-    try:
-        anon = getattr(request.state, "_anon_client_id", None)
-        if not anon:
-            anon = "anon-" + uuid.uuid4().hex
-            try:
-                request.state._anon_client_id = anon
-            except Exception:
-                pass
-        return anon
-    except Exception:
-        return "anon-" + uuid.uuid4().hex
 
 
 class MotorCommandGateway:
@@ -82,7 +63,7 @@ class MotorCommandGateway:
         if request is None:
             return False
         try:
-            key = _client_key(request)
+            key = client_key(request)
             exp = self._client_emergency.get(key)
             if exp is None:
                 return False
@@ -106,7 +87,7 @@ class MotorCommandGateway:
             pass
         try:
             if cmd.request is not None:
-                self._client_emergency[_client_key(cmd.request)] = time.time() + 0.3
+                self._client_emergency[client_key(cmd.request)] = time.time() + 0.3
         except Exception:
             pass
 

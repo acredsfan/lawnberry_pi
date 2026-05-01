@@ -23,7 +23,7 @@ from ..core.globals import (
     _manual_control_sessions,
     _security_settings,
 )
-from ..control.command_gateway import _client_key
+from ..core.http_util import client_key
 from .routers import telemetry
 from .routers.auth import _resolve_manual_session
 from ..services.websocket_hub import websocket_hub
@@ -605,7 +605,7 @@ def _client_emergency_active(request: Request | None) -> bool:
     try:
         if request is None:
             return False
-        key = _client_key(request)
+        key = client_key(request)
         exp = _client_emergency.get(key)
         now = time.time()
         if exp is None:
