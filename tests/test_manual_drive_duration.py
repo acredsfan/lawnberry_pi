@@ -216,29 +216,36 @@ async def test_drive_duration_zero_clamps_to_500ms():
 
 
 @pytest.mark.asyncio
-async def test_drive_timeout_module_variable_retained():
-    """Verify _drive_timeout_task module variable is retained (not GC'd) (Issue #2)."""
-    
-    # This is a simple unit test that verifies the module variable exists and can be accessed
-    from backend.src.api import rest
-    
-    # Verify the variable exists
-    assert hasattr(rest, "_drive_timeout_task"), "_drive_timeout_task should exist at module level"
-    
-    # Create a dummy task and store it
+async def test_drive_timeout_task_retained_on_gateway():
+    """Verify _drive_timeout_task is retained on the gateway (not GC'd) (Issue #2).
+
+    Phase D moved auto-stop task tracking from rest._drive_timeout_task to
+    MotorCommandGateway._drive_timeout_task so the gateway owns the reference.
+    """
+    from backend.src.control.command_gateway import MotorCommandGateway
+    from backend.src.core import globals as core_globals
+
+    gw = MotorCommandGateway(
+        safety_state=core_globals._safety_state,
+        blade_state=core_globals._blade_state,
+        client_emergency=core_globals._client_emergency,
+        robohat=MagicMock(status=MagicMock(serial_connected=False)),
+        persistence=MagicMock(),
+    )
+
+    assert hasattr(gw, "_drive_timeout_task"), "_drive_timeout_task should exist on gateway"
+
     async def dummy_task():
         await asyncio.sleep(1)
-    
-    rest._drive_timeout_task = asyncio.create_task(dummy_task())
-    stored_task = rest._drive_timeout_task
-    
-    # Verify we can retrieve it
-    assert rest._drive_timeout_task is stored_task, "Module variable should retain task reference"
-    
-    # Clean up
-    rest._drive_timeout_task.cancel()
+
+    gw._drive_timeout_task = asyncio.create_task(dummy_task())
+    stored_task = gw._drive_timeout_task
+
+    assert gw._drive_timeout_task is stored_task, "Gateway should retain task reference"
+
+    gw._drive_timeout_task.cancel()
     try:
-        await rest._drive_timeout_task
+        await gw._drive_timeout_task
     except asyncio.CancelledError:
         pass
 

@@ -49,10 +49,6 @@ _planning_job_counter = 0
 _last_drive_audit_at: float = 0.0
 _DRIVE_AUDIT_SAMPLE_INTERVAL_S: float = 1.0
 
-# Manual drive auto-stop task tracking (Issue #2).
-# Must be retained at module scope to prevent garbage collection mid-flight.
-_drive_timeout_task: asyncio.Task | None = None
-
 
 class SystemSettings(BaseModel):
     timezone: str = "UTC"
@@ -586,14 +582,6 @@ class ControlResponseV2(BaseModel):
     timestamp: str
 
 
-def _emergency_active() -> bool:
-    try:
-        if bool(_safety_state.get("emergency_stop_active", False)):
-            return True
-        return time.time() < _emergency_until
-    except Exception:
-        return False
-
 
 def _enum_value(value: Any) -> Any:
     return value.value if hasattr(value, "value") else value
@@ -1076,12 +1064,12 @@ async def control_emergency_stop_alias(
 
 
 @router.post("/control/start")
-async def control_start_navigation():
+async def control_start_navigation(runtime: RuntimeContext = Depends(get_runtime)):
     """Start autonomous navigation using the active planned path."""
     from ..services.navigation_service import NavigationService
 
     nav_service = NavigationService.get_instance()
-    if _emergency_active():
+    if runtime.command_gateway.is_emergency_active():
         return _navigation_error_response(
             nav_service,
             status_label="emergency_stop_active",
@@ -1124,12 +1112,12 @@ async def control_pause_navigation():
 
 
 @router.post("/control/resume")
-async def control_resume_navigation():
+async def control_resume_navigation(runtime: RuntimeContext = Depends(get_runtime)):
     """Resume navigation after a pause."""
     from ..services.navigation_service import NavigationService
 
     nav_service = NavigationService.get_instance()
-    if _emergency_active():
+    if runtime.command_gateway.is_emergency_active():
         return _navigation_error_response(
             nav_service,
             status_label="emergency_stop_active",
@@ -1172,12 +1160,12 @@ async def control_stop_navigation():
 
 
 @router.post("/control/return-home")
-async def control_return_home():
+async def control_return_home(runtime: RuntimeContext = Depends(get_runtime)):
     """Start a return-to-home navigation sequence when home and position are available."""
     from ..services.navigation_service import NavigationService
 
     nav_service = NavigationService.get_instance()
-    if _emergency_active():
+    if runtime.command_gateway.is_emergency_active():
         return _navigation_error_response(
             nav_service,
             status_label="emergency_stop_active",
@@ -1213,7 +1201,9 @@ async def control_navigation_status():
 
 
 @router.post("/control/diagnose/stiffness")
-async def diagnose_stiffness_progressive(cmd: dict, request: Request):
+async def diagnose_stiffness_progressive(
+    cmd: dict, request: Request, runtime: RuntimeContext = Depends(get_runtime)
+):
     """Start progressive stiffness detection test (slowly increase turn effort until stuck).
 
     POST /api/v2/control/diagnose/stiffness
@@ -1241,7 +1231,7 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
     nav_service = NavigationService.get_instance()
     robohat = get_robohat_service()
 
-    if _emergency_active():
+    if runtime.command_gateway.is_emergency_active():
         return JSONResponse(status_code=403, content={"detail": "Emergency stop active"})
 
     direction = cmd.get("direction", "left")
@@ -1315,7 +1305,9 @@ async def diagnose_stiffness_progressive(cmd: dict, request: Request):
 
 
 @router.post("/control/diagnose/heading-validation")
-async def diagnose_heading_validation(cmd: dict, request: Request):
+async def diagnose_heading_validation(
+    cmd: dict, request: Request, runtime: RuntimeContext = Depends(get_runtime)
+):
     """Validate heading by comparing GPS Course-Over-Ground vs IMU yaw.
 
     POST /api/v2/control/diagnose/heading-validation
@@ -1342,7 +1334,7 @@ async def diagnose_heading_validation(cmd: dict, request: Request):
     nav_service = NavigationService.get_instance()
     robohat = get_robohat_service()
 
-    if _emergency_active():
+    if runtime.command_gateway.is_emergency_active():
         return JSONResponse(status_code=403, content={"detail": "Emergency stop active"})
 
     # Collect GPS and IMU heading data while driving forward

@@ -1,5 +1,9 @@
 # LawnBerry Agent Instructions
 
+## Code Search
+
+Use the semble MCP tools (`mcp__semble__search`, `mcp__semble__find_related`) for file and code searches before falling back to `grep`/`find`. Pass the repo root path or a GitHub URL for external repos. Call `find_related` on a search result to discover similar code elsewhere in the codebase. Prefer semble for any question about how code works, where a symbol is defined, or which files reference a given name.
+
 ## Project Orientation
 
 - LawnBerry Pi is a Raspberry Pi autonomous mower system with a FastAPI backend, Vue 3 frontend, hardware drivers, systemd deployment units, and operations tooling.

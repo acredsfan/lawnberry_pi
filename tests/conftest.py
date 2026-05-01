@@ -107,18 +107,30 @@ def reset_control_safety_state():
     Emergency lockout is now intentionally latched until explicit clear, so tests must
     start from a known nominal state to avoid cross-test leakage.
     """
-    try:
-        from backend.src.api import rest as rest_api
+    def _do_reset():
+        # Reset via gateway if runtime is available (Phase D+)
+        try:
+            from backend.src.main import app
+            gw = getattr(getattr(app.state, "runtime", None), "command_gateway", None)
+            if gw is not None:
+                gw.reset_for_testing()
+                return
+        except Exception:
+            pass
+        # Fallback: direct dict reset (unit tests without lifespan)
+        try:
+            from backend.src.api import rest as rest_api
 
-        rest_api._safety_state["emergency_stop_active"] = False
-        rest_api._blade_state["active"] = False
-        rest_api._emergency_until = 0.0
-        rest_api._client_emergency.clear()
-        rest_api._legacy_motors_active = False
-    except Exception:
-        # Keep fixture fail-safe for import-order edge cases in isolated tests.
-        pass
-    
+            rest_api._safety_state["emergency_stop_active"] = False
+            rest_api._blade_state["active"] = False
+            rest_api._emergency_until = 0.0
+            rest_api._client_emergency.clear()
+            rest_api._legacy_motors_active = False
+        except Exception:
+            pass
+
+    _do_reset()
+
     # Reset traction control global singleton
     try:
         import backend.src.services.traction_control_service as tc_module
@@ -159,17 +171,8 @@ def reset_control_safety_state():
 
     yield
 
-    try:
-        from backend.src.api import rest as rest_api
+    _do_reset()
 
-        rest_api._safety_state["emergency_stop_active"] = False
-        rest_api._blade_state["active"] = False
-        rest_api._emergency_until = 0.0
-        rest_api._client_emergency.clear()
-        rest_api._legacy_motors_active = False
-    except Exception:
-        pass
-    
     # Reset traction control global singleton
     try:
         import backend.src.services.traction_control_service as tc_module
