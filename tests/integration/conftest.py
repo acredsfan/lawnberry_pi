@@ -42,10 +42,17 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture(autouse=True)
 def reset_legacy_motor_state():
     """Reset _legacy_motors_active between integration tests to prevent state bleed."""
-    import backend.src.api.rest as rest_module
-    rest_module._legacy_motors_active = False
+    try:
+        import backend.src.api.rest as rest_module
+        rest_module._legacy_motors_active = False
+    except Exception:
+        pass
     yield
-    rest_module._legacy_motors_active = False
+    try:
+        import backend.src.api.rest as rest_module
+        rest_module._legacy_motors_active = False
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)

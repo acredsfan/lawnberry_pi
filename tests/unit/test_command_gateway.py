@@ -161,3 +161,18 @@ async def test_dispatch_blade_disable_always_accepted():
         BladeCommand(active=False, source="manual", motors_active=True)
     )
     assert outcome.status in (CommandStatus.ACCEPTED, CommandStatus.QUEUED)
+
+
+# ---- Phase D: reset_for_testing ----
+
+@pytest.mark.asyncio
+async def test_reset_for_testing_clears_all_state():
+    from backend.src.control.commands import EmergencyTrigger
+
+    gw, safety, blade = _make_gw()
+    await gw.trigger_emergency(EmergencyTrigger(reason="x", source="operator"))
+    assert gw.is_emergency_active() is True
+    gw.reset_for_testing()
+    assert gw.is_emergency_active() is False
+    assert safety["emergency_stop_active"] is False
+    assert blade["active"] is False
