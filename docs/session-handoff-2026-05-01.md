@@ -1,10 +1,11 @@
-# Session Handoff — 2026-04-30
+# Session Handoff — 2026-05-01
 
 **Branch:** `main`
 **HEAD:** `72fae02` (Merge pull request #47 — feat(observability): baseline navigation tick runtime metric (§12))
 **Working tree:** clean (only `.claude/` untracked — local Claude Code state, not session debris)
 **CI on `main`:** all checks green
-**Tests:** `SIM_MODE=1 uv run pytest -q` → ≈619 passed, 47 skipped, 11 xfailed, 3 xpassed (count drifts ±2 across runs due to xpass/xfail variance; expect 0 failures)
+**Open PRs:** [#48](https://github.com/acredsfan/lawnberry_pi/pull/48) — §1 follow-up: `runtime.sensor_manager` live-property (Issue #44). Awaits review/merge. After it merges the baseline test count rises by 3 — see "Tests" line.
+**Tests:** `SIM_MODE=1 uv run pytest -q` → ≈619 passed, 47 skipped, 11 xfailed, 3 xpassed on `main` today; ≈622 passed once #48 merges (the 3 new property tests). ±2 drift across runs due to xpass/xfail variance; expect 0 failures.
 
 ---
 
@@ -12,9 +13,10 @@
 
 | PR | Scope | Plan doc |
 |----|-------|----------|
+| **#48** *(open, awaits merge)* | §1 follow-up: convert `RuntimeContext.sensor_manager` from a snapshot dataclass field to a `@property` that delegates to `AppState.get_instance().sensor_manager` (Issue #44). Drops the `sensor_manager=` kwarg from all 5 call sites. Strengthens `test_runtime_lifespan.py` from `hasattr` to identity assertion. Removes the "Known caveat" warning in `docs/runtime-context.md`. | `docs/superpowers/plans/2026-04-30-runtime-sensor-manager-property.md` |
 | **#47** | §12 (partial): baseline navigation tick wall-time metric — instruments `NavigationService.update_navigation_state` with `observability.metrics.record_timer("navigation_tick_duration", ...)`. Surfaces on `/metrics` as `lawnberry_timer_navigation_tick_duration_{count,avg_ms,min_ms,max_ms}`. | `docs/superpowers/plans/2026-04-29-navigation-tick-metric.md` |
 
-Also new in `main`: `docs/runtime-budget.md` — describes the metric, how to read it from `/metrics`, the procedure for capturing a hardware baseline, and the regression policy. **The first baseline-table row is still TBD pending an operator yard run.**
+Also new in `main` (from PR #47): `docs/runtime-budget.md` — describes the metric, how to read it from `/metrics`, the procedure for capturing a hardware baseline, and the regression policy. **The first baseline-table row is still TBD pending an operator yard run.**
 
 Earlier merges still relevant: PR #45 (§1 RuntimeContext), PR #46 (CI stabilization), prior session's §8 replay harness.
 
@@ -24,12 +26,12 @@ Earlier merges still relevant: PR #45 (§1 RuntimeContext), PR #46 (CI stabiliza
 
 The active backlog lives in `docs/major-architecture-and-code-improvement-plan.md`. Done so far:
 
-- §1 RuntimeContext ✅ (rest.py deferred to §4)
+- §1 RuntimeContext ✅ (rest.py still deferred to §4; sensor_manager live-property awaits PR #48 merge)
 - §8 Replay harness ✅
 - §10 Lint ratchet ✅
 - §12 *partial:* baseline metric instrumentation ✅. Two §12 sub-deliverables remain (see "Outstanding follow-ups").
 
-Phase 1 still open: §3, §4, §6, §11, plus the §12 remainders and the §1 follow-up below.
+Phase 1 still open: §3, §4, §6, §11, plus the §12 remainders.
 
 ---
 
@@ -37,8 +39,8 @@ Phase 1 still open: §3, §4, §6, §11, plus the §12 remainders and the §1 fo
 
 In recommended order (small wins first, then the substantial piece):
 
-### 1. §1 follow-up: `runtime.sensor_manager` live reference _(small, ~1 PR)_
-Currently `RuntimeContext.sensor_manager` is captured at lifespan-construction time as a snapshot, and is typically `None` because sensor_manager is lazy-initialized later. Documented landmine in `docs/runtime-context.md` and `backend/src/main.py:195` (TODO referencing issue #44). Fix: convert the field to a property that delegates to `AppState.sensor_manager` so the live value is always read. **Do not migrate any router to read `runtime.sensor_manager` until this lands.**
+### 1. Land PR #48, then unblock router migration to `runtime.sensor_manager` _(tiny)_
+PR #48 converts `RuntimeContext.sensor_manager` to a live property. After it merges, the "Do not migrate any router to read `runtime.sensor_manager`" caution is gone — the field becomes a safe live read. No code work required to "land" the PR beyond review/merge; once merged, this priority is closed and you proceed to #2. If review surfaces issues, the plan doc at `docs/superpowers/plans/2026-04-30-runtime-sensor-manager-property.md` is the reference.
 
 ### 2. Capture the first runtime-budget baseline row _(operator task — not coding)_
 `docs/runtime-budget.md` ships with an empty baseline table. Boot the mower in `SIM_MODE=0` with a typical mission for ≥5 minutes, then `curl -s http://localhost:8000/metrics | grep navigation_tick_duration` and append the row. This is the regression anchor for §3 (real pose pipeline) and onward.
@@ -84,8 +86,7 @@ Set `LAWNBERRY_CAPTURE_PATH=data/captures/yard-$(date +%Y%m%d).jsonl`, drive the
 
 ## Skills to use next session
 
-- `superpowers:writing-plans` for the §1 follow-up plan (small but plan it anyway).
-- `superpowers:test-driven-development` to execute the §1 follow-up.
 - `superpowers:brainstorming` before §4 motor gateway (design has tradeoffs worth exploring).
-- `superpowers:writing-plans` again for the §4 plan once the design is settled.
+- `superpowers:writing-plans` for the §4 plan once the design is settled.
+- `superpowers:test-driven-development` to execute it.
 - `superpowers:verification-before-completion` before opening any PR.
