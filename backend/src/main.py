@@ -183,16 +183,8 @@ async def lifespan(app: FastAPI):
     # Build the typed RuntimeContext once all services are up. This is
     # consumed by safety-critical routers via Depends(get_runtime).
     # See docs/superpowers/plans/2026-04-26-runtime-context.md.
-    #
-    # NOTE on sensor_manager: at this point AppState.sensor_manager is
-    # typically None — it's lazy-initialized later by the telemetry loop
-    # via websocket_hub._ensure_sensor_manager(). The runtime captures a
-    # snapshot of the current (likely None) value here. Routers that
-    # need live sensor access should NOT migrate to runtime.sensor_manager
-    # in §1. When telemetry/sensor work in Phase 2 lands, this field
-    # should become a property that delegates to AppState (live reference)
-    # so the snapshot trap is removed.
-    # TODO(v3): convert sensor_manager to a live-reference property - Issue #44
+    # `sensor_manager` is a property on RuntimeContext that reads AppState
+    # live (Issue #44 / docs/runtime-context.md), so it is not passed here.
     from backend.src.core import globals as global_state
     from backend.src.core.persistence import persistence
     from backend.src.core.runtime import RuntimeContext
@@ -202,7 +194,6 @@ async def lifespan(app: FastAPI):
         config_loader=loader,
         hardware_config=hardware_cfg,
         safety_limits=safety_limits,
-        sensor_manager=shared_state.sensor_manager,
         navigation=nav_service,
         mission_service=mission_service,
         safety_state=global_state._safety_state,

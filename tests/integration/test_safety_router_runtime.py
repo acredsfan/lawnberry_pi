@@ -15,7 +15,6 @@ def _make_runtime(**overrides: Any) -> RuntimeContext:
         "config_loader": MagicMock(name="config_loader"),
         "hardware_config": MagicMock(name="hardware_config"),
         "safety_limits": MagicMock(name="safety_limits"),
-        "sensor_manager": MagicMock(name="sensor_manager"),
         "navigation": MagicMock(name="navigation"),
         "mission_service": MagicMock(name="mission_service"),
         "safety_state": {"emergency_stop_active": True, "estop_reason": "test"},

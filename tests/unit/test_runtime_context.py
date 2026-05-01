@@ -17,7 +17,6 @@ def _make_runtime(**overrides: Any) -> RuntimeContext:
         "config_loader": MagicMock(name="config_loader"),
         "hardware_config": MagicMock(name="hardware_config"),
         "safety_limits": MagicMock(name="safety_limits"),
-        "sensor_manager": MagicMock(name="sensor_manager"),
         "navigation": MagicMock(name="navigation"),
         "mission_service": MagicMock(name="mission_service"),
         "safety_state": {"emergency_stop_active": False, "estop_reason": None},
@@ -37,7 +36,6 @@ def test_runtime_context_holds_all_required_fields():
         "config_loader",
         "hardware_config",
         "safety_limits",
-        "sensor_manager",
         "navigation",
         "mission_service",
         "safety_state",
@@ -53,6 +51,9 @@ def test_runtime_context_holds_all_required_fields():
     runtime = _make_runtime()
     for name in expected:
         assert hasattr(runtime, name)
+
+    # sensor_manager is exposed as a @property (Issue #44), not a dataclass field.
+    assert hasattr(runtime, "sensor_manager")
 
 
 def test_runtime_context_safety_state_is_a_live_reference():
@@ -111,3 +112,45 @@ def test_dependency_override_replaces_get_runtime():
             assert response.json() == {"nav_kind": "str"}
     finally:
         app.dependency_overrides.clear()
+
+
+def test_sensor_manager_is_a_property_not_a_dataclass_field():
+    """Issue #44: sensor_manager must be a @property delegating to AppState,
+    not a dataclass field captured as a snapshot at construction time."""
+    from dataclasses import fields
+
+    field_names = {f.name for f in fields(RuntimeContext)}
+    assert "sensor_manager" not in field_names, (
+        "sensor_manager is still a dataclass field; convert it to a @property"
+    )
+    assert isinstance(
+        getattr(RuntimeContext, "sensor_manager", None), property
+    ), "sensor_manager must be exposed as a @property on RuntimeContext"
+
+
+def test_runtime_context_constructor_rejects_sensor_manager_kwarg():
+    """Once converted to a property, the dataclass __init__ must not accept
+    sensor_manager= — silent acceptance would mask call-site bugs."""
+    with pytest.raises(TypeError):
+        _make_runtime(sensor_manager=MagicMock())  # type: ignore[arg-type]
+
+
+def test_runtime_sensor_manager_reads_live_from_appstate():
+    """runtime.sensor_manager must reflect the current AppState value, not a
+    snapshot taken at construction time. This is the entire point of #44."""
+    from backend.src.core.state_manager import AppState
+
+    app_state = AppState.get_instance()
+    original = app_state.sensor_manager
+    try:
+        sentinel_a = object()
+        app_state.sensor_manager = sentinel_a
+        runtime = _make_runtime()
+        assert runtime.sensor_manager is sentinel_a
+
+        # Mutate AppState after runtime construction; live reads must follow.
+        sentinel_b = object()
+        app_state.sensor_manager = sentinel_b
+        assert runtime.sensor_manager is sentinel_b
+    finally:
+        app_state.sensor_manager = original

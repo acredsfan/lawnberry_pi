@@ -14,7 +14,7 @@ architecture plan.
 | `config_loader`   | The `ConfigLoader` singleton              | `backend/src/core/config_loader.py`           |
 | `hardware_config` | Loaded `HardwareConfig`                   | YAML via `ConfigLoader().get()`               |
 | `safety_limits`   | Loaded `SafetyLimits`                     | YAML via `ConfigLoader().get()`               |
-| `sensor_manager`  | `SensorManager` snapshot                  | `AppState.sensor_manager` (see caveat below)  |
+| `sensor_manager`  | Live `SensorManager` (or `None`) via property | `AppState.sensor_manager` (read on every access) |
 | `navigation`      | `NavigationService` singleton             | `NavigationService.get_instance()`            |
 | `mission_service` | `MissionService` instance                 | `get_mission_service(...)`                    |
 | `safety_state`    | Live emergency-stop dict                  | `core/globals._safety_state` (same dict)      |
@@ -28,18 +28,14 @@ propagate to `core/globals._safety_state` and vice versa, because they're the
 same dict object. This lets new and legacy code paths coexist without
 diverging.
 
-### Known caveat: `sensor_manager` is a snapshot, not a live reference
+### `sensor_manager` is a property, not a stored field
 
-At lifespan-construction time, `AppState.sensor_manager` is typically `None`
-because the telemetry loop initializes it lazily on first use. The runtime
-captures whatever is there *at that moment*, so `runtime.sensor_manager` is
-likely `None` for the lifetime of the process even after `AppState`'s
-attribute is set. **Do not migrate routers to `runtime.sensor_manager` until
-this is fixed** — fall back to `AppState.get_instance().sensor_manager` for
-live reads, or use the existing telemetry/websocket access paths. See the
-TODO at `backend/src/main.py` near the runtime construction. Tracked as a
-follow-up; will be fixed when `sensor_manager` becomes a property that
-delegates to AppState.
+`AppState.sensor_manager` is `None` at lifespan startup and lazy-initialized
+later by the telemetry loop. To avoid freezing a `None` snapshot at
+RuntimeContext construction, `sensor_manager` is exposed as a `@property`
+that reads `AppState.get_instance().sensor_manager` on every access. Routers
+that need live sensor access can read `runtime.sensor_manager` directly.
+Resolved in Issue #44.
 
 ## Using it from a router
 
@@ -76,7 +72,6 @@ def test_example():
         config_loader=MagicMock(),
         hardware_config=MagicMock(),
         safety_limits=MagicMock(),
-        sensor_manager=MagicMock(),
         navigation=MagicMock(),
         mission_service=MagicMock(),
         safety_state={"emergency_stop_active": False, "estop_reason": None},

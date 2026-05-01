@@ -32,12 +32,16 @@ class RuntimeContext:
     Field types are intentionally `Any` for service slots to avoid import
     cycles with the service modules (NavigationService, MissionService, etc.).
     Tighten the types when we split those services into focused modules.
+
+    `sensor_manager` is exposed as a property (not a field) because
+    `AppState.sensor_manager` is lazy-initialized after lifespan startup
+    completes — capturing it at construction time would freeze a `None`
+    snapshot. See Issue #44 and docs/runtime-context.md.
     """
 
     config_loader: Any
     hardware_config: Any
     safety_limits: Any
-    sensor_manager: Any
     navigation: Any
     mission_service: Any
     safety_state: dict[str, Any]
@@ -45,6 +49,12 @@ class RuntimeContext:
     robohat: Any
     websocket_hub: Any
     persistence: Any
+
+    @property
+    def sensor_manager(self) -> Any:
+        from .state_manager import AppState
+
+        return AppState.get_instance().sensor_manager
 
 
 def get_runtime(request: Request) -> RuntimeContext:

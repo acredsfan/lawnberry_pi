@@ -27,7 +27,6 @@ def _override_runtime_for_control_routes():
         config_loader=MagicMock(),
         hardware_config=MagicMock(),
         safety_limits=MagicMock(),
-        sensor_manager=MagicMock(),
         navigation=MagicMock(),
         mission_service=MagicMock(),
         safety_state=core_globals._safety_state,
