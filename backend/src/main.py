@@ -215,11 +215,15 @@ async def lifespan(app: FastAPI):
         persistence=persistence,
         command_gateway=_command_gateway,
     )
+    _fw = None
+    if app.state.runtime.robohat:
+        _fw = getattr(app.state.runtime.robohat.status, "firmware_version", None)
     _log.info(
-        "RuntimeContext ready: navigation=%s mission=%s robohat=%s",
+        "RuntimeContext ready: navigation=%s mission=%s robohat=%s firmware=%s",
         type(app.state.runtime.navigation).__name__,
         type(app.state.runtime.mission_service).__name__,
         type(app.state.runtime.robohat).__name__ if app.state.runtime.robohat else "none",
+        _fw or "not_yet_received",
     )
     yield
     # Shutdown
