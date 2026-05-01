@@ -176,3 +176,35 @@ async def test_reset_for_testing_clears_all_state():
     assert gw.is_emergency_active() is False
     assert safety["emergency_stop_active"] is False
     assert blade["active"] is False
+
+
+# ---- Phase E: firmware preflight ----
+
+@pytest.mark.asyncio
+async def test_dispatch_drive_blocked_firmware_unknown():
+    from backend.src.control.commands import CommandStatus, DriveCommand
+
+    gw, _, _ = _make_gw()
+    # Simulate robohat connected but firmware_version is None
+    gw._robohat = MagicMock(
+        status=MagicMock(serial_connected=True, firmware_version=None)
+    )
+    outcome = await gw.dispatch_drive(
+        DriveCommand(left=0.3, right=0.3, source="manual", duration_ms=200)
+    )
+    assert outcome.status == CommandStatus.FIRMWARE_UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_dispatch_drive_blocked_firmware_incompatible():
+    from backend.src.control.commands import CommandStatus, DriveCommand
+
+    gw, _, _ = _make_gw()
+    gw._robohat = MagicMock(
+        status=MagicMock(serial_connected=True, firmware_version="0.0.1")
+    )
+    # 0.0.1 is not in SUPPORTED_FIRMWARE_VERSIONS
+    outcome = await gw.dispatch_drive(
+        DriveCommand(left=0.3, right=0.3, source="manual", duration_ms=200)
+    )
+    assert outcome.status == CommandStatus.FIRMWARE_INCOMPATIBLE

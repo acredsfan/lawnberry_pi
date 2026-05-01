@@ -246,3 +246,18 @@ async def test_control_navigation_endpoints_surface_runtime_state(monkeypatch):
         assert payload["ok"] is True
         assert payload["mode"] == "idle"
         assert payload["waypoints_total"] == 2
+
+
+def test_robohat_status_includes_firmware_version():
+    """firmware_version field must be present in /hardware/robohat response."""
+    import os
+
+    os.environ.setdefault("SIM_MODE", "1")
+    from fastapi.testclient import TestClient
+    from backend.src.main import app
+
+    with TestClient(app) as client:
+        r = client.get("/api/v2/hardware/robohat")
+    assert r.status_code == 200
+    data = r.json()
+    assert "firmware_version" in data, "firmware_version field missing from /hardware/robohat"

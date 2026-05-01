@@ -24,6 +24,8 @@ from .commands import (
 
 logger = logging.getLogger(__name__)
 
+SUPPORTED_FIRMWARE_VERSIONS: frozenset[str] = frozenset({"1.0.0", "1.1.0", "1.2.0", "1.2.1"})
+
 
 class MotorCommandGateway:
     def __init__(
@@ -148,6 +150,27 @@ class MotorCommandGateway:
         from datetime import datetime
 
         audit_id = str(_uuid.uuid4())
+
+        # Firmware preflight (Phase E)
+        _robohat = self._robohat
+        if _robohat and getattr(getattr(_robohat, "status", None), "serial_connected", False):
+            fw_ver = getattr(_robohat.status, "firmware_version", None)
+            if fw_ver is None:
+                return DriveOutcome(
+                    status=CommandStatus.FIRMWARE_UNKNOWN,
+                    audit_id=str(uuid.uuid4()),
+                    status_reason="firmware_version_not_received",
+                    active_interlocks=[],
+                    watchdog_latency_ms=None,
+                )
+            if fw_ver not in SUPPORTED_FIRMWARE_VERSIONS:
+                return DriveOutcome(
+                    status=CommandStatus.FIRMWARE_INCOMPATIBLE,
+                    audit_id=str(uuid.uuid4()),
+                    status_reason=f"firmware_version_unsupported:{fw_ver}",
+                    active_interlocks=[],
+                    watchdog_latency_ms=None,
+                )
 
         if self.is_emergency_active(request):
             return DriveOutcome(
@@ -295,6 +318,23 @@ class MotorCommandGateway:
         import uuid as _uuid
 
         audit_id = str(_uuid.uuid4())
+
+        # Firmware preflight (Phase E)
+        _robohat = self._robohat
+        if _robohat and getattr(getattr(_robohat, "status", None), "serial_connected", False):
+            fw_ver = getattr(_robohat.status, "firmware_version", None)
+            if fw_ver is None:
+                return BladeOutcome(
+                    status=CommandStatus.FIRMWARE_UNKNOWN,
+                    audit_id=str(_uuid.uuid4()),
+                    status_reason="firmware_version_not_received",
+                )
+            if fw_ver not in SUPPORTED_FIRMWARE_VERSIONS:
+                return BladeOutcome(
+                    status=CommandStatus.FIRMWARE_INCOMPATIBLE,
+                    audit_id=str(_uuid.uuid4()),
+                    status_reason=f"firmware_version_unsupported:{fw_ver}",
+                )
 
         if cmd.active:
             if cmd.motors_active:

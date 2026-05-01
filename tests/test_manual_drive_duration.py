@@ -61,7 +61,7 @@ async def test_manual_drive_respects_duration_ms():
         return True
 
     fake_robohat = SimpleNamespace(
-        status=SimpleNamespace(serial_connected=True, last_error=None),
+        status=SimpleNamespace(serial_connected=True, last_error=None, firmware_version="1.0.0"),
         send_motor_command=mock_send_motor_command,
     )
 
@@ -118,7 +118,7 @@ async def test_drive_timeout_task_cancellation_on_new_command():
         return True
 
     fake_robohat = SimpleNamespace(
-        status=SimpleNamespace(serial_connected=True, last_error=None),
+        status=SimpleNamespace(serial_connected=True, last_error=None, firmware_version="1.0.0"),
         send_motor_command=mock_send_motor_command,
     )
 
@@ -177,7 +177,7 @@ async def test_drive_duration_zero_clamps_to_500ms():
         return True
 
     fake_robohat = SimpleNamespace(
-        status=SimpleNamespace(serial_connected=True, last_error=None),
+        status=SimpleNamespace(serial_connected=True, last_error=None, firmware_version="1.0.0"),
         send_motor_command=mock_send_motor_command,
     )
 

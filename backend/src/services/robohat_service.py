@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 class RoboHATStatus:
     """RoboHAT firmware status"""
 
-    firmware_version: str = "unknown"
+    firmware_version: str | None = None
     uptime_seconds: int = 0
     watchdog_active: bool = False
     last_watchdog_echo: str | None = None
@@ -672,8 +672,17 @@ class RoboHATService:
                 pass
         return None
 
+    _VERSION_RE = re.compile(r"firmware[:\s]+v?(\d+\.\d+[\.\d]*)", re.I)
+
+    def _try_parse_firmware_version(self, line: str) -> None:
+        m = self._VERSION_RE.search(line)
+        if m:
+            self.status.firmware_version = m.group(1)
+            logger.info("RoboHAT firmware version: %s", self.status.firmware_version)
+
     def _process_line(self, line: str) -> None:
         """Parse human-readable firmware messages and update status fields."""
+        self._try_parse_firmware_version(line)
         if not line:
             return
 
@@ -765,8 +774,8 @@ class RoboHATService:
             return
 
         if line_lower.startswith("\u25b6") or line_lower.startswith("▶"):
-            # Firmware banner – useful for firmware version detection.
-            self.status.firmware_version = line.strip()
+            # Firmware banner – parse version string if present.
+            self._try_parse_firmware_version(line)
             return
 
         if line_lower.startswith("[rc]") or line_lower.startswith("[rc-"):
