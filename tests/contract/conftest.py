@@ -1,5 +1,7 @@
 import os
 import os.path
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,6 +24,50 @@ PLACEHOLDER_BASENAMES = {
     "test_waypoint_navigation.py",
     "test_navigation_modes.py",
 }
+
+
+@pytest.fixture(autouse=True)
+def _ensure_runtime_for_contract_tests():
+    """Inject a minimal RuntimeContext so contract tests can call gateway-wired endpoints.
+
+    Contract tests use ASGITransport without running lifespan, so app.state.runtime
+    is never built. This fixture provides a minimal runtime that covers emergency endpoint
+    needs (command_gateway). Tests that need specific state should use dependency_overrides.
+    """
+    from backend.src.control.command_gateway import MotorCommandGateway
+    from backend.src.core import globals as _g
+    from backend.src.core.runtime import RuntimeContext, get_runtime
+    from backend.src.main import app
+
+    _gw = MotorCommandGateway(
+        safety_state=_g._safety_state,
+        blade_state=_g._blade_state,
+        client_emergency=_g._client_emergency,
+        robohat=MagicMock(status=MagicMock(serial_connected=False)),
+        persistence=MagicMock(),
+    )
+    _runtime = RuntimeContext(
+        config_loader=MagicMock(name="config_loader"),
+        hardware_config=MagicMock(name="hardware_config"),
+        safety_limits=MagicMock(name="safety_limits"),
+        navigation=MagicMock(name="navigation"),
+        mission_service=MagicMock(name="mission_service"),
+        safety_state=_g._safety_state,
+        blade_state=_g._blade_state,
+        robohat=MagicMock(name="robohat"),
+        websocket_hub=MagicMock(name="websocket_hub"),
+        persistence=MagicMock(name="persistence"),
+        command_gateway=_gw,
+    )
+    # Only inject if the test hasn't already overridden get_runtime
+    if get_runtime not in app.dependency_overrides:
+        app.dependency_overrides[get_runtime] = lambda: _runtime
+        try:
+            yield
+        finally:
+            app.dependency_overrides.pop(get_runtime, None)
+    else:
+        yield
 
 
 def pytest_collection_modifyitems(config, items):

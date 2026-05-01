@@ -49,6 +49,7 @@ class RuntimeContext:
     robohat: Any
     websocket_hub: Any
     persistence: Any
+    command_gateway: Any = None  # MotorCommandGateway; Any to avoid import cycle
 
     @property
     def sensor_manager(self) -> Any:

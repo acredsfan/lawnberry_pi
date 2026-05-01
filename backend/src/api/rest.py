@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone, timedelta
@@ -13,6 +13,7 @@ import asyncio
 from email.utils import format_datetime, parsedate_to_datetime
 
 from ..core.persistence import persistence
+from ..core.runtime import RuntimeContext, get_runtime
 from ..core.globals import (
     _blade_state,
     _safety_state,
@@ -22,6 +23,7 @@ from ..core.globals import (
     _manual_control_sessions,
     _security_settings,
 )
+from ..core.http_util import client_key
 from .routers import telemetry
 from .routers.auth import _resolve_manual_session
 from ..services.websocket_hub import websocket_hub
@@ -594,49 +596,6 @@ def _emergency_active() -> bool:
         return False
 
 
-def _latch_emergency_state(
-    request: Request | None = None, reason: str = "Manual emergency stop"
-) -> None:
-    """Latch emergency state until explicitly cleared by /control/emergency_clear."""
-    _safety_state["emergency_stop_active"] = True
-    _safety_state["estop_reason"] = reason
-    _blade_state["active"] = False
-
-    global _legacy_motors_active
-    _legacy_motors_active = False
-
-    global _emergency_until
-    _emergency_until = time.time() + 0.2
-
-    try:
-        if request is not None:
-            _client_emergency[_client_key(request)] = time.time() + 0.3
-    except Exception:
-        pass
-
-
-def _client_key(request: Request) -> str:
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth:
-        return auth
-    cid = request.headers.get("X-Client-Id") or request.headers.get("x-client-id")
-    if cid:
-        return cid
-    # Fall back to a per-request ephemeral anon id to avoid cross-test leakage
-    try:
-        anon = getattr(request.state, "_anon_client_id", None)
-        if not anon:
-            anon = "anon-" + uuid.uuid4().hex
-            try:
-                request.state._anon_client_id = anon
-            except Exception:
-                pass
-        return anon
-    except Exception:
-        # As a last resort, return a fresh anon id each time
-        return "anon-" + uuid.uuid4().hex
-
-
 def _client_emergency_active(request: Request | None) -> bool:
     """Return True if this client's emergency flag is active; expire stale entries.
 
@@ -646,7 +605,7 @@ def _client_emergency_active(request: Request | None) -> bool:
     try:
         if request is None:
             return False
-        key = _client_key(request)
+        key = client_key(request)
         exp = _client_emergency.get(key)
         now = time.time()
         if exp is None:
@@ -785,7 +744,6 @@ class DriveContractIn(BaseModel):
 @router.post("/control/drive", response_model=ControlResponseV2, status_code=202)
 async def control_drive_v2(cmd: dict, request: Request):
     """Execute drive command with safety checks and audit logging"""
-    import uuid
     from ..services.robohat_service import get_robohat_service
     from ..services.motor_service import MotorService
 
@@ -1125,8 +1083,6 @@ async def control_blade_v2(cmd: dict, request: Request):
     The only gate here is the emergency-stop interlock.  UI login already
     authenticates the caller; no additional session/auth layer is required.
     """
-    import uuid
-
     audit_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc)
 
@@ -1190,10 +1146,13 @@ async def control_blade_v2(cmd: dict, request: Request):
 
 
 @router.post("/control/emergency", response_model=ControlResponseV2, status_code=202)
-async def control_emergency_v2(body: Optional[dict] = None, request: Request = None):
+async def control_emergency_v2(
+    body: Optional[dict] = None,
+    request: Request = None,
+    runtime: RuntimeContext = Depends(get_runtime),
+):
     """Trigger emergency stop with immediate hardware shutdown"""
-    import uuid
-    from ..services.robohat_service import get_robohat_service
+    from ..control.commands import EmergencyTrigger
 
     audit_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc)
@@ -1204,16 +1163,15 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
     if not is_legacy:
         session_context = _resolve_manual_session(payload.get("session_id"))
 
-    # Set emergency state (latched until explicit clear)
-    _latch_emergency_state(request, reason="Operator-triggered emergency stop")
+    outcome = await runtime.command_gateway.trigger_emergency(
+        EmergencyTrigger(
+            reason="Operator-triggered emergency stop",
+            source="operator",
+            request=request,
+        )
+    )
+    emergency_confirmed = outcome.hardware_confirmed
 
-    # Send emergency stop to RoboHAT
-    robohat = get_robohat_service()
-    emergency_confirmed = True
-    if robohat and robohat.status.serial_connected:
-        emergency_confirmed = await robohat.emergency_stop()
-
-    # If legacy payload with command field was sent, return 200 with integration-expected shape
     if is_legacy:
         legacy_payload = {
             "status": "EMERGENCY_STOP_ACTIVE",
@@ -1245,29 +1203,28 @@ async def control_emergency_v2(body: Optional[dict] = None, request: Request = N
         },
         timestamp=timestamp.isoformat(),
     )
-
-    # Audit the emergency stop
     audit_details: dict[str, Any] = {"response": response.model_dump(mode="json")}
     if session_context and session_context.get("principal"):
         audit_details["principal"] = session_context["principal"]
     persistence.add_audit_log("control.emergency.triggered", details=audit_details)
-
     return response
 
 
 @router.post("/control/emergency-stop")
-async def control_emergency_stop_alias(request: Request = None):
+async def control_emergency_stop_alias(
+    request: Request = None,
+    runtime: RuntimeContext = Depends(get_runtime),
+):
     """Integration-friendly alias that always returns 200 and a simple flag."""
-    # Trigger emergency state
-    _latch_emergency_state(request)
-    try:
-        from ..services.robohat_service import get_robohat_service
+    from ..control.commands import EmergencyTrigger
 
-        robohat = get_robohat_service()
-        if robohat and robohat.status.serial_connected:
-            await robohat.emergency_stop()
-    except Exception:
-        logger.debug("Emergency-stop alias hardware dispatch failed", exc_info=True)
+    await runtime.command_gateway.trigger_emergency(
+        EmergencyTrigger(
+            reason="Operator-triggered emergency stop",
+            source="operator",
+            request=request,
+        )
+    )
     payload = {
         "emergency_stop_active": True,
         "motors_stopped": True,
