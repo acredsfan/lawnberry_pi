@@ -569,7 +569,7 @@ class ControlCommandV2(BaseModel):
     blade_enabled: Optional[bool] = None
     max_speed_limit: float = Field(0.8, ge=0.0, le=1.0)
     timeout_ms: int = Field(1000, ge=100, le=10000)
-    confirmation_code: Optional[str] = None
+    confirmation_token: Optional[str] = None
 
 
 class ControlResponseV2(BaseModel):

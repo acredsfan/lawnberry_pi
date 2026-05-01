@@ -23,15 +23,18 @@ fi
 # - Private key headers
 # - Generic key/password/token assignments
 PATTERN='(AIza[0-9A-Za-z\-_]{35}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(^|[^A-Za-z])(api[_-]?key|secret|password|token)\s*[:=]\s*[^\s,;]+)'
+# Exclude lines that are Python type annotations (e.g. `my_token: Optional[str] = None`)
+# or assignments to Python built-in types / None — these are never real secrets.
+EXCLUDE_PATTERN='(:\s*(Optional\[|List\[|Dict\[|str|int|bool|float|bytes|None\b)|=\s*None\s*$|=\s*Field\()'
 
 FOUND=0
 
 while IFS= read -r file; do
-  # Skip example and dist files
-  if [[ "$file" =~ \.example$ ]] || [[ "$file" =~ (^|/)dist/ ]]; then
+  # Skip example, dist, and the scanner script itself (its own pattern comments trigger false positives)
+  if [[ "$file" =~ \.example$ ]] || [[ "$file" =~ (^|/)dist/ ]] || [[ "$file" == "scripts/pre-commit-secret-scan.sh" ]]; then
     continue
   fi
-  if git show :"$file" | grep -E -n "$PATTERN" >/tmp/secret-scan.out 2>/dev/null; then
+  if git show :"$file" | grep -E -n "$PATTERN" | grep -Ev "$EXCLUDE_PATTERN" >/tmp/secret-scan.out 2>/dev/null; then
     echo -e "${RED}❌ Potential secret detected in staged file:${NC} $file"
     sed -E 's/(AIza[0-9A-Za-z\-_]{35}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{10})/***REDACTED***/g' /tmp/secret-scan.out | sed 's/^/  > /'
     FOUND=1

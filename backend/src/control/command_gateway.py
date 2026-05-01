@@ -98,7 +98,12 @@ class MotorCommandGateway:
         self._safety_state["emergency_stop_active"] = True
         self._safety_state["estop_reason"] = cmd.reason
         self._blade_state["active"] = False
-        self._rest()._emergency_until = time.time() + 0.2
+        rest = self._rest()
+        rest._emergency_until = time.time() + 0.2
+        try:
+            rest._legacy_motors_active = False
+        except Exception:
+            pass
         try:
             if cmd.request is not None:
                 self._client_emergency[_client_key(cmd.request)] = time.time() + 0.3
