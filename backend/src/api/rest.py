@@ -23,6 +23,7 @@ from ..core.globals import (
     _manual_control_sessions,
     _security_settings,
 )
+from ..control.command_gateway import _client_key
 from .routers import telemetry
 from .routers.auth import _resolve_manual_session
 from ..services.websocket_hub import websocket_hub
@@ -568,7 +569,7 @@ class ControlCommandV2(BaseModel):
     blade_enabled: Optional[bool] = None
     max_speed_limit: float = Field(0.8, ge=0.0, le=1.0)
     timeout_ms: int = Field(1000, ge=100, le=10000)
-    confirmation_token: Optional[str] = None
+    confirmation_code: Optional[str] = None
 
 
 class ControlResponseV2(BaseModel):
@@ -593,28 +594,6 @@ def _emergency_active() -> bool:
         return time.time() < _emergency_until
     except Exception:
         return False
-
-
-def _client_key(request: Request) -> str:
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth:
-        return auth
-    cid = request.headers.get("X-Client-Id") or request.headers.get("x-client-id")
-    if cid:
-        return cid
-    # Fall back to a per-request ephemeral anon id to avoid cross-test leakage
-    try:
-        anon = getattr(request.state, "_anon_client_id", None)
-        if not anon:
-            anon = "anon-" + uuid.uuid4().hex
-            try:
-                request.state._anon_client_id = anon
-            except Exception:
-                pass
-        return anon
-    except Exception:
-        # As a last resort, return a fresh anon id each time
-        return "anon-" + uuid.uuid4().hex
 
 
 def _client_emergency_active(request: Request | None) -> bool:
@@ -765,7 +744,6 @@ class DriveContractIn(BaseModel):
 @router.post("/control/drive", response_model=ControlResponseV2, status_code=202)
 async def control_drive_v2(cmd: dict, request: Request):
     """Execute drive command with safety checks and audit logging"""
-    import uuid
     from ..services.robohat_service import get_robohat_service
     from ..services.motor_service import MotorService
 
@@ -1105,8 +1083,6 @@ async def control_blade_v2(cmd: dict, request: Request):
     The only gate here is the emergency-stop interlock.  UI login already
     authenticates the caller; no additional session/auth layer is required.
     """
-    import uuid
-
     audit_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc)
 
@@ -1176,7 +1152,6 @@ async def control_emergency_v2(
     runtime: RuntimeContext = Depends(get_runtime),
 ):
     """Trigger emergency stop with immediate hardware shutdown"""
-    import uuid
     from ..control.commands import EmergencyTrigger
 
     audit_id = str(uuid.uuid4())

@@ -24,9 +24,6 @@ logger = logging.getLogger(__name__)
 
 
 def _client_key(request: Any) -> str:
-    """Derive a stable per-client key from Authorization header or X-Client-Id."""
-    import uuid as _uuid
-
     auth = request.headers.get("authorization") or request.headers.get("Authorization")
     if auth:
         return auth
@@ -36,14 +33,14 @@ def _client_key(request: Any) -> str:
     try:
         anon = getattr(request.state, "_anon_client_id", None)
         if not anon:
-            anon = "anon-" + _uuid.uuid4().hex
+            anon = "anon-" + uuid.uuid4().hex
             try:
                 request.state._anon_client_id = anon
             except Exception:
                 pass
         return anon
     except Exception:
-        return "anon-" + _uuid.uuid4().hex
+        return "anon-" + uuid.uuid4().hex
 
 
 class MotorCommandGateway:
@@ -69,14 +66,12 @@ class MotorCommandGateway:
         self._drive_timeout_task: Any = None
 
     def _rest(self) -> Any:
-        """Lazy import of rest module to avoid circular imports at load time."""
         if self.__rest_module is not None:
             return self.__rest_module
         import backend.src.api.rest as _rest
         return _rest
 
     def is_emergency_active(self, request: Any = None) -> bool:
-        """Return True if any emergency condition blocks motion commands."""
         try:
             if bool(self._safety_state.get("emergency_stop_active", False)):
                 return True
@@ -99,7 +94,6 @@ class MotorCommandGateway:
         return False
 
     async def trigger_emergency(self, cmd: EmergencyTrigger) -> EmergencyOutcome:
-        """Latch emergency state and dispatch stop to hardware."""
         audit_id = str(uuid.uuid4())
         self._safety_state["emergency_stop_active"] = True
         self._safety_state["estop_reason"] = cmd.reason
@@ -126,7 +120,6 @@ class MotorCommandGateway:
         )
 
     async def clear_emergency(self, cmd: EmergencyClear) -> EmergencyOutcome:
-        """Clear latched emergency state after operator confirmation."""
         audit_id = str(uuid.uuid4())
         if not cmd.confirmed:
             return EmergencyOutcome(
@@ -168,7 +161,6 @@ class MotorCommandGateway:
         raise NotImplementedError("dispatch_blade implemented in Phase B")
 
     def reset_for_testing(self) -> None:
-        """Reset all emergency state. Called from conftest in Phase D."""
         self._safety_state["emergency_stop_active"] = False
         self._safety_state["estop_reason"] = None
         self._blade_state["active"] = False
