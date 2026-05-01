@@ -65,7 +65,6 @@ _settings_last_modified: datetime = datetime.now(timezone.utc)
 
 def _docs_root():
     from pathlib import Path
-    import os
 
     return Path(os.getcwd()) / "docs"
 
@@ -596,29 +595,6 @@ def _emergency_active() -> bool:
         return False
 
 
-def _client_emergency_active(request: Request | None) -> bool:
-    """Return True if this client's emergency flag is active; expire stale entries.
-
-    Uses a short TTL to prevent cross-test leakage while still blocking
-    immediately-following commands after an emergency trigger.
-    """
-    try:
-        if request is None:
-            return False
-        key = client_key(request)
-        exp = _client_emergency.get(key)
-        now = time.time()
-        if exp is None:
-            return False
-        if now < exp:
-            return True
-        # Expired: cleanup
-        _client_emergency.pop(key, None)
-        return False
-    except Exception:
-        return False
-
-
 def _enum_value(value: Any) -> Any:
     return value.value if hasattr(value, "value") else value
 
@@ -742,22 +718,35 @@ class DriveContractIn(BaseModel):
 
 
 @router.post("/control/drive", response_model=ControlResponseV2, status_code=202)
-async def control_drive_v2(cmd: dict, request: Request):
+async def control_drive_v2(cmd: dict, request: Request, runtime: RuntimeContext = Depends(get_runtime)):
     """Execute drive command with safety checks and audit logging"""
-    from ..services.robohat_service import get_robohat_service
-    from ..services.motor_service import MotorService
+    from ..control.commands import CommandStatus, DriveCommand
 
-    audit_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc)
 
-    # Legacy behavior for integration tests: when payload is legacy style (mode/command),
-    # return 200 with calculated motor speeds, unless emergency stop is active (then 403).
     is_legacy = "session_id" not in cmd
     if is_legacy:
-        # Emergency stop -> reject legacy drive commands with 403 (short-lived TTL)
-        if _client_emergency_active(request) or _emergency_active():
+        throttle = float(cmd.get("throttle", 0.0))
+        turn = float(cmd.get("turn", 0.0))
+        max_speed_limit = 1.0
+        left_speed = throttle + turn
+        right_speed = throttle - turn
+        left_speed = max(-max_speed_limit, min(max_speed_limit, left_speed))
+        right_speed = max(-max_speed_limit, min(max_speed_limit, right_speed))
+
+        drive_cmd = DriveCommand(
+            left=left_speed,
+            right=right_speed,
+            source="legacy",
+            duration_ms=0,
+            legacy=True,
+            max_speed_limit=max_speed_limit,
+        )
+        outcome = await runtime.command_gateway.dispatch_drive(drive_cmd, request=request)
+
+        if outcome.status == CommandStatus.BLOCKED:
             try:
-                cmd_details = cmd if isinstance(cmd, dict) else cmd.model_dump()
+                cmd_details = dict(cmd)
             except Exception:
                 cmd_details = {}
             persistence.add_audit_log(
@@ -768,18 +757,7 @@ async def control_drive_v2(cmd: dict, request: Request):
                 status_code=403,
                 content={"detail": "Emergency stop active - drive commands blocked"},
             )
-        # Compute motor speeds using arcade drive.
-        # RoboHAT service uses INVERTED arcade formula to compensate for MDDRC10 motor wiring.
-        # Convention: positive turn = turn right → right wheel speed < left wheel speed
-        throttle = float(cmd.get("throttle", 0.0))
-        turn = float(cmd.get("turn", 0.0))
-        left_speed = throttle + turn
-        right_speed = throttle - turn
-        # Clamp
-        max_speed_limit = 1.0
-        left_speed = max(-max_speed_limit, min(max_speed_limit, left_speed))
-        right_speed = max(-max_speed_limit, min(max_speed_limit, right_speed))
-        # Mark legacy motors active for interlock tests
+
         global _legacy_motors_active
         _legacy_motors_active = True
         body = {
@@ -791,15 +769,13 @@ async def control_drive_v2(cmd: dict, request: Request):
         return JSONResponse(status_code=200, content=body)
 
     # Contract-style payload
-    # Block when emergency stop is active
-    if _client_emergency_active(request) or _emergency_active():
+    if runtime.command_gateway.is_emergency_active(request):
         try:
-            cmd_details = cmd if isinstance(cmd, dict) else cmd.model_dump()
+            cmd_details = dict(cmd)
+            if "session_id" in cmd_details:
+                cmd_details["session_id"] = "***"
         except Exception:
             cmd_details = {}
-        if isinstance(cmd_details, dict) and "session_id" in cmd_details:
-            cmd_details = dict(cmd_details)
-            cmd_details["session_id"] = "***"
         persistence.add_audit_log(
             "control.drive.blocked",
             details={"reason": "emergency_stop_active", "command": cmd_details},
@@ -816,15 +792,12 @@ async def control_drive_v2(cmd: dict, request: Request):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, detail="duration_ms must be an integer"
         )
-
     if duration_ms < 0 or duration_ms > 5000:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail="duration_ms must be between 0 and 5000 milliseconds",
         )
 
-    # Extract vector and convert to differential speeds (arcade)
-    # Contract-style payload
     throttle = float(cmd.get("vector", {}).get("linear", 0.0))
     turn = float(cmd.get("vector", {}).get("angular", 0.0))
     try:
@@ -834,100 +807,48 @@ async def control_drive_v2(cmd: dict, request: Request):
             status.HTTP_422_UNPROCESSABLE_ENTITY, detail="max_speed_limit must be numeric"
         )
     speed_limit = max(0.0, min(1.0, speed_limit))
-    motion_requested = abs(throttle) > 1e-3 or abs(turn) > 1e-3
+    left_speed = throttle - turn
+    right_speed = throttle + turn
+    left_speed = max(-speed_limit, min(speed_limit, left_speed))
+    right_speed = max(-speed_limit, min(speed_limit, right_speed))
 
-    # Send command to RoboHAT
+    drive_cmd = DriveCommand(
+        left=left_speed,
+        right=right_speed,
+        source="manual",
+        duration_ms=duration_ms,
+        session_id=cmd.get("session_id"),
+        max_speed_limit=speed_limit,
+        legacy=False,
+    )
+    outcome = await runtime.command_gateway.dispatch_drive(drive_cmd, request=request)
 
-    robohat = get_robohat_service()
-    watchdog_start = datetime.now(timezone.utc)
-    telemetry_snapshot: dict[str, Any] | None = None
-    manual_active_interlocks: list[str] = []
-
-    if (
-        motion_requested
-        and robohat
-        and robohat.status.serial_connected
-        and os.getenv("SIM_MODE", "0") == "0"
-    ):
-        try:
-            from ..services.navigation_service import NavigationService
-
-            telemetry_snapshot = await websocket_hub.get_cached_telemetry()
-            # Use the shared app.state loader so hot-reloaded limits are always fresh.
-            # Fall back to constructing a loader (test environments that skip startup lifespan).
-            _loader = getattr(request.app.state, "config_loader", None)
-            if _loader is None:
-                from ..core.config_loader import ConfigLoader
-
-                _loader = ConfigLoader()
-            _, limits = _loader.get()
-            max_position_accuracy_m = NavigationService.get_instance().max_waypoint_accuracy_m
-
-            source = telemetry_snapshot.get("source")
-            if source != "hardware":
-                manual_active_interlocks.append("telemetry_unavailable")
-            else:
-                snapshot_timestamp = telemetry_snapshot.get("timestamp")
-                try:
-                    snapshot_at = datetime.fromisoformat(str(snapshot_timestamp))
-                    if snapshot_at.tzinfo is None:
-                        snapshot_at = snapshot_at.replace(tzinfo=timezone.utc)
-                    if (datetime.now(timezone.utc) - snapshot_at).total_seconds() > 2.5:
-                        manual_active_interlocks.append("telemetry_stale")
-                except Exception:
-                    manual_active_interlocks.append("telemetry_stale")
-
-                position = telemetry_snapshot.get("position") or {}
-                latitude = position.get("latitude")
-                longitude = position.get("longitude")
-                accuracy = position.get("accuracy")
-                if latitude is None or longitude is None or accuracy is None:
-                    manual_active_interlocks.append("location_awareness_unavailable")
-                else:
-                    try:
-                        if float(accuracy) > float(max_position_accuracy_m):
-                            manual_active_interlocks.append("location_awareness_unavailable")
-                    except (TypeError, ValueError):
-                        manual_active_interlocks.append("location_awareness_unavailable")
-
-                tof = telemetry_snapshot.get("tof") or {}
-                threshold_mm = float(limits.tof_obstacle_distance_meters) * 1000.0
-                for side in ("left", "right"):
-                    side_payload = tof.get(side) or {}
-                    distance_mm = side_payload.get("distance_mm")
-                    if distance_mm is None:
-                        continue
-                    try:
-                        if float(distance_mm) <= threshold_mm:
-                            manual_active_interlocks.append("obstacle_detected")
-                            break
-                    except (TypeError, ValueError):
-                        continue
-        except Exception as exc:
-            logger.warning("Manual drive telemetry safety validation failed: %s", exc)
-            manual_active_interlocks.append("telemetry_unavailable")
-
-    if manual_active_interlocks:
-        manual_active_interlocks = list(dict.fromkeys(manual_active_interlocks))
-
-        # Determine auto-expiry for transient vs persistent faults.
-        # Obstacle faults clear only when the obstacle actually moves — no time-based expiry.
-        # Telemetry/location faults are transient and auto-expire so the UI unlocks once sensors recover.
-        _transient_interlocks = {
-            "telemetry_unavailable",
-            "telemetry_stale",
-            "location_awareness_unavailable",
-        }
-        _has_only_transient = all(i in _transient_interlocks for i in manual_active_interlocks)
+    if outcome.status == CommandStatus.BLOCKED and outcome.active_interlocks:
+        _transient = {"telemetry_unavailable", "telemetry_stale", "location_awareness_unavailable"}
+        has_only_transient = all(i in _transient for i in outcome.active_interlocks)
         lockout_until_str: str | None = None
-        if _has_only_transient:
+        if has_only_transient:
             lockout_until_str = (datetime.now(timezone.utc) + timedelta(seconds=3)).isoformat()
 
+        try:
+            details_cmd = dict(cmd)
+            if "session_id" in details_cmd:
+                details_cmd["session_id"] = "***"
+        except Exception:
+            details_cmd = {}
+        persistence.add_audit_log(
+            "control.drive.blocked",
+            details={
+                "reason": outcome.status_reason,
+                "active_interlocks": outcome.active_interlocks,
+                "command": details_cmd,
+            },
+        )
         blocked_response = ControlResponseV2(
             accepted=False,
-            audit_id=audit_id,
+            audit_id=outcome.audit_id,
             result="blocked",
-            status_reason=_manual_drive_status_reason(manual_active_interlocks),
+            status_reason=outcome.status_reason,
             safety_checks=[
                 "emergency_stop_check",
                 "command_validation",
@@ -935,123 +856,47 @@ async def control_drive_v2(cmd: dict, request: Request):
                 "location_awareness_check",
                 "obstacle_clearance_check",
             ],
-            active_interlocks=manual_active_interlocks,
+            active_interlocks=outcome.active_interlocks,
             remediation={
                 "docs_link": "/docs/OPERATIONS.md#manual-drive-safety-gating",
                 "message": "Clear nearby obstacles and restore fresh hardware telemetry before retrying manual movement.",
             },
-            telemetry_snapshot=telemetry_snapshot,
+            telemetry_snapshot=None,
             until=lockout_until_str,
             timestamp=timestamp.isoformat(),
         )
-        try:
-            details_cmd = cmd if isinstance(cmd, dict) else cmd.model_dump()
-        except Exception:
-            details_cmd = {}
-        if isinstance(details_cmd, dict) and "session_id" in details_cmd:
-            details_cmd = dict(details_cmd)
-            details_cmd["session_id"] = "***"
-        persistence.add_audit_log(
-            "control.drive.blocked",
-            details={
-                "reason": blocked_response.status_reason,
-                "active_interlocks": manual_active_interlocks,
-                "command": details_cmd,
-            },
-        )
         return JSONResponse(status_code=423, content=blocked_response.model_dump(mode="json"))
 
-    if robohat and robohat.status.serial_connected:
-        # Calculate differential speeds.
-        # RoboHAT service uses INVERTED arcade formula (right_norm - left_norm)
-        # to compensate for MDDRC10 physical wiring. Use matching formula here.
-        # Convention: positive turn = turn right → right wheel speed < left wheel speed
-        left_speed = throttle - turn
-        right_speed = throttle + turn
+    accepted = outcome.status in (CommandStatus.ACCEPTED, CommandStatus.QUEUED)
+    result = outcome.status.value if accepted else "rejected"
+    response = ControlResponseV2(
+        accepted=accepted,
+        audit_id=outcome.audit_id,
+        result=result,
+        status_reason=outcome.status_reason,
+        watchdog_latency_ms=outcome.watchdog_latency_ms,
+        safety_checks=["emergency_stop_check", "command_validation"],
+        active_interlocks=[],
+        telemetry_snapshot={
+            "component_id": "drive_left",
+            "status": "healthy" if accepted else "warning",
+            "latency_ms": outcome.watchdog_latency_ms or 0.0,
+            "speed_limit": speed_limit,
+        },
+        timestamp=timestamp.isoformat(),
+    )
 
-        # Clamp to max speed limit
-        left_speed = max(-speed_limit, min(speed_limit, left_speed))
-        right_speed = max(-speed_limit, min(speed_limit, right_speed))
-
-        # Send to RoboHAT
-        success = await robohat.send_motor_command(left_speed, right_speed)
-
-        # Auto-stop enforcement: if client goes silent, kill motors after duration_ms (Issue #2)
-        if success:
-            global _drive_timeout_task
-            if _drive_timeout_task and not _drive_timeout_task.done():
-                _drive_timeout_task.cancel()
-            
-            # duration_ms == 0 means "use client-side tick" — clamp to hard ceiling anyway
-            auto_stop_ms = duration_ms if duration_ms > 0 else 500
-            
-            async def _auto_stop():
-                try:
-                    await asyncio.sleep(auto_stop_ms / 1000.0)
-                    await robohat.send_motor_command(0.0, 0.0)
-                    logger.warning("Manual drive duration expired (%d ms); motors stopped", auto_stop_ms)
-                except asyncio.CancelledError:
-                    pass
-            
-            _drive_timeout_task = asyncio.create_task(_auto_stop())
-
-        watchdog_end = datetime.now(timezone.utc)
-        watchdog_latency = (watchdog_end - watchdog_start).total_seconds() * 1000
-
-        response = ControlResponseV2(
-            accepted=success,
-            audit_id=audit_id,
-            result="accepted" if success else "rejected",
-            status_reason=None
-            if success
-            else (robohat.status.last_error or "robohat_communication_failed"),
-            watchdog_echo=robohat.status.last_watchdog_echo,
-            watchdog_latency_ms=watchdog_latency,
-            safety_checks=["emergency_stop_check", "command_validation"],
-            active_interlocks=[],
-            telemetry_snapshot={
-                "component_id": "drive_left",
-                "status": "healthy" if success else "warning",
-                "latency_ms": round(watchdog_latency, 2),
-                "speed_limit": speed_limit,
-            },
-            timestamp=timestamp.isoformat(),
-        )
-    else:
-        # Contract allows "queued" acknowledgement even if hardware not connected
-        response = ControlResponseV2(
-            accepted=True,
-            audit_id=audit_id,
-            result="queued",
-            status_reason="nominal",
-            safety_checks=["emergency_stop_check"],
-            active_interlocks=[],
-            remediation=None,
-            telemetry_snapshot={
-                "component_id": "drive_left",
-                "status": "warning",
-                "latency_ms": 0.0,
-                "speed_limit": speed_limit,
-            },
-            timestamp=timestamp.isoformat(),
-        )
-
-    # Audit the command — sampled at 1 Hz for accepted drive commands to avoid
-    # blocking the event loop with a synchronous SQLite write on every 120 ms
-    # joystick pulse.  Blocked / fault audit entries are always written (see above).
     global _last_drive_audit_at
     try:
-        details_cmd = cmd if isinstance(cmd, dict) else cmd.model_dump()
-    except Exception:
-        details_cmd = {}
-    if isinstance(details_cmd, dict):
-        details_cmd = dict(details_cmd)
+        details_cmd = dict(cmd)
         if "session_id" in details_cmd:
             details_cmd["session_id"] = "***"
-        principal = session_context.get("principal")
-        if principal and "principal" not in details_cmd:
+        principal = session_context.get("principal") if session_context else None
+        if principal:
             details_cmd["principal"] = principal
         details_cmd["max_speed_limit"] = speed_limit
+    except Exception:
+        details_cmd = {}
     _now = time.monotonic()
     if _now - _last_drive_audit_at >= _DRIVE_AUDIT_SAMPLE_INTERVAL_S:
         _last_drive_audit_at = _now
@@ -1077,16 +922,13 @@ class BladeContractIn(BaseModel):
 
 
 @router.post("/control/blade")
-async def control_blade_v2(cmd: dict, request: Request):
-    """Execute blade command with safety interlocks and audit logging.
+async def control_blade_v2(cmd: dict, request: Request, runtime: RuntimeContext = Depends(get_runtime)):
+    """Execute blade command with safety interlocks and audit logging."""
+    from ..control.commands import BladeCommand, CommandStatus
 
-    The only gate here is the emergency-stop interlock.  UI login already
-    authenticates the caller; no additional session/auth layer is required.
-    """
     audit_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc)
 
-    # Resolve desired state from either {"active": bool} or {"action": str}
     desired: bool | None = None
     if "active" in cmd:
         desired = bool(cmd["active"])
@@ -1102,47 +944,38 @@ async def control_blade_v2(cmd: dict, request: Request):
         desired = False
 
     if desired is None:
-        body = {
-            "detail": "Invalid blade command — provide 'active' (bool) or 'action' (enable/disable)"
-        }
-        return JSONResponse(status_code=422, content=body)
-
-    if desired is True and _legacy_motors_active:
-        body = {
-            "detail": "safety_interlock: motors_active — blade enable blocked while motors running"
-        }
-        persistence.add_audit_log(
-            "control.blade.blocked", details={"command": cmd, "response": body}
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "Invalid blade command — provide 'active' (bool) or 'action' (enable/disable)"},
         )
-        return JSONResponse(status_code=403, content=body)
 
-    if desired is True and (_emergency_active() or _client_emergency_active(request)):
+    blade_cmd = BladeCommand(
+        active=desired,
+        source="manual",
+        motors_active=_legacy_motors_active,
+    )
+    outcome = await runtime.command_gateway.dispatch_blade(blade_cmd, request=request)
+
+    if outcome.status == CommandStatus.BLOCKED:
+        if "motors_active" in (outcome.status_reason or ""):
+            body = {"detail": "safety_interlock: motors_active — blade enable blocked while motors running"}
+            persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
+            return JSONResponse(status_code=403, content=body)
         body = {"detail": "safety_interlock: emergency_stop_active — blade commands blocked"}
-        persistence.add_audit_log(
-            "control.blade.blocked", details={"command": cmd, "response": body}
-        )
+        persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
         return JSONResponse(status_code=409, content=body)
 
-    try:
-        from ..services.blade_service import get_blade_service
-
-        bs = get_blade_service()
-        await bs.initialize()
-        ok = await bs.set_active(desired)
-        body = {
-            "accepted": ok,
-            "audit_id": audit_id,
-            "result": "accepted" if ok else "rejected",
-            "blade_status": "ENABLED" if desired else "DISABLED",
-            "timestamp": timestamp.isoformat(),
-        }
-        persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
-        return JSONResponse(status_code=200 if ok else 409, content=body)
-    except Exception as exc:
-        logger.exception("Blade command failed: %s", exc)
-        body = {"detail": f"Blade command error: {exc}"}
-        persistence.add_audit_log("control.blade.error", details={"command": cmd, "response": body})
-        return JSONResponse(status_code=500, content=body)
+    ok = outcome.status in (CommandStatus.ACCEPTED, CommandStatus.QUEUED)
+    body = {
+        "accepted": ok,
+        "audit_id": audit_id,
+        "result": "accepted" if ok else "rejected",
+        "blade_active": desired if ok else _blade_state.get("active", False),
+        "blade_status": "ENABLED" if (ok and desired) else "DISABLED",
+        "timestamp": timestamp.isoformat(),
+    }
+    persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})
+    return JSONResponse(status_code=200, content=body)
 
 
 @router.post("/control/emergency", response_model=ControlResponseV2, status_code=202)

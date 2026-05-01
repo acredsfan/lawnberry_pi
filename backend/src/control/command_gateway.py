@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from datetime import UTC
 from typing import Any
 
 from ..core.http_util import client_key
@@ -141,10 +142,192 @@ class MotorCommandGateway:
         )
 
     async def dispatch_drive(self, cmd: DriveCommand, request: Any = None) -> DriveOutcome:
-        raise NotImplementedError("dispatch_drive implemented in Phase B")
+        import asyncio
+        import os
+        import uuid as _uuid
+        from datetime import datetime
+
+        audit_id = str(_uuid.uuid4())
+
+        if self.is_emergency_active(request):
+            return DriveOutcome(
+                status=CommandStatus.BLOCKED,
+                audit_id=audit_id,
+                status_reason="emergency_stop_active",
+                active_interlocks=[],
+                watchdog_latency_ms=None,
+            )
+
+        manual_active_interlocks: list[str] = []
+        if (
+            not cmd.legacy
+            and cmd.source == "manual"
+            and os.getenv("SIM_MODE", "0") == "0"
+            and self._robohat
+            and getattr(getattr(self._robohat, "status", None), "serial_connected", False)
+        ):
+            manual_active_interlocks = await self._check_manual_drive_interlocks(cmd)
+
+        if manual_active_interlocks:
+            manual_active_interlocks = list(dict.fromkeys(manual_active_interlocks))
+            return DriveOutcome(
+                status=CommandStatus.BLOCKED,
+                audit_id=audit_id,
+                status_reason=self._drive_interlock_reason(manual_active_interlocks),
+                active_interlocks=manual_active_interlocks,
+                watchdog_latency_ms=None,
+            )
+
+        robohat = self._robohat
+        if robohat and getattr(getattr(robohat, "status", None), "serial_connected", False):
+            watchdog_start = datetime.now(UTC)
+            success = await robohat.send_motor_command(cmd.left, cmd.right)
+            watchdog_latency = (datetime.now(UTC) - watchdog_start).total_seconds() * 1000
+
+            if success:
+                auto_stop_ms = cmd.duration_ms if cmd.duration_ms > 0 else 500
+                if self._drive_timeout_task and not self._drive_timeout_task.done():
+                    self._drive_timeout_task.cancel()
+
+                async def _auto_stop() -> None:
+                    try:
+                        await asyncio.sleep(auto_stop_ms / 1000.0)
+                        await robohat.send_motor_command(0.0, 0.0)
+                        logger.warning(
+                            "Manual drive duration expired (%d ms); motors stopped", auto_stop_ms
+                        )
+                    except asyncio.CancelledError:
+                        pass
+
+                self._drive_timeout_task = asyncio.create_task(_auto_stop())
+
+            return DriveOutcome(
+                status=CommandStatus.ACCEPTED if success else CommandStatus.ACK_FAILED,
+                audit_id=audit_id,
+                status_reason=None
+                if success
+                else (getattr(getattr(robohat, "status", None), "last_error", None) or "robohat_communication_failed"),
+                active_interlocks=[],
+                watchdog_latency_ms=round(watchdog_latency, 2),
+            )
+
+        return DriveOutcome(
+            status=CommandStatus.QUEUED,
+            audit_id=audit_id,
+            status_reason="nominal",
+            active_interlocks=[],
+            watchdog_latency_ms=0.0,
+        )
+
+    async def _check_manual_drive_interlocks(self, cmd: DriveCommand) -> list[str]:
+        from datetime import datetime
+
+        interlocks: list[str] = []
+        try:
+            telemetry = await self._websocket_hub.get_cached_telemetry()
+            source = telemetry.get("source")
+            if source != "hardware":
+                interlocks.append("telemetry_unavailable")
+                return interlocks
+
+            snapshot_timestamp = telemetry.get("timestamp")
+            try:
+                snapshot_at = datetime.fromisoformat(str(snapshot_timestamp))
+                if snapshot_at.tzinfo is None:
+                    snapshot_at = snapshot_at.replace(tzinfo=UTC)
+                if (datetime.now(UTC) - snapshot_at).total_seconds() > 2.5:
+                    interlocks.append("telemetry_stale")
+            except Exception:
+                interlocks.append("telemetry_stale")
+
+            position = telemetry.get("position") or {}
+            lat = position.get("latitude")
+            lon = position.get("longitude")
+            acc = position.get("accuracy")
+            if lat is None or lon is None or acc is None:
+                interlocks.append("location_awareness_unavailable")
+            else:
+                try:
+                    from ..services.navigation_service import NavigationService
+
+                    max_acc = NavigationService.get_instance().max_waypoint_accuracy_m
+                    if float(acc) > float(max_acc):
+                        interlocks.append("location_awareness_unavailable")
+                except Exception:
+                    interlocks.append("location_awareness_unavailable")
+
+            if not interlocks or "location_awareness_unavailable" not in interlocks:
+                loader = self._config_loader
+                if loader is None:
+                    from ..core.config_loader import ConfigLoader
+
+                    loader = ConfigLoader()
+                _, limits = loader.get()
+                tof = telemetry.get("tof") or {}
+                threshold_mm = float(limits.tof_obstacle_distance_meters) * 1000.0
+                for side in ("left", "right"):
+                    side_payload = tof.get(side) or {}
+                    distance_mm = side_payload.get("distance_mm")
+                    if distance_mm is None:
+                        continue
+                    try:
+                        if float(distance_mm) <= threshold_mm:
+                            interlocks.append("obstacle_detected")
+                            break
+                    except (TypeError, ValueError):
+                        continue
+        except Exception as exc:
+            logger.warning("Manual drive telemetry safety validation failed: %s", exc)
+            interlocks.append("telemetry_unavailable")
+        return interlocks
+
+    @staticmethod
+    def _drive_interlock_reason(interlocks: list[str]) -> str:
+        if "obstacle_detected" in interlocks:
+            return "OBSTACLE_DETECTED"
+        if "location_awareness_unavailable" in interlocks:
+            return "LOCATION_AWARENESS_UNAVAILABLE"
+        if "telemetry_unavailable" in interlocks or "telemetry_stale" in interlocks:
+            return "TELEMETRY_UNAVAILABLE"
+        return "SAFETY_LOCKOUT"
 
     async def dispatch_blade(self, cmd: BladeCommand, request: Any = None) -> BladeOutcome:
-        raise NotImplementedError("dispatch_blade implemented in Phase B")
+        import uuid as _uuid
+
+        audit_id = str(_uuid.uuid4())
+
+        if cmd.active:
+            if cmd.motors_active:
+                return BladeOutcome(
+                    status=CommandStatus.BLOCKED,
+                    audit_id=audit_id,
+                    status_reason="motors_active",
+                )
+            if self.is_emergency_active(request):
+                return BladeOutcome(
+                    status=CommandStatus.BLOCKED,
+                    audit_id=audit_id,
+                    status_reason="emergency_stop_active",
+                )
+
+        try:
+            from ..services.blade_service import get_blade_service
+
+            bs = get_blade_service()
+            await bs.initialize()
+            ok = await bs.set_active(cmd.active)
+            return BladeOutcome(
+                status=CommandStatus.ACCEPTED if ok else CommandStatus.ACK_FAILED,
+                audit_id=audit_id,
+                status_reason=None if ok else "blade_service_rejected",
+            )
+        except Exception as exc:
+            logger.warning("Blade service dispatch failed: %s", exc)
+            return BladeOutcome(
+                status=CommandStatus.ACK_FAILED,
+                audit_id=audit_id,
+                status_reason="blade_service_unavailable",
+            )
 
     def reset_for_testing(self) -> None:
         self._safety_state["emergency_stop_active"] = False

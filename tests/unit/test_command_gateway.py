@@ -85,3 +85,79 @@ async def test_clear_when_not_active_is_idempotent():
     outcome = await gw.clear_emergency(EmergencyClear(confirmed=True))
     assert outcome.status == CommandStatus.ACCEPTED
     assert outcome.idempotent is True
+
+
+# ---- Phase B: drive outcomes ----
+
+@pytest.mark.asyncio
+async def test_dispatch_drive_blocked_when_emergency_active():
+    from backend.src.control.commands import CommandStatus, DriveCommand, EmergencyTrigger
+
+    gw, _, _ = _make_gw()
+    await gw.trigger_emergency(EmergencyTrigger(reason="x", source="operator"))
+    outcome = await gw.dispatch_drive(
+        DriveCommand(left=0.5, right=0.5, source="manual", duration_ms=200)
+    )
+    assert outcome.status == CommandStatus.BLOCKED
+    assert "emergency" in (outcome.status_reason or "").lower() or outcome.status_reason is not None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_drive_queued_when_no_hardware():
+    from backend.src.control.commands import CommandStatus, DriveCommand
+
+    gw, _, _ = _make_gw()  # robohat.status.serial_connected = False
+    outcome = await gw.dispatch_drive(
+        DriveCommand(left=0.3, right=0.3, source="manual", duration_ms=200)
+    )
+    assert outcome.status == CommandStatus.QUEUED
+
+
+@pytest.mark.asyncio
+async def test_dispatch_drive_legacy_queued_when_no_hardware():
+    from backend.src.control.commands import CommandStatus, DriveCommand
+
+    gw, _, _ = _make_gw()
+    outcome = await gw.dispatch_drive(
+        DriveCommand(left=0.95, right=0.55, source="legacy", duration_ms=0, legacy=True)
+    )
+    assert outcome.status in (CommandStatus.QUEUED, CommandStatus.ACCEPTED)
+
+
+# ---- Phase B: blade outcomes ----
+
+@pytest.mark.asyncio
+async def test_dispatch_blade_blocked_while_emergency_active():
+    from backend.src.control.commands import (
+        BladeCommand, CommandStatus, EmergencyTrigger,
+    )
+
+    gw, _, _ = _make_gw()
+    await gw.trigger_emergency(EmergencyTrigger(reason="x", source="operator"))
+    outcome = await gw.dispatch_blade(
+        BladeCommand(active=True, source="manual")
+    )
+    assert outcome.status == CommandStatus.BLOCKED
+
+
+@pytest.mark.asyncio
+async def test_dispatch_blade_blocked_while_motors_active():
+    from backend.src.control.commands import BladeCommand, CommandStatus
+
+    gw, _, _ = _make_gw()
+    outcome = await gw.dispatch_blade(
+        BladeCommand(active=True, source="manual", motors_active=True)
+    )
+    assert outcome.status == CommandStatus.BLOCKED
+    assert "motors_active" in (outcome.status_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_blade_disable_always_accepted():
+    from backend.src.control.commands import BladeCommand, CommandStatus
+
+    gw, _, _ = _make_gw()
+    outcome = await gw.dispatch_blade(
+        BladeCommand(active=False, source="manual", motors_active=True)
+    )
+    assert outcome.status in (CommandStatus.ACCEPTED, CommandStatus.QUEUED)
