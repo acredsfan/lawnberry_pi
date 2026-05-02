@@ -242,6 +242,10 @@ class NavigationService:
         self._load_alignment_from_disk()
         # Optional telemetry capture. Set via attach_capture(); default is no-op.
         self._capture = None
+        # Localization facade: set by attach_localization() during lifespan startup.
+        # When not None and USE_LEGACY_NAVIGATION is not set, position/heading
+        # state is owned by LocalizationService and mirrored here.
+        self._localization: Any | None = None
 
     _instance: NavigationService | None = None
 
@@ -257,6 +261,22 @@ class NavigationService:
         See backend/src/diagnostics/capture.py. Pass None to detach.
         """
         self._capture = capture
+
+    def attach_localization(self, localization_service: Any) -> None:
+        """Attach a LocalizationService for facade delegation.
+
+        When attached and USE_LEGACY_NAVIGATION is not set, position/heading
+        updates are delegated to the LocalizationService and its results are
+        mirrored into NavigationState.
+        """
+        self._localization = localization_service
+
+    def _use_localization(self) -> bool:
+        """Return True when delegation to LocalizationService is active."""
+        return (
+            self._localization is not None
+            and os.getenv("USE_LEGACY_NAVIGATION", "0") != "1"
+        )
 
     async def initialize(self) -> bool:
         """Initialize navigation service"""
@@ -289,15 +309,20 @@ class NavigationService:
         # Reset heading alignment for each mission so the bootstrap drive gets a
         # clean GPS COG snap.  IMU Game Rotation Vector yaw is relative to boot
         # orientation and must be re-calibrated before the first tank turn.
-        self._session_heading_alignment = 0.0
-        self._heading_alignment_sample_count = 0
-        self._gps_cog_history.clear()
-        self._require_gps_heading_alignment = True
-        self._last_gps_track_position = None
-        self._last_gps_track_time = None
-        self.navigation_state.heading = None
-        self.navigation_state.gps_cog = None
-        self._save_alignment_to_disk("mission_start_reset")
+        if self._use_localization():
+            self._localization.reset_for_mission()
+            self.navigation_state.heading = None
+            self.navigation_state.gps_cog = None
+        else:
+            self._session_heading_alignment = 0.0
+            self._heading_alignment_sample_count = 0
+            self._gps_cog_history.clear()
+            self._require_gps_heading_alignment = True
+            self._last_gps_track_position = None
+            self._last_gps_track_time = None
+            self.navigation_state.heading = None
+            self.navigation_state.gps_cog = None
+            self._save_alignment_to_disk("mission_start_reset")
         await self._run_bootstrap_and_check_geofence()
 
         # Load yard boundary from map zones so geofence enforcement is active for this mission
@@ -917,6 +942,8 @@ class NavigationService:
         """
         logger.info("Heading bootstrap: driving forward to acquire GPS COG snap...")
         self._bootstrap_start_time = time.monotonic()
+        if self._use_localization():
+            self._localization.begin_bootstrap()
         # Extended from 3s to give more time for GPS COG stability.
         deadline = time.monotonic() + 5.0
         try:
@@ -946,10 +973,16 @@ class NavigationService:
                 except Exception as e:
                     logger.debug(f"Bootstrap telemetry update failed: {e}")
 
-                if self._heading_alignment_sample_count >= 1:
+                if self._use_localization():
+                    done = self._localization.alignment_sample_count >= 1
+                    align_val = self._localization._session_heading_alignment
+                else:
+                    done = self._heading_alignment_sample_count >= 1
+                    align_val = self._session_heading_alignment
+                if done:
                     logger.info(
                         "Heading bootstrap complete: session_align=%.1f°",
-                        self._session_heading_alignment,
+                        align_val,
                     )
                     break
             else:
@@ -959,6 +992,8 @@ class NavigationService:
                 )
         finally:
             self._bootstrap_start_time = None
+            if self._use_localization():
+                self._localization.end_bootstrap()
             await self._deliver_stop_command(reason="heading bootstrap")
             await asyncio.sleep(0.3)
 
@@ -1013,6 +1048,8 @@ class NavigationService:
 
     def _gps_fix_is_fresh(self) -> bool:
         """Return True when the latest GPS fix is recent enough for autonomy decisions."""
+        if self._use_localization():
+            return self._localization.gps_fix_is_fresh()
         last_fix = self.navigation_state.last_gps_fix
         if last_fix is None:
             return False
@@ -1020,6 +1057,8 @@ class NavigationService:
 
     def _position_is_verified_for_waypoint(self) -> bool:
         """Return True when position data is trustworthy enough to advance a waypoint."""
+        if self._use_localization():
+            return self._localization.position_is_verified()
         position = self.navigation_state.current_position
         if position is None:
             return False
@@ -1212,140 +1251,154 @@ class NavigationService:
     async def _update_navigation_state_impl(self, sensor_data: SensorData) -> NavigationState:
         """Original update_navigation_state body — measured by the public wrapper."""
 
-        # Update position from GPS or dead reckoning
-        current_position = await self._update_position(sensor_data)
-        if current_position:
-            self.navigation_state.current_position = current_position
+        if self._use_localization():
+            # Delegate position, heading, GPS COG, dead reckoning, and quality to
+            # LocalizationService. Mirror the results into NavigationState so all
+            # callers of NavigationService see consistent data.
+            loc_state = await self._localization.update(sensor_data)
+            self.navigation_state.current_position = loc_state.current_position
+            self.navigation_state.heading = loc_state.heading
+            self.navigation_state.gps_cog = loc_state.gps_cog
+            self.navigation_state.dead_reckoning_active = loc_state.dead_reckoning_active
+            self.navigation_state.dead_reckoning_drift = loc_state.dead_reckoning_drift
+            self.navigation_state.last_gps_fix = loc_state.last_gps_fix
+            current_position = loc_state.current_position
+        else:
+            # Legacy path: original implementation unchanged.
+            # Update position from GPS or dead reckoning
+            current_position = await self._update_position(sensor_data)
+            if current_position:
+                self.navigation_state.current_position = current_position
 
-        # Update heading. During mission bootstrap, do not trust BNO085 Game Rotation
-        # Vector yaw as an absolute compass until GPS COG has snapped the session
-        # alignment. Its yaw zero is relative to power-on, not true north.
-        speed_threshold = 0.1 if self._bootstrap_start_time else 0.3
-        gps_cog, gps_cog_speed, gps_cog_source = self._resolve_gps_course_over_ground(
-            sensor_data,
-            current_position,
-            speed_threshold=speed_threshold,
-        )
-        if gps_cog is not None:
-            self.navigation_state.gps_cog = gps_cog
-
-        imu_valid = (
-            sensor_data.imu is not None
-            and sensor_data.imu.yaw is not None
-            and sensor_data.imu.calibration_status != "uncalibrated"
-        )
-        imu_alignment_ready = (
-            not self._require_gps_heading_alignment
-            or self._heading_alignment_sample_count > 0
-        )
-
-        if imu_valid:
-            raw_yaw = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
-            # BNO085 Game Rotation Vector uses ZYX aerospace convention (right-hand, z-up):
-            # positive yaw = CCW rotation (counter-clockwise when viewed from above).
-            # Navigation uses compass convention: North=0°, East=90°, South=180°, West=270°.
-            # Compass convention is CW-positive (clockwise: North→East→South→West).
-            # These rotational directions are OPPOSITE, so negate raw_yaw to convert.
-            # Then apply yaw_offset for mechanical mounting (e.g., IMU rotated in enclosure).
-            adjusted_yaw = (
-                -raw_yaw + self._imu_yaw_offset + self._session_heading_alignment
-            ) % 360.0
-
-            # Log raw and adjusted yaw for diagnostic purposes
-            _log_imu_now = time.monotonic()
-            if _log_imu_now - getattr(self, "_last_imu_log", 0) > 5.0:
-                logger.info(
-                    "IMU heading: raw_zyx=%.1f° adjusted_compass=%.1f° "
-                    "mounting_offset=%.1f° session_align=%.1f° alignment_ready=%s",
-                    raw_yaw,
-                    adjusted_yaw,
-                    self._imu_yaw_offset,
-                    self._session_heading_alignment,
-                    imu_alignment_ready,
-                )
-                self._last_imu_log = _log_imu_now
-
-            if imu_alignment_ready:
-                self._set_navigation_heading(adjusted_yaw)
-            elif gps_cog is not None:
-                self.navigation_state.heading = gps_cog
-            else:
-                self.navigation_state.heading = None
-
-            # GPS COG comparison and session heading alignment update.
-            # Only mutate IMU alignment during the explicit straight bootstrap drive.
-            # During normal waypoint pursuit, GPS COG is the motion vector and can differ
-            # from chassis heading during arcs, tank turns, slip, or obstacle maneuvers.
+            # Update heading. During mission bootstrap, do not trust BNO085 Game Rotation
+            # Vector yaw as an absolute compass until GPS COG has snapped the session
+            # alignment. Its yaw zero is relative to power-on, not true north.
+            speed_threshold = 0.1 if self._bootstrap_start_time else 0.3
+            gps_cog, gps_cog_speed, gps_cog_source = self._resolve_gps_course_over_ground(
+                sensor_data,
+                current_position,
+                speed_threshold=speed_threshold,
+            )
             if gps_cog is not None:
-                cog = gps_cog
-                # delta = how much alignment needs to increase (positive = IMU reads too low)
-                delta = self._heading_delta(cog, adjusted_yaw)
-                logger.debug(
-                    "HDG: raw_imu=%.1f° adjusted=%.1f° gps_cog=%.1f° "
-                    "source=%s speed=%.2f delta=%.1f° session_align=%.1f°",
-                    raw_yaw,
-                    adjusted_yaw,
-                    cog,
-                    gps_cog_source,
-                    gps_cog_speed if gps_cog_speed is not None else -1.0,
-                    delta,
-                    self._session_heading_alignment,
-                )
-                if (
-                    self._bootstrap_start_time is not None
-                    and abs(delta) > 45.0
-                    and self._heading_alignment_sample_count < 10
-                ):
-                    logger.warning(
-                        "HDG mismatch: adjusted IMU=%.1f° vs GPS COG=%.1f° (delta=%.1f°) — "
-                        "session alignment converging (samples=%d)",
+                self.navigation_state.gps_cog = gps_cog
+
+            imu_valid = (
+                sensor_data.imu is not None
+                and sensor_data.imu.yaw is not None
+                and sensor_data.imu.calibration_status != "uncalibrated"
+            )
+            imu_alignment_ready = (
+                not self._require_gps_heading_alignment
+                or self._heading_alignment_sample_count > 0
+            )
+
+            if imu_valid:
+                raw_yaw = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
+                # BNO085 Game Rotation Vector uses ZYX aerospace convention (right-hand, z-up):
+                # positive yaw = CCW rotation (counter-clockwise when viewed from above).
+                # Navigation uses compass convention: North=0°, East=90°, South=180°, West=270°.
+                # Compass convention is CW-positive (clockwise: North→East→South→West).
+                # These rotational directions are OPPOSITE, so negate raw_yaw to convert.
+                # Then apply yaw_offset for mechanical mounting (e.g., IMU rotated in enclosure).
+                adjusted_yaw = (
+                    -raw_yaw + self._imu_yaw_offset + self._session_heading_alignment
+                ) % 360.0
+
+                # Log raw and adjusted yaw for diagnostic purposes
+                _log_imu_now = time.monotonic()
+                if _log_imu_now - getattr(self, "_last_imu_log", 0) > 5.0:
+                    logger.info(
+                        "IMU heading: raw_zyx=%.1f° adjusted_compass=%.1f° "
+                        "mounting_offset=%.1f° session_align=%.1f° alignment_ready=%s",
+                        raw_yaw,
+                        adjusted_yaw,
+                        self._imu_yaw_offset,
+                        self._session_heading_alignment,
+                        imu_alignment_ready,
+                    )
+                    self._last_imu_log = _log_imu_now
+
+                if imu_alignment_ready:
+                    self._set_navigation_heading(adjusted_yaw)
+                elif gps_cog is not None:
+                    self.navigation_state.heading = gps_cog
+                else:
+                    self.navigation_state.heading = None
+
+                # GPS COG comparison and session heading alignment update.
+                # Only mutate IMU alignment during the explicit straight bootstrap drive.
+                # During normal waypoint pursuit, GPS COG is the motion vector and can differ
+                # from chassis heading during arcs, tank turns, slip, or obstacle maneuvers.
+                if gps_cog is not None:
+                    cog = gps_cog
+                    # delta = how much alignment needs to increase (positive = IMU reads too low)
+                    delta = self._heading_delta(cog, adjusted_yaw)
+                    logger.debug(
+                        "HDG: raw_imu=%.1f° adjusted=%.1f° gps_cog=%.1f° "
+                        "source=%s speed=%.2f delta=%.1f° session_align=%.1f°",
+                        raw_yaw,
                         adjusted_yaw,
                         cog,
+                        gps_cog_source,
+                        gps_cog_speed if gps_cog_speed is not None else -1.0,
                         delta,
-                        self._heading_alignment_sample_count,
+                        self._session_heading_alignment,
                     )
-
-                if self._bootstrap_start_time is not None:
-                    # Track GPS COG stability for straight-motion detection.
-                    self._gps_cog_history.append(cog)
-                    if len(self._gps_cog_history) > 5:
-                        self._gps_cog_history.pop(0)
-
-                    going_straight = False
-                    if len(self._gps_cog_history) >= 3:
-                        sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
-                        cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
-                        cog_mean = math.degrees(math.atan2(sin_c, cos_c)) % 360.0
-                        max_dev = max(
-                            abs(self._heading_delta(c, cog_mean))
-                            for c in self._gps_cog_history
+                    if (
+                        self._bootstrap_start_time is not None
+                        and abs(delta) > 45.0
+                        and self._heading_alignment_sample_count < 10
+                    ):
+                        logger.warning(
+                            "HDG mismatch: adjusted IMU=%.1f° vs GPS COG=%.1f° (delta=%.1f°) — "
+                            "session alignment converging (samples=%d)",
+                            adjusted_yaw,
+                            cog,
+                            delta,
+                            self._heading_alignment_sample_count,
                         )
-                        going_straight = max_dev < 15.0
 
-                    if going_straight and self._heading_alignment_sample_count == 0:
-                        # First stable bootstrap sample: snap immediately to GPS COG.
-                        clamped_delta = max(-180.0, min(180.0, delta))
-                        self._session_heading_alignment = (
-                            self._session_heading_alignment + clamped_delta
-                        ) % 360.0
-                        self._heading_alignment_sample_count = 1
-                        self._require_gps_heading_alignment = False
-                        adjusted_yaw = (
-                            -raw_yaw + self._imu_yaw_offset + self._session_heading_alignment
-                        ) % 360.0
-                        self._set_navigation_heading(adjusted_yaw, allow_large_jump=True)
-                        logger.info(
-                            "HDG snap-calibrated from GPS COG: delta=%.1f° "
-                            "new_align=%.1f° source=%s",
-                            clamped_delta,
-                            self._session_heading_alignment,
-                            gps_cog_source,
-                        )
-                        self._save_alignment_to_disk("gps_cog_snap")
-        elif gps_cog is not None:
-            # Use GPS course-over-ground as heading fallback while in motion.
-            # GPS COG is already in world frame; IMU yaw_offset does NOT apply here.
-            self.navigation_state.heading = gps_cog
+                    if self._bootstrap_start_time is not None:
+                        # Track GPS COG stability for straight-motion detection.
+                        self._gps_cog_history.append(cog)
+                        if len(self._gps_cog_history) > 5:
+                            self._gps_cog_history.pop(0)
+
+                        going_straight = False
+                        if len(self._gps_cog_history) >= 3:
+                            sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
+                            cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
+                            cog_mean = math.degrees(math.atan2(sin_c, cos_c)) % 360.0
+                            max_dev = max(
+                                abs(self._heading_delta(c, cog_mean))
+                                for c in self._gps_cog_history
+                            )
+                            going_straight = max_dev < 15.0
+
+                        if going_straight and self._heading_alignment_sample_count == 0:
+                            # First stable bootstrap sample: snap immediately to GPS COG.
+                            clamped_delta = max(-180.0, min(180.0, delta))
+                            self._session_heading_alignment = (
+                                self._session_heading_alignment + clamped_delta
+                            ) % 360.0
+                            self._heading_alignment_sample_count = 1
+                            self._require_gps_heading_alignment = False
+                            adjusted_yaw = (
+                                -raw_yaw + self._imu_yaw_offset + self._session_heading_alignment
+                            ) % 360.0
+                            self._set_navigation_heading(adjusted_yaw, allow_large_jump=True)
+                            logger.info(
+                                "HDG snap-calibrated from GPS COG: delta=%.1f° "
+                                "new_align=%.1f° source=%s",
+                                clamped_delta,
+                                self._session_heading_alignment,
+                                gps_cog_source,
+                            )
+                            self._save_alignment_to_disk("gps_cog_snap")
+            elif gps_cog is not None:
+                # Use GPS course-over-ground as heading fallback while in motion.
+                # GPS COG is already in world frame; IMU yaw_offset does NOT apply here.
+                self.navigation_state.heading = gps_cog
 
         # Update obstacles
         obstacles = self.obstacle_detector.update_obstacles_from_sensors(sensor_data)

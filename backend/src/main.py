@@ -202,6 +202,20 @@ async def lifespan(app: FastAPI):
         config_loader=loader,
     )
 
+    # Construct LocalizationService when not running in legacy navigation mode.
+    # USE_LEGACY_NAVIGATION=1 keeps NavigationService running its original code path.
+    import os as _os
+    _localization_service = None
+    if _os.getenv("USE_LEGACY_NAVIGATION", "0") != "1":
+        from backend.src.services.localization_service import (
+            build_localization_service_from_config,
+        )
+        _localization_service = build_localization_service_from_config()
+        nav_service.attach_localization(_localization_service)
+        _log.info("LocalizationService constructed and attached to NavigationService")
+    else:
+        _log.info("USE_LEGACY_NAVIGATION=1: running legacy NavigationService code path")
+
     app.state.runtime = RuntimeContext(
         config_loader=loader,
         hardware_config=hardware_cfg,
@@ -214,6 +228,7 @@ async def lifespan(app: FastAPI):
         websocket_hub=websocket_hub,
         persistence=persistence,
         command_gateway=_command_gateway,
+        localization=_localization_service,
     )
     _fw = None
     if app.state.runtime.robohat:

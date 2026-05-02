@@ -50,6 +50,7 @@ class RuntimeContext:
     websocket_hub: Any
     persistence: Any
     command_gateway: Any = None  # MotorCommandGateway; Any to avoid import cycle
+    localization: Any = None     # LocalizationService; Any to avoid import cycle
 
     @property
     def sensor_manager(self) -> Any:

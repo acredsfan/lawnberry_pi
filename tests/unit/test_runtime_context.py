@@ -44,6 +44,7 @@ def test_runtime_context_holds_all_required_fields():
         "websocket_hub",
         "persistence",
         "command_gateway",
+        "localization",
     }
     actual = {f.name for f in fields(RuntimeContext)}
     assert actual == expected, f"field set drift: extra={actual-expected}, missing={expected-actual}"
