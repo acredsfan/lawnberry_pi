@@ -28,8 +28,7 @@ def test_localization_state_defaults():
 
 # --- Task 3: LocalizationService core behavior ------------------------------
 
-import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -175,7 +174,7 @@ async def test_bootstrap_alignment_snaps_from_gps_cog():
     loc.begin_bootstrap()
     assert loc.bootstrap_active is True
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     for index in range(4):
         await loc.update(
             SensorData(
@@ -237,6 +236,7 @@ async def test_reset_clears_alignment():
 
 def test_load_alignment_from_file(tmp_path):
     import json
+
     from backend.src.services.localization_service import LocalizationService
 
     align_file = tmp_path / "imu_alignment.json"
@@ -259,6 +259,7 @@ def test_load_alignment_from_file(tmp_path):
 
 def test_save_alignment_to_file(tmp_path):
     import json
+
     from backend.src.services.localization_service import LocalizationService
 
     align_file = tmp_path / "imu_alignment.json"

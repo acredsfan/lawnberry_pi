@@ -18,7 +18,6 @@ import time
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
 
 from ..models import Position, SensorData
 from ..nav.geoutils import haversine_m
@@ -299,6 +298,9 @@ class LocalizationService:
         )
         if gps_cog is not None:
             self.state.gps_cog = gps_cog
+        # Write velocity from GPS COG speed when available; encoder odometry will replace this.
+        if gps_cog_speed is not None:
+            self.state.velocity = gps_cog_speed
 
         # 4. Resolve heading from IMU + alignment (full reconciliation with GPS COG)
         if imu_valid:
@@ -465,10 +467,16 @@ class LocalizationService:
             self.state.last_gps_fix = datetime.now(UTC)
             return gps_position
 
-        # Fallback: dead reckoning
+        # Fallback: dead reckoning.
+        # NOTE: distance_traveled is a placeholder (0.1 m/tick) until encoder odometry is wired.
+        # The _DeadReckoningState.estimate() always offsets from last_gps_position rather than
+        # accumulating from estimated_position, so reported position stays ~0.1 m from the
+        # last fix regardless of elapsed time. drift_estimate DOES grow with time, causing a
+        # known inconsistency between reported position and drift. This is acceptable until
+        # encoder odometry replaces this path.
         heading = self.state.heading
         if heading is not None:
-            distance_traveled = 0.1  # placeholder — encoder odometry future work
+            distance_traveled = 0.1
             dr_pos = self._dead_reckoning.estimate(float(heading), distance_traveled)
             if dr_pos is not None:
                 self.state.dead_reckoning_active = True
@@ -490,7 +498,7 @@ class LocalizationService:
             return None, None, None
 
         now = getattr(gps, "timestamp", None)
-        if not isinstance(now, datetime):
+        if not isinstance(now, datetime) or now.tzinfo is None:
             now = datetime.now(UTC)
 
         derived_cog: float | None = None
