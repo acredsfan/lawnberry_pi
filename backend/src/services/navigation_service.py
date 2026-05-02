@@ -1191,10 +1191,20 @@ class NavigationService:
 
         Wall-time of the tick is recorded as the ``navigation_tick_duration``
         timer metric (§12 runtime budget baseline).
+
+        When LAWN_LEGACY_NAV=1 the pre-Phase-2 localization path is used.
+        Set this flag to run the legacy path during Phase 2 migration or to
+        bisect a regression.  See docs/rollback-bisect.md.
         """
+        use_legacy = os.getenv("LAWN_LEGACY_NAV", "0") == "1"
+        _dispatch = (
+            self._update_navigation_state_legacy
+            if use_legacy
+            else self._update_navigation_state_impl
+        )
         start = time.perf_counter()
         try:
-            return await self._update_navigation_state_impl(sensor_data)
+            return await _dispatch(sensor_data)
         finally:
             duration_ms = (time.perf_counter() - start) * 1000.0
             observability.metrics.record_timer("navigation_tick_duration", duration_ms)
@@ -1394,6 +1404,20 @@ class NavigationService:
             except Exception as exc:  # pragma: no cover - safety net
                 logger.warning("Telemetry capture record failed: %s", exc)
         return self.navigation_state
+
+    async def _update_navigation_state_legacy(self, sensor_data: SensorData) -> NavigationState:
+        """Legacy NavigationService localization path.
+
+        This method is the stable alias for the pre-Phase-2 implementation.
+        It delegates to _update_navigation_state_impl for the duration of
+        Phase 2.  Once the refactored localization path (_update_navigation_state_impl)
+        has demonstrated replay parity, this method body will be replaced with
+        the old implementation snapshot and _update_navigation_state_impl will
+        contain the refactored code.
+
+        Controlled by LAWN_LEGACY_NAV=1.  See docs/rollback-bisect.md.
+        """
+        return await self._update_navigation_state_impl(sensor_data)
 
     def _apply_gps_antenna_offset(self, gps_position: Position) -> Position:
         forward_m = self._gps_antenna_offset_forward_m
