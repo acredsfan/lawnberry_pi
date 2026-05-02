@@ -392,3 +392,91 @@ class MissionExecutor:
             await asyncio.sleep(0.2)
 
         return False
+
+    # ------------------------------------------------------------------
+    # Mission orchestration loop (Task 7)
+    # ------------------------------------------------------------------
+
+    async def execute_mission(
+        self,
+        mission: "Mission",
+        mission_service: "MissionStatusReader",
+        *,
+        on_bootstrap: "Any | None" = None,
+    ) -> None:
+        """Execute all waypoints in mission order.
+
+        Args:
+            mission: The mission object with waypoints.
+            mission_service: MissionStatusReader for pause/abort polling.
+            on_bootstrap: Optional async callable invoked once before the
+                waypoint loop (heading bootstrap hook). Signature: async () -> None.
+                Defaults to a no-op when None.
+        """
+        logger.info(
+            "MissionExecutor: starting mission %s — %s", mission.id, mission.name
+        )
+        self._active = True
+        self._failure_detail = None
+        self.current_waypoint_index = 0
+
+        if on_bootstrap is not None:
+            await on_bootstrap()
+
+        status = mission_service.mission_statuses.get(mission.id)
+        if status is not None:
+            requested_index = getattr(status, "current_waypoint_index", 0) or 0
+            max_index = max(0, len(mission.waypoints) - 1)
+            self.current_waypoint_index = max(0, min(requested_index, max_index))
+
+        try:
+            while self.current_waypoint_index < len(mission.waypoints):
+                status = mission_service.mission_statuses.get(mission.id)
+                if not status:
+                    logger.warning(
+                        "Mission %s interrupted: status missing", mission.id
+                    )
+                    return
+
+                _status_val = (
+                    status.status.value if hasattr(status.status, "value") else status.status
+                )
+
+                if _status_val == "paused":
+                    await self._deliver_stop_command(reason="mission pause hold")
+                    await asyncio.sleep(0.1)
+                    continue
+
+                if _status_val != "running":
+                    logger.warning(
+                        "Mission %s interrupted: status=%s", mission.id, _status_val
+                    )
+                    return
+
+                current_wp = mission.waypoints[self.current_waypoint_index]
+                waypoint_reached = await self.go_to_waypoint(mission, current_wp, mission_service)
+
+                if not waypoint_reached:
+                    status = mission_service.mission_statuses.get(mission.id)
+                    _sv = (
+                        status.status.value if status and hasattr(status.status, "value")
+                        else (status.status if status else None)
+                    )
+                    if not status or _sv != "running":
+                        return
+                else:
+                    await mission_service.update_waypoint_progress(
+                        mission.id, self.current_waypoint_index
+                    )
+                    self.current_waypoint_index += 1
+
+                await asyncio.sleep(0.05)
+
+            logger.info("MissionExecutor: mission %s completed.", mission.id)
+
+        except Exception as exc:
+            self._failure_detail = str(exc)
+            await self._deliver_stop_command(reason="mission failure")
+            raise
+        finally:
+            self._active = False

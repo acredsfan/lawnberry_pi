@@ -305,3 +305,113 @@ async def test_go_to_waypoint_blocked_by_emergency():
 
     reached = await executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader)
     assert reached is False
+
+
+# ---------------------------------------------------------------------------
+# Task 7: execute_mission
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_execute_mission_completes_when_all_waypoints_reached():
+    from backend.src.services.mission_executor import MissionExecutor
+    from backend.src.models.mission import MissionLifecycleStatus
+
+    # Position already within tolerance of every waypoint
+    loc = FakeLocalization(
+        position=Position(latitude=0.1, longitude=0.1, accuracy=0.3),
+        heading=0.0,
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    gw = FakeGateway()
+    executor = MissionExecutor(localization=loc, gateway=gw, waypoint_tolerance=20000.0)
+
+    mission = _make_mission([
+        {"lat": 0.1, "lon": 0.1, "blade_on": False, "speed": 50},
+        {"lat": 0.2, "lon": 0.2, "blade_on": False, "speed": 50},
+    ])
+    from backend.src.models.mission import MissionStatus
+    status = MissionStatus(
+        mission_id=mission.id,
+        status=MissionLifecycleStatus.RUNNING,
+        current_waypoint_index=0,
+        completion_percentage=0.0,
+        total_waypoints=2,
+    )
+    ms_reader = FakeMissionStatusReader(mission, status)
+
+    await executor.execute_mission(mission, ms_reader)
+
+    # Both waypoints should have been reported as reached
+    assert len(ms_reader.progress_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_mission_waits_while_paused():
+    from backend.src.services.mission_executor import MissionExecutor
+    from backend.src.models.mission import MissionLifecycleStatus, MissionStatus
+
+    loc = FakeLocalization(
+        position=Position(latitude=0.1, longitude=0.1, accuracy=0.3),
+        heading=0.0,
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    gw = FakeGateway()
+    executor = MissionExecutor(localization=loc, gateway=gw, waypoint_tolerance=5000.0)
+
+    mission = _make_mission([{"lat": 0.1, "lon": 0.1, "blade_on": False, "speed": 50}])
+    status = MissionStatus(
+        mission_id=mission.id,
+        status=MissionLifecycleStatus.PAUSED,
+        current_waypoint_index=0,
+        completion_percentage=0.0,
+        total_waypoints=1,
+    )
+    ms_reader = FakeMissionStatusReader(mission, status)
+
+    task = asyncio.create_task(executor.execute_mission(mission, ms_reader))
+    await asyncio.sleep(0.2)
+    assert not task.done()
+
+    # Unblock by setting running
+    status.status = MissionLifecycleStatus.RUNNING
+    await asyncio.wait_for(task, timeout=1.0)
+    assert len(ms_reader.progress_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_mission_marks_failure_on_waypoint_error():
+    from backend.src.services.mission_executor import MissionExecutor
+    from backend.src.models.mission import MissionLifecycleStatus, MissionStatus
+
+    loc = FakeLocalization(
+        position=Position(latitude=0.0, longitude=0.0, accuracy=0.3),
+        heading=0.0,
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    gw = FakeGateway()
+    executor = MissionExecutor(
+        localization=loc,
+        gateway=gw,
+        waypoint_tolerance=0.001,  # tiny tolerance — never reached
+        position_verification_timeout_seconds=0.05,  # fast abort
+    )
+    # Force position verification to fail so go_to_waypoint raises
+    loc._dead_reckoning_active = True
+
+    mission = _make_mission([{"lat": 1.0, "lon": 1.0, "blade_on": False, "speed": 50}])
+    status = MissionStatus(
+        mission_id=mission.id,
+        status=MissionLifecycleStatus.RUNNING,
+        current_waypoint_index=0,
+        completion_percentage=0.0,
+        total_waypoints=1,
+    )
+    ms_reader = FakeMissionStatusReader(mission, status)
+
+    with pytest.raises(RuntimeError):
+        await executor.execute_mission(mission, ms_reader)
+
+    assert executor._failure_detail is not None
