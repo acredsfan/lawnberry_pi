@@ -49,6 +49,8 @@ def compute_tank_speeds(
         CW turn (heading_err > 0): left > 0, right < 0.
         CCW turn (heading_err < 0): left < 0, right > 0.
     """
+    if heading_err == 0.0:
+        return 0.0, 0.0
     turn_sign = 1.0 if heading_err > 0 else -1.0
     turn_speed = min(max_speed, 0.5 + stall_boost)
     left_speed = turn_sign * turn_speed

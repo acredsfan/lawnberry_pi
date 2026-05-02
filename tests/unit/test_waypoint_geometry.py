@@ -92,3 +92,9 @@ def test_compute_blend_speeds_clamped_to_max_speed():
     )
     assert left <= 0.8
     assert right <= 0.8
+
+
+def test_compute_tank_speeds_zero_error_returns_zero():
+    left, right = compute_tank_speeds(heading_err=0.0, max_speed=0.8, stall_boost=0.0)
+    assert left == 0.0
+    assert right == 0.0
