@@ -148,6 +148,51 @@ class DeadReckoningSystem:
         return self.estimated_position
 
 
+class _NavStateLocalizationAdapter:
+    """Adapts NavigationService.navigation_state to the LocalizationProvider protocol.
+
+    Used by the embedded MissionExecutor so it can read localization state
+    without holding a reference to the full NavigationService.
+    """
+
+    def __init__(self, nav_service: "NavigationService") -> None:
+        self._nav = nav_service
+
+    @property
+    def current_position(self) -> "Position | None":
+        return self._nav.navigation_state.current_position
+
+    @property
+    def heading(self) -> "float | None":
+        return self._nav.navigation_state.heading
+
+    @property
+    def dead_reckoning_active(self) -> bool:
+        return self._nav.navigation_state.dead_reckoning_active
+
+    @property
+    def last_gps_fix(self):
+        return self._nav.navigation_state.last_gps_fix
+
+
+class _NavGatewayAdapter:
+    """Adapts NavigationService drive/emergency interface to MissionExecutor's gateway protocol."""
+
+    def __init__(self, nav_service: "NavigationService") -> None:
+        self._nav = nav_service
+
+    def is_emergency_active(self) -> bool:
+        return self._nav._global_emergency_active()
+
+    async def dispatch_drive_speeds(self, left: float, right: float) -> bool:
+        try:
+            await self._nav.set_speed(left, right)
+            return True
+        except Exception as exc:
+            logger.debug("_NavGatewayAdapter.dispatch_drive_speeds failed: %s", exc)
+            return False
+
+
 class NavigationService:
     """Main navigation service with sensor fusion and path planning"""
 
@@ -247,6 +292,21 @@ class NavigationService:
         # state is owned by LocalizationService and mirrored here.
         self._localization: Any | None = None
 
+        from .mission_executor import MissionExecutor
+
+        self._localization_adapter = _NavStateLocalizationAdapter(self)
+        self._gateway_adapter = _NavGatewayAdapter(self)
+        self._mission_executor = MissionExecutor(
+            localization=self._localization_adapter,
+            gateway=self._gateway_adapter,
+            max_speed=self.max_speed,
+            cruise_speed=self.cruise_speed,
+            waypoint_tolerance=self.waypoint_tolerance,
+            max_waypoint_fix_age_seconds=self.max_waypoint_fix_age_seconds,
+            max_waypoint_accuracy_m=self.max_waypoint_accuracy_m,
+            position_verification_timeout_seconds=self.position_verification_timeout_seconds,
+        )
+
     _instance: NavigationService | None = None
 
     @classmethod
@@ -286,11 +346,9 @@ class NavigationService:
 
     async def execute_mission(self, mission: Mission, mission_service: MissionStatusReader):
         """Execute a mission by navigating to each waypoint."""
-        logger.info(f"Starting mission execution: {mission.id} - {mission.name}")
+        logger.info("NavigationService: delegating execute_mission %s to MissionExecutor", mission.id)
         self.navigation_state.navigation_mode = NavigationMode.AUTO
         self.navigation_state.path_status = PathStatus.EXECUTING
-
-        # Convert MissionWaypoints to Navigation Waypoints
         self.navigation_state.planned_path = [
             Waypoint(
                 position=Position(latitude=wp.lat, longitude=wp.lon),
@@ -298,103 +356,46 @@ class NavigationService:
             )
             for wp in mission.waypoints
         ]
+        self.navigation_state.operation_start_time = datetime.now(UTC)
 
+        # Reset heading alignment state for new mission (localization bootstrap)
+        self._session_heading_alignment = 0.0
+        self._heading_alignment_sample_count = 0
+        self._gps_cog_history.clear()
+        self._require_gps_heading_alignment = True
+        self._last_gps_track_position = None
+        self._last_gps_track_time = None
+        self.navigation_state.heading = None
+        self.navigation_state.gps_cog = None
+        self._save_alignment_to_disk("mission_start_reset")
+
+        # Propagate current_waypoint_index from mission status
         status = mission_service.mission_statuses.get(mission.id)
         requested_index = status.current_waypoint_index if status else 0
         max_index = max(0, len(self.navigation_state.planned_path) - 1)
         self.navigation_state.current_waypoint_index = max(0, min(requested_index or 0, max_index))
-        self.navigation_state.operation_start_time = datetime.now(UTC)
+
         self._mission_execution_active = True
-
-        # Reset heading alignment for each mission so the bootstrap drive gets a
-        # clean GPS COG snap.  IMU Game Rotation Vector yaw is relative to boot
-        # orientation and must be re-calibrated before the first tank turn.
-        if self._use_localization():
-            self._localization.reset_for_mission()
-            self.navigation_state.heading = None
-            self.navigation_state.gps_cog = None
-        else:
-            self._session_heading_alignment = 0.0
-            self._heading_alignment_sample_count = 0
-            self._gps_cog_history.clear()
-            self._require_gps_heading_alignment = True
-            self._last_gps_track_position = None
-            self._last_gps_track_time = None
-            self.navigation_state.heading = None
-            self.navigation_state.gps_cog = None
-            self._save_alignment_to_disk("mission_start_reset")
-        await self._run_bootstrap_and_check_geofence()
-
-        # Load yard boundary from map zones so geofence enforcement is active for this mission
         self._load_boundaries_from_zones()
 
+        async def _bootstrap():
+            await self._run_bootstrap_and_check_geofence()
+
         try:
-            while self.navigation_state.current_waypoint_index < len(
-                self.navigation_state.planned_path
-            ):
-                status = mission_service.mission_statuses.get(mission.id)
-                if not status:
-                    logger.warning(
-                        "Mission %s interrupted. Status: %s",
-                        mission.id,
-                        status.status if status else "N/A",
-                    )
-                    self.navigation_state.path_status = PathStatus.INTERRUPTED
-                    self.navigation_state.navigation_mode = NavigationMode.IDLE
-                    return
-
-                if status.status == "paused":
-                    self.navigation_state.navigation_mode = NavigationMode.PAUSED
-                    await self._deliver_stop_command(reason="mission pause hold")
-                    await asyncio.sleep(0.1)
-                    continue
-
-                if status.status != "running":
-                    logger.warning(f"Mission {mission.id} interrupted. Status: {status.status}")
-                    self.navigation_state.path_status = PathStatus.INTERRUPTED
-                    self.navigation_state.navigation_mode = NavigationMode.IDLE
-                    await self._deliver_stop_command(reason="mission interruption")
-                    return
-
-                if self.navigation_state.navigation_mode != NavigationMode.AUTO:
-                    self.navigation_state.navigation_mode = NavigationMode.AUTO
-
-                current_mission_waypoint = mission.waypoints[
-                    self.navigation_state.current_waypoint_index
-                ]
-                waypoint_reached = await self.go_to_waypoint(
-                    mission, current_mission_waypoint, mission_service
-                )
-                if not waypoint_reached:
-                    status = mission_service.mission_statuses.get(mission.id)
-                    if not status or status.status != "running":
-                        self.navigation_state.path_status = PathStatus.INTERRUPTED
-                        self.navigation_state.navigation_mode = NavigationMode.IDLE
-                        return
-                else:
-                    await mission_service.update_waypoint_progress(
-                        mission.id, self.navigation_state.current_waypoint_index
-                    )
-
-                # go_to_waypoint blocks until the waypoint is reached or interrupted.
-                # The loop will then proceed to the next waypoint.
-                # Sleep briefly if go_to_waypoint returns immediately.
-                await asyncio.sleep(0.1)
-
+            await self._mission_executor.execute_mission(
+                mission,
+                mission_service,
+                on_bootstrap=_bootstrap,
+            )
+            # Sync terminal state back
             if self.navigation_state.navigation_mode == NavigationMode.AUTO:
                 self.navigation_state.path_status = PathStatus.COMPLETED
                 self.navigation_state.navigation_mode = NavigationMode.IDLE
-                logger.info(f"Mission {mission.id} completed.")
         except Exception:
             self.navigation_state.target_velocity = 0.0
             self.navigation_state.path_status = PathStatus.FAILED
             if self.navigation_state.navigation_mode != NavigationMode.EMERGENCY_STOP:
                 self.navigation_state.navigation_mode = NavigationMode.IDLE
-                stop_confirmed = await self._deliver_stop_command(reason="mission failure")
-                if not stop_confirmed:
-                    logger.error(
-                        "Mission %s failed and stop delivery could not be confirmed", mission.id
-                    )
             raise
         finally:
             self._mission_execution_active = False
@@ -405,453 +406,8 @@ class NavigationService:
         waypoint: MissionWaypoint,
         mission_service: MissionStatusReader,
     ) -> bool:
-        """Navigate to a single waypoint and block until arrival."""
-
-        target_pos = Position(latitude=waypoint.lat, longitude=waypoint.lon)
-        logger.info(f"Navigating to waypoint: {target_pos.latitude}, {target_pos.longitude}")
-
-        # Engage/disengage blade for this leg when hardware is available
-        try:
-            if os.getenv("SIM_MODE", "0") == "0":
-                robohat = get_robohat_service()
-                if robohat is not None and robohat.running and robohat.status.serial_connected:
-                    await robohat.send_blade_command(bool(waypoint.blade_on))
-        except Exception:
-            # Blade command failures should not abort navigation
-            logger.warning("Blade command failed or unavailable; continuing movement")
-
-        verification_wait_start = time.monotonic()
-        heading_wait_start: float | None = None
-        obstacle_wait_start: float | None = None
-        _last_nav_log: float = 0.0
-        # Stall detection: ramp up motor power when heading isn't changing
-        _stall_start: float | None = None
-        _stall_heading: float | None = None
-        # Hysteresis: prevent TANK/BLEND mode flapping near the 60° boundary.
-        # Enter TANK when |error| > 70°, exit TANK when |error| < 50°.
-        _in_tank_mode: bool = False
-        # Tank-turn watchdog: abort the waypoint if we spend too long in pure-rotation
-        # mode without converging.  Motor EMI on the IMU magnetometer can cause heading
-        # to oscillate indefinitely; this guard prevents eternal spinning.
-        _tank_turn_start: float | None = None
-        _TANK_TURN_TIMEOUT_S: float = 8.0
-        # "Definitely stuck" detector: if stall boost is maxed AND heading is
-        # still frozen, the mower is mechanically stuck — abort cleanly.
-        _stall_max_start: float | None = None
-        # Grace period for motor controller USB reconnect.  When the controller
-        # is transiently unavailable (USB disconnect / replug), the loop continues
-        # checking safety gates rather than failing immediately.  After
-        # _MOTOR_RECONNECT_GRACE_S seconds with no recovery, the mission fails.
-        _motor_unavail_start: float | None = None
-        _MOTOR_RECONNECT_GRACE_S: float = 20.0
-        # Position-hold diagnostic logging: log on first entry then every 5 s.
-        _pos_hold_start: float | None = None
-        _pos_hold_log_last: float = -5.0  # -5.0 so first log fires immediately
-
-        while True:
-            status = mission_service.mission_statuses.get(mission.id)
-            if not status:
-                logger.info("Waypoint navigation interrupted: mission status missing.")
-                await self._deliver_stop_command(reason="missing mission status")
-                return False
-
-            if status.status == "paused":
-                self.navigation_state.navigation_mode = NavigationMode.PAUSED
-                await self._deliver_stop_command(reason="mission pause hold")
-                await asyncio.sleep(0.1)
-                continue
-
-            if status.status != "running":
-                logger.info("Waypoint navigation interrupted.")
-                await self._deliver_stop_command(reason="mission status change")
-                return False
-
-            if self._global_emergency_active():
-                logger.critical("Waypoint navigation blocked by active emergency stop latch")
-                await self._deliver_stop_command(reason="global emergency hold")
-                self.navigation_state.navigation_mode = NavigationMode.EMERGENCY_STOP
-                return False
-
-            if not self.navigation_state.current_position:
-                heading_wait_start = None
-                obstacle_wait_start = None
-                if (
-                    time.monotonic() - verification_wait_start
-                ) >= self.position_verification_timeout_seconds:
-                    await self._deliver_stop_command(reason="position acquisition timeout")
-                    emergency_ok = await self.emergency_stop(
-                        reason="GPS position unavailable for 30 s"
-                    )
-                    raise RuntimeError(
-                        "Position acquisition timeout while navigating waypoint"
-                        + ("; emergency stop activated" if emergency_ok else "")
-                    )
-                await asyncio.sleep(0.5)
-                continue
-
-            if not self._position_is_verified_for_waypoint():
-                heading_wait_start = None
-                obstacle_wait_start = None
-                self.navigation_state.target_velocity = 0.0
-                await self._deliver_stop_command(reason="position verification hold")
-                _now_mono = time.monotonic()
-                if _pos_hold_start is None:
-                    _pos_hold_start = _now_mono
-                if _now_mono - _pos_hold_log_last >= 5.0:
-                    _pos_hold_log_last = _now_mono
-                    _elapsed = _now_mono - _pos_hold_start
-                    _pos = self.navigation_state.current_position
-                    _acc = _pos.accuracy if _pos else None
-                    if self.navigation_state.dead_reckoning_active:
-                        _hold_reason = "dead reckoning active — GPS unavailable"
-                    elif not self._gps_fix_is_fresh():
-                        _hold_reason = "GPS fix stale — no recent position update"
-                    elif _acc is None:
-                        _hold_reason = "GPS accuracy unknown (accuracy field missing)"
-                    else:
-                        _hold_reason = (
-                            f"GPS accuracy {_acc:.1f} m > threshold "
-                            f"{self.max_waypoint_accuracy_m:.1f} m — waiting for RTK/DGPS fix"
-                        )
-                    logger.info(
-                        "Position verification hold active for %.0f s: %s",
-                        _elapsed,
-                        _hold_reason,
-                    )
-                if (
-                    time.monotonic() - verification_wait_start
-                ) >= self.position_verification_timeout_seconds:
-                    emergency_ok = await self.emergency_stop(reason="GPS accuracy too low for 30 s")
-                    raise RuntimeError(
-                        "Position verification timeout while navigating waypoint"
-                        + ("; emergency stop activated" if emergency_ok else "")
-                    )
-                await asyncio.sleep(0.2)
-                continue
-
-            verification_wait_start = time.monotonic()
-            _pos_hold_start = None
-            _pos_hold_log_last = -5.0  # reset so next hold logs immediately
-
-            distance_to_target = self.path_planner.calculate_distance(
-                self.navigation_state.current_position, target_pos
-            )
-
-            if distance_to_target <= self.waypoint_tolerance:
-                logger.info(f"Waypoint reached: {waypoint.lat}, {waypoint.lon}")
-                stop_confirmed = await self._deliver_stop_command(reason="waypoint arrival")
-                if not stop_confirmed:
-                    raise RuntimeError("Failed to stop safely at waypoint")
-                if self.navigation_state.advance_waypoint():
-                    logger.info(
-                        "Advanced to next waypoint index: %s",
-                        self.navigation_state.current_waypoint_index,
-                    )
-                else:
-                    logger.info("Final waypoint in path reached.")
-                return True
-
-            if (
-                self.navigation_state.obstacle_avoidance_active
-                and not self.obstacle_detector.is_path_clear(
-                    self.navigation_state.current_position,
-                    target_pos,
-                )
-            ):
-                heading_wait_start = None
-                if obstacle_wait_start is None:
-                    obstacle_wait_start = time.monotonic()
-                    logger.warning(
-                        "Obstacle detected while navigating to waypoint; holding position"
-                    )
-                await self._deliver_stop_command(reason="obstacle hold")
-                if (
-                    time.monotonic() - obstacle_wait_start
-                ) >= self.position_verification_timeout_seconds:
-                    raise RuntimeError(
-                        "Obstacle persisted inside navigation safety distance "
-                        f"({self.obstacle_avoidance_distance:.2f} m) while navigating waypoint"
-                    )
-                await asyncio.sleep(0.2)
-                continue
-            obstacle_wait_start = None
-
-            # Geofence enforcement: stop and return to boundary if outside mowing area
-            if self.navigation_state.safety_boundaries and self.navigation_state.current_position:
-                outer_boundary = self.navigation_state.safety_boundaries[0]
-                polygon = [(p.latitude, p.longitude) for p in outer_boundary]
-                cur = self.navigation_state.current_position
-                if not point_in_polygon(cur.latitude, cur.longitude, polygon):
-                    await self._deliver_stop_command(reason="outside geofence boundary")
-                    nearest = self._nearest_boundary_point(cur, outer_boundary)
-                    logger.warning(
-                        "Mower outside geofence boundary at (%.6f, %.6f); "
-                        "returning to boundary (%.6f, %.6f)",
-                        cur.latitude,
-                        cur.longitude,
-                        nearest.latitude,
-                        nearest.longitude,
-                    )
-                    target_pos = nearest
-                    continue
-
-            # Calculate heading and apply motor commands
-            heading_to_target = self.path_planner.calculate_bearing(
-                self.navigation_state.current_position, target_pos
-            )
-
-            current_heading = self.navigation_state.heading
-            _in_heading_bootstrap = current_heading is None
-            if current_heading is None:
-                # No heading from IMU or GPS COG yet.  Bootstrap by assuming we face
-                # the target so the mower starts moving; GPS COG will take over once
-                # speed >= 0.3 m/s.  E-stop is intentionally NOT triggered here — a
-                # missing heading source is a navigation limitation, not a safety
-                # emergency.  The mission will be aborted cleanly if heading never arrives.
-                if heading_wait_start is None:
-                    heading_wait_start = time.monotonic()
-                    logger.warning(
-                        "No heading data available; assuming bearing %.1f° "
-                        "to target to start motion.",
-                        heading_to_target,
-                    )
-                if (
-                    time.monotonic() - heading_wait_start
-                ) >= self.position_verification_timeout_seconds:
-                    await self._deliver_stop_command(reason="heading unavailable — mission aborted")
-                    raise RuntimeError(
-                        "Heading unavailable while navigating waypoint; mission aborted"
-                    )
-                current_heading = heading_to_target
-            else:
-                heading_wait_start = None
-
-            heading_error = (heading_to_target - current_heading + 180) % 360 - 180
-
-            _now = time.monotonic()
-            if _now - _last_nav_log > 2.0:
-                logger.debug(
-                    "NAV_CONTROL: target_bearing=%.1f° current_heading=%.1f° error=%.1f° | "
-                    "tank_mode=%s in_turn=%s",
-                    heading_to_target,
-                    current_heading,
-                    heading_error,
-                    _in_tank_mode,
-                    (abs(heading_error) > 10),
-                )
-                _last_nav_log = _now
-
-            # --- Stall detection: if heading barely changes while we command a
-            # turn, progressively boost motor power to overcome grass/friction.
-            _stall_boost = 0.0
-            if abs(heading_error) > 20:
-                if _stall_start is None:
-                    _stall_start = time.monotonic()
-                    _stall_heading = current_heading
-                else:
-                    _hdg_delta = abs(((current_heading - (_stall_heading or 0)) + 180) % 360 - 180)
-                    if _hdg_delta < 5.0:
-                        # Heading barely moved — ramp up 15% per second, cap at +60%
-                        _stall_boost = min(0.6, (time.monotonic() - _stall_start) * 0.15)
-                        # "Definitely stuck": boost is maxed and heading still frozen
-                        if _stall_boost >= 0.59:
-                            if _stall_max_start is None:
-                                _stall_max_start = time.monotonic()
-                            elif (time.monotonic() - _stall_max_start) > 8.0:
-                                logger.error(
-                                    "Mower physically stuck: max turn boost for 8 s, "
-                                    "heading unchanged at %.1f° — stopping mission",
-                                    current_heading,
-                                )
-                                await self._deliver_stop_command(reason="physically stuck")
-                                raise RuntimeError(
-                                    "Mower appears physically stuck: heading did not change "
-                                    "despite maximum turn effort for 8 s"
-                                )
-                        else:
-                            _stall_max_start = None
-                    else:
-                        # Heading is changing — reset stall tracker
-                        _stall_start = time.monotonic()
-                        _stall_heading = current_heading
-                        _stall_max_start = None
-            else:
-                _stall_start = None
-                _stall_heading = None
-                _stall_max_start = None
-
-            # Set speed (scale by waypoint speed preference when provided)
-            base_speed = self.cruise_speed
-            try:
-                if hasattr(waypoint, "speed") and isinstance(waypoint.speed, int):
-                    base_speed = max(
-                        0.1, min(self.max_speed, (waypoint.speed / 100.0) * self.max_speed)
-                    )
-            except Exception:
-                base_speed = self.cruise_speed
-
-            # --- Motor command strategy depends on heading error magnitude ---
-            abs_err = abs(heading_error)
-            turn_sign = 1.0 if heading_error > 0 else -1.0
-
-            # Hysteresis: enter TANK at >70°, exit at <50° to prevent mode flapping.
-            if abs_err > 70:
-                _in_tank_mode = True
-            elif abs_err < 50:
-                _in_tank_mode = False
-
-            if _in_tank_mode:
-                # Tank-turn watchdog: heading should converge within the timeout.
-                # EMI from motor windings can corrupt the BNO085 magnetometer and
-                # cause the heading to oscillate without ever settling on target.
-                if _tank_turn_start is None:
-                    _tank_turn_start = time.monotonic()
-                elif (time.monotonic() - _tank_turn_start) > _TANK_TURN_TIMEOUT_S:
-                    logger.error(
-                        "Tank-turn watchdog: heading not converging after %.0f s "
-                        "(last err=%.1f°, hdg=%.1f°) — aborting waypoint",
-                        _TANK_TURN_TIMEOUT_S,
-                        heading_error,
-                        current_heading,
-                    )
-                    await self._deliver_stop_command(reason="tank-turn timeout")
-                    raise RuntimeError(
-                        f"Tank-turn timed out after {_TANK_TURN_TIMEOUT_S:.0f} s "
-                        "without heading convergence"
-                    )
-
-                # TANK TURN: counter-rotate wheels in place to point toward
-                # the waypoint.  One-wheel turns can't overcome grass friction.
-                # Sign convention: turn_sign > 0 means we need CW (right).
-                # Combined motor chain: set_speed(ls, rs) → send_motor_command(rs_norm, ls_norm)
-                # → arcade angular = (ls_norm - rs_norm) / 2.  For CW: need ls > rs.
-                turn_speed = min(self.max_speed, 0.5 + _stall_boost)
-                left_speed = turn_sign * turn_speed
-                right_speed = -turn_sign * turn_speed
-            else:
-                _tank_turn_start = None  # reset watchdog when no longer in tank mode
-                # BLENDED: proportional turn with forward movement.
-                # Motor chain: set_speed(ls, rs) → send_motor_command(rs_norm, ls_norm)
-                # → angular = (ls_norm - rs_norm) / 2.  CW (turn_effort > 0): need ls > rs.
-                turn_effort = max(-1.0, min(1.0, heading_error / 45.0))
-                forward_speed = base_speed
-                # Gentle taper: full speed at 0°, 70% at 60°
-                if abs_err > 10:
-                    taper = max(0.7, 1.0 - abs_err / 200.0)
-                    forward_speed *= taper
-
-                # During heading bootstrap, enforce minimum forward speed so GPS
-                # COG activates quickly (COG gate is 0.1 m/s during bootstrap; 0.15 m/s for margin).
-                if _in_heading_bootstrap:
-                    forward_speed = max(forward_speed, 0.15)
-
-                # Floor so motor controller dead zone is always overcome
-                forward_speed = max(forward_speed, 0.3)
-
-                # SWAPPED: left gets more speed when turning right (CW/positive turn_effort)
-                left_speed = forward_speed + turn_effort * forward_speed
-                right_speed = forward_speed - turn_effort * forward_speed
-
-                # In thick grass single-wheel pivots (one wheel stopped) cause
-                # bogging.  Ensure both wheels keep at least 20% forward speed.
-                _inner_min = forward_speed * 0.2
-                if turn_effort > 0:  # CW turn — right is inner wheel
-                    right_speed = max(right_speed, _inner_min)
-                elif turn_effort < 0:  # CCW turn — left is inner wheel
-                    left_speed = max(left_speed, _inner_min)
-
-            # Clamp speeds
-            left_speed = max(-self.max_speed, min(self.max_speed, left_speed))
-            right_speed = max(-self.max_speed, min(self.max_speed, right_speed))
-
-            # Motor controller availability check with grace-period reconnect.
-            # When the controller is unavailable (USB drop), the loop continues
-            # iterating — all safety gates above keep running — while the RoboHAT
-            # service attempts to reconnect in the background.  The firmware's
-            # serial-timeout (~5 s) will stop the physical motors if commands
-            # stop arriving.  After _MOTOR_RECONNECT_GRACE_S the mission fails.
-            if os.getenv("SIM_MODE", "0") != "1":
-                _robohat_chk = get_robohat_service()
-                _ctrl_ok = (
-                    _robohat_chk is not None
-                    and _robohat_chk.running
-                    and _robohat_chk.status.serial_connected
-                )
-                if not _ctrl_ok:
-                    if _motor_unavail_start is None:
-                        _motor_unavail_start = time.monotonic()
-                        logger.warning(
-                            "Motor controller unavailable during navigation; "
-                            "waiting up to %.0f s for reconnect "
-                            "(firmware serial-timeout will stop motors ~5 s)",
-                            _MOTOR_RECONNECT_GRACE_S,
-                        )
-                    if time.monotonic() - _motor_unavail_start >= _MOTOR_RECONNECT_GRACE_S:
-                        logger.error(
-                            "Motor controller still unavailable after %.0f s grace period; "
-                            "aborting waypoint",
-                            _MOTOR_RECONNECT_GRACE_S,
-                        )
-                        raise RuntimeError(
-                            "Motor controller unavailable: failed to reconnect "
-                            f"within {_MOTOR_RECONNECT_GRACE_S:.0f} s grace period"
-                        )
-                    await asyncio.sleep(0.2)
-                    continue  # loop back; all safety gates re-run each iteration
-                else:
-                    _motor_unavail_start = None  # reset on confirmed controller presence
-
-            # Retry transient motor command failures (e.g. single PWM ack timeout)
-            # before aborting the mission.
-            _motor_attempts = 3
-            _motor_last_exc: Exception | None = None
-            for _attempt in range(1, _motor_attempts + 1):
-                try:
-                    await self.set_speed(left_speed, right_speed)
-                    _motor_last_exc = None
-                    break
-                except Exception as e:
-                    _motor_last_exc = e
-                    logger.warning(
-                        "Motor command attempt %d/%d failed: %s",
-                        _attempt,
-                        _motor_attempts,
-                        e,
-                    )
-                    if _attempt < _motor_attempts:
-                        await asyncio.sleep(0.15)
-            if _motor_last_exc is not None:
-                logger.error(
-                    "All %d motor command attempts failed: %s", _motor_attempts, _motor_last_exc
-                )
-                await self._deliver_stop_command(reason="navigation command failure")
-                raise RuntimeError(
-                    "Failed to deliver navigation motor command"
-                ) from _motor_last_exc
-
-            # Periodic navigation progress log (~every 5 s)
-            _now = time.monotonic()
-            if (_now - _last_nav_log) >= 5.0:
-                _last_nav_log = _now
-                _mode = "TANK" if _in_tank_mode else "BLEND"
-                logger.info(
-                    "NAV %s → wp(%.6f,%.6f) dist=%.1fm hdg=%.1f° err=%.1f° "
-                    "spd=L%.2f/R%.2f boost=%.0f%%",
-                    _mode,
-                    target_pos.latitude,
-                    target_pos.longitude,
-                    distance_to_target,
-                    current_heading if current_heading is not None else -1,
-                    heading_error,
-                    left_speed,
-                    right_speed,
-                    _stall_boost * 100,
-                )
-
-            # Control loop at 5Hz
-            await asyncio.sleep(0.2)
-
-        return False
+        """Navigate to a single waypoint — delegates to MissionExecutor."""
+        return await self._mission_executor.go_to_waypoint(mission, waypoint, mission_service)
 
     async def set_speed(self, left_speed: float, right_speed: float) -> None:
         """Drive command helper integrating with the RoboHAT controller.

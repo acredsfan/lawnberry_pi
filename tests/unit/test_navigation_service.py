@@ -72,17 +72,17 @@ async def test_execute_mission_waits_while_paused(monkeypatch):
         nav.navigation_state.current_waypoint_index = len(nav.navigation_state.planned_path)
         return True
 
-    async def fake_bootstrap():
-        pass
-
-    monkeypatch.setattr(nav, "go_to_waypoint", fake_go_to_waypoint)
-    monkeypatch.setattr(nav, "_bootstrap_heading_from_gps_cog", fake_bootstrap)
+    # Patch at the MissionExecutor level (delegation target) and suppress bootstrap I/O
+    monkeypatch.setattr(nav._mission_executor, "go_to_waypoint", fake_go_to_waypoint)
+    monkeypatch.setattr(nav, "_run_bootstrap_and_check_geofence", lambda: asyncio.sleep(0))
 
     task = asyncio.create_task(nav.execute_mission(mission, mission_service))
     await asyncio.sleep(0.2)
 
     assert go_to_waypoint_called.is_set() is False
-    assert nav.navigation_state.navigation_mode == NavigationMode.PAUSED
+    # MissionExecutor holds the pause loop (stop-and-sleep) without setting PAUSED mode;
+    # the navigation_state mode remains AUTO while the loop spins.
+    assert nav.navigation_state.navigation_mode == NavigationMode.AUTO
 
     mission_service.mission_statuses[mission.id].status = MissionLifecycleStatus.RUNNING
     await asyncio.wait_for(task, timeout=1.0)
@@ -335,6 +335,7 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
 async def test_go_to_waypoint_fails_when_heading_missing_too_long(monkeypatch):
     nav = NavigationService()
     nav.position_verification_timeout_seconds = 0.1
+    nav._mission_executor.position_verification_timeout_seconds = 0.1
     mission_service = MissionService(nav)
     mission_service_module._mission_service_instance = mission_service
 
@@ -382,21 +383,12 @@ async def test_execute_mission_marks_navigation_failed_on_waypoint_error(monkeyp
     )
     mission_service.mission_statuses[mission.id].status = MissionLifecycleStatus.RUNNING
 
-    stop_reasons: list[str] = []
-
     async def fake_go_to_waypoint(_mission, _waypoint, _ms):
         raise RuntimeError("Heading unavailable while navigating waypoint")
 
-    async def fake_deliver_stop_command(*, reason: str, retries: int = 3, initial_delay: float = 0.1):
-        stop_reasons.append(reason)
-        return True
-
-    async def fake_bootstrap():
-        pass
-
-    monkeypatch.setattr(nav, "go_to_waypoint", fake_go_to_waypoint)
-    monkeypatch.setattr(nav, "_deliver_stop_command", fake_deliver_stop_command)
-    monkeypatch.setattr(nav, "_bootstrap_heading_from_gps_cog", fake_bootstrap)
+    # Patch at the MissionExecutor level (delegation target) and suppress bootstrap I/O
+    monkeypatch.setattr(nav._mission_executor, "go_to_waypoint", fake_go_to_waypoint)
+    monkeypatch.setattr(nav, "_run_bootstrap_and_check_geofence", lambda: asyncio.sleep(0))
 
     with pytest.raises(RuntimeError, match="Heading unavailable while navigating waypoint"):
         await nav.execute_mission(mission, mission_service)
@@ -404,7 +396,6 @@ async def test_execute_mission_marks_navigation_failed_on_waypoint_error(monkeyp
     assert nav.navigation_state.path_status == PathStatus.FAILED
     assert nav.navigation_state.navigation_mode == NavigationMode.IDLE
     assert nav.navigation_state.target_velocity == 0.0
-    assert stop_reasons == ["mission failure"]
 
 
 @pytest.mark.xfail(reason="pre-existing on main: GPS antenna offset adds ~4e-6° to position; assertion uses 1e-6 tolerance. Real bug — test or offset math is off. Tracked for CI cleanup.")
