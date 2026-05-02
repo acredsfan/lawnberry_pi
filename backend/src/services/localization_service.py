@@ -221,6 +221,26 @@ class LocalizationService:
     def session_heading_alignment(self) -> float:
         return self._session_heading_alignment
 
+    # ── LocalizationProvider proxy properties ────────────────────────────────
+    # These delegate to self.state so callers can read pose without accessing
+    # the internal LocalizationState object directly.
+
+    @property
+    def current_position(self) -> "Position | None":
+        return self.state.current_position
+
+    @property
+    def heading(self) -> "float | None":
+        return self.state.heading
+
+    @property
+    def dead_reckoning_active(self) -> bool:
+        return self.state.dead_reckoning_active
+
+    @property
+    def last_gps_fix(self) -> "datetime | None":
+        return self.state.last_gps_fix
+
     # ── Mission lifecycle ────────────────────────────────────────────────────
 
     def reset_for_mission(self) -> None:
