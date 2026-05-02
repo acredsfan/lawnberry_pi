@@ -8,12 +8,65 @@
 
 ## Tools
 
+### Code Search — semble
+
 Use **semble MCP tools** for all code search before falling back to `grep` or `find`:
 - `mcp__semble__search` — find where a symbol, function, or pattern is defined/used
 - `mcp__semble__find_related` — discover related code after an initial hit
 
 Use the **Explore subagent** for open-ended multi-file investigations (file patterns, cross-file
 references, architecture surveys). Use `mcp__semble__search` for targeted lookups.
+
+### Pi System Control — pi-control
+
+The `pi-control` MCP server gives direct access to the Raspberry Pi OS. Prefer these over
+spawning subagents for simple runtime checks. **Tier 3 is enabled** (full system access).
+
+**Shell & processes**
+| Tool | When to use |
+|------|------------|
+| `mcp__pi-control__Shell` | Run any shell command on the Pi (replaces `Bash` for live system state) |
+| `mcp__pi-control__ListProcesses` | See running processes and their PIDs |
+| `mcp__pi-control__KillProcess` | Send signal to a process by PID |
+
+**Services (systemd)**
+| Tool | When to use |
+|------|------------|
+| `mcp__pi-control__ServiceList` | List all systemd units and their active/enabled state |
+| `mcp__pi-control__ServiceHealthReport` | Health summary for LawnBerry systemd units |
+| `mcp__pi-control__ServiceStart` | Start a systemd service |
+| `mcp__pi-control__ServiceStop` | Stop a systemd service |
+| `mcp__pi-control__JournalSearch` | Query journald logs (replaces `journalctl` grep) |
+
+**Network & ports**
+| Tool | When to use |
+|------|------------|
+| `mcp__pi-control__PortCheck` | Confirm a port is listening (e.g. backend on 8081) |
+| `mcp__pi-control__NetConnections` | Active network connections |
+| `mcp__pi-control__Ping` | Reachability check |
+| `mcp__pi-control__NetworkFailoverStatus` | LTE/WiFi failover state |
+
+**Hardware & mower runtime**
+| Tool | When to use |
+|------|------------|
+| `mcp__pi-control__GetSystemInfo` | CPU, memory, disk, temperature |
+| `mcp__pi-control__HardwareProbe` | Detect attached hardware devices |
+| `mcp__pi-control__MowerRuntimeSnapshot` | Live mower service state (GPS, IMU, mission) |
+
+**Git & file ops**
+| Tool | When to use |
+|------|------------|
+| `mcp__pi-control__GitProjectState` | Branch, status, recent commits for `/home/pi/lawnberry` |
+| `mcp__pi-control__FileList` | Directory listing |
+| `mcp__pi-control__FileRead` | Read a file by path |
+| `mcp__pi-control__FileSearch` | Find files by name pattern |
+
+**Screen & UI** (use sparingly — prefer Shell for automation)
+| Tool | When to use |
+|------|------------|
+| `mcp__pi-control__Snapshot` | Screenshot of the Pi display |
+| `mcp__pi-control__ObserveScreen` | Watch for display changes |
+| `mcp__pi-control__OCR` | Extract text from a screenshot region |
 
 ---
 
