@@ -11,29 +11,16 @@ responsibilities to this service.
 """
 from __future__ import annotations
 
-import json
 import logging
-import math
-import time
 from datetime import UTC, datetime
-from enum import Enum
-from pathlib import Path
-from typing import Any
+from enum import StrEnum
 
-from ..models import Position, SensorData
-from ..nav.geoutils import haversine_m
-from ..nav.localization_helpers import (
-    apply_antenna_offset,
-    heading_delta,
-    resolve_gps_cog_from_inputs,
-    wrap_heading,
-)
-from ..nav.path_planner import PathPlanner
+from ..models import Position
 
 logger = logging.getLogger(__name__)
 
 
-class PoseQuality(str, Enum):
+class PoseQuality(StrEnum):
     """Coarse pose quality classification visible in telemetry and Mission Planner.
 
     rtk_fixed      — RTK-fixed GPS, sub-centimetre horizontal accuracy.
