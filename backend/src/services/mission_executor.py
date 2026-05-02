@@ -73,3 +73,63 @@ class MissionExecutor:
         self.current_waypoint_index: int = 0
         self._active: bool = False
         self._failure_detail: str | None = None
+
+    # ------------------------------------------------------------------
+    # Position verification helpers (Task 4)
+    # ------------------------------------------------------------------
+
+    def _gps_fix_is_fresh(self) -> bool:
+        """Return True when the latest GPS fix is within the staleness window."""
+        last_fix = self._loc.last_gps_fix
+        if last_fix is None:
+            return False
+        return (datetime.now(UTC) - last_fix).total_seconds() <= self.max_waypoint_fix_age_seconds
+
+    def _position_is_verified(self) -> bool:
+        """Return True when position is trustworthy enough to advance a waypoint."""
+        position = self._loc.current_position
+        if position is None:
+            return False
+        if self._loc.dead_reckoning_active:
+            return False
+        if not self._gps_fix_is_fresh():
+            return False
+        accuracy = position.accuracy
+        if accuracy is None:
+            return False
+        return float(accuracy) <= self.max_waypoint_accuracy_m
+
+    # ------------------------------------------------------------------
+    # Stop delivery helper (Task 5)
+    # ------------------------------------------------------------------
+
+    async def _deliver_stop_command(
+        self,
+        *,
+        reason: str,
+        retries: int = 3,
+        initial_delay: float = 0.1,
+    ) -> bool:
+        """Best-effort bounded stop delivery used by hold and interruption paths."""
+        delay = max(0.0, initial_delay)
+        total_attempts = max(1, retries)
+        for attempt in range(1, total_attempts + 1):
+            try:
+                ok = await self._gw.dispatch_drive_speeds(0.0, 0.0)
+                if ok:
+                    return True
+            except Exception as exc:
+                logger.warning(
+                    "Failed to deliver %s stop command (attempt %d/%d): %s",
+                    reason,
+                    attempt,
+                    total_attempts,
+                    exc,
+                )
+            if attempt < total_attempts and delay > 0:
+                await asyncio.sleep(delay)
+                delay *= 2
+        logger.error(
+            "Unable to confirm %s stop command after %d attempts", reason, total_attempts
+        )
+        return False

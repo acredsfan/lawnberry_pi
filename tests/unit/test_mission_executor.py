@@ -78,3 +78,82 @@ def test_mission_executor_constructs():
     gw = FakeGateway()
     executor = MissionExecutor(localization=loc, gateway=gw)
     assert executor is not None
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Position verification helpers
+# ---------------------------------------------------------------------------
+
+def test_position_verified_when_gps_fresh_and_accurate():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=1.0),
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._position_is_verified() is True
+
+
+def test_position_not_verified_when_dead_reckoning():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=1.0),
+        dead_reckoning_active=True,
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._position_is_verified() is False
+
+
+def test_position_not_verified_when_accuracy_too_low():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=99.0),
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway(), max_waypoint_accuracy_m=5.0)
+    assert executor._position_is_verified() is False
+
+
+def test_position_not_verified_when_no_position():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    loc = FakeLocalization(position=None)
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._position_is_verified() is False
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Stop delivery helper
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_deliver_stop_succeeds_on_first_attempt():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    gw = FakeGateway()
+    executor = MissionExecutor(localization=FakeLocalization(), gateway=gw)
+    result = await executor._deliver_stop_command(reason="test")
+    assert result is True
+    assert (0.0, 0.0) in gw.drive_calls
+
+
+@pytest.mark.asyncio
+async def test_deliver_stop_returns_false_when_all_retries_fail():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    class FailingGateway(FakeGateway):
+        async def dispatch_drive_speeds(self, left: float, right: float) -> bool:
+            raise RuntimeError("hardware unavailable")
+
+    executor = MissionExecutor(
+        localization=FakeLocalization(),
+        gateway=FailingGateway(),
+    )
+    result = await executor._deliver_stop_command(reason="test", retries=2, initial_delay=0.0)
+    assert result is False
