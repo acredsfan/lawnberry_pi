@@ -157,3 +157,151 @@ async def test_deliver_stop_returns_false_when_all_retries_fail():
     )
     result = await executor._deliver_stop_command(reason="test", retries=2, initial_delay=0.0)
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Task 6: go_to_waypoint
+# ---------------------------------------------------------------------------
+
+def _make_mission(waypoints_dicts):
+    """Build a minimal Mission object for testing."""
+    from backend.src.models.mission import Mission, MissionWaypoint, MissionStatus, MissionLifecycleStatus
+
+    wps = [MissionWaypoint(**d) for d in waypoints_dicts]
+    mission = Mission(name="test", waypoints=wps, created_at=datetime.now(UTC).isoformat())
+    return mission
+
+
+def _make_status(mission, status=None):
+    from backend.src.models.mission import MissionStatus, MissionLifecycleStatus
+
+    if status is None:
+        status = MissionLifecycleStatus.RUNNING
+    return MissionStatus(
+        mission_id=mission.id,
+        status=status,
+        current_waypoint_index=0,
+        completion_percentage=0.0,
+        total_waypoints=len(mission.waypoints),
+    )
+
+
+class FakeMissionStatusReader:
+    def __init__(self, mission, status):
+        self.mission = mission
+        self._status = status
+        self.mission_statuses = {mission.id: status}
+        self.progress_calls = []
+
+    async def update_waypoint_progress(self, mission_id: str, waypoint_index: int) -> None:
+        self.progress_calls.append((mission_id, waypoint_index))
+
+
+@pytest.mark.asyncio
+async def test_go_to_waypoint_returns_true_when_already_at_target():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    # Position already within tolerance of target
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=0.5),
+        heading=0.0,
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    gw = FakeGateway()
+    executor = MissionExecutor(localization=loc, gateway=gw, waypoint_tolerance=1.0)
+
+    mission = _make_mission([{"lat": 1.0, "lon": 1.0, "blade_on": False, "speed": 50}])
+    status = _make_status(mission)
+    ms_reader = FakeMissionStatusReader(mission, status)
+
+    reached = await executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader)
+    assert reached is True
+
+
+@pytest.mark.asyncio
+async def test_go_to_waypoint_returns_false_when_mission_aborted():
+    from backend.src.services.mission_executor import MissionExecutor
+    from backend.src.models.mission import MissionLifecycleStatus
+
+    loc = FakeLocalization(
+        position=Position(latitude=0.0, longitude=0.0, accuracy=0.5),
+        heading=0.0,
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    gw = FakeGateway()
+    executor = MissionExecutor(localization=loc, gateway=gw)
+
+    mission = _make_mission([{"lat": 1.0, "lon": 1.0, "blade_on": False, "speed": 50}])
+    from backend.src.models.mission import MissionStatus
+    status = MissionStatus(
+        mission_id=mission.id,
+        status=MissionLifecycleStatus.ABORTED,
+        current_waypoint_index=0,
+        completion_percentage=0.0,
+        total_waypoints=1,
+    )
+    ms_reader = FakeMissionStatusReader(mission, status)
+
+    reached = await executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader)
+    assert reached is False
+
+
+@pytest.mark.asyncio
+async def test_go_to_waypoint_holds_when_paused():
+    from backend.src.services.mission_executor import MissionExecutor
+    from backend.src.models.mission import MissionLifecycleStatus, MissionStatus
+
+    loc = FakeLocalization(
+        position=Position(latitude=0.0, longitude=0.0, accuracy=0.5),
+        heading=0.0,
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    gw = FakeGateway()
+    executor = MissionExecutor(localization=loc, gateway=gw)
+
+    mission = _make_mission([{"lat": 1.0, "lon": 1.0, "blade_on": False, "speed": 50}])
+    status = MissionStatus(
+        mission_id=mission.id,
+        status=MissionLifecycleStatus.PAUSED,
+        current_waypoint_index=0,
+        completion_percentage=0.0,
+        total_waypoints=1,
+    )
+    ms_reader = FakeMissionStatusReader(mission, status)
+
+    task = asyncio.create_task(
+        executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader)
+    )
+    await asyncio.sleep(0.2)
+    # Still paused — should not have returned
+    assert not task.done()
+
+    # Resume it by switching to aborted and letting task finish
+    status.status = MissionLifecycleStatus.ABORTED
+    result = await asyncio.wait_for(task, timeout=1.0)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_go_to_waypoint_blocked_by_emergency():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    loc = FakeLocalization(
+        position=Position(latitude=0.0, longitude=0.0, accuracy=0.5),
+        heading=0.0,
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    gw = FakeGateway()
+    gw._emergency = True
+    executor = MissionExecutor(localization=loc, gateway=gw)
+
+    mission = _make_mission([{"lat": 1.0, "lon": 1.0, "blade_on": False, "speed": 50}])
+    status = _make_status(mission)
+    ms_reader = FakeMissionStatusReader(mission, status)
+
+    reached = await executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader)
+    assert reached is False
