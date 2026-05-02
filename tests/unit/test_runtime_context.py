@@ -156,3 +156,27 @@ def test_runtime_sensor_manager_reads_live_from_appstate():
         assert runtime.sensor_manager is sentinel_b
     finally:
         app_state.sensor_manager = original
+
+
+# --- LocalizationService in RuntimeContext ---
+
+
+def test_runtime_context_accepts_localization_field():
+    """RuntimeContext must accept a localization field without error."""
+    runtime = _make_runtime(localization=None)
+    assert runtime.localization is None
+
+
+def test_runtime_context_localization_can_be_set():
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(
+        imu_yaw_offset=0.0,
+        antenna_forward_m=0.0,
+        antenna_right_m=0.0,
+        max_fix_age_seconds=2.0,
+        max_accuracy_m=5.0,
+        alignment_file=None,
+    )
+    runtime = _make_runtime(localization=loc)
+    assert isinstance(runtime.localization, LocalizationService)
