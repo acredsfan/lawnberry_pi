@@ -8,7 +8,7 @@ Run with:
 """
 import pytest
 
-from backend.src.models import GpsReading, ImuReading, Position, SensorData
+from backend.src.models import GpsReading, ImuReading, SensorData
 from backend.src.services.navigation_service import NavigationService
 
 

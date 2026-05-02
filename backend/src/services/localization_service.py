@@ -217,6 +217,10 @@ class LocalizationService:
     def alignment_sample_count(self) -> int:
         return self._heading_alignment_sample_count
 
+    @property
+    def session_heading_alignment(self) -> float:
+        return self._session_heading_alignment
+
     # ── Mission lifecycle ────────────────────────────────────────────────────
 
     def reset_for_mission(self) -> None:

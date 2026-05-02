@@ -975,7 +975,7 @@ class NavigationService:
 
                 if self._use_localization():
                     done = self._localization.alignment_sample_count >= 1
-                    align_val = self._localization._session_heading_alignment
+                    align_val = self._localization.session_heading_alignment
                 else:
                     done = self._heading_alignment_sample_count >= 1
                     align_val = self._session_heading_alignment

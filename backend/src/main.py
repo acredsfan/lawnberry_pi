@@ -204,9 +204,8 @@ async def lifespan(app: FastAPI):
 
     # Construct LocalizationService when not running in legacy navigation mode.
     # USE_LEGACY_NAVIGATION=1 keeps NavigationService running its original code path.
-    import os as _os
     _localization_service = None
-    if _os.getenv("USE_LEGACY_NAVIGATION", "0") != "1":
+    if os.getenv("USE_LEGACY_NAVIGATION", "0") != "1":
         from backend.src.services.localization_service import (
             build_localization_service_from_config,
         )
