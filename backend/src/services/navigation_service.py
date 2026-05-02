@@ -155,15 +155,15 @@ class _NavStateLocalizationAdapter:
     without holding a reference to the full NavigationService.
     """
 
-    def __init__(self, nav_service: "NavigationService") -> None:
+    def __init__(self, nav_service: NavigationService) -> None:
         self._nav = nav_service
 
     @property
-    def current_position(self) -> "Position | None":
+    def current_position(self) -> Position | None:
         return self._nav.navigation_state.current_position
 
     @property
-    def heading(self) -> "float | None":
+    def heading(self) -> float | None:
         return self._nav.navigation_state.heading
 
     @property
@@ -171,14 +171,14 @@ class _NavStateLocalizationAdapter:
         return self._nav.navigation_state.dead_reckoning_active
 
     @property
-    def last_gps_fix(self) -> "datetime | None":
+    def last_gps_fix(self) -> datetime | None:
         return self._nav.navigation_state.last_gps_fix
 
 
 class _NavGatewayAdapter:
     """Adapts NavigationService drive/emergency interface to MissionExecutor's gateway protocol."""
 
-    def __init__(self, nav_service: "NavigationService") -> None:
+    def __init__(self, nav_service: NavigationService) -> None:
         self._nav = nav_service
 
     def is_emergency_active(self) -> bool:
