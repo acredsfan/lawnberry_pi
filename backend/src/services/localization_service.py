@@ -226,11 +226,11 @@ class LocalizationService:
     # the internal LocalizationState object directly.
 
     @property
-    def current_position(self) -> "Position | None":
+    def current_position(self) -> Position | None:
         return self.state.current_position
 
     @property
-    def heading(self) -> "float | None":
+    def heading(self) -> float | None:
         return self.state.heading
 
     @property
@@ -238,7 +238,7 @@ class LocalizationService:
         return self.state.dead_reckoning_active
 
     @property
-    def last_gps_fix(self) -> "datetime | None":
+    def last_gps_fix(self) -> datetime | None:
         return self.state.last_gps_fix
 
     # ── Mission lifecycle ────────────────────────────────────────────────────
