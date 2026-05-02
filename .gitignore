@@ -239,3 +239,8 @@ data/lawnberry.db-wal
 # Git worktrees (local development workspaces)
 # =============================================================
 .worktrees/
+
+# =============================================================
+# Local-only superpowers implementation plans
+# =============================================================
+docs/superpowers/plans/
