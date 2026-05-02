@@ -8,8 +8,6 @@ to enable independent unit testing of the mathematical core.
 """
 from __future__ import annotations
 
-import math
-
 from ..nav.geoutils import body_offset_to_north_east, offset_lat_lon
 
 
@@ -98,7 +96,9 @@ def resolve_gps_cog_from_inputs(
         receiver_speed: Speed from GPS receiver (m/s), or None.
         derived_cog: Bearing derived from sequential position deltas, or None.
         derived_speed: Speed derived from position deltas (m/s), or None.
-        speed_threshold: Minimum speed (m/s) required to accept a COG reading.
+        speed_threshold: Minimum speed (m/s) for accepting a receiver-reported
+            heading. Caller is responsible for ensuring ``derived_cog`` is
+            already threshold-qualified before passing it.
 
     Returns:
         (cog_degrees, speed_mps, source_label) where source is

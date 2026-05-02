@@ -99,7 +99,6 @@ def test_apply_antenna_offset_right_east_heading():
         forward_m=0.0, right_m=0.3, heading_deg=90.0,
     )
     # When heading east, right is south, so center is north of antenna
-    meters_per_deg_lon = 111_320.0 * __import__('math').cos(__import__('math').radians(40.0))
     # antenna_north = 0*cos(90) - 0.3*sin(90) = -0.3 → north offset applied negated → +0.3 north
     expected_lat = 40.0 + 0.3 / 111_320.0
     assert lat == pytest.approx(expected_lat, rel=1e-5)
