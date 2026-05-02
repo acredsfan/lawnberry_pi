@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from backend.src.core.runtime import RuntimeContext, get_runtime
