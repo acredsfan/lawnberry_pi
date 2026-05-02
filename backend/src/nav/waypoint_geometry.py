@@ -5,15 +5,13 @@ They can be imported and tested without constructing any service object.
 """
 from __future__ import annotations
 
-import math
-
 
 def heading_error(target: float, current: float) -> float:
     """Return the signed shortest heading delta from *current* to *target* (degrees).
 
     Positive = clockwise (right turn needed).
     Negative = counter-clockwise (left turn needed).
-    Result is in (-180, +180].
+    Result is in [-180, +180).
     """
     return (target - current + 180.0) % 360.0 - 180.0
 

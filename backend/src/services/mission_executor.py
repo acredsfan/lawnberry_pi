@@ -8,20 +8,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from ..models import NavigationMode, PathStatus, Position, Waypoint
+from ..models import Position
+from ..nav.path_planner import PathPlanner
 from ..nav.waypoint_geometry import (
     compute_blend_speeds,
     compute_tank_speeds,
     heading_error,
     is_in_tank_mode,
 )
-from ..nav.path_planner import PathPlanner
-from ..nav.geoutils import point_in_polygon
 
 if TYPE_CHECKING:
     from ..models.mission import Mission, MissionWaypoint
@@ -140,9 +138,9 @@ class MissionExecutor:
 
     async def go_to_waypoint(
         self,
-        mission: "Mission",
-        waypoint: "MissionWaypoint",
-        mission_service: "MissionStatusReader",
+        mission: Mission,
+        waypoint: MissionWaypoint,
+        mission_service: MissionStatusReader,
     ) -> bool:
         """Navigate to a single waypoint; block until arrival or interruption.
 
@@ -391,18 +389,17 @@ class MissionExecutor:
             # Control loop at 5 Hz
             await asyncio.sleep(0.2)
 
-        return False
-
     # ------------------------------------------------------------------
     # Mission orchestration loop (Task 7)
     # ------------------------------------------------------------------
 
     async def execute_mission(
         self,
-        mission: "Mission",
-        mission_service: "MissionStatusReader",
+        mission: Mission,
+        mission_service: MissionStatusReader,
         *,
-        on_bootstrap: "Any | None" = None,
+        on_bootstrap: Any | None = None,
+        on_waypoint_advance: Any | None = None,
     ) -> None:
         """Execute all waypoints in mission order.
 
@@ -412,6 +409,9 @@ class MissionExecutor:
             on_bootstrap: Optional async callable invoked once before the
                 waypoint loop (heading bootstrap hook). Signature: async () -> None.
                 Defaults to a no-op when None.
+            on_waypoint_advance: Optional callable invoked after each waypoint is
+                reached. Signature: (completed_index: int) -> None.
+                completed_index is the 0-based index of the waypoint just reached.
         """
         logger.info(
             "MissionExecutor: starting mission %s — %s", mission.id, mission.name
@@ -469,6 +469,8 @@ class MissionExecutor:
                         mission.id, self.current_waypoint_index
                     )
                     self.current_waypoint_index += 1
+                    if on_waypoint_advance is not None:
+                        on_waypoint_advance(self.current_waypoint_index - 1)
 
                 await asyncio.sleep(0.05)
 

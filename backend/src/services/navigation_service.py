@@ -171,7 +171,7 @@ class _NavStateLocalizationAdapter:
         return self._nav.navigation_state.dead_reckoning_active
 
     @property
-    def last_gps_fix(self):
+    def last_gps_fix(self) -> "datetime | None":
         return self._nav.navigation_state.last_gps_fix
 
 
@@ -381,11 +381,15 @@ class NavigationService:
         async def _bootstrap():
             await self._run_bootstrap_and_check_geofence()
 
+        def _on_waypoint_advance(completed_index: int) -> None:
+            self.navigation_state.current_waypoint_index = completed_index + 1
+
         try:
             await self._mission_executor.execute_mission(
                 mission,
                 mission_service,
                 on_bootstrap=_bootstrap,
+                on_waypoint_advance=_on_waypoint_advance,
             )
             # Sync terminal state back
             if self.navigation_state.navigation_mode == NavigationMode.AUTO:
