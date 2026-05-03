@@ -52,18 +52,17 @@ class BaseRepository(ABC):
                         "%s: applying migration v%d", self.__class__.__name__, version
                     )
                     conn.executescript(sql)
-                    conn.execute(
-                        "INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (version,)
-                    )
-                    conn.commit()
+                    # schema_version INSERT is embedded in each migration's SQL script
 
     @contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """Yield a sqlite3.Connection; serialises with a threading.Lock."""
-        conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
+        conn = None
         try:
+            conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
             with self._lock:
                 yield conn
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
