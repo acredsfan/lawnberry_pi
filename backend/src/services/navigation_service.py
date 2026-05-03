@@ -1613,6 +1613,7 @@ class NavigationService:
 
     async def get_navigation_status(self) -> dict[str, Any]:
         """Get current navigation status"""
+        pose = self._current_pose
         return {
             "mode": self.navigation_state.navigation_mode,
             "path_status": self.navigation_state.path_status,
@@ -1626,4 +1627,8 @@ class NavigationService:
             "obstacles_detected": len(self.navigation_state.obstacle_map),
             "dead_reckoning_active": self.navigation_state.dead_reckoning_active,
             "path_confidence": self.navigation_state.path_confidence,
+            "pose_quality": pose.quality.value if pose else None,
+            "pose_x_m": pose.x_m if pose else None,
+            "pose_y_m": pose.y_m if pose else None,
+            "pose_heading_deg": pose.heading_deg if pose else None,
         }
