@@ -27,6 +27,9 @@ from ..models import (
     Waypoint,
 )
 from ..nav.geoutils import body_offset_to_north_east, haversine_m, offset_lat_lon, point_in_polygon
+from ..fusion.ekf import PoseFilter
+from ..fusion.enu_frame import ENUFrame
+from ..fusion.pose2d import Pose2D, PoseQuality
 from ..nav.odometry import OdometryIntegrator
 from ..nav.path_planner import PathPlanner
 from .robohat_service import get_robohat_service
@@ -297,6 +300,12 @@ class NavigationService:
         self._odometry_integrator = OdometryIntegrator()
         self._last_dr_time_s: float = time.monotonic()
 
+        # EKF pose pipeline (Phase 4: Real Pose Pipeline)
+        self._pose_filter = PoseFilter()
+        self._enu_frame = ENUFrame()
+        self._current_pose: "Pose2D | None" = None
+        self._last_predict_ts: float = time.monotonic()
+
         from .mission_executor import MissionExecutor
 
         self._localization_adapter = _NavStateLocalizationAdapter(self)
@@ -373,6 +382,13 @@ class NavigationService:
         self.navigation_state.heading = None
         self.navigation_state.gps_cog = None
         self._save_alignment_to_disk("mission_start_reset")
+
+        # Reset ENU frame and pose filter for this mission
+        self._enu_frame = ENUFrame()  # will anchor on first GPS fix
+        self._pose_filter.reset()
+        self._odometry_integrator.reset_ticks()
+        self._last_dr_time_s = time.monotonic()
+        self._last_predict_ts = time.monotonic()
 
         # Propagate current_waypoint_index from mission status
         status = mission_service.mission_statuses.get(mission.id)
@@ -885,6 +901,11 @@ class NavigationService:
 
                 if imu_alignment_ready:
                     self._set_navigation_heading(adjusted_yaw)
+                    if hasattr(self, '_pose_filter'):
+                        self._pose_filter.update_imu_heading(
+                            adjusted_yaw,
+                            quality=getattr(sensor_data.imu, 'calibration_status', None) or "calibrated"
+                        )
                 elif gps_cog is not None:
                     self.navigation_state.heading = gps_cog
                 else:
@@ -1116,6 +1137,17 @@ class NavigationService:
                             exc_info=True,
                         )
 
+            # Anchor ENU frame on first GPS fix
+            if not self._enu_frame.is_anchored:
+                self._enu_frame.set_origin(gps_position.latitude, gps_position.longitude)
+                self._pose_filter.reset(x_m=0.0, y_m=0.0,
+                                        heading_deg=self.navigation_state.heading or 0.0)
+
+            x_m, y_m = self._enu_frame.to_local(gps_position.latitude, gps_position.longitude)
+            acc = float(gps_position.accuracy or 5.0)
+            self._pose_filter.update_gps(x_m, y_m, accuracy_m=acc)
+            self._current_pose = self._pose_filter.get_pose()
+
             # Update dead reckoning reference
             self.dead_reckoning.update_gps_reference(gps_position)
             self.navigation_state.dead_reckoning_active = False
@@ -1161,6 +1193,13 @@ class NavigationService:
                 distance_traveled, delta_heading_deg = self._odometry_integrator.step_velocity(
                     commanded_v, 0.0, dt_s
                 )
+
+            now_s_mono = time.monotonic()
+            dt_for_predict = now_s_mono - self._last_predict_ts
+            self._last_predict_ts = now_s_mono
+            self._pose_filter.predict(dt=dt_for_predict, distance_m=distance_traveled,
+                                      delta_heading_deg=delta_heading_deg)
+            self._current_pose = self._pose_filter.get_pose()
 
             dead_reckoning_pos = self.dead_reckoning.estimate_position(
                 self.navigation_state.heading, distance_traveled
@@ -1567,6 +1606,10 @@ class NavigationService:
                 best_dist = d
                 best = pt
         return best
+
+    def get_pose(self) -> "Pose2D | None":
+        """Return the current fused Pose2D. None until first GPS fix."""
+        return self._current_pose
 
     async def get_navigation_status(self) -> dict[str, Any]:
         """Get current navigation status"""
