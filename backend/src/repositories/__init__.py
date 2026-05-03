@@ -6,12 +6,14 @@ Tests construct repositories against tmp_path databases; no real data/
 directory is touched.
 """
 from .base import BaseRepository
+from .calibration_repository import CalibrationRepository
 from .map_repository import MapRepository
 from .mission_repository import MissionRepository
 from .settings_repository import SettingsRepository
 
 __all__ = [
     "BaseRepository",
+    "CalibrationRepository",
     "MapRepository",
     "MissionRepository",
     "SettingsRepository",
