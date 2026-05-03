@@ -138,9 +138,8 @@ class PoseFilter:
         self._x_m += distance_m * math.cos(heading_rad)
         self._y_m += distance_m * math.sin(heading_rad)
         self._heading_deg = (self._heading_deg + delta_heading_deg) % 360.0
-        if dt > 0:
-            self._v_mps = max(0.0, distance_m / dt)
-            self._omega_dps = delta_heading_deg / dt
+        self._v_mps = max(0.0, distance_m / dt)
+        self._omega_dps = delta_heading_deg / dt
 
         # Jacobian F (linearised motion model around current heading)
         heading_rad_u = heading_rad  # heading at start of step
@@ -197,10 +196,10 @@ class PoseFilter:
         """Apply IMU heading measurement.
 
         heading_deg is the adjusted compass heading (after yaw offset + session alignment).
-        quality == 'uncalibrated' triples measurement noise and returns False after applying
-        to signal degraded trust. Fully rejected only when quality == 'fault'.
+        quality == 'uncalibrated' triples measurement noise (9× R) to signal degraded trust
+        but still applies the update if within gate. Fully rejected only when quality == 'fault'.
 
-        Returns True if measurement was accepted.
+        Returns True if measurement was accepted (passed innovation gate), False if rejected.
         """
         if quality == "fault":
             return False
