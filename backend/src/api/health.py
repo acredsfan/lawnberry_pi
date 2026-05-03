@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from ..core.health import HealthService
 
@@ -51,10 +51,13 @@ def health_root() -> dict:
 
 
 @router.get("/health")
-def health_root_route() -> dict:
+def health_root_route(request: Request) -> dict:
     """Return aggregated health status for platform monitoring."""
 
-    return _with_compatibility_aliases(health_root())
+    report = _with_compatibility_aliases(health_root())
+    startup_report = getattr(request.app.state, "startup_config_report", None)
+    report["startup_config_report"] = startup_report
+    return report
 
 
 @router.get("/api/v2/health")

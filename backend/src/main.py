@@ -263,6 +263,19 @@ async def lifespan(app: FastAPI):
         type(app.state.runtime.robohat).__name__ if app.state.runtime.robohat else "none",
         _fw or "not_yet_received",
     )
+
+    # --- Startup config report (§5) ---
+    from backend.src.core.startup_report import build_startup_report as _build_report
+
+    _startup_report = _build_report(
+        hardware_path=loader.hardware_path,
+        limits_path=loader.limits_path,
+        hardware_local_path=loader.hardware_local_path or "",
+        calibration_path=_data_dir / "calibration.json",
+        secrets_keys=["ntrip_password", "google_api_key", "api_key"],
+    )
+    app.state.startup_config_report = _startup_report
+
     yield
     # Shutdown
     set_safety_event_handler(None)
