@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import math
 
-
 _METERS_PER_DEG_LAT: float = 111_320.0  # matches geoutils.py constant
 
 

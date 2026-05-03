@@ -1,8 +1,7 @@
 """Unit tests for Pose2D and PoseQuality."""
 from __future__ import annotations
 
-import pytest
-from backend.src.fusion.pose2d import Pose2D, PoseQuality, STALE_THRESHOLD_S
+from backend.src.fusion.pose2d import STALE_THRESHOLD_S, Pose2D, PoseQuality
 
 
 def test_default_quality_is_stale():
