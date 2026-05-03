@@ -85,3 +85,11 @@ def test_latency_stats(repo: TelemetryRepository) -> None:
     stats = repo.compute_latency_stats(component_id="power")
     assert stats["count"] == 2
     assert stats["avg_latency_ms"] == pytest.approx(1.0)
+
+
+def test_latency_stats_empty(repo: TelemetryRepository) -> None:
+    stats = repo.compute_latency_stats()
+    assert stats["count"] == 0
+    assert stats["avg_latency_ms"] is None
+    assert stats["min_latency_ms"] is None
+    assert stats["max_latency_ms"] is None
