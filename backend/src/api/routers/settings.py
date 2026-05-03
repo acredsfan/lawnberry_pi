@@ -172,8 +172,9 @@ def _compute_branding_checksum() -> str:
 def _sync_legacy_settings_to_sections(
     legacy_payload: dict[str, Any],
     maps_patch: dict[str, Any] | None = None,
+    request: Request | None = None,
 ) -> None:
-    sections = _load_ui_settings()
+    sections = _load_ui_settings(request)
     system = {**sections.get("system", {})}
     system_ui = {**system.get("ui", {})}
     maps = {**sections.get("maps", {})}
@@ -189,23 +190,29 @@ def _sync_legacy_settings_to_sections(
         maps.update(maps_patch)
     sections["system"] = SystemSectionResponse.model_validate(system).model_dump()
     sections["maps"] = _normalize_maps_section({**sections.get("maps", {}), **maps})
-    _save_ui_settings(sections)
+    _save_ui_settings(sections, request)
 
 
-def _profile_payload() -> dict[str, Any]:
+def _profile_payload(request: Request | None = None) -> dict[str, Any]:
     service_profile = _settings_service().load_profile()
-    legacy = _load_legacy_settings()
-    sections = _load_ui_settings()
+    legacy = _load_legacy_settings(request)
+    sections = _load_ui_settings(request)
     system_section = sections.get("system", {}) if isinstance(sections, dict) else {}
     system_ui = system_section.get("ui", {}) if isinstance(system_section, dict) else {}
     stored: dict[str, Any] = {}
-    try:
-        if SETTINGS_FILE.exists():
-            raw = json.loads(SETTINGS_FILE.read_text())
-            if isinstance(raw, dict):
-                stored = raw
-    except Exception as exc:
-        logger.warning("Failed to load settings profile payload: %s", exc)
+    repo = _get_settings_repository(request)
+    if repo is not None:
+        repo_data = repo.load()
+        if isinstance(repo_data, dict):
+            stored = repo_data
+    else:
+        try:
+            if SETTINGS_FILE.exists():
+                raw = json.loads(SETTINGS_FILE.read_text())
+                if isinstance(raw, dict):
+                    stored = raw
+        except Exception as exc:
+            logger.warning("Failed to load settings profile payload: %s", exc)
 
     unit_system = _normalize_unit_system(
         system_ui.get("unit_system")
@@ -247,7 +254,13 @@ def _profile_payload() -> dict[str, Any]:
     return payload
 
 
-def _save_profile_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _save_profile_payload(
+    payload: dict[str, Any], request: Request | None = None
+) -> dict[str, Any]:
+    repo = _get_settings_repository(request)
+    if repo is not None:
+        repo.save(payload)
+        return payload
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         SETTINGS_FILE.write_text(json.dumps(payload, indent=2, sort_keys=True))
@@ -258,7 +271,9 @@ def _save_profile_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sync_profile_update(
-    settings: dict[str, Any], current_payload: dict[str, Any]
+    settings: dict[str, Any],
+    current_payload: dict[str, Any],
+    request: Request | None = None,
 ) -> dict[str, Any]:
     current_version = str(current_payload.get("profile_version") or "1.0.0")
     requested_version = str(settings.get("profile_version") or current_version)
@@ -326,9 +341,9 @@ def _sync_profile_update(
         if key in settings
     }
     if legacy_patch:
-        legacy_payload = _save_legacy_settings(legacy_patch)
+        legacy_payload = _save_legacy_settings(legacy_patch, request)
     else:
-        legacy_payload = _load_legacy_settings()
+        legacy_payload = _load_legacy_settings(request)
     maps_patch = {
         key: settings[key]
         for key in (
@@ -343,21 +358,59 @@ def _sync_profile_update(
     mission_planner = settings.get("mission_planner")
     if isinstance(mission_planner, dict):
         maps_patch["mission_planner"] = mission_planner
-    _sync_legacy_settings_to_sections(legacy_payload, maps_patch=maps_patch)
+    _sync_legacy_settings_to_sections(legacy_payload, maps_patch=maps_patch, request=request)
 
-    updated_payload = _profile_payload()
+    updated_payload = _profile_payload(request)
     updated_payload["profile_version"] = requested_version
     updated_payload["branding_checksum"] = normalized_checksum
     updated_payload["simulation_mode"] = bool(
         settings.get("simulation_mode", updated_payload.get("simulation_mode"))
     )
     updated_payload["updated_at"] = datetime.now(UTC).isoformat()
-    _save_profile_payload(updated_payload)
+    _save_profile_payload(updated_payload, request)
     return {"payload": updated_payload}
 
 
-def _load_legacy_settings() -> dict[str, Any]:
+def _get_settings_repository(request: Request | None) -> Any | None:
+    """Return the SettingsRepository from the runtime context, or None."""
+    if request is None:
+        return None
+    try:
+        from ...core.runtime import get_runtime
+
+        runtime = get_runtime(request)
+        return getattr(runtime, "settings_repository", None)
+    except Exception:
+        return None
+
+
+def _load_legacy_settings(request: Request | None = None) -> dict[str, Any]:
     defaults = _default_legacy_settings()
+    repo = _get_settings_repository(request)
+    if repo is not None:
+        stored = repo.load()
+        if stored is not None:
+            merged = {**defaults, **stored}
+            merged["units"] = _normalize_unit_system(
+                merged.get("unit_system") or merged.get("units"),
+                default=defaults["units"],
+            )
+            map_provider = (
+                str(merged.get("map_provider") or defaults["map_provider"]).strip().lower()
+            )
+            if map_provider == "openstreetmap":
+                map_provider = "osm"
+            merged["map_provider"] = map_provider
+            return {
+                "theme": str(merged.get("theme") or defaults["theme"]),
+                "units": merged["units"],
+                "language": str(merged.get("language") or defaults["language"]),
+                "notifications_enabled": bool(
+                    merged.get("notifications_enabled", defaults["notifications_enabled"])
+                ),
+                "map_provider": map_provider,
+            }
+        return defaults
     try:
         if SETTINGS_FILE.exists():
             data = json.loads(SETTINGS_FILE.read_text())
@@ -387,7 +440,26 @@ def _load_legacy_settings() -> dict[str, Any]:
     return defaults
 
 
-def _save_legacy_settings(data: dict[str, Any]) -> dict[str, Any]:
+def _save_legacy_settings(
+    data: dict[str, Any], request: Request | None = None
+) -> dict[str, Any]:
+    repo = _get_settings_repository(request)
+    if repo is not None:
+        merged = {**_load_legacy_settings(request), **data}
+        merged["units"] = _normalize_unit_system(merged.get("unit_system") or merged.get("units"))
+        map_provider = str(merged.get("map_provider") or "osm").strip().lower()
+        if map_provider == "openstreetmap":
+            map_provider = "osm"
+        merged["map_provider"] = map_provider
+        payload = {
+            "theme": str(merged.get("theme") or "dark"),
+            "units": merged["units"],
+            "language": str(merged.get("language") or "en"),
+            "notifications_enabled": bool(merged.get("notifications_enabled", True)),
+            "map_provider": map_provider,
+        }
+        repo.save(payload)
+        return payload
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         merged = {**_load_legacy_settings(), **data}
@@ -410,8 +482,17 @@ def _save_legacy_settings(data: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail="Failed to save settings") from exc
 
 
-def _load_ui_settings() -> dict[str, Any]:
+def _load_ui_settings(request: Request | None = None) -> dict[str, Any]:
     defaults = _default_sections()
+    repo = _get_settings_repository(request)
+    if repo is not None:
+        stored = repo.load_ui_settings()
+        if stored is not None:
+            merged = defaults | stored
+            for key in ("system", "security", "remote_access", "maps", "gps_policy"):
+                merged[key] = {**defaults.get(key, {}), **(stored.get(key, {}) or {})}
+            return merged
+        return defaults
     try:
         if UI_SETTINGS_FILE.exists():
             data = json.loads(UI_SETTINGS_FILE.read_text())
@@ -425,7 +506,14 @@ def _load_ui_settings() -> dict[str, Any]:
     return defaults
 
 
-def _save_ui_settings(data: dict[str, Any]) -> dict[str, Any]:
+def _save_ui_settings(
+    data: dict[str, Any], request: Request | None = None
+) -> dict[str, Any]:
+    repo = _get_settings_repository(request)
+    if repo is not None:
+        payload = {**data, "updated_at": datetime.now(UTC).isoformat()}
+        repo.save_ui_settings(payload)
+        return payload
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         payload = {**data, "updated_at": datetime.now(UTC).isoformat()}
@@ -683,18 +771,18 @@ def _settings_service() -> SettingsService:
 
 
 @router.get("/settings")
-async def get_settings():
+async def get_settings(request: Request):
     """Get canonical settings profile payload with compatibility fields."""
-    payload = _profile_payload()
-    _save_profile_payload(payload)
+    payload = _profile_payload(request)
+    _save_profile_payload(payload, request)
     return payload
 
 
 @router.put("/settings")
-async def update_settings(settings: dict[str, Any]):
+async def update_settings(settings: dict[str, Any], request: Request):
     """Update canonical settings profile, accepting legacy compatibility fields too."""
-    current_payload = _profile_payload()
-    profile_result = _sync_profile_update(settings, current_payload)
+    current_payload = _profile_payload(request)
+    profile_result = _sync_profile_update(settings, current_payload, request)
     if "error" in profile_result:
         return profile_result["error"]
     return profile_result["payload"]
@@ -702,7 +790,7 @@ async def update_settings(settings: dict[str, Any]):
 
 @router.get("/settings/system")
 async def get_system_settings(request: Request):
-    sections = _load_ui_settings()
+    sections = _load_ui_settings(request)
     payload = SystemSectionResponse.model_validate(sections.get("system", {})).model_dump()
     payload["ui"]["unit_system"] = payload.get("unit_system") or payload["ui"].get(
         "unit_system", "metric"
@@ -717,8 +805,8 @@ async def get_system_settings(request: Request):
 
 
 @router.put("/settings/system")
-async def update_system_settings(settings: dict[str, Any]):
-    sections = _load_ui_settings()
+async def update_system_settings(settings: dict[str, Any], request: Request):
+    sections = _load_ui_settings(request)
     current = {**sections.get("system", {})}
     merged = {**current, **settings}
     merged_ui = {**current.get("ui", {}), **(settings.get("ui") or {})}
@@ -736,8 +824,8 @@ async def update_system_settings(settings: dict[str, Any]):
     merged["ui"] = merged_ui
     validated = SystemSectionResponse.model_validate(merged).model_dump()
     sections["system"] = validated
-    _save_ui_settings(sections)
-    current_profile = _profile_payload()
+    _save_ui_settings(sections, request)
+    current_profile = _profile_payload(request)
     current_profile["system"] = {
         **current_profile.get("system", {}),
         "unit_system": unit_system,
@@ -745,22 +833,22 @@ async def update_system_settings(settings: dict[str, Any]):
     current_profile["units"] = unit_system
     current_profile["unit_system"] = unit_system
     current_profile["updated_at"] = datetime.now(UTC).isoformat()
-    _save_profile_payload(current_profile)
+    _save_profile_payload(current_profile, request)
     persistence.add_audit_log("settings.update", details={"scope": "system", "settings": settings})
     return validated
 
 
 @router.get("/settings/security")
-async def get_security_settings():
-    sections = _load_ui_settings()
+async def get_security_settings(request: Request):
+    sections = _load_ui_settings(request)
     return _security_section_payload(sections.get("security", {}))
 
 
 @router.put("/settings/security")
-async def update_security_settings(settings: dict[str, Any]):
+async def update_security_settings(settings: dict[str, Any], request: Request):
     global _security_last_modified
 
-    sections = _load_ui_settings()
+    sections = _load_ui_settings(request)
     current = {**sections.get("security", {})}
     merged = {**current, **settings}
     auth_level = _coerce_auth_level(
@@ -794,13 +882,13 @@ async def update_security_settings(settings: dict[str, Any]):
         "totp_digits": merged.get("totp_digits"),
         "google_client_id": merged.get("google_client_id"),
     }
-    _save_ui_settings(sections)
+    _save_ui_settings(sections, request)
     return _security_section_payload(sections["security"])
 
 
 @router.get("/settings/remote-access")
 async def get_remote_access_settings(request: Request):
-    sections = _load_ui_settings()
+    sections = _load_ui_settings(request)
     payload = _normalize_remote_section(sections.get("remote_access", {}))
     last_modified = datetime.fromisoformat(
         sections.get("updated_at", datetime.now(UTC).isoformat())
@@ -812,18 +900,18 @@ async def get_remote_access_settings(request: Request):
 
 
 @router.put("/settings/remote-access")
-async def update_remote_access_settings(settings: dict[str, Any]):
-    sections = _load_ui_settings()
+async def update_remote_access_settings(settings: dict[str, Any], request: Request):
+    sections = _load_ui_settings(request)
     current = {**sections.get("remote_access", {})}
     payload = _normalize_remote_section({**current, **settings})
     sections["remote_access"] = payload
-    _save_ui_settings(sections)
+    _save_ui_settings(sections, request)
     return payload
 
 
 @router.get("/settings/maps")
 async def get_maps_settings(request: Request):
-    sections = _load_ui_settings()
+    sections = _load_ui_settings(request)
     payload = _maps_response_payload(sections.get("maps", {}))
     last_modified = datetime.fromisoformat(
         sections.get("updated_at", datetime.now(UTC).isoformat())
@@ -835,18 +923,18 @@ async def get_maps_settings(request: Request):
 
 
 @router.put("/settings/maps")
-async def update_maps_settings(settings: dict[str, Any]):
-    sections = _load_ui_settings()
+async def update_maps_settings(settings: dict[str, Any], request: Request):
+    sections = _load_ui_settings(request)
     current = {**sections.get("maps", {})}
     payload = _normalize_maps_section({**current, **settings})
     sections["maps"] = payload
-    _save_ui_settings(sections)
+    _save_ui_settings(sections, request)
     return _maps_response_payload(payload)
 
 
 @router.get("/settings/gps-policy")
 async def get_gps_policy_settings(request: Request):
-    sections = _load_ui_settings()
+    sections = _load_ui_settings(request)
     payload = GpsPolicySectionResponse.model_validate(sections.get("gps_policy", {})).model_dump()
     last_modified = datetime.fromisoformat(
         sections.get("updated_at", datetime.now(UTC).isoformat())
@@ -858,12 +946,12 @@ async def get_gps_policy_settings(request: Request):
 
 
 @router.put("/settings/gps-policy")
-async def update_gps_policy_settings(settings: dict[str, Any]):
-    sections = _load_ui_settings()
+async def update_gps_policy_settings(settings: dict[str, Any], request: Request):
+    sections = _load_ui_settings(request)
     current = {**sections.get("gps_policy", {})}
     payload = GpsPolicySectionResponse.model_validate({**current, **settings}).model_dump()
     sections["gps_policy"] = payload
-    _save_ui_settings(sections)
+    _save_ui_settings(sections, request)
     return payload
 
 
