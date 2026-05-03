@@ -27,7 +27,7 @@ from ..models import (
     Waypoint,
 )
 from ..nav.geoutils import body_offset_to_north_east, haversine_m, offset_lat_lon, point_in_polygon
-from ..nav.odometry import OdometryIntegrator, WheelParams
+from ..nav.odometry import OdometryIntegrator
 from ..nav.path_planner import PathPlanner
 from .robohat_service import get_robohat_service
 from .traction_control_service import get_traction_control_service
