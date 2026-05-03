@@ -109,7 +109,11 @@ _zones_last_modified: datetime = datetime.now(timezone.utc)
 
 @router.get("/map/zones", response_model=list[Zone])
 def get_map_zones(request: Request):
-    data = [z.model_dump(mode="json") for z in _zones_store]
+    repo = getattr(getattr(request.app.state, "runtime", None), "map_repository", None)
+    if repo is not None:
+        data = repo.list_zones()
+    else:
+        data = [z.model_dump(mode="json") for z in _zones_store]
     body = json.dumps(data, sort_keys=True).encode()
     etag = hashlib.sha256(body).hexdigest()
     inm = request.headers.get("if-none-match")
@@ -134,12 +138,15 @@ def get_map_zones(request: Request):
 
 
 @router.post("/map/zones", response_model=list[Zone])
-def post_map_zones(zones: list[Zone]):
-    global _zones_store
-    _zones_store = zones
-    global _zones_last_modified
+def post_map_zones(zones: list[Zone], request: Request):
+    global _zones_store, _zones_last_modified
+    repo = getattr(getattr(request.app.state, "runtime", None), "map_repository", None)
+    if repo is not None:
+        repo.save_zones([z.model_dump(mode="json") for z in zones])
+    else:
+        _zones_store = zones
     _zones_last_modified = datetime.now(timezone.utc)
-    return _zones_store
+    return zones
 
 
 # --------------------- Map Locations ---------------------
