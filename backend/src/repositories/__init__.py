@@ -10,6 +10,7 @@ from .calibration_repository import CalibrationRepository
 from .map_repository import MapRepository
 from .mission_repository import MissionRepository
 from .settings_repository import SettingsRepository
+from .telemetry_repository import TelemetryRepository
 
 __all__ = [
     "BaseRepository",
@@ -17,4 +18,5 @@ __all__ = [
     "MapRepository",
     "MissionRepository",
     "SettingsRepository",
+    "TelemetryRepository",
 ]
