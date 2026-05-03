@@ -6,32 +6,11 @@ Tests construct repositories against tmp_path databases; no real data/
 directory is touched.
 """
 from .base import BaseRepository
-
-# Import repositories as they are implemented
-try:
-    from .calibration_repository import CalibrationRepository
-except ImportError:
-    CalibrationRepository = None  # type: ignore
-
-try:
-    from .map_repository import MapRepository
-except ImportError:
-    MapRepository = None  # type: ignore
-
-try:
-    from .mission_repository import MissionRepository
-except ImportError:
-    MissionRepository = None  # type: ignore
-
-try:
-    from .settings_repository import SettingsRepository
-except ImportError:
-    SettingsRepository = None  # type: ignore
-
-try:
-    from .telemetry_repository import TelemetryRepository
-except ImportError:
-    TelemetryRepository = None  # type: ignore
+from .calibration_repository import CalibrationRepository
+from .map_repository import MapRepository
+from .mission_repository import MissionRepository
+from .settings_repository import SettingsRepository
+from .telemetry_repository import TelemetryRepository
 
 __all__ = [
     "BaseRepository",
