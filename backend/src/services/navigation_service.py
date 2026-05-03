@@ -1030,6 +1030,7 @@ class NavigationService:
                     dead_reckoning_drift=self.navigation_state.dead_reckoning_drift,
                     last_gps_fix=self.navigation_state.last_gps_fix,
                     timestamp=self.navigation_state.timestamp,
+                    pose_quality=self._current_pose.quality.value if self._current_pose else None,
                 )
                 self._capture.record(
                     CaptureRecord(

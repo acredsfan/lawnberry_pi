@@ -39,6 +39,7 @@ class NavigationStateSnapshot(BaseModel):
     dead_reckoning_drift: float | None = None
     last_gps_fix: datetime | None = None
     timestamp: datetime | None = None
+    pose_quality: str | None = None  # PoseQuality string value; None for legacy records
 
     model_config = ConfigDict(use_enum_values=True)
 
