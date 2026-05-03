@@ -27,6 +27,7 @@ from ..models import (
     Waypoint,
 )
 from ..nav.geoutils import body_offset_to_north_east, haversine_m, offset_lat_lon, point_in_polygon
+from ..nav.odometry import OdometryIntegrator, WheelParams
 from ..nav.path_planner import PathPlanner
 from .robohat_service import get_robohat_service
 from .traction_control_service import get_traction_control_service
@@ -291,6 +292,10 @@ class NavigationService:
         # When not None and USE_LEGACY_NAVIGATION is not set, position/heading
         # state is owned by LocalizationService and mirrored here.
         self._localization: Any | None = None
+
+        # Odometry integrator for dead-reckoning distance/heading estimation.
+        self._odometry_integrator = OdometryIntegrator()
+        self._last_dr_time_s: float = time.monotonic()
 
         from .mission_executor import MissionExecutor
 
@@ -1120,8 +1125,42 @@ class NavigationService:
 
         # Fallback: Dead reckoning
         elif self.navigation_state.heading is not None:
-            # Estimate distance traveled since last update (placeholder)
-            distance_traveled = 0.1  # meters, would be calculated from wheel encoders
+            # Dead-reckoning fallback: use encoder ticks if available, otherwise
+            # commanded velocity × elapsed time. Never a fixed constant.
+            now_s = time.monotonic()
+            dt_s = now_s - self._last_dr_time_s
+            self._last_dr_time_s = now_s
+
+            # Try encoder ticks from RoboHAT status
+            distance_traveled = 0.0
+            delta_heading_deg = 0.0
+            encoder_used = False
+
+            try:
+                if os.getenv("SIM_MODE", "0") != "1":
+                    from .robohat_service import get_robohat_service as _rhs
+                    robohat = _rhs()
+                    if (
+                        robohat is not None
+                        and hasattr(robohat.status, "encoder_left_ticks")
+                        and hasattr(robohat.status, "encoder_right_ticks")
+                    ):
+                        dist, dh = self._odometry_integrator.step_ticks(
+                            int(robohat.status.encoder_left_ticks),
+                            int(robohat.status.encoder_right_ticks),
+                        )
+                        distance_traveled = dist
+                        delta_heading_deg = dh
+                        encoder_used = True
+            except Exception:
+                pass
+
+            if not encoder_used and dt_s > 0:
+                # Velocity fallback: use last commanded target_velocity
+                commanded_v = float(self.navigation_state.target_velocity or 0.0)
+                distance_traveled, delta_heading_deg = self._odometry_integrator.step_velocity(
+                    commanded_v, 0.0, dt_s
+                )
 
             dead_reckoning_pos = self.dead_reckoning.estimate_position(
                 self.navigation_state.heading, distance_traveled
