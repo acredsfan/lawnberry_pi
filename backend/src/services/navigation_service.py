@@ -200,12 +200,16 @@ class _NavGatewayAdapter:
 class NavigationService:
     """Main navigation service with sensor fusion and path planning"""
 
-    def __init__(self, weather=None):
+    def __init__(self, weather=None, calibration_repository=None):
         self.navigation_state = NavigationState()
         self.path_planner = PathPlanner()
         self.dead_reckoning = DeadReckoningSystem()
         # Optional weather service with get_current() and get_planning_advice()
         self.weather = weather
+        # Optional CalibrationRepository for IMU alignment persistence.
+        # When set, _load_alignment_from_disk and _save_alignment_to_disk delegate
+        # to the repository instead of reading/writing data/imu_alignment.json directly.
+        self._calibration_repo = calibration_repository
 
         # Navigation parameters
         self.max_speed = 0.8  # m/s
@@ -324,9 +328,11 @@ class NavigationService:
     _instance: NavigationService | None = None
 
     @classmethod
-    def get_instance(cls, weather=None) -> NavigationService:
+    def get_instance(cls, weather=None, calibration_repository=None) -> NavigationService:
         if cls._instance is None:
-            cls._instance = NavigationService(weather=weather)
+            cls._instance = NavigationService(
+                weather=weather, calibration_repository=calibration_repository
+            )
         return cls._instance
 
     def attach_capture(self, capture) -> None:
@@ -335,6 +341,17 @@ class NavigationService:
         See backend/src/diagnostics/capture.py. Pass None to detach.
         """
         self._capture = capture
+
+    def attach_calibration_repository(self, calibration_repository) -> None:
+        """Late-inject a CalibrationRepository and reload IMU alignment from it.
+
+        Called during lifespan startup after the repository is constructed.
+        Re-runs _load_alignment_from_disk so the alignment is sourced from the
+        repository rather than the legacy flat-file path.
+        """
+        self._calibration_repo = calibration_repository
+        self._load_alignment_from_disk()
+        logger.info("CalibrationRepository attached; IMU alignment reloaded via repository")
 
     def attach_localization(self, localization_service: Any) -> None:
         """Attach a LocalizationService for facade delegation.
@@ -1408,7 +1425,21 @@ class NavigationService:
 
         Called once during __init__.  A missing or corrupt file is silently ignored
         and the alignment starts at 0.0 (boot-time default).
+
+        When a CalibrationRepository is injected, delegates to it instead of
+        reading the file directly.
         """
+        if self._calibration_repo is not None:
+            data = self._calibration_repo.load_imu_alignment()
+            self._session_heading_alignment = float(data.get("session_heading_alignment", 0.0)) % 360.0
+            self._heading_alignment_sample_count = int(data.get("sample_count", 0))
+            logger.info(
+                "IMU alignment loaded via CalibrationRepository: %.1f° (source=%s, samples=%d)",
+                self._session_heading_alignment,
+                data.get("source", "unknown"),
+                self._heading_alignment_sample_count,
+            )
+            return
         try:
             if not self._ALIGNMENT_FILE.exists():
                 return
@@ -1433,7 +1464,17 @@ class NavigationService:
 
         Uses an atomic write (write to tmp then rename) to avoid partial files.
         Silently swallows errors so a filesystem issue never crashes navigation.
+
+        When a CalibrationRepository is injected, delegates to it instead of
+        writing the file directly.
         """
+        if self._calibration_repo is not None:
+            self._calibration_repo.save_imu_alignment(
+                heading_deg=self._session_heading_alignment,
+                sample_count=self._heading_alignment_sample_count,
+                source=source,
+            )
+            return
         try:
             payload = {
                 "session_heading_alignment": round(self._session_heading_alignment, 3),
