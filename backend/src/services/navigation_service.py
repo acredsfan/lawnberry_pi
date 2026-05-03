@@ -901,11 +901,10 @@ class NavigationService:
 
                 if imu_alignment_ready:
                     self._set_navigation_heading(adjusted_yaw)
-                    if hasattr(self, '_pose_filter'):
-                        self._pose_filter.update_imu_heading(
-                            adjusted_yaw,
-                            quality=getattr(sensor_data.imu, 'calibration_status', None) or "calibrated"
-                        )
+                    self._pose_filter.update_imu_heading(
+                        adjusted_yaw,
+                        quality=getattr(sensor_data.imu, 'calibration_status', None) or "calibrated"
+                    )
                 elif gps_cog is not None:
                     self.navigation_state.heading = gps_cog
                 else:
