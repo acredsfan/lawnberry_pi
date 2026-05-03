@@ -7,8 +7,10 @@ directory is touched.
 """
 from .base import BaseRepository
 from .map_repository import MapRepository
+from .mission_repository import MissionRepository
 
 __all__ = [
     "BaseRepository",
     "MapRepository",
+    "MissionRepository",
 ]
