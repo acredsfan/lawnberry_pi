@@ -19,7 +19,17 @@ def clean_settings_file(tmp_path, monkeypatch):
     # instead of the real config/default.json (config_dir default is ./config)
     from backend.src.services.settings_service import SettingsService
     monkeypatch.setattr(settings_router, "_settings_service", lambda: SettingsService(config_dir=tmp_path))
+    # Disable settings_repository so the router falls back to file-based I/O.
+    # Required when tests run after test_health_api_endpoints.py which wires a
+    # real repo into app.state.runtime; without this, monkeypatching SETTINGS_FILE
+    # has no effect because the router delegates to the repo first.
+    runtime = getattr(app.state, "runtime", None)
+    if runtime is not None:
+        original_repo = getattr(runtime, "settings_repository", None)
+        runtime.settings_repository = None
     yield
+    if runtime is not None:
+        runtime.settings_repository = original_repo
     for path in (settings_file, ui_settings_file):
         if os.path.exists(path):
             os.remove(path)

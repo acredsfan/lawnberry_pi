@@ -41,7 +41,6 @@ class TelemetryRepository(BaseRepository):
             );
             CREATE INDEX IF NOT EXISTS idx_tel_ts ON hardware_telemetry_streams(timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_tel_comp ON hardware_telemetry_streams(component_id);
-            INSERT OR REPLACE INTO schema_version (version) VALUES (1);
             """,
         ),
     ]

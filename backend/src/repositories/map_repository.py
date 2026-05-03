@@ -37,7 +37,6 @@ class MapRepository(BaseRepository):
                 config_json TEXT NOT NULL,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
-            INSERT OR REPLACE INTO schema_version (version) VALUES (1);
             """,
         ),
     ]

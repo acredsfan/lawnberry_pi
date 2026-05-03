@@ -36,15 +36,21 @@ class BaseRepository(ABC):
         """Ordered list of (schema_version, sql_script) to apply in sequence."""
 
     def _apply_migrations(self) -> None:
-        """Create schema_version table if absent; apply pending migrations."""
+        """Create per-repo schema_version table if absent; apply pending migrations.
+
+        Each subclass gets its own schema_version_<classname> table so multiple
+        repositories sharing the same SQLite file do not collide on version numbers.
+        Migration DDL uses IF NOT EXISTS, so re-runs on crash recovery are safe.
+        """
+        ver_table = f"_schema_ver_{type(self).__name__.lower()}"
         with self._get_connection() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
-                "CREATE TABLE IF NOT EXISTS schema_version "
+                f"CREATE TABLE IF NOT EXISTS {ver_table} "
                 "(version INTEGER PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)"
             )
             conn.commit()
-            cursor = conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version")
+            cursor = conn.execute(f"SELECT COALESCE(MAX(version), 0) FROM {ver_table}")
             current: int = cursor.fetchone()[0]
             for version, sql in self._migrations:
                 if version > current:
@@ -52,7 +58,10 @@ class BaseRepository(ABC):
                         "%s: applying migration v%d", self.__class__.__name__, version
                     )
                     conn.executescript(sql)
-                    # schema_version INSERT is embedded in each migration's SQL script
+                    conn.execute(
+                        f"INSERT OR REPLACE INTO {ver_table} (version) VALUES (?)", (version,)
+                    )
+                    conn.commit()
 
     @contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:

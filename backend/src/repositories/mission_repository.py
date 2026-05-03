@@ -45,7 +45,6 @@ class MissionRepository(BaseRepository):
             );
             CREATE INDEX IF NOT EXISTS idx_mission_execution_status
                 ON mission_execution_state(status);
-            INSERT OR REPLACE INTO schema_version (version) VALUES (1);
             """,
         ),
     ]

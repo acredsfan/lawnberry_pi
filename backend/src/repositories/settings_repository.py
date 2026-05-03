@@ -37,7 +37,6 @@ class SettingsRepository(BaseRepository):
                 settings_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            INSERT OR REPLACE INTO schema_version (version) VALUES (1);
             """,
         ),
     ]
