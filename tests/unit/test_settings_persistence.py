@@ -15,6 +15,10 @@ def clean_settings_file(tmp_path, monkeypatch):
     monkeypatch.setattr(settings_router, "DATA_DIR", Path(tmp_path))
     monkeypatch.setattr(settings_router, "SETTINGS_FILE", settings_file)
     monkeypatch.setattr(settings_router, "UI_SETTINGS_FILE", ui_settings_file)
+    # Also redirect SettingsService.save_profile so it writes to tmp_path
+    # instead of the real config/default.json (config_dir default is ./config)
+    from backend.src.services.settings_service import SettingsService
+    monkeypatch.setattr(settings_router, "_settings_service", lambda: SettingsService(config_dir=tmp_path))
     yield
     for path in (settings_file, ui_settings_file):
         if os.path.exists(path):

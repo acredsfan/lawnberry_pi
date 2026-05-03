@@ -3,9 +3,17 @@
 import httpx
 import pytest
 
+import backend.src.api.routers.settings as _settings_module
 from backend.src.main import app
+from backend.src.services.settings_service import SettingsService
 
 BASE_URL = "http://test"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_settings_dir(tmp_path, monkeypatch):
+    """Redirect SettingsService to tmp_path so tests never write config/default.json."""
+    monkeypatch.setattr(_settings_module, "_settings_service", lambda: SettingsService(config_dir=tmp_path))
 
 
 def _bump_patch(version: str) -> str:
