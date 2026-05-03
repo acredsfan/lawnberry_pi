@@ -27,6 +27,7 @@ from ..nav.localization_helpers import (
     resolve_gps_cog_from_inputs,
     wrap_heading,
 )
+from ..nav.odometry import OdometryIntegrator
 from ..nav.path_planner import PathPlanner
 
 logger = logging.getLogger(__name__)
@@ -188,6 +189,8 @@ class LocalizationService:
 
         # Dead reckoning fallback
         self._dead_reckoning = _DeadReckoningState()
+        self._odometry_integrator = OdometryIntegrator()
+        self._last_dr_time_s: float = time.monotonic()
 
         # Public mutable pose state
         self.state = LocalizationState()
@@ -253,6 +256,8 @@ class LocalizationService:
         self._last_gps_track_time = None
         self.state.heading = None
         self.state.gps_cog = None
+        self._odometry_integrator.reset_ticks()
+        self._last_dr_time_s = time.monotonic()
         if self._alignment_file is not None:
             self.save_alignment(source="mission_start_reset")
 
@@ -491,16 +496,16 @@ class LocalizationService:
             self.state.last_gps_fix = datetime.now(UTC)
             return gps_position
 
-        # Fallback: dead reckoning.
-        # NOTE: distance_traveled is a placeholder (0.1 m/tick) until encoder odometry is wired.
-        # The _DeadReckoningState.estimate() always offsets from last_gps_position rather than
-        # accumulating from estimated_position, so reported position stays ~0.1 m from the
-        # last fix regardless of elapsed time. drift_estimate DOES grow with time, causing a
-        # known inconsistency between reported position and drift. This is acceptable until
-        # encoder odometry replaces this path.
+        # Fallback: dead reckoning using velocity integration (never a fixed constant).
         heading = self.state.heading
         if heading is not None:
-            distance_traveled = 0.1
+            now_s = time.monotonic()
+            dt_s = now_s - self._last_dr_time_s
+            self._last_dr_time_s = now_s
+            commanded_v = float(getattr(self.state, 'target_velocity', None) or 0.0)
+            distance_traveled, _ = self._odometry_integrator.step_velocity(
+                commanded_v, 0.0, dt_s
+            )
             dr_pos = self._dead_reckoning.estimate(float(heading), distance_traveled)
             if dr_pos is not None:
                 self.state.dead_reckoning_active = True
