@@ -68,9 +68,11 @@ class MissionService:
         self,
         navigation_service: NavigationService | None = None,
         websocket_hub: WebSocketHub | None = None,
+        mission_repository=None,
     ):
         self.nav_service = navigation_service  # type: ignore[assignment]
         self._websocket_hub = websocket_hub
+        self._mission_repo = mission_repository
         self.missions: dict[str, Mission] = {}
         self.mission_statuses: dict[str, MissionStatus] = {}
         self.mission_tasks: dict[str, asyncio.Task] = {}
@@ -83,6 +85,16 @@ class MissionService:
         return max(0, min(int(current_waypoint_index), len(mission.waypoints) - 1))
 
     def _persist_mission(self, mission: Mission) -> None:
+        if self._mission_repo is not None:
+            self._mission_repo.save_mission(
+                {
+                    "id": mission.id,
+                    "name": mission.name,
+                    "waypoints": [waypoint.model_dump() for waypoint in mission.waypoints],
+                    "created_at": mission.created_at,
+                }
+            )
+            return
         with persistence.get_connection() as conn:
             conn.execute(
                 """
@@ -109,6 +121,18 @@ class MissionService:
         status.total_waypoints = len(mission.waypoints)
         status.completion_percentage = self._calculate_completion_percentage(mission, clamped_index)
 
+        if self._mission_repo is not None:
+            self._mission_repo.save_execution_state(
+                {
+                    "mission_id": mission_id,
+                    "status": status.status.value if hasattr(status.status, "value") else status.status,
+                    "current_waypoint_index": clamped_index,
+                    "completion_percentage": status.completion_percentage,
+                    "total_waypoints": status.total_waypoints,
+                    "detail": status.detail,
+                }
+            )
+            return
         with persistence.get_connection() as conn:
             conn.execute(
                 """
@@ -197,6 +221,24 @@ class MissionService:
 
     def _load_state_from_db(self) -> tuple[list[dict], list[dict]]:
         """Load all persisted missions and execution states. Runs in executor thread."""
+        if self._mission_repo is not None:
+            raw_missions = self._mission_repo.list_missions()
+            # Convert repo format (waypoints list) back to the format expected by recover_persisted_missions
+            mission_rows = [
+                {
+                    "id": m["id"],
+                    "name": m["name"],
+                    "waypoints_json": json.dumps(m.get("waypoints", [])),
+                    "created_at": m["created_at"],
+                }
+                for m in raw_missions
+            ]
+            state_rows = []
+            for m in raw_missions:
+                state = self._mission_repo.get_execution_state(m["id"])
+                if state is not None:
+                    state_rows.append(state)
+            return mission_rows, state_rows
         with persistence.get_connection() as conn:
             mission_rows = [
                 dict(r)
@@ -223,6 +265,9 @@ class MissionService:
 
     def _prune_old_terminal_missions(self, retention_days: int = 30) -> None:
         """Delete terminal missions older than retention_days to cap DB growth."""
+        if self._mission_repo is not None:
+            self._mission_repo.prune_terminal_missions(retention_days=retention_days)
+            return
         with persistence.get_connection() as conn:
             conn.execute(
                 """
@@ -705,15 +750,20 @@ _mission_service_instance: MissionService | None = None
 def get_mission_service(
     nav_service: NavigationService = Depends(NavigationService.get_instance),
     websocket_hub: WebSocketHub | None = None,
+    mission_repository=None,
 ) -> MissionService:
     global _mission_service_instance
     if _mission_service_instance is None:
         _mission_service_instance = MissionService(
             navigation_service=nav_service,
             websocket_hub=websocket_hub,
+            mission_repository=mission_repository,
         )
-    elif websocket_hub is not None and _mission_service_instance._websocket_hub is None:
-        # Allow the hub to be injected after first construction (lifespan priming)
-        _mission_service_instance._websocket_hub = websocket_hub
-    # else: singleton already has a hub; new hub is ignored
+    else:
+        if websocket_hub is not None and _mission_service_instance._websocket_hub is None:
+            # Allow the hub to be injected after first construction (lifespan priming)
+            _mission_service_instance._websocket_hub = websocket_hub
+        if mission_repository is not None and _mission_service_instance._mission_repo is None:
+            # Allow the repository to be injected after first construction (lifespan priming)
+            _mission_service_instance._mission_repo = mission_repository
     return _mission_service_instance
