@@ -5,7 +5,18 @@ from ..core.health import HealthService
 router = APIRouter()
 
 
-health_service = HealthService()
+def _robohat_health_provider() -> dict | None:
+    try:
+        from ..services.robohat_service import get_robohat_service
+        svc = get_robohat_service()
+        if svc is None:
+            return None
+        return svc.get_status().to_dict()
+    except Exception:
+        return None
+
+
+health_service = HealthService(robohat_provider=_robohat_health_provider)
 
 
 def _with_compatibility_aliases(report: dict) -> dict:

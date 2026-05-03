@@ -1,6 +1,7 @@
 """Unit tests for MotorCommandGateway — Phase A: emergency lifecycle."""
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 
 def _make_gw():
@@ -129,7 +130,9 @@ async def test_dispatch_drive_legacy_queued_when_no_hardware():
 @pytest.mark.asyncio
 async def test_dispatch_blade_blocked_while_emergency_active():
     from backend.src.control.commands import (
-        BladeCommand, CommandStatus, EmergencyTrigger,
+        BladeCommand,
+        CommandStatus,
+        EmergencyTrigger,
     )
 
     gw, _, _ = _make_gw()
@@ -208,3 +211,67 @@ async def test_dispatch_drive_blocked_firmware_incompatible():
         DriveCommand(left=0.3, right=0.3, source="manual", duration_ms=200)
     )
     assert outcome.status == CommandStatus.FIRMWARE_INCOMPATIBLE
+
+
+@pytest.mark.asyncio
+async def test_dispatch_blade_blocked_firmware_unknown():
+    """dispatch_blade must also enforce firmware preflight."""
+    from backend.src.control.commands import BladeCommand, CommandStatus
+
+    gw, _, _ = _make_gw()
+    gw._robohat = MagicMock(
+        status=MagicMock(serial_connected=True, firmware_version=None)
+    )
+    outcome = await gw.dispatch_blade(
+        BladeCommand(active=True, source="manual")
+    )
+    assert outcome.status == CommandStatus.FIRMWARE_UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_dispatch_drive_allowed_with_supported_firmware():
+    """Gateway must not block dispatch when firmware version is in SUPPORTED_FIRMWARE_VERSIONS."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from backend.src.control.command_gateway import SUPPORTED_FIRMWARE_VERSIONS
+    from backend.src.control.commands import CommandStatus, DriveCommand
+
+    gw, _, _ = _make_gw()
+    good_version = next(iter(SUPPORTED_FIRMWARE_VERSIONS))
+    mock_robohat = MagicMock()
+    mock_robohat.status.serial_connected = True
+    mock_robohat.status.firmware_version = good_version
+    mock_robohat.send_motor_command = AsyncMock(return_value=True)
+    gw._robohat = mock_robohat
+
+    outcome = await gw.dispatch_drive(
+        DriveCommand(left=0.3, right=0.3, source="manual", duration_ms=200)
+    )
+    assert outcome.status not in (
+        CommandStatus.FIRMWARE_UNKNOWN,
+        CommandStatus.FIRMWARE_INCOMPATIBLE,
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_drive_ack_timeout_returns_ack_failed():
+    """Simulated ack timeout: send_motor_command returns False -> ACK_FAILED outcome."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from backend.src.control.command_gateway import SUPPORTED_FIRMWARE_VERSIONS
+    from backend.src.control.commands import CommandStatus, DriveCommand
+
+    gw, _, _ = _make_gw()
+    good_version = next(iter(SUPPORTED_FIRMWARE_VERSIONS))
+    mock_robohat = MagicMock()
+    mock_robohat.status.serial_connected = True
+    mock_robohat.status.firmware_version = good_version
+    mock_robohat.status.last_error = "pwm_ack_timeout"
+    mock_robohat.send_motor_command = AsyncMock(return_value=False)
+    gw._robohat = mock_robohat
+
+    outcome = await gw.dispatch_drive(
+        DriveCommand(left=0.3, right=0.3, source="manual", duration_ms=200)
+    )
+    assert outcome.status == CommandStatus.ACK_FAILED
+    assert outcome.watchdog_latency_ms is not None

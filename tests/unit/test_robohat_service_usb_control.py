@@ -616,8 +616,6 @@ async def test_estop_pending_set_when_serial_disconnected():
 @pytest.mark.asyncio
 async def test_estop_pending_sends_neutral_on_reconnect():
     """On serial reconnect, if _estop_pending, neutral PWM sent before any other command."""
-    from unittest.mock import AsyncMock
-
     svc = RoboHATService.__new__(RoboHATService)
     svc._estop_pending = True
     sent_lines = []
@@ -641,8 +639,6 @@ async def test_estop_pending_sends_neutral_on_reconnect():
 @pytest.mark.asyncio
 async def test_reconnect_resets_last_pwm_cache():
     """Verify _send_safe_state_on_reconnect resets _last_pwm to neutral (Issue #1)."""
-    from unittest.mock import AsyncMock
-    
     svc = RoboHATService.__new__(RoboHATService)
     svc.status = types.SimpleNamespace(serial_connected=False)
     sent_lines = []
@@ -760,3 +756,57 @@ async def test_estop_queued_when_usb_control_timeout():
     assert svc._estop_pending is True, "E-stop should be queued for retry"
     assert svc._last_pwm == (1500, 1500), "PWM cache should reset to neutral"
     assert svc.status.motor_controller_ok is False
+
+
+# ---- Firmware version parsing ----
+
+def test_process_line_parses_semver_from_banner():
+    """_process_line must extract clean semver from a firmware banner line."""
+    import asyncio
+
+    from backend.src.services.robohat_service import RoboHATService, RoboHATStatus
+
+    svc = RoboHATService.__new__(RoboHATService)
+    svc.status = RoboHATStatus()
+    svc._rc_enabled = True
+    svc._pending_rc_state = None
+    svc._pending_rc_since = 0.0
+    svc._usb_control_requested = False
+    svc._last_status_at = 0.0
+    svc._pwm_ack_count = 0
+    svc._pwm_ack_event = asyncio.Event()
+    svc._encoder_enabled = True
+
+    for banner, expected in [
+        ("▶ LawnBerry RoboHAT firmware v1.2.3", "1.2.3"),
+        ("▶ firmware:1.0.0 ready", "1.0.0"),
+        ("▶ v1.1.0", "1.1.0"),
+        ("▶ RoboHAT 1.3.0", "1.3.0"),
+    ]:
+        svc.status.firmware_version = None
+        svc._process_line(banner)
+        assert svc.status.firmware_version == expected, (
+            f"Banner {banner!r} -> expected {expected!r}, got {svc.status.firmware_version!r}"
+        )
+
+
+def test_process_line_keeps_none_when_no_version_in_banner():
+    """_process_line must not overwrite firmware_version when no semver is found."""
+    import asyncio
+
+    from backend.src.services.robohat_service import RoboHATService, RoboHATStatus
+
+    svc = RoboHATService.__new__(RoboHATService)
+    svc.status = RoboHATStatus()
+    svc._rc_enabled = True
+    svc._pending_rc_state = None
+    svc._pending_rc_since = 0.0
+    svc._usb_control_requested = False
+    svc._last_status_at = 0.0
+    svc._pwm_ack_count = 0
+    svc._pwm_ack_event = asyncio.Event()
+    svc._encoder_enabled = True
+
+    svc.status.firmware_version = None
+    svc._process_line("▶ LawnBerry RoboHAT booting...")
+    assert svc.status.firmware_version is None

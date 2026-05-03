@@ -66,6 +66,7 @@ class HealthService:
         sensor_probe_timeout: float = 2.0,
         sensor_health_provider: Callable[[], dict[str, Any]] | None = None,
         dependency_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        robohat_provider: Callable[[], dict[str, Any] | None] | None = None,
     ) -> None:
         self.hardware_config_path = hardware_config_path
         self.system_config_path = system_config_path
@@ -79,6 +80,7 @@ class HealthService:
         self.sensor_probe_timeout = max(0.5, float(sensor_probe_timeout))
         self._sensor_health_provider = sensor_health_provider
         self._dependency_provider = dependency_provider
+        self._robohat_provider = robohat_provider
 
     def evaluate(self) -> dict[str, Any]:
         now = datetime.now(UTC)
@@ -93,6 +95,7 @@ class HealthService:
         metrics_snapshot = observability.get_metrics_snapshot()
 
         system_config = self._load_system_config()
+        firmware = self._evaluate_firmware()
         hardware = self._evaluate_hardware()
         sensor_health = self._evaluate_sensor_health()
         subsystems = self._evaluate_subsystems(
@@ -102,6 +105,7 @@ class HealthService:
         dependencies = self._evaluate_dependencies(metrics_snapshot)
 
         overall = HealthLevel.HEALTHY
+        overall = _merge_status(overall, _coerce_level(firmware.get("status")))
         overall = _merge_status(overall, _coerce_level(hardware.get("status")))
         overall = _merge_status(overall, _coerce_level(sensor_health.get("status")))
         for subsystem in subsystems.values():
@@ -120,6 +124,7 @@ class HealthService:
         return {
             "timestamp": now.isoformat(),
             "overall_status": overall.value,
+            "firmware": firmware,
             "hardware": hardware,
             "sensor_health": sensor_health,
             "subsystems": subsystems,
@@ -451,6 +456,52 @@ class HealthService:
             return data, None
         except Exception as exc:  # pragma: no cover - defensive
             return None, f"Unable to parse hardware configuration: {exc}"
+
+    def _evaluate_firmware(self) -> dict[str, Any]:
+        """Return firmware health info from robohat provider, or a stub if unavailable."""
+        if self._robohat_provider is None:
+            return {
+                "status": HealthLevel.UNKNOWN.value,
+                "detail": "RoboHAT provider not configured",
+                "firmware_version": None,
+            }
+        try:
+            data = self._robohat_provider()
+        except Exception as exc:
+            logger.debug("RoboHAT health provider failed: %s", exc)
+            return {
+                "status": HealthLevel.UNKNOWN.value,
+                "detail": f"RoboHAT provider error: {exc}",
+                "firmware_version": None,
+            }
+        if data is None:
+            return {
+                "status": HealthLevel.UNKNOWN.value,
+                "detail": "RoboHAT not initialized",
+                "firmware_version": None,
+            }
+
+        fw_ver = data.get("firmware_version")
+        serial_connected = data.get("serial_connected", False)
+        health_status = data.get("health_status", "unknown")
+
+        if not serial_connected:
+            level = HealthLevel.DEGRADED
+            detail = "RoboHAT serial not connected"
+        elif fw_ver in (None, "unknown"):
+            level = HealthLevel.DEGRADED
+            detail = "Firmware version not yet received"
+        else:
+            level = HealthLevel.HEALTHY
+            detail = f"Firmware {fw_ver} connected"
+
+        return {
+            "status": level.value,
+            "detail": detail,
+            "firmware_version": fw_ver,
+            "serial_connected": serial_connected,
+            "robohat_health_status": health_status,
+        }
 
     def _evaluate_hardware(self) -> dict[str, Any]:
         config, error = self._load_hardware_config()

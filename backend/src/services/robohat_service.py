@@ -672,10 +672,10 @@ class RoboHATService:
                 pass
         return None
 
-    _VERSION_RE = re.compile(r"firmware[:\s]+v?(\d+\.\d+[\.\d]*)", re.I)
+    _FIRMWARE_VERSION_RE = re.compile(r"\bv?(\d+\.\d+(?:\.\d+)*)\b")
 
     def _try_parse_firmware_version(self, line: str) -> None:
-        m = self._VERSION_RE.search(line)
+        m = self._FIRMWARE_VERSION_RE.search(line)
         if m:
             self.status.firmware_version = m.group(1)
             logger.info("RoboHAT firmware version: %s", self.status.firmware_version)
@@ -895,6 +895,10 @@ class RoboHATService:
         """Get current RoboHAT status"""
         self.status.timestamp = datetime.now(UTC)
         return self.status
+
+    def get_firmware_version(self) -> str | None:
+        """Return the firmware version parsed from the boot banner, or None if not yet received."""
+        return self.status.firmware_version
 
     async def _apply_estop_if_pending(self) -> None:
         """Send queued emergency stop if one was requested while disconnected."""

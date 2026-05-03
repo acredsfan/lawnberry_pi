@@ -36,3 +36,45 @@ def test_health_endpoints_surface_service_evaluation(monkeypatch):
     assert readiness["dependencies"] == sample_report["dependencies"]
 
     assert health_liveness()["status"] == "alive"
+
+
+def test_health_response_includes_firmware_section():
+    """The /health endpoint must include a 'firmware' section after Phase E."""
+    import os
+
+    from fastapi.testclient import TestClient
+
+    from backend.src.main import app
+
+    os.environ.setdefault("SIM_MODE", "1")
+
+    with TestClient(app) as client:
+        r = client.get("/health")
+    assert r.status_code == 200
+    data = r.json()
+    assert "firmware" in data, (
+        "/health response missing 'firmware' key — "
+        "HealthService._evaluate_firmware() not wired into evaluate()"
+    )
+    firmware = data["firmware"]
+    assert "status" in firmware
+    assert "firmware_version" in firmware
+
+
+def test_health_api_v2_includes_firmware_section():
+    """The /api/v2/health endpoint must also include the firmware section."""
+    import os
+
+    from fastapi.testclient import TestClient
+
+    from backend.src.main import app
+
+    os.environ.setdefault("SIM_MODE", "1")
+
+    with TestClient(app) as client:
+        r = client.get("/api/v2/health")
+    assert r.status_code == 200
+    data = r.json()
+    assert "firmware" in data
+    firmware = data["firmware"]
+    assert "firmware_version" in firmware
