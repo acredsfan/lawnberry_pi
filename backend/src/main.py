@@ -215,6 +215,25 @@ async def lifespan(app: FastAPI):
     else:
         _log.info("USE_LEGACY_NAVIGATION=1: running legacy NavigationService code path")
 
+    # --- Repository construction (§5) ---
+    from backend.src.repositories import (
+        CalibrationRepository,
+        MapRepository,
+        MissionRepository,
+        SettingsRepository,
+        TelemetryRepository,
+    )
+    from pathlib import Path as _Path
+
+    _data_dir = _Path(os.getcwd()) / "data"
+    _db_path = _data_dir / "lawnberry.db"
+
+    _map_repo = MapRepository(db_path=_db_path)
+    _mission_repo = MissionRepository(db_path=_db_path)
+    _settings_repo = SettingsRepository(db_path=_db_path)
+    _calibration_repo = CalibrationRepository(calibration_path=_data_dir / "calibration.json")
+    _telemetry_repo = TelemetryRepository(db_path=_db_path)
+
     app.state.runtime = RuntimeContext(
         config_loader=loader,
         hardware_config=hardware_cfg,
@@ -228,6 +247,11 @@ async def lifespan(app: FastAPI):
         persistence=persistence,
         command_gateway=_command_gateway,
         localization=_localization_service,
+        map_repository=_map_repo,
+        mission_repository=_mission_repo,
+        settings_repository=_settings_repo,
+        calibration_repository=_calibration_repo,
+        telemetry_repository=_telemetry_repo,
     )
     _fw = None
     if app.state.runtime.robohat:

@@ -45,6 +45,11 @@ def test_runtime_context_holds_all_required_fields():
         "persistence",
         "command_gateway",
         "localization",
+        "map_repository",
+        "mission_repository",
+        "settings_repository",
+        "calibration_repository",
+        "telemetry_repository",
     }
     actual = {f.name for f in fields(RuntimeContext)}
     assert actual == expected, f"field set drift: extra={actual-expected}, missing={expected-actual}"
@@ -180,3 +185,32 @@ def test_runtime_context_localization_can_be_set():
     )
     runtime = _make_runtime(localization=loc)
     assert isinstance(runtime.localization, LocalizationService)
+
+
+def test_runtime_context_has_repository_slots() -> None:
+    """RuntimeContext accepts all five repository fields (may be None)."""
+    from backend.src.core.runtime import RuntimeContext
+
+    ctx = RuntimeContext(
+        config_loader=None,
+        hardware_config=None,
+        safety_limits=None,
+        navigation=None,
+        mission_service=None,
+        safety_state={},
+        blade_state={},
+        robohat=None,
+        websocket_hub=None,
+        persistence=None,
+        command_gateway=None,
+        map_repository=None,
+        mission_repository=None,
+        settings_repository=None,
+        calibration_repository=None,
+        telemetry_repository=None,
+    )
+    assert ctx.map_repository is None
+    assert ctx.mission_repository is None
+    assert ctx.settings_repository is None
+    assert ctx.calibration_repository is None
+    assert ctx.telemetry_repository is None

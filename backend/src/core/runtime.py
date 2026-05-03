@@ -52,6 +52,13 @@ class RuntimeContext:
     command_gateway: Any = None  # MotorCommandGateway; Any to avoid import cycle
     localization: Any = None     # LocalizationService; Any to avoid import cycle
 
+    # Repository fields — typed Any to avoid import cycle; cast at call site
+    map_repository: Any = None       # MapRepository
+    mission_repository: Any = None   # MissionRepository
+    settings_repository: Any = None  # SettingsRepository
+    calibration_repository: Any = None  # CalibrationRepository
+    telemetry_repository: Any = None    # TelemetryRepository
+
     @property
     def sensor_manager(self) -> Any:
         from .state_manager import AppState
