@@ -5,6 +5,10 @@ import tempfile
 import pytest
 
 
+# WARNING: PersistenceLayer opens a new sqlite3 connection per get_connection() call.
+# Using ':memory:' would create a separate empty database for each call, causing migrations
+# to run in isolation and data written to one connection to be invisible to others.
+# Always pass a real file path (e.g., tempfile) to _make_store.
 def _make_store(mode: str = "summary", db_path: str = ":memory:"):
     from backend.src.observability.event_store import EventStore
     from backend.src.observability.events import PersistenceMode
