@@ -25,6 +25,7 @@ from .api.routers import settings as settings_router
 from .api.routers import telemetry as telemetry_router
 from .api.routers import weather as weather_router
 from .api.safety import router as safety_router
+from .api.run_summary import router as run_summary_router
 from .api.status import router as status_router
 from .core.config_loader import get_config_loader
 from .core.env_validation import validate_environment
@@ -369,6 +370,7 @@ app.include_router(health_router)
 app.include_router(mission_router)
 app.include_router(ai_router)
 app.include_router(docs_router)
+app.include_router(run_summary_router)
 
 app.include_router(rest_v1_router, prefix="/api/v1")
 
