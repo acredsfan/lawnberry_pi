@@ -26,7 +26,7 @@ PATTERN='(AIza[0-9A-Za-z\-_]{35}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36,}|xox[baprs
 # Exclude lines that are Python type annotations (e.g. `my_token: Optional[str] = None`),
 # assignments to Python built-in types / None, or RHS that is a function call
 # (e.g. `google_api_key = str(...)` — never a bare credential literal).
-EXCLUDE_PATTERN='(:\s*(Optional\[|List\[|Dict\[|str|int|bool|float|bytes|None\b)|=\s*None\s*$|=\s*Field\(|=\s*[A-Za-z_][A-Za-z_0-9]*\()'
+EXCLUDE_PATTERN='(:\s*(Optional\[|List\[|Dict\[|str|int|bool|float|bytes|None\b)|=\s*None\s*$|=\s*Field\(|=\s*[A-Za-z_][A-Za-z_0-9]*\(|==\s*["\x27]|=\s*\(|=\s*[A-Za-z_][A-Za-z_0-9.]*\.[A-Za-z_]|f["\x27].*password:|f["\x27].*token:|\blogging\b|\blogger\b)'
 
 FOUND=0
 

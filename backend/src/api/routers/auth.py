@@ -11,7 +11,7 @@ from typing import Any
 import bcrypt
 import pyotp
 from fastapi import APIRouter, HTTPException, Request, WebSocket, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ...core import globals as global_state
 from ...core.globals import _manual_control_sessions
@@ -74,7 +74,7 @@ class UserOut(BaseModel):
     id: str
     username: str
     role: str = "admin"
-    created_at: datetime = datetime.now(UTC)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class AuthResponse(BaseModel):

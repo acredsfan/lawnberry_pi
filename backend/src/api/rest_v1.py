@@ -15,7 +15,7 @@ from email.utils import format_datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..services.auth_service import AuthenticationError, primary_auth_service
 
@@ -38,7 +38,7 @@ class SystemStatus(BaseModel):
     navigation_state: str = "IDLE"
     safety_status: SafetyStatus = SafetyStatus()
     motor_status: str = "idle"
-    last_updated: datetime = datetime.now(UTC)
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # --- Auth Models ---
@@ -84,7 +84,7 @@ class Job(BaseModel):
     priority: int = 1
     enabled: bool = True
     status: str = "pending"
-    created_at: datetime = datetime.now(UTC)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_run: datetime | None = None
 
 
