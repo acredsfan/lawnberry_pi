@@ -54,3 +54,65 @@ A baseline pair `(avg_ms, max_ms)` should be captured on the target Pi 5 platfor
 - Instrumentation: `backend/src/services/navigation_service.py` — the `update_navigation_state` wrapper.
 - Endpoint: `backend/src/api/metrics.py` — Prometheus-compatible serializer.
 - Plan reference: `docs/major-architecture-and-code-improvement-plan.md` §12.
+
+---
+
+## §12 Event Persistence IO Budget
+
+This section tracks the write rate of the `mission_events` table introduced in
+the §9 observability plan (`docs/superpowers/plans/2026-05-01-09-observability-events.md`).
+
+### Persistence modes
+
+Controlled by the `LAWNBERRY_PERSISTENCE_MODE` environment variable (default: `summary`).
+
+| Mode | Events persisted | Approx writes/minute at 1 Hz nav | Approx bytes/minute |
+|------|-----------------|----------------------------------|---------------------|
+| `summary` | `mission_state_changed`, `safety_gate_blocked` | ≤2 (lifecycle events only) | ≤500 B/min |
+| `full` | All 7 event types | ~60–120 (pose + commands) | ~18–36 KB/min |
+
+**Default is `summary`.** Use `full` only for debugging sessions; do not leave `full`
+enabled on a deployed Pi running unattended multi-hour missions.
+
+### IO budget thresholds
+
+- `summary` mode: **≤2 KB/minute** write ceiling (lifecycle events + safety blocks only).
+- `full` mode: **≤50 KB/minute** write ceiling (development/debug only; not enforced in CI).
+- Navigation tick metric (existing): unchanged from prior §12 entry above.
+
+### How to set persistence mode
+
+```bash
+# Summary mode (default, field-safe):
+export LAWNBERRY_PERSISTENCE_MODE=summary
+
+# Full mode (debug sessions only):
+export LAWNBERRY_PERSISTENCE_MODE=full
+```
+
+In `config/environment` or systemd unit `Environment=` stanza, set:
+
+```
+LAWNBERRY_PERSISTENCE_MODE=summary
+```
+
+### Measuring write rate
+
+After a 5-minute mission with `LAWNBERRY_PERSISTENCE_MODE=full`:
+
+```bash
+# Check mission_events row count and approximate table size
+sqlite3 data/lawnberry.db "
+  SELECT COUNT(*) as rows, event_type FROM mission_events GROUP BY event_type;
+"
+sqlite3 data/lawnberry.db ".dbinfo" | grep "page size\|pages"
+```
+
+Divide total rows by elapsed minutes to validate the bytes/minute estimate.
+Append a measurement row to the table below when first measured on real hardware.
+
+### Baseline history
+
+| Date | Mode | Run duration (min) | Events written | KB/min | Notes |
+|------|------|--------------------|---------------|--------|-------|
+| _TBD — first capture pending yard run with §9 deployed_ | | | | | |
