@@ -295,6 +295,10 @@ class NavigationService:
         self._load_alignment_from_disk()
         # Optional telemetry capture. Set via attach_capture(); default is no-op.
         self._capture = None
+        # Observability: event store injected per-run by set_event_store().
+        self._event_store: Any | None = None
+        self._obs_run_id: str = ""
+        self._obs_mission_id: str = ""
         # Localization facade: set by attach_localization() during lifespan startup.
         # When not None and USE_LEGACY_NAVIGATION is not set, position/heading
         # state is owned by LocalizationService and mirrored here.
@@ -341,6 +345,28 @@ class NavigationService:
         See backend/src/diagnostics/capture.py. Pass None to detach.
         """
         self._capture = capture
+
+    def set_event_store(self, store: Any, run_id: str, mission_id: str) -> None:
+        """Attach an EventStore for this run. Called by MissionService on start."""
+        self._event_store = store
+        self._obs_run_id = run_id
+        self._obs_mission_id = mission_id
+
+    def _emit_event(self, event: Any) -> None:
+        if self._event_store is not None:
+            try:
+                self._event_store.emit(event)
+            except Exception:
+                pass  # never let event emission crash the nav loop
+
+    def _current_pose_quality(self) -> str:
+        """Map current GPS/IMU state to a pose quality string."""
+        gps_qual = getattr(self.navigation_state, "gps_fix_quality", None)
+        if gps_qual in ("rtk_fixed", "rtk_float"):
+            return "rtk_fixed"
+        if self._heading_alignment_sample_count > 0:
+            return "gps_float"
+        return "gps_degraded"
 
     def attach_calibration_repository(self, calibration_repository) -> None:
         """Late-inject a CalibrationRepository and reload IMU alignment from it.
@@ -985,6 +1011,16 @@ class NavigationService:
                             ) % 360.0
                             self._heading_alignment_sample_count = 1
                             self._require_gps_heading_alignment = False
+                            if self._event_store is not None:
+                                from ..observability.events import HeadingAligned
+                                self._emit_event(HeadingAligned(
+                                    run_id=self._obs_run_id,
+                                    mission_id=self._obs_mission_id,
+                                    aligned_heading_deg=float(self._session_heading_alignment),
+                                    sample_count=self._heading_alignment_sample_count,
+                                    alignment_source="gps_cog_snap",
+                                    delta_applied_deg=float(clamped_delta),
+                                ))
                             adjusted_yaw = (
                                 -raw_yaw + self._imu_yaw_offset + self._session_heading_alignment
                             ) % 360.0
@@ -1012,6 +1048,21 @@ class NavigationService:
         # Update path execution if in auto mode
         if self.navigation_state.navigation_mode == NavigationMode.AUTO:
             await self._update_path_execution()
+
+        # Emit PoseUpdated if we have a position and an event store.
+        if current_position and self._event_store is not None:
+            from ..observability.events import PoseUpdated
+            gps = sensor_data.gps
+            self._emit_event(PoseUpdated(
+                run_id=self._obs_run_id,
+                mission_id=self._obs_mission_id,
+                lat=float(current_position.latitude) if hasattr(current_position, "latitude") else 0.0,
+                lon=float(current_position.longitude) if hasattr(current_position, "longitude") else 0.0,
+                heading_deg=float(self.navigation_state.heading or 0.0),
+                pose_quality=self._current_pose_quality(),
+                source="gps" if (gps and gps.accuracy) else "dead_reckoning",
+                accuracy_m=float(gps.accuracy) if (gps and gps.accuracy) else None,
+            ))
 
         # Update distance tracking
         if self.last_position and current_position:
