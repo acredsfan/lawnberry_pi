@@ -52,11 +52,18 @@ export function useMissionMapSettings() {
   }
 
   async function persistStyleChange() {
-    const next = { ...mapDisplaySettings.value, style: mapStyle.value }
+    const prev = mapDisplaySettings.value
+    const next = { ...prev, style: mapStyle.value }
     mapDisplaySettings.value = next
-    await api.put('/api/v2/settings/maps', {
-      mission_planner: { provider: next.provider, style: next.style },
-    })
+    try {
+      await api.put('/api/v2/settings/maps', {
+        mission_planner: { provider: next.provider, style: next.style },
+      })
+    } catch (error) {
+      mapDisplaySettings.value = prev
+      mapStyle.value = prev.style
+      console.warn('useMissionMapSettings: failed to persist style', error)
+    }
   }
 
   return { mapDisplaySettings, mapStyle, loadSettings, persistStyleChange }

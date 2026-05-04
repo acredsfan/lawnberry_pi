@@ -67,4 +67,16 @@ describe('useMissionMapSettings', () => {
     // Should not throw; defaults remain
     expect(getResult().mapDisplaySettings.value.provider).toBe('osm')
   })
+
+  it('rolls back on persistStyleChange PUT failure', async () => {
+    mockGet.mockResolvedValue({ data: { mission_planner: { provider: 'osm', style: 'standard' } } })
+    mockPut.mockRejectedValue(new Error('network error'))
+    const { getResult } = mountWithComposable()
+    await getResult().loadSettings()
+    getResult().mapStyle.value = 'hybrid'
+    await getResult().persistStyleChange()
+    // State reverted to pre-mutation values
+    expect(getResult().mapDisplaySettings.value.style).toBe('standard')
+    expect(getResult().mapStyle.value).toBe('standard')
+  })
 })
