@@ -63,6 +63,7 @@ export function useMissionMapSettings() {
       mapDisplaySettings.value = prev
       mapStyle.value = prev.style
       console.warn('useMissionMapSettings: failed to persist style', error)
+      throw error
     }
   }
 

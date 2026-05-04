@@ -74,7 +74,7 @@ describe('useMissionMapSettings', () => {
     const { getResult } = mountWithComposable()
     await getResult().loadSettings()
     getResult().mapStyle.value = 'hybrid'
-    await getResult().persistStyleChange()
+    await expect(getResult().persistStyleChange()).rejects.toThrow('network error')
     // State reverted to pre-mutation values
     expect(getResult().mapDisplaySettings.value.style).toBe('standard')
     expect(getResult().mapStyle.value).toBe('standard')
