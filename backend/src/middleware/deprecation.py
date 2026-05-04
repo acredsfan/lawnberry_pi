@@ -9,6 +9,8 @@ Usage in main.py:
 """
 from __future__ import annotations
 
+import datetime
+import email.utils
 from typing import Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -19,7 +21,7 @@ from starlette.responses import Response
 # Keys are path prefixes (startswith match). Values are (sunset_date, link_to_canonical).
 # Bare-path legacy WebSocket routes use exact matching via the EXACT_DEPRECATED set.
 _PREFIX_DEPRECATED: dict[str, tuple[str, str]] = {
-    "/api/v1/": (
+    "/api/v1": (
         "2026-09-01",
         "https://github.com/acredsfan/lawnberry/blob/main/docs/api-inventory.md",
     ),
@@ -45,11 +47,19 @@ _EXACT_DEPRECATED: dict[str, tuple[str, str]] = {
 }
 
 
+def _http_date(iso_date: str) -> str:
+    """Convert 'YYYY-MM-DD' to RFC 9110 IMF-fixdate (HTTP-date)."""
+    d = datetime.datetime.strptime(iso_date, "%Y-%m-%d").replace(
+        tzinfo=datetime.timezone.utc
+    )
+    return email.utils.formatdate(d.timestamp(), usegmt=True)
+
+
 def _deprecation_value(sunset_date: str) -> str:
     """Return an RFC 8594 `Deprecation` header value (ISO date as HTTP-date string)."""
     # RFC 8594 allows a boolean "true" or an HTTP-date. Use the sunset date as
     # the deprecation date so callers know when the notice was issued.
-    return f'@"{sunset_date}T00:00:00Z"'
+    return _http_date(sunset_date)
 
 
 class DeprecationMiddleware(BaseHTTPMiddleware):
@@ -70,7 +80,7 @@ class DeprecationMiddleware(BaseHTTPMiddleware):
 
         if sunset is not None:
             response.headers["Deprecation"] = _deprecation_value(sunset)
-            response.headers["Sunset"] = f"{sunset}T00:00:00Z"
+            response.headers["Sunset"] = _http_date(sunset)
             if link:
                 response.headers["Link"] = f'<{link}>; rel="successor-version"'
 
