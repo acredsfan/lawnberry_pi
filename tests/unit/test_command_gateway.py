@@ -275,3 +275,95 @@ async def test_dispatch_drive_ack_timeout_returns_ack_failed():
     )
     assert outcome.status == CommandStatus.ACK_FAILED
     assert outcome.watchdog_latency_ms is not None
+
+
+# -- Observability event tests (W1-5) --
+
+def _make_gw_with_store(mode: str = "full"):
+    from backend.src.control.command_gateway import MotorCommandGateway
+    from backend.src.observability.event_store import EventStore
+    from backend.src.observability.events import PersistenceMode
+
+    safety = {"emergency_stop_active": False, "estop_reason": None}
+    blade = {"active": False}
+    client_em: dict = {}
+    rest_mock = MagicMock()
+    rest_mock._emergency_until = 0.0
+    emitted = []
+    store = EventStore(persistence=None, mode=PersistenceMode(mode))
+    store.emit = lambda evt: emitted.append(evt)
+
+    gw = MotorCommandGateway(
+        safety_state=safety,
+        blade_state=blade,
+        client_emergency=client_em,
+        robohat=None,
+        persistence=None,
+        _rest_module=rest_mock,
+    )
+    gw.set_event_store(store, run_id="run-gw", mission_id="m-gw")
+    return gw, emitted
+
+
+@pytest.mark.asyncio
+async def test_dispatch_drive_emits_motion_command_issued():
+    from backend.src.control.commands import DriveCommand
+    gw, emitted = _make_gw_with_store()
+    cmd = DriveCommand(left=0.5, right=0.5, source="mission", duration_ms=500)
+    await gw.dispatch_drive(cmd)
+    issued = [e for e in emitted if e.event_type == "motion_command_issued"]
+    assert len(issued) == 1
+    assert issued[0].left == pytest.approx(0.5)
+    assert issued[0].source == "mission"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_drive_blocked_emits_safety_gate_blocked():
+    from backend.src.control.commands import DriveCommand
+    gw, emitted = _make_gw_with_store()
+    gw._safety_state["emergency_stop_active"] = True
+    cmd = DriveCommand(left=0.5, right=0.5, source="manual", duration_ms=200)
+    await gw.dispatch_drive(cmd)
+    blocked = [e for e in emitted if e.event_type == "safety_gate_blocked"]
+    assert len(blocked) == 1
+    assert blocked[0].reason == "emergency_stop_active"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_drive_in_summary_mode_does_not_persist_issued():
+    """In summary mode, MotionCommandIssued is not written to DB."""
+    import os
+    import tempfile
+    from backend.src.observability.events import PersistenceMode
+    from backend.src.observability.event_store import EventStore
+    from backend.src.core.persistence import PersistenceLayer
+    from backend.src.control.command_gateway import MotorCommandGateway
+    from backend.src.control.commands import DriveCommand
+
+    written = []
+
+    class SpyStore(EventStore):
+        def _write(self, event):
+            written.append(event)
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db = f.name
+    try:
+        store = SpyStore(persistence=PersistenceLayer(db), mode=PersistenceMode.SUMMARY)
+
+        rest_mock = MagicMock()
+        rest_mock._emergency_until = 0.0
+        gw = MotorCommandGateway(
+            safety_state={"emergency_stop_active": False, "estop_reason": None},
+            blade_state={"active": False},
+            client_emergency={},
+            robohat=None,
+            persistence=None,
+            _rest_module=rest_mock,
+        )
+        gw.set_event_store(store, run_id="r", mission_id="m")
+        cmd = DriveCommand(left=0.1, right=0.1, source="mission", duration_ms=100)
+        await gw.dispatch_drive(cmd)
+        assert all(e.event_type != "motion_command_issued" for e in written)
+    finally:
+        os.unlink(db)

@@ -51,12 +51,29 @@ class MotorCommandGateway:
         self._config_loader = config_loader
         self.__rest_module = _rest_module
         self._drive_timeout_task: Any = None
+        # Observability: event store injected per-run.
+        self._event_store: Any | None = None
+        self._obs_run_id: str = ""
+        self._obs_mission_id: str = ""
 
     def _rest(self) -> Any:
         if self.__rest_module is not None:
             return self.__rest_module
         import backend.src.api.rest as _rest
         return _rest
+
+    def set_event_store(self, store: Any, run_id: str, mission_id: str) -> None:
+        """Attach an EventStore. run_id/mission_id overwritten per mission start."""
+        self._event_store = store
+        self._obs_run_id = run_id
+        self._obs_mission_id = mission_id
+
+    def _emit_event(self, event: Any) -> None:
+        if self._event_store is not None:
+            try:
+                self._event_store.emit(event)
+            except Exception:
+                pass
 
     def is_emergency_active(self, request: Any = None) -> bool:
         try:
@@ -176,6 +193,16 @@ class MotorCommandGateway:
                 )
 
         if self.is_emergency_active(request):
+            if self._event_store is not None:
+                from ..observability.events import SafetyGateBlocked
+                self._emit_event(SafetyGateBlocked(
+                    run_id=self._obs_run_id,
+                    mission_id=self._obs_mission_id,
+                    audit_id=audit_id,
+                    reason="emergency_stop_active",
+                    interlocks=["emergency_stop_active"],
+                    source=cmd.source,
+                ))
             return DriveOutcome(
                 status=CommandStatus.BLOCKED,
                 audit_id=audit_id,
@@ -196,6 +223,16 @@ class MotorCommandGateway:
 
         if manual_active_interlocks:
             manual_active_interlocks = list(dict.fromkeys(manual_active_interlocks))
+            if self._event_store is not None:
+                from ..observability.events import SafetyGateBlocked
+                self._emit_event(SafetyGateBlocked(
+                    run_id=self._obs_run_id,
+                    mission_id=self._obs_mission_id,
+                    audit_id=audit_id,
+                    reason=self._drive_interlock_reason(manual_active_interlocks),
+                    interlocks=manual_active_interlocks,
+                    source=cmd.source,
+                ))
             return DriveOutcome(
                 status=CommandStatus.BLOCKED,
                 audit_id=audit_id,
@@ -204,6 +241,19 @@ class MotorCommandGateway:
                 watchdog_latency_ms=None,
             )
 
+        # Emit MotionCommandIssued: all safety gates cleared, command proceeds to dispatch.
+        if self._event_store is not None:
+            from ..observability.events import MotionCommandIssued
+            self._emit_event(MotionCommandIssued(
+                run_id=self._obs_run_id,
+                mission_id=self._obs_mission_id,
+                audit_id=audit_id,
+                left=cmd.left,
+                right=cmd.right,
+                source=cmd.source,
+                duration_ms=cmd.duration_ms,
+            ))
+
         robohat = self._robohat
         if robohat and getattr(getattr(robohat, "status", None), "serial_connected", False):
             watchdog_start = datetime.now(UTC)
@@ -211,6 +261,15 @@ class MotorCommandGateway:
             watchdog_latency = (datetime.now(UTC) - watchdog_start).total_seconds() * 1000
 
             if success:
+                if self._event_store is not None:
+                    from ..observability.events import MotionCommandAcked
+                    self._emit_event(MotionCommandAcked(
+                        run_id=self._obs_run_id,
+                        mission_id=self._obs_mission_id,
+                        audit_id=audit_id,
+                        watchdog_latency_ms=round(watchdog_latency, 2),
+                        hardware_confirmed=True,
+                    ))
                 auto_stop_ms = cmd.duration_ms if cmd.duration_ms > 0 else 500
                 if self._drive_timeout_task and not self._drive_timeout_task.done():
                     self._drive_timeout_task.cancel()
