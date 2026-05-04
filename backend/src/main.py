@@ -278,6 +278,13 @@ async def lifespan(app: FastAPI):
         event_store=event_store,
         persistence_mode=_persistence_mode.value,
     )
+    # Attach EventStore to services that emit events.
+    if hasattr(app.state.runtime.mission_service, "set_event_store"):
+        app.state.runtime.mission_service.set_event_store(event_store)
+    if hasattr(app.state.runtime.command_gateway, "set_event_store"):
+        app.state.runtime.command_gateway.set_event_store(
+            event_store, run_id="", mission_id=""
+        )
     _fw = None
     if app.state.runtime.robohat:
         _fw = getattr(app.state.runtime.robohat.status, "firmware_version", None)
