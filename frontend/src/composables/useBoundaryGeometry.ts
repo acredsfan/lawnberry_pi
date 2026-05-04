@@ -13,11 +13,15 @@ export function useBoundaryGeometry() {
     const pts = vertices.value
     if (pts.length < 3) return 0
     const R = 6371000 // Earth radius in metres
+    // Use mean latitude for consistent cosLat across all vertices
+    const cosLat = Math.cos(
+      (pts.reduce((sum, p) => sum + p.lat, 0) / pts.length) * Math.PI / 180
+    )
     let area = 0
     for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-      const xi = (pts[i].lon * Math.PI / 180) * R * Math.cos(pts[i].lat * Math.PI / 180)
+      const xi = (pts[i].lon * Math.PI / 180) * R * cosLat
       const yi = (pts[i].lat * Math.PI / 180) * R
-      const xj = (pts[j].lon * Math.PI / 180) * R * Math.cos(pts[j].lat * Math.PI / 180)
+      const xj = (pts[j].lon * Math.PI / 180) * R * cosLat
       const yj = (pts[j].lat * Math.PI / 180) * R
       area += xi * yj - xj * yi
     }

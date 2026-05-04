@@ -34,6 +34,8 @@ describe('useBoundaryGeometry', () => {
     getResult().addVertex(37.001, -122.0)
     getResult().addVertex(37.001, -122.001)
     expect(getResult().areaM2.value).toBeGreaterThan(0)
+    // Approximate right-triangle: 111m * 89m * 0.5 ≈ 4900 m²; tolerance ±20%
+    expect(getResult().areaM2.value).toBeCloseTo(4922, -2)
   })
 
   it('removeVertex removes the correct vertex', () => {
