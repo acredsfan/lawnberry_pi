@@ -50,6 +50,8 @@ def test_runtime_context_holds_all_required_fields():
         "settings_repository",
         "calibration_repository",
         "telemetry_repository",
+        "event_store",
+        "persistence_mode",
     }
     actual = {f.name for f in fields(RuntimeContext)}
     assert actual == expected, f"field set drift: extra={actual-expected}, missing={expected-actual}"
