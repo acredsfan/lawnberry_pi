@@ -816,7 +816,6 @@
       "Job": {
         "properties": {
           "created_at": {
-            "default": "2026-05-04T15:09:00.403601Z",
             "format": "date-time",
             "title": "Created At",
             "type": "string"
@@ -1246,7 +1245,6 @@
             "type": "boolean"
           },
           "last_updated": {
-            "default": "2026-05-04T15:09:00.419060Z",
             "format": "date-time",
             "title": "Last Updated",
             "type": "string"
@@ -1596,7 +1594,6 @@
             "title": "Battery Percentage"
           },
           "last_updated": {
-            "default": "2026-05-04T15:09:00.399958Z",
             "format": "date-time",
             "title": "Last Updated",
             "type": "string"
@@ -1794,7 +1791,6 @@
       "UserOut": {
         "properties": {
           "created_at": {
-            "default": "2026-05-04T15:08:59.312428Z",
             "format": "date-time",
             "title": "Created At",
             "type": "string"
