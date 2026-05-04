@@ -25,6 +25,7 @@ export function useJoystickDrive(opts: {
   let driveDispatchPromise: Promise<void> | null = null
   let driveCommandActive = false
   let pendingDrivePayload: Record<string, unknown> | null = null
+  let destroyed = false
 
   function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value))
@@ -40,6 +41,7 @@ export function useJoystickDrive(opts: {
     driveCommandActive = true
     try {
       while (pendingDrivePayload) {
+        if (destroyed || !isControlUnlocked.value || lockout.value) { pendingDrivePayload = null; break }
         const payload = pendingDrivePayload
         pendingDrivePayload = null
         try {
@@ -119,6 +121,7 @@ export function useJoystickDrive(opts: {
   }
 
   onUnmounted(() => {
+    destroyed = true
     clearMovementTimer()
     pendingDrivePayload = null
   })
