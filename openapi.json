@@ -1,0 +1,5705 @@
+{
+  "components": {
+    "schemas": {
+      "AuthLoginRequest": {
+        "properties": {
+          "credential": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "title": "AuthLoginRequest",
+        "type": "object"
+      },
+      "BoundingBox": {
+        "description": "Object detection bounding box",
+        "properties": {
+          "height": {
+            "title": "Height",
+            "type": "number"
+          },
+          "width": {
+            "title": "Width",
+            "type": "number"
+          },
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "title": "BoundingBox",
+        "type": "object"
+      },
+      "ControlResponseV2": {
+        "properties": {
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          },
+          "active_interlocks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Active Interlocks",
+            "type": "array"
+          },
+          "audit_id": {
+            "title": "Audit Id",
+            "type": "string"
+          },
+          "remediation": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remediation"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          },
+          "safety_checks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Safety Checks",
+            "type": "array"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
+          },
+          "telemetry_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telemetry Snapshot"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "watchdog_echo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Watchdog Echo"
+          },
+          "watchdog_latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Watchdog Latency Ms"
+          }
+        },
+        "required": [
+          "accepted",
+          "audit_id",
+          "result",
+          "timestamp"
+        ],
+        "title": "ControlResponseV2",
+        "type": "object"
+      },
+      "DatasetExportRequest": {
+        "properties": {
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "include_unlabeled": {
+            "default": false,
+            "title": "Include Unlabeled",
+            "type": "boolean"
+          },
+          "min_confidence": {
+            "default": 0.5,
+            "title": "Min Confidence",
+            "type": "number"
+          }
+        },
+        "required": [
+          "format"
+        ],
+        "title": "DatasetExportRequest",
+        "type": "object"
+      },
+      "DetectedObject": {
+        "description": "Detected object with classification",
+        "properties": {
+          "bounding_box": {
+            "$ref": "#/components/schemas/BoundingBox"
+          },
+          "class_name": {
+            "title": "Class Name",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "distance_estimate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Estimate"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "relative_bearing": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Bearing"
+          },
+          "tracking_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Id"
+          }
+        },
+        "required": [
+          "object_id",
+          "class_name",
+          "confidence",
+          "bounding_box"
+        ],
+        "title": "DetectedObject",
+        "type": "object"
+      },
+      "DriveCommand": {
+        "properties": {
+          "throttle": {
+            "description": "-1.0..1.0",
+            "title": "Throttle",
+            "type": "number"
+          },
+          "turn": {
+            "description": "-1.0..1.0",
+            "title": "Turn",
+            "type": "number"
+          }
+        },
+        "required": [
+          "throttle",
+          "turn"
+        ],
+        "title": "DriveCommand",
+        "type": "object"
+      },
+      "EmergencyClearRequest": {
+        "properties": {
+          "confirmation": {
+            "default": false,
+            "description": "Operator confirmation required to clear E-stop",
+            "title": "Confirmation",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional reason or operator note",
+            "title": "Reason"
+          }
+        },
+        "title": "EmergencyClearRequest",
+        "type": "object"
+      },
+      "EnvSummary": {
+        "properties": {
+          "initialized": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initialized"
+          },
+          "last_read_age_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Read Age S"
+          },
+          "last_reading": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reading"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          }
+        },
+        "title": "EnvSummary",
+        "type": "object"
+      },
+      "GPSInject": {
+        "properties": {
+          "accuracy_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy M"
+          },
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "GPSInject",
+        "type": "object"
+      },
+      "GPSSummary": {
+        "properties": {
+          "initialized": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initialized"
+          },
+          "last_read_age_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Read Age S"
+          },
+          "last_reading": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reading"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          }
+        },
+        "title": "GPSSummary",
+        "type": "object"
+      },
+      "GeofenceIn": {
+        "properties": {
+          "boundary": {
+            "items": {
+              "$ref": "#/components/schemas/LatLng"
+            },
+            "title": "Boundary",
+            "type": "array"
+          },
+          "buffer_distance_m": {
+            "default": 0.0,
+            "title": "Buffer Distance M",
+            "type": "number"
+          },
+          "geofence_id": {
+            "default": "default",
+            "title": "Geofence Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "boundary"
+        ],
+        "title": "GeofenceIn",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IMUCalibrationResultPayload": {
+        "properties": {
+          "calibration_score": {
+            "default": 0,
+            "description": "Normalized score from 0-3.",
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Calibration Score",
+            "type": "integer"
+          },
+          "calibration_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw status reported by the IMU.",
+            "title": "Calibration Status"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Additional guidance for the operator.",
+            "title": "Notes"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Timestamp when the calibration routine began.",
+            "title": "Started At"
+          },
+          "status": {
+            "description": "High-level outcome for the calibration run.",
+            "title": "Status",
+            "type": "string"
+          },
+          "steps": {
+            "description": "Diagnostic step snapshots captured during calibration.",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "timestamp": {
+            "description": "Completion timestamp (ISO 8601).",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "timestamp"
+        ],
+        "title": "IMUCalibrationResultPayload",
+        "type": "object"
+      },
+      "IMUCalibrationStatusResponse": {
+        "properties": {
+          "in_progress": {
+            "description": "True when a calibration routine is currently executing.",
+            "title": "In Progress",
+            "type": "boolean"
+          },
+          "last_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IMUCalibrationResultPayload"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most recent calibration summary if available."
+          }
+        },
+        "required": [
+          "in_progress"
+        ],
+        "title": "IMUCalibrationStatusResponse",
+        "type": "object"
+      },
+      "IMUSummary": {
+        "properties": {
+          "initialized": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initialized"
+          },
+          "last_read_age_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Read Age S"
+          },
+          "last_reading": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reading"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          }
+        },
+        "title": "IMUSummary",
+        "type": "object"
+      },
+      "InferenceResult": {
+        "description": "Results from AI model inference",
+        "properties": {
+          "classification_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classification Confidence"
+          },
+          "classification_result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classification Result"
+          },
+          "confidence_threshold": {
+            "default": 0.5,
+            "title": "Confidence Threshold",
+            "type": "number"
+          },
+          "detected_objects": {
+            "items": {
+              "$ref": "#/components/schemas/DetectedObject"
+            },
+            "title": "Detected Objects",
+            "type": "array"
+          },
+          "inference_id": {
+            "title": "Inference Id",
+            "type": "string"
+          },
+          "inference_time_ms": {
+            "default": 0.0,
+            "title": "Inference Time Ms",
+            "type": "number"
+          },
+          "input_frame_id": {
+            "title": "Input Frame Id",
+            "type": "string"
+          },
+          "input_height": {
+            "title": "Input Height",
+            "type": "integer"
+          },
+          "input_width": {
+            "title": "Input Width",
+            "type": "integer"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "model_version": {
+            "default": "1.0",
+            "title": "Model Version",
+            "type": "string"
+          },
+          "postprocessing_time_ms": {
+            "default": 0.0,
+            "title": "Postprocessing Time Ms",
+            "type": "number"
+          },
+          "preprocessing_time_ms": {
+            "default": 0.0,
+            "title": "Preprocessing Time Ms",
+            "type": "number"
+          },
+          "segmentation_mask": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segmentation Mask"
+          },
+          "task": {
+            "$ref": "#/components/schemas/InferenceTask"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "total_time_ms": {
+            "default": 0.0,
+            "title": "Total Time Ms",
+            "type": "number"
+          }
+        },
+        "required": [
+          "inference_id",
+          "task",
+          "model_name",
+          "input_frame_id",
+          "input_width",
+          "input_height"
+        ],
+        "title": "InferenceResult",
+        "type": "object"
+      },
+      "InferenceTask": {
+        "description": "Types of AI inference tasks",
+        "enum": [
+          "obstacle_detection",
+          "grass_quality",
+          "boundary_detection",
+          "navigation_aid",
+          "object_classification",
+          "safety_monitoring"
+        ],
+        "title": "InferenceTask",
+        "type": "string"
+      },
+      "InjectTiltRequest": {
+        "properties": {
+          "pitch_deg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pitch Deg"
+          },
+          "roll_deg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roll Deg"
+          }
+        },
+        "title": "InjectTiltRequest",
+        "type": "object"
+      },
+      "InjectToFRequest": {
+        "properties": {
+          "distance_m": {
+            "title": "Distance M",
+            "type": "number"
+          },
+          "position": {
+            "title": "Position",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "distance_m"
+        ],
+        "title": "InjectToFRequest",
+        "type": "object"
+      },
+      "Job": {
+        "properties": {
+          "created_at": {
+            "default": "2026-05-04T15:09:00.403601Z",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "priority": {
+            "default": 1,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "schedule": {
+            "title": "Schedule",
+            "type": "string"
+          },
+          "status": {
+            "default": "pending",
+            "title": "Status",
+            "type": "string"
+          },
+          "zones": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Zones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "schedule",
+          "zones"
+        ],
+        "title": "Job",
+        "type": "object"
+      },
+      "LatLng": {
+        "properties": {
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "LatLng",
+        "type": "object"
+      },
+      "ManualUnlockRequest": {
+        "properties": {
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "totp_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totp Code"
+          }
+        },
+        "title": "ManualUnlockRequest",
+        "type": "object"
+      },
+      "ManualUnlockResponse": {
+        "properties": {
+          "authorized": {
+            "title": "Authorized",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Principal"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "source": {
+            "default": "manual_control",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorized",
+          "session_id",
+          "expires_at"
+        ],
+        "title": "ManualUnlockResponse",
+        "type": "object"
+      },
+      "ManualUnlockStatusResponse": {
+        "properties": {
+          "authorized": {
+            "title": "Authorized",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Principal"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "authorized"
+        ],
+        "title": "ManualUnlockStatusResponse",
+        "type": "object"
+      },
+      "MapLocations": {
+        "properties": {
+          "am_sun": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Position"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "home": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Position"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pm_sun": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Position"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "MapLocations",
+        "type": "object"
+      },
+      "Mission": {
+        "description": "Represents a sequence of waypoints for the mower to follow.",
+        "properties": {
+          "created_at": {
+            "description": "ISO 8601 timestamp of when the mission was created.",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the mission.",
+            "title": "Name",
+            "type": "string"
+          },
+          "waypoints": {
+            "description": "List of waypoints in the mission.",
+            "items": {
+              "$ref": "#/components/schemas/MissionWaypoint"
+            },
+            "title": "Waypoints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "created_at"
+        ],
+        "title": "Mission",
+        "type": "object"
+      },
+      "MissionCreationRequest": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "waypoints": {
+            "items": {
+              "$ref": "#/components/schemas/MissionWaypoint"
+            },
+            "minItems": 1,
+            "title": "Waypoints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "waypoints"
+        ],
+        "title": "MissionCreationRequest",
+        "type": "object"
+      },
+      "MissionLifecycleStatus": {
+        "enum": [
+          "idle",
+          "running",
+          "paused",
+          "completed",
+          "aborted",
+          "failed"
+        ],
+        "title": "MissionLifecycleStatus",
+        "type": "string"
+      },
+      "MissionStatus": {
+        "properties": {
+          "completion_percentage": {
+            "default": 0.0,
+            "title": "Completion Percentage",
+            "type": "number"
+          },
+          "current_waypoint_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Waypoint Index"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "mission_id": {
+            "title": "Mission Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MissionLifecycleStatus"
+          },
+          "total_waypoints": {
+            "default": 0,
+            "title": "Total Waypoints",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mission_id",
+          "status"
+        ],
+        "title": "MissionStatus",
+        "type": "object"
+      },
+      "MissionWaypoint": {
+        "description": "A single waypoint in a mission.",
+        "properties": {
+          "blade_on": {
+            "default": false,
+            "description": "Whether the blade is active for this waypoint.",
+            "title": "Blade On",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lat": {
+            "description": "Latitude of the waypoint.",
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "description": "Longitude of the waypoint.",
+            "title": "Lon",
+            "type": "number"
+          },
+          "speed": {
+            "default": 50,
+            "description": "Mower speed at this waypoint (0-100%).",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Speed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lat",
+          "lon"
+        ],
+        "title": "MissionWaypoint",
+        "type": "object"
+      },
+      "ModeIn": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/NavigationMode"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "ModeIn",
+        "type": "object"
+      },
+      "MowerStatus": {
+        "properties": {
+          "battery_percentage": {
+            "default": 0,
+            "title": "Battery Percentage",
+            "type": "number"
+          },
+          "blade_active": {
+            "default": false,
+            "title": "Blade Active",
+            "type": "boolean"
+          },
+          "last_updated": {
+            "default": "2026-05-04T15:09:00.419060Z",
+            "format": "date-time",
+            "title": "Last Updated",
+            "type": "string"
+          },
+          "navigation_state": {
+            "default": "IDLE",
+            "title": "Navigation State",
+            "type": "string"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Position"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "power_mode": {
+            "default": "NORMAL",
+            "title": "Power Mode",
+            "type": "string"
+          },
+          "safety_status": {
+            "$ref": "#/components/schemas/SafetyStatus",
+            "default": {
+              "blade_safety_ok": true,
+              "emergency_stop_active": false,
+              "obstacle_detected": false,
+              "safety_interlocks": [],
+              "tilt_detected": false
+            }
+          }
+        },
+        "title": "MowerStatus",
+        "type": "object"
+      },
+      "NavigationMode": {
+        "enum": [
+          "IDLE",
+          "MANUAL",
+          "AUTONOMOUS",
+          "EMERGENCY_STOP"
+        ],
+        "title": "NavigationMode",
+        "type": "string"
+      },
+      "Point": {
+        "properties": {
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "Point",
+        "type": "object"
+      },
+      "Position": {
+        "properties": {
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "altitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Altitude"
+          },
+          "gps_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gps Mode"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          }
+        },
+        "title": "Position",
+        "type": "object"
+      },
+      "PowerSummary": {
+        "properties": {
+          "initialized": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initialized"
+          },
+          "last_read_age_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Read Age S"
+          },
+          "last_reading": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Reading"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          }
+        },
+        "title": "PowerSummary",
+        "type": "object"
+      },
+      "RefreshResponse": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "expires_in": {
+            "default": 3600,
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "token_type": {
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "token",
+          "expires_at"
+        ],
+        "title": "RefreshResponse",
+        "type": "object"
+      },
+      "RtkDiagnosticsResponse": {
+        "properties": {
+          "gps": {
+            "additionalProperties": true,
+            "title": "Gps",
+            "type": "object"
+          },
+          "hardware": {
+            "additionalProperties": true,
+            "title": "Hardware",
+            "type": "object"
+          },
+          "ntrip": {
+            "additionalProperties": true,
+            "title": "Ntrip",
+            "type": "object"
+          }
+        },
+        "required": [
+          "ntrip",
+          "gps",
+          "hardware"
+        ],
+        "title": "RtkDiagnosticsResponse",
+        "type": "object"
+      },
+      "SafetyStatus": {
+        "properties": {
+          "blade_safety_ok": {
+            "default": true,
+            "title": "Blade Safety Ok",
+            "type": "boolean"
+          },
+          "emergency_stop_active": {
+            "default": false,
+            "title": "Emergency Stop Active",
+            "type": "boolean"
+          },
+          "obstacle_detected": {
+            "default": false,
+            "title": "Obstacle Detected",
+            "type": "boolean"
+          },
+          "safety_interlocks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Safety Interlocks",
+            "type": "array"
+          },
+          "tilt_detected": {
+            "default": false,
+            "title": "Tilt Detected",
+            "type": "boolean"
+          }
+        },
+        "title": "SafetyStatus",
+        "type": "object"
+      },
+      "SensorHealthResponse": {
+        "properties": {
+          "components": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Components",
+            "type": "object"
+          },
+          "initialized": {
+            "title": "Initialized",
+            "type": "boolean"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "initialized",
+          "components",
+          "timestamp"
+        ],
+        "title": "SensorHealthResponse",
+        "type": "object"
+      },
+      "SetPasswordRequest": {
+        "properties": {
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "SetPasswordRequest",
+        "type": "object"
+      },
+      "SetPasswordResponse": {
+        "properties": {
+          "message": {
+            "default": "Password configured successfully",
+            "title": "Message",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "SetPasswordResponse",
+        "type": "object"
+      },
+      "SystemStatus": {
+        "properties": {
+          "battery_percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Percentage"
+          },
+          "last_updated": {
+            "default": "2026-05-04T15:09:00.399958Z",
+            "format": "date-time",
+            "title": "Last Updated",
+            "type": "string"
+          },
+          "motor_status": {
+            "default": "idle",
+            "title": "Motor Status",
+            "type": "string"
+          },
+          "navigation_state": {
+            "default": "IDLE",
+            "title": "Navigation State",
+            "type": "string"
+          },
+          "safety_status": {
+            "$ref": "#/components/schemas/SafetyStatus",
+            "default": {
+              "blade_safety_ok": true,
+              "emergency_stop_active": false,
+              "obstacle_detected": false,
+              "safety_interlocks": [],
+              "tilt_detected": false
+            }
+          }
+        },
+        "title": "SystemStatus",
+        "type": "object"
+      },
+      "TelemetryPingRequest": {
+        "properties": {
+          "component_id": {
+            "title": "Component Id",
+            "type": "string"
+          },
+          "sample_count": {
+            "default": 10,
+            "title": "Sample Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "component_id"
+        ],
+        "title": "TelemetryPingRequest",
+        "type": "object"
+      },
+      "TimezoneResponse": {
+        "properties": {
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timezone",
+          "source"
+        ],
+        "title": "TimezoneResponse",
+        "type": "object"
+      },
+      "ToFProbe": {
+        "properties": {
+          "backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backend"
+          },
+          "i2c_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "I2C Address"
+          },
+          "i2c_bus": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "I2C Bus"
+          },
+          "initialized": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initialized"
+          },
+          "last_distance_mm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Distance Mm"
+          },
+          "last_read_age_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Read Age S"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          },
+          "sensor_side": {
+            "title": "Sensor Side",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sensor_side"
+        ],
+        "title": "ToFProbe",
+        "type": "object"
+      },
+      "ToFStatusResponse": {
+        "properties": {
+          "left": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToFProbe"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "right": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToFProbe"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sim_mode": {
+            "title": "Sim Mode",
+            "type": "boolean"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sim_mode",
+          "left",
+          "right",
+          "timestamp"
+        ],
+        "title": "ToFStatusResponse",
+        "type": "object"
+      },
+      "UserOut": {
+        "properties": {
+          "created_at": {
+            "default": "2026-05-04T15:08:59.312428Z",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "default": "admin",
+            "title": "Role",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username"
+        ],
+        "title": "UserOut",
+        "type": "object"
+      },
+      "UserResponse": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "default": "admin",
+            "title": "Role",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username"
+        ],
+        "title": "UserResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VerificationArtifactCreateRequest": {
+        "properties": {
+          "created_by": {
+            "default": "automation",
+            "title": "Created By",
+            "type": "string"
+          },
+          "linked_requirements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Linked Requirements",
+            "type": "array"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "location"
+        ],
+        "title": "VerificationArtifactCreateRequest",
+        "type": "object"
+      },
+      "WaypointIn": {
+        "properties": {
+          "arrival_threshold_m": {
+            "default": 1.0,
+            "maximum": 10.0,
+            "minimum": 0.1,
+            "title": "Arrival Threshold M",
+            "type": "number"
+          },
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          },
+          "waypoint_id": {
+            "title": "Waypoint Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "waypoint_id",
+          "latitude",
+          "longitude"
+        ],
+        "title": "WaypointIn",
+        "type": "object"
+      },
+      "WaypointList": {
+        "properties": {
+          "waypoints": {
+            "items": {
+              "$ref": "#/components/schemas/WaypointIn"
+            },
+            "title": "Waypoints",
+            "type": "array"
+          }
+        },
+        "required": [
+          "waypoints"
+        ],
+        "title": "WaypointList",
+        "type": "object"
+      },
+      "Zone": {
+        "properties": {
+          "exclusion_zone": {
+            "default": false,
+            "title": "Exclusion Zone",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "polygon": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "title": "Polygon",
+            "type": "array"
+          },
+          "priority": {
+            "default": 0,
+            "title": "Priority",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "polygon"
+        ],
+        "title": "Zone",
+        "type": "object"
+      },
+      "backend__src__api__rest_v1__AuthResponse": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "default": 3600,
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "token_type": {
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserResponse"
+          }
+        },
+        "required": [
+          "access_token",
+          "user"
+        ],
+        "title": "AuthResponse",
+        "type": "object"
+      },
+      "backend__src__api__routers__auth__AuthResponse": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "expires_in": {
+            "default": 3600,
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "token_type": {
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          }
+        },
+        "required": [
+          "access_token",
+          "user",
+          "token",
+          "expires_at"
+        ],
+        "title": "AuthResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Autonomous robotic lawn mower backend API",
+    "title": "LawnBerry Pi v2",
+    "version": "2.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Root"
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "deprecated": true,
+        "description": "Start login flow (MFA compatible).",
+        "operationId": "auth_login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backend__src__api__rest_v1__AuthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Login"
+      }
+    },
+    "/api/v1/maps/zones": {
+      "get": {
+        "deprecated": true,
+        "description": "List all zones.",
+        "operationId": "get_zones_api_v1_maps_zones_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Zone"
+                  },
+                  "title": "Response Get Zones Api V1 Maps Zones Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Zones"
+      },
+      "post": {
+        "deprecated": true,
+        "description": "Create or update zones.",
+        "operationId": "create_zones_api_v1_maps_zones_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "$ref": "#/components/schemas/Zone"
+                },
+                "title": "Zones",
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Zone"
+                  },
+                  "title": "Response Create Zones Api V1 Maps Zones Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Zones"
+      }
+    },
+    "/api/v1/mow/jobs": {
+      "get": {
+        "deprecated": true,
+        "description": "List all mowing jobs.",
+        "operationId": "get_jobs_api_v1_mow_jobs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Job"
+                  },
+                  "title": "Response Get Jobs Api V1 Mow Jobs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Jobs"
+      },
+      "post": {
+        "deprecated": true,
+        "description": "Queue a new mowing job.",
+        "operationId": "create_job_api_v1_mow_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Job Data",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Job"
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "deprecated": true,
+        "description": "Get system status snapshot.",
+        "operationId": "get_status_api_v1_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Status"
+      }
+    },
+    "/api/v2/ai/datasets": {
+      "get": {
+        "description": "Return the currently known AI datasets for operator/export workflows.",
+        "operationId": "list_ai_datasets_api_v2_ai_datasets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Ai Datasets"
+      }
+    },
+    "/api/v2/ai/datasets/{dataset_id}/export": {
+      "post": {
+        "description": "Start a lightweight dataset export job for the requested dataset.",
+        "operationId": "export_ai_dataset_api_v2_ai_datasets__dataset_id__export_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "title": "Dataset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Ai Dataset"
+      }
+    },
+    "/api/v2/ai/inference": {
+      "post": {
+        "description": "Run AI inference against an uploaded image.",
+        "operationId": "run_uploaded_inference_api_v2_ai_inference_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "task",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/InferenceTask",
+              "default": "obstacle_detection"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confidence_threshold",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Confidence Threshold"
+            }
+          },
+          {
+            "in": "query",
+            "name": "frame_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Frame Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Uploaded Inference"
+      }
+    },
+    "/api/v2/ai/inference/latest": {
+      "post": {
+        "description": "Run AI inference against the latest camera frame.",
+        "operationId": "run_latest_frame_inference_api_v2_ai_inference_latest_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "task",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/InferenceTask",
+              "default": "obstacle_detection"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confidence_threshold",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Confidence Threshold"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Latest Frame Inference"
+      }
+    },
+    "/api/v2/ai/results/recent": {
+      "get": {
+        "description": "Return recent inference results, newest first.",
+        "operationId": "get_recent_results_api_v2_ai_results_recent_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InferenceResult"
+                  },
+                  "title": "Response Get Recent Results Api V2 Ai Results Recent Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Recent Results"
+      }
+    },
+    "/api/v2/ai/status": {
+      "get": {
+        "description": "Return AI runtime and model status.",
+        "operationId": "get_ai_status_api_v2_ai_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Ai Status"
+      }
+    },
+    "/api/v2/auth/configure/password": {
+      "post": {
+        "description": "Configure a custom username/password for local authentication.\n\nRequires an active authenticated session (admin).\nGenerates a bcrypt hash and stores it in the security config.",
+        "operationId": "configure_password_api_v2_auth_configure_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetPasswordResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Configure Password"
+      }
+    },
+    "/api/v2/auth/login": {
+      "post": {
+        "operationId": "auth_login_api_v2_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backend__src__api__routers__auth__AuthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Login"
+      }
+    },
+    "/api/v2/auth/logout": {
+      "post": {
+        "operationId": "auth_logout_api_v2_auth_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Logout"
+      }
+    },
+    "/api/v2/auth/profile": {
+      "get": {
+        "operationId": "auth_profile_api_v2_auth_profile_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Profile"
+      }
+    },
+    "/api/v2/auth/refresh": {
+      "post": {
+        "operationId": "auth_refresh_api_v2_auth_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Refresh"
+      }
+    },
+    "/api/v2/camera/frame": {
+      "get": {
+        "description": "Get the most recent camera frame as JPEG.",
+        "operationId": "get_current_frame_api_v2_camera_frame_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Current Frame"
+      }
+    },
+    "/api/v2/camera/start": {
+      "post": {
+        "description": "Start camera streaming.",
+        "operationId": "start_camera_api_v2_camera_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Camera"
+      }
+    },
+    "/api/v2/camera/status": {
+      "get": {
+        "description": "Get camera service status.",
+        "operationId": "get_camera_status_api_v2_camera_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Camera Status"
+      }
+    },
+    "/api/v2/camera/stop": {
+      "post": {
+        "description": "Stop camera streaming.",
+        "operationId": "stop_camera_api_v2_camera_stop_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Camera"
+      }
+    },
+    "/api/v2/camera/stream.mjpeg": {
+      "get": {
+        "description": "Stream camera frames as Motion JPEG.",
+        "operationId": "stream_mjpeg_api_v2_camera_stream_mjpeg_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "client",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Client"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ts",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ts"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Mjpeg"
+      }
+    },
+    "/api/v2/control/blade": {
+      "post": {
+        "description": "Execute blade command with safety interlocks and audit logging.",
+        "operationId": "control_blade_v2_api_v2_control_blade_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Cmd",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Control Blade V2"
+      }
+    },
+    "/api/v2/control/diagnose/heading-validation": {
+      "post": {
+        "description": "Validate heading by comparing GPS Course-Over-Ground vs IMU yaw.\n\nPOST /api/v2/control/diagnose/heading-validation\nBody: {\n    \"session_id\": \"<session>\",\n    \"distance_m\": 5.0,       # Drive forward this far\n    \"samples\": 10            # Collect this many GPS/IMU samples\n}\n\nReturns:\n{\n    \"ok\": true,\n    \"heading_source\": \"gps|imu|conflict\",\n    \"gps_cog\": 45.2,\n    \"imu_yaw\": 45.5,\n    \"difference\": 0.3,\n    \"confidence\": 0.95,\n    \"recommendation\": \"GPS source is reliable\" | \"IMU appears inverted\" | \"Conflict detected\"\n}",
+        "operationId": "diagnose_heading_validation_api_v2_control_diagnose_heading_validation_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Cmd",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diagnose Heading Validation"
+      }
+    },
+    "/api/v2/control/diagnose/stiffness": {
+      "post": {
+        "description": "Start progressive stiffness detection test (slowly increase turn effort until stuck).\n\nPOST /api/v2/control/diagnose/stiffness\nBody: {\n    \"session_id\": \"<session>\",\n    \"direction\": \"left|right\",\n    \"initial_effort\": 0.1,  # Start at 10% effort, optional\n    \"step\": 0.05,            # Increase by 5% each iteration, optional\n    \"max_effort\": 1.0        # Stop at 100%, optional\n}\n\nReturns:\n{\n    \"ok\": true,\n    \"test_active\": true,\n    \"current_effort\": 0.10,\n    \"heading\": 45.2,\n    \"heading_delta\": 0.0,  # degrees changed since last step\n    \"status\": \"testing|stuck|completed\"\n}",
+        "operationId": "diagnose_stiffness_progressive_api_v2_control_diagnose_stiffness_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Cmd",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diagnose Stiffness Progressive"
+      }
+    },
+    "/api/v2/control/drive": {
+      "post": {
+        "description": "Execute drive command with safety checks and audit logging",
+        "operationId": "control_drive_v2_api_v2_control_drive_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Cmd",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlResponseV2"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Control Drive V2"
+      }
+    },
+    "/api/v2/control/emergency": {
+      "post": {
+        "description": "Trigger emergency stop with immediate hardware shutdown",
+        "operationId": "control_emergency_v2_api_v2_control_emergency_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlResponseV2"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Control Emergency V2"
+      }
+    },
+    "/api/v2/control/emergency-stop": {
+      "post": {
+        "description": "Integration-friendly alias that always returns 200 and a simple flag.",
+        "operationId": "control_emergency_stop_alias_api_v2_control_emergency_stop_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Control Emergency Stop Alias"
+      }
+    },
+    "/api/v2/control/emergency_clear": {
+      "post": {
+        "description": "Clear emergency stop after explicit operator confirmation.",
+        "operationId": "clear_emergency_stop_api_v2_control_emergency_clear_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmergencyClearRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Emergency Stop"
+      }
+    },
+    "/api/v2/control/manual-unlock": {
+      "post": {
+        "operationId": "manual_unlock_api_v2_control_manual_unlock_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualUnlockRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualUnlockResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Manual Unlock"
+      }
+    },
+    "/api/v2/control/manual-unlock/status": {
+      "get": {
+        "operationId": "manual_unlock_status_api_v2_control_manual_unlock_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualUnlockStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Manual Unlock Status"
+      }
+    },
+    "/api/v2/control/pause": {
+      "post": {
+        "description": "Pause autonomous navigation while preserving the current path.",
+        "operationId": "control_pause_navigation_api_v2_control_pause_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Control Pause Navigation"
+      }
+    },
+    "/api/v2/control/resume": {
+      "post": {
+        "description": "Resume navigation after a pause.",
+        "operationId": "control_resume_navigation_api_v2_control_resume_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Control Resume Navigation"
+      }
+    },
+    "/api/v2/control/return-home": {
+      "post": {
+        "description": "Start a return-to-home navigation sequence when home and position are available.",
+        "operationId": "control_return_home_api_v2_control_return_home_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Control Return Home"
+      }
+    },
+    "/api/v2/control/start": {
+      "post": {
+        "description": "Start autonomous navigation using the active planned path.",
+        "operationId": "control_start_navigation_api_v2_control_start_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Control Start Navigation"
+      }
+    },
+    "/api/v2/control/status": {
+      "get": {
+        "description": "Expose navigation control state for operator dashboards.",
+        "operationId": "control_navigation_status_api_v2_control_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Control Navigation Status"
+      }
+    },
+    "/api/v2/control/stop": {
+      "post": {
+        "description": "Stop navigation and place the system back in idle.",
+        "operationId": "control_stop_navigation_api_v2_control_stop_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Control Stop Navigation"
+      }
+    },
+    "/api/v2/dashboard/metrics": {
+      "get": {
+        "operationId": "get_dashboard_metrics_api_v2_dashboard_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Dashboard Metrics Api V2 Dashboard Metrics Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Dashboard Metrics"
+      }
+    },
+    "/api/v2/dashboard/status": {
+      "get": {
+        "operationId": "dashboard_status_api_v2_dashboard_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MowerStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Dashboard Status"
+      }
+    },
+    "/api/v2/dashboard/telemetry": {
+      "get": {
+        "description": "Get real-time telemetry from hardware sensors with RTK/IMU orientation states",
+        "operationId": "dashboard_telemetry_api_v2_dashboard_telemetry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Dashboard Telemetry"
+      }
+    },
+    "/api/v2/debug/geofence": {
+      "post": {
+        "operationId": "debug_geofence_set_api_v2_debug_geofence_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeofenceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Debug Geofence Set"
+      }
+    },
+    "/api/v2/debug/gps/inject": {
+      "post": {
+        "operationId": "debug_gps_inject_api_v2_debug_gps_inject_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GPSInject"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Debug Gps Inject"
+      }
+    },
+    "/api/v2/debug/sensors/inject-tilt": {
+      "post": {
+        "description": "Debug-only: inject tilt (roll/pitch) to simulate IMU tilt event.",
+        "operationId": "inject_tilt_api_v2_debug_sensors_inject_tilt_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InjectTiltRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inject Tilt"
+      }
+    },
+    "/api/v2/debug/sensors/inject-tof": {
+      "post": {
+        "description": "Debug-only: inject a ToF distance reading (simulation/testing only).\n\nThis updates an in-memory override that SensorManager can read in future\niterations. For now, we simply store and acknowledge for contract tests.",
+        "operationId": "inject_tof_api_v2_debug_sensors_inject_tof_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InjectToFRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inject Tof"
+      }
+    },
+    "/api/v2/docs/bundle": {
+      "get": {
+        "operationId": "get_docs_bundle_api_v2_docs_bundle_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "simulate_checksum_mismatch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Simulate Checksum Mismatch"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Docs Bundle"
+      }
+    },
+    "/api/v2/docs/checksums": {
+      "get": {
+        "operationId": "get_docs_checksums_api_v2_docs_checksums_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Docs Checksums Api V2 Docs Checksums Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Docs Checksums"
+      }
+    },
+    "/api/v2/docs/freshness": {
+      "get": {
+        "operationId": "get_docs_freshness_api_v2_docs_freshness_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Docs Freshness Api V2 Docs Freshness Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Docs Freshness"
+      }
+    },
+    "/api/v2/docs/list": {
+      "get": {
+        "operationId": "get_docs_list_api_v2_docs_list_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Get Docs List Api V2 Docs List Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Docs List"
+      }
+    },
+    "/api/v2/docs/{doc_path}": {
+      "get": {
+        "operationId": "get_doc_contents_api_v2_docs__doc_path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_path",
+            "required": true,
+            "schema": {
+              "title": "Doc Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Doc Contents"
+      }
+    },
+    "/api/v2/fusion/state": {
+      "get": {
+        "description": "Return a fused navigation state (SIM_MODE-friendly scaffold).\n\nIn SIM_MODE, advance the model slightly each call to emulate motion and set\nstable quality metrics. This keeps CI safe and enables placeholder tests.",
+        "operationId": "get_fused_state_api_v2_fusion_state_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Fused State Api V2 Fusion State Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Fused State"
+      }
+    },
+    "/api/v2/hardware/robohat": {
+      "get": {
+        "description": "Get RoboHAT firmware health and watchdog status with safety summary.",
+        "operationId": "get_robohat_status_api_v2_hardware_robohat_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Robohat Status"
+      }
+    },
+    "/api/v2/health": {
+      "get": {
+        "description": "Expose health report under the versioned API namespace.",
+        "operationId": "health_api_v2_api_v2_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Health Api V2 Api V2 Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Api V2"
+      }
+    },
+    "/api/v2/health/liveness": {
+      "get": {
+        "description": "Simple liveness probe for container orchestration.",
+        "operationId": "health_liveness_api_v2_health_liveness_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Health Liveness Api V2 Health Liveness Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Liveness"
+      }
+    },
+    "/api/v2/health/readiness": {
+      "get": {
+        "description": "Readiness probe including subsystem rollup.",
+        "operationId": "health_readiness_api_v2_health_readiness_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Health Readiness Api V2 Health Readiness Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Readiness"
+      }
+    },
+    "/api/v2/maintenance/imu/calibrate": {
+      "get": {
+        "description": "Return current calibration activity state and the most recent result.",
+        "operationId": "get_calibration_status_api_v2_maintenance_imu_calibrate_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IMUCalibrationStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Calibration Status"
+      },
+      "post": {
+        "description": "Execute the IMU calibration routine and return the resulting summary.",
+        "operationId": "post_calibrate_imu_api_v2_maintenance_imu_calibrate_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IMUCalibrationResultPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Post Calibrate Imu"
+      }
+    },
+    "/api/v2/map/configuration": {
+      "get": {
+        "operationId": "get_map_configuration_api_v2_map_configuration_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "config_id",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Config Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "simulate_fallback",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Simulate Fallback"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Map Configuration"
+      },
+      "put": {
+        "operationId": "put_map_configuration_api_v2_map_configuration_put",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "config_id",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Envelope",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Map Configuration"
+      }
+    },
+    "/api/v2/map/locations": {
+      "get": {
+        "operationId": "get_map_locations_api_v2_map_locations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapLocations"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Map Locations"
+      },
+      "put": {
+        "operationId": "put_map_locations_api_v2_map_locations_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MapLocations"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapLocations"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Map Locations"
+      }
+    },
+    "/api/v2/map/provider-fallback": {
+      "post": {
+        "operationId": "trigger_map_provider_fallback_api_v2_map_provider_fallback_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "config_id",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Config Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Map Provider Fallback"
+      }
+    },
+    "/api/v2/map/zones": {
+      "get": {
+        "operationId": "get_map_zones_api_v2_map_zones_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Zone"
+                  },
+                  "title": "Response Get Map Zones Api V2 Map Zones Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Map Zones"
+      },
+      "post": {
+        "operationId": "post_map_zones_api_v2_map_zones_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "$ref": "#/components/schemas/Zone"
+                },
+                "title": "Zones",
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Zone"
+                  },
+                  "title": "Response Post Map Zones Api V2 Map Zones Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Map Zones"
+      }
+    },
+    "/api/v2/missions/create": {
+      "post": {
+        "description": "Create a new mission.",
+        "operationId": "create_mission_api_v2_missions_create_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MissionCreationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mission"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Mission"
+      }
+    },
+    "/api/v2/missions/list": {
+      "get": {
+        "description": "List all saved missions.",
+        "operationId": "list_missions_api_v2_missions_list_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Mission"
+                  },
+                  "title": "Response List Missions Api V2 Missions List Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Missions"
+      }
+    },
+    "/api/v2/missions/{mission_id}/abort": {
+      "post": {
+        "description": "Abort a mission.",
+        "operationId": "abort_mission_api_v2_missions__mission_id__abort_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mission_id",
+            "required": true,
+            "schema": {
+              "title": "Mission Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Abort Mission"
+      }
+    },
+    "/api/v2/missions/{mission_id}/pause": {
+      "post": {
+        "description": "Pause a mission.",
+        "operationId": "pause_mission_api_v2_missions__mission_id__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mission_id",
+            "required": true,
+            "schema": {
+              "title": "Mission Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pause Mission"
+      }
+    },
+    "/api/v2/missions/{mission_id}/resume": {
+      "post": {
+        "description": "Resume a paused mission.",
+        "operationId": "resume_mission_api_v2_missions__mission_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mission_id",
+            "required": true,
+            "schema": {
+              "title": "Mission Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume Mission"
+      }
+    },
+    "/api/v2/missions/{mission_id}/start": {
+      "post": {
+        "description": "Start a mission.",
+        "operationId": "start_mission_api_v2_missions__mission_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mission_id",
+            "required": true,
+            "schema": {
+              "title": "Mission Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Mission"
+      }
+    },
+    "/api/v2/missions/{mission_id}/status": {
+      "get": {
+        "description": "Get the status of a mission.",
+        "operationId": "get_mission_status_api_v2_missions__mission_id__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mission_id",
+            "required": true,
+            "schema": {
+              "title": "Mission Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Mission Status"
+      }
+    },
+    "/api/v2/motors/drive": {
+      "post": {
+        "operationId": "drive_api_v2_motors_drive_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DriveCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "additionalProperties": {
+                      "type": "integer"
+                    },
+                    "type": "object"
+                  },
+                  "title": "Response Drive Api V2 Motors Drive Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Drive"
+      }
+    },
+    "/api/v2/nav/coverage-plan": {
+      "get": {
+        "operationId": "get_coverage_plan_api_v2_nav_coverage_plan_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "config_id",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "title": "Config Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "spacing_m",
+            "required": false,
+            "schema": {
+              "default": 0.6,
+              "exclusiveMinimum": 0.0,
+              "maximum": 5.0,
+              "title": "Spacing M",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Coverage Plan"
+      }
+    },
+    "/api/v2/nav/mode": {
+      "post": {
+        "operationId": "set_mode_api_v2_nav_mode_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Mode"
+      }
+    },
+    "/api/v2/nav/status": {
+      "get": {
+        "operationId": "get_nav_status_api_v2_nav_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Nav Status"
+      }
+    },
+    "/api/v2/nav/waypoints": {
+      "post": {
+        "operationId": "set_waypoints_api_v2_nav_waypoints_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WaypointList"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Waypoints"
+      }
+    },
+    "/api/v2/planning/jobs": {
+      "get": {
+        "operationId": "list_planning_jobs_api_v2_planning_jobs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Planning Jobs"
+      },
+      "post": {
+        "operationId": "create_planning_job_api_v2_planning_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Planning Job"
+      }
+    },
+    "/api/v2/planning/jobs/{job_id}": {
+      "delete": {
+        "operationId": "delete_planning_job_api_v2_planning_jobs__job_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Planning Job"
+      }
+    },
+    "/api/v2/sensors/environmental/status": {
+      "get": {
+        "operationId": "get_env_status_api_v2_sensors_environmental_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Env Status"
+      }
+    },
+    "/api/v2/sensors/gps/rtk/diagnostics": {
+      "get": {
+        "description": "Return combined RTK/NTRIP diagnostics without stealing the serial port.\n\n- Exposes current GPS reading and mode\n- Reports NTRIP forwarder runtime stats when configured\n- Includes minimal hardware GPS flags from app state",
+        "operationId": "get_rtk_diagnostics_api_v2_sensors_gps_rtk_diagnostics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RtkDiagnosticsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Rtk Diagnostics"
+      }
+    },
+    "/api/v2/sensors/gps/status": {
+      "get": {
+        "operationId": "get_gps_status_api_v2_sensors_gps_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GPSSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Gps Status"
+      }
+    },
+    "/api/v2/sensors/health": {
+      "get": {
+        "description": "Return minimal sensor health snapshot.\n\nUses SensorManager when available. Safe in SIM_MODE and CI.",
+        "operationId": "get_sensors_health_api_v2_sensors_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SensorHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Sensors Health"
+      }
+    },
+    "/api/v2/sensors/imu/status": {
+      "get": {
+        "operationId": "get_imu_status_api_v2_sensors_imu_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IMUSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Imu Status"
+      }
+    },
+    "/api/v2/sensors/power/status": {
+      "get": {
+        "operationId": "get_power_status_api_v2_sensors_power_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PowerSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Power Status"
+      }
+    },
+    "/api/v2/sensors/tof/status": {
+      "get": {
+        "description": "Detailed ToF driver status for hardware verification.\n\nReturns per-sensor backend info (binding name), bus/address, and last reading.\nSafe on systems without the VL53L0X binding: fields will be None.",
+        "operationId": "get_tof_status_api_v2_sensors_tof_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToFStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Tof Status"
+      }
+    },
+    "/api/v2/settings": {
+      "get": {
+        "description": "Get canonical settings profile payload with compatibility fields.",
+        "operationId": "get_settings_api_v2_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Settings"
+      },
+      "put": {
+        "description": "Update canonical settings profile, accepting legacy compatibility fields too.",
+        "operationId": "update_settings_api_v2_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Settings",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Settings"
+      }
+    },
+    "/api/v2/settings/gps-policy": {
+      "get": {
+        "operationId": "get_gps_policy_settings_api_v2_settings_gps_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Gps Policy Settings"
+      },
+      "put": {
+        "operationId": "update_gps_policy_settings_api_v2_settings_gps_policy_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Settings",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Gps Policy Settings"
+      }
+    },
+    "/api/v2/settings/maps": {
+      "get": {
+        "operationId": "get_maps_settings_api_v2_settings_maps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Maps Settings"
+      },
+      "put": {
+        "operationId": "update_maps_settings_api_v2_settings_maps_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Settings",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Maps Settings"
+      }
+    },
+    "/api/v2/settings/remote-access": {
+      "get": {
+        "operationId": "get_remote_access_settings_api_v2_settings_remote_access_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Remote Access Settings"
+      },
+      "put": {
+        "operationId": "update_remote_access_settings_api_v2_settings_remote_access_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Settings",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Remote Access Settings"
+      }
+    },
+    "/api/v2/settings/safety": {
+      "get": {
+        "description": "Return the current safety limits from limits.yaml.",
+        "operationId": "get_safety_settings_api_v2_settings_safety_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Safety Settings"
+      },
+      "put": {
+        "description": "Update safety limits, write to limits.yaml, and hot-reload runtime.\n\nAccepts a partial JSON object — only supplied keys are changed.",
+        "operationId": "put_safety_settings_api_v2_settings_safety_put",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Put Safety Settings"
+      }
+    },
+    "/api/v2/settings/security": {
+      "get": {
+        "operationId": "get_security_settings_api_v2_settings_security_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Security Settings"
+      },
+      "put": {
+        "operationId": "update_security_settings_api_v2_settings_security_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Settings",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Security Settings"
+      }
+    },
+    "/api/v2/settings/system": {
+      "get": {
+        "operationId": "get_system_settings_api_v2_settings_system_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get System Settings"
+      },
+      "put": {
+        "operationId": "update_system_settings_api_v2_settings_system_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Settings",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update System Settings"
+      }
+    },
+    "/api/v2/settings/telemetry": {
+      "get": {
+        "operationId": "get_telemetry_settings_api_v2_settings_telemetry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Telemetry Settings"
+      },
+      "put": {
+        "operationId": "update_telemetry_settings_api_v2_settings_telemetry_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Settings",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Telemetry Settings"
+      }
+    },
+    "/api/v2/status": {
+      "get": {
+        "description": "Return current robot state in a simplified schema for contract tests.",
+        "operationId": "get_status_v2_api_v2_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Status V2"
+      }
+    },
+    "/api/v2/system/selftest": {
+      "get": {
+        "description": "Run on-device hardware self-test.\n\nSafe to run on systems without hardware; returns a structured report.",
+        "operationId": "system_selftest_api_v2_system_selftest_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "System Selftest"
+      }
+    },
+    "/api/v2/system/timezone": {
+      "get": {
+        "description": "Return the mower's default timezone.\n\nStrategy: prefer the Raspberry Pi's configured timezone. If unavailable,\nfall back to UTC. A GPS-derived timezone may be added in future.",
+        "operationId": "get_system_timezone_api_v2_system_timezone_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimezoneResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get System Timezone"
+      }
+    },
+    "/api/v2/telemetry/export": {
+      "get": {
+        "description": "Export telemetry diagnostic data including power metrics for troubleshooting",
+        "operationId": "export_telemetry_diagnostic_api_v2_telemetry_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "component",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Component"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "description": "Export format: json or csv",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "csv",
+              "description": "Export format: json or csv",
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Telemetry Diagnostic"
+      }
+    },
+    "/api/v2/telemetry/ping": {
+      "post": {
+        "description": "Return latency percentiles and samples to meet contract tests",
+        "operationId": "telemetry_ping_api_v2_telemetry_ping_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelemetryPingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Telemetry Ping"
+      }
+    },
+    "/api/v2/telemetry/stream": {
+      "get": {
+        "description": "Contract-shaped telemetry stream: items + latency_summary_ms + next_since",
+        "operationId": "get_telemetry_stream_api_v2_telemetry_stream_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Telemetry Stream"
+      }
+    },
+    "/api/v2/verification-artifacts": {
+      "post": {
+        "operationId": "create_verification_artifact_api_v2_verification_artifacts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationArtifactCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Verification Artifact"
+      }
+    },
+    "/api/v2/weather/current": {
+      "get": {
+        "description": "Get current weather data from sensors or external API.",
+        "operationId": "get_current_weather_api_v2_weather_current_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "latitude",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Latitude"
+            }
+          },
+          {
+            "in": "query",
+            "name": "longitude",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Longitude"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Current Weather"
+      }
+    },
+    "/api/v2/weather/planning": {
+      "get": {
+        "description": "Get mowing planning advice based on current weather.",
+        "operationId": "get_planning_advice_api_v2_weather_planning_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "latitude",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Latitude"
+            }
+          },
+          {
+            "in": "query",
+            "name": "longitude",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Longitude"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Planning Advice"
+      }
+    },
+    "/api/v2/weather/planning-advice": {
+      "get": {
+        "description": "Contract-friendly planning advice payload.",
+        "operationId": "get_planning_advice_contract_api_v2_weather_planning_advice_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "latitude",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Latitude"
+            }
+          },
+          {
+            "in": "query",
+            "name": "longitude",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Longitude"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Planning Advice Contract"
+      }
+    },
+    "/api/v2/ws/control": {
+      "get": {
+        "operationId": "websocket_control_handshake_api_v2_ws_control_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Websocket Control Handshake"
+      }
+    },
+    "/api/v2/ws/notifications": {
+      "get": {
+        "operationId": "websocket_notifications_handshake_api_v2_ws_notifications_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Websocket Notifications Handshake"
+      }
+    },
+    "/api/v2/ws/settings": {
+      "get": {
+        "operationId": "websocket_settings_handshake_api_v2_ws_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Websocket Settings Handshake"
+      }
+    },
+    "/api/v2/ws/telemetry": {
+      "get": {
+        "operationId": "websocket_telemetry_handshake_api_v2_ws_telemetry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Websocket Telemetry Handshake"
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Return aggregated health status for platform monitoring.",
+        "operationId": "health_root_route_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Health Root Route Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Root Route"
+      }
+    },
+    "/healthz": {
+      "get": {
+        "description": "Tiny liveness endpoint for cheap probes.",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Healthz Healthz Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Healthz"
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Expose a Prometheus-compatible metrics snapshot.",
+        "operationId": "metrics_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Metrics"
+      }
+    },
+    "/ws/control": {
+      "get": {
+        "operationId": "websocket_control_handshake_ws_control_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Websocket Control Handshake"
+      }
+    },
+    "/ws/telemetry": {
+      "get": {
+        "operationId": "websocket_telemetry_handshake_ws_telemetry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Websocket Telemetry Handshake"
+      }
+    }
+  }
+}
