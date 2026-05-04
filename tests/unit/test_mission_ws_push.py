@@ -138,3 +138,29 @@ async def test_mission_completed_callback_broadcasts_failed():
     assert hub.broadcast_to_topic.call_count >= 2
 
 
+@pytest.mark.asyncio
+async def test_mission_diagnostics_broadcast_on_start():
+    """MissionService broadcasts mission.diagnostics on start when event_store is attached."""
+    from backend.src.services.mission_service import MissionService
+    from backend.src.observability.event_store import EventStore
+    from backend.src.observability.events import PersistenceMode
+
+    ws_hub = MagicMock()
+    ws_hub.broadcast_to_topic = AsyncMock()
+
+    store = EventStore(persistence=None, mode=PersistenceMode.FULL)
+
+    svc = MissionService(
+        navigation_service=_DummyNav(),
+        websocket_hub=ws_hub,
+    )
+    svc.set_event_store(store)
+
+    mission = await svc.create_mission("D", [MissionWaypoint(lat=37.0, lon=-122.0)])
+    await svc.start_mission(mission.id)
+
+    calls = ws_hub.broadcast_to_topic.call_args_list
+    topics = [call.args[0] for call in calls]
+    assert "mission.diagnostics" in topics
+
+

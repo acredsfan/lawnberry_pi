@@ -221,6 +221,32 @@ class MissionService:
         except Exception as exc:
             logger.warning("Failed to broadcast mission status: %s", exc)
 
+    async def _broadcast_diagnostics(self, mission_id: str) -> None:
+        """Emit mission.diagnostics payload over WebSocket."""
+        if self._websocket_hub is None or self._event_store is None:
+            return
+        try:
+            from collections import Counter
+            events = self._event_store.load_events(run_id=self._obs_run_id)
+            blocked_count = sum(1 for e in events if e["event_type"] == "safety_gate_blocked")
+            pose_events = [e for e in events if e["event_type"] == "pose_updated"]
+            quality_values = [e.get("pose_quality") for e in pose_events if e.get("pose_quality")]
+            quality = Counter(quality_values).most_common(1)[0][0] if quality_values else None
+            heading_events = [e for e in events if e["event_type"] == "heading_aligned"]
+            await self._websocket_hub.broadcast_to_topic(
+                "mission.diagnostics",
+                {
+                    "run_id": self._obs_run_id,
+                    "mission_id": mission_id,
+                    "blocked_command_count": blocked_count,
+                    "average_pose_quality": quality,
+                    "heading_alignment_samples": len(heading_events),
+                    "pose_update_count": len(pose_events),
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed to broadcast mission diagnostics: %s", exc)
+
     async def update_waypoint_progress(self, mission_id: str, waypoint_index: int) -> None:
         """Update waypoint progress in mission status (MissionStatusReader protocol method).
 
@@ -498,6 +524,7 @@ class MissionService:
         # Monitor task completion
         task.add_done_callback(self._mission_completed_callback(mission_id))
         await self._broadcast_status(mission_id, "Mission started")
+        await self._broadcast_diagnostics(mission_id)
         from ..observability.events import MissionStateChanged
         self._emit_event(MissionStateChanged(
             run_id=self._obs_run_id,
@@ -608,6 +635,7 @@ class MissionService:
         self.nav_service.navigation_state.navigation_mode = NavigationMode.PAUSED
         self._persist_mission_status(mission_id)
         await self._broadcast_status(mission_id, "Mission paused")
+        await self._broadcast_diagnostics(mission_id)
         from ..observability.events import MissionStateChanged
         self._emit_event(MissionStateChanged(
             run_id=self._obs_run_id,
@@ -659,6 +687,7 @@ class MissionService:
         self.nav_service.navigation_state.navigation_mode = NavigationMode.AUTO
         self._persist_mission_status(mission_id)
         await self._broadcast_status(mission_id, "Mission resumed")
+        await self._broadcast_diagnostics(mission_id)
         from ..observability.events import MissionStateChanged
         self._emit_event(MissionStateChanged(
             run_id=self._obs_run_id,
@@ -704,6 +733,7 @@ class MissionService:
         status.detail = detail
         self._persist_mission_status(mission_id)
         await self._broadcast_status(mission_id, detail)
+        await self._broadcast_diagnostics(mission_id)
         from ..observability.events import MissionStateChanged
         self._emit_event(MissionStateChanged(
             run_id=self._obs_run_id,
