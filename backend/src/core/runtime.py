@@ -59,6 +59,10 @@ class RuntimeContext:
     calibration_repository: Any = None  # CalibrationRepository
     telemetry_repository: Any = None    # TelemetryRepository
 
+    # Observability fields (W1-3)
+    event_store: Any = None          # EventStore; Any to avoid import cycle
+    persistence_mode: str = "summary"  # "full" | "summary"
+
     @property
     def sensor_manager(self) -> Any:
         from .state_manager import AppState

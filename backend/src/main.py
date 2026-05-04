@@ -241,6 +241,22 @@ async def lifespan(app: FastAPI):
     # Wire MissionRepository into the already-constructed MissionService singleton.
     get_mission_service(nav_service, mission_repository=_mission_repo)
 
+    # --- EventStore construction (W1-3) ---
+    from backend.src.observability.event_store import EventStore
+    from backend.src.observability.events import PersistenceMode
+
+    _raw_mode = os.environ.get("LAWNBERRY_PERSISTENCE_MODE", "summary").lower()
+    try:
+        _persistence_mode = PersistenceMode(_raw_mode)
+    except ValueError:
+        _log.warning(
+            "Unknown LAWNBERRY_PERSISTENCE_MODE=%r; defaulting to 'summary'", _raw_mode
+        )
+        _persistence_mode = PersistenceMode.SUMMARY
+
+    event_store = EventStore(persistence=persistence, mode=_persistence_mode)
+    _log.info("Event persistence mode: %s", _persistence_mode.value)
+
     app.state.runtime = RuntimeContext(
         config_loader=loader,
         hardware_config=hardware_cfg,
@@ -259,6 +275,8 @@ async def lifespan(app: FastAPI):
         settings_repository=_settings_repo,
         calibration_repository=_calibration_repo,
         telemetry_repository=_telemetry_repo,
+        event_store=event_store,
+        persistence_mode=_persistence_mode.value,
     )
     _fw = None
     if app.state.runtime.robohat:
