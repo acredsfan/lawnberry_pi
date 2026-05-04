@@ -284,7 +284,7 @@ const speedLevel = ref(50)
 
 const {
   joystickEngaged, activeDriveVector,
-  handleJoystickChange, handleJoystickEnd, stopMovement, queueDriveCommand,
+  handleJoystickChange, handleJoystickEnd, stopMovement,
 } = useJoystickDrive({
   isControlUnlocked,
   lockout: computed(() => Boolean(control.lockout)),
@@ -397,7 +397,6 @@ function lockControl() {
   void stopMovement(true)
   joystickRef.value?.reset()
   lockControlBase()
-  stopCameraFeed()
   currentSpeed.value = 0
 }
 
