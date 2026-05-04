@@ -67,3 +67,11 @@ def test_lifespan_startup_assigns_runtime_to_app_state():
         )
         from backend.src.control.command_gateway import MotorCommandGateway
         assert isinstance(runtime.command_gateway, MotorCommandGateway)
+
+        # event_store and persistence_mode must be wired (Phase 9 W1-3).
+        from backend.src.observability.event_store import EventStore
+        assert runtime.event_store is not None, (
+            "runtime.event_store should not be None after lifespan startup"
+        )
+        assert isinstance(runtime.event_store, EventStore)
+        assert runtime.persistence_mode == "summary"
