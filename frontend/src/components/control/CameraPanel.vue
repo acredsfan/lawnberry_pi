@@ -19,8 +19,8 @@
             Retry
           </button>
         </div>
-        <div class="camera-badge" :class="`camera-badge--${cameraModeBadge.tone}`">
-          {{ cameraModeBadge.label }}
+        <div class="camera-badge" :class="`camera-badge--${cameraModeBadge?.tone ?? 'muted'}`">
+          {{ cameraModeBadge?.label ?? '' }}
         </div>
       </div>
       <div class="camera-meta">

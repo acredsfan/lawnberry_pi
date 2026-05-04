@@ -41,9 +41,10 @@ function formatSystemStatus(status: string) {
 }
 
 function formatTimeRemaining(seconds: number) {
-  if (!seconds || seconds <= 0) return 'expired'
-  const mins = Math.floor(seconds / 60)
-  const secs = seconds % 60
+  const s = Math.floor(seconds)
+  if (s <= 0) return 'expired'
+  const mins = Math.floor(s / 60)
+  const secs = s % 60
   if (mins === 0) return `${secs}s`
   return `${mins}m ${secs.toString().padStart(2, '0')}s`
 }

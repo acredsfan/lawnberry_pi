@@ -18,7 +18,7 @@
               class="form-control" placeholder="Enter your password" @keyup.enter="$emit('authenticate')" />
           </div>
           <div v-else-if="authLevel === 'totp'" class="auth-method">
-            <label for="ctl-auth-credential">Confirm Password</label>
+            <label for="ctl-auth-credential">Password</label>
             <input id="ctl-auth-credential" v-model="localCredential" type="password"
               class="form-control" placeholder="Enter your password" @keyup.enter="$emit('authenticate')" />
             <label for="ctl-auth-totp">Enter TOTP Code</label>
