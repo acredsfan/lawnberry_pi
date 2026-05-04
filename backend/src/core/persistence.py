@@ -31,7 +31,7 @@ class Migration:
 class PersistenceLayer:
     """SQLite-based persistence layer for LawnBerry Pi v2."""
 
-    SCHEMA_VERSION = 5
+    SCHEMA_VERSION = 6
 
     MIGRATIONS = [
         Migration(
@@ -170,6 +170,27 @@ class PersistenceLayer:
                 ON mission_execution_state(status);
 
             INSERT OR REPLACE INTO schema_version (version) VALUES (5);
+            """,
+        ),
+        Migration(
+            version=6,
+            description="Add mission_events table for structured observability events",
+            sql="""
+            CREATE TABLE IF NOT EXISTS mission_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                mission_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_mission_events_run_id
+                ON mission_events(run_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_mission_events_type
+                ON mission_events(event_type);
+
+            INSERT OR REPLACE INTO schema_version (version) VALUES (6);
             """,
         ),
     ]
