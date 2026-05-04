@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
 
 
 class PersistenceMode(str, Enum):
@@ -22,7 +21,7 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-@dataclass
+@dataclass(frozen=True)
 class PoseUpdated:
     """Emitted by NavigationService on each successful pose update."""
 
@@ -39,7 +38,7 @@ class PoseUpdated:
     event_type: str = field(default="pose_updated", init=False)
 
 
-@dataclass
+@dataclass(frozen=True)
 class HeadingAligned:
     """Emitted when the GPS COG heading bootstrap completes (first stable snap)."""
 
@@ -53,7 +52,7 @@ class HeadingAligned:
     event_type: str = field(default="heading_aligned", init=False)
 
 
-@dataclass
+@dataclass(frozen=True)
 class WaypointTargetChanged:
     """Emitted by MissionService/NavigationService when a new waypoint becomes the target."""
 
@@ -68,7 +67,7 @@ class WaypointTargetChanged:
     event_type: str = field(default="waypoint_target_changed", init=False)
 
 
-@dataclass
+@dataclass(frozen=True)
 class MotionCommandIssued:
     """Emitted by MotorCommandGateway immediately before dispatching to RoboHAT."""
 
@@ -83,7 +82,7 @@ class MotionCommandIssued:
     event_type: str = field(default="motion_command_issued", init=False)
 
 
-@dataclass
+@dataclass(frozen=True)
 class MotionCommandAcked:
     """Emitted by MotorCommandGateway after RoboHAT acknowledges a command."""
 
@@ -96,7 +95,7 @@ class MotionCommandAcked:
     event_type: str = field(default="motion_command_acked", init=False)
 
 
-@dataclass
+@dataclass(frozen=True)
 class SafetyGateBlocked:
     """Emitted by MotorCommandGateway when a command is rejected by a safety interlock."""
 
@@ -110,7 +109,7 @@ class SafetyGateBlocked:
     event_type: str = field(default="safety_gate_blocked", init=False)
 
 
-@dataclass
+@dataclass(frozen=True)
 class MissionStateChanged:
     """Emitted by MissionService on start, pause, resume, abort, or complete."""
 

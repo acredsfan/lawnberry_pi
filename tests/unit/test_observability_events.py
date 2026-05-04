@@ -1,8 +1,6 @@
 """Unit tests for structured observability event dataclasses."""
 from dataclasses import asdict
-from datetime import UTC, datetime
-
-import pytest
+from datetime import datetime
 
 
 def test_pose_updated_fields():
