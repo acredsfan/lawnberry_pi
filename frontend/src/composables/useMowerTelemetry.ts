@@ -58,6 +58,7 @@ export function useMowerTelemetry() {
         gpsAccuracyMeters.value = Number.isFinite(acc) ? acc : null
         const hdg = data?.nav_heading
         mowerHeading.value = hdg != null && Number.isFinite(Number(hdg)) ? Number(hdg) : null
+        lastWsUpdateAt.value = Date.now()
       }
     } catch {
       // REST fallback is best-effort
@@ -76,6 +77,7 @@ export function useMowerTelemetry() {
 
   onUnmounted(() => {
     telemetrySocket.unsubscribe('telemetry.navigation', handleNavigation)
+    telemetrySocket.disconnect()
     if (restPollTimer !== null) {
       clearInterval(restPollTimer)
       restPollTimer = null
