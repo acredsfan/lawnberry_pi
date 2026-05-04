@@ -10,199 +10,19 @@
 
     <div class="dashboard-grid">
       <!-- System Status -->
-      <div class="retro-card status-card">
-        <div class="card-header">
-          <h3>◢ SYSTEM STATUS ◣</h3>
-          <div class="status-indicator" :class="systemStatusClass" />
-        </div>
-        <div class="card-content">
-          <div class="status-row">
-            <span class="status-label">UPTIME:</span>
-            <span class="status-value uptime">{{ uptime }}</span>
-          </div>
-          <div class="status-row">
-            <span class="status-label">CONNECTION:</span>
-            <span class="status-value" :class="connectionStatusClass">{{ connectionStatus }}</span>
-          </div>
-          <div class="status-row">
-            <span class="status-label">STATUS:</span>
-            <span class="status-value" :class="systemStatusClass">{{ systemStatus }}</span>
-          </div>
-          <div class="status-row">
-            <span class="status-label">MODE:</span>
-            <span class="status-value">{{ currentMode }}</span>
-          </div>
-          <div class="status-row">
-            <span class="status-label">PROGRESS:</span>
-            <span class="status-value">{{ progress.toFixed(0) }}%</span>
-          </div>
-        </div>
-      </div>
+      <SystemStatusCard :data="systemData" :event-log="telemetryEventLog" />
 
       <!-- Power / Battery -->
-      <div class="retro-card power-card">
-        <div class="card-header">
-          <h4>POWER SYSTEM</h4>
-          <div class="power-indicator" :class="batteryIconClass" />
-        </div>
-        <div class="card-content power-content">
-          <div class="battery-panel">
-            <div class="battery-shell" :class="batteryBarClass">
-              <span class="battery-percentage" data-testid="battery-percentage">{{ batteryLevelDisplay }}%</span>
-            </div>
-            <div class="battery-terminal" />
-          </div>
-          <div class="power-metrics">
-            <div class="metric-line">
-              <span class="metric-label">Battery Voltage</span>
-              <span class="metric-value" data-testid="battery-voltage">{{ batteryVoltageDisplay }}V</span>
-            </div>
-            <div class="metric-line">
-              <span class="metric-label">Battery Current</span>
-              <span class="metric-value">{{ batteryCurrentDisplay }}A</span>
-            </div>
-            <div class="metric-line">
-              <span class="metric-label">Battery Power</span>
-              <span class="metric-value">{{ batteryPowerDisplay }}W</span>
-            </div>
-            <div class="metric-line">
-              <span class="metric-label">Battery State</span>
-              <span class="metric-value">{{ batteryChargeStateDisplay }}</span>
-            </div>
-            <div class="metric-line">
-              <span class="metric-label">Solar Voltage</span>
-              <span class="metric-value">{{ solarVoltageDisplay }}V</span>
-            </div>
-            <div class="metric-line">
-              <span class="metric-label">Solar Current</span>
-              <span class="metric-value">{{ solarCurrentDisplay }}A</span>
-            </div>
-            <div class="metric-line">
-              <span class="metric-label">Solar Output</span>
-              <span class="metric-value">{{ solarPowerDisplay }}W</span>
-            </div>
-            <div class="metric-line">
-              <span class="metric-label">Solar Yield (Today)</span>
-              <span class="metric-value">{{ solarYieldTodayDisplay }}Wh</span>
-            </div>
-            <div class="metric-line">
-              <span class="metric-label">Battery Consumption (Today)</span>
-              <span class="metric-value">{{ batteryConsumedTodayDisplay }}Wh</span>
-            </div>
-            <div class="metric-line">
-              <span class="metric-label">Load Current</span>
-              <span class="metric-value">{{ loadCurrentDisplay }}A</span>
-            </div>
-            <div class="metric-line">
-              <span class="metric-label">Load Power</span>
-              <span class="metric-value">{{ loadPowerDisplay }}W</span>
-            </div>
-          </div>
-        </div>
-        <div class="metric-status solar-status" :class="solarStatusClass">{{ solarStatus }}</div>
-      </div>
+      <PowerSystemCard :data="batteryData" />
 
       <!-- Orientation (speed + heading + tilt) -->
-      <div class="retro-card telemetry-card orientation-card">
-        <div class="card-header">
-          <h4>ORIENTATION</h4>
-          <div class="speed-icon">🧭</div>
-        </div>
-        <div class="card-content orientation-content">
-          <div class="orient-row">
-            <span class="metric-label">Speed</span>
-            <span class="metric-value" data-testid="speed-value">{{ speedDisplay }}<span class="unit">{{ speedUnit }}</span></span>
-            <span class="speed-trend" :class="speedTrendClass">{{ speedTrend > 0 ? '▲' : speedTrend < 0 ? '▼' : '▬' }} {{ Math.abs(speedTrend) }}%</span>
-          </div>
-          <div class="orient-row">
-            <span class="metric-label">Heading (Nav)</span>
-            <span class="metric-value">{{ navHeadingDisplay }}</span>
-          </div>
-          <div class="orient-row">
-            <span class="metric-label">IMU Yaw</span>
-            <span class="metric-value">{{ imuYawDisplay }}</span>
-          </div>
-          <div class="orient-row">
-            <span class="metric-label">GPS COG</span>
-            <span class="metric-value">{{ gpsHeadingDisplay }}</span>
-          </div>
-          <div class="orient-row">
-            <span class="metric-label">Pitch</span>
-            <span class="metric-value">{{ imuPitchDisplay }}</span>
-          </div>
-          <div class="orient-row">
-            <span class="metric-label">Roll</span>
-            <span class="metric-value">{{ imuRollDisplay }}</span>
-          </div>
-        </div>
-      </div>
+      <OrientationCard :data="orientationData" />
 
       <!-- GPS Metrics -->
-      <div class="retro-card telemetry-card gps-card">
-        <div class="card-header">
-          <h4>GPS NAVIGATION</h4>
-          <div class="gps-icon">🧭</div>
-        </div>
-        <div class="card-content gps-content">
-          <div class="gps-status-line" data-testid="gps-status">{{ gpsStatus }}</div>
-          <div class="gps-grid">
-            <div class="gps-metric">
-              <span class="metric-label">Latitude</span>
-              <span class="metric-value">{{ gpsLatitude ?? '--' }}</span>
-            </div>
-            <div class="gps-metric">
-              <span class="metric-label">Longitude</span>
-              <span class="metric-value">{{ gpsLongitude ?? '--' }}</span>
-            </div>
-            <div class="gps-metric">
-              <span class="metric-label">Accuracy</span>
-              <span class="metric-value">{{ gpsAccuracySummary }}</span>
-            </div>
-            <div class="gps-metric">
-              <span class="metric-label">Satellites</span>
-              <span class="metric-value">{{ gpsSatellitesDisplay }}</span>
-            </div>
-            <div class="gps-metric">
-              <span class="metric-label">HDOP</span>
-              <span class="metric-value">{{ gpsHdopDisplay }}</span>
-            </div>
-            <div class="gps-metric">
-              <span class="metric-label">RTK</span>
-              <span class="metric-value">{{ gpsRtkStatus ?? 'N/A' }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <GpsCard :data="positionData" />
       
       <!-- Environmental Sensors -->
-      <div class="retro-card telemetry-card environmental-card">
-        <div class="card-header">
-          <h4>ENVIRONMENT</h4>
-          <div class="temp-icon">🌡️</div>
-        </div>
-        <div class="card-content">
-          <div class="env-grid">
-            <div class="env-metric">
-              <span class="metric-label">Temp</span>
-              <span class="metric-value" data-testid="temperature-value">{{ temperatureDisplay }}<span class="unit">{{ temperatureUnit }}</span></span>
-              <span class="metric-status" :class="tempStatusClass">{{ tempStatus }}</span>
-            </div>
-            <div class="env-metric">
-              <span class="metric-label">Humidity</span>
-              <span class="metric-value" data-testid="humidity-value">{{ humidityDisplay }}<span class="unit">%</span></span>
-            </div>
-            <div class="env-metric">
-              <span class="metric-label">Pressure</span>
-              <span class="metric-value" data-testid="pressure-value">{{ pressureDisplay }}<span class="unit">{{ pressureUnit }}</span></span>
-            </div>
-            <div class="env-metric">
-              <span class="metric-label">Altitude</span>
-              <span class="metric-value" data-testid="altitude-value">{{ altitudeDisplay }}<span class="unit">{{ altitudeUnit }}</span></span>
-            </div>
-          </div>
-          <div class="env-source">Source: {{ environmentalSourceLabel }}</div>
-        </div>
-      </div>
+      <EnvironmentalCard :data="environmentalData" />
 
       <!-- ToF Sensors -->
       <div class="retro-card telemetry-card tof-card">
@@ -284,6 +104,12 @@ import { storeToRefs } from 'pinia'
 import { systemApi, controlApi, telemetryApi, weatherApi, maintenanceApi } from '@/composables/useApi'
 import { useWebSocket } from '@/services/websocket'
 import { usePreferencesStore } from '@/stores/preferences'
+import { useDashboardTelemetry } from '@/composables/useDashboardTelemetry'
+import PowerSystemCard from '@/components/dashboard/PowerSystemCard.vue'
+import OrientationCard from '@/components/dashboard/OrientationCard.vue'
+import GpsCard from '@/components/dashboard/GpsCard.vue'
+import EnvironmentalCard from '@/components/dashboard/EnvironmentalCard.vue'
+import SystemStatusCard from '@/components/dashboard/SystemStatusCard.vue'
 
 interface TofState {
   distance: number | null
@@ -302,6 +128,15 @@ interface ImuCalibrationResult {
 }
 
 const { connected, connecting, connect, subscribe, unsubscribe, setCadence, dispatchTestMessage } = useWebSocket()
+
+const {
+  batteryData,
+  positionData,
+  orientationData,
+  environmentalData,
+  systemData,
+  eventLog: telemetryEventLog,
+} = useDashboardTelemetry()
 
 // Loading and UI state
 const isLoading = ref(false)
