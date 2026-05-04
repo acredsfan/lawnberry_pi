@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ...core.globals import _debug_overrides
 from ...services.websocket_hub import websocket_hub
@@ -39,7 +39,7 @@ class MowerStatus(BaseModel):
     navigation_state: str = "IDLE"
     safety_status: SafetyStatus = SafetyStatus()
     blade_active: bool = False
-    last_updated: datetime = datetime.now(UTC)
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class SensorHealthResponse(BaseModel):
