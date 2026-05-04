@@ -4,7 +4,7 @@ import asyncio
 import datetime
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends
 
@@ -76,6 +76,25 @@ class MissionService:
         self.missions: dict[str, Mission] = {}
         self.mission_statuses: dict[str, MissionStatus] = {}
         self.mission_tasks: dict[str, asyncio.Task] = {}
+
+        # Observability: event store injected by set_event_store().
+        self._event_store: Any | None = None
+        self._obs_run_id: str = ""
+
+    def set_event_store(self, store: Any) -> None:
+        """Attach an EventStore. run_id is set per-mission at start time."""
+        self._event_store = store
+
+    def _new_run_id(self) -> str:
+        import uuid
+        return str(uuid.uuid4())
+
+    def _emit_event(self, event: Any) -> None:
+        if self._event_store is not None:
+            try:
+                self._event_store.emit(event)
+            except Exception:
+                pass
 
     def _clamp_waypoint_index(self, mission: Mission, current_waypoint_index: int | None) -> int:
         if not mission.waypoints:
@@ -218,6 +237,19 @@ class MissionService:
             mission, status.current_waypoint_index
         )
         self._persist_mission_status(mission_id)
+        if self._event_store is not None:
+            from ..observability.events import WaypointTargetChanged
+            waypoints = mission.waypoints if mission else []
+            wp = waypoints[waypoint_index] if waypoint_index < len(waypoints) else None
+            self._emit_event(WaypointTargetChanged(
+                run_id=self._obs_run_id,
+                mission_id=mission_id,
+                waypoint_index=waypoint_index,
+                waypoint_lat=float(wp.lat) if wp else 0.0,
+                waypoint_lon=float(wp.lon) if wp else 0.0,
+                distance_to_target_m=0.0,
+                previous_index=waypoint_index - 1 if waypoint_index > 0 else None,
+            ))
 
     def _load_state_from_db(self) -> tuple[list[dict], list[dict]]:
         """Load all persisted missions and execution states. Runs in executor thread."""
@@ -466,6 +498,21 @@ class MissionService:
         task.add_done_callback(self._mission_completed_callback(mission_id))
         await self._broadcast_status(mission_id, "Mission started")
 
+        self._obs_run_id = self._new_run_id()
+        from ..observability.events import MissionStateChanged
+        self._emit_event(MissionStateChanged(
+            run_id=self._obs_run_id,
+            mission_id=mission_id,
+            previous_state="idle",
+            new_state="running",
+            detail="Mission started",
+        ))
+        # Wire navigation service to the same run.
+        if hasattr(self.nav_service, "set_event_store") and self._event_store is not None:
+            self.nav_service.set_event_store(
+                self._event_store, self._obs_run_id, mission_id
+            )
+
     def _mission_completed_callback(self, mission_id: str):
         def callback(task: asyncio.Task):
             try:
@@ -562,6 +609,14 @@ class MissionService:
         self.nav_service.navigation_state.navigation_mode = NavigationMode.PAUSED
         self._persist_mission_status(mission_id)
         await self._broadcast_status(mission_id, "Mission paused")
+        from ..observability.events import MissionStateChanged
+        self._emit_event(MissionStateChanged(
+            run_id=self._obs_run_id,
+            mission_id=mission_id,
+            previous_state="running",
+            new_state="paused",
+            detail="Mission paused",
+        ))
 
     async def resume_mission(self, mission_id: str):
         import os
@@ -642,6 +697,14 @@ class MissionService:
         status.detail = detail
         self._persist_mission_status(mission_id)
         await self._broadcast_status(mission_id, detail)
+        from ..observability.events import MissionStateChanged
+        self._emit_event(MissionStateChanged(
+            run_id=self._obs_run_id,
+            mission_id=mission_id,
+            previous_state="running",
+            new_state="aborted",
+            detail=detail,
+        ))
 
     async def get_mission_status(self, mission_id: str) -> MissionStatus:
         mission = self._require_mission(mission_id)
