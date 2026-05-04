@@ -490,6 +490,7 @@ class MissionService:
             current_waypoint_index=0,
         )
 
+        self._obs_run_id = self._new_run_id()
         task = asyncio.create_task(self.nav_service.execute_mission(mission, self))
         self.mission_tasks[mission_id] = task
         self._persist_mission_status(mission_id)
@@ -497,8 +498,6 @@ class MissionService:
         # Monitor task completion
         task.add_done_callback(self._mission_completed_callback(mission_id))
         await self._broadcast_status(mission_id, "Mission started")
-
-        self._obs_run_id = self._new_run_id()
         from ..observability.events import MissionStateChanged
         self._emit_event(MissionStateChanged(
             run_id=self._obs_run_id,
@@ -660,6 +659,14 @@ class MissionService:
         self.nav_service.navigation_state.navigation_mode = NavigationMode.AUTO
         self._persist_mission_status(mission_id)
         await self._broadcast_status(mission_id, "Mission resumed")
+        from ..observability.events import MissionStateChanged
+        self._emit_event(MissionStateChanged(
+            run_id=self._obs_run_id,
+            mission_id=mission_id,
+            previous_state="paused",
+            new_state="running",
+            detail="Mission resumed",
+        ))
 
     async def abort_mission(self, mission_id: str):
         self._require_mission(mission_id)
@@ -702,7 +709,7 @@ class MissionService:
             run_id=self._obs_run_id,
             mission_id=mission_id,
             previous_state="running",
-            new_state="aborted",
+            new_state=final_status.value,
             detail=detail,
         ))
 
