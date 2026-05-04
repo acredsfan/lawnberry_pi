@@ -31,6 +31,7 @@ from .core.env_validation import validate_environment
 from .core.state_manager import AppState
 from .middleware.api_key_auth import register_api_key_auth_middleware
 from .middleware.correlation import register_correlation_middleware
+from .middleware.deprecation import register_deprecation_middleware
 from .middleware.input_validation import register_input_validation_middleware
 from .middleware.rate_limiting import register_global_rate_limiter
 from .middleware.sanitization import register_sanitization_middleware
@@ -314,13 +315,14 @@ try:
 except Exception:
     _log.exception("Environment validation crashed")
 
-# Middleware order: global limit -> input validation -> security -> API key -> correlation -> sanitization
+# Middleware order: global limit -> input validation -> security -> API key -> correlation -> sanitization -> deprecation
 register_global_rate_limiter(app)
 register_input_validation_middleware(app)
 register_security_middleware(app)
 register_api_key_auth_middleware(app)
 register_correlation_middleware(app)
 register_sanitization_middleware(app)
+register_deprecation_middleware(app)
 
 app.include_router(rest_router, prefix="/api/v2")
 app.include_router(auth_router.router, prefix="/api/v2")
