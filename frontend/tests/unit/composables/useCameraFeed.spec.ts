@@ -69,8 +69,10 @@ describe('useCameraFeed', () => {
 
   it('stopCameraFeed on unmount (called by onUnmounted)', () => {
     const { wrapper, getResult } = mountWithComposable()
-    const spy = vi.spyOn(getResult(), 'stopCameraFeed')
+    const r = getResult()
+    r.cameraStreamUrl.value = '/api/v2/camera/stream.mjpeg?client=x'
     wrapper.unmount()
-    expect(spy).toHaveBeenCalled()
+    expect(r.cameraStreamUrl.value).toBeNull()
+    expect(r.cameraStatusMessage.value).toBe('Camera paused')
   })
 })

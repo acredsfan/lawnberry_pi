@@ -10,6 +10,8 @@ export interface CameraStatusSummary {
   client_count: number | null
 }
 
+// One client ID per page load — shared across instances intentionally so the server
+// tracks a single browser client regardless of how many components mount this composable.
 const cameraStreamClientId = (() => {
   try {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -129,19 +131,21 @@ export function useCameraFeed(getSessionId: () => string | null) {
     scheduleCameraStreamRetry()
   }
 
-  function normalizeCameraStatusPayload(payload: Record<string, any> | null | undefined) {
-    if (!payload) return null
-    const data = payload?.status === 'success' && payload?.data ? payload.data : payload
+  function normalizeCameraStatusPayload(payload: unknown) {
+    if (!payload || typeof payload !== 'object') return null
+    const p = payload as Record<string, unknown>
+    const data = p?.status === 'success' && p?.data ? p.data as Record<string, unknown> : p
     if (!data || typeof data !== 'object') return null
-    const statistics = data.statistics ?? {}
-    const fpsCandidate = statistics.current_fps ?? statistics.fps ?? data.fps ?? null
-    const lastFrameCandidate = data.last_frame_time ?? data.last_frame ?? data.capture_ts ?? null
-    const active = Boolean(data.is_active ?? data.active ?? data.streaming)
+    const d = data as Record<string, unknown>
+    const statistics = (typeof d.statistics === 'object' && d.statistics !== null ? d.statistics : {}) as Record<string, unknown>
+    const fpsCandidate = statistics.current_fps ?? statistics.fps ?? d.fps ?? null
+    const lastFrameCandidate = d.last_frame_time ?? d.last_frame ?? d.capture_ts ?? null
+    const active = Boolean(d.is_active ?? d.active ?? d.streaming)
     return {
       active,
-      mode: data.mode ?? (data.sim_mode ? 'simulation' : (active ? 'streaming' : 'offline')),
+      mode: (typeof d.mode === 'string' ? d.mode : undefined) ?? (d.sim_mode ? 'simulation' : (active ? 'streaming' : 'offline')),
       fps: typeof fpsCandidate === 'number' ? Number(fpsCandidate) : null,
-      client_count: typeof data.client_count === 'number' ? Number(data.client_count) : null,
+      client_count: typeof d.client_count === 'number' ? Number(d.client_count) : null,
       last_frame_time: typeof lastFrameCandidate === 'string' ? lastFrameCandidate : null,
     }
   }
@@ -211,9 +215,8 @@ export function useCameraFeed(getSessionId: () => string | null) {
   }
 
   function resetCameraState() {
-    if (cameraFrameObjectUrl) { URL.revokeObjectURL(cameraFrameObjectUrl); cameraFrameObjectUrl = null }
     cameraStreamUrl.value = null
-    cameraFrameUrl.value = null
+    applyCameraFrameUrl(null)
     cameraStatusMessage.value = 'Initializing camera...'
     cameraError.value = null
     cameraLastFrame.value = null
