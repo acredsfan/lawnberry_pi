@@ -77,7 +77,6 @@ export function useMowerTelemetry() {
 
   onUnmounted(() => {
     telemetrySocket.unsubscribe('telemetry.navigation', handleNavigation)
-    telemetrySocket.disconnect()
     if (restPollTimer !== null) {
       clearInterval(restPollTimer)
       restPollTimer = null

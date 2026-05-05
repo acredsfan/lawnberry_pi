@@ -1,8 +1,8 @@
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useWebSocket } from '@/composables/useWebSocket'
+import { useWebSocket } from '@/services/websocket'
 
 export function useDashboardTelemetry() {
-  const ws = useWebSocket()
+  const ws = useWebSocket('telemetry')
 
   const batteryData = ref<Record<string, unknown> | null>(null)
   const positionData = ref<Record<string, unknown> | null>(null)

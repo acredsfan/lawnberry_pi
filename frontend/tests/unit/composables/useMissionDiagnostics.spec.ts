@@ -60,10 +60,10 @@ describe('useMissionDiagnostics', () => {
     expect(getResult().diagnostics.value).toBeNull()
   })
 
-  it('unsubscribes and disconnects on unmount', async () => {
+  it('unsubscribes on unmount without disconnecting the shared singleton', async () => {
     const { wrapper } = await mountWithComposable()
     await wrapper.unmount()
     expect(mockUnsubscribe).toHaveBeenCalledWith('mission.diagnostics', expect.any(Function))
-    expect(mockDisconnect).toHaveBeenCalled()
+    expect(mockDisconnect).not.toHaveBeenCalled()
   })
 })

@@ -31,7 +31,6 @@ export function useMissionDiagnostics() {
 
   onUnmounted(() => {
     socket.unsubscribe('mission.diagnostics', onMessage)
-    socket.disconnect()
   })
 
   return { diagnostics }

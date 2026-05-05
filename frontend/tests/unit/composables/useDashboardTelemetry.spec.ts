@@ -8,7 +8,7 @@ const mockUnsubscribe = vi.fn()
 const mockConnect = vi.fn().mockResolvedValue(undefined)
 const mockSetCadence = vi.fn()
 
-vi.mock('@/composables/useWebSocket', () => ({
+vi.mock('@/services/websocket', () => ({
   useWebSocket: vi.fn(() => ({
     connected: { value: false },
     connecting: { value: false },
@@ -18,7 +18,6 @@ vi.mock('@/composables/useWebSocket', () => ({
     setCadence: mockSetCadence,
     disconnect: vi.fn(),
     emit: vi.fn(),
-    subscribeTopic: vi.fn(),
   })),
 }))
 
