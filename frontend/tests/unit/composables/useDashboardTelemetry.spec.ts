@@ -47,7 +47,7 @@ describe('useDashboardTelemetry', () => {
     const powerCall = mockSubscribe.mock.calls.find(([topic]: [string]) => topic === 'telemetry.power')
     expect(powerCall).toBeDefined()
     const [, handler] = powerCall!
-    handler({ percentage: 87.5, voltage: 12.4 })
+    handler({ battery: { percentage: 87.5, voltage: 12.4 }, power: { battery_current: -0.5, battery_power: 6.0 } })
     await nextTick()
     expect(getResult().batteryData.value?.percentage).toBe(87.5)
   })
