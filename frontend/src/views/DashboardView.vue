@@ -798,7 +798,7 @@ const applyBatteryMetrics = (payload: any) => {
       loadPower.value = batteryVoltage.value * lcur
     }
     // Battery consumption today from backend accumulator
-    const bct = coerceFiniteNumber((source as any).battery_consumed_today_wh)
+    const bct = coerceFiniteNumber((payload as any).battery_consumed_today_wh)
     if (bct !== undefined) batteryConsumedTodayWh.value = bct
   }
 }

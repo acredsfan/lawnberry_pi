@@ -118,9 +118,6 @@ const leafletOptions = {
   zoomSnap: 1,
   zoomDelta: 1,
   wheelPxPerZoomLevel: 80,
-  zoomAnimation: false,
-  fadeAnimation: false,
-  markerZoomAnimation: false,
 };
 let resizeObserver: ResizeObserver | null = null;
 
