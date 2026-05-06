@@ -311,7 +311,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { LMap, LTileLayer, LMarker, LPolygon } from '@vue-leaflet/vue-leaflet';
 import { LPolyline } from '@vue-leaflet/vue-leaflet';
 import L from 'leaflet';
-// Register Google Mutant plugin (adds L.gridLayer.googleMutant)
+import googleMutantScriptUrl from 'leaflet.gridlayer.googlemutant/dist/Leaflet.GoogleMutant.js?url';
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -397,21 +397,33 @@ const googleLayerActive = ref(false);
 // Reactive key to force tile layer re-rendering when style changes
 const tileLayerKey = ref(0);
 
-// When using Google Mutant, prefer global Leaflet to allow plugin to attach to window.L
-const useGlobalLeaflet = computed(() => useGoogleMutant.value);
+// Always use bundled Leaflet; we expose it as window.L ourselves before loading GoogleMutant.
+const useGlobalLeaflet = false;
 const leafletOptions = computed(() => ({ attributionControl: !useGoogleMutant.value }));
 
+// Pending script loads — prevents resolving before the script has executed.
+const _pendingScripts = new Map<string, Promise<void>>();
+
 function loadScriptOnce(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const existing = Array.from(document.getElementsByTagName('script')).find(s => s.src === src);
-    if (existing) { resolve(); return; }
-    const el = document.createElement('script');
-    el.src = src;
-    el.async = true;
-    el.onload = () => resolve();
-    el.onerror = () => reject(new Error(`Failed to load ${src}`));
-    document.head.appendChild(el);
+  if (_pendingScripts.has(src)) return _pendingScripts.get(src)!;
+  const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
+  if (existing?.dataset.loaded === 'true') return Promise.resolve();
+  const p = new Promise<void>((resolve, reject) => {
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = () => { script.dataset.loaded = 'true'; resolve(); };
+    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    document.head.appendChild(script);
   });
+  _pendingScripts.set(src, p);
+  p.finally(() => _pendingScripts.delete(src));
+  return p;
 }
 
 async function ensureBaseLayer() {
@@ -473,9 +485,12 @@ async function ensureBaseLayer() {
       const loader = new Loader({ apiKey: String(props.googleApiKey), version: 'weekly' });
       await loader.load();
     }
-    // Load the Leaflet Google Mutant plugin via CDN to avoid bundler issues
-    if (!(window as any).L?.gridLayer?.googleMutant && !(L as any).gridLayer?.googleMutant) {
-      await loadScriptOnce('https://unpkg.com/leaflet.gridlayer.googlemutant@0.13.5/dist/Leaflet.GoogleMutant.js');
+    // Expose bundled Leaflet as window.L so the GoogleMutant IIFE can extend it at runtime.
+    if (!(window as any).L) {
+      (window as any).L = L;
+    }
+    if (!(L as any).gridLayer?.googleMutant) {
+      await loadScriptOnce(googleMutantScriptUrl);
     }
   } catch (e) {
     console.warn('Google Maps JS API failed to load. Falling back to standard tiles.', e)
@@ -487,7 +502,7 @@ async function ensureBaseLayer() {
   const style = props.mapStyle || 'standard';
   const typeMap: Record<string, string> = { standard: 'roadmap', satellite: 'satellite', hybrid: 'hybrid', terrain: 'terrain' };
   const gmType = (typeMap[style] || 'roadmap') as any;
-  const Lref: any = (window as any).L || L;
+  const Lref: any = L; // always use bundled L (same instance GoogleMutant extended)
   
   try {
     // @ts-ignore plugin augments gridLayer
