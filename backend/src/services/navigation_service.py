@@ -17,6 +17,9 @@ from typing import TYPE_CHECKING, Any
 
 from ..core.config_loader import ConfigLoader
 from ..core.observability import observability
+from ..fusion.ekf import PoseFilter
+from ..fusion.enu_frame import ENUFrame
+from ..fusion.pose2d import Pose2D
 from ..models import (
     NavigationMode,
     NavigationState,
@@ -27,9 +30,6 @@ from ..models import (
     Waypoint,
 )
 from ..nav.geoutils import body_offset_to_north_east, haversine_m, offset_lat_lon, point_in_polygon
-from ..fusion.ekf import PoseFilter
-from ..fusion.enu_frame import ENUFrame
-from ..fusion.pose2d import Pose2D, PoseQuality
 from ..nav.odometry import OdometryIntegrator
 from ..nav.path_planner import PathPlanner
 from .robohat_service import get_robohat_service
@@ -311,7 +311,7 @@ class NavigationService:
         # EKF pose pipeline (Phase 4: Real Pose Pipeline)
         self._pose_filter = PoseFilter()
         self._enu_frame = ENUFrame()
-        self._current_pose: "Pose2D | None" = None
+        self._current_pose: Pose2D | None = None
         self._last_predict_ts: float = time.monotonic()
 
         from .mission_executor import MissionExecutor
@@ -549,27 +549,27 @@ class NavigationService:
             raise RuntimeError("Motor command not accepted by controller")
 
     async def _bootstrap_heading_from_gps_cog(self) -> None:
-        """Drive briefly forward so GPS COG snaps the heading alignment.
+        """Drive forward so GPS COG snaps the heading alignment.
 
         IMU Game Rotation Vector yaw is relative to boot orientation (arbitrary zero).
-        This method drives at ~75% throttle for up to 5 seconds. As soon as
-        update_navigation_state() fires the GPS COG snap (sample_count 0→1), motion
-        stops and the alignment is correct for the mission.
+        This method drives at ~75% throttle for up to 15 seconds and requires the
+        mower to travel at least 1 m before accepting the GPS COG snap, ensuring the
+        alignment comes from real forward motion, not GPS jitter.
 
         CRITICAL: During the bootstrap drive, we must actively poll sensor data and
         call update_navigation_state() to process GPS COG snaps. The snap cannot fire
         unless telemetry data reaches update_navigation_state().
 
-        If GPS COG is not available within 5 s the method logs a warning and returns
-        without calibrating — the mission loop will attempt to use whatever heading
-        data is available.
+        Raises RuntimeError if GPS COG cannot snap within the deadline — callers
+        must treat this as a mission abort, not a recoverable condition.
         """
+        _BOOTSTRAP_DEADLINE_S: float = 15.0
         logger.info("Heading bootstrap: driving forward to acquire GPS COG snap...")
         self._bootstrap_start_time = time.monotonic()
+        start_pos = self.navigation_state.current_position
         if self._use_localization():
             self._localization.begin_bootstrap()
-        # Extended from 3s to give more time for GPS COG stability.
-        deadline = time.monotonic() + 5.0
+        deadline = time.monotonic() + _BOOTSTRAP_DEADLINE_S
         try:
             await self.set_speed(0.6, 0.6)
             while time.monotonic() < deadline:
@@ -603,6 +603,21 @@ class NavigationService:
                 else:
                     done = self._heading_alignment_sample_count >= 1
                     align_val = self._session_heading_alignment
+
+                if done:
+                    current_pos = self.navigation_state.current_position
+                    if start_pos is not None and current_pos is not None:
+                        dist_m = haversine_m(
+                            start_pos.latitude, start_pos.longitude,
+                            current_pos.latitude, current_pos.longitude,
+                        )
+                        if dist_m < 1.0:
+                            logger.debug(
+                                "Bootstrap snap at %.1f m — continuing to ≥1.0 m",
+                                dist_m,
+                            )
+                            done = False
+
                 if done:
                     logger.info(
                         "Heading bootstrap complete: session_align=%.1f°",
@@ -610,9 +625,10 @@ class NavigationService:
                     )
                     break
             else:
-                logger.warning(
-                    "Heading bootstrap: GPS COG not available in 5 s — "
-                    "proceeding with uncalibrated heading"
+                raise RuntimeError(
+                    f"Heading bootstrap failed: GPS COG not acquired within "
+                    f"{_BOOTSTRAP_DEADLINE_S:.0f} s. "
+                    "Check sky view and GPS lock before retrying."
                 )
         finally:
             self._bootstrap_start_time = None
@@ -989,7 +1005,7 @@ class NavigationService:
                             self._gps_cog_history.pop(0)
 
                         going_straight = False
-                        if len(self._gps_cog_history) >= 3:
+                        if len(self._gps_cog_history) >= 5:
                             sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
                             cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
                             cog_mean = math.degrees(math.atan2(sin_c, cos_c)) % 360.0
@@ -997,7 +1013,7 @@ class NavigationService:
                                 abs(self._heading_delta(c, cog_mean))
                                 for c in self._gps_cog_history
                             )
-                            going_straight = max_dev < 15.0
+                            going_straight = max_dev < 10.0
 
                         if going_straight and self._heading_alignment_sample_count == 0:
                             # First stable bootstrap sample: snap immediately to GPS COG.
@@ -1695,7 +1711,7 @@ class NavigationService:
                 best = pt
         return best
 
-    def get_pose(self) -> "Pose2D | None":
+    def get_pose(self) -> Pose2D | None:
         """Return the current fused Pose2D. None until first GPS fix."""
         return self._current_pose
 

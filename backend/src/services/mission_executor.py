@@ -166,7 +166,7 @@ class MissionExecutor:
 
         # Tank-turn hysteresis state
         _in_tank_mode: bool = False
-        _TANK_TURN_TIMEOUT_S: float = 8.0
+        _TANK_TURN_TIMEOUT_S: float = 25.0
         _tank_turn_start: float | None = None
 
         # Position-hold diagnostic

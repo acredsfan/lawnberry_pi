@@ -269,7 +269,7 @@ async def test_bootstrap_heading_snap_uses_position_delta_gps_cog():
     nav._last_gps_track_time = None
 
     started_at = datetime.now(UTC)
-    for index in range(4):
+    for index in range(6):
         await nav.update_navigation_state(
             SensorData(
                 gps=GpsReading(

@@ -376,14 +376,14 @@ class LocalizationService:
                         self._gps_cog_history.pop(0)
 
                     going_straight = False
-                    if len(self._gps_cog_history) >= 3:
+                    if len(self._gps_cog_history) >= 5:
                         sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
                         cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
                         cog_mean = math.degrees(math.atan2(sin_c, cos_c)) % 360.0
                         max_dev = max(
                             abs(heading_delta(c, cog_mean)) for c in self._gps_cog_history
                         )
-                        going_straight = max_dev < 15.0
+                        going_straight = max_dev < 10.0
 
                     if going_straight and self._heading_alignment_sample_count == 0:
                         clamped_delta = max(-180.0, min(180.0, delta))
