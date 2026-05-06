@@ -165,6 +165,7 @@
         ref="mapRef"
         :zoom="zoom"
         :center="centerLatLng"
+        :max-zoom="22"
         :use-global-leaflet="useGlobalLeaflet"
         :options="leafletOptions"
         style="height: 100%; width: 100%"
@@ -399,7 +400,13 @@ const tileLayerKey = ref(0);
 
 // Always use bundled Leaflet; we expose it as window.L ourselves before loading GoogleMutant.
 const useGlobalLeaflet = false;
-const leafletOptions = computed(() => ({ attributionControl: !useGoogleMutant.value }));
+const leafletOptions = computed(() => ({
+  attributionControl: !useGoogleMutant.value,
+  // Disable animations so the GoogleMutant MutationObserver stays in sync during zoom
+  zoomAnimation: false,
+  fadeAnimation: false,
+  markerZoomAnimation: false,
+}));
 
 // Pending script loads — prevents resolving before the script has executed.
 const _pendingScripts = new Map<string, Promise<void>>();
@@ -506,8 +513,9 @@ async function ensureBaseLayer() {
   
   try {
     // @ts-ignore plugin augments gridLayer
-    googleBaseLayer = Lref.gridLayer.googleMutant({ type: gmType });
-    
+    googleBaseLayer = Lref.gridLayer.googleMutant({ type: gmType, maxZoom: 22 });
+    map.setMaxZoom(22);
+
     // Add error handling for Google Maps tiles
     const handleTileError = (e: any) => {
       console.warn('Google Maps tile error:', e);

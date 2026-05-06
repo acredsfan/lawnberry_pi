@@ -78,3 +78,11 @@ export async function getRoboHATStatus(): Promise<RoboHATStatus> {
   const response = await apiService.get<RoboHATStatus>('/api/v2/hardware/robohat')
   return response.data
 }
+
+export async function sendControlCommand(
+  command: string,
+  payload: Record<string, unknown> = {}
+): Promise<unknown> {
+  const response = await apiService.post<unknown>(`/api/v2/control/${command}`, payload)
+  return response.data
+}

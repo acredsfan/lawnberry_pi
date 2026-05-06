@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
-import { sendControlCommand, getRoboHATStatus, getControlStatus, clearEmergencyStop as apiClearEmergencyStop } from '../services/api';
+import { sendControlCommand, getRoboHATStatus, getControlStatus, clearEmergencyStop as apiClearEmergencyStop } from '../services/controlClient';
 import { useWebSocket } from '../services/websocket';
 
 type ControlPayload = Record<string, unknown>;
@@ -274,7 +274,7 @@ export const useControlStore = defineStore('control', () => {
 
   async function clearEstop(reason = '') {
     try {
-      const result = await apiClearEmergencyStop(reason);
+      const result = await apiClearEmergencyStop({ confirmation: true, reason: reason || undefined });
       emergencyStopActive.value = false;
       emergencyStopReason.value = null;
       return result;

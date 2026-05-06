@@ -103,7 +103,7 @@ const TERRAIN_MAP_MAX_ZOOM = 17;
 
 const zoom = ref(18);
 const center = ref<[number, number]>([37.7749, -122.4194]);
-const mapMaxZoom = ref(DEFAULT_MAP_MAX_ZOOM);
+const mapMaxZoom = ref(EXTENDED_MAP_MAX_ZOOM);
 const isDrawing = ref(true); // Or some other logic to control cursor
 
 // Map Layers State
