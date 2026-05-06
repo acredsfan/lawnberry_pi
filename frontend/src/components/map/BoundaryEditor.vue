@@ -400,13 +400,7 @@ const tileLayerKey = ref(0);
 
 // Always use bundled Leaflet; we expose it as window.L ourselves before loading GoogleMutant.
 const useGlobalLeaflet = false;
-const leafletOptions = computed(() => ({
-  attributionControl: !useGoogleMutant.value,
-  // Disable animations so the GoogleMutant MutationObserver stays in sync during zoom
-  zoomAnimation: false,
-  fadeAnimation: false,
-  markerZoomAnimation: false,
-}));
+const leafletOptions = computed(() => ({ attributionControl: !useGoogleMutant.value }));
 
 // Pending script loads — prevents resolving before the script has executed.
 const _pendingScripts = new Map<string, Promise<void>>();

@@ -1,7 +1,7 @@
 <template>
-  <div class="card">
+  <div class="retro-card telemetry-card">
     <div class="card-header"><h3>Orientation</h3></div>
-    <div class="card-body telemetry-grid">
+    <div class="card-content telemetry-grid">
       <div class="telemetry-item"><label>Speed</label><div class="value">{{ fmt(data?.speed, ' m/s') }}</div></div>
       <div class="telemetry-item"><label>Heading</label><div class="value">{{ fmt(data?.heading, '°') }}</div></div>
       <div class="telemetry-item"><label>Yaw</label><div class="value">{{ fmt(data?.yaw, '°') }}</div></div>

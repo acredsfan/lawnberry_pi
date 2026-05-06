@@ -1,7 +1,7 @@
 <template>
-  <div class="card">
+  <div class="retro-card telemetry-card">
     <div class="card-header"><h3>GPS Navigation</h3></div>
-    <div class="card-body telemetry-grid">
+    <div class="card-content telemetry-grid">
       <div class="telemetry-item"><label>Latitude</label><div class="value">{{ fmt6(data?.latitude) }}</div></div>
       <div class="telemetry-item"><label>Longitude</label><div class="value">{{ fmt6(data?.longitude) }}</div></div>
       <div class="telemetry-item"><label>Accuracy</label><div class="value">{{ fmt(data?.accuracy, 'm') }}</div></div>

@@ -1,3 +1,105 @@
+/* ======================================
+   Retro / Cyberpunk card system
+   Used by dashboard card components and any view using .retro-card
+   ====================================== */
+.retro-card {
+  background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 30%, #16213e 70%, #0a0a0a 100%);
+  border: 2px solid #00ffff;
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  box-shadow:
+    0 8px 32px rgba(0, 255, 255, 0.3),
+    0 0 20px rgba(0, 255, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 30px rgba(0, 255, 255, 0.05);
+  transition: all 0.3s ease;
+}
+
+.retro-card:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    0 12px 40px rgba(0, 255, 255, 0.4),
+    0 0 30px rgba(0, 255, 255, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 0 40px rgba(0, 255, 255, 0.1);
+  border-color: #00ffff;
+}
+
+.retro-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #00ffff, transparent);
+  animation: retro-card-scan 3s linear infinite;
+}
+
+@keyframes retro-card-scan {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.retro-card .card-header {
+  background: rgba(0, 255, 255, 0.1);
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #00ffff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.retro-card .card-header h3,
+.retro-card .card-header h4 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #00ffff;
+  text-shadow: 0 0 10px rgba(0, 255, 255, 0.7);
+  text-transform: uppercase;
+  font-family: 'Courier New', 'Consolas', monospace;
+}
+
+.retro-card .card-content {
+  padding: 1.5rem;
+}
+
+.retro-card .telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+.retro-card .telemetry-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.retro-card .telemetry-item label {
+  display: block;
+  font-size: 0.75rem;
+  letter-spacing: 1px;
+  color: rgba(0, 255, 255, 0.7);
+  text-transform: uppercase;
+  font-family: 'Courier New', 'Consolas', monospace;
+  margin-bottom: 0;
+}
+
+.retro-card .value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #00ffff;
+  font-family: 'Courier New', 'Consolas', monospace;
+  text-shadow: 0 0 5px rgba(0, 255, 255, 0.5);
+}
+
+/* ====================================== */
+
 /* Reset and base styles */
 *, *::before, *::after {
   box-sizing: border-box;

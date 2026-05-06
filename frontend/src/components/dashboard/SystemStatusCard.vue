@@ -1,7 +1,7 @@
 <template>
-  <div class="card">
+  <div class="retro-card telemetry-card">
     <div class="card-header"><h3>System Status</h3></div>
-    <div class="card-body">
+    <div class="card-content">
       <div class="telemetry-grid">
         <div class="telemetry-item"><label>Status</label><div class="value">{{ data?.status ?? 'N/A' }}</div></div>
         <div class="telemetry-item"><label>Safety</label><div class="value">{{ data?.safety_state ?? 'N/A' }}</div></div>

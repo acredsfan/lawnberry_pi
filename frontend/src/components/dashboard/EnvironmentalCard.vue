@@ -1,7 +1,7 @@
 <template>
-  <div class="card">
+  <div class="retro-card telemetry-card">
     <div class="card-header"><h3>Environmental</h3></div>
-    <div class="card-body telemetry-grid">
+    <div class="card-content telemetry-grid">
       <div class="telemetry-item"><label>Temperature</label><div class="value">{{ fmt(data?.temperature, '°C') }}</div></div>
       <div class="telemetry-item"><label>Humidity</label><div class="value">{{ fmt(data?.humidity, '%') }}</div></div>
       <div class="telemetry-item"><label>Pressure</label><div class="value">{{ fmt(data?.pressure, ' hPa') }}</div></div>
