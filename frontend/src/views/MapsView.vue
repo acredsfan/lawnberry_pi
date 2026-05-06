@@ -8,7 +8,7 @@
     <!-- Provider configuration and preview moved to Settings; retained settings load to drive editor tiles. -->
 
     <!-- Boundary & Zone Editor -->
-    <div v-if="settings.provider !== 'none'" class="card">
+    <div v-if="settingsLoaded && settings.provider !== 'none'" class="card">
       <div class="card-header">
         <h3>Boundary & Zone Editor</h3>
       </div>
@@ -327,6 +327,7 @@ const editorRef = ref<any>(null)
 const isE2ETestMode = computed(() => typeof window !== 'undefined' && (window.location.search.includes('e2e=1') || window.location.search.includes('e2e=true')))
 
 // State
+const settingsLoaded = ref(false)
 const settings = ref({
   provider: 'osm',
   google_api_key: '',
@@ -667,6 +668,7 @@ function closePinEditor() {
 
 onMounted(async () => {
   await loadSettings()
+  settingsLoaded.value = true
   try {
     if (!mapStore.configuration) {
       await mapStore.loadConfiguration('default')

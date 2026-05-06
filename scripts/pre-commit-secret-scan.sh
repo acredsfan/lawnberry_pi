@@ -22,11 +22,14 @@ fi
 # - Slack token: xox...
 # - Private key headers
 # - Generic key/password/token assignments
-PATTERN='(AIza[0-9A-Za-z\-_]{35}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(^|[^A-Za-z])(api[_-]?key|secret|password|token)\s*[:=]\s*[^\s,;]+)'
+PATTERN='(AIza[0-9A-Za-z\-_]{35}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(^|[^A-Za-z])(api[_-]?key|secret|password|token)\s*[:=]\s*[^[:space:],;]{3,})'
 # Exclude lines that are Python type annotations (e.g. `my_token: Optional[str] = None`),
 # assignments to Python built-in types / None, or RHS that is a function call
 # (e.g. `google_api_key = str(...)` — never a bare credential literal).
-EXCLUDE_PATTERN='(:\s*(Optional\[|List\[|Dict\[|str|int|bool|float|bytes|None\b)|=\s*None\s*$|=\s*Field\(|=\s*[A-Za-z_][A-Za-z_0-9]*\(|==\s*["\x27]|=\s*\(|=\s*[A-Za-z_][A-Za-z_0-9.]*\.[A-Za-z_]|f["\x27].*password:|f["\x27].*token:|\blogging\b|\blogger\b)'
+# Use [^[:space:],;]{3,} (POSIX class) so \s-in-class is not misread as literal 's',
+# and minimum length 3 prevents empty-string defaults (key: '') from triggering.
+# Vue template prop bindings (key="obj.prop") are excluded by the dotted-property rule.
+EXCLUDE_PATTERN='(:\s*(Optional\[|List\[|Dict\[|str|int|bool|float|bytes|None\b)|=\s*None\s*$|=\s*Field\(|=\s*[A-Za-z_][A-Za-z_0-9]*\(|==\s*["\x27]|=\s*\(|=\s*[A-Za-z_][A-Za-z_0-9.]*\.[A-Za-z_]|f["\x27].*password:|f["\x27].*token:|\blogging\b|\blogger\b|=["\x27]\$?[A-Za-z_][A-Za-z0-9_.]*\.[A-Za-z_])'
 
 FOUND=0
 

@@ -18,6 +18,7 @@
     </div>
     <div class="map-container">
       <MissionMap
+        v-if="settingsLoaded"
         ref="missionMapRef"
         :waypoints="missionStore.waypoints"
         :mower-position="mowerPosition"
@@ -73,6 +74,7 @@ const adaptedMapSettings = computed(() => {
   return { ...s, [GMAP_FIELD]: s.googleMapsKey }
 })
 
+const settingsLoaded = ref(false)
 const missionMapRef = ref<InstanceType<typeof MissionMap> | null>(null)
 const followMower = ref(true)
 const missionName = ref('')
@@ -82,6 +84,7 @@ const missionActionHint = ref('')
 
 onMounted(async () => {
   await loadSettings()
+  settingsLoaded.value = true
   if (!mapStore.configuration) {
     try { await mapStore.loadConfiguration('default') } catch { /* non-fatal */ }
   }
