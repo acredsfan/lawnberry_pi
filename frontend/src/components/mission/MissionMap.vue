@@ -95,6 +95,7 @@ const emit = defineEmits<{
 const mapStore = useMapStore();
 const mapRef = ref<any>(null);
 let map: L.Map | null = null;
+let isMounted = false;
 const overlayGroupRef = ref<any>(null);
 
 const DEFAULT_MAP_MAX_ZOOM = 19;
@@ -169,6 +170,7 @@ function mowerIcon(heading: number | null): L.DivIcon {
 
 // --- Lifecycle ---
 onMounted(async () => {
+  isMounted = true;
   // Set initial center
   const configCenter = mapStore.configuration?.center_point;
   if (configCenter) {
@@ -186,6 +188,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  isMounted = false;
   resizeObserver?.disconnect();
   resizeObserver = null;
   if (googleLayer && map) {
@@ -227,13 +230,22 @@ async function initializeBaseLayer() {
     providerBadge.value = 'Google Maps';
     try {
       await loadGoogleMapsApi(apiKey);
+      // Guard: component may have unmounted during the async API load
+      if (!map || !isMounted) return;
+      // Wait one animation frame so the container has its final painted dimensions
+      // before GoogleMutant creates its hidden Google Maps div
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      if (!map || !isMounted) return;
       const style = settings.style || 'standard';
       const typeMap: Record<string, string> = { standard: 'roadmap', satellite: 'satellite', hybrid: 'hybrid', terrain: 'terrain' };
       const gmType = (typeMap[style] || 'roadmap') as any;
+      // Satellite/hybrid have native tiles at z22; roadmap tops at z21
+      const gmMaxZoom = (gmType === 'satellite' || gmType === 'hybrid') ? EXTENDED_MAP_MAX_ZOOM : EXTENDED_MAP_MAX_ZOOM - 1;
+      mapMaxZoom.value = gmMaxZoom;
       // @ts-ignore - GoogleMutant extends the bundled L via window.L alias
       googleLayer = (L as any).gridLayer.googleMutant({
         type: gmType,
-        maxZoom: EXTENDED_MAP_MAX_ZOOM,
+        maxZoom: gmMaxZoom,
       });
       googleLayer.addTo(map);
     } catch (error) {

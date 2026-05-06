@@ -503,12 +503,21 @@ async function ensureBaseLayer() {
   const style = props.mapStyle || 'standard';
   const typeMap: Record<string, string> = { standard: 'roadmap', satellite: 'satellite', hybrid: 'hybrid', terrain: 'terrain' };
   const gmType = (typeMap[style] || 'roadmap') as any;
+  // Satellite/hybrid have native tiles at z22; roadmap tops at z21
+  const gmMaxZoom = (gmType === 'satellite' || gmType === 'hybrid') ? 22 : 21;
   const Lref: any = L; // always use bundled L (same instance GoogleMutant extended)
-  
+
+  // Guard: component may have unmounted during the async API load above
+  if (!mapRef.value?.leafletObject) return;
+  // Wait one animation frame so the container has its final painted dimensions
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+  const freshMap = mapRef.value?.leafletObject as L.Map | undefined;
+  if (!freshMap) return;
+
   try {
     // @ts-ignore plugin augments gridLayer
-    googleBaseLayer = Lref.gridLayer.googleMutant({ type: gmType, maxZoom: 22 });
-    map.setMaxZoom(22);
+    googleBaseLayer = Lref.gridLayer.googleMutant({ type: gmType, maxZoom: gmMaxZoom });
+    freshMap.setMaxZoom(gmMaxZoom);
 
     // Add error handling for Google Maps tiles
     const handleTileError = (e: any) => {
@@ -537,7 +546,7 @@ async function ensureBaseLayer() {
       load: handleLoad
     };
     
-    googleBaseLayer.addTo(map);
+    googleBaseLayer.addTo(freshMap);
     googleLayerActive.value = true;
   } catch (e) {
     console.error('Error creating Google Maps layer:', e);
