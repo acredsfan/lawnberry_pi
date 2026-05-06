@@ -741,16 +741,12 @@ class NavigationService:
 
             gw = getattr(getattr(app.state, "runtime", None), "command_gateway", None)
             if gw is not None:
-                import asyncio
-
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.ensure_future(
-                        gw.trigger_emergency(
-                            EmergencyTrigger(reason="Navigation safety trigger", source="navigation")
-                        )
+                asyncio.ensure_future(
+                    gw.trigger_emergency(
+                        EmergencyTrigger(reason="Navigation safety trigger", source="navigation")
                     )
-                    return
+                )
+                return
         except Exception:
             pass
 

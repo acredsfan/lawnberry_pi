@@ -16,9 +16,9 @@ import logging
 import math
 import time
 from datetime import UTC, datetime
-from enum import StrEnum
 from pathlib import Path
 
+from ..fusion.pose2d import PoseQuality
 from ..models import Position, SensorData
 from ..nav.geoutils import haversine_m
 from ..nav.localization_helpers import (
@@ -31,22 +31,6 @@ from ..nav.odometry import OdometryIntegrator
 from ..nav.path_planner import PathPlanner
 
 logger = logging.getLogger(__name__)
-
-
-class PoseQuality(StrEnum):
-    """Coarse pose quality classification visible in telemetry and Mission Planner.
-
-    rtk_fixed      — RTK-fixed GPS, sub-centimetre horizontal accuracy.
-    gps_float      — GPS float/DGPS, accuracy < configured threshold.
-    gps_degraded   — GPS available but accuracy exceeds threshold.
-    dead_reckoning — GPS missing; odometry/IMU integration only.
-    stale          — No usable position or heading data.
-    """
-    RTK_FIXED = "rtk_fixed"
-    GPS_FLOAT = "gps_float"
-    GPS_DEGRADED = "gps_degraded"
-    DEAD_RECKONING = "dead_reckoning"
-    STALE = "stale"
 
 
 class LocalizationState:

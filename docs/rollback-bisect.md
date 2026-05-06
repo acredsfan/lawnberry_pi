@@ -14,6 +14,13 @@ the Phase 2 navigation refactor.  It implements §13 of
 
 ## Switching to the legacy navigation path
 
+> **Known issue:** `LAWN_LEGACY_NAV=1` is currently a no-op. The
+> `_update_navigation_state_legacy` method delegates unconditionally to
+> `_update_navigation_state_impl`; the pre-Phase-2 snapshot was not placed
+> here after parity was confirmed. Setting this flag logs the path as active
+> but does not change navigation behavior. Use `git checkout phase-1-complete`
+> and redeploy as the true rollback path until this is resolved.
+
 If a field regression surfaces after the Phase 2 extraction lands, switch
 the production mower to the pre-extraction implementation without reverting
 any commits:

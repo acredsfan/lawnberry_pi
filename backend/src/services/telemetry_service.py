@@ -11,6 +11,8 @@ from ..utils.battery import voltage_to_soc
 
 logger = logging.getLogger(__name__)
 
+_service_start_time: float = time.time()
+
 # Module-level lock: guarantees only one sensor init across all TelemetryService
 # instances, even when multiple are created before the first finishes.
 _sensor_init_lock: asyncio.Lock | None = None
@@ -355,7 +357,7 @@ class TelemetryService:
             "safety_state": "emergency_stop"
             if self.app_state.safety_state.get("emergency_stop_active")
             else "nominal",
-            "uptime_seconds": time.time(),
+            "uptime_seconds": time.time() - _service_start_time,
         }
 
         # Add fused navigation heading from NavigationService (IMU yaw preferred, GPS COG fallback)
