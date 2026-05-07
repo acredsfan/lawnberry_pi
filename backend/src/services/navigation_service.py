@@ -605,6 +605,7 @@ class NavigationService:
         deadline = time.monotonic() + _BOOTSTRAP_DEADLINE_S
         try:
             await self.set_speed(0.6, 0.6)
+            _last_drive_t = time.monotonic()
             while time.monotonic() < deadline:
                 await asyncio.sleep(0.2)
                 if self._global_emergency_active():
@@ -629,6 +630,15 @@ class NavigationService:
                         await self.update_navigation_state(sensor_data)
                 except Exception as e:
                     logger.debug(f"Bootstrap telemetry update failed: {e}")
+
+                # Re-issue drive command every 0.5 s to prevent RoboHAT motor watchdog
+                # from cutting power before the mower covers the required 1 m.
+                if time.monotonic() - _last_drive_t >= 0.5:
+                    try:
+                        await self.set_speed(0.6, 0.6)
+                        _last_drive_t = time.monotonic()
+                    except Exception as e:
+                        logger.debug("Bootstrap drive refresh failed: %s", e)
 
                 if self._use_localization():
                     done = self._localization.alignment_sample_count >= 1
