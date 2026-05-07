@@ -49,6 +49,7 @@ class RoboHATStatus:
     motor_controller_ok: bool = False
     encoder_feedback_ok: bool = False
     encoder_position: int = 0
+    encoder_rpm: float = 0.0
     timestamp: datetime = None
 
     def __post_init__(self):
@@ -69,6 +70,7 @@ class RoboHATStatus:
             "motor_controller_ok": self.motor_controller_ok,
             "encoder_feedback_ok": self.encoder_feedback_ok,
             "encoder_position": self.encoder_position,
+            "encoder_rpm": round(self.encoder_rpm, 1),
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "health_status": self.get_health_status(),
         }
@@ -140,6 +142,11 @@ class RoboHATService:
         # Encoder enabled flag — False when hall sensors are missing/unreliable.
         # Loaded from config/hardware.yaml encoders.enabled (default True).
         self._encoder_enabled: bool = True
+        # Delta-based velocity tracking: cumulative tick counter → RPM.
+        # With 4 magnets/wheel: RPM = (delta_ticks / elapsed_s) * (60 / 4)
+        self._enc_prev_pos: int | None = None
+        self._enc_prev_time: float | None = None
+        self._ENCODER_MAGNETS_PER_WHEEL: int = 4
         try:
             from backend.src.core.config_loader import get_config_loader
 
@@ -655,6 +662,25 @@ class RoboHATService:
                 logger.error(f"Read loop error: {e}")
                 await asyncio.sleep(0.1)
 
+    def _update_encoder_velocity(self, enc: int) -> None:
+        """Compute RPM from cumulative encoder tick delta.
+
+        Firmware reports a single cumulative hall-sensor tick counter.
+        With 4 magnets per wheel: RPM = (delta_ticks / elapsed_s) * (60 / 4).
+        """
+        now = time.monotonic()
+        if self._enc_prev_pos is not None and self._enc_prev_time is not None:
+            elapsed = now - self._enc_prev_time
+            if elapsed >= 0.05:
+                delta = abs(enc - self._enc_prev_pos)
+                ticks_per_sec = delta / elapsed
+                self.status.encoder_rpm = ticks_per_sec * (60.0 / self._ENCODER_MAGNETS_PER_WHEEL)
+                self._enc_prev_pos = enc
+                self._enc_prev_time = now
+        else:
+            self._enc_prev_pos = enc
+            self._enc_prev_time = now
+
     @staticmethod
     def _parse_encoder_from_line(line: str) -> int | None:
         """Extract encoder tick count from a firmware heartbeat/status line.
@@ -711,6 +737,7 @@ class RoboHATService:
                 self.status.encoder_feedback_ok = enc is not None
                 if enc is not None:
                     self.status.encoder_position = int(enc)
+                    self._update_encoder_velocity(int(enc))
             else:
                 self.status.encoder_feedback_ok = False
             self.status.last_watchdog_echo = "status"
@@ -771,6 +798,7 @@ class RoboHATService:
             if enc is not None and self._encoder_enabled:
                 self.status.encoder_position = enc
                 self.status.encoder_feedback_ok = True
+                self._update_encoder_velocity(enc)
             return
 
         if line_lower.startswith("\u25b6") or line_lower.startswith("▶"):
@@ -786,6 +814,7 @@ class RoboHATService:
             if enc is not None and self._encoder_enabled:
                 self.status.encoder_position = enc
                 self.status.encoder_feedback_ok = True
+                self._update_encoder_velocity(enc)
             return
 
         # For everything else, keep a debug breadcrumb without polluting logs.

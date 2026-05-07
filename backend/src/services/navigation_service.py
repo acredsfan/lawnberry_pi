@@ -33,7 +33,6 @@ from ..nav.geoutils import body_offset_to_north_east, haversine_m, offset_lat_lo
 from ..nav.odometry import OdometryIntegrator
 from ..nav.path_planner import PathPlanner
 from .robohat_service import get_robohat_service
-from .traction_control_service import get_traction_control_service
 
 if TYPE_CHECKING:
     from ..models.mission import Mission, MissionWaypoint
@@ -552,20 +551,6 @@ class NavigationService:
         # Apply traction control: detect slip and boost slipping wheel
         norm_ls = _normalize(ls)
         norm_rs = _normalize(rs)
-
-        encoder_ok = hasattr(robohat.status, "encoder_feedback_ok") and robohat.status.encoder_feedback_ok
-        if encoder_ok:
-            trac_ctrl = get_traction_control_service()
-            trac_ctrl.update_motor_feedback(
-                left_rpm=robohat.status.encoder_position * 0.5,
-                right_rpm=robohat.status.encoder_position * 0.5,
-            )
-            try:
-                norm_ls, norm_rs = trac_ctrl.apply_boost_to_command(norm_ls, norm_rs, max_speed=1.0)
-            except RuntimeError as e:
-                logger.error("Traction control timeout: %s", e)
-                await self._deliver_stop_command(reason="traction loss - max boost timeout")
-                raise
 
         accepted = await robohat.send_motor_command(norm_rs, norm_ls, ack_timeout=1.0)
         if not accepted:

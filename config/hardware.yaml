@@ -47,7 +47,7 @@ motor_controller: robohat-rp2040
 motor_controller_port: /dev/serial0
 blade_controller: ibt-4
 encoders:
-  enabled: false
+  enabled: true
 battery:
   chemistry: lifepo4
   capacity_ah: 30.0
