@@ -1,7 +1,7 @@
 import { ref, onUnmounted, type Ref } from 'vue'
 import { useControlStore } from '@/stores/control'
 
-const MOVEMENT_DURATION_MS = 160
+const MOVEMENT_DURATION_MS = 600
 const MOVEMENT_REPEAT_INTERVAL_MS = 120
 const JOYSTICK_REASON = 'manual-joystick'
 
