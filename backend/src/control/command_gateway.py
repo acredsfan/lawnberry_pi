@@ -24,7 +24,7 @@ from .commands import (
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_FIRMWARE_VERSIONS: frozenset[str] = frozenset({"1.0.0", "1.1.0", "1.2.0", "1.2.1", "1.3.0"})
+SUPPORTED_FIRMWARE_VERSIONS: frozenset[str] = frozenset({"1.0.0", "1.1.0", "1.2.0", "1.2.1", "1.3.0", "10.0.0"})
 
 ACK_TIMEOUT_S: float = 0.35
 ACK_RETRY_COUNT: int = 0
