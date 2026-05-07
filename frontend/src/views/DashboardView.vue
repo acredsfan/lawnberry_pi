@@ -13,10 +13,10 @@
       <SystemStatusCard :data="systemData" />
 
       <!-- Power / Battery -->
-      <PowerSystemCard :data="batteryData" />
+      <PowerSystemCard :data="batteryDisplayData" />
 
       <!-- Orientation (speed + heading + tilt) -->
-      <OrientationCard :data="orientationData" />
+      <OrientationCard :data="orientationDisplayData" />
 
       <!-- GPS Metrics -->
       <GpsCard :data="positionData" />
@@ -448,6 +448,31 @@ const formatTofDistance = (distanceMm: number | null) => {
 
 const tofLeftDisplay = computed(() => formatTofDistance(tofLeft.value.distance))
 const tofRightDisplay = computed(() => formatTofDistance(tofRight.value.distance))
+
+const batteryDisplayData = computed<Record<string, unknown>>(() => ({
+  percentage: batteryLevel.value,
+  voltage: batteryVoltage.value,
+  current: batteryCurrent.value,
+  power: batteryPower.value,
+  chargeState: batteryChargeState.value,
+  solarVoltage: solarVoltage.value,
+  solarCurrent: solarCurrent.value,
+  solarPower: solarPower.value,
+  solarYieldTodayWh: solarYieldTodayWh.value,
+  batteryConsumedTodayWh: batteryConsumedTodayWh.value,
+  loadCurrent: loadCurrent.value,
+  loadPower: loadPower.value,
+}))
+
+const orientationDisplayData = computed<Record<string, unknown>>(() => ({
+  speed: speed.value,
+  heading: navHeading.value,
+  gpsHeading: gpsHeading.value,
+  yaw: imuYaw.value,
+  pitch: imuPitch.value,
+  roll: imuRoll.value,
+  speedTrend: speedTrend.value,
+}))
 
 const formatTofStatus = (status: string | null) => {
   if (!status) return 'UNKNOWN'

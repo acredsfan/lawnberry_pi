@@ -30,31 +30,31 @@
         </div>
         <div class="metric-line">
           <span class="metric-label">Solar Voltage</span>
-          <span class="metric-value">N/A</span>
+          <span class="metric-value">{{ fmt(data?.solarVoltage, 'V') }}</span>
         </div>
         <div class="metric-line">
           <span class="metric-label">Solar Current</span>
-          <span class="metric-value">N/A</span>
+          <span class="metric-value">{{ fmtAbs(data?.solarCurrent, 'A') }}</span>
         </div>
         <div class="metric-line">
           <span class="metric-label">Solar Output</span>
-          <span class="metric-value">N/A</span>
+          <span class="metric-value">{{ fmtAbs(data?.solarPower, 'W') }}</span>
         </div>
         <div class="metric-line">
           <span class="metric-label">Solar Yield (Today)</span>
-          <span class="metric-value">N/A</span>
+          <span class="metric-value">{{ fmtWh(data?.solarYieldTodayWh) }}</span>
         </div>
         <div class="metric-line">
           <span class="metric-label">Battery Consumption (Today)</span>
-          <span class="metric-value">N/A</span>
+          <span class="metric-value">{{ fmtWh(data?.batteryConsumedTodayWh) }}</span>
         </div>
         <div class="metric-line">
           <span class="metric-label">Load Current</span>
-          <span class="metric-value">N/A</span>
+          <span class="metric-value">{{ fmtAbs(data?.loadCurrent, 'A') }}</span>
         </div>
         <div class="metric-line">
           <span class="metric-label">Load Power</span>
-          <span class="metric-value">N/A</span>
+          <span class="metric-value">{{ fmtAbs(data?.loadPower, 'W') }}</span>
         </div>
       </div>
     </div>
@@ -67,15 +67,28 @@ import { computed } from 'vue'
 
 const props = defineProps<{ data: Record<string, unknown> | null }>()
 
-function fmt(value: number | null | undefined, unit = '') {
-  if (value == null || !Number.isFinite(Number(value))) return 'N/A'
-  return `${Number(value).toFixed(1)}${unit}`
+function fmt(value: unknown, unit = '') {
+  const n = Number(value ?? null)
+  if (!Number.isFinite(n)) return '—'
+  return `${n.toFixed(1)}${unit}`
+}
+
+function fmtAbs(value: unknown, unit = '') {
+  const n = Number(value ?? null)
+  if (!Number.isFinite(n)) return '—'
+  return `${Math.abs(n).toFixed(1)}${unit}`
+}
+
+function fmtWh(value: unknown) {
+  const n = Number(value ?? null)
+  if (!Number.isFinite(n)) return '—'
+  return `${new Intl.NumberFormat('en-US').format(Math.round(Math.max(0, n)))}Wh`
 }
 
 const batteryLevelDisplay = computed(() => {
-  const pct = props.data?.percentage
-  if (pct == null || !Number.isFinite(Number(pct))) return 'N/A'
-  return `${Number(pct).toFixed(0)}%`
+  const pct = Number(props.data?.percentage ?? null)
+  if (!Number.isFinite(pct)) return '—'
+  return `${pct.toFixed(0)}%`
 })
 
 const batteryBarClass = computed(() => {
@@ -95,12 +108,37 @@ const batteryIconClass = computed(() => {
 })
 
 const chargeStateDisplay = computed(() => {
-  if (props.data?.charging == null) return 'N/A'
-  return props.data.charging ? 'CHARGING' : 'DISCHARGING'
+  const cs = props.data?.chargeState
+  if (typeof cs === 'string' && cs.length > 0) return cs.toUpperCase()
+  const cur = Number(props.data?.current ?? null)
+  if (!Number.isFinite(cur)) return '—'
+  return cur > 0.05 ? 'CHARGING' : cur < -0.05 ? 'DISCHARGING' : 'IDLE'
 })
 
-const solarStatusClass = computed(() => 'status-unknown')
-const solarStatus = computed(() => 'SOLAR: N/A')
+const solarStatus = computed(() => {
+  const val = Number(props.data?.solarPower ?? null)
+  if (!Number.isFinite(val)) return 'SOLAR: —'
+  if (val > 150) return 'PEAK OUTPUT'
+  if (val > 50) return 'HARVESTING'
+  if (val > 5) return 'TRICKLE'
+  if (val > 0.5) return 'IDLE'
+  return 'DARK'
+})
+
+const solarStatusClass = computed(() => {
+  switch (solarStatus.value) {
+    case 'PEAK OUTPUT':
+    case 'HARVESTING':
+      return 'status-active'
+    case 'TRICKLE':
+    case 'IDLE':
+      return 'status-warning'
+    case 'DARK':
+      return 'status-error'
+    default:
+      return 'status-unknown'
+  }
+})
 </script>
 
 <style scoped>
@@ -203,7 +241,7 @@ const solarStatus = computed(() => 'SOLAR: N/A')
 .power-metrics .metric-value {
   color: #ffff00;
   font-weight: 600;
-  font-size: 1.25rem;
+  font-size: 1.1rem;
 }
 
 .power-indicator {

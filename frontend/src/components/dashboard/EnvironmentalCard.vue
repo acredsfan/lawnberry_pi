@@ -8,7 +8,7 @@
       <div class="env-grid">
         <div class="env-metric">
           <span class="metric-label">Temp</span>
-          <span class="metric-value" data-testid="temperature-value">{{ fmt(data?.temperature) }}<span class="unit">°C</span></span>
+          <span class="metric-value" data-testid="temperature-value">{{ tempDisplay }}<span class="unit">{{ tempUnit }}</span></span>
           <span class="metric-status" :class="tempStatusClass">{{ tempStatus }}</span>
         </div>
         <div class="env-metric">
@@ -17,11 +17,11 @@
         </div>
         <div class="env-metric">
           <span class="metric-label">Pressure</span>
-          <span class="metric-value" data-testid="pressure-value">{{ fmt(data?.pressure) }}<span class="unit"> hPa</span></span>
+          <span class="metric-value" data-testid="pressure-value">{{ pressureDisplay }}<span class="unit"> {{ pressureUnit }}</span></span>
         </div>
         <div class="env-metric">
           <span class="metric-label">Altitude</span>
-          <span class="metric-value" data-testid="altitude-value">{{ fmt(data?.altitude) }}<span class="unit">m</span></span>
+          <span class="metric-value" data-testid="altitude-value">{{ altitudeDisplay }}<span class="unit">{{ altitudeUnit }}</span></span>
         </div>
       </div>
       <div class="env-source">Source: telemetry</div>
@@ -31,26 +31,60 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { usePreferencesStore } from '@/stores/preferences'
 
 const props = defineProps<{ data: Record<string, unknown> | null }>()
 
-function fmt(v: number | null | undefined) {
+const preferences = usePreferencesStore()
+const { unitSystem } = storeToRefs(preferences)
+
+function fmt(v: unknown) {
   if (v == null || !Number.isFinite(Number(v))) return 'N/A'
   return Number(v).toFixed(1)
 }
 
+const tempDisplay = computed(() => {
+  const t = Number(props.data?.temperature ?? null)
+  if (!Number.isFinite(t)) return 'N/A'
+  const converted = unitSystem.value === 'imperial' ? t * 9 / 5 + 32 : t
+  return converted.toFixed(1)
+})
+
+const tempUnit = computed(() => unitSystem.value === 'imperial' ? '°F' : '°C')
+
+const pressureDisplay = computed(() => {
+  const p = Number(props.data?.pressure ?? null)
+  if (!Number.isFinite(p)) return 'N/A'
+  const converted = unitSystem.value === 'imperial' ? p * 0.0295299831 : p
+  return converted.toFixed(unitSystem.value === 'imperial' ? 2 : 1)
+})
+
+const pressureUnit = computed(() => unitSystem.value === 'imperial' ? 'inHg' : 'hPa')
+
+const altitudeDisplay = computed(() => {
+  const a = Number(props.data?.altitude ?? null)
+  if (!Number.isFinite(a)) return 'N/A'
+  const converted = unitSystem.value === 'imperial' ? a * 3.28084 : a
+  return converted.toFixed(1)
+})
+
+const altitudeUnit = computed(() => unitSystem.value === 'imperial' ? 'ft' : 'm')
+
 const tempStatusClass = computed(() => {
   const t = Number(props.data?.temperature ?? NaN)
   if (Number.isNaN(t)) return 'status-unknown'
-  if (t > 35 || t < 0) return 'status-warning'
+  if (t > 40 || t < 0) return 'status-error'
+  if (t > 30) return 'status-warning'
   return 'status-active'
 })
 
 const tempStatus = computed(() => {
   const t = Number(props.data?.temperature ?? NaN)
   if (Number.isNaN(t)) return '---'
-  if (t > 35) return 'HOT'
+  if (t > 40) return 'HOT'
   if (t < 0) return 'COLD'
+  if (t > 30) return 'WARM'
   return 'NORMAL'
 })
 </script>

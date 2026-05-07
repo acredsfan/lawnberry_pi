@@ -17,7 +17,7 @@
         </div>
         <div class="gps-metric">
           <span class="metric-label">Accuracy</span>
-          <span class="metric-value">{{ fmt(data?.accuracy, 'm') }}</span>
+          <span class="metric-value">{{ accuracyDisplay }}</span>
         </div>
         <div class="gps-metric">
           <span class="metric-label">Satellites</span>
@@ -38,18 +38,30 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { usePreferencesStore } from '@/stores/preferences'
 
 const props = defineProps<{ data: Record<string, unknown> | null }>()
 
-function fmt(v: number | null | undefined, unit = '') {
+const preferences = usePreferencesStore()
+const { unitSystem } = storeToRefs(preferences)
+
+function fmt(v: unknown, unit = '') {
   if (v == null || !Number.isFinite(Number(v))) return 'N/A'
   return `${Number(v).toFixed(2)}${unit}`
 }
 
-function fmt6(v: number | null | undefined) {
+function fmt6(v: unknown) {
   if (v == null || !Number.isFinite(Number(v))) return '--'
   return Number(v).toFixed(6)
 }
+
+const accuracyDisplay = computed(() => {
+  const a = Number(props.data?.accuracy ?? null)
+  if (!Number.isFinite(a)) return 'N/A'
+  if (unitSystem.value === 'imperial') return `${(a * 3.28084).toFixed(2)}ft`
+  return `${a.toFixed(2)}m`
+})
 
 const gpsStatus = computed(() => {
   const rtk = String(props.data?.rtk_status ?? '').toLowerCase()
