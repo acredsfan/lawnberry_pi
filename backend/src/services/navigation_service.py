@@ -448,6 +448,34 @@ class NavigationService:
         def _on_waypoint_advance(completed_index: int) -> None:
             self.navigation_state.current_waypoint_index = completed_index + 1
 
+        async def _sensor_pump() -> None:
+            """Poll sensors and update navigation state throughout the mission.
+
+            The go_to_waypoint control loop reads navigation_state.heading but
+            never calls update_navigation_state itself. Without this pump the
+            heading freezes the moment the bootstrap loop ends, causing any
+            tank-turn to steer against a static heading forever.
+            """
+            from ..core.state_manager import get_sensor_manager
+            from ..services.telemetry_service import telemetry_service
+
+            while True:
+                try:
+                    manager = get_sensor_manager()
+                    if manager is None:
+                        await telemetry_service.initialize_sensors()
+                        manager = get_sensor_manager()
+                    if manager is not None:
+                        sensor_data = await manager.read_all_sensors()
+                        if sensor_data:
+                            await self.update_navigation_state(sensor_data)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.debug("Mission sensor pump error: %s", exc)
+                await asyncio.sleep(0.1)  # 10 Hz
+
+        sensor_pump_task = asyncio.create_task(_sensor_pump())
         try:
             await self._mission_executor.execute_mission(
                 mission,
@@ -466,6 +494,11 @@ class NavigationService:
                 self.navigation_state.navigation_mode = NavigationMode.IDLE
             raise
         finally:
+            sensor_pump_task.cancel()
+            try:
+                await sensor_pump_task
+            except asyncio.CancelledError:
+                pass
             self._mission_execution_active = False
 
     async def go_to_waypoint(
