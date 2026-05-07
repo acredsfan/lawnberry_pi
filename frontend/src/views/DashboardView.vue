@@ -10,7 +10,7 @@
 
     <div class="dashboard-grid">
       <!-- System Status -->
-      <SystemStatusCard :data="systemData" :event-log="telemetryEventLog" />
+      <SystemStatusCard :data="systemData" />
 
       <!-- Power / Battery -->
       <PowerSystemCard :data="batteryData" />
