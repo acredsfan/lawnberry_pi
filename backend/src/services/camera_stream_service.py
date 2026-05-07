@@ -400,11 +400,9 @@ class CameraStreamService:
             if not self.loop or self.loop.is_closed():
                 self.loop = asyncio.get_running_loop()
 
-            # Refresh frame queue with current configuration buffer size
-            buffer_size = max(1, int(self.stream.configuration.buffer_size))
-            fps = self.stream.configuration.framerate or 1.0
-            self._enqueue_timeout = max(1.0, min(3.0, buffer_size / max(0.5, fps)))
-            self.frame_queue = asyncio.Queue(maxsize=buffer_size)
+            # Single-slot queue: always deliver the freshest frame with no buffering lag.
+            self._enqueue_timeout = 0.5
+            self.frame_queue = asyncio.Queue(maxsize=1)
 
             # Start capture thread
             self.capture_active = True
@@ -500,7 +498,16 @@ class CameraStreamService:
         async def _enqueue_async() -> None:
             if not self.frame_queue:
                 return
-            await self.frame_queue.put(frame)
+            # Drain any stale frames so the consumer always gets the latest capture.
+            while not self.frame_queue.empty():
+                try:
+                    self.frame_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            try:
+                self.frame_queue.put_nowait(frame)
+            except asyncio.QueueFull:
+                self.stream.statistics.frames_dropped += 1
 
         try:
             future = asyncio.run_coroutine_threadsafe(_enqueue_async(), self.loop)

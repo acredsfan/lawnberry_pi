@@ -512,9 +512,8 @@ class NavigationService:
     async def set_speed(self, left_speed: float, right_speed: float) -> None:
         """Drive command helper integrating with the RoboHAT controller.
 
-        - Accepts normalized wheel speeds in m/s-like units scaled to [-1, 1].
-        - In SIM_MODE, updates state without touching hardware.
-        - Applies traction control to detect and compensate for motor slip.
+        Accepts normalized wheel speeds in m/s-like units scaled to [-1, 1].
+        In SIM_MODE, updates state without touching hardware.
         """
         # Clamp inputs for safety
         ls = max(-self.max_speed, min(self.max_speed, float(left_speed)))
@@ -548,7 +547,6 @@ class NavigationService:
                 return 0.0
             return max(-1.0, min(1.0, v / self.max_speed))
 
-        # Apply traction control: detect slip and boost slipping wheel
         norm_ls = _normalize(ls)
         norm_rs = _normalize(rs)
 
