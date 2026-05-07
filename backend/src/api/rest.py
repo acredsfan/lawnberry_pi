@@ -819,7 +819,7 @@ async def control_drive_v2(cmd: dict, request: Request, runtime: RuntimeContext 
     outcome = await runtime.command_gateway.dispatch_drive(drive_cmd, request=request)
 
     if outcome.status == CommandStatus.BLOCKED and outcome.active_interlocks:
-        _transient = {"telemetry_unavailable", "telemetry_stale", "location_awareness_unavailable"}
+        _transient = {"telemetry_unavailable", "telemetry_stale", "location_awareness_unavailable", "obstacle_detected"}
         has_only_transient = all(i in _transient for i in outcome.active_interlocks)
         lockout_until_str: str | None = None
         if has_only_transient:
