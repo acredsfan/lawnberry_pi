@@ -631,7 +631,7 @@ class CameraStreamService:
                     return None
 
                 height, width = frame.shape[:2]
-                encoded = self._encode_numpy_frame_to_jpeg(frame, color_space="BGR")
+                encoded = self._encode_numpy_frame_to_jpeg(frame, color_space="RGB")
                 if encoded:
                     return encoded, (width, height)
 

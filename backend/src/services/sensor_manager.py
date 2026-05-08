@@ -380,6 +380,8 @@ class PowerSensorInterface:
 
         # Battery consumption accumulator (reset daily at midnight)
         self._battery_consumed_today_wh: float = 0.0
+        # Solar yield accumulator — fallback when Victron doesn't report yield_today
+        self._solar_yield_today_wh: float = 0.0
         self._last_power_read_dt: datetime | None = None
         self._last_accumulation_date: _date | None = None
 
@@ -480,7 +482,7 @@ class PowerSensorInterface:
                     if reading.solar_power is None and self.last_reading.solar_power is not None:
                         reading.solar_power = self.last_reading.solar_power
 
-            # Accumulate battery consumption (load_current * battery_voltage * elapsed) only for fresh readings
+            # Accumulate battery consumption and solar yield for fresh readings
             if merged is not None and reading is not None:
                 now_dt = datetime.now(UTC)
                 now_date = now_dt.date()
@@ -489,22 +491,28 @@ class PowerSensorInterface:
                     and now_date != self._last_accumulation_date
                 ):
                     self._battery_consumed_today_wh = 0.0
+                    self._solar_yield_today_wh = 0.0
                 self._last_accumulation_date = now_date
                 if self._last_power_read_dt is not None:
                     elapsed_s = (now_dt - self._last_power_read_dt).total_seconds()
-                    lc = reading.load_current
-                    bv = reading.battery_voltage
-                    if (
-                        lc is not None
-                        and bv is not None
-                        and abs(lc) > 0.01
-                        and bv > 0
-                        and 0 < elapsed_s < 300
-                    ):
-                        self._battery_consumed_today_wh += abs(lc) * bv * elapsed_s / 3600
+                    if 0 < elapsed_s < 300:
+                        lc = reading.load_current
+                        bv = reading.battery_voltage
+                        if (
+                            lc is not None
+                            and bv is not None
+                            and abs(lc) > 0.01
+                            and bv > 0
+                        ):
+                            self._battery_consumed_today_wh += abs(lc) * bv * elapsed_s / 3600
+                        sp = reading.solar_power
+                        if sp is not None and sp > 0:
+                            self._solar_yield_today_wh += sp * elapsed_s / 3600
                 self._last_power_read_dt = now_dt
             if reading is not None:
                 reading.battery_consumed_today_wh = self._battery_consumed_today_wh
+                if reading.solar_yield_today_wh is None:
+                    reading.solar_yield_today_wh = self._solar_yield_today_wh
 
             self.last_reading = reading
             return reading
@@ -705,6 +713,18 @@ class PowerSensorInterface:
             # Guard against zero or near-zero derived values that signal bad source data
             if derived is not None and abs(derived) >= 0.05:
                 solar_voltage = round(derived, 3)
+
+        # Cross-source fallback: derive voltage from any available power+current pair.
+        # Fires only when per-source derivation above didn't produce a result.
+        if solar_voltage is None and solar_power is not None and solar_current is not None:
+            try:
+                if abs(float(solar_current)) > 1e-6:
+                    cross_derived = float(solar_power) / float(solar_current)
+                    # Plausible panel voltage range: 0.5 V – 200 V
+                    if 0.5 <= cross_derived <= 200:
+                        solar_voltage = round(cross_derived, 3)
+            except Exception:
+                pass
 
         load_current_sources: list[Any] = []
         if prefer_load:
