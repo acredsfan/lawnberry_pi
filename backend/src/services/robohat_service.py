@@ -48,7 +48,9 @@ class RoboHATStatus:
     last_error: str | None = None
     motor_controller_ok: bool = False
     encoder_feedback_ok: bool = False
-    encoder_position: int = 0
+    encoder_position: int = 0   # encoder_1 (backward compat alias)
+    encoder_1_position: int = 0
+    encoder_2_position: int = 0
     encoder_rpm: float = 0.0
     timestamp: datetime = None
 
@@ -70,6 +72,8 @@ class RoboHATStatus:
             "motor_controller_ok": self.motor_controller_ok,
             "encoder_feedback_ok": self.encoder_feedback_ok,
             "encoder_position": self.encoder_position,
+            "encoder_1_position": self.encoder_1_position,
+            "encoder_2_position": self.encoder_2_position,
             "encoder_rpm": round(self.encoder_rpm, 1),
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "health_status": self.get_health_status(),
@@ -139,6 +143,10 @@ class RoboHATService:
         # periodic retry after the initial attempt window is exhausted.
         self._reconnecting: bool = False
         self._last_reconnect_attempt: float = 0.0
+        # Timestamp of the most recent line that matched _is_robohat_response_line.
+        # Updated from drain, probe settle, and read_loop so the probe can short-
+        # circuit if the firmware was already identified before the command phase.
+        self._last_robohat_line_at: float = 0.0
         # Encoder enabled flag — False when hall sensors are missing/unreliable.
         # Loaded from config/hardware.yaml encoders.enabled (default True).
         self._encoder_enabled: bool = True
@@ -146,6 +154,8 @@ class RoboHATService:
         # With 4 magnets/wheel: RPM = (delta_ticks / elapsed_s) * (60 / 4)
         self._enc_prev_pos: int | None = None
         self._enc_prev_time: float | None = None
+        self._enc2_prev_pos: int | None = None
+        self._enc2_prev_time: float | None = None
         self._ENCODER_MAGNETS_PER_WHEEL: int = 4
         try:
             from backend.src.core.config_loader import get_config_loader
@@ -161,30 +171,83 @@ class RoboHATService:
 
     @staticmethod
     def _is_robohat_response_line(line: str) -> bool:
-        """Return True when a serial line looks like the RoboHAT firmware."""
+        """Return True when a serial line looks like the RoboHAT firmware.
+
+        CircuitPython 10 prepends a VT100 OSC title-escape with no newline
+        to the first real output line.  Strip escape sequences before matching.
+        """
         text = (line or "").strip().lower()
         if not text:
             return False
+        # Strip OSC escape sequences (ESC + ] + ... + ESC + \ or BEL).
+        clean = text
+        while "\x1b" in clean:
+            esc_idx = clean.find("\x1b")
+            found_end = False
+            for i in range(esc_idx + 1, len(clean)):
+                if clean[i] == "\x1b" and i + 1 < len(clean) and clean[i + 1] == "\\":
+                    clean = (clean[:esc_idx] + clean[i + 2:]).strip()
+                    found_end = True
+                    break
+                if clean[i] == "\x07":
+                    clean = (clean[:esc_idx] + clean[i + 1:]).strip()
+                    found_end = True
+                    break
+            if not found_end:
+                clean = clean[:esc_idx].strip()
+                break
+        if not clean:
+            return False
         return (
-            text.startswith("[usb]")
-            or text.startswith("[uart]")
-            or text.startswith("[serial]")
-            or text.startswith("[rc-")
-            or text.startswith("[status]")
-            or text.startswith("[rc]")
-            or text.startswith("▶")
-            or text.startswith("\u25b6")
-            or "robohat" in text
+            clean.startswith("[usb]")
+            or clean.startswith("[uart]")
+            or clean.startswith("[serial]")
+            or clean.startswith("[rc-")
+            or clean.startswith("[status]")
+            or clean.startswith("[rc]")
+            or "\u25b6" in clean
+            or "robohat" in clean
+            or clean.startswith("code.py output:")
         )
-
     def _is_uart_port(self, port: str) -> bool:
         """Return True when the port path looks like a hardware UART (not USB CDC)."""
         return any(p in port for p in self._UART_PORT_PATTERNS)
+
+    def _read_available_lines(self) -> list[str]:
+        """Read all bytes currently in the RX buffer and return decoded lines.
+
+        Uses read(in_waiting) instead of readline() to avoid the 1-second blocking
+        stall when CircuitPython 10's title-escape sequence has no trailing newline.
+        Partial lines (no trailing newline) are included stripped; they may be empty.
+        """
+        if not self.serial_conn or not self.serial_conn.is_open:
+            return []
+        try:
+            waiting = self.serial_conn.in_waiting
+            if not waiting:
+                return []
+            raw = self.serial_conn.read(waiting)
+            lines = []
+            for raw_line in raw.split(b"\n"):
+                line = raw_line.decode("utf-8", errors="ignore").strip()
+                if line:
+                    lines.append(line)
+            return lines
+        except Exception:
+            return []
 
     async def _probe_firmware_response(self, timeout: float = 2.5) -> bool:
         """Verify the opened serial port actually speaks the RoboHAT protocol."""
         if not self.serial_conn or not self.serial_conn.is_open:
             return False
+
+        # If the drain phase (called just before this) already saw a valid firmware
+        # line on this connection (e.g. the CircuitPython startup banner or a
+        # heartbeat), trust that evidence and skip the settle + command round-trip.
+        _DRAIN_RECENCY_S = 10.0
+        if time.monotonic() - self._last_robohat_line_at <= _DRAIN_RECENCY_S:
+            self.status.last_error = None
+            return True
 
         saw_robohat_line = False
 
@@ -200,20 +263,54 @@ class RoboHATService:
         settle_deadline = time.monotonic() + settle_seconds
         while time.monotonic() < settle_deadline:
             try:
-                if self.serial_conn.in_waiting:
-                    raw = await asyncio.to_thread(self.serial_conn.readline)
-                    line = raw.decode("utf-8", errors="ignore").strip()
-                    if not line:
-                        await asyncio.sleep(0.05)
-                        continue
+                for line in await asyncio.to_thread(self._read_available_lines):
                     self._process_line(line)
                     if self._is_robohat_response_line(line):
                         saw_robohat_line = True
-                else:
-                    await asyncio.sleep(0.05)
+                        self._last_robohat_line_at = time.monotonic()
+                await asyncio.sleep(0.05)
             except Exception:
                 await asyncio.sleep(0.05)
 
+        if saw_robohat_line:
+            self.status.last_error = None
+            return True
+
+        # No firmware response in the settle window.  The device may be in
+        # CircuitPython REPL mode (code.py crashed or was interrupted).
+        # Send Ctrl+D (soft reload) to restart code.py, then wait for the
+        # firmware banner / first heartbeat.  CP10 takes ~5 s to boot after
+        # a soft reload, so allow 7 s before giving up.
+        try:
+            # Send Enter first to flush any pending REPL input (e.g. a stale
+            # rc=disable command left in the buffer), then Ctrl+D (soft reload).
+            await asyncio.to_thread(self.serial_conn.write, b"\r\n\x04")
+        except Exception as exc:
+            logger.warning("RoboHAT probe: Enter+Ctrl+D write failed on %s: %s", port_name, exc)
+            return False
+
+        _CTRLD_BOOT_TIMEOUT = 7.0
+        deadline = time.monotonic() + _CTRLD_BOOT_TIMEOUT
+        while time.monotonic() < deadline:
+            try:
+                for line in await asyncio.to_thread(self._read_available_lines):
+                    self._process_line(line)
+                    if self._is_robohat_response_line(line):
+                        saw_robohat_line = True
+                        self._last_robohat_line_at = time.monotonic()
+                        self.status.last_error = None
+                        return True
+                await asyncio.sleep(0.05)
+            except Exception:
+                await asyncio.sleep(0.05)
+
+        if saw_robohat_line:
+            self.status.last_error = None
+            return True
+
+        # Last resort: send rc=disable and wait briefly.  This catches a
+        # device that is already running but whose output happened to fall
+        # outside all previous read windows.
         try:
             await self._send_line("rc=disable")
         except Exception:
@@ -222,18 +319,14 @@ class RoboHATService:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                if self.serial_conn.in_waiting:
-                    raw = await asyncio.to_thread(self.serial_conn.readline)
-                    line = raw.decode("utf-8", errors="ignore").strip()
-                    if not line:
-                        await asyncio.sleep(0.05)
-                        continue
+                for line in await asyncio.to_thread(self._read_available_lines):
                     self._process_line(line)
                     if self._is_robohat_response_line(line):
                         saw_robohat_line = True
+                        self._last_robohat_line_at = time.monotonic()
+                        self.status.last_error = None
                         return True
-                else:
-                    await asyncio.sleep(0.05)
+                await asyncio.sleep(0.05)
             except Exception:
                 await asyncio.sleep(0.05)
 
@@ -362,12 +455,17 @@ class RoboHATService:
             return
 
         try:
-            # Read until buffer empty; keep the last status to process quickly
+            # Read all available bytes without blocking (avoids 1 s readline
+            # stall when CircuitPython 10's title-escape has no trailing newline).
             while self.serial_conn.in_waiting:
-                raw = self.serial_conn.readline()
-                line = raw.decode("utf-8", errors="ignore").strip()
-                if line:
+                raw = self.serial_conn.read(self.serial_conn.in_waiting)
+                for raw_line in raw.split(b"\n"):
+                    line = raw_line.decode("utf-8", errors="ignore").strip()
+                    if not line:
+                        continue
                     self._process_line(line)
+                    if self._is_robohat_response_line(line):
+                        self._last_robohat_line_at = time.monotonic()
         except Exception:
             # Non-fatal – buffer draining is best effort
             pass
@@ -629,11 +727,11 @@ class RoboHATService:
                 # does not block the PWM ack from being processed within the same
                 # 20 ms window.  Each asyncio.to_thread() still yields to the event
                 # loop, so other coroutines remain responsive during the drain.
-                while self.serial_conn and self.serial_conn.is_open and self.serial_conn.in_waiting:
-                    raw = await asyncio.to_thread(self.serial_conn.readline)
-                    line = raw.decode("utf-8", errors="ignore").strip()
-                    if line:
+                if self.serial_conn and self.serial_conn.is_open and not self._reconnecting:
+                    for line in await asyncio.to_thread(self._read_available_lines):
                         self._process_line(line)
+                        if self._is_robohat_response_line(line):
+                            self._last_robohat_line_at = time.monotonic()
 
                 # Periodic retry after initial reconnect attempts are exhausted.
                 # This is the only place that starts a reconnect task so we
@@ -662,41 +760,42 @@ class RoboHATService:
                 logger.error(f"Read loop error: {e}")
                 await asyncio.sleep(0.1)
 
-    def _update_encoder_velocity(self, enc: int) -> None:
-        """Compute RPM from cumulative encoder tick delta.
-
-        Firmware reports a single cumulative hall-sensor tick counter.
-        With 4 magnets per wheel: RPM = (delta_ticks / elapsed_s) * (60 / 4).
-        """
+    def _update_encoder_velocity(self, enc1: int, enc2: int | None = None) -> None:
+        """Compute RPM from cumulative encoder tick delta (encoder 1)."""
         now = time.monotonic()
         if self._enc_prev_pos is not None and self._enc_prev_time is not None:
             elapsed = now - self._enc_prev_time
             if elapsed >= 0.05:
-                delta = abs(enc - self._enc_prev_pos)
+                delta = abs(enc1 - self._enc_prev_pos)
                 ticks_per_sec = delta / elapsed
                 self.status.encoder_rpm = ticks_per_sec * (60.0 / self._ENCODER_MAGNETS_PER_WHEEL)
-                self._enc_prev_pos = enc
+                self._enc_prev_pos = enc1
                 self._enc_prev_time = now
         else:
-            self._enc_prev_pos = enc
+            self._enc_prev_pos = enc1
             self._enc_prev_time = now
 
     @staticmethod
-    def _parse_encoder_from_line(line: str) -> int | None:
-        """Extract encoder tick count from a firmware heartbeat/status line.
+    def _parse_encoder_from_line(line: str) -> tuple[int | None, int | None]:
+        """Extract encoder tick counts from a firmware heartbeat/status line.
 
-        Matches ``enc=N`` or ``"encoder": N`` patterns in lines such as::
-
-            [USB] signal=LOST steer=1500 µs thr=1500 µs blade=OFF enc=42
-            [RC-emergency] ... enc=-17
+        Dual format (new):  enc_1=N enc_2=N
+        Legacy format (old): enc=N  (mapped to encoder_1; encoder_2 stays None)
         """
+        m1 = re.search(r"\benc_1=(-?\d+)", line)
+        m2 = re.search(r"\benc_2=(-?\d+)", line)
+        if m1 or m2:
+            e1 = int(m1.group(1)) if m1 else None
+            e2 = int(m2.group(1)) if m2 else None
+            return e1, e2
+        # Legacy single-encoder heartbeat: enc=N
         m = re.search(r"\benc=(-?\d+)", line)
         if m:
             try:
-                return int(m.group(1))
+                return int(m.group(1)), None
             except ValueError:
                 pass
-        return None
+        return None, None
 
     _FIRMWARE_VERSION_RE = re.compile(r"\bv?(\d+\.\d+(?:\.\d+)*)\b")
 
@@ -732,12 +831,16 @@ class RoboHATService:
             if rc_enabled != self._rc_enabled:
                 self._mark_rc_state(rc_enabled)
             self.status.motor_controller_ok = not rc_enabled
-            enc = payload.get("encoder")
+            enc1 = payload.get("encoder_1") if payload.get("encoder_1") is not None else payload.get("encoder")
+            enc2 = payload.get("encoder_2")
             if self._encoder_enabled:
-                self.status.encoder_feedback_ok = enc is not None
-                if enc is not None:
-                    self.status.encoder_position = int(enc)
-                    self._update_encoder_velocity(int(enc))
+                self.status.encoder_feedback_ok = enc1 is not None or enc2 is not None
+                if enc1 is not None:
+                    self.status.encoder_1_position = int(enc1)
+                    self.status.encoder_position = int(enc1)
+                    self._update_encoder_velocity(int(enc1))
+                if enc2 is not None:
+                    self.status.encoder_2_position = int(enc2)
             else:
                 self.status.encoder_feedback_ok = False
             self.status.last_watchdog_echo = "status"
@@ -792,13 +895,16 @@ class RoboHATService:
             self.status.last_watchdog_echo = line.strip()
             if not self._rc_enabled:
                 self.status.last_error = None
-            # Parse encoder tick count from firmware heartbeat lines, e.g.:
-            # "[USB] signal=LOST steer=1500 µs thr=1500 µs blade=OFF enc=42"
-            enc = self._parse_encoder_from_line(line)
-            if enc is not None and self._encoder_enabled:
-                self.status.encoder_position = enc
+            # Parse encoder tick counts from firmware heartbeat lines.
+            enc1, enc2 = self._parse_encoder_from_line(line)
+            if self._encoder_enabled and (enc1 is not None or enc2 is not None):
+                if enc1 is not None:
+                    self.status.encoder_1_position = enc1
+                    self.status.encoder_position = enc1
+                    self._update_encoder_velocity(enc1)
+                if enc2 is not None:
+                    self.status.encoder_2_position = enc2
                 self.status.encoder_feedback_ok = True
-                self._update_encoder_velocity(enc)
             return
 
         if line_lower.startswith("\u25b6") or line_lower.startswith("▶"):
@@ -810,11 +916,15 @@ class RoboHATService:
             # Heartbeat from firmware – keep as last echo and parse encoder.
             self.status.last_watchdog_echo = line
             self._last_status_at = time.monotonic()
-            enc = self._parse_encoder_from_line(line)
-            if enc is not None and self._encoder_enabled:
-                self.status.encoder_position = enc
+            enc1, enc2 = self._parse_encoder_from_line(line)
+            if self._encoder_enabled and (enc1 is not None or enc2 is not None):
+                if enc1 is not None:
+                    self.status.encoder_1_position = enc1
+                    self.status.encoder_position = enc1
+                    self._update_encoder_velocity(enc1)
+                if enc2 is not None:
+                    self.status.encoder_2_position = enc2
                 self.status.encoder_feedback_ok = True
-                self._update_encoder_velocity(enc)
             return
 
         # For everything else, keep a debug breadcrumb without polluting logs.
