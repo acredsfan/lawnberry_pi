@@ -63,10 +63,23 @@ class ApiService {
     // Response interceptor for error handling
     this.client.interceptors.response.use(
       (response) => response,
-      (error) => {
-        if (error.response?.status === 401) {
+      async (error) => {
+        if (error.response?.status === 401 && !error.config?._retried) {
           const authStore = useAuthStore()
-          authStore.logout()
+          // Attempt a single token refresh before giving up. This handles the
+          // case where the backend restarted and the session was reconstructed
+          // but the old token needs re-validation.
+          try {
+            error.config._retried = true
+            const refreshed = await authStore.refreshToken()
+            if (refreshed) {
+              error.config.headers.Authorization = `Bearer ${authStore.token}`
+              return this.client.request(error.config)
+            }
+          } catch {
+            // refresh failed — fall through to logout
+          }
+          await authStore.logout()
         }
         return Promise.reject(error)
       }

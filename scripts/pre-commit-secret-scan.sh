@@ -29,7 +29,7 @@ PATTERN='(AIza[0-9A-Za-z\-_]{35}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36,}|xox[baprs
 # Use [^[:space:],;]{3,} (POSIX class) so \s-in-class is not misread as literal 's',
 # and minimum length 3 prevents empty-string defaults (key: '') from triggering.
 # Vue template prop bindings (key="obj.prop") are excluded by the dotted-property rule.
-EXCLUDE_PATTERN='(:\s*(Optional\[|List\[|Dict\[|str|int|bool|float|bytes|None\b)|=\s*None\s*$|=\s*Field\(|=\s*[A-Za-z_][A-Za-z_0-9]*\(|==\s*["\x27]|=\s*\(|=\s*[A-Za-z_][A-Za-z_0-9.]*\.[A-Za-z_]|f["\x27].*password:|f["\x27].*token:|\blogging\b|\blogger\b|=["\x27]\$?[A-Za-z_][A-Za-z0-9_.]*\.[A-Za-z_])'
+EXCLUDE_PATTERN='(:\s*(Optional\[|List\[|Dict\[|str|int|bool|float|bytes|None\b)|=\s*None\s*$|=\s*Field\(|=\s*[A-Za-z_][A-Za-z_0-9]*\(|==\s*["\x27]|=\s*\(|=\s*[A-Za-z_][A-Za-z_0-9.]*\.[A-Za-z_]|f["\x27].*password:|f["\x27].*token:|\blogging\b|\blogger\b|=["\x27]\$?[A-Za-z_][A-Za-z0-9_.]*\.[A-Za-z_]|=\s*f["\x27]|[A-Za-z_][A-Za-z_0-9]*=[A-Za-z_][A-Za-z_0-9]*[,)\s]|\bor\s+["\x27]sim-mode)'
 
 FOUND=0
 

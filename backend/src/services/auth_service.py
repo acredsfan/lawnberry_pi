@@ -336,13 +336,46 @@ class AuthService:
 
         session = self.active_sessions.get(session_id)
         if session is None:
-            return None
+            # JWT is cryptographically valid but session is absent — likely a
+            # backend restart cleared active_sessions. Reconstruct a minimal
+            # session from the JWT claims so the user isn't forced to re-login.
+            session = self._restore_session_from_jwt(payload)
+            if session is None:
+                return None
+            return session
 
         if session.is_expired():
             await self.terminate_session(session_id, "expired")
             return None
 
         return session
+
+    def _restore_session_from_jwt(self, payload: dict[str, Any]) -> UserSession | None:
+        """Reconstruct a minimal session from a valid JWT payload after a backend restart."""
+        try:
+            session_id = payload.get("sid")
+            exp = payload.get("exp")
+            if not session_id or not exp:
+                return None
+            expires_at = datetime.fromtimestamp(exp, tz=UTC)
+            if datetime.now(UTC) >= expires_at:
+                return None
+            session = UserSession(
+                session_id=session_id,
+                expires_at=expires_at,
+                status=SessionStatus.ACTIVE,
+            )
+            session.security_context.authentication_method = AuthenticationMethod.SHARED_CREDENTIAL
+            session.security_context.credential_hash = self.operator_credential_hash
+            self.active_sessions[session_id] = session
+            logger.info(
+                "auth.session.restored",
+                extra={"correlation_id": get_correlation_id(), "session_id": session_id},
+            )
+            return session
+        except Exception as exc:
+            logger.warning("Failed to restore session from JWT: %s", exc)
+            return None
 
     async def verify_session(self, session_id: str) -> UserSession | None:
         """Verify session by ID"""
