@@ -53,9 +53,8 @@
         </div>
       </div>
 
-      <!-- Live Camera Feed & Movement Controls Side-by-Side -->
-      <div class="stream-and-control-container">
-        <!-- Camera Feed -->
+      <!-- Full-width camera feed with joystick overlay -->
+      <div class="camera-with-overlay">
         <CameraPanel
           :camera-info="cameraInfo"
           :camera-display-source="cameraDisplaySource"
@@ -70,51 +69,46 @@
           @retry="retryCameraFeed"
         />
 
-        <!-- Movement Controls (Joystick) -->
-        <div class="card control-card">
-          <div class="card-header">
-            <h3>Movement Controls</h3>
-          </div>
-          <div class="card-body">
-            <div class="movement-layout">
-              <div class="joystick-column">
-                <VirtualJoystick
-                  ref="joystickRef"
-                  class="joystick-component"
-                  :disabled="!canMove"
-                  :dead-zone="0.12"
-                  @change="handleJoystickChange"
-                  @end="handleJoystickEnd"
-                />
-                <small class="joystick-hint">Drag to drive • Release or tap stop to halt</small>
-              </div>
-              <div class="movement-actions">
-                <button
-                  class="btn btn-danger stop-button"
-                  :disabled="!isControlUnlocked"
-                  @click="handleStopButton"
-                >
-                  🛑 Stop Motors
-                </button>
-                <div class="movement-readout">
-                  <span>Linear: {{ formatCommandValue(activeDriveVector.linear) }}</span>
-                  <span>Angular: {{ formatCommandValue(activeDriveVector.angular) }}</span>
-                </div>
-                <div v-if="joystickEngaged" class="movement-status active">Joystick engaged</div>
-                <div v-else class="movement-status">Joystick idle</div>
-              </div>
+        <!-- Movement Controls overlay -->
+        <div class="control-overlay">
+          <div class="overlay-top-row">
+            <div class="movement-readout-overlay">
+              <span>L: {{ formatCommandValue(activeDriveVector.linear) }}</span>
+              <span>A: {{ formatCommandValue(activeDriveVector.angular) }}</span>
             </div>
+            <div v-if="joystickEngaged" class="movement-status-badge active">● DRIVING</div>
+            <div v-else class="movement-status-badge">○ IDLE</div>
+          </div>
 
-            <div class="speed-control">
-              <label>Speed: {{ speedLevel }}%</label>
-              <input
-                v-model.number="speedLevel"
-                type="range"
-                min="10"
-                max="100"
-                step="10"
-                class="speed-slider"
+          <div class="overlay-joystick-row">
+            <VirtualJoystick
+              ref="joystickRef"
+              class="joystick-component"
+              :disabled="!canMove"
+              :dead-zone="0.12"
+              @change="handleJoystickChange"
+              @end="handleJoystickEnd"
+            />
+            <div class="overlay-side-controls">
+              <button
+                class="btn btn-danger stop-button"
+                :disabled="!isControlUnlocked"
+                @click="handleStopButton"
               >
+                🛑 Stop
+              </button>
+              <div class="speed-control-overlay">
+                <label>Speed {{ speedLevel }}%</label>
+                <input
+                  v-model.number="speedLevel"
+                  type="range"
+                  min="10"
+                  max="100"
+                  step="10"
+                  class="speed-slider"
+                  orient="vertical"
+                >
+              </div>
             </div>
           </div>
         </div>
@@ -759,116 +753,116 @@ onUnmounted(() => {
   font-size: 0.875rem;
 }
 
-.movement-layout {
-  display: flex;
-  gap: 2rem;
-  align-items: stretch;
-  flex-wrap: wrap;
-}
-
-.joystick-column {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.75rem;
-}
-
 .joystick-component {
   width: 220px;
   height: 220px;
   touch-action: none;
 }
 
-.joystick-hint {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-.movement-actions {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  min-width: 200px;
-}
-
 .stop-button {
-  align-self: flex-start;
-  padding: 0.85rem 1.5rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.9rem;
+  white-space: nowrap;
 }
 
-.movement-readout {
-  display: flex;
-  gap: 1.5rem;
-  font-family: 'Roboto Mono', 'Fira Code', monospace;
-  font-size: 1rem;
-  color: var(--text-muted);
-}
-
-.movement-status {
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-.movement-status.active {
-  color: var(--accent-green);
-}
-
-.speed-control {
-  margin-top: 1rem;
-}
-
-.speed-slider {
-  width: 100%;
-  margin-top: 0.5rem;
-}
-
-/* Side-by-side stream and control layout */
-.stream-and-control-container {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2rem;
+/* Full-width camera with controls overlaid */
+.camera-with-overlay {
+  position: relative;
   margin-bottom: 2rem;
 }
 
-.control-card {
-  grid-column: 2;
+.control-overlay {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
   display: flex;
   flex-direction: column;
+  gap: 0.5rem;
+  background: rgba(10, 10, 10, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(0, 255, 146, 0.25);
+  border-radius: 10px;
+  padding: 0.75rem;
+  z-index: 10;
+  /* prevent overlay from triggering camera stream error events */
+  pointer-events: auto;
 }
 
-.control-card .card-body {
-  flex: 1;
+.overlay-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.movement-readout-overlay {
+  display: flex;
+  gap: 0.75rem;
+  font-family: 'Roboto Mono', 'Fira Code', monospace;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.movement-status-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.movement-status-badge.active {
+  color: var(--accent-green);
+}
+
+.overlay-joystick-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.overlay-side-controls {
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  align-items: center;
+  gap: 0.75rem;
 }
 
-/* Responsive: stack on smaller screens */
-@media (max-width: 1400px) {
-  .stream-and-control-container {
-    grid-template-columns: 1fr;
-    gap: 1.5rem;
-  }
+.speed-control-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
 
-  .control-card {
-    grid-column: 1;
-  }
+.speed-control-overlay label {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.65);
+  white-space: nowrap;
+}
+
+.speed-control-overlay .speed-slider {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 28px;
+  height: 120px;
+  cursor: pointer;
 }
 
 @media (max-width: 768px) {
-  .stream-and-control-container {
-    grid-template-columns: 1fr;
+  .control-overlay {
+    bottom: 0.5rem;
+    right: 0.5rem;
+    padding: 0.5rem;
   }
 
   .joystick-component {
-    width: 180px;
-    height: 180px;
+    width: 160px;
+    height: 160px;
   }
 
-  .movement-layout {
-    flex-direction: column;
-    align-items: center;
+  .speed-control-overlay .speed-slider {
+    height: 90px;
   }
 }
 
@@ -972,11 +966,6 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  .movement-layout {
-    flex-direction: column;
-    align-items: center;
-  }
-
   .mowing-controls, .system-controls {
     flex-direction: column;
   }
