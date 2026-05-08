@@ -86,11 +86,11 @@
           <!-- Preset maneuver buttons -->
           <div class="preset-row">
             <button class="btn-preset" title="Forward ~0.5 m" :disabled="!canMove" @click="runPreset({linear:1,angular:0}, PRESET_NUDGE_MS, 'Forward')">▲</button>
-            <button class="btn-preset" title="Turn left 45°"  :disabled="!canMove" @click="runPreset({linear:0,angular:1},  presetTurnMs(45),  '↺ 45°')">↺ 45</button>
-            <button class="btn-preset" title="Turn left 90°"  :disabled="!canMove" @click="runPreset({linear:0,angular:1},  presetTurnMs(90),  '↺ 90°')">↺ 90</button>
-            <button class="btn-preset" title="Turn 180°"      :disabled="!canMove" @click="runPreset({linear:0,angular:1},  presetTurnMs(180), '↺ 180°')">↕ 180</button>
-            <button class="btn-preset" title="Turn right 90°" :disabled="!canMove" @click="runPreset({linear:0,angular:-1}, presetTurnMs(90),  '↻ 90°')">↻ 90</button>
-            <button class="btn-preset" title="Turn right 45°" :disabled="!canMove" @click="runPreset({linear:0,angular:-1}, presetTurnMs(45),  '↻ 45°')">↻ 45</button>
+            <button class="btn-preset" title="Turn left 45°"  :disabled="!canMove" @click="runTurnPreset(-45,  '↺ 45°')">↺ 45</button>
+            <button class="btn-preset" title="Turn left 90°"  :disabled="!canMove" @click="runTurnPreset(-90,  '↺ 90°')">↺ 90</button>
+            <button class="btn-preset" title="Turn 180°"      :disabled="!canMove" @click="runTurnPreset(-180, '↕ 180°')">↕ 180</button>
+            <button class="btn-preset" title="Turn right 90°" :disabled="!canMove" @click="runTurnPreset(90,   '↻ 90°')">↻ 90</button>
+            <button class="btn-preset" title="Turn right 45°" :disabled="!canMove" @click="runTurnPreset(45,   '↻ 45°')">↻ 45</button>
             <button class="btn-preset" title="Reverse ~0.5 m" :disabled="!canMove" @click="runPreset({linear:-1,angular:0}, PRESET_NUDGE_MS, 'Reverse')">▼</button>
             <button
               v-if="presetActive"
@@ -299,15 +299,8 @@ const speedLevel = ref(50)
 // ── Preset maneuver constants ─────────────────────────────────────────────────
 // Fixed 50% speed for all presets so they're consistent regardless of the joystick slider.
 const PRESET_SPEED_LIMIT = 0.5
-// Degrees per second the mower spins at PRESET_SPEED_LIMIT. Hardware-dependent; adjust if
-// turns are consistently over/under. 60°/s is a conservative default for most small mowers.
-const PRESET_TURN_DPS = 60
 // Duration for a ~0.5 m forward/reverse nudge at PRESET_SPEED_LIMIT.
 const PRESET_NUDGE_MS = 1600
-
-function presetTurnMs(degrees: number): number {
-  return Math.min(Math.ceil((Math.abs(degrees) / PRESET_TURN_DPS) * 1000), 5000)
-}
 
 const {
   joystickEngaged, activeDriveVector,
@@ -470,6 +463,26 @@ async function runPreset(vector: { linear: number; angular: number }, durationMs
     if (!cancelled) {
       await new Promise<void>(resolve => { cancelTimer = window.setTimeout(resolve, durationMs + 150) })
     }
+  } catch { /* non-fatal */ } finally {
+    presetCancelFn = null
+    presetActive.value = false
+    presetLabel.value = ''
+  }
+}
+
+async function runTurnPreset(degrees: number, label: string) {
+  if (presetActive.value || !isControlUnlocked.value || lockout.value) return
+  joystickRef.value?.reset()
+  await stopMovement(true)
+  presetActive.value = true
+  presetLabel.value = label
+  presetCancelFn = () => { stopMovement(true) }
+  try {
+    await control.submitCommand('preset-turn', {
+      session_id: ensureSession().session_id,
+      target_degrees: degrees,
+      speed: PRESET_SPEED_LIMIT,
+    })
   } catch { /* non-fatal */ } finally {
     presetCancelFn = null
     presetActive.value = false

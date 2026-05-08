@@ -910,6 +910,135 @@ async def control_drive_v2(cmd: dict, request: Request, runtime: RuntimeContext 
     return response
 
 
+_PRESET_TURN_SPEED = 0.5
+_PRESET_TURN_TIMEOUT_S = 8.0   # must be < axios 10 s client timeout
+_PRESET_TURN_DPS = 60.0        # fallback timed rate (degrees per second)
+
+
+@router.post("/control/preset-turn")
+async def control_preset_turn(
+    cmd: dict, request: Request, runtime: RuntimeContext = Depends(get_runtime)
+):
+    """Execute a closed-loop preset turn using IMU heading feedback.
+
+    POST /api/v2/control/preset-turn
+    Body: {
+        "session_id": "<session>",
+        "target_degrees": 90.0,    # positive = CW (right), negative = CCW (left)
+        "speed": 0.5               # optional, default 0.5
+    }
+
+    Returns:
+    {
+        "ok": bool,
+        "target_degrees": float,
+        "actual_degrees": float,
+        "duration_ms": int,
+        "method": "imu" | "timed"
+    }
+    """
+    import os
+
+    from ..services.navigation_service import NavigationService
+    from ..services.robohat_service import get_robohat_service
+
+    if runtime.command_gateway.is_emergency_active(request):
+        return JSONResponse(status_code=403, content={"detail": "Emergency stop active"})
+
+    session_context = _resolve_manual_session(cmd.get("session_id"))
+    if session_context is None:
+        return JSONResponse(status_code=403, content={"detail": "Invalid or expired session"})
+
+    try:
+        target_degrees = float(cmd.get("target_degrees", 0.0))
+    except (TypeError, ValueError):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="target_degrees must be numeric")
+    if target_degrees == 0.0:
+        return {"ok": True, "target_degrees": 0.0, "actual_degrees": 0.0, "duration_ms": 0, "method": "imu"}
+
+    try:
+        speed = float(cmd.get("speed", _PRESET_TURN_SPEED))
+    except (TypeError, ValueError):
+        speed = _PRESET_TURN_SPEED
+    speed = max(0.1, min(1.0, speed))
+
+    # CW (positive): left forward, right backward
+    turn_sign = 1.0 if target_degrees > 0 else -1.0
+    left_cmd = turn_sign * speed
+    right_cmd = -turn_sign * speed
+
+    start_time = time.monotonic()
+    sim_mode = os.getenv("SIM_MODE", "0") == "1"
+
+    if sim_mode:
+        duration_s = abs(target_degrees) / _PRESET_TURN_DPS
+        await asyncio.sleep(duration_s)
+        elapsed_ms = int((time.monotonic() - start_time) * 1000)
+        return {
+            "ok": True,
+            "target_degrees": target_degrees,
+            "actual_degrees": target_degrees,
+            "duration_ms": elapsed_ms,
+            "method": "timed",
+        }
+
+    nav_service = NavigationService.get_instance()
+    robohat = get_robohat_service()
+
+    initial_heading = nav_service.navigation_state.heading if nav_service else None
+
+    if initial_heading is None:
+        # No IMU available — fall back to timed
+        if robohat:
+            await robohat.send_motor_command(left_cmd, right_cmd)
+        duration_s = abs(target_degrees) / _PRESET_TURN_DPS
+        await asyncio.sleep(duration_s)
+        if robohat:
+            await robohat.send_motor_command(0.0, 0.0)
+        elapsed_ms = int((time.monotonic() - start_time) * 1000)
+        return {
+            "ok": True,
+            "target_degrees": target_degrees,
+            "actual_degrees": target_degrees,
+            "duration_ms": elapsed_ms,
+            "method": "timed",
+        }
+
+    # IMU closed-loop turn
+    if robohat:
+        await robohat.send_motor_command(left_cmd, right_cmd)
+
+    cumulative = 0.0
+    prev_heading = float(initial_heading)
+    timed_out = False
+
+    try:
+        while abs(cumulative) < abs(target_degrees):
+            if time.monotonic() - start_time > _PRESET_TURN_TIMEOUT_S:
+                timed_out = True
+                break
+            await asyncio.sleep(0.05)
+            curr_heading = nav_service.navigation_state.heading
+            if curr_heading is None:
+                continue
+            curr = float(curr_heading)
+            step = (curr - prev_heading + 180.0) % 360.0 - 180.0
+            cumulative += step
+            prev_heading = curr
+    finally:
+        if robohat:
+            await robohat.send_motor_command(0.0, 0.0)
+
+    elapsed_ms = int((time.monotonic() - start_time) * 1000)
+    return {
+        "ok": not timed_out,
+        "target_degrees": target_degrees,
+        "actual_degrees": round(cumulative, 1),
+        "duration_ms": elapsed_ms,
+        "method": "imu",
+    }
+
+
 class BladeContractIn(BaseModel):
     session_id: str
     action: str
