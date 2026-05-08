@@ -162,21 +162,22 @@ class CameraStreamService:
                     logger.info("Initializing Pi Camera...")
                     self.camera = Picamera2()
 
-                    # Configure camera
+                    # Configure camera.
+                    # BGR888 delivers data in OpenCV-native BGR byte order so no
+                    # colour-space conversion is needed before cv2.imencode.
                     config = self.camera.create_video_configuration(
                         main={
-                            "format": "RGB888",
+                            "format": "BGR888",
                             "size": (
                                 self.stream.configuration.width,
                                 self.stream.configuration.height,
                             ),
                         }
                     )
-                    # Keep buffer small to minimise latency
+                    # 3 buffers: enough to avoid stalls while keeping pipeline
+                    # latency at one frame.
                     try:
-                        config["buffer_count"] = max(
-                            3, min(6, self.stream.configuration.buffer_size)
-                        )
+                        config["buffer_count"] = 3
                     except Exception:
                         pass
                     self.camera.configure(config)
@@ -194,6 +195,16 @@ class CameraStreamService:
                             logger.debug(
                                 "Unable to enforce PiCamera2 frame duration limits: %s", exc
                             )
+
+                    # Use the full sensor area so the output is not cropped/zoomed.
+                    # Without this, Picamera2 defaults to a centre-crop when the
+                    # requested resolution is smaller than the sensor's native size.
+                    try:
+                        max_crop = self.camera.camera_properties.get("ScalerCropMaximum")
+                        if max_crop:
+                            self.camera.set_controls({"ScalerCrop": max_crop})
+                    except Exception as exc:
+                        logger.debug("Unable to set ScalerCrop for full FOV: %s", exc)
 
                     # Update capabilities from camera
                     self.stream.capabilities.sensor_type = "Pi Camera v3"
@@ -620,7 +631,7 @@ class CameraStreamService:
                     return None
 
                 height, width = frame.shape[:2]
-                encoded = self._encode_numpy_frame_to_jpeg(frame, color_space="RGB")
+                encoded = self._encode_numpy_frame_to_jpeg(frame, color_space="BGR")
                 if encoded:
                     return encoded, (width, height)
 
@@ -952,7 +963,7 @@ class CameraStreamService:
                 # Reconfigure Pi Camera with video-friendly settings
                 config = self.camera.create_video_configuration(
                     main={
-                        "format": "RGB888",
+                        "format": "BGR888",
                         "size": (
                             self.stream.configuration.width,
                             self.stream.configuration.height,
@@ -960,7 +971,7 @@ class CameraStreamService:
                     }
                 )
                 try:
-                    config["buffer_count"] = max(3, min(6, self.stream.configuration.buffer_size))
+                    config["buffer_count"] = 3
                 except Exception:
                     pass
 
@@ -980,6 +991,13 @@ class CameraStreamService:
                         )
                     except Exception as exc:
                         logger.debug("Unable to enforce PiCamera2 frame duration limits: %s", exc)
+
+                try:
+                    max_crop = self.camera.camera_properties.get("ScalerCropMaximum")
+                    if max_crop:
+                        self.camera.set_controls({"ScalerCrop": max_crop})
+                except Exception as exc:
+                    logger.debug("Unable to set ScalerCrop for full FOV: %s", exc)
 
             elif OPENCV_AVAILABLE and isinstance(self.camera, cv2.VideoCapture):
                 # Update OpenCV camera properties

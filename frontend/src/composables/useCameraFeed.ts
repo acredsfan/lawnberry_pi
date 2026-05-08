@@ -44,7 +44,7 @@ export function useCameraFeed(getSessionId: () => string | null) {
   // Reconnect the MJPEG stream periodically so the TCP write buffer never
   // accumulates more than ~RECONNECT_INTERVAL_MS worth of stale frames.
   // The browser opens a fresh connection with an empty buffer each time.
-  const STREAM_RECONNECT_INTERVAL_MS = 30_000
+  const STREAM_RECONNECT_INTERVAL_MS = 4_000
 
   const cameraIsStreaming = computed(() => Boolean(cameraStreamUrl.value))
   const cameraDisplaySource = computed(() => cameraStreamUrl.value ?? cameraFrameUrl.value)

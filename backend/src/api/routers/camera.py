@@ -114,7 +114,7 @@ async def get_current_frame():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-_MJPEG_TARGET_FPS = 10
+_MJPEG_TARGET_FPS = 5
 _MJPEG_INTERVAL = 1.0 / _MJPEG_TARGET_FPS
 
 
