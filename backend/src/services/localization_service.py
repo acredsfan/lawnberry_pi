@@ -437,12 +437,20 @@ class LocalizationService:
         # 5. Update pose quality
         self._update_quality()
 
-        # Diagnostic: trace heading / gps_cog during bootstrap and just after
+        # Diagnostic: trace heading / gps_cog during bootstrap and just after.
+        # Includes GPS position availability so we can distinguish "no GPS fix"
+        # from "GPS fix but not moving enough to compute COG".
         if self._bootstrap_start_time is not None or self._heading_alignment_sample_count <= 1:
+            _gps = sensor_data.gps if sensor_data else None
+            _gps_has_fix = bool(_gps and _gps.latitude and _gps.longitude)
+            _gps_acc = getattr(_gps, "accuracy", None) if _gps else None
             logger.info(
-                "LOC_TRACE: heading=%s gps_cog=%s imu_valid=%s bootstrap=%s samples=%d",
+                "LOC_TRACE: heading=%s gps_cog=%s gps_fix=%s gps_acc=%s "
+                "imu_valid=%s bootstrap=%s samples=%d",
                 f"{self.state.heading:.1f}°" if self.state.heading is not None else "None",
                 f"{gps_cog:.1f}°" if gps_cog is not None else "None",
+                _gps_has_fix,
+                f"{_gps_acc:.2f}m" if _gps_acc is not None else "None",
                 imu_valid,
                 self._bootstrap_start_time is not None,
                 self._heading_alignment_sample_count,

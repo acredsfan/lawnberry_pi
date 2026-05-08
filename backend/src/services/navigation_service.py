@@ -575,6 +575,60 @@ class NavigationService:
         must treat this as a mission abort, not a recoverable condition.
         """
         _BOOTSTRAP_DEADLINE_S: float = 15.0
+        _GPS_PREFLIGHT_WAIT_S: float = 60.0
+
+        # Pre-flight: ensure GPS has provided at least one valid position before driving.
+        # Without a position, _resolve_gps_cog returns None immediately on every tick
+        # because current_position is None, so the bootstrap drive produces no COG no
+        # matter how long the mower moves.
+        if self.navigation_state.current_position is None:
+            logger.info(
+                "Heading bootstrap: waiting for GPS fix before driving (timeout %.0f s)...",
+                _GPS_PREFLIGHT_WAIT_S,
+            )
+            from ..core.state_manager import get_sensor_manager as _get_sm
+            gps_wait_start = time.monotonic()
+            gps_fix_deadline = gps_wait_start + _GPS_PREFLIGHT_WAIT_S
+            _last_gps_warn_t = gps_wait_start
+            while time.monotonic() < gps_fix_deadline:
+                await asyncio.sleep(1.0)
+                try:
+                    _mgr = _get_sm()
+                    if _mgr is not None:
+                        _sd = await _mgr.read_all_sensors()
+                        if _sd:
+                            await self.update_navigation_state(_sd)
+                except Exception:
+                    pass
+                if self.navigation_state.current_position is not None:
+                    _acc = getattr(self.navigation_state.current_position, "accuracy", None)
+                    logger.info(
+                        "Heading bootstrap: GPS fix acquired "
+                        "(accuracy=%.2f m, waited %.0f s) — starting drive.",
+                        _acc or 0.0,
+                        time.monotonic() - gps_wait_start,
+                    )
+                    break
+                _now = time.monotonic()
+                if _now - _last_gps_warn_t >= 10.0:
+                    logger.warning(
+                        "Heading bootstrap: still waiting for GPS fix "
+                        "(%.0f s elapsed — check sky view and antenna)",
+                        _now - gps_wait_start,
+                    )
+                    _last_gps_warn_t = _now
+            else:
+                raise RuntimeError(
+                    f"Heading bootstrap pre-flight: no GPS fix within {_GPS_PREFLIGHT_WAIT_S:.0f} s. "
+                    "Check sky view, GPS antenna, and satellite signal before retrying."
+                )
+        else:
+            _acc = getattr(self.navigation_state.current_position, "accuracy", None)
+            logger.info(
+                "Heading bootstrap: GPS fix already available (accuracy=%.2f m) — starting drive.",
+                _acc or 0.0,
+            )
+
         logger.info("Heading bootstrap: driving forward to acquire GPS COG snap...")
         self._bootstrap_start_time = time.monotonic()
         start_pos = self.navigation_state.current_position

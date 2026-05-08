@@ -312,7 +312,10 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
         return True
 
     async def fake_update_navigation_state(_sensor_data: SensorData):
+        nonlocal calls
         nav._heading_alignment_sample_count = 1
+        # Simulate ~2 m of forward movement so the min-distance gate passes.
+        nav.navigation_state.current_position = Position(latitude=0.00002, longitude=0.0, accuracy=1.0)
         return nav.navigation_state
 
     original_manager = AppState.get_instance().sensor_manager
@@ -321,6 +324,8 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
     monkeypatch.setattr(nav, "_deliver_stop_command", fake_deliver_stop_command)
     monkeypatch.setattr(nav, "_global_emergency_active", lambda: False)
     monkeypatch.setattr(nav, "update_navigation_state", fake_update_navigation_state)
+    # Pre-set a GPS fix so the pre-flight check passes immediately without waiting.
+    nav.navigation_state.current_position = Position(latitude=0.0, longitude=0.0, accuracy=1.0)
 
     try:
         await nav._bootstrap_heading_from_gps_cog()
