@@ -10,13 +10,13 @@ requires-python = ">=3.11"
 
 dependencies = [
     "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.30.0", 
+    "uvicorn[standard]>=0.30.0",
     "httpx>=0.27.0",
     "pydantic>=2.8.0",
     "websockets>=12.0",
-    "python-multipart>=0.0.6",
+    "python-multipart>=0.0.27",
     "PyYAML>=6.0.1",
-    "PyJWT>=2.8.0",
+    "pyjwt>=2.12.0",
     "passlib[bcrypt]>=1.7.4",
     "pyotp>=2.8.0",
     "structlog>=23.1.0",
@@ -33,7 +33,8 @@ dependencies = [
     # Lightweight image decode/resize support for CPU inference and camera-adjacent workflows
     "Pillow>=9.4.0",
     # Load .env for runtime secrets (e.g., NTRIP_*)
-    "python-dotenv>=1.0.1",
+    "python-dotenv>=1.2.2",
+    "starlette>=0.49.1",
 ]
 
 # Optional extras for hardware backends (install with: pip install .[hardware])

@@ -54,6 +54,11 @@ export async function getMissionStatus(missionId: string): Promise<MissionStatus
   return response.data
 }
 
+export async function getMission(missionId: string): Promise<Mission> {
+  const response = await apiService.get<Mission>(`/api/v2/missions/${missionId}`)
+  return response.data
+}
+
 export async function listMissions(): Promise<Mission[]> {
   const response = await apiService.get<Mission[]>('/api/v2/missions/list')
   return response.data

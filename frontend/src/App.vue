@@ -54,6 +54,7 @@ import { computed, onMounted } from 'vue'
 import { useAuthStore } from './stores/auth'
 import { useSystemStore } from './stores/system'
 import { usePreferencesStore } from './stores/preferences'
+import { useMissionStore } from './stores/mission'
 import UserMenu from './components/UserMenu.vue'
 import ToastHost from './components/ui/ToastHost.vue'
 import CommandPalette from './components/CommandPalette.vue'
@@ -63,6 +64,7 @@ import logoUrl from '@/assets/logo.png'
 const authStore = useAuthStore()
 const systemStore = useSystemStore()
 const preferencesStore = usePreferencesStore()
+const missionStore = useMissionStore()
 
 preferencesStore.ensureInitialized()
 
@@ -88,6 +90,7 @@ onMounted(async () => {
   // Validate user session on app start
   if (authStore.token) {
     await authStore.validateSession()
+    await missionStore.init()
   }
   
   // Track user activity for session management

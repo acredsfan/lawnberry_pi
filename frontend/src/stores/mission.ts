@@ -53,6 +53,8 @@ function extractMissionErrorMessage(error: unknown, fallback: string): string {
   return String(message || fallback);
 }
 
+const CURRENT_MISSION_ID_KEY = 'lawnberry:currentMissionId';
+
 export const useMissionStore = defineStore('mission', () => {
   const waypoints = ref<Waypoint[]>([]);
   const currentMission = ref<Mission | null>(null);
@@ -65,6 +67,14 @@ export const useMissionStore = defineStore('mission', () => {
     return missionStatus.value === 'paused' && /recover/i.test(statusDetail.value ?? '');
   });
   let statusPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  const _persistCurrentMissionId = (id: string | null) => {
+    if (id) {
+      localStorage.setItem(CURRENT_MISSION_ID_KEY, id);
+    } else {
+      localStorage.removeItem(CURRENT_MISSION_ID_KEY);
+    }
+  };
 
   const { subscribe, unsubscribe } = useWebSocket();
 
@@ -112,13 +122,45 @@ export const useMissionStore = defineStore('mission', () => {
     waypoints.value = [];
   };
 
+  const _setCurrentMission = (mission: Mission) => {
+    currentMission.value = mission;
+    _persistCurrentMissionId(mission.id);
+  };
+
+  const selectMission = async (mission: Mission) => {
+    _setCurrentMission(mission);
+    try {
+      const response = await apiService.get<MissionStatusResponse>(`/api/v2/missions/${mission.id}/status`);
+      applyMissionStatus(response.data);
+    } catch {
+      missionStatus.value = 'idle';
+    }
+  };
+
+  const init = async () => {
+    const savedId = localStorage.getItem(CURRENT_MISSION_ID_KEY);
+    if (!savedId) return;
+    try {
+      const missionRes = await apiService.get<Mission>(`/api/v2/missions/${savedId}`);
+      const statusRes = await apiService.get<MissionStatusResponse>(`/api/v2/missions/${savedId}/status`);
+      currentMission.value = missionRes.data;
+      waypoints.value = [...missionRes.data.waypoints];
+      applyMissionStatus(statusRes.data);
+      if (statusRes.data.status === 'running' || statusRes.data.status === 'paused') {
+        startStatusPolling();
+      }
+    } catch {
+      localStorage.removeItem(CURRENT_MISSION_ID_KEY);
+    }
+  };
+
   const createMission = async (name: string) => {
     try {
       const response = await apiService.post<Mission>('/api/v2/missions/create', {
         name,
         waypoints: waypoints.value,
       });
-      currentMission.value = response.data;
+      _setCurrentMission(response.data);
       missionStatus.value = 'idle';
       progress.value = 0;
       currentWaypointIndex.value = 0;
@@ -196,6 +238,7 @@ export const useMissionStore = defineStore('mission', () => {
       statusDetail.value = 'Mission aborted by operator';
       stopStatusPolling();
       currentMission.value = null;
+      _persistCurrentMissionId(null);
     } catch (error) {
       console.error('Error aborting mission:', error);
       statusDetail.value = extractMissionErrorMessage(error, 'Unable to abort mission.');
@@ -270,6 +313,8 @@ export const useMissionStore = defineStore('mission', () => {
     reorderWaypoints,
     removeLastWaypoint,
     clearWaypoints,
+    init,
+    selectMission,
     createMission,
     startCurrentMission,
     pauseCurrentMission,
