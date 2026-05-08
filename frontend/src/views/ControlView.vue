@@ -76,8 +76,28 @@
               <span>L: {{ formatCommandValue(activeDriveVector.linear) }}</span>
               <span>A: {{ formatCommandValue(activeDriveVector.angular) }}</span>
             </div>
-            <div v-if="joystickEngaged" class="movement-status-badge active">● DRIVING</div>
+            <div v-if="presetActive" class="movement-status-badge preset">
+              ⏳ {{ presetLabel }}
+            </div>
+            <div v-else-if="joystickEngaged" class="movement-status-badge active">● DRIVING</div>
             <div v-else class="movement-status-badge">○ IDLE</div>
+          </div>
+
+          <!-- Preset maneuver buttons -->
+          <div class="preset-row">
+            <button class="btn-preset" title="Forward ~0.5 m" :disabled="!canMove" @click="runPreset({linear:1,angular:0}, PRESET_NUDGE_MS, 'Forward')">▲</button>
+            <button class="btn-preset" title="Turn left 45°"  :disabled="!canMove" @click="runPreset({linear:0,angular:1},  presetTurnMs(45),  '↺ 45°')">↺ 45</button>
+            <button class="btn-preset" title="Turn left 90°"  :disabled="!canMove" @click="runPreset({linear:0,angular:1},  presetTurnMs(90),  '↺ 90°')">↺ 90</button>
+            <button class="btn-preset" title="Turn 180°"      :disabled="!canMove" @click="runPreset({linear:0,angular:1},  presetTurnMs(180), '↺ 180°')">↕ 180</button>
+            <button class="btn-preset" title="Turn right 90°" :disabled="!canMove" @click="runPreset({linear:0,angular:-1}, presetTurnMs(90),  '↻ 90°')">↻ 90</button>
+            <button class="btn-preset" title="Turn right 45°" :disabled="!canMove" @click="runPreset({linear:0,angular:-1}, presetTurnMs(45),  '↻ 45°')">↻ 45</button>
+            <button class="btn-preset" title="Reverse ~0.5 m" :disabled="!canMove" @click="runPreset({linear:-1,angular:0}, PRESET_NUDGE_MS, 'Reverse')">▼</button>
+            <button
+              v-if="presetActive"
+              class="btn-preset btn-preset--cancel"
+              title="Cancel preset"
+              @click="cancelPreset"
+            >✕</button>
           </div>
 
           <div class="overlay-joystick-row">
@@ -276,6 +296,19 @@ const {
 // Speed level is ControlView-local (not in preferences store)
 const speedLevel = ref(50)
 
+// ── Preset maneuver constants ─────────────────────────────────────────────────
+// Fixed 50% speed for all presets so they're consistent regardless of the joystick slider.
+const PRESET_SPEED_LIMIT = 0.5
+// Degrees per second the mower spins at PRESET_SPEED_LIMIT. Hardware-dependent; adjust if
+// turns are consistently over/under. 60°/s is a conservative default for most small mowers.
+const PRESET_TURN_DPS = 60
+// Duration for a ~0.5 m forward/reverse nudge at PRESET_SPEED_LIMIT.
+const PRESET_NUDGE_MS = 1600
+
+function presetTurnMs(degrees: number): number {
+  return Math.min(Math.ceil((Math.abs(degrees) / PRESET_TURN_DPS) * 1000), 5000)
+}
+
 const {
   joystickEngaged, activeDriveVector,
   handleJoystickChange, handleJoystickEnd, stopMovement,
@@ -306,6 +339,9 @@ const currentSpeed = ref(0)
 const mowingActive = ref(false)
 
 const joystickRef = ref<JoystickHandle | null>(null)
+const presetActive = ref(false)
+const presetLabel = ref('')
+let presetCancelFn: (() => void) | null = null
 
 const displaySpeed = computed(() => {
   const value = Number(currentSpeed.value)
@@ -327,7 +363,7 @@ const isEmergencyStopActive = computed(() => control.emergencyStopActive)
 const estopReason = computed(() => control.emergencyStopReason)
 
 const canMove = computed(() =>
-  isControlUnlocked.value && !performing.value && !lockout.value && motorControllerState.value.ready
+  isControlUnlocked.value && !performing.value && !lockout.value && motorControllerState.value.ready && !presetActive.value
 )
 
 const canSubmitBlade = computed(() =>
@@ -397,6 +433,10 @@ function lockControl() {
 // ── Stop button (joystick reset + motor stop) ─────────────────────────────────
 
 function handleStopButton() {
+  presetCancelFn?.()
+  presetCancelFn = null
+  presetActive.value = false
+  presetLabel.value = ''
   joystickRef.value?.reset()
   void stopMovement(true)
 }
@@ -404,6 +444,45 @@ function handleStopButton() {
 function formatCommandValue(value: number) {
   if (!Number.isFinite(value)) return '0.00'
   return value.toFixed(2)
+}
+
+// ── Preset maneuvers ──────────────────────────────────────────────────────────
+
+async function runPreset(vector: { linear: number; angular: number }, durationMs: number, label: string) {
+  if (presetActive.value || !isControlUnlocked.value || lockout.value) return
+  joystickRef.value?.reset()
+  await stopMovement(true)
+  presetActive.value = true
+  presetLabel.value = label
+  let cancelled = false
+  let cancelTimer: number | undefined
+  presetCancelFn = () => { cancelled = true; if (cancelTimer) window.clearTimeout(cancelTimer) }
+  try {
+    if (!cancelled) {
+      await control.submitCommand('drive', {
+        session_id: ensureSession().session_id,
+        vector,
+        duration_ms: durationMs,
+        reason: 'preset-maneuver',
+        max_speed_limit: PRESET_SPEED_LIMIT,
+      })
+    }
+    if (!cancelled) {
+      await new Promise<void>(resolve => { cancelTimer = window.setTimeout(resolve, durationMs + 150) })
+    }
+  } catch { /* non-fatal */ } finally {
+    presetCancelFn = null
+    presetActive.value = false
+    presetLabel.value = ''
+  }
+}
+
+async function cancelPreset() {
+  presetCancelFn?.()
+  presetCancelFn = null
+  presetActive.value = false
+  presetLabel.value = ''
+  await stopMovement(true)
 }
 
 // ── Telemetry ─────────────────────────────────────────────────────────────────
@@ -813,6 +892,59 @@ onUnmounted(() => {
 
 .movement-status-badge.active {
   color: var(--accent-green);
+}
+
+.movement-status-badge.preset {
+  color: #ffc107;
+}
+
+/* Preset maneuver button row */
+.preset-row {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0.25rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.btn-preset {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  min-width: 42px;
+  padding: 0.3rem 0.4rem;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.btn-preset:hover:not(:disabled) {
+  background: rgba(0, 255, 146, 0.18);
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+.btn-preset:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-preset--cancel {
+  background: rgba(220, 53, 69, 0.25);
+  border-color: #dc3545;
+  color: #ff6b6b;
+}
+
+.btn-preset--cancel:hover:not(:disabled) {
+  background: rgba(220, 53, 69, 0.45);
+  border-color: #ff4343;
+  color: #fff;
 }
 
 .overlay-joystick-row {
