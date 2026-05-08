@@ -120,19 +120,21 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 # Sync Python environment from lockfile (reproducible)
+# --extra hardware installs hardware drivers (adafruit libs, GPIO) required on the Pi.
+# Omitting this strips those packages from the venv on every sync.
 if [[ -f "$ROOT_DIR/uv.lock" ]]; then
   echo "[setup] Installing Python dependencies via uv (frozen lockfile)..."
   # Use project root as working directory
-  (cd "$ROOT_DIR" && uv sync --frozen)
+  (cd "$ROOT_DIR" && uv sync --frozen --extra hardware)
 else
   echo "[setup] WARNING: uv.lock not found; creating environment from pyproject (non-frozen)."
-  (cd "$ROOT_DIR" && uv sync)
+  (cd "$ROOT_DIR" && uv sync --extra hardware)
 fi
 
 # Optional update step to refresh lock and re-sync explicitly when requested
 if [[ $UPDATE -eq 1 ]]; then
   echo "[setup] --update specified: attempting to update dependencies and refresh lockfile."
-  (cd "$ROOT_DIR" && uv lock && uv sync)
+  (cd "$ROOT_DIR" && uv lock && uv sync --extra hardware)
 fi
 
 # Ensure cloudflared tunnel binary is installed
