@@ -45,6 +45,7 @@ class ConfigLoader:
         hardware_path: str | None = None,
         limits_path: str | None = None,
         hardware_local_path: str | None = None,
+        limits_local_path: str | None = None,
     ) -> None:
         self.config_dir = config_dir or _default_config_dir()
         self.hardware_path = hardware_path or os.path.join(self.config_dir, "hardware.yaml")
@@ -54,6 +55,12 @@ class ConfigLoader:
             hardware_local_path
             or env_local_path
             or os.path.join(self.config_dir, "hardware.local.yaml")
+        )
+        env_limits_local = os.environ.get("LAWN_LIMITS_LOCAL_PATH")
+        self.limits_local_path = (
+            limits_local_path
+            or env_limits_local
+            or os.path.join(self.config_dir, "limits.local.yaml")
         )
         self._cache: tuple[HardwareConfig, SafetyLimits] | None = None
 
@@ -78,6 +85,9 @@ class ConfigLoader:
         if local_raw:
             hw_raw = self._deep_merge(hw_raw, local_raw)
         limits_raw = self._read_yaml(self.limits_path)
+        limits_local_raw = self._read_yaml(self.limits_local_path) if self.limits_local_path else {}
+        if limits_local_raw:
+            limits_raw = self._deep_merge(limits_raw, limits_local_raw)
 
         try:
             hardware = HardwareConfig(**self._normalize_hardware_yaml(hw_raw))
@@ -115,30 +125,28 @@ class ConfigLoader:
         return self.load()
 
     def update_limits(self, patch: dict[str, Any]) -> SafetyLimits:
-        """Merge *patch* into limits.yaml, validate, write back, and reload.
+        """Merge *patch* into limits.local.yaml, validate the merged result, and reload.
 
-        Only keys present in SafetyLimits are accepted; unknown keys are
-        silently dropped.  Returns the validated SafetyLimits after write.
+        User customisations are written only to limits.local.yaml (gitignored)
+        so that limits.yaml can remain an unmodified template in version control.
+        Only keys present in SafetyLimits are accepted; unknown keys are silently dropped.
+        Returns the validated merged SafetyLimits after write.
         """
-        current_raw = self._read_yaml(self.limits_path)
+        # Load current local overrides (may be empty on first write)
+        local_raw = self._read_yaml(self.limits_local_path)
         allowed = set(SafetyLimits.model_fields.keys())
         for key, value in patch.items():
             if key in allowed:
-                current_raw[key] = value
+                local_raw[key] = value
 
-        # Validate before writing
-        updated = SafetyLimits(**self._normalize_limits_yaml(current_raw))
+        # Validate the full merged result (template + new local) before writing
+        template_raw = self._read_yaml(self.limits_path)
+        merged_raw = self._deep_merge(template_raw, local_raw)
+        updated = SafetyLimits(**self._normalize_limits_yaml(merged_raw))
 
-        # Write with a header comment
-        with open(self.limits_path, "w", encoding="utf-8") as f:
-            f.write("# LawnBerry safety limits configuration\n")
-            f.write("# Values below respect constitutional constraints.\n\n")
-            yaml.dump(
-                updated.model_dump(),
-                f,
-                default_flow_style=False,
-                sort_keys=False,
-            )
+        # Persist only the local overrides (not the full merged set)
+        with open(self.limits_local_path, "w", encoding="utf-8") as f:
+            yaml.dump(local_raw, f, default_flow_style=False, sort_keys=False)
 
         self._cache = None  # bust cache so next get() reads new values
         return updated

@@ -1,2 +1,3 @@
 # Sensitive configuration overrides (not committed)
 hardware.local.yaml
+limits.local.yaml
