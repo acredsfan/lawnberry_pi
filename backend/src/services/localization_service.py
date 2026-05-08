@@ -437,6 +437,17 @@ class LocalizationService:
         # 5. Update pose quality
         self._update_quality()
 
+        # Diagnostic: trace heading / gps_cog during bootstrap and just after
+        if self._bootstrap_start_time is not None or self._heading_alignment_sample_count <= 1:
+            logger.info(
+                "LOC_TRACE: heading=%s gps_cog=%s imu_valid=%s bootstrap=%s samples=%d",
+                f"{self.state.heading:.1f}°" if self.state.heading is not None else "None",
+                f"{gps_cog:.1f}°" if gps_cog is not None else "None",
+                imu_valid,
+                self._bootstrap_start_time is not None,
+                self._heading_alignment_sample_count,
+            )
+
         self.state.timestamp = datetime.now(UTC)
         return self.state
 
@@ -553,7 +564,13 @@ class LocalizationService:
                     float(previous_position.accuracy or 0.0),
                     float(current_position.accuracy or 0.0),
                 )
-                min_distance_m = max(0.25, min(1.0, accuracy * 0.5))
+                # During bootstrap the mower drives slowly (~0.3 m/s); keep the
+                # minimum low so a single GPS tick is enough to derive COG.
+                # Outside bootstrap use the accuracy-scaled floor to filter noise.
+                if self._bootstrap_start_time is not None:
+                    min_distance_m = 0.25
+                else:
+                    min_distance_m = max(0.25, min(1.0, accuracy * 0.5))
                 if distance_m >= min_distance_m:
                     derived_speed = distance_m / elapsed_s
                     if derived_speed >= speed_threshold:

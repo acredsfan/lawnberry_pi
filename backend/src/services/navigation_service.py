@@ -424,6 +424,11 @@ class NavigationService:
         self.navigation_state.heading = None
         self.navigation_state.gps_cog = None
         self._save_alignment_to_disk("mission_start_reset")
+        # Mirror reset into LocalizationService when it owns pose state.
+        # Without this, _heading_alignment_sample_count loaded from the alignment
+        # file stays at 1, blocking the GPS-COG snap guard which requires == 0.
+        if self._use_localization():
+            self._localization.reset_for_mission()
 
         # Reset ENU frame and pose filter for this mission
         self._enu_frame = ENUFrame()  # will anchor on first GPS fix

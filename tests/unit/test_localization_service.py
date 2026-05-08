@@ -175,7 +175,10 @@ async def test_bootstrap_alignment_snaps_from_gps_cog():
     assert loc.bootstrap_active is True
 
     started_at = datetime.now(UTC)
-    for index in range(4):
+    # 6 ticks: tick 0 has no previous position, ticks 1-5 each produce a COG
+    # reading.  The snap fires when _gps_cog_history reaches 5 entries and
+    # going_straight is confirmed (requires >= 5 samples in history).
+    for index in range(6):
         await loc.update(
             SensorData(
                 gps=GpsReading(

@@ -92,17 +92,13 @@ async def abort_mission(
         _raise_mission_http_error(e)
 
 
-@router.get("/api/v2/missions/{mission_id}", response_model=Mission)
-async def get_mission(
-    mission_id: str,
+@router.get("/api/v2/missions/list", response_model=list[Mission])
+async def list_missions(
     runtime: RuntimeContext = Depends(get_runtime),
 ):
-    """Get a mission by ID."""
+    """List all saved missions."""
     mission_service = runtime.mission_service
-    try:
-        return mission_service._require_mission(mission_id)
-    except Exception as e:
-        _raise_mission_http_error(e)
+    return await mission_service.list_missions()
 
 
 @router.get("/api/v2/missions/{mission_id}/status", response_model=MissionStatus)
@@ -119,10 +115,14 @@ async def get_mission_status(
         _raise_mission_http_error(e)
 
 
-@router.get("/api/v2/missions/list", response_model=list[Mission])
-async def list_missions(
+@router.get("/api/v2/missions/{mission_id}", response_model=Mission)
+async def get_mission(
+    mission_id: str,
     runtime: RuntimeContext = Depends(get_runtime),
 ):
-    """List all saved missions."""
+    """Get a mission by ID."""
     mission_service = runtime.mission_service
-    return await mission_service.list_missions()
+    try:
+        return mission_service._require_mission(mission_id)
+    except Exception as e:
+        _raise_mission_http_error(e)
