@@ -38,7 +38,13 @@ export function useCameraFeed(getSessionId: () => string | null) {
   let cameraFrameTimer: number | undefined
   let cameraStatusTimer: number | undefined
   let cameraRetryTimer: number | undefined
+  let cameraReconnectTimer: number | undefined
   let cameraStartRequested = false
+
+  // Reconnect the MJPEG stream periodically so the TCP write buffer never
+  // accumulates more than ~RECONNECT_INTERVAL_MS worth of stale frames.
+  // The browser opens a fresh connection with an empty buffer each time.
+  const STREAM_RECONNECT_INTERVAL_MS = 30_000
 
   const cameraIsStreaming = computed(() => Boolean(cameraStreamUrl.value))
   const cameraDisplaySource = computed(() => cameraStreamUrl.value ?? cameraFrameUrl.value)
@@ -55,6 +61,20 @@ export function useCameraFeed(getSessionId: () => string | null) {
 
   function clearCameraRetryTimer() {
     if (cameraRetryTimer) { window.clearTimeout(cameraRetryTimer); cameraRetryTimer = undefined }
+  }
+
+  function clearStreamReconnectTimer() {
+    if (cameraReconnectTimer) { window.clearTimeout(cameraReconnectTimer); cameraReconnectTimer = undefined }
+  }
+
+  function scheduleStreamReconnect() {
+    clearStreamReconnectTimer()
+    cameraReconnectTimer = window.setTimeout(() => {
+      cameraReconnectTimer = undefined
+      if (cameraStreamUrl.value && !cameraStreamUnavailable.value) {
+        refreshCameraStream(true)
+      }
+    }, STREAM_RECONNECT_INTERVAL_MS)
   }
 
   function applyCameraFrameUrl(nextUrl: string | null, { revokeExisting = true } = {}) {
@@ -85,6 +105,7 @@ export function useCameraFeed(getSessionId: () => string | null) {
 
   function startSnapshotFallback(message?: string) {
     cameraStreamUrl.value = null
+    clearStreamReconnectTimer()
     if (message) cameraStatusMessage.value = message
     clearSnapshotTimer()
     void fetchCameraFrame()
@@ -117,6 +138,7 @@ export function useCameraFeed(getSessionId: () => string | null) {
     cameraStreamFailureCount.value = 0
     cameraStreamUnavailable.value = false
     clearCameraRetryTimer()
+    scheduleStreamReconnect()
   }
 
   function handleCameraStreamError() {
@@ -246,6 +268,7 @@ export function useCameraFeed(getSessionId: () => string | null) {
   function stopCameraFeed() {
     clearSnapshotTimer()
     clearCameraRetryTimer()
+    clearStreamReconnectTimer()
     if (cameraStatusTimer) { window.clearInterval(cameraStatusTimer); cameraStatusTimer = undefined }
     cameraStartRequested = false
     cameraFetchInFlight.value = false

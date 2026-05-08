@@ -1,6 +1,8 @@
+import asyncio
 import logging
+import time
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from ...services.camera_stream_service import camera_service
@@ -112,8 +114,13 @@ async def get_current_frame():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+_MJPEG_TARGET_FPS = 10
+_MJPEG_INTERVAL = 1.0 / _MJPEG_TARGET_FPS
+
+
 @router.get("/camera/stream.mjpeg")
 async def stream_mjpeg(
+    request: Request,
     client: str | None = Query(None),
     session_id: str | None = Query(None),
     ts: str | None = Query(None),
@@ -121,32 +128,41 @@ async def stream_mjpeg(
     """Stream camera frames as Motion JPEG."""
 
     async def generate_mjpeg():
-        """Generate MJPEG stream."""
-        import asyncio
+        """Generate MJPEG stream at a fixed target rate.
 
-        boundary = "frame"
+        Uses timestamp-based pacing so the loop never drifts above the target
+        FPS regardless of how long frame retrieval takes.  Client disconnection
+        is detected via request.is_disconnected() so the generator exits
+        promptly instead of leaking until the next write raises an OSError.
+        """
+        next_tick = time.monotonic()
 
         while True:
-            try:
-                frame = await camera_service.get_current_frame()
-                if frame is not None:
-                    frame_bytes = (
-                        frame.get_frame_data() if hasattr(frame, "get_frame_data") else None
-                    )
-                    if not frame_bytes:
-                        await asyncio.sleep(0.05)
-                        continue
+            if await request.is_disconnected():
+                break
+
+            frame = await camera_service.get_current_frame()
+            if frame is not None:
+                frame_bytes = frame.get_frame_data() if hasattr(frame, "get_frame_data") else None
+                if frame_bytes:
                     yield (
-                        b"--" + boundary.encode() + b"\r\n"
+                        b"--frame\r\n"
                         b"Content-Type: image/jpeg\r\n"
                         + f"Content-Length: {len(frame_bytes)}\r\n\r\n".encode()
                         + frame_bytes
                         + b"\r\n"
                     )
-                await asyncio.sleep(1.0 / 10)  # ~10 FPS
-            except Exception as e:
-                logger.error(f"Error in MJPEG stream: {e}")
-                break
+
+            # Pace to target FPS; skip tick if we're already behind so the
+            # generator never queues up a backlog of work.
+            next_tick += _MJPEG_INTERVAL
+            remaining = next_tick - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+            else:
+                # Already behind; reset clock and yield control briefly.
+                next_tick = time.monotonic()
+                await asyncio.sleep(0)
 
     try:
         if not camera_service.running:
