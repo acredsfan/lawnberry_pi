@@ -380,6 +380,9 @@ class RoboHATService:
             self.watchdog_task = asyncio.create_task(self._watchdog_loop())
             self.read_task = asyncio.create_task(self._read_loop())
 
+            # Claim USB control immediately on first connect (same as reconnect path).
+            await self._send_safe_state_on_reconnect()
+
             logger.info("RoboHAT service initialized successfully")
             return True
 

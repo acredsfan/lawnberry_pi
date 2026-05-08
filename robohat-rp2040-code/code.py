@@ -3,8 +3,9 @@ RP2040‑Zero RoboHAT controller – CircuitPython 9 / 10
 Advanced RC Control System with configurable operation modes
   • RC PWM in  : GP6 (steer), GP5 (throttle), GP7 (aux1), GP4 (aux2), GP3 (aux3), GP2 (aux4)
   • Servo PWM out : GP10 (steer), GP11 (throttle)
-  • Motor control: GP12 (blade), GP13 (mode_switch)
-  • Wheel encoder : GP8 (A), GP9 (B)
+  • Motor control: GP12 (blade)
+  • Wheel encoder 1: GP8  (signal – Hall effect, KY-003; software polling, A-pin)
+  • Wheel encoder 2: GP13 (signal – Hall effect, KY-003; software polling, B-pin conflicts with blade)
   • Status NeoPixel on GP16
   • Hardware UART  : GP0 (TX → Pi GPIO15/RX), GP1 (RX ← Pi GPIO14/TX) at 115200 baud
 
@@ -14,7 +15,7 @@ USB/UART commands (accepted on both interfaces simultaneously)
   rc_config=<ch>,<func>    – configure channel function
   pwm,<steer>,<throttle>   (µs, 1000‑2000) when RC disabled
   blade=<on|off>           – blade control
-  enc=zero                 – reset wheel‑tick counter
+  enc=zero                 – reset both wheel‑tick counters
   get_rc_status           – get comprehensive RC status
 """
 
@@ -30,7 +31,6 @@ import digitalio
 import pwmio
 import supervisor
 import microcontroller
-import rotaryio
 import adafruit_pixelbuf
 import neopixel_write
 from pulseio import PulseIn
@@ -101,13 +101,23 @@ for ch_num, config in RC_CHANNELS.items():
 
 # Additional motor control pins
 blade_pwm = pwmio.PWMOut(board.GP12, frequency=PWM_FREQ, duty_cycle=0)
-mode_switch_pin = digitalio.DigitalInOut(board.GP13)
-mode_switch_pin.direction = digitalio.Direction.OUTPUT
-mode_switch_pin.value = False
 
-# ---------- Quadrature encoder ---------- #
-encoder = rotaryio.IncrementalEncoder(board.GP8, board.GP9)
-encoder.position = 0
+# ---------- Single-channel Hall effect wheel encoders ---------- #
+# KY-003 / A3144 sensors wired to GP8 (enc1) and GP13 (enc2).
+# countio.Counter can't be used:
+#   GP8 = PWM4A (wrong channel type for countio)
+#   GP13 = PWM6B, but blade_pwm uses PWM6A (same slice conflict)
+# Both encoders use software edge detection in the main loop.
+_enc1_pin = digitalio.DigitalInOut(board.GP8)
+_enc1_pin.direction = digitalio.Direction.INPUT
+_enc1_pin.pull = digitalio.Pull.UP
+_enc1_prev = _enc1_pin.value
+_enc1_count = 0
+_enc2_pin = digitalio.DigitalInOut(board.GP13)
+_enc2_pin.direction = digitalio.Direction.INPUT
+_enc2_pin.pull = digitalio.Pull.UP
+_enc2_prev = _enc2_pin.value
+_enc2_count = 0
 
 # ---------- Watchdog ---------- #
 wdt = microcontroller.watchdog
@@ -136,10 +146,6 @@ def set_pwm(steer_us: int, thr_us: int) -> None:
     steer_pwm.duty_cycle = us_to_dc(steer_us)
     thr_pwm.duty_cycle   = us_to_dc(thr_us)
 
-
-def set_drive_outputs_enabled(enabled: bool) -> None:
-    """Gate the external drive path wired behind the RoboHAT mode switch."""
-    mode_switch_pin.value = bool(enabled)
 
 
 def drain_pulsein(pin: PulseIn) -> list[int]:
@@ -203,7 +209,7 @@ def parse_cmd(line: str) -> tuple[str, str | None, str | None]:
         return "rc_enable", None, None
     if line == "rc=disable":
         return "rc_disable", None, None
-    if line == "enc=zero":
+    if line in ("enc=zero", "enc1=zero", "enc2=zero"):
         return "enc_zero", None, None
     if line == "get_rc_status":
         return "get_rc_status", None, None
@@ -307,13 +313,10 @@ def get_circuitpython_version() -> str:
 # ---------- main loop ---------- #
 def main() -> None:
     global rc_enabled, last_serial_time, rc_mode, blade_enabled  # pylint: disable=global-statement
+    global _enc1_count, _enc1_prev, _enc2_count, _enc2_prev
 
     set_pwm(1500, 1500)
     blade_pwm.duty_cycle = 0
-    # Keep the Cytron drive path explicitly enabled while PWM outputs are under
-    # firmware control. Older minimal builds left GP13 floating/low, which can
-    # result in accepted USB commands without any actual motor response.
-    set_drive_outputs_enabled(True)
     set_led(True, force=True)
     startup_msg = f"▶ RoboHAT Advanced RC Control ready (CircuitPython {get_circuitpython_version()})"
     print(startup_msg)
@@ -369,12 +372,16 @@ def main() -> None:
                     "signal_lost": signal_lost,
                     "blade_enabled": blade_enabled,
                     "channels": channel_data,
-                    "encoder": encoder.position
+                    "encoder_1": _enc1_count,
+                    "encoder_2": _enc2_count,
                 }
                 respond(f"STATUS {status}")
             elif cmd == "enc_zero":
-                encoder.position = 0
-                respond("Encoder counter reset")
+                _enc1_count = 0
+                _enc1_prev = _enc1_pin.value
+                _enc2_count = 0
+                _enc2_prev = _enc2_pin.value
+                respond("Encoder counters reset")
             elif cmd == "pwm" and not rc_enabled:
                 set_pwm(int(param1), int(param2))
                 last_serial_time = now
@@ -439,12 +446,21 @@ def main() -> None:
                 f"steer={channel_values.get(1, 1500)} µs "
                 f"thr={channel_values.get(2, 1500)} µs "
                 f"blade={'ON' if blade_enabled else 'OFF'} "
-                f"enc={encoder.position}"
+                f"enc_1={_enc1_count} enc_2={_enc2_count}"
             )
             print(hb_msg)
             uart_write(hb_msg)
             hb_t = now
 
+        # Software edge-count for both encoders (GP8/GP13; countio not usable, see init)
+        _enc1_now = _enc1_pin.value
+        if _enc1_now != _enc1_prev:  # any transition = magnet edge
+            _enc1_count += 1
+        _enc1_prev = _enc1_now
+        _enc2_now = _enc2_pin.value
+        if _enc2_now != _enc2_prev:  # any transition = magnet edge
+            _enc2_count += 1
+        _enc2_prev = _enc2_now
         time.sleep(0.02)
 
 
@@ -455,6 +471,5 @@ if __name__ == "__main__":
         print(f"[FATAL] {err!r}")
     finally:
         set_pwm(1500, 1500)
-        set_drive_outputs_enabled(False)
         pixel[0] = (255, 0, 0)  # red = halted/error
         pixel.show()
