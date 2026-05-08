@@ -714,18 +714,6 @@ class PowerSensorInterface:
             if derived is not None and abs(derived) >= 0.05:
                 solar_voltage = round(derived, 3)
 
-        # Cross-source fallback: derive voltage from any available power+current pair.
-        # Fires only when per-source derivation above didn't produce a result.
-        if solar_voltage is None and solar_power is not None and solar_current is not None:
-            try:
-                if abs(float(solar_current)) > 1e-6:
-                    cross_derived = float(solar_power) / float(solar_current)
-                    # Plausible panel voltage range: 0.5 V – 200 V
-                    if 0.5 <= cross_derived <= 200:
-                        solar_voltage = round(cross_derived, 3)
-            except Exception:
-                pass
-
         load_current_sources: list[Any] = []
         if prefer_load:
             load_current_sources.append(victron.get("load_current_amps") if victron else None)
