@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -169,6 +170,15 @@ class MissionExecutor:
         _TANK_TURN_TIMEOUT_S: float = 25.0
         _tank_turn_start: float | None = None
 
+        # Dead-reckoning heading for tank turns.
+        # GPS COG tracks the antenna's arc (~90° offset from mower heading during a pivot),
+        # so we integrate (left - right) / wheelbase instead while spinning.
+        _TANK_WHEELBASE_M: float = 0.30  # match odometry.py
+        _tank_dr_heading: float | None = None
+        _tank_dr_last_t: float | None = None
+        _prev_left_speed: float = 0.0
+        _prev_right_speed: float = 0.0
+
         # Position-hold diagnostic
         _pos_hold_start: float | None = None
         _pos_hold_log_last: float = -5.0
@@ -248,10 +258,10 @@ class MissionExecutor:
 
             # --- Heading and motor calculation ---
             heading_to_target = planner.calculate_bearing(current_position, target_pos)
-            current_heading = self._loc.heading
-            _in_heading_bootstrap = current_heading is None
+            raw_heading = self._loc.heading
+            _in_heading_bootstrap = raw_heading is None
 
-            if current_heading is None:
+            if raw_heading is None:
                 if heading_wait_start is None:
                     heading_wait_start = time.monotonic()
                     logger.warning(
@@ -266,7 +276,28 @@ class MissionExecutor:
                         "Heading unavailable while navigating waypoint; mission aborted"
                     )
                 current_heading = heading_to_target
+                _tank_dr_heading = None
+            elif _in_tank_mode:
+                # During a tank turn the GPS antenna traces an arc (~90° offset from the
+                # mower's actual facing direction), so GPS COG is unreliable.  Dead-reckon
+                # heading from commanded wheel speeds instead.
+                _now_dr = time.monotonic()
+                if _tank_dr_heading is None:
+                    _tank_dr_heading = raw_heading
+                    _tank_dr_last_t = _now_dr
+                else:
+                    _dt_dr = _now_dr - (_tank_dr_last_t or _now_dr)
+                    if _dt_dr > 0 and (_prev_left_speed != 0.0 or _prev_right_speed != 0.0):
+                        _angular_rad_s = (_prev_left_speed - _prev_right_speed) / _TANK_WHEELBASE_M
+                        _tank_dr_heading = (
+                            _tank_dr_heading + _angular_rad_s * _dt_dr * (180.0 / math.pi)
+                        ) % 360.0
+                    _tank_dr_last_t = _now_dr
+                current_heading = _tank_dr_heading
+                heading_wait_start = None
             else:
+                _tank_dr_heading = None
+                current_heading = raw_heading
                 heading_wait_start = None
 
             err = heading_error(target=heading_to_target, current=current_heading)
@@ -283,9 +314,11 @@ class MissionExecutor:
                 )
                 _last_nav_log = _now
 
-            # Stall detection
+            # Stall detection — suppressed during tank turns.
+            # A deliberate pivot shows no translational heading change; firing "stuck"
+            # here is a false positive.  The 25 s tank-turn watchdog handles true failures.
             _stall_boost = 0.0
-            if abs_err > 20:
+            if abs_err > 20 and not _in_tank_mode:
                 if _stall_start is None:
                     _stall_start = time.monotonic()
                     _stall_heading = current_heading
@@ -385,6 +418,10 @@ class MissionExecutor:
                 raise RuntimeError(
                     "Failed to deliver navigation motor command"
                 ) from _motor_last_exc
+
+            # Store for next-iteration dead-reckoning
+            _prev_left_speed = left_speed
+            _prev_right_speed = right_speed
 
             # Control loop at 5 Hz
             await asyncio.sleep(0.2)
