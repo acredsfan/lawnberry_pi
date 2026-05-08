@@ -927,6 +927,21 @@ class RoboHATService:
                 self.status.encoder_feedback_ok = True
             return
 
+        if line_lower.startswith("[serial]") or line_lower.startswith("[uart]"):
+            # Periodic serial-mode heartbeat from firmware – same handling as [rc].
+            self.status.last_watchdog_echo = line.strip()
+            self._last_status_at = time.monotonic()
+            enc1, enc2 = self._parse_encoder_from_line(line)
+            if self._encoder_enabled and (enc1 is not None or enc2 is not None):
+                if enc1 is not None:
+                    self.status.encoder_1_position = enc1
+                    self.status.encoder_position = enc1
+                    self._update_encoder_velocity(enc1)
+                if enc2 is not None:
+                    self.status.encoder_2_position = enc2
+                self.status.encoder_feedback_ok = True
+            return
+
         # For everything else, keep a debug breadcrumb without polluting logs.
         logger.debug("RoboHAT: %s", line)
 
