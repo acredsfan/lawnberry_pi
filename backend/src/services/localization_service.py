@@ -376,14 +376,14 @@ class LocalizationService:
                         self._gps_cog_history.pop(0)
 
                     going_straight = False
-                    if len(self._gps_cog_history) >= 5:
+                    if len(self._gps_cog_history) >= 3:
                         sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
                         cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
                         cog_mean = math.degrees(math.atan2(sin_c, cos_c)) % 360.0
                         max_dev = max(
                             abs(heading_delta(c, cog_mean)) for c in self._gps_cog_history
                         )
-                        going_straight = max_dev < 10.0
+                        going_straight = max_dev < 15.0
 
                     if going_straight and self._heading_alignment_sample_count == 0:
                         clamped_delta = max(-180.0, min(180.0, delta))
@@ -415,14 +415,14 @@ class LocalizationService:
                 if len(self._gps_cog_history) > 5:
                     self._gps_cog_history.pop(0)
                 going_straight = False
-                if len(self._gps_cog_history) >= 5:
+                if len(self._gps_cog_history) >= 3:
                     sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
                     cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
                     cog_mean = math.degrees(math.atan2(sin_c, cos_c)) % 360.0
                     max_dev = max(
                         abs(heading_delta(c, cog_mean)) for c in self._gps_cog_history
                     )
-                    going_straight = max_dev < 10.0
+                    going_straight = max_dev < 15.0
                 if going_straight and self._heading_alignment_sample_count == 0:
                     self._heading_alignment_sample_count = 1
                     self._require_gps_heading_alignment = False
@@ -585,9 +585,15 @@ class LocalizationService:
                         derived_cog = self._path_planner.calculate_bearing(
                             previous_position, current_position
                         )
-
-        self._last_gps_track_position = current_position
-        self._last_gps_track_time = now
+                # Advance the baseline only after a proper elapsed-time window so
+                # rapid back-to-back callers (background telemetry + bootstrap loop)
+                # don't reset the delta before enough movement has accumulated.
+                self._last_gps_track_position = current_position
+                self._last_gps_track_time = now
+        else:
+            # First call — initialize tracking baseline.
+            self._last_gps_track_position = current_position
+            self._last_gps_track_time = now
 
         receiver_heading = getattr(gps, "heading", None)
         receiver_speed = getattr(gps, "speed", None)
