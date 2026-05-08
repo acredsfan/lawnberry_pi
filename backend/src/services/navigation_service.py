@@ -669,8 +669,9 @@ class NavigationService:
                     try:
                         await self.set_speed(0.6, 0.6)
                         _last_drive_t = time.monotonic()
+                        logger.info("Bootstrap: drive re-issued at t+%.1f s", time.monotonic() - self._bootstrap_start_time)
                     except Exception as e:
-                        logger.debug("Bootstrap drive refresh failed: %s", e)
+                        logger.warning("Bootstrap drive refresh failed: %s", e)
 
                 if self._use_localization():
                     done = self._localization.alignment_sample_count >= 1

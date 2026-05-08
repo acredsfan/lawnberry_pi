@@ -572,11 +572,12 @@ class LocalizationService:
                     float(previous_position.accuracy or 0.0),
                     float(current_position.accuracy or 0.0),
                 )
-                # During bootstrap the mower drives slowly (~0.3 m/s); keep the
-                # minimum low so a single GPS tick is enough to derive COG.
+                # During bootstrap the mower drives slowly (~0.3 m/s). The GPS
+                # driver blocks ~0.75 s per read, so each window captures ~0.22 m of
+                # travel. Use 0.15 m (5× RTK noise floor) so COG fires on every read.
                 # Outside bootstrap use the accuracy-scaled floor to filter noise.
                 if self._bootstrap_start_time is not None:
-                    min_distance_m = 0.25
+                    min_distance_m = 0.15
                 else:
                     min_distance_m = max(0.25, min(1.0, accuracy * 0.5))
                 if distance_m >= min_distance_m:
