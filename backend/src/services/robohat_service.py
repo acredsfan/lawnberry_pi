@@ -623,6 +623,10 @@ class RoboHATService:
         have been commanded before the disconnect.
         """
         try:
+            # Always claim USB control on reconnect so motor_controller_ok
+            # becomes True without waiting for the first explicit motor command.
+            await self._set_rc_enabled(False)
+            await asyncio.sleep(0.05)
             await self._send_line("pwm,1500,1500")
             self._last_pwm = (1500, 1500)
             self._last_pwm_at = time.monotonic()
