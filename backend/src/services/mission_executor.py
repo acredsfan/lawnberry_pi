@@ -160,10 +160,10 @@ class MissionExecutor:
         heading_wait_start: float | None = None
         _last_nav_log: float = 0.0
 
-        # Stall detection
+        # Stall detection + escape ladder
         _stall_start: float | None = None
         _stall_heading: float | None = None
-        _stall_max_start: float | None = None
+        _stall_escape_stage: str | None = None
 
         # Tank-turn hysteresis state
         _in_tank_mode: bool = False
@@ -314,42 +314,102 @@ class MissionExecutor:
                 )
                 _last_nav_log = _now
 
-            # Stall detection — suppressed during tank turns.
-            # A deliberate pivot shows no translational heading change; firing "stuck"
-            # here is a false positive.  The 25 s tank-turn watchdog handles true failures.
+            # Stall detection + staged escape ladder.
+            # Runs in blend mode and persists through forced escape stages.
+            # Uses raw IMU heading (not dead-reckoned) for progress checks so a truly
+            # pinned mower (where DR advances but the physical heading doesn't) still
+            # advances to the next escape stage.
             _stall_boost = 0.0
-            if abs_err > 20 and not _in_tank_mode:
+            _force_tank_escape = False
+            _force_reverse_escape = False
+            _stall_active = _stall_start is not None
+            _imu_heading = raw_heading if raw_heading is not None else current_heading
+
+            if abs_err > 20 and (not _in_tank_mode or _stall_active):
                 if _stall_start is None:
                     _stall_start = time.monotonic()
-                    _stall_heading = current_heading
+                    _stall_heading = _imu_heading
+                    _stall_escape_stage = None
+                    logger.debug(
+                        "Stall detector armed: err=%.1f° hdg=%.1f°",
+                        err, _imu_heading,
+                    )
                 else:
-                    _hdg_delta = abs(heading_error(target=current_heading, current=(_stall_heading or 0)))
-                    if _hdg_delta < 5.0:
-                        _stall_boost = min(0.6, (time.monotonic() - _stall_start) * 0.15)
-                        if _stall_boost >= 0.59:
-                            if _stall_max_start is None:
-                                _stall_max_start = time.monotonic()
-                            elif (time.monotonic() - _stall_max_start) > 8.0:
-                                logger.error(
-                                    "Mower physically stuck: max turn boost for 8 s, "
-                                    "heading unchanged at %.1f° — stopping mission",
-                                    current_heading,
+                    _hdg_delta = abs(
+                        heading_error(target=_imu_heading, current=(_stall_heading or 0.0))
+                    )
+                    if _hdg_delta >= 5.0:
+                        logger.debug(
+                            "Stall cleared: IMU moved %.1f° (stage=%s)",
+                            _hdg_delta, _stall_escape_stage,
+                        )
+                        _stall_start = None
+                        _stall_heading = None
+                        _stall_escape_stage = None
+                    else:
+                        _elapsed = time.monotonic() - _stall_start
+                        if _elapsed < 4.0:
+                            # Stage A: ramp boost from 0 → 0.6 over 4 s.
+                            # With stall_boost now wired into compute_blend_speeds,
+                            # this actually amplifies commanded wheel speeds.
+                            _stall_boost = min(0.6, _elapsed * 0.15)
+                            if _stall_escape_stage != "A":
+                                _stall_escape_stage = "A"
+                                logger.info(
+                                    "Stall escape A: ramping blend boost "
+                                    "(err=%.1f°, hdg=%.1f°)",
+                                    err, _imu_heading,
                                 )
-                                await self._deliver_stop_command(reason="physically stuck")
-                                raise RuntimeError(
-                                    "Mower appears physically stuck: heading did not change "
-                                    "despite maximum turn effort for 8 s"
+                        elif _elapsed < 7.0:
+                            # Stage B: force counter-rotating tank pivot for 3 s.
+                            # Mechanically cleaner than blend on grass; the inner-wheel
+                            # stiction anchor is eliminated.
+                            _stall_boost = 0.6
+                            _force_tank_escape = True
+                            if _stall_escape_stage != "B":
+                                _stall_escape_stage = "B"
+                                logger.info(
+                                    "Stall escape B: forcing tank pivot "
+                                    "(elapsed=%.1fs, err=%.1f°, hdg=%.1f°)",
+                                    _elapsed, err, _imu_heading,
+                                )
+                        elif _elapsed < 7.5:
+                            # Stage C: brief reverse kick (~0.5 s) to break ground-contact
+                            # lock and change wheel loading before retrying pivot.
+                            _force_reverse_escape = True
+                            if _stall_escape_stage != "C":
+                                _stall_escape_stage = "C"
+                                logger.info(
+                                    "Stall escape C: reverse kick "
+                                    "(elapsed=%.1fs, err=%.1f°, hdg=%.1f°)",
+                                    _elapsed, err, _imu_heading,
+                                )
+                        elif _elapsed < 10.0:
+                            # Stage D: second tank pivot attempt after reverse kick.
+                            _stall_boost = 0.6
+                            _force_tank_escape = True
+                            if _stall_escape_stage != "D":
+                                _stall_escape_stage = "D"
+                                logger.info(
+                                    "Stall escape D: tank pivot retry "
+                                    "(elapsed=%.1fs, err=%.1f°, hdg=%.1f°)",
+                                    _elapsed, err, _imu_heading,
                                 )
                         else:
-                            _stall_max_start = None
-                    else:
-                        _stall_start = time.monotonic()
-                        _stall_heading = current_heading
-                        _stall_max_start = None
+                            logger.error(
+                                "Mower physically stuck: all escape stages exhausted after "
+                                "%.1f s (err=%.1f°, hdg=%.1f°) — stopping mission",
+                                _elapsed, err, current_heading,
+                            )
+                            await self._deliver_stop_command(reason="physically stuck")
+                            raise RuntimeError(
+                                "Mower appears physically stuck: heading did not change "
+                                "after staged escape attempts (A→B→C→D)"
+                            )
             else:
                 _stall_start = None
                 _stall_heading = None
-                _stall_max_start = None
+                _stall_escape_stage = None
 
             # Waypoint base speed
             base_speed = self.cruise_speed
@@ -361,25 +421,43 @@ class MissionExecutor:
             except Exception:
                 base_speed = self.cruise_speed
 
-            # Tank/blend mode selection with hysteresis
+            # Tank/blend mode selection with hysteresis.
+            # _force_tank_escape and _force_reverse_escape override normal mode selection
+            # during escape stages B–D; the tank-turn watchdog is suppressed for those
+            # iterations so the 25 s timer doesn't accumulate against escape attempts.
             _in_tank_mode = is_in_tank_mode(abs_error=abs_err, currently_in_tank=_in_tank_mode)
+            if _force_tank_escape:
+                _in_tank_mode = True
 
-            if _in_tank_mode:
-                if _tank_turn_start is None:
-                    _tank_turn_start = time.monotonic()
-                elif (time.monotonic() - _tank_turn_start) > _TANK_TURN_TIMEOUT_S:
-                    logger.error(
-                        "Tank-turn watchdog: heading not converging after %.0f s "
-                        "(last err=%.1f°, hdg=%.1f°) — aborting waypoint",
-                        _TANK_TURN_TIMEOUT_S,
-                        err,
-                        current_heading,
-                    )
-                    await self._deliver_stop_command(reason="tank-turn timeout")
-                    raise RuntimeError(
-                        f"Tank-turn timed out after {_TANK_TURN_TIMEOUT_S:.0f} s "
-                        "without heading convergence"
-                    )
+            if _force_reverse_escape:
+                # Stage C: straight reverse to change ground contact
+                left_speed, right_speed = -0.35, -0.35
+                _tank_turn_start = None
+                logger.debug(
+                    "Escape C: dispatching reverse (%.2f, %.2f) hdg=%.1f°",
+                    left_speed, right_speed, current_heading,
+                )
+            elif _in_tank_mode:
+                if _force_tank_escape:
+                    # Don't tick the watchdog during escape; reset it so normal
+                    # tank turns get a clean 25 s window after escape succeeds.
+                    _tank_turn_start = None
+                else:
+                    if _tank_turn_start is None:
+                        _tank_turn_start = time.monotonic()
+                    elif (time.monotonic() - _tank_turn_start) > _TANK_TURN_TIMEOUT_S:
+                        logger.error(
+                            "Tank-turn watchdog: heading not converging after %.0f s "
+                            "(last err=%.1f°, hdg=%.1f°) — aborting waypoint",
+                            _TANK_TURN_TIMEOUT_S,
+                            err,
+                            current_heading,
+                        )
+                        await self._deliver_stop_command(reason="tank-turn timeout")
+                        raise RuntimeError(
+                            f"Tank-turn timed out after {_TANK_TURN_TIMEOUT_S:.0f} s "
+                            "without heading convergence"
+                        )
                 left_speed, right_speed = compute_tank_speeds(
                     err, max_speed=self.max_speed, stall_boost=_stall_boost
                 )

@@ -19,10 +19,10 @@ def heading_error(target: float, current: float) -> float:
 def is_in_tank_mode(abs_error: float, *, currently_in_tank: bool) -> bool:
     """Apply hysteresis for tank vs blended drive mode.
 
-    Enter tank-turn at >70°; exit when error drops below 50°.
+    Enter tank-turn at >60°; exit when error drops below 50°.
     This prevents mode flapping near the boundary.
     """
-    if abs_error > 70.0:
+    if abs_error > 60.0:
         return True
     if currently_in_tank and abs_error >= 50.0:
         return True
@@ -71,7 +71,9 @@ def compute_blend_speeds(
     Args:
         heading_err: Signed heading error in degrees (positive = CW).
         base_speed: Desired forward speed before corrections.
-        stall_boost: Unused in blend mode; present for API symmetry.
+        stall_boost: Stall-escape boost (0–0.6) from the stall detector.
+            Scales forward_speed by (1 + stall_boost) and raises the inner
+            wheel floor so both wheels stay above stiction on grass.
         max_speed: Speed ceiling for clamping.
         in_heading_bootstrap: When True, enforce a minimum forward speed
             so GPS COG activates quickly during the heading bootstrap drive.
@@ -94,10 +96,13 @@ def compute_blend_speeds(
 
     forward_speed = max(forward_speed, 0.3)
 
+    if stall_boost > 0.0:
+        forward_speed = min(max_speed, forward_speed * (1.0 + stall_boost))
+
     left_speed = forward_speed + turn_effort * forward_speed
     right_speed = forward_speed - turn_effort * forward_speed
 
-    inner_min = base_speed * 0.2
+    inner_min = base_speed * (0.2 + stall_boost)
     if turn_effort > 0:
         right_speed = max(right_speed, inner_min)
     elif turn_effort < 0:
