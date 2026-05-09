@@ -340,14 +340,30 @@ class MissionExecutor:
                     _hdg_delta = abs(
                         heading_error(target=_imu_heading, current=(_stall_heading or 0.0))
                     )
-                    # Clear stall only when raw-IMU error has meaningfully improved
-                    # (< 12°) or the mower has rotated 15°+.  Using _raw_abs_err (not
-                    # abs_err) prevents DR heading lapping the compass and hitting a
-                    # spurious "near target" value that would falsely clear the stall.
-                    if _raw_abs_err < 12.0 or _hdg_delta >= 15.0:
+                    if _raw_abs_err < 12.0:
+                        # Error converged — mower is aligned, clear completely.
                         logger.debug(
-                            "Stall cleared: raw_err=%.1f° IMU moved %.1f° (stage=%s)",
-                            _raw_abs_err, _hdg_delta, _stall_escape_stage,
+                            "Stall cleared: raw_err=%.1f° converged (stage=%s)",
+                            _raw_abs_err, _stall_escape_stage,
+                        )
+                        _stall_start = None
+                        _stall_heading = None
+                        _stall_escape_stage = None
+                    elif _stall_escape_stage is None and _hdg_delta >= 5.0:
+                        # Pre-escape: heading IS moving, just slowly.  Reset the
+                        # clock from the new position so boost never fires during
+                        # active turning.  Only escalate after 4 s with <5° movement.
+                        _stall_start = time.monotonic()
+                        _stall_heading = _imu_heading
+                        logger.debug(
+                            "Stall timer reset: IMU moved %.1f° (raw_err=%.1f°)",
+                            _hdg_delta, _raw_abs_err,
+                        )
+                    elif _stall_escape_stage is not None and _hdg_delta >= 15.0:
+                        # Active escape stage: large rotation means mower broke free.
+                        logger.debug(
+                            "Stall cleared during escape: IMU moved %.1f° (stage=%s)",
+                            _hdg_delta, _stall_escape_stage,
                         )
                         _stall_start = None
                         _stall_heading = None
