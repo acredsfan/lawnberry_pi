@@ -461,7 +461,7 @@ def main() -> None:
         if _enc2_now != _enc2_prev:  # any transition = magnet edge
             _enc2_count += 1
         _enc2_prev = _enc2_now
-        time.sleep(0.02)
+        time.sleep(0.002)
 
 
 if __name__ == "__main__":
