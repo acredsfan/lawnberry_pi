@@ -338,10 +338,14 @@ class MissionExecutor:
                     _hdg_delta = abs(
                         heading_error(target=_imu_heading, current=(_stall_heading or 0.0))
                     )
-                    if _hdg_delta >= 5.0:
+                    # Clear stall only when the heading error itself has meaningfully
+                    # improved (< 12°) or the mower has rotated 15°+ — not on a
+                    # 5° oscillation that still leaves abs_err unchanged.  The 5° check
+                    # caused an A→B→reset→A loop when Stage B made a tiny rotation.
+                    if abs_err < 12.0 or _hdg_delta >= 15.0:
                         logger.debug(
-                            "Stall cleared: IMU moved %.1f° (stage=%s)",
-                            _hdg_delta, _stall_escape_stage,
+                            "Stall cleared: err=%.1f° IMU moved %.1f° (stage=%s)",
+                            abs_err, _hdg_delta, _stall_escape_stage,
                         )
                         _stall_start = None
                         _stall_heading = None
