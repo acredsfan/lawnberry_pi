@@ -315,17 +315,19 @@ class MissionExecutor:
                 _last_nav_log = _now
 
             # Stall detection + staged escape ladder.
-            # Runs in blend mode and persists through forced escape stages.
-            # Uses raw IMU heading (not dead-reckoned) for progress checks so a truly
-            # pinned mower (where DR advances but the physical heading doesn't) still
-            # advances to the next escape stage.
+            # ALL arm/clear decisions use raw IMU heading (never dead-reckoned).
+            # When Stage B forces _in_tank_mode=True, current_heading switches to
+            # _tank_dr_heading, which has a very high angular rate model and laps
+            # the compass in seconds — causing abs_err to hit 0° spuriously and
+            # falsely clearing the stall.  _raw_abs_err is always from IMU.
             _stall_boost = 0.0
             _force_tank_escape = False
             _force_reverse_escape = False
             _stall_active = _stall_start is not None
             _imu_heading = raw_heading if raw_heading is not None else current_heading
+            _raw_abs_err = abs(heading_error(target=heading_to_target, current=_imu_heading))
 
-            if abs_err > 20 and (not _in_tank_mode or _stall_active):
+            if _raw_abs_err > 20 and (not _in_tank_mode or _stall_active):
                 if _stall_start is None:
                     _stall_start = time.monotonic()
                     _stall_heading = _imu_heading
@@ -338,14 +340,14 @@ class MissionExecutor:
                     _hdg_delta = abs(
                         heading_error(target=_imu_heading, current=(_stall_heading or 0.0))
                     )
-                    # Clear stall only when the heading error itself has meaningfully
-                    # improved (< 12°) or the mower has rotated 15°+ — not on a
-                    # 5° oscillation that still leaves abs_err unchanged.  The 5° check
-                    # caused an A→B→reset→A loop when Stage B made a tiny rotation.
-                    if abs_err < 12.0 or _hdg_delta >= 15.0:
+                    # Clear stall only when raw-IMU error has meaningfully improved
+                    # (< 12°) or the mower has rotated 15°+.  Using _raw_abs_err (not
+                    # abs_err) prevents DR heading lapping the compass and hitting a
+                    # spurious "near target" value that would falsely clear the stall.
+                    if _raw_abs_err < 12.0 or _hdg_delta >= 15.0:
                         logger.debug(
-                            "Stall cleared: err=%.1f° IMU moved %.1f° (stage=%s)",
-                            abs_err, _hdg_delta, _stall_escape_stage,
+                            "Stall cleared: raw_err=%.1f° IMU moved %.1f° (stage=%s)",
+                            _raw_abs_err, _hdg_delta, _stall_escape_stage,
                         )
                         _stall_start = None
                         _stall_heading = None
