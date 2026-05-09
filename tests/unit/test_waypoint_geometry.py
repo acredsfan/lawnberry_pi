@@ -107,10 +107,11 @@ def test_compute_tank_speeds_zero_error_returns_zero():
 # --- stall_boost wired into blend (the actual root cause fix) ---
 
 def test_compute_blend_speeds_stall_boost_zero_regression():
-    """Baseline: stall_boost=0.0 produces the same result as before the fix."""
+    """Baseline: stall_boost=0.0 with 90° turn denominator."""
     left, right = compute_blend_speeds(heading_err=-26.6, base_speed=0.5, stall_boost=0.0)
-    assert left == pytest.approx(0.177, abs=0.01)
-    assert right == pytest.approx(0.691, abs=0.01)
+    # turn_effort = -26.6/90 = -0.296; forward ≈ 0.433 (0.5 * 0.867 taper)
+    assert left == pytest.approx(0.305, abs=0.01)
+    assert right == pytest.approx(0.561, abs=0.01)
 
 
 def test_compute_blend_speeds_stall_boost_amplifies_both_wheels():

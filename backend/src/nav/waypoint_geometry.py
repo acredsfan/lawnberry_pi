@@ -84,7 +84,7 @@ def compute_blend_speeds(
         CCW (heading_err < 0): right > left.
     """
     abs_err = abs(heading_err)
-    turn_effort = max(-1.0, min(1.0, heading_err / 45.0))
+    turn_effort = max(-1.0, min(1.0, heading_err / 90.0))
     forward_speed = base_speed
 
     if abs_err > 10:
