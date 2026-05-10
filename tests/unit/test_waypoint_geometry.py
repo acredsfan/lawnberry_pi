@@ -7,6 +7,8 @@ from backend.src.nav.waypoint_geometry import (
     compute_tank_speeds,
     compute_blend_speeds,
     is_in_tank_mode,
+    cross_track_error,
+    stanley_steer,
 )
 
 
@@ -135,3 +137,99 @@ def test_compute_blend_speeds_stall_boost_respects_max_speed():
         heading_err=-26.6, base_speed=0.5, stall_boost=0.6, max_speed=0.8
     )
     assert right <= 0.8
+
+
+# --- cross_track_error tests ---
+
+def test_cross_track_zero_on_line():
+    """A point on the line has zero cross-track error."""
+    # Path going north; midpoint is on the line.
+    a = (0.0, 0.0)
+    b = (0.001, 0.0)   # ~111 m north
+    mid = (0.0005, 0.0)
+    assert cross_track_error(mid, a, b) == pytest.approx(0.0, abs=0.01)
+
+
+def test_cross_track_signed_right_positive():
+    """Point to the right of a northward path gives positive CTE."""
+    a = (0.0, 0.0)
+    b = (0.001, 0.0)
+    p = (0.0005, 0.00001)  # slightly east = right of northward path
+    assert cross_track_error(p, a, b) > 0.0
+
+
+def test_cross_track_signed_left_negative():
+    """Point to the left of a northward path gives negative CTE."""
+    a = (0.0, 0.0)
+    b = (0.001, 0.0)
+    p = (0.0005, -0.00001)  # slightly west = left of northward path
+    assert cross_track_error(p, a, b) < 0.0
+
+
+def test_cross_track_one_meter_offset():
+    """A 1 m lateral offset on a northward 100 m leg returns ~1.0 m CTE."""
+    a = (0.0, 0.0)
+    # ~100 m north
+    b = (100.0 / 111_320.0, 0.0)
+    # ~1 m east
+    p = (50.0 / 111_320.0, 1.0 / 111_320.0)
+    assert cross_track_error(p, a, b) == pytest.approx(1.0, abs=0.05)
+
+
+def test_cross_track_degenerate_zero_length():
+    """A→B of zero length returns 0 without errors."""
+    a = (0.0, 0.0)
+    assert cross_track_error((0.0, 0.0), a, a) == 0.0
+
+
+def test_cross_track_eastward_path():
+    """Right side of an eastward path is to the south (negative lat offset)."""
+    a = (0.0, 0.0)
+    b = (0.0, 0.001)   # eastward path
+    p = (0.0, 0.0005)
+    # Point due south of midpoint (right of eastward path)
+    p_south = (-0.00001, 0.0005)
+    assert cross_track_error(p_south, a, b) > 0.0
+
+
+# --- stanley_steer tests ---
+
+def test_stanley_zero_cte_returns_heading_err():
+    """With zero CTE, stanley_steer equals heading_err_deg (within dead-band)."""
+    steer = stanley_steer(15.0, 0.0, 0.5)
+    assert steer == pytest.approx(15.0, abs=0.01)
+
+
+def test_stanley_dead_band_zeros_cte():
+    """CTE within dead_band_m should produce same result as zero CTE."""
+    steer_zero = stanley_steer(10.0, 0.0, 0.5, dead_band_m=0.1)
+    steer_tiny = stanley_steer(10.0, 0.05, 0.5, dead_band_m=0.1)
+    assert steer_zero == pytest.approx(steer_tiny, abs=0.01)
+
+
+def test_stanley_right_of_path_gives_left_correction():
+    """Positive CTE (right of path) should reduce / invert steer (left turn)."""
+    steer_no_cte = stanley_steer(0.0, 0.0, 0.4)
+    steer_right = stanley_steer(0.0, 1.0, 0.4)
+    assert steer_right < steer_no_cte
+
+
+def test_stanley_left_of_path_gives_right_correction():
+    """Negative CTE (left of path) should increase steer (right turn)."""
+    steer_no_cte = stanley_steer(0.0, 0.0, 0.4)
+    steer_left = stanley_steer(0.0, -1.0, 0.4)
+    assert steer_left > steer_no_cte
+
+
+def test_stanley_low_speed_clamps_via_floor():
+    """At standstill, v_floor prevents infinite steer from large CTE."""
+    steer_slow = stanley_steer(0.0, 2.0, 0.0, v_floor=0.2)
+    steer_floor = stanley_steer(0.0, 2.0, 0.2, v_floor=0.2)
+    assert steer_slow == pytest.approx(steer_floor, abs=0.01)
+
+
+def test_stanley_max_steer_clip():
+    """Output is clipped to ±max_steer_deg."""
+    # 80° heading err + large leftward CTE adding ~80° → raw steer ≈ 160° → clips to 60°
+    steer = stanley_steer(80.0, -5.0, 0.5, max_steer_deg=60.0)
+    assert steer == pytest.approx(60.0, abs=0.01)

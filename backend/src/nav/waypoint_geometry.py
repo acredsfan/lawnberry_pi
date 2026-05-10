@@ -1,9 +1,12 @@
-"""Pure stateless waypoint geometry helpers.
+"""Pure stateless waypoint geometry helpers — heading error, drive mixing, and
+Stanley path-tracking.
 
 All functions are side-effect-free and depend only on their arguments.
 They can be imported and tested without constructing any service object.
 """
 from __future__ import annotations
+
+import math
 
 
 def heading_error(target: float, current: float) -> float:
@@ -111,3 +114,80 @@ def compute_blend_speeds(
     left_speed = max(-max_speed, min(max_speed, left_speed))
     right_speed = max(-max_speed, min(max_speed, right_speed))
     return left_speed, right_speed
+
+
+def cross_track_error(
+    point: tuple[float, float],
+    line_a: tuple[float, float],
+    line_b: tuple[float, float],
+) -> float:
+    """Signed perpendicular distance (metres) from *point* to the line A→B.
+
+    Positive = point is to the RIGHT of the line when walking from A to B.
+    Uses a flat-Earth ENU projection anchored at *line_a* (accurate to ~20 km).
+
+    Args:
+        point:  (latitude, longitude) of the current position.
+        line_a: (latitude, longitude) of the path segment start.
+        line_b: (latitude, longitude) of the path segment end.
+    """
+    lat_a, lon_a = line_a
+    _MPD_LAT = 111_320.0
+    mpd_lon = _MPD_LAT * math.cos(math.radians(lat_a))
+
+    north_p = (point[0] - lat_a) * _MPD_LAT
+    east_p = (point[1] - lon_a) * mpd_lon
+
+    north_b = (line_b[0] - lat_a) * _MPD_LAT
+    east_b = (line_b[1] - lon_a) * mpd_lon
+
+    path_len = math.hypot(east_b, north_b)
+    if path_len < 1e-9:
+        return 0.0
+
+    # Unit path vector (east, north component)
+    ue = east_b / path_len
+    un = north_b / path_len
+
+    # Positive = right of path (2D right-hand rule: un*east_p - ue*north_p)
+    return un * east_p - ue * north_p
+
+
+def stanley_steer(
+    heading_err_deg: float,
+    cte_m: float,
+    velocity_mps: float,
+    *,
+    k_cte: float = 0.6,
+    v_floor: float = 0.2,
+    max_steer_deg: float = 60.0,
+    dead_band_m: float = 0.1,
+) -> float:
+    """Stanley path-tracking steer command (degrees).
+
+    Positive = right turn needed; negative = left turn needed.
+
+    Combines a path-heading error with a cross-track-error correction:
+        steer = heading_err - atan(k_cte * cte / max(v, v_floor))
+
+    When the vehicle is to the right of the path (cte > 0) the CTE term
+    subtracts from the heading error, producing a left correction, and
+    vice versa.
+
+    Args:
+        heading_err_deg: wrap180(path_bearing - current_heading).
+            Positive = current heading is CCW of path (right turn needed).
+        cte_m: Signed cross-track error from cross_track_error().
+            Positive = vehicle is to the RIGHT of the path.
+        velocity_mps: Current forward speed.
+        k_cte: Stanley gain (rad·(m/s)/m).  Default 0.6.
+        v_floor: Minimum speed used in the denominator (prevents ÷0 at standstill).
+        max_steer_deg: Output is clipped to ±this value.
+        dead_band_m: CTE magnitudes below this are zeroed (suppresses GPS jitter).
+    """
+    if abs(cte_m) < dead_band_m:
+        cte_m = 0.0
+    v_eff = max(v_floor, velocity_mps)
+    cte_correction = math.degrees(math.atan2(k_cte * cte_m, v_eff))
+    steer = heading_err_deg - cte_correction
+    return max(-max_steer_deg, min(max_steer_deg, steer))

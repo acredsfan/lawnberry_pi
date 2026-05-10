@@ -18,8 +18,10 @@ from ..nav.path_planner import PathPlanner
 from ..nav.waypoint_geometry import (
     compute_blend_speeds,
     compute_tank_speeds,
+    cross_track_error,
     heading_error,
     is_in_tank_mode,
+    stanley_steer,
 )
 
 if TYPE_CHECKING:
@@ -142,11 +144,19 @@ class MissionExecutor:
         mission: Mission,
         waypoint: MissionWaypoint,
         mission_service: MissionStatusReader,
+        *,
+        previous_position: Position | None = None,
     ) -> bool:
         """Navigate to a single waypoint; block until arrival or interruption.
 
         Returns True when the waypoint is reached, False when interrupted.
         Raises RuntimeError for unrecoverable navigation failures.
+
+        Args:
+            previous_position: Position of the previous waypoint (or None for
+                the first leg). Used to define the path line A→B for the Stanley
+                path-tracker. When None, the mower's position at first valid GPS
+                tick is used as the leg-start anchor.
         """
         target_pos = Position(latitude=waypoint.lat, longitude=waypoint.lon)
         logger.info(
@@ -182,6 +192,20 @@ class MissionExecutor:
         # Position-hold diagnostic
         _pos_hold_start: float | None = None
         _pos_hold_log_last: float = -5.0
+
+        # Stanley path-tracking state (per-leg)
+        # _path_a: start of the current path segment (previous waypoint, or mower
+        #   start position captured at the first valid GPS tick on leg 0).
+        # _path_bearing: bearing A→B, cached once and constant for the whole leg.
+        # _heading_ema: exponential moving average of IMU heading for noise reduction.
+        _path_a_lat: float | None = (
+            previous_position.latitude if previous_position is not None else None
+        )
+        _path_a_lon: float | None = (
+            previous_position.longitude if previous_position is not None else None
+        )
+        _path_bearing: float | None = None
+        _heading_ema: float | None = None
 
         while True:
             status = mission_service.mission_statuses.get(mission.id)
@@ -256,10 +280,40 @@ class MissionExecutor:
                     raise RuntimeError("Failed to stop safely at waypoint")
                 return True
 
+            # --- Stanley path anchor: capture leg-start on first valid GPS tick ---
+            if _path_a_lat is None:
+                _path_a_lat = current_position.latitude
+                _path_a_lon = current_position.longitude
+            if _path_bearing is None:
+                _path_bearing = planner.calculate_bearing(
+                    Position(latitude=_path_a_lat, longitude=_path_a_lon),
+                    target_pos,
+                )
+
             # --- Heading and motor calculation ---
-            heading_to_target = planner.calculate_bearing(current_position, target_pos)
+            # Use the cached path bearing (A→B constant for this leg) to avoid
+            # GPS-jitter from recomputing bearing from the current position each tick.
+            heading_to_target = _path_bearing
             raw_heading = self._loc.heading
             _in_heading_bootstrap = raw_heading is None
+
+            # Update EMA-filtered heading (α=0.3 at 5 Hz ≈ 3-tick smoothing window).
+            # Apply a soft GPS COG correction when moving to bound IMU drift.
+            if raw_heading is not None:
+                if _heading_ema is None:
+                    _heading_ema = raw_heading
+                else:
+                    _hdg_diff = (raw_heading - _heading_ema + 180.0) % 360.0 - 180.0
+                    _heading_ema = (_heading_ema + 0.3 * _hdg_diff) % 360.0
+                _loc_state = getattr(self._loc, "state", None)
+                if _loc_state is not None:
+                    _gps_cog = getattr(_loc_state, "gps_cog", None)
+                    _loc_vel = getattr(_loc_state, "velocity", None) or 0.0
+                    if _gps_cog is not None and _loc_vel > 0.3:
+                        _cog_diff = (_gps_cog - _heading_ema + 180.0) % 360.0 - 180.0
+                        _heading_ema = (
+                            _heading_ema + max(-2.0, min(2.0, 0.1 * _cog_diff))
+                        ) % 360.0
 
             if raw_heading is None:
                 if heading_wait_start is None:
@@ -306,9 +360,10 @@ class MissionExecutor:
             _now = time.monotonic()
             if _now - _last_nav_log > 2.0:
                 logger.debug(
-                    "NAV_CONTROL: target_bearing=%.1f° heading=%.1f° error=%.1f° tank=%s",
+                    "NAV_CONTROL: path_bearing=%.1f° heading=%.1f° ema=%.1f° err=%.1f° tank=%s",
                     heading_to_target,
                     current_heading,
+                    _heading_ema if _heading_ema is not None else current_heading,
                     err,
                     _in_tank_mode,
                 )
@@ -485,8 +540,41 @@ class MissionExecutor:
                 )
             else:
                 _tank_turn_start = None
+
+                # Stanley path-tracker: combine filtered heading error with
+                # cross-track-error correction.  Falls back to raw heading error
+                # during bootstrap (no IMU) or before path anchor is established.
+                _steer = err
+                if (
+                    not _in_heading_bootstrap
+                    and _path_a_lat is not None
+                    and _heading_ema is not None
+                ):
+                    _loc_state = getattr(self._loc, "state", None)
+                    _loc_vel = (
+                        getattr(_loc_state, "velocity", None) if _loc_state is not None else None
+                    ) or 0.0
+                    _cte = cross_track_error(
+                        (current_position.latitude, current_position.longitude),
+                        (_path_a_lat, _path_a_lon),
+                        (target_pos.latitude, target_pos.longitude),
+                    )
+                    _heading_err_path = heading_error(
+                        target=heading_to_target, current=_heading_ema
+                    )
+                    _steer = stanley_steer(_heading_err_path, _cte, _loc_vel)
+                    logger.debug(
+                        "STANLEY: path_bearing=%.1f° ema_hdg=%.1f° err=%.1f° "
+                        "cte=%.3fm steer=%.1f°",
+                        heading_to_target,
+                        _heading_ema,
+                        _heading_err_path,
+                        _cte,
+                        _steer,
+                    )
+
                 left_speed, right_speed = compute_blend_speeds(
-                    err,
+                    _steer,
                     base_speed=base_speed,
                     stall_boost=_stall_boost,
                     max_speed=self.max_speed,
@@ -566,6 +654,10 @@ class MissionExecutor:
             max_index = max(0, len(mission.waypoints) - 1)
             self.current_waypoint_index = max(0, min(requested_index, max_index))
 
+        # Track the position of the most recently reached waypoint so each leg
+        # has a known path anchor (A = previous wp, B = current wp).
+        _prev_wp_pos: Position | None = None
+
         try:
             while self.current_waypoint_index < len(mission.waypoints):
                 status = mission_service.mission_statuses.get(mission.id)
@@ -591,7 +683,10 @@ class MissionExecutor:
                     return
 
                 current_wp = mission.waypoints[self.current_waypoint_index]
-                waypoint_reached = await self.go_to_waypoint(mission, current_wp, mission_service)
+                waypoint_reached = await self.go_to_waypoint(
+                    mission, current_wp, mission_service,
+                    previous_position=_prev_wp_pos,
+                )
 
                 if not waypoint_reached:
                     status = mission_service.mission_statuses.get(mission.id)
@@ -602,6 +697,7 @@ class MissionExecutor:
                     if not status or _sv != "running":
                         return
                 else:
+                    _prev_wp_pos = Position(latitude=current_wp.lat, longitude=current_wp.lon)
                     await mission_service.update_waypoint_progress(
                         mission.id, self.current_waypoint_index
                     )

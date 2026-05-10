@@ -67,7 +67,7 @@ async def test_execute_mission_waits_while_paused(monkeypatch):
 
     go_to_waypoint_called = asyncio.Event()
 
-    async def fake_go_to_waypoint(_mission, _waypoint, _ms):
+    async def fake_go_to_waypoint(_mission, _waypoint, _ms, **_kwargs):
         go_to_waypoint_called.set()
         nav.navigation_state.current_waypoint_index = len(nav.navigation_state.planned_path)
         return True
@@ -388,7 +388,7 @@ async def test_execute_mission_marks_navigation_failed_on_waypoint_error(monkeyp
     )
     mission_service.mission_statuses[mission.id].status = MissionLifecycleStatus.RUNNING
 
-    async def fake_go_to_waypoint(_mission, _waypoint, _ms):
+    async def fake_go_to_waypoint(_mission, _waypoint, _ms, **_kwargs):
         raise RuntimeError("Heading unavailable while navigating waypoint")
 
     # Patch at the MissionExecutor level (delegation target) and suppress bootstrap I/O
