@@ -25,6 +25,15 @@
       <LLayerGroup ref="overlayGroupRef">
         <!-- Waypoints and Path -->
         <LPolyline :lat-lngs="waypointLatLngs" :color="'#00ffff'" :weight="3" />
+        <!-- Actual path traveled during the mission -->
+        <LPolyline
+          v-if="traceLatLngs.length > 1"
+          :lat-lngs="traceLatLngs"
+          :color="'#ff7f50'"
+          :weight="2"
+          :opacity="0.85"
+          :dash-array="'4 4'"
+        />
         <LMarker
           v-for="(wp, idx) in waypoints"
           :key="`wp-${wp.id}`"
@@ -82,6 +91,7 @@ const props = defineProps<{
   mowerPosition: { lat: number; lon: number; accuracy: number; heading?: number | null } | null;
   followMower: boolean;
   mapSettings?: { provider: 'google' | 'osm' | 'none'; style: 'standard' | 'satellite' | 'hybrid' | 'terrain'; google_api_key: string } | null;
+  pathTrace?: [number, number][];
 }>();
 
 // Emits
@@ -126,6 +136,7 @@ let resizeObserver: ResizeObserver | null = null;
 const waypointLatLngs = computed(() => props.waypoints.map(wp => [wp.lat, wp.lon]));
 const mowerLatLng = computed(() => (props.mowerPosition ? [props.mowerPosition.lat, props.mowerPosition.lon] : null));
 const accuracyRadius = computed(() => props.mowerPosition?.accuracy || 0);
+const traceLatLngs = computed<[number, number][]>(() => props.pathTrace ?? []);
 
 function looksLikeGoogleOAuthClientId(value: string): boolean {
   return String(value || '').trim().toLowerCase().endsWith('.apps.googleusercontent.com');

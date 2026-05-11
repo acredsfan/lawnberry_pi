@@ -15,6 +15,11 @@
       <button class="btn" :disabled="!mowerLatLng" @click="recenterToMower">🎯 Recenter</button>
       <button class="btn" :disabled="missionStore.waypoints.length === 0" @click="undoLastWaypoint">↩️ Undo last</button>
       <button class="btn btn-danger" :disabled="missionStore.waypoints.length === 0" @click="clearAllWaypoints">🗑️ Clear all</button>
+      <button
+        v-if="missionStore.pathTrace.length > 0"
+        class="btn btn-secondary"
+        @click="missionStore.clearTrace()"
+      >✕ Clear trace</button>
     </div>
     <div class="map-container">
       <MissionMap
@@ -24,6 +29,7 @@
         :mower-position="mowerPosition"
         :follow-mower="followMower"
         :map-settings="adaptedMapSettings"
+        :path-trace="missionStore.pathTrace"
         @add-waypoint="handleAddWaypoint"
         @update-waypoint="handleUpdateWaypoint"
         @remove-waypoint="handleRemoveWaypoint"

@@ -63,6 +63,7 @@ export const useMissionStore = defineStore('mission', () => {
   const currentWaypointIndex = ref<number | null>(null);
   const totalWaypoints = ref(0);
   const statusDetail = ref<string | null>(null);
+  const pathTrace = ref<[number, number][]>([]);
   const isRecoveredPause = computed(() => {
     return missionStatus.value === 'paused' && /recover/i.test(statusDetail.value ?? '');
   });
@@ -122,6 +123,19 @@ export const useMissionStore = defineStore('mission', () => {
     waypoints.value = [];
   };
 
+  const appendTracePoint = (lat: number, lon: number) => {
+    if (missionStatus.value !== 'running') return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const last = pathTrace.value[pathTrace.value.length - 1];
+    if (last && Math.abs(last[0] - lat) < 1e-6 && Math.abs(last[1] - lon) < 1e-6) return;
+    pathTrace.value.push([lat, lon]);
+    if (pathTrace.value.length > 5000) pathTrace.value.shift();
+  };
+
+  const clearTrace = () => {
+    pathTrace.value = [];
+  };
+
   const _setCurrentMission = (mission: Mission) => {
     currentMission.value = mission;
     _persistCurrentMissionId(mission.id);
@@ -178,6 +192,7 @@ export const useMissionStore = defineStore('mission', () => {
     if (!currentMission.value) return;
     try {
       await apiService.post(`/api/v2/missions/${currentMission.value.id}/start`, {});
+      clearTrace();
       missionStatus.value = 'running';
       statusDetail.value = null;
       startStatusPolling();
@@ -264,6 +279,7 @@ export const useMissionStore = defineStore('mission', () => {
     if (statusPollInterval) return;
     // Subscribe to real-time WebSocket push events for this mission
     subscribe('mission.status', handleMissionStatusWsEvent);
+    subscribe('telemetry.navigation', handleTelemetryNavWsEvent);
     // 30 s reconciliation fallback poll (replaces the previous 2 s poll)
     statusPollInterval = setInterval(pollMissionStatus, 30000);
   };
@@ -274,6 +290,16 @@ export const useMissionStore = defineStore('mission', () => {
       statusPollInterval = null;
     }
     unsubscribe('mission.status', handleMissionStatusWsEvent);
+    unsubscribe('telemetry.navigation', handleTelemetryNavWsEvent);
+  };
+
+  const handleTelemetryNavWsEvent = (data: any) => {
+    const payload = data?.data ?? data;
+    const lat = payload?.position?.latitude;
+    const lon = payload?.position?.longitude;
+    if (lat != null && lon != null) {
+      appendTracePoint(lat, lon);
+    }
   };
 
   const handleMissionStatusWsEvent = (data: any) => {
@@ -307,12 +333,15 @@ export const useMissionStore = defineStore('mission', () => {
     totalWaypoints,
     statusDetail,
     isRecoveredPause,
+    pathTrace,
     addWaypoint,
     removeWaypoint,
     updateWaypoint,
     reorderWaypoints,
     removeLastWaypoint,
     clearWaypoints,
+    appendTracePoint,
+    clearTrace,
     init,
     selectMission,
     createMission,
