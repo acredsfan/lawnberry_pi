@@ -437,20 +437,27 @@ class PowerSensorInterface:
             return None
 
         try:
-            ina_payload: dict[str, Any] | None = None
-            victron_payload: dict[str, Any] | None = None
+            # Per-driver timeouts allow a stalled Victron BLE read to be cancelled
+            # without discarding INA3221 data that already succeeded.
+            _INA_TIMEOUT_S = 1.0
+            _VICTRON_TIMEOUT_S = 4.0
 
-            if self._ina_driver is not None:
+            async def _safe_driver_read(name: str, driver, timeout: float):
+                if driver is None:
+                    return None
                 try:
-                    ina_payload = await self._ina_driver.read_power()
-                except Exception as exc:  # pragma: no cover - hardware dependent
-                    logger.error("INA3221 read failed: %s", exc)
+                    return await asyncio.wait_for(driver.read_power(), timeout=timeout)
+                except TimeoutError:
+                    logger.warning("%s read timed out after %.1fs; using last known", name, timeout)
+                    return None
+                except Exception as exc:
+                    logger.error("%s read failed: %s", name, exc)
+                    return None
 
-            if self._victron_driver is not None:
-                try:
-                    victron_payload = await self._victron_driver.read_power()
-                except Exception as exc:  # pragma: no cover - optional hardware
-                    logger.error("Victron VE.Direct read failed: %s", exc)
+            ina_payload, victron_payload = await asyncio.gather(
+                _safe_driver_read("INA3221", self._ina_driver, _INA_TIMEOUT_S),
+                _safe_driver_read("Victron", self._victron_driver, _VICTRON_TIMEOUT_S),
+            )
 
             merged = self._merge_power_payload(
                 ina_payload,
@@ -750,9 +757,9 @@ class SensorManager:
     # BNO085 uses SHTP Game Rotation Vector (1.0s per-read); GPS F9P_USB is fast.
     # 2.5 s is ample for all non-BLE sensors.
     SENSOR_READ_TIMEOUT_SECONDS = 2.5
-    # Inner _read_victron_cli_frame deadline is 8.0 s; subprocess cleanup adds ≤2 s.
-    # 11 s covers the realistic worst case with 1 s of margin.
-    POWER_READ_TIMEOUT_SECONDS = 11.0
+    # Inner driver timeouts sum to ≤5 s (INA 1 s + Victron 4 s, parallel).
+    # The outer budget is kept slightly above that as a backstop.
+    POWER_READ_TIMEOUT_SECONDS = 5.0
 
     def __init__(
         self,

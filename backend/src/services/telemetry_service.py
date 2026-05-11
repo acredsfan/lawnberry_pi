@@ -367,9 +367,13 @@ class TelemetryService:
         if position_correction is not None:
             telemetry["position_correction"] = position_correction
 
-        # Add Power Data
+        # Add Power Data — always present so WebSocket hub always broadcasts the topic
         if data and data.power:
             telemetry["power"] = self._format_power_data(data.power)
+            telemetry["power_status"] = "ok"
+        else:
+            telemetry["power"] = self._empty_power_payload()
+            telemetry["power_status"] = "unavailable"
 
         # Add Environmental Data
         if data and data.environmental:
@@ -402,6 +406,21 @@ class TelemetryService:
             "battery_consumed_today_wh": getattr(power_data, "battery_consumed_today_wh", None),
             "load_current": getattr(power_data, "load_current", None),
             "timestamp": getattr(power_data, "timestamp", None),
+        }
+
+    def _empty_power_payload(self) -> dict[str, Any]:
+        """Return an all-null power payload when sensor data is unavailable."""
+        return {
+            "battery_voltage": None,
+            "battery_current": None,
+            "battery_power": None,
+            "solar_voltage": None,
+            "solar_current": None,
+            "solar_power": None,
+            "solar_yield_today_wh": None,
+            "battery_consumed_today_wh": None,
+            "load_current": None,
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     def _format_tof(self, tof_data: Any) -> dict[str, Any]:

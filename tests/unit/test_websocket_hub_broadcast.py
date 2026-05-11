@@ -99,3 +99,78 @@ async def test_get_cached_telemetry_returns_shallow_copy():
     result["heading"] = 999.0
 
     assert hub._last_telemetry_snapshot["heading"] == 90.0
+
+
+# ── telemetry.power always-broadcast tests ───────────────────────────────────
+
+
+def _make_hub_with_subscriber(topic: str) -> tuple:
+    """Return (hub, client_ws_mock) with one subscriber on *topic*."""
+    hub = WebSocketHub.__new__(WebSocketHub)
+    hub.clients = {}
+    hub.subscriptions = {topic: set()}
+    hub.calibration_data = {}
+    hub._calibration_lock = asyncio.Lock()
+
+    ws = MagicMock()
+    ws.send_text = AsyncMock()
+    hub.clients["c1"] = ws
+    hub.subscriptions[topic].add("c1")
+    return hub, ws
+
+
+@pytest.mark.asyncio
+async def test_power_topic_broadcast_when_power_key_present():
+    """telemetry.power is broadcast when the dict contains a 'power' key (normal case)."""
+    hub, ws = _make_hub_with_subscriber("telemetry.power")
+
+    telemetry = {
+        "power": {"battery_voltage": 12.5, "battery_current": 1.0},
+        "power_status": "ok",
+        "battery": {"percentage": 80.0, "voltage": 12.5},
+        "source": "hardware",
+        "position": {},
+        "imu": {},
+    }
+    await hub._broadcast_telemetry_topics(telemetry)
+
+    ws.send_text.assert_called_once()
+    import json
+    payload = json.loads(ws.send_text.call_args[0][0])
+    assert payload["topic"] == "telemetry.power"
+    assert payload["data"]["power"]["battery_voltage"] == 12.5
+
+
+@pytest.mark.asyncio
+async def test_power_topic_broadcast_when_power_is_null_payload():
+    """telemetry.power is still broadcast when the power block holds all-null fields."""
+    hub, ws = _make_hub_with_subscriber("telemetry.power")
+
+    # This is what _format_telemetry now emits when sensor data is unavailable
+    telemetry = {
+        "power": {
+            "battery_voltage": None,
+            "battery_current": None,
+            "battery_power": None,
+            "solar_voltage": None,
+            "solar_current": None,
+            "solar_power": None,
+            "solar_yield_today_wh": None,
+            "battery_consumed_today_wh": None,
+            "load_current": None,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        },
+        "power_status": "unavailable",
+        "battery": {"percentage": 0.0, "voltage": 0.0},
+        "source": "hardware",
+        "position": {},
+        "imu": {},
+    }
+    await hub._broadcast_telemetry_topics(telemetry)
+
+    ws.send_text.assert_called_once()
+    import json
+    payload = json.loads(ws.send_text.call_args[0][0])
+    assert payload["topic"] == "telemetry.power"
+    # power_status forwarded in the message
+    assert payload["data"]["power"]["battery_voltage"] is None

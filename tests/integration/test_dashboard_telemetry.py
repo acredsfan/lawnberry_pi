@@ -164,6 +164,7 @@ async def test_telemetry_data_completeness():
 
         if "power" in data:
             power = data["power"]
+            # Flat schema: all fields are top-level keys (no nested battery/solar sub-objects)
             expected_power_fields = [
                 "battery_voltage",
                 "battery_current",
@@ -171,11 +172,13 @@ async def test_telemetry_data_completeness():
                 "solar_voltage",
                 "solar_current",
                 "solar_power",
+                "solar_yield_today_wh",
+                "battery_consumed_today_wh",
+                "load_current",
+                "timestamp",
             ]
             for field in expected_power_fields:
                 assert field in power, f"Missing power field: {field}"
-            assert "battery" in power and isinstance(power["battery"], dict)
-            assert "solar" in power and isinstance(power["solar"], dict)
 
 
 @pytest.mark.asyncio

@@ -466,30 +466,4 @@ async def dashboard_telemetry():
             "left": {"distance_mm": None, "range_status": None, "signal_strength": None},
             "right": {"distance_mm": None, "range_status": None, "signal_strength": None},
         }
-    if "power" not in telemetry_data:
-        telemetry_data["power"] = {
-            "battery_voltage": telemetry_data.get("battery", {}).get("voltage"),
-            "battery_current": None,
-            "battery_power": None,
-            "solar_voltage": None,
-            "solar_current": None,
-            "solar_power": None,
-            "solar_yield_today_wh": None,
-            "battery_consumed_today_wh": None,
-            "load_current": None,
-            "timestamp": telemetry_data.get("timestamp"),
-            "battery": {
-                "voltage": telemetry_data.get("battery", {}).get("voltage"),
-                "percentage": telemetry_data.get("battery", {}).get("percentage"),
-                "current": None,
-                "power": None,
-            },
-            "solar": {
-                "voltage": None,
-                "current": None,
-                "power": None,
-                "yield_today_wh": None,
-            },
-        }
-
     return telemetry_data
