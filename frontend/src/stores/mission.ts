@@ -236,6 +236,10 @@ export const useMissionStore = defineStore('mission', () => {
   };
 
   const init = async () => {
+    // Always register cross-client WS listeners, regardless of saved mission state
+    subscribe('mission.deleted', handleMissionDeletedWsEvent);
+    subscribe('mission.updated', handleMissionUpdatedWsEvent);
+
     const savedId = localStorage.getItem(CURRENT_MISSION_ID_KEY);
     if (!savedId) return;
     try {
@@ -250,9 +254,6 @@ export const useMissionStore = defineStore('mission', () => {
     } catch {
       localStorage.removeItem(CURRENT_MISSION_ID_KEY);
     }
-    // Subscribe to mission list changes from other clients
-    subscribe('mission.deleted', handleMissionDeletedWsEvent);
-    subscribe('mission.updated', handleMissionUpdatedWsEvent);
   };
 
   const createMission = async (name: string) => {

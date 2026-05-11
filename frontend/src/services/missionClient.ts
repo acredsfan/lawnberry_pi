@@ -66,7 +66,7 @@ export async function listMissions(): Promise<Mission[]> {
 
 export async function updateMission(
   id: string,
-  payload: { name?: string; waypoints?: any[] }
+  payload: { name?: string; waypoints?: components['schemas']['MissionWaypoint'][] }
 ): Promise<Mission> {
   const response = await apiService.patch<Mission>(`/api/v2/missions/${id}`, payload)
   return response.data
