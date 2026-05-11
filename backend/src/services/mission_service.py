@@ -818,6 +818,7 @@ class MissionService:
             self._mission_repo.delete_mission(mission_id)
         else:
             with persistence.get_connection() as conn:
+                conn.execute("DELETE FROM mission_execution_state WHERE mission_id = ?", (mission_id,))
                 conn.execute("DELETE FROM missions WHERE id = ?", (mission_id,))
                 conn.commit()
         self.missions.pop(mission_id, None)

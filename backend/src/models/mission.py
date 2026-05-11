@@ -77,6 +77,16 @@ class MissionUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     waypoints: list[MissionWaypoint] | None = Field(default=None, min_length=1)
 
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Mission name cannot be empty")
+        return cleaned
+
     @model_validator(mode="after")
     def _at_least_one_field(self) -> "MissionUpdateRequest":
         if self.name is None and self.waypoints is None:
