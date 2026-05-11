@@ -63,3 +63,15 @@ export async function listMissions(): Promise<Mission[]> {
   const response = await apiService.get<Mission[]>('/api/v2/missions/list')
   return response.data
 }
+
+export async function updateMission(
+  id: string,
+  payload: { name?: string; waypoints?: any[] }
+): Promise<Mission> {
+  const response = await apiService.patch<Mission>(`/api/v2/missions/${id}`, payload)
+  return response.data
+}
+
+export async function deleteMission(id: string): Promise<void> {
+  await apiService.delete(`/api/v2/missions/${id}`)
+}

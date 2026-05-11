@@ -64,6 +64,7 @@ export const useMissionStore = defineStore('mission', () => {
   const totalWaypoints = ref(0);
   const statusDetail = ref<string | null>(null);
   const pathTrace = ref<[number, number][]>([]);
+  const missions = ref<Mission[]>([]);
   const isRecoveredPause = computed(() => {
     return missionStatus.value === 'paused' && /recover/i.test(statusDetail.value ?? '');
   });
@@ -143,11 +144,94 @@ export const useMissionStore = defineStore('mission', () => {
 
   const selectMission = async (mission: Mission) => {
     _setCurrentMission(mission);
+    waypoints.value = [...mission.waypoints];
     try {
       const response = await apiService.get<MissionStatusResponse>(`/api/v2/missions/${mission.id}/status`);
       applyMissionStatus(response.data);
     } catch {
       missionStatus.value = 'idle';
+    }
+  };
+
+  const fetchMissions = async () => {
+    try {
+      const response = await apiService.get<Mission[]>('/api/v2/missions/list');
+      missions.value = response.data;
+    } catch (error) {
+      console.error('Error fetching missions:', error);
+    }
+  };
+
+  const updateMissionById = async (id: string, payload: { name?: string; waypoints?: Waypoint[] }) => {
+    try {
+      const response = await apiService.patch<Mission>(`/api/v2/missions/${id}`, payload);
+      const updated = response.data;
+      const idx = missions.value.findIndex(m => m.id === id);
+      if (idx !== -1) {
+        missions.value[idx] = updated;
+      }
+      if (currentMission.value?.id === id) {
+        currentMission.value = updated;
+        if (payload.waypoints !== undefined) {
+          waypoints.value = [...updated.waypoints];
+        }
+      }
+      return updated;
+    } catch (error) {
+      const msg = extractMissionErrorMessage(error, 'Unable to update mission.');
+      statusDetail.value = msg;
+      throw error;
+    }
+  };
+
+  const deleteMissionById = async (id: string) => {
+    try {
+      await apiService.delete(`/api/v2/missions/${id}`);
+      missions.value = missions.value.filter(m => m.id !== id);
+      if (currentMission.value?.id === id) {
+        currentMission.value = null;
+        waypoints.value = [];
+        _persistCurrentMissionId(null);
+        stopStatusPolling();
+        missionStatus.value = 'idle';
+      }
+    } catch (error) {
+      const msg = extractMissionErrorMessage(error, 'Unable to delete mission.');
+      statusDetail.value = msg;
+      throw error;
+    }
+  };
+
+  const handleMissionDeletedWsEvent = async (data: any) => {
+    const payload = data?.data ?? data;
+    const mission_id = payload?.mission_id;
+    if (!mission_id) return;
+    missions.value = missions.value.filter(m => m.id !== mission_id);
+    if (currentMission.value?.id === mission_id) {
+      currentMission.value = null;
+      waypoints.value = [];
+      _persistCurrentMissionId(null);
+      stopStatusPolling();
+      missionStatus.value = 'idle';
+    }
+  };
+
+  const handleMissionUpdatedWsEvent = async (data: any) => {
+    const payload = data?.data ?? data;
+    const mission_id = payload?.mission_id;
+    if (!mission_id) return;
+    try {
+      const response = await apiService.get<Mission>(`/api/v2/missions/${mission_id}`);
+      const updated = response.data;
+      const idx = missions.value.findIndex(m => m.id === mission_id);
+      if (idx !== -1) {
+        missions.value[idx] = updated;
+      }
+      if (currentMission.value?.id === mission_id) {
+        currentMission.value = updated;
+      }
+    } catch {
+      // Mission may have been deleted before we fetched it — ignore
     }
   };
 
@@ -166,6 +250,9 @@ export const useMissionStore = defineStore('mission', () => {
     } catch {
       localStorage.removeItem(CURRENT_MISSION_ID_KEY);
     }
+    // Subscribe to mission list changes from other clients
+    subscribe('mission.deleted', handleMissionDeletedWsEvent);
+    subscribe('mission.updated', handleMissionUpdatedWsEvent);
   };
 
   const createMission = async (name: string) => {
@@ -334,6 +421,7 @@ export const useMissionStore = defineStore('mission', () => {
     statusDetail,
     isRecoveredPause,
     pathTrace,
+    missions,
     addWaypoint,
     removeWaypoint,
     updateWaypoint,
@@ -350,5 +438,8 @@ export const useMissionStore = defineStore('mission', () => {
     resumeCurrentMission,
     abortCurrentMission,
     pollMissionStatus,
+    fetchMissions,
+    updateMissionById,
+    deleteMissionById,
   };
 });
