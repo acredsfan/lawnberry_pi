@@ -768,6 +768,70 @@ class MissionService:
     async def list_missions(self) -> list[Mission]:
         return list(self.missions.values())
 
+    async def update_mission(
+        self,
+        mission_id: str,
+        *,
+        name: str | None = None,
+        waypoints: list[MissionWaypoint] | None = None,
+    ) -> Mission:
+        mission = self._require_mission(mission_id)
+        status = self._require_status(mission_id)
+        if status.status in (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED):
+            raise MissionConflictError("Cannot edit a running or paused mission.")
+        if waypoints is not None:
+            self._validate_waypoints_in_geofence(waypoints)
+        if name is not None:
+            mission.name = name
+        if waypoints is not None:
+            mission.waypoints = waypoints
+        self.mission_statuses[mission_id] = self._build_status(
+            mission_id,
+            status.status,
+            current_waypoint_index=status.current_waypoint_index,
+            detail=status.detail,
+        )
+        self._persist_mission(mission)
+        if self._websocket_hub is not None:
+            try:
+                await self._websocket_hub.broadcast_to_topic(
+                    "mission.updated",
+                    {
+                        "mission_id": mission_id,
+                        "name": mission.name,
+                        "waypoint_count": len(mission.waypoints),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Failed to broadcast mission.updated: %s", exc)
+        return mission
+
+    async def delete_mission(self, mission_id: str) -> None:
+        self._require_mission(mission_id)
+        status = self._require_status(mission_id)
+        if status.status in (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED):
+            raise MissionConflictError("Cannot delete a running or paused mission.")
+        task = self.mission_tasks.get(mission_id)
+        if task is not None and not task.done():
+            raise MissionConflictError("Mission task still active.")
+        if self._mission_repo is not None:
+            self._mission_repo.delete_mission(mission_id)
+        else:
+            with persistence.get_connection() as conn:
+                conn.execute("DELETE FROM missions WHERE id = ?", (mission_id,))
+                conn.commit()
+        self.missions.pop(mission_id, None)
+        self.mission_statuses.pop(mission_id, None)
+        self.mission_tasks.pop(mission_id, None)
+        if self._websocket_hub is not None:
+            try:
+                await self._websocket_hub.broadcast_to_topic(
+                    "mission.deleted",
+                    {"mission_id": mission_id},
+                )
+            except Exception as exc:
+                logger.warning("Failed to broadcast mission.deleted: %s", exc)
+
     def _require_mission(self, mission_id: str) -> Mission:
         mission = self.missions.get(mission_id)
         if mission is None:

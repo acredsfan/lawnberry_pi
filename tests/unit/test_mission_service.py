@@ -7,6 +7,7 @@ from backend.src.models import NavigationMode, Position
 from backend.src.models.mission import MissionLifecycleStatus, MissionWaypoint
 from backend.src.services.mission_service import (
     MissionConflictError,
+    MissionNotFoundError,
     MissionService,
     MissionStateError,
     MissionValidationError,
@@ -226,3 +227,94 @@ async def test_start_mission_surfaces_navigation_failure_detail():
 
     assert service.mission_statuses[mission.id].status == MissionLifecycleStatus.FAILED
     assert service.mission_statuses[mission.id].detail == "Heading unavailable while navigating waypoint"
+
+
+@pytest.mark.asyncio
+async def test_update_mission_happy_path():
+    """update_mission mutates name/waypoints in place, keeps id + created_at."""
+    nav = DummyNavigationService()
+    service = MissionService(nav)
+    mission = await service.create_mission(
+        "original", [MissionWaypoint(lat=0.1, lon=0.1)]
+    )
+    original_id = mission.id
+    original_created_at = mission.created_at
+
+    updated = await service.update_mission(
+        mission.id, name="renamed", waypoints=[MissionWaypoint(lat=0.2, lon=0.2)]
+    )
+
+    assert updated.id == original_id
+    assert updated.created_at == original_created_at
+    assert updated.name == "renamed"
+    assert updated.waypoints[0].lat == pytest.approx(0.2)
+    # In-memory dict also updated
+    assert service.missions[original_id].name == "renamed"
+
+
+@pytest.mark.asyncio
+async def test_update_mission_rejects_when_running():
+    nav = DummyNavigationService()
+    service = MissionService(nav)
+    mission = await service.create_mission("m", [MissionWaypoint(lat=0.1, lon=0.1)])
+    service.mission_statuses[mission.id].status = MissionLifecycleStatus.RUNNING
+
+    with pytest.raises(MissionConflictError, match="running or paused"):
+        await service.update_mission(mission.id, name="renamed")
+
+
+@pytest.mark.asyncio
+async def test_update_mission_rejects_when_paused():
+    nav = DummyNavigationService()
+    service = MissionService(nav)
+    mission = await service.create_mission("m", [MissionWaypoint(lat=0.1, lon=0.1)])
+    service.mission_statuses[mission.id].status = MissionLifecycleStatus.PAUSED
+
+    with pytest.raises(MissionConflictError, match="running or paused"):
+        await service.update_mission(mission.id, name="renamed")
+
+
+@pytest.mark.asyncio
+async def test_update_mission_terminal_states_allowed():
+    """Completed/aborted/failed missions can be edited."""
+    nav = DummyNavigationService()
+    service = MissionService(nav)
+    for terminal in (MissionLifecycleStatus.COMPLETED, MissionLifecycleStatus.ABORTED, MissionLifecycleStatus.FAILED):
+        mission = await service.create_mission("m", [MissionWaypoint(lat=0.1, lon=0.1)])
+        service.mission_statuses[mission.id].status = terminal
+        updated = await service.update_mission(mission.id, name="new name")
+        assert updated.name == "new name"
+
+
+@pytest.mark.asyncio
+async def test_delete_mission_happy_path():
+    nav = DummyNavigationService()
+    service = MissionService(nav)
+    mission = await service.create_mission("m", [MissionWaypoint(lat=0.1, lon=0.1)])
+
+    await service.delete_mission(mission.id)
+
+    assert mission.id not in service.missions
+    assert mission.id not in service.mission_statuses
+
+
+@pytest.mark.asyncio
+async def test_delete_mission_rejects_when_running():
+    nav = DummyNavigationService()
+    service = MissionService(nav)
+    mission = await service.create_mission("m", [MissionWaypoint(lat=0.1, lon=0.1)])
+    service.mission_statuses[mission.id].status = MissionLifecycleStatus.RUNNING
+
+    with pytest.raises(MissionConflictError, match="running or paused"):
+        await service.delete_mission(mission.id)
+
+
+@pytest.mark.asyncio
+async def test_delete_mission_rejects_when_paused():
+    nav = DummyNavigationService()
+    service = MissionService(nav)
+    mission = await service.create_mission("m", [MissionWaypoint(lat=0.1, lon=0.1)])
+    service.mission_statuses[mission.id].status = MissionLifecycleStatus.PAUSED
+
+    with pytest.raises(MissionConflictError, match="running or paused"):
+        await service.delete_mission(mission.id)

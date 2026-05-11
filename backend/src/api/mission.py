@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from ..core.runtime import RuntimeContext, get_runtime
-from ..models.mission import Mission, MissionCreationRequest, MissionStatus
+from ..models.mission import Mission, MissionCreationRequest, MissionStatus, MissionUpdateRequest
 from ..services.mission_service import (
     MissionConflictError,
     MissionNotFoundError,
@@ -124,5 +124,35 @@ async def get_mission(
     mission_service = runtime.mission_service
     try:
         return mission_service._require_mission(mission_id)
+    except Exception as e:
+        _raise_mission_http_error(e)
+
+
+@router.patch("/api/v2/missions/{mission_id}", response_model=Mission)
+async def update_mission(
+    mission_id: str,
+    payload: MissionUpdateRequest,
+    runtime: RuntimeContext = Depends(get_runtime),
+):
+    """Update a mission's name and/or waypoints in place."""
+    mission_service = runtime.mission_service
+    try:
+        return await mission_service.update_mission(
+            mission_id, name=payload.name, waypoints=payload.waypoints
+        )
+    except Exception as e:
+        _raise_mission_http_error(e)
+
+
+@router.delete("/api/v2/missions/{mission_id}", status_code=204)
+async def delete_mission(
+    mission_id: str,
+    runtime: RuntimeContext = Depends(get_runtime),
+):
+    """Hard-delete a mission and its execution state."""
+    mission_service = runtime.mission_service
+    try:
+        await mission_service.delete_mission(mission_id)
+        return Response(status_code=204)
     except Exception as e:
         _raise_mission_http_error(e)

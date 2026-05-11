@@ -134,6 +134,52 @@ def test_create_mission_request_validation(client):
     assert response.status_code == 422
 
 
+def test_update_mission(client, mock_mission_service):
+    waypoints = [{"lat": 0.1, "lon": 0.1, "blade_on": False, "speed": 50}]
+    mock_mission_service.update_mission = AsyncMock(
+        return_value=Mission(id="m1", name="renamed", waypoints=waypoints, created_at="now")
+    )
+    response = client.patch("/api/v2/missions/m1", json={"name": "renamed"})
+    assert response.status_code == 200
+    assert response.json()["name"] == "renamed"
+    mock_mission_service.update_mission.assert_called_once()
+
+
+def test_update_mission_not_found(client, mock_mission_service):
+    mock_mission_service.update_mission = AsyncMock(side_effect=MissionNotFoundError("nope"))
+    response = client.patch("/api/v2/missions/missing", json={"name": "x"})
+    assert response.status_code == 404
+
+
+def test_update_mission_conflict(client, mock_mission_service):
+    mock_mission_service.update_mission = AsyncMock(
+        side_effect=MissionConflictError("running or paused")
+    )
+    response = client.patch("/api/v2/missions/m1", json={"name": "x"})
+    assert response.status_code == 409
+
+
+def test_delete_mission(client, mock_mission_service):
+    mock_mission_service.delete_mission = AsyncMock(return_value=None)
+    response = client.delete("/api/v2/missions/m1")
+    assert response.status_code == 204
+    mock_mission_service.delete_mission.assert_called_once_with("m1")
+
+
+def test_delete_mission_not_found(client, mock_mission_service):
+    mock_mission_service.delete_mission = AsyncMock(side_effect=MissionNotFoundError("nope"))
+    response = client.delete("/api/v2/missions/missing")
+    assert response.status_code == 404
+
+
+def test_delete_mission_conflict(client, mock_mission_service):
+    mock_mission_service.delete_mission = AsyncMock(
+        side_effect=MissionConflictError("running or paused")
+    )
+    response = client.delete("/api/v2/missions/m1")
+    assert response.status_code == 409
+
+
 def test_mission_endpoints_resolve_via_runtime_dependency():
     """Confirm mission endpoints resolve via the runtime override path.
 

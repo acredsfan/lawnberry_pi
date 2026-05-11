@@ -1,7 +1,7 @@
 import uuid
 from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class MissionLifecycleStatus(str, Enum):
@@ -71,6 +71,17 @@ class MissionCreationRequest(BaseModel):
         if not cleaned:
             raise ValueError("Mission name cannot be empty")
         return cleaned
+
+
+class MissionUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    waypoints: list[MissionWaypoint] | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self) -> "MissionUpdateRequest":
+        if self.name is None and self.waypoints is None:
+            raise ValueError("Provide name or waypoints to update.")
+        return self
 
 
 class MissionStatus(BaseModel):
