@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import MissionListPanel from '@/components/mission/MissionListPanel.vue'
 import { useMissionStore } from '@/stores/mission'
@@ -27,10 +27,11 @@ describe('MissionListPanel', () => {
   it('shows empty state when no missions', async () => {
     mockedApi.get.mockResolvedValueOnce({ data: [] })
     const wrapper = mount(MissionListPanel)
-    await wrapper.vm.$nextTick()
+    await flushPromises()
     // After fetchMissions resolves with empty list
-    await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.text()).toContain('No saved missions')
+    const emptyEl = wrapper.find('.empty-state')
+    expect(emptyEl.exists()).toBe(true)
+    expect(emptyEl.text()).toContain('No saved missions')
   })
 
   it('renders mission rows when missions exist', async () => {
@@ -39,8 +40,7 @@ describe('MissionListPanel', () => {
     mockedApi.get.mockResolvedValueOnce({ data: [sampleMission] })
 
     const wrapper = mount(MissionListPanel)
-    await wrapper.vm.$nextTick()
-    await new Promise(r => setTimeout(r, 10))
+    await flushPromises()
 
     expect(wrapper.text()).toContain('Loop')
     expect(wrapper.text()).toContain('1 waypoints')
@@ -55,11 +55,11 @@ describe('MissionListPanel', () => {
     mockedApi.get.mockResolvedValueOnce({ data: { status: 'idle', mission_id: 'm1', completion_percentage: 0, total_waypoints: 1 } })
 
     const wrapper = mount(MissionListPanel)
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
     const selectBtn = wrapper.find('button')
     await selectBtn.trigger('click')
-    await new Promise(r => setTimeout(r, 10))
+    await flushPromises()
 
     expect(store.currentMission?.id).toBe('m1')
   })

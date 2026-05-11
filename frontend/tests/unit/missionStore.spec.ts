@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useMissionStore } from '@/stores/mission'
 import apiService from '@/services/api'
@@ -291,7 +292,7 @@ describe('Mission Store — CRUD actions (fetchMissions / updateMissionById / de
     mockedApi.patch.mockRejectedValueOnce(new Error('server error'))
 
     await expect(store.updateMissionById('m1', { name: 'X' })).rejects.toThrow()
-    expect(store.statusDetail).toBeTruthy()
+    expect(store.statusDetail).toBe('server error')
   })
 
   // ── deleteMissionById ────────────────────────────────────────────────────
@@ -340,7 +341,7 @@ describe('Mission Store — CRUD actions (fetchMissions / updateMissionById / de
     mockedApi.delete.mockRejectedValueOnce(new Error('server error'))
 
     await expect(store.deleteMissionById('m1')).rejects.toThrow()
-    expect(store.statusDetail).toBeTruthy()
+    expect(store.statusDetail).toBe('server error')
   })
 
   // ── WS handlers ──────────────────────────────────────────────────────────
@@ -355,7 +356,7 @@ describe('Mission Store — CRUD actions (fetchMissions / updateMissionById / de
     const instances = (globalThis as any).__wsMockInstances as Array<any>
     const wsInst = instances[instances.length - 1].instance
     wsInst.__emit('mission.deleted', { mission_id: 'm1' })
-    await new Promise(r => setTimeout(r, 0)) // flush
+    await flushPromises()
 
     expect(store.missions.find(m => m.id === 'm1')).toBeUndefined()
   })
@@ -371,7 +372,7 @@ describe('Mission Store — CRUD actions (fetchMissions / updateMissionById / de
     const instances = (globalThis as any).__wsMockInstances as Array<any>
     const wsInst = instances[instances.length - 1].instance
     wsInst.__emit('mission.deleted', { mission_id: 'm1' })
-    await new Promise(r => setTimeout(r, 0))
+    await flushPromises()
 
     expect(store.currentMission).toBeNull()
     expect(store.waypoints).toHaveLength(0)
