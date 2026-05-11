@@ -1,54 +1,62 @@
 <template>
   <div class="mission-planner-view">
     <h1>Mission Planner</h1>
-    <div class="map-toolbar">
-      <label class="follow-toggle"><input v-model="followMower" type="checkbox"> Follow mower</label>
-      <label class="map-style-toggle">
-        Map style
-        <select v-model="mapStyle" @change="handleMapStyleChange">
-          <option value="standard">Standard</option>
-          <option value="satellite">Satellite</option>
-          <option value="hybrid">Hybrid</option>
-          <option value="terrain">Terrain</option>
-        </select>
-      </label>
-      <button class="btn" :disabled="!mowerLatLng" @click="recenterToMower">🎯 Recenter</button>
-      <button class="btn" :disabled="missionStore.waypoints.length === 0" @click="undoLastWaypoint">↩️ Undo last</button>
-      <button class="btn btn-danger" :disabled="missionStore.waypoints.length === 0" @click="clearAllWaypoints">🗑️ Clear all</button>
-      <button
-        v-if="missionStore.pathTrace.length > 0"
-        class="btn btn-secondary"
-        @click="missionStore.clearTrace()"
-      >✕ Clear trace</button>
+    <div class="planner-layout">
+      <aside class="planner-sidebar">
+        <MissionListPanel />
+      </aside>
+      <div class="planner-main">
+        <div class="map-toolbar">
+          <label class="follow-toggle"><input v-model="followMower" type="checkbox"> Follow mower</label>
+          <label class="map-style-toggle">
+            Map style
+            <select v-model="mapStyle" @change="handleMapStyleChange">
+              <option value="standard">Standard</option>
+              <option value="satellite">Satellite</option>
+              <option value="hybrid">Hybrid</option>
+              <option value="terrain">Terrain</option>
+            </select>
+          </label>
+          <button class="btn" :disabled="!mowerLatLng" @click="recenterToMower">🎯 Recenter</button>
+          <button class="btn" :disabled="missionStore.waypoints.length === 0" @click="undoLastWaypoint">↩️ Undo last</button>
+          <button class="btn btn-danger" :disabled="missionStore.waypoints.length === 0" @click="clearAllWaypoints">🗑️ Clear all</button>
+          <button
+            v-if="missionStore.pathTrace.length > 0"
+            class="btn btn-secondary"
+            @click="missionStore.clearTrace()"
+          >✕ Clear trace</button>
+        </div>
+        <div class="map-container">
+          <MissionMap
+            v-if="settingsLoaded"
+            ref="missionMapRef"
+            :waypoints="missionStore.waypoints"
+            :mower-position="mowerPosition"
+            :follow-mower="followMower"
+            :map-settings="adaptedMapSettings"
+            :path-trace="missionStore.pathTrace"
+            @add-waypoint="handleAddWaypoint"
+            @update-waypoint="handleUpdateWaypoint"
+            @remove-waypoint="handleRemoveWaypoint"
+          />
+        </div>
+        <MissionWaypointList />
+        <MissionControls
+          v-model:missionName="missionName"
+          :creating-mission="creatingMission"
+          :starting-mission="startingMission"
+          @create="createMission"
+          @start="startMission"
+          @pause="pauseMission"
+          @resume="resumeMission"
+          @abort="abortMission"
+          @save="saveMissionChanges"
+        />
+        <p v-if="missionActionHint" class="mission-action-hint">{{ missionActionHint }}</p>
+        <MissionStatusPanel />
+        <MissionDiagnosticsPanel class="diagnostics-panel" />
+      </div>
     </div>
-    <div class="map-container">
-      <MissionMap
-        v-if="settingsLoaded"
-        ref="missionMapRef"
-        :waypoints="missionStore.waypoints"
-        :mower-position="mowerPosition"
-        :follow-mower="followMower"
-        :map-settings="adaptedMapSettings"
-        :path-trace="missionStore.pathTrace"
-        @add-waypoint="handleAddWaypoint"
-        @update-waypoint="handleUpdateWaypoint"
-        @remove-waypoint="handleRemoveWaypoint"
-      />
-    </div>
-    <MissionWaypointList />
-    <MissionControls
-      v-model:missionName="missionName"
-      :creating-mission="creatingMission"
-      :starting-mission="startingMission"
-      @create="createMission"
-      @start="startMission"
-      @pause="pauseMission"
-      @resume="resumeMission"
-      @abort="abortMission"
-    />
-    <p v-if="missionActionHint" class="mission-action-hint">{{ missionActionHint }}</p>
-    <MissionStatusPanel />
-    <MissionDiagnosticsPanel class="diagnostics-panel" />
   </div>
 </template>
 
@@ -59,6 +67,7 @@ import MissionMap from '@/components/mission/MissionMap.vue'
 import MissionControls from '@/components/mission/MissionControls.vue'
 import MissionStatusPanel from '@/components/mission/MissionStatusPanel.vue'
 import MissionDiagnosticsPanel from '@/components/mission/MissionDiagnosticsPanel.vue'
+import MissionListPanel from '@/components/mission/MissionListPanel.vue'
 import { useMissionStore, type Waypoint } from '@/stores/mission'
 import { useMapStore } from '@/stores/map'
 import { useToastStore } from '@/stores/toast'
@@ -180,10 +189,39 @@ function clearAllWaypoints() {
 }
 
 function undoLastWaypoint() { missionStore.removeLastWaypoint() }
+
+async function saveMissionChanges() {
+  if (!missionStore.currentMission) return
+  try {
+    await missionStore.updateMissionById(missionStore.currentMission.id, {
+      waypoints: missionStore.waypoints,
+    })
+    toast.show('Mission saved', 'success', 2500)
+  } catch {
+    toast.show(missionStore.statusDetail || 'Save failed.', 'error', 5000)
+  }
+}
 </script>
 
 <style scoped>
 .mission-planner-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.planner-layout {
+  display: flex;
+  gap: 1.25rem;
+  align-items: flex-start;
+}
+.planner-sidebar {
+  flex-shrink: 0;
+  position: sticky;
+  top: 1rem;
+}
+.planner-main {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 1rem;

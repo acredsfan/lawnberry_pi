@@ -8,6 +8,12 @@
       {{ creatingMission ? 'Creating...' : 'Create Mission' }}
     </button>
     <button
+      v-if="isSavedMission && !isMissionActive"
+      @click="$emit('save')"
+    >
+      Save changes
+    </button>
+    <button
       :disabled="startingMission || !missionStore.currentMission"
       @click="$emit('start')"
     >
@@ -32,6 +38,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useMissionStore } from '@/stores/mission'
 
 const missionStore = useMissionStore()
@@ -44,10 +51,19 @@ defineProps<{
 
 defineEmits<{
   (e: 'create'): void
+  (e: 'save'): void
   (e: 'start'): void
   (e: 'pause'): void
   (e: 'resume'): void
   (e: 'abort'): void
   (e: 'update:missionName', value: string): void
 }>()
+
+const isSavedMission = computed(() =>
+  !!missionStore.currentMission &&
+  missionStore.missions.some(m => m.id === missionStore.currentMission?.id)
+)
+const isMissionActive = computed(() =>
+  missionStore.missionStatus === 'running' || missionStore.missionStatus === 'paused'
+)
 </script>
