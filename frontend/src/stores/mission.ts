@@ -240,6 +240,9 @@ export const useMissionStore = defineStore('mission', () => {
     subscribe('mission.deleted', handleMissionDeletedWsEvent);
     subscribe('mission.updated', handleMissionUpdatedWsEvent);
 
+    // Pre-populate missions[] so isSavedMission is correct on cold-start / page refresh
+    fetchMissions().catch(() => {}); // non-blocking, best-effort
+
     const savedId = localStorage.getItem(CURRENT_MISSION_ID_KEY);
     if (!savedId) return;
     try {

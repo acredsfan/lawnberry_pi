@@ -45,6 +45,7 @@
           v-model:missionName="missionName"
           :creating-mission="creatingMission"
           :starting-mission="startingMission"
+          :saving-changes="savingMissionChanges"
           @create="createMission"
           @start="startMission"
           @pause="pauseMission"
@@ -95,6 +96,7 @@ const followMower = ref(true)
 const missionName = ref('')
 const creatingMission = ref(false)
 const startingMission = ref(false)
+const savingMissionChanges = ref(false)
 const missionActionHint = ref('')
 
 onMounted(async () => {
@@ -192,6 +194,7 @@ function undoLastWaypoint() { missionStore.removeLastWaypoint() }
 
 async function saveMissionChanges() {
   if (!missionStore.currentMission) return
+  savingMissionChanges.value = true
   try {
     await missionStore.updateMissionById(missionStore.currentMission.id, {
       waypoints: missionStore.waypoints,
@@ -199,6 +202,8 @@ async function saveMissionChanges() {
     toast.show('Mission saved', 'success', 2500)
   } catch {
     toast.show(missionStore.statusDetail || 'Save failed.', 'error', 5000)
+  } finally {
+    savingMissionChanges.value = false
   }
 }
 </script>

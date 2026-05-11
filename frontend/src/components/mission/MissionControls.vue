@@ -9,9 +9,10 @@
     </button>
     <button
       v-if="isSavedMission && !isMissionActive"
+      :disabled="savingChanges"
       @click="$emit('save')"
     >
-      Save changes
+      {{ savingChanges ? 'Saving...' : 'Save changes' }}
     </button>
     <button
       :disabled="startingMission || !missionStore.currentMission"
@@ -47,6 +48,7 @@ defineProps<{
   missionName: string
   creatingMission?: boolean
   startingMission?: boolean
+  savingChanges?: boolean
 }>()
 
 defineEmits<{
