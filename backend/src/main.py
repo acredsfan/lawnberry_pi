@@ -270,6 +270,11 @@ async def lifespan(app: FastAPI):
     event_store = EventStore(persistence=persistence, mode=_persistence_mode)
     _log.info("Event persistence mode: %s", _persistence_mode.value)
 
+    # --- PlanningService construction ---
+    from backend.src.services.planning_service import get_planning_service as _get_planning_svc
+    _planning_svc = _get_planning_svc()
+    _planning_svc.set_map_repository(_map_repo)
+
     app.state.runtime = RuntimeContext(
         config_loader=loader,
         hardware_config=hardware_cfg,
@@ -291,6 +296,7 @@ async def lifespan(app: FastAPI):
         event_store=event_store,
         persistence_mode=_persistence_mode.value,
         jobs_service=_jobs_service_singleton,
+        planning_service=_planning_svc,
     )
     # Attach EventStore to services that emit events.
     if hasattr(app.state.runtime.mission_service, "set_event_store"):

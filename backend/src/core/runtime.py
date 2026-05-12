@@ -65,6 +65,7 @@ class RuntimeContext:
 
     # Planning / scheduling service
     jobs_service: Any = None         # JobsService; Any to avoid import cycle
+    planning_service: Any = None     # PlanningService; Any to avoid import cycle
 
     @property
     def sensor_manager(self) -> Any:
