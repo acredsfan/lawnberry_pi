@@ -57,10 +57,10 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T4 | ✓ done | Fix `ping -W 0` → `max(1, …)` in connectivity.py | V7 |
 | T5 | ✓ done | Add `Restart=always` to cloudflared.service | V1 |
 | T6 | ✓ done | Remove `WatchdogSec=120s` from cloudflared.service | V1 |
-| T7 | . | Set `maxReconnectAttempts = -1` and cap backoff at 30 s in websocket.ts | V5, V6 |
+| T7 | ✓ done | Set `maxReconnectAttempts = -1` and cap backoff at 30 s in websocket.ts | V5, V6 |
 | T8 | . | Verify Vite `ws:true` proxy survives Cloudflare's HTTP upgrade path; add integration smoke-test | V8, I.cf |
 | T9 | . | Add wifi-watchdog unit test: assert disabled tier is skipped, not stalling | V4 |
-| T10 | . | Commit and push all service-file + watchdog source changes made today | V1–V4, V7 |
+| T10 | ✓ done | Commit and push all service-file + watchdog source changes made today | V1–V4, V7 |
 
 ---
 
