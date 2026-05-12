@@ -6,8 +6,8 @@ endpoints in rest.py so both surfaces always reflect the same data.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, Response
@@ -26,12 +26,12 @@ router = APIRouter(tags=["schedules"])
 class PlanningJobResponse(BaseModel):
     id: str
     name: str
-    schedule: Optional[str] = None
+    schedule: str | None = None
     zones: list[Any] = []
     priority: int = 1
     enabled: bool = True
-    created_at: Optional[str] = None
-    last_run: Optional[str] = None
+    created_at: str | None = None
+    last_run: str | None = None
     status: str = "pending"
 
 
@@ -77,7 +77,7 @@ async def create_schedule(payload: dict[str, Any]):
         "zones": list(payload.get("zones") or []),
         "priority": int(payload.get("priority") or 1),
         "enabled": bool(payload.get("enabled", True)),
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "last_run": None,
         "status": "pending",
         "pattern": str(payload.get("pattern") or "parallel"),

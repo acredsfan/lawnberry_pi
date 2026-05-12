@@ -50,8 +50,11 @@ Canonical surface is `/api/v2/*`. All new frontend code must use canonical endpo
 
 | Method | Path | Label | Router file | Notes |
 |---|---|---|---|---|
-| GET  | `/api/v2/map/zones` | `canonical` | `api/rest.py` | In-memory store; migrate to MapRepository (§5) |
-| POST | `/api/v2/map/zones` | `canonical` | `api/rest.py` | |
+| GET  | `/api/v2/map/zones` | `canonical` | `api/rest.py` | Backed by MapRepository (SQLite) |
+| POST | `/api/v2/map/zones` | `canonical` | `api/rest.py` | Bulk replace; triggers WS `planning.zone.changed` |
+| GET  | `/api/v2/map/zones/{zone_id}` | `canonical` | `api/rest.py` | Per-zone lookup (404 if not found) |
+| PUT  | `/api/v2/map/zones/{zone_id}` | `canonical` | `api/rest.py` | Update a single zone |
+| DELETE | `/api/v2/map/zones/{zone_id}` | `canonical` | `api/rest.py` | Delete a single zone (204) |
 | GET  | `/api/v2/map/locations` | `canonical` | `api/rest.py` | |
 | PUT  | `/api/v2/map/locations` | `canonical` | `api/rest.py` | |
 | GET  | `/api/v2/map/configuration` | `canonical` | `api/rest.py` | |
@@ -62,9 +65,25 @@ Canonical surface is `/api/v2/*`. All new frontend code must use canonical endpo
 
 | Method | Path | Label | Router file | Notes |
 |---|---|---|---|---|
-| GET  | `/api/v2/planning/jobs` | `canonical` | `api/rest.py` | In-memory store; migrate to MissionRepository (§5) |
-| POST | `/api/v2/planning/jobs` | `canonical` | `api/rest.py` | |
-| DELETE | `/api/v2/planning/jobs/{id}` | `canonical` | `api/rest.py` | |
+| GET  | `/api/v2/planning/jobs` | `canonical` | `api/rest.py` | Backed by SQLite via `persistence.load_planning_jobs` |
+| POST | `/api/v2/planning/jobs` | `canonical` | `api/rest.py` | Create a scheduled mowing job |
+| GET  | `/api/v2/planning/jobs/{id}` | `canonical` | `api/rest.py` | Fetch single job (404 if not found) |
+| DELETE | `/api/v2/planning/jobs/{id}` | `canonical` | `api/rest.py` | Delete a job (204) |
+
+## Schedules
+
+`/api/v2/schedules` is an alias surface backed by the same SQLite store as `/api/v2/planning/jobs`.
+All mutations on either surface are immediately visible through the other.
+
+| Method | Path | Label | Router file | Notes |
+|---|---|---|---|---|
+| GET  | `/api/v2/schedules` | `canonical` | `api/routers/planning.py` | List all schedules |
+| POST | `/api/v2/schedules` | `canonical` | `api/routers/planning.py` | Create a schedule (201); accepts `pattern`, `pattern_params`, `zones`, `schedule` (HH:MM), `timezone` |
+| GET  | `/api/v2/schedules/{id}` | `canonical` | `api/routers/planning.py` | Fetch single schedule (404 if not found) |
+| PUT  | `/api/v2/schedules/{id}` | `canonical` | `api/routers/planning.py` | Update schedule fields (merges with existing) |
+| DELETE | `/api/v2/schedules/{id}` | `canonical` | `api/routers/planning.py` | Delete schedule (204) |
+| POST | `/api/v2/schedules/{id}/enable` | `canonical` | `api/routers/planning.py` | Set `enabled=True` |
+| POST | `/api/v2/schedules/{id}/disable` | `canonical` | `api/routers/planning.py` | Set `enabled=False` |
 
 ## Telemetry & Dashboard
 
