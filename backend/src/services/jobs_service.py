@@ -490,6 +490,15 @@ class JobsService:
             )
             return
 
+        if len(zones) > 1:
+            logger.info(
+                "Job %s has %d zones; dispatching for zones[0]=%s only"
+                " (multi-zone queuing not yet implemented)",
+                job.get("id"),
+                len(zones),
+                zones[0],
+            )
+
         zone_id = zones[0]
         pattern = job.get("pattern", "parallel")
         pattern_params: dict = job.get("pattern_params") or {}

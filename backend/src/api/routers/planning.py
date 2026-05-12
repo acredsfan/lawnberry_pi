@@ -33,6 +33,8 @@ class PlanningJobResponse(BaseModel):
     created_at: str | None = None
     last_run: str | None = None
     status: str = "pending"
+    pattern: str | None = None
+    pattern_params: dict | None = None
 
 
 # ---------------------------------------------------------------------------

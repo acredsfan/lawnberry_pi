@@ -275,6 +275,9 @@ class PersistenceLayer:
     def save_planning_job(self, job_data: dict[str, Any]) -> None:
         """Save planning job to database."""
         pattern_params = job_data.get("pattern_params") or {}
+        # Ensure schedule is never NULL (NOT NULL constraint on legacy schema).
+        # An empty string is used as sentinel for "no schedule configured".
+        schedule = job_data.get("schedule") or ""
         with self.get_connection() as conn:
             conn.execute(
                 """
@@ -286,7 +289,7 @@ class PersistenceLayer:
                 (
                     job_data["id"],
                     job_data["name"],
-                    job_data["schedule"],
+                    schedule,
                     json.dumps(job_data["zones"]),
                     job_data.get("priority", 1),
                     job_data.get("enabled", True),

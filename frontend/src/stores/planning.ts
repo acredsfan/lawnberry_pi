@@ -12,12 +12,15 @@ import {
   disableSchedule,
 } from '@/services/planningClient'
 import type { PlanningJob } from '@/services/planningClient'
+import { getMapZones } from '@/services/mapsClient'
+import type { Zone } from '@/services/mapsClient'
 
-export type { PlanningJob }
+export type { PlanningJob, Zone }
 
 export const usePlanningStore = defineStore('planning', () => {
   const jobs = ref<PlanningJob[]>([])
   const schedules = ref<PlanningJob[]>([])
+  const zones = ref<Zone[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -99,6 +102,14 @@ export const usePlanningStore = defineStore('planning', () => {
     }
   }
 
+  async function fetchZones(): Promise<void> {
+    try {
+      zones.value = await getMapZones()
+    } catch (err) {
+      error.value = (err as { message?: string })?.message ?? 'Failed to load zones'
+    }
+  }
+
   // Auto-refresh on relevant WebSocket events
   subscribe('planning.zone.changed', () => void fetchJobs())
   subscribe('planning.schedule.fired', () => void fetchJobs())
@@ -106,6 +117,7 @@ export const usePlanningStore = defineStore('planning', () => {
   return {
     jobs,
     schedules,
+    zones,
     loading,
     error,
     fetchJobs,
@@ -118,5 +130,6 @@ export const usePlanningStore = defineStore('planning', () => {
     deleteSchedule,
     enableScheduleById,
     disableScheduleById,
+    fetchZones,
   }
 })

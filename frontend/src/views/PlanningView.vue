@@ -166,7 +166,7 @@
               <div class="schedule-header">
                 <div class="schedule-info">
                   <h4>{{ schedule.name }}</h4>
-                  <span class="schedule-frequency">{{ formatFrequency(schedule.frequency) }}</span>
+                  <span class="schedule-frequency">{{ schedule.frequency ? formatFrequency(schedule.frequency) : '—' }}</span>
                 </div>
                 <div class="schedule-actions">
                   <button 
@@ -188,7 +188,7 @@
               <div class="schedule-details">
                 <span>Zones: {{ schedule.zones.join(', ') }}</span>
                 <span>Pattern: {{ schedule.pattern }}</span>
-                <span>Next run: {{ formatDateTime(schedule.next_run) }}</span>
+                <span>Next run: {{ schedule.next_run ? formatDateTime(schedule.next_run) : '—' }}</span>
               </div>
             </div>
           </div>
@@ -409,12 +409,42 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, type Ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useApiService } from '@/services/api'
 import { useWebSocket } from '@/services/websocket'
 import { usePreferencesStore } from '@/stores/preferences'
 import { usePlanningStore } from '@/stores/planning'
+
+/** Extended zone shape that adds optional UI-only fields not present in the API type. */
+interface DisplayZone {
+  id: string
+  name?: string | null
+  priority: number | string
+  exclusion_zone?: boolean
+  area_m2?: number
+  cutting_height?: number
+  last_mowed?: string
+}
+
+/** Extended schedule shape with optional fields pending backend support. */
+interface DisplaySchedule {
+  id: string
+  name: string
+  enabled: boolean
+  zones: unknown[]
+  schedule?: string | null
+  status: string
+  priority: number
+  created_at?: string | null
+  last_run?: string | null
+  pattern?: string | null
+  pattern_params?: Record<string, unknown> | null
+  /** Pending backend support — not yet returned by the API. */
+  frequency?: string
+  /** Pending backend support — not yet returned by the API. */
+  next_run?: string
+}
 
 const api = useApiService()
 const { connect, subscribe, unsubscribe } = useWebSocket()
@@ -441,8 +471,14 @@ const tabs = [
   { id: 'patterns', label: 'Patterns' }
 ]
 
-// Data — jobs and schedules come from the planning store
-const { jobs, schedules } = storeToRefs(planningStore)
+// Data — jobs, schedules, and zones come from the planning store
+const { jobs } = storeToRefs(planningStore)
+// Cast to DisplaySchedule[] so templates can access pending fields (frequency, next_run)
+// without TS errors. Those fields are not yet returned by the API (show '—' in template).
+const schedules = storeToRefs(planningStore).schedules as unknown as Ref<DisplaySchedule[]>
+// Cast to DisplayZone[] so templates can access optional UI fields (area_m2, cutting_height, etc.)
+// that may not be present in the API Zone schema.
+const zones = storeToRefs(planningStore).zones as unknown as Ref<DisplayZone[]>
 
 const completedJobs = ref([
   {
@@ -458,33 +494,6 @@ const completedJobs = ref([
     completed_at: '2024-09-26T11:15:00',
     actual_duration: 45,
     area_covered: 150
-  }
-])
-
-const zones = ref([
-  {
-    id: 'front_lawn',
-    name: 'Front Lawn',
-    area_m2: 200,
-    cutting_height: 35,
-    priority: 'high',
-    last_mowed: '2024-09-26T10:00:00'
-  },
-  {
-    id: 'back_garden',
-    name: 'Back Lawn',
-    area_m2: 150,
-    cutting_height: 40,
-    priority: 'medium',
-    last_mowed: '2024-09-25T14:00:00'
-  },
-  {
-    id: 'side_garden',
-    name: 'Side Lawn',
-    area_m2: 75,
-    cutting_height: 30,
-    priority: 'low',
-    last_mowed: '2024-09-24T16:00:00'
   }
 ])
 
@@ -749,11 +758,11 @@ async function deleteSchedule(schedule: any) {
   }
 }
 
-function selectZone(zone: any) {
+function selectZone(zone: DisplayZone) {
   selectedZone.value = selectedZone.value?.id === zone.id ? null : zone
 }
 
-async function mowZone(zone: any) {
+async function mowZone(zone: DisplayZone) {
   try {
     await api.post('/api/v2/planning/jobs', {
       name: `${zone.name} - Quick Mow`,
@@ -773,7 +782,7 @@ function openZoneModal() {
   showStatus('Zone management coming soon', true)
 }
 
-function editZone(zone: any) {
+function editZone(zone: DisplayZone) {
   // Placeholder for zone editing
   showStatus('Zone editing coming soon', true)
 }
@@ -800,8 +809,9 @@ function formatFrequency(frequency: string): string {
   return freqMap[frequency as keyof typeof freqMap] || frequency
 }
 
-function formatPriority(priority: string): string {
-  return priority.charAt(0).toUpperCase() + priority.slice(1)
+function formatPriority(priority: string | number): string {
+  const s = String(priority)
+  return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 function formatDateTime(dateString: string): string {
@@ -863,6 +873,7 @@ onMounted(async () => {
   // Cleanup subscriptions when component is unmounted
   await refreshJobs()
   await refreshSchedules()
+  await planningStore.fetchZones()
 })
 
 onUnmounted(() => {
