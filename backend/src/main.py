@@ -299,6 +299,11 @@ async def lifespan(app: FastAPI):
         jobs_service=_jobs_service_singleton,
         planning_service=_planning_svc,
     )
+    # Wire MissionService and WebSocketHub into JobsService for scheduled dispatch.
+    _jobs_service_singleton.set_mission_service(mission_service)
+    _jobs_service_singleton.set_websocket_hub(websocket_hub)
+    _log.info("JobsService: MissionService and WebSocketHub wired for scheduled dispatch")
+
     # Attach EventStore to services that emit events.
     if hasattr(app.state.runtime.mission_service, "set_event_store"):
         app.state.runtime.mission_service.set_event_store(event_store)

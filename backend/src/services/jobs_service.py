@@ -1,9 +1,15 @@
 import asyncio
 import zoneinfo
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 from ..core.observability import observability
+from ..core.state_manager import get_safety_state
 from ..models.job import Job, JobPriority, JobStatus, JobType
+
+if TYPE_CHECKING:
+    from .mission_service import MissionService
+    from .websocket_hub import WebSocketHub
 
 logger = observability.get_logger(__name__)
 
@@ -17,6 +23,20 @@ class JobsService:
         self.scheduler_running = False
         self._scheduler_task: asyncio.Task | None = None
         self._running_tasks: set[asyncio.Task] = set()
+        self._mission_service: "MissionService | None" = None
+        self._websocket_hub: "WebSocketHub | None" = None
+
+    # ------------------------------------------------------------------
+    # Dependency injection setters
+    # ------------------------------------------------------------------
+
+    def set_mission_service(self, mission_service: "MissionService") -> None:
+        """Wire in MissionService (called from lifespan after both services are up)."""
+        self._mission_service = mission_service
+
+    def set_websocket_hub(self, websocket_hub: "WebSocketHub") -> None:
+        """Wire in WebSocketHub for best-effort event broadcasting."""
+        self._websocket_hub = websocket_hub
 
     def create_job(
         self,
@@ -190,6 +210,9 @@ class JobsService:
                 # Clean up old completed jobs
                 self._cleanup_old_jobs()
 
+                # Dispatch planning jobs from persistence whose next_run has arrived.
+                await self._check_and_dispatch_planning_jobs()
+
                 # Wait before next check
                 await asyncio.sleep(30)  # Check every 30 seconds
 
@@ -208,6 +231,53 @@ class JobsService:
                     metadata={"context": "_scheduler_loop"},
                 )
                 await asyncio.sleep(60)
+
+    async def _check_and_dispatch_planning_jobs(self) -> None:
+        """Load planning jobs from persistence and fire any whose next_run has passed."""
+        if self._mission_service is None:
+            # MissionService not wired yet; nothing to dispatch.
+            return
+
+        try:
+            from ..core.persistence import persistence
+            planning_jobs = persistence.load_planning_jobs()
+        except Exception as exc:
+            logger.warning("Could not load planning jobs for dispatch: %s", exc)
+            return
+
+        now = datetime.now(UTC)
+        for job in planning_jobs:
+            if not job.get("enabled", True):
+                continue
+            next_run_raw = job.get("next_run")
+            if next_run_raw is None:
+                continue
+            try:
+                next_run = datetime.fromisoformat(next_run_raw)
+                # Make timezone-aware if naive
+                if next_run.tzinfo is None:
+                    next_run = next_run.replace(tzinfo=UTC)
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Planning job %r has unparseable next_run=%r — skipping.",
+                    job.get("id"),
+                    next_run_raw,
+                )
+                continue
+
+            if next_run <= now:
+                try:
+                    await self._dispatch_scheduled_job(job)
+                except RuntimeError:
+                    # MissionService guard — should not happen since we check above
+                    raise
+                except Exception as exc:
+                    logger.error(
+                        "Unhandled error dispatching planning job %r: %s",
+                        job.get("id"),
+                        exc,
+                        exc_info=True,
+                    )
 
     def _update_recurring_schedules(self):
         """Update next_run times for recurring jobs."""
@@ -306,6 +376,154 @@ class JobsService:
 
         for job_id in jobs_to_remove:
             del self.jobs[job_id]
+
+    async def _dispatch_scheduled_job(self, job: dict[str, Any]) -> None:
+        """Create and start a mission when a planning-job fires.
+
+        ``job`` is a planning-job dict as returned by
+        ``persistence.load_planning_jobs()`` (fields: id, name, zones, pattern,
+        pattern_params, …).
+
+        Skip conditions:
+          - MissionService not wired  → RuntimeError (programming error)
+          - Emergency stop active     → log and skip
+          - Another mission RUNNING   → log and skip
+          - No zones configured       → log warning and skip
+
+        After a successful create+start the job's ``last_run`` is updated and
+        persisted.  Errors from ``start_mission`` and WS broadcast are caught
+        so the scheduler loop remains stable.
+        """
+        if self._mission_service is None:
+            raise RuntimeError(
+                "JobsService: MissionService is not wired. "
+                "Call set_mission_service() before dispatching scheduled jobs."
+            )
+
+        job_id = job.get("id", "<unknown>")
+        job_name = job.get("name", "<unnamed>")
+
+        # --- Safety guard ---
+        safety = get_safety_state()
+        if safety.get("emergency_stop_active", False):
+            logger.warning(
+                "Scheduled job %r (%s) skipped: emergency stop is active.",
+                job_name,
+                job_id,
+            )
+            return
+
+        # --- Conflict guard: skip if any mission is already RUNNING ---
+        try:
+            missions = await self._mission_service.list_missions()
+        except Exception as exc:
+            logger.error(
+                "Scheduled job %r (%s): could not list missions — skip. Error: %s",
+                job_name,
+                job_id,
+                exc,
+            )
+            return
+
+        mission_statuses = getattr(self._mission_service, "mission_statuses", {})
+        for mission in missions:
+            status = mission_statuses.get(mission.id)
+            if status is not None:
+                from ..models.mission import MissionLifecycleStatus
+                if status.status == MissionLifecycleStatus.RUNNING:
+                    logger.info(
+                        "Scheduled job %r (%s) skipped: mission %s is already RUNNING.",
+                        job_name,
+                        job_id,
+                        mission.id,
+                    )
+                    return
+
+        # --- Zone guard ---
+        zones: list[str] = job.get("zones") or []
+        if not zones:
+            logger.warning(
+                "Scheduled job %r (%s) skipped: no zones configured.",
+                job_name,
+                job_id,
+            )
+            return
+
+        zone_id = zones[0]
+        pattern = job.get("pattern", "parallel")
+        pattern_params: dict = job.get("pattern_params") or {}
+
+        # --- Create mission ---
+        try:
+            mission = await self._mission_service.create_mission(
+                name=f"Scheduled: {job_name}",
+                zone_id=zone_id,
+                pattern=pattern,
+                pattern_params=pattern_params,
+            )
+        except Exception as exc:
+            logger.error(
+                "Scheduled job %r (%s): create_mission failed: %s",
+                job_name,
+                job_id,
+                exc,
+                exc_info=True,
+            )
+            return
+
+        # --- Start mission ---
+        try:
+            await self._mission_service.start_mission(mission.id)
+        except Exception as exc:
+            logger.error(
+                "Scheduled job %r (%s): start_mission(%s) failed: %s",
+                job_name,
+                job_id,
+                mission.id,
+                exc,
+                exc_info=True,
+            )
+
+        # --- Best-effort WS broadcast ---
+        if self._websocket_hub is not None:
+            try:
+                await self._websocket_hub.broadcast_to_topic(
+                    "planning.schedule.fired",
+                    {
+                        "job_id": job_id,
+                        "job_name": job_name,
+                        "mission_id": mission.id,
+                        "zone_id": zone_id,
+                        "fired_at": datetime.now(UTC).isoformat(),
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Scheduled job %r (%s): WS broadcast failed (non-fatal): %s",
+                    job_name,
+                    job_id,
+                    exc,
+                )
+
+        # --- Update last_run and persist ---
+        job["last_run"] = datetime.now(UTC).isoformat()
+        try:
+            from ..core.persistence import persistence
+            persistence.save_planning_job(job)
+        except Exception as exc:
+            logger.warning(
+                "Scheduled job %r (%s): could not persist last_run: %s",
+                job_name,
+                job_id,
+                exc,
+            )
+
+        logger.info(
+            "Scheduled job %r (%s) dispatched → mission %s started.",
+            job_name,
+            job_id,
+            mission.id,
+        )
 
     async def _execute_job(self, job: Job):
         """Execute a job (placeholder implementation)."""
