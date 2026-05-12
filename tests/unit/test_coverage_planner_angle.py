@@ -43,7 +43,7 @@ def _path_length_m(path: list[tuple[float, float]]) -> float:
 # ---------------------------------------------------------------------------
 
 class TestAngle0Unchanged:
-    def test_angle_0_produces_same_result_as_default(self):
+    def test_angle_0_unchanged(self):
         boundary = _square_boundary()
         path_default, rows_default, len_default = plan_coverage(boundary, spacing_m=1.0)
         path_zero, rows_zero, len_zero = plan_coverage(boundary, spacing_m=1.0, angle_deg=0.0)
