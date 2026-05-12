@@ -43,6 +43,7 @@ from .safety.safety_triggers import set_safety_event_handler
 from .safety.safety_validator import validate_on_start
 from .services.ai_service import get_ai_service
 from .services.camera_stream_service import camera_service
+from .services.jobs_service import jobs_service as _jobs_service_singleton
 from .services.mission_service import get_mission_service
 from .services.navigation_service import NavigationService
 from .services.robohat_service import initialize_robohat_service, shutdown_robohat_service
@@ -172,6 +173,12 @@ async def lifespan(app: FastAPI):
         _log.error("Mission recovery timed out after 30 s; continuing startup")
     except Exception:
         _log.exception("Mission recovery failed during startup")
+    # Start the job scheduler (module-level singleton; idempotent if already running).
+    try:
+        await _jobs_service_singleton.start_scheduler()
+        _log.info("JobsService scheduler started")
+    except Exception:
+        _log.exception("JobsService scheduler startup failed")
     try:
         await camera_service.initialize()
         await camera_service.start_streaming()
@@ -278,6 +285,7 @@ async def lifespan(app: FastAPI):
         telemetry_repository=_telemetry_repo,
         event_store=event_store,
         persistence_mode=_persistence_mode.value,
+        jobs_service=_jobs_service_singleton,
     )
     # Attach EventStore to services that emit events.
     if hasattr(app.state.runtime.mission_service, "set_event_store"):
@@ -315,6 +323,11 @@ async def lifespan(app: FastAPI):
     if getattr(app.state, "gps_deg_monitor", None):
         await app.state.gps_deg_monitor.stop()
     await websocket_hub.stop_telemetry_loop()
+    try:
+        await _jobs_service_singleton.stop_scheduler()
+        _log.info("JobsService scheduler stopped")
+    except Exception:
+        _log.exception("JobsService scheduler shutdown failed")
     try:
         await camera_service.shutdown()
     except Exception:

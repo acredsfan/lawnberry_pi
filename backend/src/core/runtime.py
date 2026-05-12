@@ -63,6 +63,9 @@ class RuntimeContext:
     event_store: Any = None          # EventStore; Any to avoid import cycle
     persistence_mode: str = "summary"  # "full" | "summary"
 
+    # Planning / scheduling service
+    jobs_service: Any = None         # JobsService; Any to avoid import cycle
+
     @property
     def sensor_manager(self) -> Any:
         from .state_manager import AppState
