@@ -144,6 +144,19 @@ async def update_mission(
         _raise_mission_http_error(e)
 
 
+@router.delete("/api/v2/missions", status_code=200)
+async def delete_all_missions(
+    runtime: RuntimeContext = Depends(get_runtime),
+):
+    """Hard-delete all missions that are not currently running or paused."""
+    mission_service = runtime.mission_service
+    try:
+        count = await mission_service.delete_all_missions()
+        return {"deleted": count}
+    except Exception as e:
+        _raise_mission_http_error(e)
+
+
 @router.delete("/api/v2/missions/{mission_id}", status_code=204)
 async def delete_mission(
     mission_id: str,

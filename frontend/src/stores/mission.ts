@@ -202,6 +202,24 @@ export const useMissionStore = defineStore('mission', () => {
     }
   };
 
+  const deleteAllMissions = async () => {
+    try {
+      await apiService.delete('/api/v2/missions');
+      missions.value = [];
+      if (currentMission.value) {
+        currentMission.value = null;
+        waypoints.value = [];
+        _persistCurrentMissionId(null);
+        stopStatusPolling();
+        missionStatus.value = 'idle';
+      }
+    } catch (error) {
+      const msg = extractMissionErrorMessage(error, 'Unable to delete all missions.');
+      statusDetail.value = msg;
+      throw error;
+    }
+  };
+
   const handleMissionDeletedWsEvent = async (data: any) => {
     const payload = data?.data ?? data;
     const mission_id = payload?.mission_id;
@@ -445,5 +463,6 @@ export const useMissionStore = defineStore('mission', () => {
     fetchMissions,
     updateMissionById,
     deleteMissionById,
+    deleteAllMissions,
   };
 });

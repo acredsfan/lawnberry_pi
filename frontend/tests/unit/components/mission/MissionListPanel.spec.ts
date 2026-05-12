@@ -57,8 +57,9 @@ describe('MissionListPanel', () => {
     const wrapper = mount(MissionListPanel)
     await flushPromises()
 
-    const selectBtn = wrapper.find('button')
-    await selectBtn.trigger('click')
+    // Use row-scoped selector to avoid dependence on header button order
+    const rowButtons = wrapper.findAll('.mission-row-actions button')
+    await rowButtons[0].trigger('click') // Select
     await flushPromises()
 
     expect(store.currentMission?.id).toBe('m1')
@@ -74,10 +75,10 @@ describe('MissionListPanel', () => {
     const wrapper = mount(MissionListPanel)
     await wrapper.vm.$nextTick()
 
-    const buttons = wrapper.findAll('button')
-    // buttons[0] = Select, buttons[1] = Edit, buttons[2] = Delete
-    expect(buttons[1].attributes('disabled')).toBeDefined()
-    expect(buttons[2].attributes('disabled')).toBeDefined()
+    const rowButtons = wrapper.findAll('.mission-row-actions button')
+    // rowButtons[0] = Select, rowButtons[1] = Edit, rowButtons[2] = Delete
+    expect(rowButtons[1].attributes('disabled')).toBeDefined()
+    expect(rowButtons[2].attributes('disabled')).toBeDefined()
   })
 
   it('Edit and Delete buttons are disabled when active mission is paused', async () => {
@@ -90,9 +91,9 @@ describe('MissionListPanel', () => {
     const wrapper = mount(MissionListPanel)
     await wrapper.vm.$nextTick()
 
-    const buttons = wrapper.findAll('button')
-    expect(buttons[1].attributes('disabled')).toBeDefined()
-    expect(buttons[2].attributes('disabled')).toBeDefined()
+    const rowButtons = wrapper.findAll('.mission-row-actions button')
+    expect(rowButtons[1].attributes('disabled')).toBeDefined()
+    expect(rowButtons[2].attributes('disabled')).toBeDefined()
   })
 
   it('Edit and Delete buttons are enabled when mission is idle', async () => {
@@ -105,9 +106,45 @@ describe('MissionListPanel', () => {
     const wrapper = mount(MissionListPanel)
     await wrapper.vm.$nextTick()
 
-    const buttons = wrapper.findAll('button')
-    expect(buttons[1].attributes('disabled')).toBeUndefined()
-    expect(buttons[2].attributes('disabled')).toBeUndefined()
+    const rowButtons = wrapper.findAll('.mission-row-actions button')
+    expect(rowButtons[1].attributes('disabled')).toBeUndefined()
+    expect(rowButtons[2].attributes('disabled')).toBeUndefined()
+  })
+
+  it('Delete All button is disabled when a mission is running', async () => {
+    const store = useMissionStore()
+    store.missions = [sampleMission]
+    store.currentMission = sampleMission
+    store.missionStatus = 'running'
+    mockedApi.get.mockResolvedValueOnce({ data: [sampleMission] })
+
+    const wrapper = mount(MissionListPanel)
+    await wrapper.vm.$nextTick()
+
+    const deleteAllBtn = wrapper.find('.btn-delete-all')
+    expect(deleteAllBtn.exists()).toBe(true)
+    expect(deleteAllBtn.attributes('disabled')).toBeDefined()
+  })
+
+  it('Delete All button calls deleteAllMissions after confirm', async () => {
+    const store = useMissionStore()
+    store.missions = [sampleMission]
+    store.missionStatus = 'idle'
+    mockedApi.get.mockResolvedValueOnce({ data: [sampleMission] })
+    mockedApi.delete.mockResolvedValueOnce({ data: { deleted: 1 } })
+
+    vi.stubGlobal('confirm', vi.fn(() => true))
+
+    const wrapper = mount(MissionListPanel)
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('.btn-delete-all').trigger('click')
+    await flushPromises()
+
+    expect(mockedApi.delete).toHaveBeenCalledWith('/api/v2/missions')
+    expect(store.missions).toHaveLength(0)
+
+    vi.unstubAllGlobals()
   })
 
   it('active mission row has highlighted class', async () => {

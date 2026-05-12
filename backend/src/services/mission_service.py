@@ -806,6 +806,19 @@ class MissionService:
                 logger.warning("Failed to broadcast mission.updated: %s", exc)
         return mission
 
+    async def delete_all_missions(self) -> int:
+        """Delete all missions that are not running or paused. Returns count deleted."""
+        blocked = [
+            mid for mid, st in self.mission_statuses.items()
+            if st.status in (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED)
+        ]
+        if blocked:
+            raise MissionConflictError("Cannot delete all missions while one is running or paused.")
+        ids = list(self.missions.keys())
+        for mission_id in ids:
+            await self.delete_mission(mission_id)
+        return len(ids)
+
     async def delete_mission(self, mission_id: str) -> None:
         self._require_mission(mission_id)
         status = self._require_status(mission_id)

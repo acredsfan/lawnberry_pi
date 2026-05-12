@@ -1,6 +1,14 @@
 <template>
   <div class="mission-list-panel">
-    <h3 class="panel-title">Saved Missions</h3>
+    <div class="panel-header">
+      <h3 class="panel-title">Saved Missions</h3>
+      <button
+        v-if="missionStore.missions.length > 0"
+        class="btn-sm btn-sm--danger btn-delete-all"
+        :disabled="isAnyMissionActive"
+        @click="deleteAll"
+      >Delete All</button>
+    </div>
     <p v-if="missionStore.missions.length === 0" class="empty-state">No saved missions.</p>
     <ul v-else class="mission-list">
       <li
@@ -32,10 +40,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useMissionStore, type Mission } from '@/stores/mission'
 
 const missionStore = useMissionStore()
+
+const isAnyMissionActive = computed(() =>
+  missionStore.missionStatus === 'running' || missionStore.missionStatus === 'paused'
+)
 
 onMounted(() => {
   missionStore.fetchMissions()
@@ -70,6 +82,15 @@ async function deleteMission(m: Mission) {
     alert('Failed to delete mission.')
   }
 }
+
+async function deleteAll() {
+  if (!confirm(`Delete all ${missionStore.missions.length} saved missions? This cannot be undone.`)) return
+  try {
+    await missionStore.deleteAllMissions()
+  } catch {
+    alert('Failed to delete all missions.')
+  }
+}
 </script>
 
 <style scoped>
@@ -84,11 +105,22 @@ async function deleteMission(m: Mission) {
   min-width: 260px;
   max-width: 320px;
 }
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
 .panel-title {
   margin: 0;
   font-size: 1rem;
   color: #00ffff;
   letter-spacing: 0.04em;
+}
+.btn-delete-all {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  white-space: nowrap;
 }
 .empty-state {
   margin: 0;
