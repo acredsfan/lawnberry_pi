@@ -41,7 +41,6 @@ legacy_router.add_api_route(
 )
 legacy_router.add_api_route("/ws/control", telemetry.websocket_control_handshake, methods=["GET"])
 
-_planning_jobs_store: list[dict[str, Any]] = []
 _planning_job_counter = 0
 
 # Rate-limit for high-frequency drive audit logs (accepted commands only).
@@ -205,9 +204,12 @@ def put_map_locations(locations: MapLocations):
     return _locations_store
 
 
+# TODO(v3): extract PlanningRepository(BaseRepository) once subsystem is end-to-end green - Issue #60
+
+
 @router.get("/planning/jobs")
 async def list_planning_jobs():
-    return [dict(job) for job in _planning_jobs_store]
+    return persistence.load_planning_jobs()
 
 
 @router.post("/planning/jobs")
@@ -221,18 +223,19 @@ async def create_planning_job(payload: dict[str, Any]):
         "zones": list(payload.get("zones") or []),
         "priority": int(payload.get("priority") or 1),
         "enabled": bool(payload.get("enabled", True)),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pending",
     }
-    _planning_jobs_store.append(job)
+    persistence.save_planning_job(job)
     return JSONResponse(status_code=201, content=job)
 
 
 @router.delete("/planning/jobs/{job_id}")
 async def delete_planning_job(job_id: str):
-    for index, job in enumerate(_planning_jobs_store):
-        if job.get("id") == job_id:
-            _planning_jobs_store.pop(index)
-            return JSONResponse(status_code=204, content=None)
-    raise HTTPException(status_code=404, detail="Planning job not found")
+    deleted = persistence.delete_planning_job(job_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Planning job not found")
+    return JSONResponse(status_code=204, content=None)
 
 
 def _normalize_map_provider(provider: Any) -> str:
