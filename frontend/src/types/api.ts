@@ -657,6 +657,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/control/preset-turn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control Preset Turn
+         * @description Execute a closed-loop preset turn using IMU heading feedback.
+         *
+         *     POST /api/v2/control/preset-turn
+         *     Body: {
+         *         "session_id": "<session>",
+         *         "target_degrees": 90.0,    # positive = CW (right), negative = CCW (left)
+         *         "speed": 0.5               # optional, default 0.5
+         *     }
+         *
+         *     Returns:
+         *     {
+         *         "ok": bool,
+         *         "target_degrees": float,
+         *         "actual_degrees": float,
+         *         "duration_ms": int,
+         *         "method": "imu" | "timed"
+         *     }
+         */
+        post: operations["control_preset_turn_api_v2_control_preset_turn_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/control/resume": {
         parameters: {
             query?: never;
@@ -1171,6 +1207,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/map/zones/{zone_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Map Zone */
+        get: operations["get_map_zone_api_v2_map_zones__zone_id__get"];
+        /** Put Map Zone */
+        put: operations["put_map_zone_api_v2_map_zones__zone_id__put"];
+        post?: never;
+        /** Delete Map Zone */
+        delete: operations["delete_map_zone_api_v2_map_zones__zone_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete All Missions
+         * @description Hard-delete all missions that are not currently running or paused.
+         */
+        delete: operations["delete_all_missions_api_v2_missions_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/missions/create": {
         parameters: {
             query?: never;
@@ -1209,6 +1284,34 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions/{mission_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mission
+         * @description Get a mission by ID.
+         */
+        get: operations["get_mission_api_v2_missions__mission_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Mission
+         * @description Hard-delete a mission and its execution state.
+         */
+        delete: operations["delete_mission_api_v2_missions__mission_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Mission
+         * @description Update a mission's name and/or waypoints in place.
+         */
+        patch: operations["update_mission_api_v2_missions__mission_id__patch"];
         trace?: never;
     };
     "/api/v2/missions/{mission_id}/abort": {
@@ -1303,6 +1406,26 @@ export interface paths {
          * @description Get the status of a mission.
          */
         get: operations["get_mission_status_api_v2_missions__mission_id__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions/{run_id}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Summary
+         * @description Return a post-run diagnostic summary for the given run_id.
+         */
+        get: operations["get_run_summary_api_v2_missions__run_id__summary_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1426,6 +1549,98 @@ export interface paths {
         post?: never;
         /** Delete Planning Job */
         delete: operations["delete_planning_job_api_v2_planning_jobs__job_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Schedules
+         * @description List all schedules (same backing store as GET /planning/jobs).
+         */
+        get: operations["list_schedules_api_v2_schedules_get"];
+        put?: never;
+        /**
+         * Create Schedule
+         * @description Create a schedule (same body as POST /planning/jobs).
+         */
+        post: operations["create_schedule_api_v2_schedules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/schedules/{schedule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Schedule
+         * @description Get a single schedule by ID (404 if not found).
+         */
+        get: operations["get_schedule_api_v2_schedules__schedule_id__get"];
+        /**
+         * Update Schedule
+         * @description Update an existing schedule (404 if not found).
+         */
+        put: operations["update_schedule_api_v2_schedules__schedule_id__put"];
+        post?: never;
+        /**
+         * Delete Schedule
+         * @description Delete a schedule (204 No Content; 404 if not found).
+         */
+        delete: operations["delete_schedule_api_v2_schedules__schedule_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/schedules/{schedule_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable Schedule
+         * @description Set enabled=False for the schedule.
+         */
+        post: operations["disable_schedule_api_v2_schedules__schedule_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/schedules/{schedule_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable Schedule
+         * @description Set enabled=True for the schedule.
+         */
+        post: operations["enable_schedule_api_v2_schedules__schedule_id__enable_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2527,8 +2742,16 @@ export interface components {
         MissionCreationRequest: {
             /** Name */
             name: string;
+            /** Pattern */
+            pattern?: string | null;
+            /** Pattern Params */
+            pattern_params?: {
+                [key: string]: unknown;
+            } | null;
             /** Waypoints */
-            waypoints: components["schemas"]["MissionWaypoint"][];
+            waypoints?: components["schemas"]["MissionWaypoint"][] | null;
+            /** Zone Id */
+            zone_id?: string | null;
         };
         /**
          * MissionLifecycleStatus
@@ -2554,6 +2777,13 @@ export interface components {
              * @default 0
              */
             total_waypoints: number;
+        };
+        /** MissionUpdateRequest */
+        MissionUpdateRequest: {
+            /** Name */
+            name?: string | null;
+            /** Waypoints */
+            waypoints?: components["schemas"]["MissionWaypoint"][] | null;
         };
         /**
          * MissionWaypoint
@@ -2633,6 +2863,39 @@ export interface components {
          * @enum {string}
          */
         NavigationMode: "IDLE" | "MANUAL" | "AUTONOMOUS" | "EMERGENCY_STOP";
+        /** PlanningJobResponse */
+        PlanningJobResponse: {
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Last Run */
+            last_run?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Priority
+             * @default 1
+             */
+            priority: number;
+            /** Schedule */
+            schedule?: string | null;
+            /**
+             * Status
+             * @default pending
+             */
+            status: string;
+            /**
+             * Zones
+             * @default []
+             */
+            zones: unknown[];
+        };
         /** Point */
         Point: {
             /** Latitude */
@@ -2702,6 +2965,22 @@ export interface components {
             ntrip: {
                 [key: string]: unknown;
             };
+        };
+        /** RunSummary */
+        RunSummary: {
+            /** Average Pose Quality */
+            average_pose_quality: string | null;
+            /** Blocked Command Count */
+            blocked_command_count: number;
+            /** Heading Alignment Samples */
+            heading_alignment_samples: number;
+            /** Mission Id */
+            mission_id: string | null;
+            /** Run Id */
+            run_id: string;
+            /** Total Distance M */
+            total_distance_m: number;
+            waypoint_inefficiency_metrics: components["schemas"]["WaypointInefficiencyMetrics"];
         };
         /** SafetyStatus */
         SafetyStatus: {
@@ -2867,6 +3146,10 @@ export interface components {
         };
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
@@ -2910,6 +3193,13 @@ export interface components {
             longitude: number;
             /** Waypoint Id */
             waypoint_id: string;
+        };
+        /** WaypointInefficiencyMetrics */
+        WaypointInefficiencyMetrics: {
+            /** Average Approach Distance M */
+            average_approach_distance_m: number | null;
+            /** Waypoint Count */
+            waypoint_count: number;
         };
         /** WaypointList */
         WaypointList: {
@@ -3905,6 +4195,41 @@ export interface operations {
             };
         };
     };
+    control_preset_turn_api_v2_control_preset_turn_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     control_resume_navigation_api_v2_control_resume_post: {
         parameters: {
             query?: never;
@@ -4681,6 +5006,121 @@ export interface operations {
             };
         };
     };
+    get_map_zone_api_v2_map_zones__zone_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                zone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Zone"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_map_zone_api_v2_map_zones__zone_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                zone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Zone"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Zone"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_map_zone_api_v2_map_zones__zone_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                zone_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_all_missions_api_v2_missions_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     create_mission_api_v2_missions_create_post: {
         parameters: {
             query?: never;
@@ -4730,6 +5170,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Mission"][];
+                };
+            };
+        };
+    };
+    get_mission_api_v2_missions__mission_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mission"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_mission_api_v2_missions__mission_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_mission_api_v2_missions__mission_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MissionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mission"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4876,6 +5411,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MissionStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_summary_api_v2_missions__run_id__summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSummary"];
                 };
             };
             /** @description Validation Error */
@@ -5117,6 +5683,220 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_schedules_api_v2_schedules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanningJobResponse"][];
+                };
+            };
+        };
+    };
+    create_schedule_api_v2_schedules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanningJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_schedule_api_v2_schedules__schedule_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanningJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_schedule_api_v2_schedules__schedule_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanningJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_schedule_api_v2_schedules__schedule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_schedule_api_v2_schedules__schedule_id__disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanningJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enable_schedule_api_v2_schedules__schedule_id__enable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanningJobResponse"];
                 };
             };
             /** @description Validation Error */
