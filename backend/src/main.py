@@ -246,6 +246,11 @@ async def lifespan(app: FastAPI):
     # Wire CalibrationRepository into the already-constructed NavigationService singleton.
     nav_service.attach_calibration_repository(_calibration_repo)
 
+    # Wire MapRepository into the already-constructed NavigationService singleton.
+    # This lets _load_boundaries_from_zones() read persisted zones instead of
+    # the deprecated _zones_store global in rest.py.
+    nav_service.attach_map_repository(_map_repo)
+
     # Wire MissionRepository into the already-constructed MissionService singleton.
     get_mission_service(nav_service, mission_repository=_mission_repo)
 

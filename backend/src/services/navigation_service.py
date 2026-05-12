@@ -302,6 +302,9 @@ class NavigationService:
         # When not None and USE_LEGACY_NAVIGATION is not set, position/heading
         # state is owned by LocalizationService and mirrored here.
         self._localization: Any | None = None
+        # MapRepository: injected at lifespan startup via attach_map_repository().
+        # Used by _load_boundaries_from_zones() to read persisted zone definitions.
+        self._map_repository: Any | None = None
 
         # Odometry integrator for dead-reckoning distance/heading estimation.
         self._odometry_integrator = OdometryIntegrator()
@@ -386,6 +389,16 @@ class NavigationService:
         mirrored into NavigationState.
         """
         self._localization = localization_service
+
+    def attach_map_repository(self, map_repository: Any) -> None:
+        """Late-inject a MapRepository for geofence/zone persistence.
+
+        Called during lifespan startup after the repository is constructed.
+        After attachment, _load_boundaries_from_zones() reads zones from the
+        repository rather than the deprecated _zones_store global.
+        """
+        self._map_repository = map_repository
+        logger.info("MapRepository attached to NavigationService")
 
     def _use_localization(self) -> bool:
         """Return True when delegation to LocalizationService is active."""
@@ -1745,29 +1758,57 @@ class NavigationService:
         logger.info(f"Set {len(boundaries)} safety boundaries")
 
     def _load_boundaries_from_zones(self) -> None:
-        """Load mowing-area polygons from the map zones store into safety_boundaries."""
-        try:
-            from ..api import rest as rest_api
+        """Load zone polygons from MapRepository into safety_boundaries and no_go_zones.
 
-            zones = rest_api._zones_store  # list[Zone]
+        Non-exclusion zones are stored as safety_boundaries (the mower must stay inside).
+        Zones with exclusion_zone=True are stored as no_go_zones (the mower avoids these).
+
+        Gracefully handles an empty repository (no zones saved) or a missing repository
+        by leaving the boundary lists unchanged and logging a warning.
+        """
+        if self._map_repository is None:
+            logger.warning(
+                "MapRepository not attached; geofence enforcement disabled for this mission"
+            )
+            return
+
+        try:
+            zones = self._map_repository.list_zones()  # list[dict[str, Any]]
             boundary_polygons: list[list[Position]] = []
+            no_go_polygons: list[list[Position]] = []
+
             for zone in zones:
-                if not getattr(zone, "exclusion_zone", False):
-                    pts = [
-                        Position(latitude=p.latitude, longitude=p.longitude) for p in zone.polygon
-                    ]
-                    if len(pts) >= 3:
-                        boundary_polygons.append(pts)
+                polygon_data = zone.get("polygon", [])
+                pts = [
+                    Position(latitude=float(p["latitude"]), longitude=float(p["longitude"]))
+                    for p in polygon_data
+                ]
+                if len(pts) < 3:
+                    continue
+
+                if zone.get("exclusion_zone", False):
+                    no_go_polygons.append(pts)
+                else:
+                    boundary_polygons.append(pts)
+
+            self.navigation_state.safety_boundaries = boundary_polygons
+            self.navigation_state.no_go_zones = no_go_polygons
+
             if boundary_polygons:
-                self.navigation_state.safety_boundaries = boundary_polygons
-                logger.info("Loaded %d boundary polygon(s) from map zones", len(boundary_polygons))
+                logger.info(
+                    "Loaded %d boundary polygon(s) and %d no-go zone(s) from MapRepository",
+                    len(boundary_polygons),
+                    len(no_go_polygons),
+                )
             else:
                 logger.warning(
-                    "No mowing-area zones defined; geofence enforcement disabled for this mission"
+                    "No mowing-area zones defined in MapRepository; "
+                    "geofence enforcement disabled for this mission"
                 )
         except Exception:
             logger.warning(
-                "Failed to load map zones for geofence; continuing without boundary enforcement",
+                "Failed to load map zones from MapRepository for geofence; "
+                "continuing without boundary enforcement",
                 exc_info=True,
             )
 
