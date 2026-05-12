@@ -1,4 +1,5 @@
 import asyncio
+import zoneinfo
 from datetime import UTC, datetime, timedelta
 
 from ..core.observability import observability
@@ -226,22 +227,70 @@ class JobsService:
                     job.scheduled_for = next_run
                     job.status = JobStatus.PENDING
 
+    @staticmethod
+    def _resolve_dst_gap(candidate: datetime, tz: "zoneinfo.ZoneInfo") -> datetime:
+        """Resolve a candidate datetime that may fall inside a DST gap.
+
+        ``datetime.combine(..., tzinfo=ZoneInfo(...))`` with fold=0 can produce
+        a wall-clock time that does not actually exist during spring-forward
+        transitions.  We detect this by round-tripping through UTC: if the
+        UTC→local conversion yields a different wall-clock time, the original
+        was in the gap and we use the normalised (post-gap) result instead.
+        """
+        utc_equiv = candidate.astimezone(UTC)
+        normalised = utc_equiv.astimezone(tz)
+        # If wall-clock time changed, the original was in a DST gap.
+        if normalised.hour != candidate.hour or normalised.minute != candidate.minute:
+            return normalised
+        return candidate
+
     def _calculate_next_run(self, job: Job, from_time: datetime) -> datetime | None:
-        """Calculate next run time for a job."""
+        """Calculate next run time for a job in the operator's local timezone.
+
+        Uses ``job.schedule.timezone`` (an IANA timezone string, e.g.
+        ``"America/New_York"``) so that DST transitions and day-of-week checks
+        are evaluated in wall-clock time rather than UTC.
+
+        DST gap handling: if ``start_time`` falls in a skipped hour (spring-
+        forward), the returned datetime is advanced to the first valid instant
+        after the gap.  Fold (fall-back) ambiguity is resolved by ``fold=0``
+        (the first occurrence, i.e. still in DST).
+
+        Backward-compatible: existing records that were serialised without a
+        ``timezone`` field get the default ``"UTC"``, so behaviour is unchanged
+        for UTC-only deployments.
+        """
         if not job.schedule or not job.schedule.start_time:
             return None
 
-        # Simple daily scheduling (can be enhanced for more complex patterns)
-        next_date = from_time.date() + timedelta(days=1)
-        next_run = datetime.combine(next_date, job.schedule.start_time)
-        next_run = next_run.replace(tzinfo=UTC)
+        tz = zoneinfo.ZoneInfo(job.schedule.timezone)
 
-        # Check if this day is allowed
+        # Normalise from_time into the operator's local timezone so that
+        # day-of-week comparisons are done in wall-clock terms.
+        now_local = from_time.astimezone(tz)
+        today = now_local.date()
+
+        def _make_candidate(date) -> datetime:
+            """Build a DST-safe local datetime for *date* at start_time."""
+            raw = datetime.combine(date, job.schedule.start_time, tzinfo=tz)
+            return self._resolve_dst_gap(raw, tz)
+
+        candidate = _make_candidate(today)
+
+        # If today's candidate is already in the past (or right now), start
+        # searching from tomorrow.
+        if candidate <= now_local:
+            candidate = _make_candidate(today + timedelta(days=1))
+
+        # Advance day-by-day until we land on an allowed day-of-week.
         if job.schedule.days_of_week:
-            while next_run.weekday() not in job.schedule.days_of_week:
-                next_run += timedelta(days=1)
+            # Safety cap: at most 7 iterations to find the next allowed day.
+            for _ in range(7):
+                if candidate.weekday() in job.schedule.days_of_week:
+                    break
+                candidate = _make_candidate(candidate.date() + timedelta(days=1))
 
-        return next_run
+        return candidate
 
     def _cleanup_old_jobs(self):
         """Remove old completed jobs."""

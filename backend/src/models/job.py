@@ -36,6 +36,7 @@ class SchedulePattern(BaseModel):
     start_time: time | None = None
     duration_minutes: int | None = None
     enabled: bool = True
+    timezone: str = "UTC"  # IANA timezone name, e.g. "America/New_York"
 
 
 class JobProgress(BaseModel):
