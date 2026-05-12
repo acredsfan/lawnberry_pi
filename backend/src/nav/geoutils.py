@@ -79,6 +79,51 @@ def point_in_polygon(lat: float, lon: float, polygon: Iterable[tuple[float, floa
     return inside
 
 
+def latlon_to_enu(
+    lat: float,
+    lon: float,
+    origin_lat: float,
+    origin_lon: float,
+) -> tuple[float, float]:
+    """Convert a WGS84 (lat, lon) point to local ENU meters relative to origin.
+
+    Returns (east_m, north_m).  Accuracy is good for small areas (< a few km).
+    """
+    north_m = (lat - origin_lat) * METERS_PER_DEGREE_LATITUDE
+    meters_per_deg_lon = METERS_PER_DEGREE_LATITUDE * math.cos(math.radians(origin_lat))
+    east_m = (lon - origin_lon) * meters_per_deg_lon
+    return east_m, north_m
+
+
+def enu_to_latlon(
+    east_m: float,
+    north_m: float,
+    origin_lat: float,
+    origin_lon: float,
+) -> tuple[float, float]:
+    """Convert local ENU meters back to WGS84 (lat, lon).
+
+    Inverse of :func:`latlon_to_enu`.
+    """
+    lat = origin_lat + north_m / METERS_PER_DEGREE_LATITUDE
+    meters_per_deg_lon = METERS_PER_DEGREE_LATITUDE * math.cos(math.radians(origin_lat))
+    lon = origin_lon + (east_m / meters_per_deg_lon if abs(meters_per_deg_lon) > 1.0 else 0.0)
+    return lat, lon
+
+
+def rotate_enu(east_m: float, north_m: float, angle_deg: float) -> tuple[float, float]:
+    """Rotate an ENU point (east_m, north_m) around the origin by angle_deg.
+
+    Positive angle rotates counter-clockwise in the ENU plane (east=x, north=y).
+    """
+    theta = math.radians(angle_deg)
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+    new_east = east_m * cos_t - north_m * sin_t
+    new_north = east_m * sin_t + north_m * cos_t
+    return new_east, new_north
+
+
 def _on_segment(px: float, py: float, x1: float, y1: float, x2: float, y2: float) -> bool:
     """Return True if P lies on segment (X1,Y1)-(X2,Y2) within epsilon."""
     eps = 1e-9
