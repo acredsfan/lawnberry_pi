@@ -41,8 +41,6 @@ legacy_router.add_api_route(
 )
 legacy_router.add_api_route("/ws/control", telemetry.websocket_control_handshake, methods=["GET"])
 
-_planning_job_counter = 0
-
 # Rate-limit for high-frequency drive audit logs (accepted commands only).
 # Blocked / fault logs are always written synchronously regardless of this gate.
 _last_drive_audit_at: float = 0.0
@@ -214,16 +212,16 @@ async def list_planning_jobs():
 
 @router.post("/planning/jobs")
 async def create_planning_job(payload: dict[str, Any]):
-    global _planning_job_counter
-    _planning_job_counter += 1
+    job_id = str(uuid.uuid4())
     job = {
-        "id": f"planning-{_planning_job_counter:04d}",
-        "name": str(payload.get("name") or f"Planning Job {_planning_job_counter}"),
+        "id": job_id,
+        "name": str(payload.get("name") or f"Planning Job {job_id[:8]}"),
         "schedule": payload.get("schedule"),
         "zones": list(payload.get("zones") or []),
         "priority": int(payload.get("priority") or 1),
         "enabled": bool(payload.get("enabled", True)),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "last_run": None,
         "status": "pending",
     }
     persistence.save_planning_job(job)

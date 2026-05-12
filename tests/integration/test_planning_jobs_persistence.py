@@ -42,10 +42,6 @@ def test_create_job_survives_app_restart():
         job_id = resp.json()["id"]
         assert job_id
 
-    # Simulate process restart: reset the module-level counter.
-    # The job must survive this reset because it is backed by SQLite, not an
-    # in-memory list.  (The old implementation would have lost the job here.)
-
     # Second client — simulates app restart; job must still be present
     with TestClient(app) as client2:
         resp2 = client2.get("/api/v2/planning/jobs")
