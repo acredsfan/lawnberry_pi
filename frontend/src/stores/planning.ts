@@ -5,6 +5,9 @@ import {
   getPlanningJobs,
   createPlanningJob,
   deletePlanningJob,
+  getSchedules,
+  createSchedule as apiCreateSchedule,
+  deleteSchedule as apiDeleteSchedule,
   enableSchedule,
   disableSchedule,
 } from '@/services/planningClient'
@@ -14,6 +17,7 @@ export type { PlanningJob }
 
 export const usePlanningStore = defineStore('planning', () => {
   const jobs = ref<PlanningJob[]>([])
+  const schedules = ref<PlanningJob[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -58,12 +62,50 @@ export const usePlanningStore = defineStore('planning', () => {
     }
   }
 
+  // ---- Schedule actions (/api/v2/schedules) ----
+
+  async function fetchSchedules(): Promise<void> {
+    try {
+      schedules.value = await getSchedules()
+    } catch (err) {
+      error.value = (err as { message?: string })?.message ?? 'Failed to load schedules'
+    }
+  }
+
+  async function createSchedule(data: Record<string, unknown>): Promise<PlanningJob> {
+    const schedule = await apiCreateSchedule(data)
+    schedules.value.push(schedule)
+    return schedule
+  }
+
+  async function deleteSchedule(id: string): Promise<void> {
+    await apiDeleteSchedule(id)
+    schedules.value = schedules.value.filter(s => s.id !== id)
+  }
+
+  async function enableScheduleById(id: string): Promise<void> {
+    const updated = await enableSchedule(id)
+    const idx = schedules.value.findIndex(s => s.id === id)
+    if (idx !== -1) {
+      schedules.value[idx] = updated
+    }
+  }
+
+  async function disableScheduleById(id: string): Promise<void> {
+    const updated = await disableSchedule(id)
+    const idx = schedules.value.findIndex(s => s.id === id)
+    if (idx !== -1) {
+      schedules.value[idx] = updated
+    }
+  }
+
   // Auto-refresh on relevant WebSocket events
   subscribe('planning.zone.changed', () => void fetchJobs())
   subscribe('planning.schedule.fired', () => void fetchJobs())
 
   return {
     jobs,
+    schedules,
     loading,
     error,
     fetchJobs,
@@ -71,5 +113,10 @@ export const usePlanningStore = defineStore('planning', () => {
     deleteJob,
     enableJob,
     disableJob,
+    fetchSchedules,
+    createSchedule,
+    deleteSchedule,
+    enableScheduleById,
+    disableScheduleById,
   }
 })

@@ -414,10 +414,12 @@ import { storeToRefs } from 'pinia'
 import { useApiService } from '@/services/api'
 import { useWebSocket } from '@/services/websocket'
 import { usePreferencesStore } from '@/stores/preferences'
+import { usePlanningStore } from '@/stores/planning'
 
 const api = useApiService()
-const { connected, connect, subscribe, unsubscribe } = useWebSocket()
+const { connect, subscribe, unsubscribe } = useWebSocket()
 const preferences = usePreferencesStore()
+const planningStore = usePlanningStore()
 
 preferences.ensureInitialized()
 const { unitSystem } = storeToRefs(preferences)
@@ -439,29 +441,8 @@ const tabs = [
   { id: 'patterns', label: 'Patterns' }
 ]
 
-// Data
-const jobs = ref([
-  {
-    id: 1,
-    name: 'Front Lawn Weekly',
-    status: 'running',
-    zones: ['Front Lawn', 'Side Lawn'],
-    pattern: 'parallel',
-    progress: 45,
-    estimated_remaining: 25,
-    scheduled_start: '2024-09-28T10:00:00'
-  },
-  {
-    id: 2,
-    name: 'Back Lawn Maintenance',
-    status: 'scheduled',
-    zones: ['Back Lawn'],
-    pattern: 'spiral',
-    progress: 0,
-    estimated_remaining: null,
-    scheduled_start: '2024-09-28T14:00:00'
-  }
-])
+// Data — jobs and schedules come from the planning store
+const { jobs, schedules } = storeToRefs(planningStore)
 
 const completedJobs = ref([
   {
@@ -477,27 +458,6 @@ const completedJobs = ref([
     completed_at: '2024-09-26T11:15:00',
     actual_duration: 45,
     area_covered: 150
-  }
-])
-
-const schedules = ref([
-  {
-    id: 1,
-    name: 'Weekly Full Property',
-    frequency: 'weekly',
-    zones: ['Front Lawn', 'Back Lawn', 'Side Lawn'],
-    pattern: 'parallel',
-    enabled: true,
-    next_run: '2024-09-30T10:00:00'
-  },
-  {
-    id: 2,
-    name: 'Bi-weekly Edge Trim',
-    frequency: 'biweekly',
-    zones: ['Perimeter'],
-    pattern: 'edge',
-    enabled: false,
-    next_run: '2024-10-05T09:00:00'
   }
 ])
 
@@ -707,21 +667,11 @@ async function saveSchedule() {
 }
 
 async function refreshJobs() {
-  try {
-    const response = await api.get('/api/v2/planning/jobs')
-    jobs.value = Array.isArray(response.data) ? response.data : (response.data.active || [])
-  } catch (error) {
-    console.error('Failed to refresh jobs:', error)
-  }
+  await planningStore.fetchJobs()
 }
 
 async function refreshSchedules() {
-  try {
-    const response = await api.get('/api/v2/schedules')
-    schedules.value = response.data || []
-  } catch (error) {
-    console.error('Failed to refresh schedules:', error)
-  }
+  await planningStore.fetchSchedules()
 }
 
 async function startJob(job: any) {
@@ -759,9 +709,7 @@ async function cancelJob(job: any) {
   if (!confirm(`Cancel job "${job.name}"?`)) return
 
   try {
-    await api.delete(`/api/v2/planning/jobs/${job.id}`)
-    const index = jobs.value.findIndex(j => j.id === job.id)
-    if (index > -1) jobs.value.splice(index, 1)
+    await planningStore.deleteJob(String(job.id))
     showStatus('Job cancelled', true)
   } catch (error) {
     showStatus('Failed to cancel job', false)
@@ -770,13 +718,13 @@ async function cancelJob(job: any) {
 
 async function toggleSchedule(schedule: any) {
   try {
-    await api.put(`/api/v2/schedules/${schedule.id}`, {
-      ...schedule,
-      enabled: !schedule.enabled
-    })
-    schedule.enabled = !schedule.enabled
+    if (schedule.enabled) {
+      await planningStore.disableScheduleById(String(schedule.id))
+    } else {
+      await planningStore.enableScheduleById(String(schedule.id))
+    }
     showStatus(
-      schedule.enabled ? 'Schedule enabled' : 'Schedule disabled', 
+      schedule.enabled ? 'Schedule disabled' : 'Schedule enabled',
       true
     )
   } catch (error) {
@@ -792,11 +740,9 @@ function editSchedule(schedule: any) {
 
 async function deleteSchedule(schedule: any) {
   if (!confirm(`Delete schedule "${schedule.name}"?`)) return
-  
+
   try {
-    await api.delete(`/api/v2/schedules/${schedule.id}`)
-    const index = schedules.value.findIndex(s => s.id === schedule.id)
-    if (index > -1) schedules.value.splice(index, 1)
+    await planningStore.deleteSchedule(String(schedule.id))
     showStatus('Schedule deleted', true)
   } catch (error) {
     showStatus('Failed to delete schedule', false)
