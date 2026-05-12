@@ -107,31 +107,17 @@ class MissionService:
         return max(0, min(int(current_waypoint_index), len(mission.waypoints) - 1))
 
     def _persist_mission(self, mission: Mission, *, planning_intent: dict | None = None) -> None:
-        if self._mission_repo is not None:
-            self._mission_repo.save_mission(
-                {
-                    "id": mission.id,
-                    "name": mission.name,
-                    "waypoints": [waypoint.model_dump() for waypoint in mission.waypoints],
-                    "created_at": mission.created_at,
-                    "planning_intent": planning_intent,
-                }
-            )
-            return
-        with persistence.get_connection() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO missions (id, name, waypoints_json, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    mission.id,
-                    mission.name,
-                    json.dumps([waypoint.model_dump() for waypoint in mission.waypoints]),
-                    mission.created_at,
-                ),
-            )
-            conn.commit()
+        if self._mission_repo is None:
+            raise RuntimeError("MissionRepository is required but was not injected")
+        self._mission_repo.save_mission(
+            {
+                "id": mission.id,
+                "name": mission.name,
+                "waypoints": [waypoint.model_dump() for waypoint in mission.waypoints],
+                "created_at": mission.created_at,
+                "planning_intent": planning_intent,
+            }
+        )
 
     def _persist_mission_status(self, mission_id: str) -> None:
         status = self.mission_statuses.get(mission_id)

@@ -6,6 +6,7 @@ import backend.src.services.mission_service as mission_service_module
 from backend.src.core.persistence import PersistenceLayer
 from backend.src.models import NavigationMode
 from backend.src.models.mission import MissionLifecycleStatus, MissionWaypoint
+from backend.src.repositories.mission_repository import MissionRepository
 from backend.src.services.mission_service import MissionService
 
 
@@ -62,15 +63,21 @@ def reset_singletons(tmp_path, monkeypatch):
     mission_service_module.persistence = original_persistence
 
 
+@pytest.fixture()
+def mission_repo(tmp_path) -> MissionRepository:
+    """A MissionRepository backed by the same DB as the monkeypatched persistence layer."""
+    return MissionRepository(db_path=tmp_path / "lawnberry.db")
+
+
 @pytest.mark.asyncio
-async def test_mission_metadata_survives_restart():
-    service = MissionService(DummyNavigationService())
+async def test_mission_metadata_survives_restart(mission_repo):
+    service = MissionService(DummyNavigationService(), mission_repository=mission_repo)
     mission = await service.create_mission(
         "Persistent mission",
         [MissionWaypoint(lat=0.1, lon=0.1, blade_on=False, speed=50)],
     )
 
-    restarted = MissionService(DummyNavigationService())
+    restarted = MissionService(DummyNavigationService(), mission_repository=mission_repo)
     await restarted.recover_persisted_missions()
 
     assert mission.id in restarted.missions
@@ -79,10 +86,10 @@ async def test_mission_metadata_survives_restart():
 
 
 @pytest.mark.asyncio
-async def test_running_mission_recovers_as_paused_after_restart():
+async def test_running_mission_recovers_as_paused_after_restart(mission_repo):
     nav = DummyNavigationService()
     nav._mission_gate = asyncio.Event()
-    service = MissionService(nav)
+    service = MissionService(nav, mission_repository=mission_repo)
     mission = await service.create_mission(
         "Recover running",
         [MissionWaypoint(lat=0.1, lon=0.1, blade_on=False, speed=50)],
@@ -92,34 +99,36 @@ async def test_running_mission_recovers_as_paused_after_restart():
     await asyncio.sleep(0)
     task = service.mission_tasks[mission.id]
 
-    with mission_service_module.persistence.get_connection() as conn:
-        conn.execute(
-            """
-            UPDATE mission_execution_state
-            SET status = ?, current_waypoint_index = ?, completion_percentage = ?, total_waypoints = ?, detail = ?
-            WHERE mission_id = ?
-            """,
-            (MissionLifecycleStatus.RUNNING.value, 0, 0.0, 1, None, mission.id),
-        )
-        conn.commit()
+    # Force execution state to RUNNING in the repo so recovery can see it.
+    mission_repo.save_execution_state(
+        {
+            "mission_id": mission.id,
+            "status": MissionLifecycleStatus.RUNNING.value,
+            "current_waypoint_index": 0,
+            "completion_percentage": 0.0,
+            "total_waypoints": 1,
+            "detail": None,
+        }
+    )
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    with mission_service_module.persistence.get_connection() as conn:
-        conn.execute(
-            """
-            UPDATE mission_execution_state
-            SET status = ?, current_waypoint_index = ?, completion_percentage = ?, total_waypoints = ?, detail = ?
-            WHERE mission_id = ?
-            """,
-            (MissionLifecycleStatus.RUNNING.value, 0, 0.0, 1, None, mission.id),
-        )
-        conn.commit()
+    # Ensure DB still shows RUNNING after cancellation (simulate crash).
+    mission_repo.save_execution_state(
+        {
+            "mission_id": mission.id,
+            "status": MissionLifecycleStatus.RUNNING.value,
+            "current_waypoint_index": 0,
+            "completion_percentage": 0.0,
+            "total_waypoints": 1,
+            "detail": None,
+        }
+    )
 
     restarted_nav = DummyNavigationService()
-    restarted = MissionService(restarted_nav)
+    restarted = MissionService(restarted_nav, mission_repository=mission_repo)
     await restarted.recover_persisted_missions()
 
     recovered_status = restarted.mission_statuses[mission.id]
@@ -129,10 +138,10 @@ async def test_running_mission_recovers_as_paused_after_restart():
 
 
 @pytest.mark.asyncio
-async def test_recovered_paused_mission_resumes_with_new_task():
+async def test_recovered_paused_mission_resumes_with_new_task(mission_repo):
     nav = DummyNavigationService()
     nav._mission_gate = asyncio.Event()
-    service = MissionService(nav)
+    service = MissionService(nav, mission_repository=mission_repo)
     mission = await service.create_mission(
         "Recover paused",
         [
@@ -147,7 +156,7 @@ async def test_recovered_paused_mission_resumes_with_new_task():
 
     restarted_nav = DummyNavigationService()
     restarted_nav._mission_gate = asyncio.Event()
-    restarted = MissionService(restarted_nav)
+    restarted = MissionService(restarted_nav, mission_repository=mission_repo)
     await restarted.recover_persisted_missions()
     await restarted.resume_mission(mission.id)
 
@@ -160,8 +169,8 @@ async def test_recovered_paused_mission_resumes_with_new_task():
 
 
 @pytest.mark.asyncio
-async def test_recovered_paused_status_preserves_waypoint_index_before_resume():
-    service = MissionService(DummyNavigationService())
+async def test_recovered_paused_status_preserves_waypoint_index_before_resume(mission_repo):
+    service = MissionService(DummyNavigationService(), mission_repository=mission_repo)
     mission = await service.create_mission(
         "Paused status preserved",
         [
@@ -174,7 +183,7 @@ async def test_recovered_paused_status_preserves_waypoint_index_before_resume():
     service.mission_statuses[mission.id].current_waypoint_index = 1
     service._persist_mission_status(mission.id)
 
-    restarted = MissionService(DummyNavigationService())
+    restarted = MissionService(DummyNavigationService(), mission_repository=mission_repo)
     await restarted.recover_persisted_missions()
 
     recovered_status = await restarted.get_mission_status(mission.id)
@@ -184,8 +193,8 @@ async def test_recovered_paused_status_preserves_waypoint_index_before_resume():
 
 
 @pytest.mark.asyncio
-async def test_recovery_clamps_invalid_waypoint_index():
-    service = MissionService(DummyNavigationService())
+async def test_recovery_clamps_invalid_waypoint_index(mission_repo):
+    service = MissionService(DummyNavigationService(), mission_repository=mission_repo)
     mission = await service.create_mission(
         "Clamp index",
         [
@@ -194,26 +203,27 @@ async def test_recovery_clamps_invalid_waypoint_index():
         ],
     )
 
-    with mission_service_module.persistence.get_connection() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO mission_execution_state (
-                mission_id, status, current_waypoint_index, completion_percentage, total_waypoints, detail, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """,
-            (mission.id, MissionLifecycleStatus.PAUSED.value, 99, 0.0, 2, None),
-        )
-        conn.commit()
+    # Inject an out-of-range waypoint index directly via the repo.
+    mission_repo.save_execution_state(
+        {
+            "mission_id": mission.id,
+            "status": MissionLifecycleStatus.PAUSED.value,
+            "current_waypoint_index": 99,
+            "completion_percentage": 0.0,
+            "total_waypoints": 2,
+            "detail": None,
+        }
+    )
 
-    restarted = MissionService(DummyNavigationService())
+    restarted = MissionService(DummyNavigationService(), mission_repository=mission_repo)
     await restarted.recover_persisted_missions()
 
     assert restarted.mission_statuses[mission.id].current_waypoint_index == 1
 
 
 @pytest.mark.asyncio
-async def test_recovery_escalates_to_failed_when_stop_cannot_be_confirmed():
-    service = MissionService(DummyNavigationService())
+async def test_recovery_escalates_to_failed_when_stop_cannot_be_confirmed(mission_repo):
+    service = MissionService(DummyNavigationService(), mission_repository=mission_repo)
     mission = await service.create_mission(
         "Unsafe recovery",
         [MissionWaypoint(lat=0.1, lon=0.1, blade_on=False, speed=50)],
@@ -223,7 +233,7 @@ async def test_recovery_escalates_to_failed_when_stop_cannot_be_confirmed():
 
     restarted_nav = DummyNavigationService()
     restarted_nav.stop_navigation_results = [False]
-    restarted = MissionService(restarted_nav)
+    restarted = MissionService(restarted_nav, mission_repository=mission_repo)
     await restarted.recover_persisted_missions()
 
     recovered_status = restarted.mission_statuses[mission.id]
