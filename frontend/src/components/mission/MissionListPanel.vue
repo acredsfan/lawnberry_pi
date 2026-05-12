@@ -3,13 +3,29 @@
     <div class="panel-header">
       <h3 class="panel-title">Saved Missions</h3>
       <button
-        v-if="missionStore.missions.length > 0"
+        v-if="!missionStore.missionsLoading && !missionStore.missionsError && missionStore.missions.length > 0"
         class="btn-sm btn-sm--danger btn-delete-all"
         :disabled="isAnyMissionActive"
         @click="deleteAll"
       >Delete All</button>
     </div>
-    <p v-if="missionStore.missions.length === 0" class="empty-state">No saved missions.</p>
+
+    <!-- Loading -->
+    <div v-if="missionStore.missionsLoading" class="status-state">
+      <span class="spinner" aria-label="Loading missions" />
+      <span class="status-text">Loading missions…</span>
+    </div>
+
+    <!-- Error -->
+    <div v-else-if="missionStore.missionsError" class="status-state status-state--error">
+      <span class="status-text">{{ missionStore.missionsError }}</span>
+      <button class="btn-sm btn-retry" @click="missionStore.fetchMissions()">Retry</button>
+    </div>
+
+    <!-- Empty -->
+    <p v-else-if="missionStore.missions.length === 0" class="empty-state">No saved missions.</p>
+
+    <!-- List -->
     <ul v-else class="mission-list">
       <li
         v-for="m in missionStore.missions"
@@ -40,10 +56,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useMissionStore, type Mission } from '@/stores/mission'
+import { useAuthStore } from '@/stores/auth'
 
 const missionStore = useMissionStore()
+const authStore = useAuthStore()
 
 const isAnyMissionActive = computed(() =>
   missionStore.missionStatus === 'running' || missionStore.missionStatus === 'paused'
@@ -52,6 +70,12 @@ const isAnyMissionActive = computed(() =>
 onMounted(() => {
   missionStore.fetchMissions()
 })
+
+// Re-fetch after login so the list populates without a page reload
+watch(
+  () => authStore.isAuthenticated,
+  (authed) => { if (authed) missionStore.fetchMissions() }
+)
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString()
@@ -121,6 +145,46 @@ async function deleteAll() {
   font-size: 0.75rem;
   padding: 0.2rem 0.5rem;
   white-space: nowrap;
+}
+.status-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+.status-state--error {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.status-text {
+  font-size: 0.875rem;
+  color: rgba(255,255,255,0.55);
+}
+.status-state--error .status-text {
+  color: #ff6b6b;
+}
+.btn-retry {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.75rem;
+  border-color: rgba(0,255,255,0.3);
+  color: #00ffff;
+}
+.btn-retry:hover {
+  background: rgba(0,255,255,0.08);
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0,255,255,0.2);
+  border-top-color: #00ffff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
 }
 .empty-state {
   margin: 0;

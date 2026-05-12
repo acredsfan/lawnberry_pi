@@ -65,6 +65,8 @@ export const useMissionStore = defineStore('mission', () => {
   const statusDetail = ref<string | null>(null);
   const pathTrace = ref<[number, number][]>([]);
   const missions = ref<Mission[]>([]);
+  const missionsLoading = ref(false);
+  const missionsError = ref<string | null>(null);
   const isRecoveredPause = computed(() => {
     return missionStatus.value === 'paused' && /recover/i.test(statusDetail.value ?? '');
   });
@@ -154,11 +156,15 @@ export const useMissionStore = defineStore('mission', () => {
   };
 
   const fetchMissions = async () => {
+    missionsLoading.value = true;
+    missionsError.value = null;
     try {
       const response = await apiService.get<Mission[]>('/api/v2/missions/list');
       missions.value = response.data;
     } catch (error) {
-      console.error('Error fetching missions:', error);
+      missionsError.value = extractMissionErrorMessage(error, 'Failed to load missions.');
+    } finally {
+      missionsLoading.value = false;
     }
   };
 
@@ -259,7 +265,7 @@ export const useMissionStore = defineStore('mission', () => {
     subscribe('mission.updated', handleMissionUpdatedWsEvent);
 
     // Pre-populate missions[] so isSavedMission is correct on cold-start / page refresh
-    fetchMissions().catch(() => {}); // non-blocking, best-effort
+    void fetchMissions(); // non-blocking; errors surface via missionsError ref
 
     const savedId = localStorage.getItem(CURRENT_MISSION_ID_KEY);
     if (!savedId) return;
@@ -444,6 +450,8 @@ export const useMissionStore = defineStore('mission', () => {
     isRecoveredPause,
     pathTrace,
     missions,
+    missionsLoading,
+    missionsError,
     addWaypoint,
     removeWaypoint,
     updateWaypoint,
