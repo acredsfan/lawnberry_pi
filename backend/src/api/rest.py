@@ -103,19 +103,17 @@ class Zone(BaseModel):
 _zones_last_modified: datetime = datetime.now(timezone.utc)
 
 
-def _emit_zone_changed(hub, zone_id: str, action: str) -> None:
+async def _emit_zone_changed(hub, zone_id: str, action: str) -> None:
     """Best-effort WS broadcast for zone mutations — never raises to caller."""
     if hub is None:
         return
     try:
-        asyncio.create_task(
-            hub.broadcast_to_topic(
-                "planning.zone.changed",
-                {"zone_id": zone_id, "action": action},
-            )
+        await hub.broadcast_to_topic(
+            "planning.zone.changed",
+            {"zone_id": zone_id, "action": action},
         )
     except Exception:
-        # No running event loop (e.g. sync test context) — skip silently
+        # Hub unavailable or closed — skip silently
         pass
 
 
@@ -151,7 +149,7 @@ def get_map_zones(request: Request, runtime: RuntimeContext = Depends(get_runtim
 
 
 @router.post("/map/zones", response_model=list[Zone])
-def post_map_zones(zones: list[Zone], runtime: RuntimeContext = Depends(get_runtime)):
+async def post_map_zones(zones: list[Zone], runtime: RuntimeContext = Depends(get_runtime)):
     global _zones_last_modified
     repo = getattr(runtime, "map_repository", None)
     zone_dicts = [z.model_dump(mode="json") for z in zones]
@@ -160,7 +158,7 @@ def post_map_zones(zones: list[Zone], runtime: RuntimeContext = Depends(get_runt
     _zones_last_modified = datetime.now(timezone.utc)
     hub = getattr(runtime, "websocket_hub", None)
     for z in zones:
-        _emit_zone_changed(hub, z.id, "bulk_replace")
+        await _emit_zone_changed(hub, z.id, "bulk_replace")
     return zone_dicts
 
 
@@ -176,7 +174,7 @@ def get_map_zone(zone_id: str, runtime: RuntimeContext = Depends(get_runtime)):
 
 
 @router.put("/map/zones/{zone_id}", response_model=Zone)
-def put_map_zone(zone_id: str, zone: Zone, runtime: RuntimeContext = Depends(get_runtime)):
+async def put_map_zone(zone_id: str, zone: Zone, runtime: RuntimeContext = Depends(get_runtime)):
     global _zones_last_modified
     if zone.id != zone_id:
         raise HTTPException(
@@ -195,12 +193,12 @@ def put_map_zone(zone_id: str, zone: Zone, runtime: RuntimeContext = Depends(get
         raise HTTPException(status_code=404, detail="Zone not found")
     _zones_last_modified = datetime.now(timezone.utc)
     hub = getattr(runtime, "websocket_hub", None)
-    _emit_zone_changed(hub, zone_id, "updated")
+    await _emit_zone_changed(hub, zone_id, "updated")
     return zone_dict
 
 
 @router.delete("/map/zones/{zone_id}", status_code=204)
-def delete_map_zone(zone_id: str, runtime: RuntimeContext = Depends(get_runtime)):
+async def delete_map_zone(zone_id: str, runtime: RuntimeContext = Depends(get_runtime)):
     global _zones_last_modified
     repo = getattr(runtime, "map_repository", None)
     if repo is None:
@@ -210,7 +208,7 @@ def delete_map_zone(zone_id: str, runtime: RuntimeContext = Depends(get_runtime)
         raise HTTPException(status_code=404, detail="Zone not found")
     _zones_last_modified = datetime.now(timezone.utc)
     hub = getattr(runtime, "websocket_hub", None)
-    _emit_zone_changed(hub, zone_id, "deleted")
+    await _emit_zone_changed(hub, zone_id, "deleted")
     return Response(status_code=204)
 
 

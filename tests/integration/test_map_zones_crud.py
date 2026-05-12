@@ -10,7 +10,6 @@ Tests:
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -258,10 +257,8 @@ async def test_zone_change_emits_ws_event_on_post(ws_hub: MagicMock):
         resp = await _post_zones(client, _zone_payload(zone_id, "Test Zone"))
         assert resp.status_code == 200
 
-    # Allow the asyncio.create_task to run
-    await asyncio.sleep(0)
-
-    ws_hub.broadcast_to_topic.assert_called()
+    # broadcast_to_topic is awaited directly in the async handler — no sleep needed
+    ws_hub.broadcast_to_topic.assert_awaited()
     call_args = ws_hub.broadcast_to_topic.call_args
     assert call_args[0][0] == "planning.zone.changed"
 
@@ -281,8 +278,7 @@ async def test_zone_change_emits_ws_event_on_put(ws_hub: MagicMock):
         )
         assert resp.status_code == 200
 
-    await asyncio.sleep(0)
-    ws_hub.broadcast_to_topic.assert_called()
+    ws_hub.broadcast_to_topic.assert_awaited()
     assert ws_hub.broadcast_to_topic.call_args[0][0] == "planning.zone.changed"
 
 
@@ -299,8 +295,7 @@ async def test_zone_change_emits_ws_event_on_delete(ws_hub: MagicMock):
         resp = await client.delete(f"/api/v2/map/zones/{zone_id}")
         assert resp.status_code == 204
 
-    await asyncio.sleep(0)
-    ws_hub.broadcast_to_topic.assert_called()
+    ws_hub.broadcast_to_topic.assert_awaited()
     assert ws_hub.broadcast_to_topic.call_args[0][0] == "planning.zone.changed"
 
 
