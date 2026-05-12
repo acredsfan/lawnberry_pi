@@ -11,7 +11,7 @@ export interface WebSocketMessage {
 export class WebSocketService {
   private ws: WebSocket | null = null
   private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
+  private maxReconnectAttempts = -1
   private reconnectDelay = 1000
   private subscriptions = new Set<string>()
   private listeners = new Map<string, Array<(data: any) => void>>()
@@ -228,7 +228,7 @@ export class WebSocketService {
     }
     if (this.maxReconnectAttempts < 0 || this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++
-      const backoff = this.reconnectDelay * this.reconnectAttempts
+      const backoff = Math.min(this.reconnectDelay * this.reconnectAttempts, 30000)
       const jitter = Math.floor(Math.random() * 250)
       // Throttle reconnection log chatter
       try {
