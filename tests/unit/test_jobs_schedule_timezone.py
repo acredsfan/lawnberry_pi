@@ -219,3 +219,31 @@ def test_next_run_already_past_today_schedules_next_week():
     )
     assert next_run_local.hour == 8
     assert next_run_local.minute == 0
+
+
+# ---------------------------------------------------------------------------
+# T6 — Invalid timezone string is rejected at model construction
+# ---------------------------------------------------------------------------
+
+def test_invalid_timezone_rejected():
+    """SchedulePattern must raise ValueError for an unknown timezone string."""
+    with pytest.raises(ValueError, match="Unknown timezone"):
+        SchedulePattern(
+            days_of_week=[0],
+            start_time=time(8, 0),
+            timezone="Not/ATimezone",
+        )
+
+
+# ---------------------------------------------------------------------------
+# T7 — days_of_week out of range is rejected at model construction
+# ---------------------------------------------------------------------------
+
+def test_days_of_week_out_of_range_rejected():
+    """SchedulePattern must reject days_of_week values outside 0–6."""
+    with pytest.raises(ValueError, match="days_of_week"):
+        SchedulePattern(
+            days_of_week=[8],
+            start_time=time(8, 0),
+            timezone="UTC",
+        )

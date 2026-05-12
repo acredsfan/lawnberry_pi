@@ -1,8 +1,9 @@
+import zoneinfo
 from datetime import UTC, datetime, time
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class JobStatus(str, Enum):
@@ -37,6 +38,25 @@ class SchedulePattern(BaseModel):
     duration_minutes: int | None = None
     enabled: bool = True
     timezone: str = "UTC"  # IANA timezone name, e.g. "America/New_York"
+
+    @field_validator("timezone", mode="before")
+    @classmethod
+    def validate_timezone(cls, v: str) -> str:
+        try:
+            zoneinfo.ZoneInfo(v)
+        except zoneinfo.ZoneInfoNotFoundError as exc:
+            raise ValueError(f"Unknown timezone: {v!r}") from exc
+        return v
+
+    @field_validator("days_of_week", mode="before")
+    @classmethod
+    def validate_days_of_week(cls, v: list) -> list:
+        for day in v:
+            if not isinstance(day, int) or day < 0 or day > 6:
+                raise ValueError(
+                    f"days_of_week values must be integers 0–6 (Monday–Sunday), got {day!r}"
+                )
+        return v
 
 
 class JobProgress(BaseModel):

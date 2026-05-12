@@ -228,7 +228,7 @@ class JobsService:
                     job.status = JobStatus.PENDING
 
     @staticmethod
-    def _resolve_dst_gap(candidate: datetime, tz: "zoneinfo.ZoneInfo") -> datetime:
+    def _resolve_dst_gap(candidate: datetime, tz: zoneinfo.ZoneInfo) -> datetime:
         """Resolve a candidate datetime that may fall inside a DST gap.
 
         ``datetime.combine(..., tzinfo=ZoneInfo(...))`` with fold=0 can produce
