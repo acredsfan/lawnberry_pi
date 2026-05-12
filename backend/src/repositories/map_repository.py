@@ -81,6 +81,34 @@ class MapRepository(BaseRepository):
                 zones.append(z)
             return zones
 
+    def get_zone(self, zone_id: str) -> dict[str, Any] | None:
+        """Return a single zone by id, or None if not found."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT * FROM map_zones WHERE id = ?", (zone_id,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            z = dict(row)
+            z["polygon"] = json.loads(z.pop("polygon_json"))
+            return z
+
+    def update_zone(self, zone: dict[str, Any]) -> bool:
+        """Update a single zone by id. Returns True if a row was updated."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "UPDATE map_zones SET name = ?, polygon_json = ?, priority = ?, exclusion_zone = ? "
+                "WHERE id = ?",
+                (
+                    zone.get("name"),
+                    json.dumps(zone["polygon"]),
+                    zone.get("priority", 0),
+                    int(bool(zone.get("exclusion_zone", False))),
+                    zone["id"],
+                ),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
     def delete_zone(self, zone_id: str) -> bool:
         """Delete a single zone by id. Returns True if a row was deleted."""
         with self._get_connection() as conn:

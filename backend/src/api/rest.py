@@ -100,17 +100,33 @@ class Zone(BaseModel):
     exclusion_zone: bool = False
 
 
-_zones_store: list[Zone] = []
 _zones_last_modified: datetime = datetime.now(timezone.utc)
 
 
+def _emit_zone_changed(hub, zone_id: str, action: str) -> None:
+    """Best-effort WS broadcast for zone mutations — never raises to caller."""
+    if hub is None:
+        return
+    try:
+        asyncio.create_task(
+            hub.broadcast_to_topic(
+                "planning.zone.changed",
+                {"zone_id": zone_id, "action": action},
+            )
+        )
+    except Exception:
+        # No running event loop (e.g. sync test context) — skip silently
+        pass
+
+
 @router.get("/map/zones", response_model=list[Zone])
-def get_map_zones(request: Request):
-    repo = getattr(getattr(request.app.state, "runtime", None), "map_repository", None)
+def get_map_zones(request: Request, runtime: RuntimeContext = Depends(get_runtime)):
+    global _zones_last_modified
+    repo = getattr(runtime, "map_repository", None)
     if repo is not None:
         data = repo.list_zones()
     else:
-        data = [z.model_dump(mode="json") for z in _zones_store]
+        data = []
     body = json.dumps(data, sort_keys=True).encode()
     etag = hashlib.sha256(body).hexdigest()
     inm = request.headers.get("if-none-match")
@@ -135,15 +151,67 @@ def get_map_zones(request: Request):
 
 
 @router.post("/map/zones", response_model=list[Zone])
-def post_map_zones(zones: list[Zone], request: Request):
-    global _zones_store, _zones_last_modified
-    repo = getattr(getattr(request.app.state, "runtime", None), "map_repository", None)
+def post_map_zones(zones: list[Zone], runtime: RuntimeContext = Depends(get_runtime)):
+    global _zones_last_modified
+    repo = getattr(runtime, "map_repository", None)
+    zone_dicts = [z.model_dump(mode="json") for z in zones]
     if repo is not None:
-        repo.save_zones([z.model_dump(mode="json") for z in zones])
-    else:
-        _zones_store = zones
+        repo.save_zones(zone_dicts)
     _zones_last_modified = datetime.now(timezone.utc)
-    return zones
+    hub = getattr(runtime, "websocket_hub", None)
+    for z in zones:
+        _emit_zone_changed(hub, z.id, "bulk_replace")
+    return zone_dicts
+
+
+@router.get("/map/zones/{zone_id}", response_model=Zone)
+def get_map_zone(zone_id: str, runtime: RuntimeContext = Depends(get_runtime)):
+    repo = getattr(runtime, "map_repository", None)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    zone = repo.get_zone(zone_id)
+    if zone is None:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    return zone
+
+
+@router.put("/map/zones/{zone_id}", response_model=Zone)
+def put_map_zone(zone_id: str, zone: Zone, runtime: RuntimeContext = Depends(get_runtime)):
+    global _zones_last_modified
+    if zone.id != zone_id:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Zone id in body '{zone.id}' does not match path id '{zone_id}'",
+        )
+    repo = getattr(runtime, "map_repository", None)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    existing = repo.get_zone(zone_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    zone_dict = zone.model_dump(mode="json")
+    updated = repo.update_zone(zone_dict)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    _zones_last_modified = datetime.now(timezone.utc)
+    hub = getattr(runtime, "websocket_hub", None)
+    _emit_zone_changed(hub, zone_id, "updated")
+    return zone_dict
+
+
+@router.delete("/map/zones/{zone_id}", status_code=204)
+def delete_map_zone(zone_id: str, runtime: RuntimeContext = Depends(get_runtime)):
+    global _zones_last_modified
+    repo = getattr(runtime, "map_repository", None)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    deleted = repo.delete_zone(zone_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    _zones_last_modified = datetime.now(timezone.utc)
+    hub = getattr(runtime, "websocket_hub", None)
+    _emit_zone_changed(hub, zone_id, "deleted")
+    return Response(status_code=204)
 
 
 # --------------------- Map Locations ---------------------
