@@ -47,6 +47,12 @@ class MissionRepository(BaseRepository):
                 ON mission_execution_state(status);
             """,
         ),
+        (
+            2,
+            """
+            ALTER TABLE missions ADD COLUMN planning_intent_json TEXT;
+            """,
+        ),
     ]
 
     @property
@@ -62,15 +68,19 @@ class MissionRepository(BaseRepository):
     # ------------------------------------------------------------------
     def save_mission(self, mission: dict[str, Any]) -> None:
         """Upsert a mission definition."""
+        planning_intent = mission.get("planning_intent")
+        planning_intent_json = json.dumps(planning_intent) if planning_intent is not None else None
         with self._get_connection() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO missions (id, name, waypoints_json, created_at) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO missions "
+                "(id, name, waypoints_json, created_at, planning_intent_json) "
+                "VALUES (?, ?, ?, ?, ?)",
                 (
                     mission["id"],
                     mission["name"],
                     json.dumps(mission.get("waypoints", [])),
                     mission.get("created_at", datetime.now(UTC).isoformat()),
+                    planning_intent_json,
                 ),
             )
             conn.commit()
@@ -84,6 +94,8 @@ class MissionRepository(BaseRepository):
                 return None
             m = dict(row)
             m["waypoints"] = json.loads(m.pop("waypoints_json"))
+            raw_intent = m.pop("planning_intent_json", None)
+            m["planning_intent"] = json.loads(raw_intent) if raw_intent else None
             return m
 
     def list_missions(self) -> list[dict[str, Any]]:
@@ -94,6 +106,8 @@ class MissionRepository(BaseRepository):
             for row in cursor.fetchall():
                 m = dict(row)
                 m["waypoints"] = json.loads(m.pop("waypoints_json"))
+                raw_intent = m.pop("planning_intent_json", None)
+                m["planning_intent"] = json.loads(raw_intent) if raw_intent else None
                 missions.append(m)
             return missions
 

@@ -30,7 +30,13 @@ async def create_mission(
     """Create a new mission."""
     mission_service = runtime.mission_service
     try:
-        mission = await mission_service.create_mission(request.name, request.waypoints)
+        mission = await mission_service.create_mission(
+            request.name,
+            request.waypoints,
+            zone_id=request.zone_id,
+            pattern=request.pattern,
+            pattern_params=request.pattern_params,
+        )
         return mission
     except Exception as e:
         _raise_mission_http_error(e)

@@ -21,6 +21,7 @@ from ..models.mission import (
 )
 from ..nav.geoutils import point_in_polygon
 from ..services.navigation_service import NavigationService
+from ..services.planning_service import get_planning_service
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,8 @@ class MissionService:
         self.missions: dict[str, Mission] = {}
         self.mission_statuses: dict[str, MissionStatus] = {}
         self.mission_tasks: dict[str, asyncio.Task] = {}
+        # Planning intents for lazy waypoint generation: mission_id → intent dict
+        self._planning_intents: dict[str, dict] = {}
 
         # Observability: event store injected by set_event_store().
         self._event_store: Any | None = None
@@ -103,7 +106,7 @@ class MissionService:
             return 0
         return max(0, min(int(current_waypoint_index), len(mission.waypoints) - 1))
 
-    def _persist_mission(self, mission: Mission) -> None:
+    def _persist_mission(self, mission: Mission, *, planning_intent: dict | None = None) -> None:
         if self._mission_repo is not None:
             self._mission_repo.save_mission(
                 {
@@ -111,6 +114,7 @@ class MissionService:
                     "name": mission.name,
                     "waypoints": [waypoint.model_dump() for waypoint in mission.waypoints],
                     "created_at": mission.created_at,
+                    "planning_intent": planning_intent,
                 }
             )
             return
@@ -288,6 +292,7 @@ class MissionService:
                     "name": m["name"],
                     "waypoints_json": json.dumps(m.get("waypoints", [])),
                     "created_at": m["created_at"],
+                    "planning_intent": m.get("planning_intent"),
                 }
                 for m in raw_missions
             ]
@@ -353,6 +358,7 @@ class MissionService:
         recovered_missions: dict[str, Mission] = {}
         persisted_states: dict[str, dict] = {}
 
+        recovered_intents: dict[str, dict] = {}
         for row in mission_rows:
             mission = Mission.model_validate(
                 {
@@ -363,6 +369,8 @@ class MissionService:
                 }
             )
             recovered_missions[mission.id] = mission
+            if row.get("planning_intent"):
+                recovered_intents[mission.id] = row["planning_intent"]
 
         for row in state_rows:
             persisted_states[row["mission_id"]] = row
@@ -370,6 +378,7 @@ class MissionService:
         self.missions = recovered_missions
         self.mission_statuses = {}
         self.mission_tasks = {}
+        self._planning_intents = recovered_intents
 
         active_like_states = {
             mission_id
@@ -455,19 +464,39 @@ class MissionService:
         # Prune old terminal missions to prevent unbounded DB growth.
         await loop.run_in_executor(None, self._prune_old_terminal_missions)
 
-    async def create_mission(self, name: str, waypoints: list[MissionWaypoint]) -> Mission:
+    async def create_mission(
+        self,
+        name: str,
+        waypoints: list[MissionWaypoint] | None = None,
+        *,
+        zone_id: str | None = None,
+        pattern: str | None = None,
+        pattern_params: dict | None = None,
+    ) -> Mission:
         clean_name = (name or "").strip()
         if not clean_name:
             raise MissionValidationError("Mission name cannot be empty.")
-        if not waypoints:
-            raise MissionValidationError("Mission must contain at least one waypoint.")
-        normalized_waypoints = [
-            waypoint
-            if isinstance(waypoint, MissionWaypoint)
-            else MissionWaypoint.model_validate(waypoint)
-            for waypoint in waypoints
-        ]
-        self._validate_waypoints_in_geofence(normalized_waypoints)
+
+        planning_intent: dict | None = None
+
+        if zone_id is not None:
+            # Lazy-generation path: store intent, no waypoints yet.
+            planning_intent = {
+                "zone_id": zone_id,
+                "pattern": pattern or "parallel",
+                "pattern_params": pattern_params or {},
+            }
+            normalized_waypoints: list[MissionWaypoint] = []
+        else:
+            if not waypoints:
+                raise MissionValidationError("Mission must contain at least one waypoint.")
+            normalized_waypoints = [
+                waypoint
+                if isinstance(waypoint, MissionWaypoint)
+                else MissionWaypoint.model_validate(waypoint)
+                for waypoint in waypoints
+            ]
+            self._validate_waypoints_in_geofence(normalized_waypoints)
 
         mission = Mission(
             name=clean_name,
@@ -475,10 +504,13 @@ class MissionService:
             created_at=datetime.datetime.now(datetime.UTC).isoformat(),
         )
         self.missions[mission.id] = mission
+        # Store planning intent in-memory (keyed by mission id)
+        if planning_intent is not None:
+            self._planning_intents[mission.id] = planning_intent
         self.mission_statuses[mission.id] = self._build_status(
             mission.id, MissionLifecycleStatus.IDLE
         )
-        self._persist_mission(mission)
+        self._persist_mission(mission, planning_intent=planning_intent)
         self._persist_mission_status(mission.id)
         return mission
 
@@ -509,6 +541,33 @@ class MissionService:
             raise MissionConflictError("Mission is already active.")
         if status.status == MissionLifecycleStatus.PAUSED:
             raise MissionStateError("Mission is paused. Use resume instead of start.")
+
+        # Lazy waypoint generation: if mission has a planning intent and no waypoints yet,
+        # generate waypoints NOW before changing status or spawning the nav task.
+        intent = self._planning_intents.get(mission_id)
+        if intent and not mission.waypoints:
+            ps = get_planning_service()
+            try:
+                planned = await ps.plan_path_for_zone(
+                    zone_id=intent["zone_id"],
+                    pattern=intent.get("pattern", "parallel"),
+                    params=intent.get("pattern_params") or {},
+                )
+            except (KeyError, NotImplementedError, ValueError, RuntimeError) as exc:
+                raise MissionValidationError(
+                    f"Failed to generate waypoints for zone {intent['zone_id']!r}: {exc}"
+                ) from exc
+
+            if not planned.waypoints:
+                raise MissionValidationError(
+                    f"Path planner returned no waypoints for zone {intent['zone_id']!r}."
+                )
+
+            # Populate the in-memory mission and re-validate against geofence.
+            mission.waypoints = planned.waypoints
+            self._validate_waypoints_in_geofence(mission.waypoints)
+            # Persist updated waypoints immediately.
+            self._persist_mission(mission)
 
         self.mission_statuses[mission_id] = self._build_status(
             mission.id,

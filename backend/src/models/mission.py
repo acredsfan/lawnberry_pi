@@ -62,7 +62,10 @@ class Mission(BaseModel):
 
 class MissionCreationRequest(BaseModel):
     name: str
-    waypoints: list[MissionWaypoint] = Field(min_length=1)
+    waypoints: list[MissionWaypoint] | None = None
+    zone_id: str | None = None
+    pattern: str | None = None
+    pattern_params: dict | None = None
 
     @field_validator("name")
     @classmethod
@@ -71,6 +74,20 @@ class MissionCreationRequest(BaseModel):
         if not cleaned:
             raise ValueError("Mission name cannot be empty")
         return cleaned
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> "MissionCreationRequest":
+        has_waypoints = bool(self.waypoints)
+        has_zone = bool(self.zone_id)
+        if has_waypoints and has_zone:
+            raise ValueError(
+                "Provide either 'waypoints' or 'zone_id', not both."
+            )
+        if not has_waypoints and not has_zone:
+            raise ValueError(
+                "Provide either 'waypoints' (non-empty list) or 'zone_id' to create a mission."
+            )
+        return self
 
 
 class MissionUpdateRequest(BaseModel):
