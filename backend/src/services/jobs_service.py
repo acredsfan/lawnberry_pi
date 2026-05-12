@@ -233,7 +233,16 @@ class JobsService:
                 await asyncio.sleep(60)
 
     async def _check_and_dispatch_planning_jobs(self) -> None:
-        """Load planning jobs from persistence and fire any whose next_run has passed."""
+        """Load planning jobs from persistence and fire any whose next_run has passed.
+
+        ``next_run`` is computed dynamically from the stored ``schedule`` field
+        rather than read from the DB (the DB has no ``next_run`` column).  This
+        ensures jobs fire correctly after a server restart.
+
+        Schedule field formats supported:
+          - "HH:MM"  plain time string (legacy)
+          - JSON SchedulePattern dict  (days_of_week, start_time, timezone, …)
+        """
         if self._mission_service is None:
             # MissionService not wired yet; nothing to dispatch.
             return
@@ -249,21 +258,53 @@ class JobsService:
         for job in planning_jobs:
             if not job.get("enabled", True):
                 continue
-            next_run_raw = job.get("next_run")
-            if next_run_raw is None:
+
+            schedule_raw = job.get("schedule")
+            if not schedule_raw:
                 continue
+
+            # --- Compute next_run dynamically from the schedule field ---
             try:
-                next_run = datetime.fromisoformat(next_run_raw)
-                # Make timezone-aware if naive
-                if next_run.tzinfo is None:
-                    next_run = next_run.replace(tzinfo=UTC)
-            except (ValueError, TypeError):
+                from ..models.job import Job as JobModel, SchedulePattern
+                import json as _json
+
+                # The schedule column may hold a JSON SchedulePattern or a bare "HH:MM" string.
+                if isinstance(schedule_raw, dict):
+                    schedule_dict = schedule_raw
+                else:
+                    try:
+                        schedule_dict = _json.loads(schedule_raw)
+                    except (ValueError, TypeError):
+                        # Treat as plain "HH:MM" string
+                        schedule_dict = {"start_time": str(schedule_raw).strip()}
+
+                schedule = SchedulePattern.model_validate(schedule_dict)
+                # Build a minimal Job-like object for _calculate_next_run
+                job_obj = JobModel(id=job.get("id", "tmp"), name=job.get("name", ""), schedule=schedule)
+                next_run = self._calculate_next_run(job_obj, from_time=now)
+            except Exception as exc:
                 logger.warning(
-                    "Planning job %r has unparseable next_run=%r — skipping.",
+                    "Planning job %r: failed to compute next_run from schedule %r — skipping. Error: %s",
                     job.get("id"),
-                    next_run_raw,
+                    schedule_raw,
+                    exc,
                 )
                 continue
+
+            if next_run is None:
+                continue
+
+            # Don't re-fire if we already ran this cycle (last_run >= next_run)
+            last_run_raw = job.get("last_run")
+            if last_run_raw:
+                try:
+                    last_run = datetime.fromisoformat(last_run_raw)
+                    if last_run.tzinfo is None:
+                        last_run = last_run.replace(tzinfo=UTC)
+                    if last_run >= next_run:
+                        continue
+                except (ValueError, TypeError):
+                    pass  # Unparseable last_run — treat as never run
 
             if next_run <= now:
                 try:
@@ -472,8 +513,10 @@ class JobsService:
             return
 
         # --- Start mission ---
+        mission_started = False
         try:
             await self._mission_service.start_mission(mission.id)
+            mission_started = True
         except Exception as exc:
             logger.error(
                 "Scheduled job %r (%s): start_mission(%s) failed: %s",
@@ -484,8 +527,8 @@ class JobsService:
                 exc_info=True,
             )
 
-        # --- Best-effort WS broadcast ---
-        if self._websocket_hub is not None:
+        # --- Best-effort WS broadcast (only on successful start) ---
+        if mission_started and self._websocket_hub is not None:
             try:
                 await self._websocket_hub.broadcast_to_topic(
                     "planning.schedule.fired",

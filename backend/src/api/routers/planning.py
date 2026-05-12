@@ -80,6 +80,8 @@ async def create_schedule(payload: dict[str, Any]):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "last_run": None,
         "status": "pending",
+        "pattern": str(payload.get("pattern") or "parallel"),
+        "pattern_params": dict(payload.get("pattern_params") or {}),
     }
     persistence.save_planning_job(job)
     return JSONResponse(status_code=201, content=job)
@@ -99,6 +101,8 @@ async def update_schedule(schedule_id: str, payload: dict[str, Any]):
         "priority": int(payload.get("priority") or existing.get("priority") or 1),
         "enabled": bool(payload.get("enabled", existing.get("enabled", True))),
         "status": str(payload.get("status") or existing.get("status") or "pending"),
+        "pattern": str(payload.get("pattern") or existing.get("pattern") or "parallel"),
+        "pattern_params": dict(payload.get("pattern_params") or existing.get("pattern_params") or {}),
     }
     persistence.save_planning_job(updated)
     return updated

@@ -289,6 +289,8 @@ async def create_planning_job(payload: dict[str, Any]):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "last_run": None,
         "status": "pending",
+        "pattern": str(payload.get("pattern") or "parallel"),
+        "pattern_params": dict(payload.get("pattern_params") or {}),
     }
     persistence.save_planning_job(job)
     return JSONResponse(status_code=201, content=job)

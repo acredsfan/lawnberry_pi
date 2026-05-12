@@ -31,7 +31,7 @@ class Migration:
 class PersistenceLayer:
     """SQLite-based persistence layer for LawnBerry Pi v2."""
 
-    SCHEMA_VERSION = 6
+    SCHEMA_VERSION = 7
 
     MIGRATIONS = [
         Migration(
@@ -193,6 +193,16 @@ class PersistenceLayer:
             INSERT OR REPLACE INTO schema_version (version) VALUES (6);
             """,
         ),
+        Migration(
+            version=7,
+            description="Add pattern and pattern_params columns to planning_jobs",
+            sql="""
+            ALTER TABLE planning_jobs ADD COLUMN pattern TEXT DEFAULT 'parallel';
+            ALTER TABLE planning_jobs ADD COLUMN pattern_params_json TEXT DEFAULT '{}';
+
+            INSERT OR REPLACE INTO schema_version (version) VALUES (7);
+            """,
+        ),
     ]
 
     def __init__(self, db_path: str = "data/lawnberry.db"):
@@ -264,12 +274,14 @@ class PersistenceLayer:
     # Planning Jobs
     def save_planning_job(self, job_data: dict[str, Any]) -> None:
         """Save planning job to database."""
+        pattern_params = job_data.get("pattern_params") or {}
         with self.get_connection() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO planning_jobs 
-                (id, name, schedule, zones_json, priority, enabled, created_at, last_run, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO planning_jobs
+                (id, name, schedule, zones_json, priority, enabled, created_at, last_run, status,
+                 pattern, pattern_params_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     job_data["id"],
@@ -281,6 +293,8 @@ class PersistenceLayer:
                     job_data.get("created_at"),
                     job_data.get("last_run"),
                     job_data.get("status", "pending"),
+                    job_data.get("pattern", "parallel"),
+                    json.dumps(pattern_params),
                 ),
             )
             conn.commit()
@@ -294,6 +308,16 @@ class PersistenceLayer:
                 job = dict(row)
                 job["zones"] = json.loads(job["zones_json"])
                 del job["zones_json"]
+                # Deserialise pattern_params_json if the column exists (migration 7+)
+                if "pattern_params_json" in job:
+                    try:
+                        job["pattern_params"] = json.loads(job["pattern_params_json"] or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        job["pattern_params"] = {}
+                    del job["pattern_params_json"]
+                else:
+                    job.setdefault("pattern_params", {})
+                job.setdefault("pattern", "parallel")
                 jobs.append(job)
             return jobs
 
