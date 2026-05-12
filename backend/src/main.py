@@ -24,6 +24,7 @@ from .api.routers import sensors as sensors_router
 from .api.routers import settings as settings_router
 from .api.routers import telemetry as telemetry_router
 from .api.routers import weather as weather_router
+from .api.routers import planning as planning_router
 from .api.safety import router as safety_router
 from .api.run_summary import router as run_summary_router
 from .api.status import router as status_router
@@ -381,6 +382,7 @@ app.include_router(sensors_router.router, prefix="/api/v2")
 app.include_router(maintenance_router.router, prefix="/api/v2")
 app.include_router(camera_router.router, prefix="/api/v2")
 app.include_router(weather_router.router, prefix="/api/v2")
+app.include_router(planning_router.router, prefix="/api/v2")
 app.include_router(settings_router.router, prefix="/api/v2")
 app.include_router(rest_legacy_router)
 app.include_router(metrics_router)
