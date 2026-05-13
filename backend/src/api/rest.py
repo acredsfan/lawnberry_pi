@@ -177,6 +177,13 @@ async def post_map_zones(
     hub = getattr(runtime, "websocket_hub", None)
     for z in zones:
         await _emit_zone_changed(hub, z.id, "bulk_replace")
+    persistence.add_audit_log(
+        "map.zones.bulk_replace",
+        details={
+            "count": len(zones),
+            "ids": [z.id for z in zones],
+        },
+    )
     return zone_dicts
 
 
@@ -212,6 +219,17 @@ async def post_map_zone_single(
     _zones_last_modified = datetime.now(timezone.utc)
     hub = getattr(runtime, "websocket_hub", None)
     await _emit_zone_changed(hub, zone_id, "created")
+    persistence.add_audit_log(
+        "map.zone.created",
+        resource=zone_id,
+        details={
+            "name": zone.name,
+            "zone_kind": zone.zone_kind,
+            "priority": zone.priority,
+            "exclusion_zone": zone.exclusion_zone,
+            "polygon": [{"latitude": p.latitude, "longitude": p.longitude} for p in zone.polygon],
+        },
+    )
     return zone.model_dump(mode="json")
 
 
@@ -247,6 +265,17 @@ async def put_map_zone(zone_id: str, zone: Zone, runtime: RuntimeContext = Depen
     _zones_last_modified = datetime.now(timezone.utc)
     hub = getattr(runtime, "websocket_hub", None)
     await _emit_zone_changed(hub, zone_id, "updated")
+    persistence.add_audit_log(
+        "map.zone.updated",
+        resource=zone_id,
+        details={
+            "name": zone.name,
+            "zone_kind": zone.zone_kind,
+            "priority": zone.priority,
+            "exclusion_zone": zone.exclusion_zone,
+            "polygon": [{"latitude": p.latitude, "longitude": p.longitude} for p in zone.polygon],
+        },
+    )
     return zone_dict
 
 
@@ -256,12 +285,19 @@ async def delete_map_zone(zone_id: str, runtime: RuntimeContext = Depends(get_ru
     repo = getattr(runtime, "map_repository", None)
     if repo is None:
         raise HTTPException(status_code=404, detail="Zone not found")
+    # Load zone details before deletion so they can be recorded in the audit log
+    zone_for_audit = repo.get_zone(zone_id)
     deleted = repo.delete_zone(zone_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Zone not found")
     _zones_last_modified = datetime.now(timezone.utc)
     hub = getattr(runtime, "websocket_hub", None)
     await _emit_zone_changed(hub, zone_id, "deleted")
+    persistence.add_audit_log(
+        "map.zone.deleted",
+        resource=zone_id,
+        details=zone_for_audit or {"id": zone_id},
+    )
     return Response(status_code=204)
 
 
