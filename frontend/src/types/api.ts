@@ -4,15 +4,2213 @@
  */
 
 export interface paths {
-    "/": {
+    "/api/v2/map/zones": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Root */
-        get: operations["root__get"];
+        /** Get Map Zones */
+        get: operations["get_map_zones_api_v2_map_zones_get"];
+        put?: never;
+        /** Post Map Zones */
+        post: operations["post_map_zones_api_v2_map_zones_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/map/zones/{zone_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Map Zone */
+        get: operations["get_map_zone_api_v2_map_zones__zone_id__get"];
+        /** Put Map Zone */
+        put: operations["put_map_zone_api_v2_map_zones__zone_id__put"];
+        /**
+         * Post Map Zone Single
+         * @description Atomically create a single zone. 409 if zone_id already exists.
+         */
+        post: operations["post_map_zone_single_api_v2_map_zones__zone_id__post"];
+        /** Delete Map Zone */
+        delete: operations["delete_map_zone_api_v2_map_zones__zone_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/map/locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Map Locations */
+        get: operations["get_map_locations_api_v2_map_locations_get"];
+        /** Put Map Locations */
+        put: operations["put_map_locations_api_v2_map_locations_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/planning/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Planning Jobs */
+        get: operations["list_planning_jobs_api_v2_planning_jobs_get"];
+        put?: never;
+        /** Create Planning Job */
+        post: operations["create_planning_job_api_v2_planning_jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/planning/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Planning Job */
+        delete: operations["delete_planning_job_api_v2_planning_jobs__job_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/map/configuration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Map Configuration */
+        get: operations["get_map_configuration_api_v2_map_configuration_get"];
+        /** Put Map Configuration */
+        put: operations["put_map_configuration_api_v2_map_configuration_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/map/provider-fallback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Trigger Map Provider Fallback */
+        post: operations["trigger_map_provider_fallback_api_v2_map_provider_fallback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/hardware/robohat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Robohat Status
+         * @description Get RoboHAT firmware health and watchdog status with safety summary.
+         */
+        get: operations["get_robohat_status_api_v2_hardware_robohat_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/drive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control Drive V2
+         * @description Execute drive command with safety checks and audit logging
+         */
+        post: operations["control_drive_v2_api_v2_control_drive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/preset-turn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control Preset Turn
+         * @description Execute a closed-loop preset turn using IMU heading feedback.
+         *
+         *     POST /api/v2/control/preset-turn
+         *     Body: {
+         *         "session_id": "<session>",
+         *         "target_degrees": 90.0,    # positive = CW (right), negative = CCW (left)
+         *         "speed": 0.5               # optional, default 0.5
+         *     }
+         *
+         *     Returns:
+         *     {
+         *         "ok": bool,
+         *         "target_degrees": float,
+         *         "actual_degrees": float,
+         *         "duration_ms": int,
+         *         "method": "imu" | "timed"
+         *     }
+         */
+        post: operations["control_preset_turn_api_v2_control_preset_turn_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/blade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control Blade V2
+         * @description Execute blade command with safety interlocks and audit logging.
+         */
+        post: operations["control_blade_v2_api_v2_control_blade_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/emergency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control Emergency V2
+         * @description Trigger emergency stop with immediate hardware shutdown
+         */
+        post: operations["control_emergency_v2_api_v2_control_emergency_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/emergency-stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control Emergency Stop Alias
+         * @description Integration-friendly alias that always returns 200 and a simple flag.
+         */
+        post: operations["control_emergency_stop_alias_api_v2_control_emergency_stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control Start Navigation
+         * @description Start autonomous navigation using the active planned path.
+         */
+        post: operations["control_start_navigation_api_v2_control_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control Pause Navigation
+         * @description Pause autonomous navigation while preserving the current path.
+         */
+        post: operations["control_pause_navigation_api_v2_control_pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control Resume Navigation
+         * @description Resume navigation after a pause.
+         */
+        post: operations["control_resume_navigation_api_v2_control_resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control Stop Navigation
+         * @description Stop navigation and place the system back in idle.
+         */
+        post: operations["control_stop_navigation_api_v2_control_stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/return-home": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control Return Home
+         * @description Start a return-to-home navigation sequence when home and position are available.
+         */
+        post: operations["control_return_home_api_v2_control_return_home_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Control Navigation Status
+         * @description Expose navigation control state for operator dashboards.
+         */
+        get: operations["control_navigation_status_api_v2_control_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/diagnose/stiffness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Diagnose Stiffness Progressive
+         * @description Start progressive stiffness detection test (slowly increase turn effort until stuck).
+         *
+         *     POST /api/v2/control/diagnose/stiffness
+         *     Body: {
+         *         "session_id": "<session>",
+         *         "direction": "left|right",
+         *         "initial_effort": 0.1,  # Start at 10% effort, optional
+         *         "step": 0.05,            # Increase by 5% each iteration, optional
+         *         "max_effort": 1.0        # Stop at 100%, optional
+         *     }
+         *
+         *     Returns:
+         *     {
+         *         "ok": true,
+         *         "test_active": true,
+         *         "current_effort": 0.10,
+         *         "heading": 45.2,
+         *         "heading_delta": 0.0,  # degrees changed since last step
+         *         "status": "testing|stuck|completed"
+         *     }
+         */
+        post: operations["diagnose_stiffness_progressive_api_v2_control_diagnose_stiffness_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/diagnose/heading-validation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Diagnose Heading Validation
+         * @description Validate heading by comparing GPS Course-Over-Ground vs IMU yaw.
+         *
+         *     POST /api/v2/control/diagnose/heading-validation
+         *     Body: {
+         *         "session_id": "<session>",
+         *         "distance_m": 5.0,       # Drive forward this far
+         *         "samples": 10            # Collect this many GPS/IMU samples
+         *     }
+         *
+         *     Returns:
+         *     {
+         *         "ok": true,
+         *         "heading_source": "gps|imu|conflict",
+         *         "gps_cog": 45.2,
+         *         "imu_yaw": 45.5,
+         *         "difference": 0.3,
+         *         "confidence": 0.95,
+         *         "recommendation": "GPS source is reliable" | "IMU appears inverted" | "Conflict detected"
+         *     }
+         */
+        post: operations["diagnose_heading_validation_api_v2_control_diagnose_heading_validation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Auth Login */
+        post: operations["auth_login_api_v2_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Auth Refresh */
+        post: operations["auth_refresh_api_v2_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Auth Logout */
+        post: operations["auth_logout_api_v2_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/auth/configure/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Configure Password
+         * @description Configure a custom username/password for local authentication.
+         *
+         *     Requires an active authenticated session (admin).
+         *     Generates a bcrypt hash and stores it in the security config.
+         */
+        post: operations["configure_password_api_v2_auth_configure_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/auth/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Auth Profile */
+        get: operations["auth_profile_api_v2_auth_profile_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/manual-unlock/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Manual Unlock Status */
+        get: operations["manual_unlock_status_api_v2_control_manual_unlock_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/manual-unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Manual Unlock */
+        post: operations["manual_unlock_api_v2_control_manual_unlock_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/ws/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Websocket Telemetry Handshake */
+        get: operations["websocket_telemetry_handshake_api_v2_ws_telemetry_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/ws/control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Websocket Control Handshake */
+        get: operations["websocket_control_handshake_api_v2_ws_control_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/ws/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Websocket Settings Handshake */
+        get: operations["websocket_settings_handshake_api_v2_ws_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/ws/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Websocket Notifications Handshake */
+        get: operations["websocket_notifications_handshake_api_v2_ws_notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/telemetry/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Telemetry Stream
+         * @description Contract-shaped telemetry stream: items + latency_summary_ms + next_since
+         */
+        get: operations["get_telemetry_stream_api_v2_telemetry_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/telemetry/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Telemetry Diagnostic
+         * @description Export telemetry diagnostic data including power metrics for troubleshooting
+         */
+        get: operations["export_telemetry_diagnostic_api_v2_telemetry_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/telemetry/ping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Telemetry Ping
+         * @description Return latency percentiles and samples to meet contract tests
+         */
+        post: operations["telemetry_ping_api_v2_telemetry_ping_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/dashboard/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dashboard Telemetry
+         * @description Get real-time telemetry from hardware sensors with RTK/IMU orientation states
+         */
+        get: operations["dashboard_telemetry_api_v2_dashboard_telemetry_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/dashboard/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Dashboard Status */
+        get: operations["dashboard_status_api_v2_dashboard_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/sensors/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sensors Health
+         * @description Return minimal sensor health snapshot.
+         *
+         *     Uses SensorManager when available. Safe in SIM_MODE and CI.
+         */
+        get: operations["get_sensors_health_api_v2_sensors_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/sensors/tof/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Tof Status
+         * @description Detailed ToF driver status for hardware verification.
+         *
+         *     Returns per-sensor backend info (binding name), bus/address, and last reading.
+         *     Safe on systems without the VL53L0X binding: fields will be None.
+         */
+        get: operations["get_tof_status_api_v2_sensors_tof_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/sensors/gps/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Gps Status */
+        get: operations["get_gps_status_api_v2_sensors_gps_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/sensors/gps/rtk/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Rtk Diagnostics
+         * @description Return combined RTK/NTRIP diagnostics without stealing the serial port.
+         *
+         *     - Exposes current GPS reading and mode
+         *     - Reports NTRIP forwarder runtime stats when configured
+         *     - Includes minimal hardware GPS flags from app state
+         */
+        get: operations["get_rtk_diagnostics_api_v2_sensors_gps_rtk_diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/sensors/imu/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Imu Status */
+        get: operations["get_imu_status_api_v2_sensors_imu_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/sensors/environmental/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Env Status */
+        get: operations["get_env_status_api_v2_sensors_environmental_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/sensors/power/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Power Status */
+        get: operations["get_power_status_api_v2_sensors_power_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/debug/sensors/inject-tof": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Inject Tof
+         * @description Debug-only: inject a ToF distance reading (simulation/testing only).
+         *
+         *     This updates an in-memory override that SensorManager can read in future
+         *     iterations. For now, we simply store and acknowledge for contract tests.
+         */
+        post: operations["inject_tof_api_v2_debug_sensors_inject_tof_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/debug/sensors/inject-tilt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Inject Tilt
+         * @description Debug-only: inject tilt (roll/pitch) to simulate IMU tilt event.
+         */
+        post: operations["inject_tilt_api_v2_debug_sensors_inject_tilt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/system/selftest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * System Selftest
+         * @description Run on-device hardware self-test.
+         *
+         *     Safe to run on systems without hardware; returns a structured report.
+         */
+        get: operations["system_selftest_api_v2_system_selftest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/health/liveness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health Liveness
+         * @description Simple liveness probe for container orchestration.
+         */
+        get: operations["health_liveness_api_v2_health_liveness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/health/readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health Readiness
+         * @description Readiness probe including subsystem rollup.
+         */
+        get: operations["health_readiness_api_v2_health_readiness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/system/timezone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Timezone
+         * @description Return the mower's default timezone.
+         *
+         *     Strategy: prefer the Raspberry Pi's configured timezone. If unavailable,
+         *     fall back to UTC. A GPS-derived timezone may be added in future.
+         */
+        get: operations["get_system_timezone_api_v2_system_timezone_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/maintenance/imu/calibrate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Calibration Status
+         * @description Return current calibration activity state and the most recent result.
+         */
+        get: operations["get_calibration_status_api_v2_maintenance_imu_calibrate_get"];
+        put?: never;
+        /**
+         * Post Calibrate Imu
+         * @description Execute the IMU calibration routine and return the resulting summary.
+         */
+        post: operations["post_calibrate_imu_api_v2_maintenance_imu_calibrate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/camera/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Camera Status
+         * @description Get camera service status.
+         */
+        get: operations["get_camera_status_api_v2_camera_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/camera/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Camera
+         * @description Start camera streaming.
+         */
+        post: operations["start_camera_api_v2_camera_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/camera/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Camera
+         * @description Stop camera streaming.
+         */
+        post: operations["stop_camera_api_v2_camera_stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/camera/frame": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Current Frame
+         * @description Get the most recent camera frame as JPEG.
+         */
+        get: operations["get_current_frame_api_v2_camera_frame_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/camera/stream.mjpeg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Mjpeg
+         * @description Stream camera frames as Motion JPEG.
+         */
+        get: operations["stream_mjpeg_api_v2_camera_stream_mjpeg_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/weather/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Current Weather
+         * @description Get current weather data from sensors or external API.
+         */
+        get: operations["get_current_weather_api_v2_weather_current_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/weather/planning": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Planning Advice
+         * @description Get mowing planning advice based on current weather.
+         */
+        get: operations["get_planning_advice_api_v2_weather_planning_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/weather/planning-advice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Planning Advice Contract
+         * @description Contract-friendly planning advice payload.
+         */
+        get: operations["get_planning_advice_contract_api_v2_weather_planning_advice_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Schedules
+         * @description List all schedules (same backing store as GET /planning/jobs).
+         */
+        get: operations["list_schedules_api_v2_schedules_get"];
+        put?: never;
+        /**
+         * Create Schedule
+         * @description Create a schedule (same body as POST /planning/jobs).
+         */
+        post: operations["create_schedule_api_v2_schedules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/schedules/{schedule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Schedule
+         * @description Get a single schedule by ID (404 if not found).
+         */
+        get: operations["get_schedule_api_v2_schedules__schedule_id__get"];
+        /**
+         * Update Schedule
+         * @description Update an existing schedule (404 if not found).
+         */
+        put: operations["update_schedule_api_v2_schedules__schedule_id__put"];
+        post?: never;
+        /**
+         * Delete Schedule
+         * @description Delete a schedule (204 No Content; 404 if not found).
+         */
+        delete: operations["delete_schedule_api_v2_schedules__schedule_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/schedules/{schedule_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable Schedule
+         * @description Set enabled=True for the schedule.
+         */
+        post: operations["enable_schedule_api_v2_schedules__schedule_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/schedules/{schedule_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable Schedule
+         * @description Set enabled=False for the schedule.
+         */
+        post: operations["disable_schedule_api_v2_schedules__schedule_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Settings
+         * @description Get canonical settings profile payload with compatibility fields.
+         */
+        get: operations["get_settings_api_v2_settings_get"];
+        /**
+         * Update Settings
+         * @description Update canonical settings profile, accepting legacy compatibility fields too.
+         */
+        put: operations["update_settings_api_v2_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/settings/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get System Settings */
+        get: operations["get_system_settings_api_v2_settings_system_get"];
+        /** Update System Settings */
+        put: operations["update_system_settings_api_v2_settings_system_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/settings/security": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Security Settings */
+        get: operations["get_security_settings_api_v2_settings_security_get"];
+        /** Update Security Settings */
+        put: operations["update_security_settings_api_v2_settings_security_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/settings/remote-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Remote Access Settings */
+        get: operations["get_remote_access_settings_api_v2_settings_remote_access_get"];
+        /** Update Remote Access Settings */
+        put: operations["update_remote_access_settings_api_v2_settings_remote_access_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/settings/maps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Maps Settings */
+        get: operations["get_maps_settings_api_v2_settings_maps_get"];
+        /** Update Maps Settings */
+        put: operations["update_maps_settings_api_v2_settings_maps_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/settings/gps-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Gps Policy Settings */
+        get: operations["get_gps_policy_settings_api_v2_settings_gps_policy_get"];
+        /** Update Gps Policy Settings */
+        put: operations["update_gps_policy_settings_api_v2_settings_gps_policy_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/settings/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Telemetry Settings */
+        get: operations["get_telemetry_settings_api_v2_settings_telemetry_get"];
+        /** Update Telemetry Settings */
+        put: operations["update_telemetry_settings_api_v2_settings_telemetry_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/settings/safety": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Safety Settings
+         * @description Return the current safety limits from limits.yaml.
+         */
+        get: operations["get_safety_settings_api_v2_settings_safety_get"];
+        /**
+         * Put Safety Settings
+         * @description Update safety limits, write to limits.yaml, and hot-reload runtime.
+         *
+         *     Accepts a partial JSON object — only supplied keys are changed.
+         */
+        put: operations["put_safety_settings_api_v2_settings_safety_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ws/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Websocket Telemetry Handshake */
+        get: operations["websocket_telemetry_handshake_ws_telemetry_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ws/control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Websocket Control Handshake */
+        get: operations["websocket_control_handshake_ws_control_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metrics
+         * @description Expose a Prometheus-compatible metrics snapshot.
+         */
+        get: operations["metrics_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Status V2
+         * @description Return current robot state in a simplified schema for contract tests.
+         */
+        get: operations["get_status_v2_api_v2_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/debug/gps/inject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Debug Gps Inject */
+        post: operations["debug_gps_inject_api_v2_debug_gps_inject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/debug/geofence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Debug Geofence Set */
+        post: operations["debug_geofence_set_api_v2_debug_geofence_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/nav/waypoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Waypoints */
+        post: operations["set_waypoints_api_v2_nav_waypoints_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/nav/mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Mode */
+        post: operations["set_mode_api_v2_nav_mode_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/nav/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Nav Status */
+        get: operations["get_nav_status_api_v2_nav_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/nav/coverage-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Coverage Plan */
+        get: operations["get_coverage_plan_api_v2_nav_coverage_plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/motors/drive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Drive */
+        post: operations["drive_api_v2_motors_drive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/control/emergency_clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear Emergency Stop
+         * @description Clear emergency stop after explicit operator confirmation.
+         */
+        post: operations["clear_emergency_stop_api_v2_control_emergency_clear_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/fusion/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fused State
+         * @description Return a fused navigation state (SIM_MODE-friendly scaffold).
+         *
+         *     In SIM_MODE, advance the model slightly each call to emulate motion and set
+         *     stable quality metrics. This keeps CI safe and enables placeholder tests.
+         */
+        get: operations["get_fused_state_api_v2_fusion_state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/dashboard/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Dashboard Metrics */
+        get: operations["get_dashboard_metrics_api_v2_dashboard_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health Root Route
+         * @description Return aggregated health status for platform monitoring.
+         */
+        get: operations["health_root_route_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health Api V2
+         * @description Expose health report under the versioned API namespace.
+         */
+        get: operations["health_api_v2_api_v2_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/healthz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Healthz
+         * @description Tiny liveness endpoint for cheap probes.
+         */
+        get: operations["healthz_healthz_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Mission
+         * @description Create a new mission.
+         */
+        post: operations["create_mission_api_v2_missions_create_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions/{mission_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Mission
+         * @description Start a mission.
+         */
+        post: operations["start_mission_api_v2_missions__mission_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions/{mission_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause Mission
+         * @description Pause a mission.
+         */
+        post: operations["pause_mission_api_v2_missions__mission_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions/{mission_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Mission
+         * @description Resume a paused mission.
+         */
+        post: operations["resume_mission_api_v2_missions__mission_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions/{mission_id}/abort": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Abort Mission
+         * @description Abort a mission.
+         */
+        post: operations["abort_mission_api_v2_missions__mission_id__abort_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Missions
+         * @description List all saved missions.
+         */
+        get: operations["list_missions_api_v2_missions_list_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions/{mission_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mission Status
+         * @description Get the status of a mission.
+         */
+        get: operations["get_mission_status_api_v2_missions__mission_id__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions/{mission_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mission
+         * @description Get a mission by ID.
+         */
+        get: operations["get_mission_api_v2_missions__mission_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Mission
+         * @description Hard-delete a mission and its execution state.
+         */
+        delete: operations["delete_mission_api_v2_missions__mission_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Mission
+         * @description Update a mission's name and/or waypoints in place.
+         */
+        patch: operations["update_mission_api_v2_missions__mission_id__patch"];
+        trace?: never;
+    };
+    "/api/v2/missions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete All Missions
+         * @description Hard-delete all missions that are not currently running or paused. Skips running/paused.
+         */
+        delete: operations["delete_all_missions_api_v2_missions_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/ai/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Ai Datasets
+         * @description Return the currently known AI datasets for operator/export workflows.
+         */
+        get: operations["list_ai_datasets_api_v2_ai_datasets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/ai/datasets/{dataset_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export Ai Dataset
+         * @description Start a lightweight dataset export job for the requested dataset.
+         */
+        post: operations["export_ai_dataset_api_v2_ai_datasets__dataset_id__export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/ai/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ai Status
+         * @description Return AI runtime and model status.
+         */
+        get: operations["get_ai_status_api_v2_ai_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/ai/results/recent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Recent Results
+         * @description Return recent inference results, newest first.
+         */
+        get: operations["get_recent_results_api_v2_ai_results_recent_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/ai/inference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Uploaded Inference
+         * @description Run AI inference against an uploaded image.
+         */
+        post: operations["run_uploaded_inference_api_v2_ai_inference_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/ai/inference/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Latest Frame Inference
+         * @description Run AI inference against the latest camera frame.
+         */
+        post: operations["run_latest_frame_inference_api_v2_ai_inference_latest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/docs/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Docs List */
+        get: operations["get_docs_list_api_v2_docs_list_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/docs/checksums": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Docs Checksums */
+        get: operations["get_docs_checksums_api_v2_docs_checksums_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/docs/freshness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Docs Freshness */
+        get: operations["get_docs_freshness_api_v2_docs_freshness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/docs/bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Docs Bundle */
+        get: operations["get_docs_bundle_api_v2_docs_bundle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/verification-artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Verification Artifact */
+        post: operations["create_verification_artifact_api_v2_verification_artifacts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/docs/{doc_path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Doc Contents */
+        get: operations["get_doc_contents_api_v2_docs__doc_path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/missions/{run_id}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Summary
+         * @description Return a post-run diagnostic summary for the given run_id.
+         */
+        get: operations["get_run_summary_api_v2_missions__run_id__summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Status
+         * @deprecated
+         * @description Get system status snapshot.
+         */
+        get: operations["get_status_api_v1_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -94,2209 +2292,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/status": {
+    "/": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Status
-         * @deprecated
-         * @description Get system status snapshot.
-         */
-        get: operations["get_status_api_v1_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/ai/datasets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Ai Datasets
-         * @description Return the currently known AI datasets for operator/export workflows.
-         */
-        get: operations["list_ai_datasets_api_v2_ai_datasets_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/ai/datasets/{dataset_id}/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Export Ai Dataset
-         * @description Start a lightweight dataset export job for the requested dataset.
-         */
-        post: operations["export_ai_dataset_api_v2_ai_datasets__dataset_id__export_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/ai/inference": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Run Uploaded Inference
-         * @description Run AI inference against an uploaded image.
-         */
-        post: operations["run_uploaded_inference_api_v2_ai_inference_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/ai/inference/latest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Run Latest Frame Inference
-         * @description Run AI inference against the latest camera frame.
-         */
-        post: operations["run_latest_frame_inference_api_v2_ai_inference_latest_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/ai/results/recent": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Recent Results
-         * @description Return recent inference results, newest first.
-         */
-        get: operations["get_recent_results_api_v2_ai_results_recent_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/ai/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Ai Status
-         * @description Return AI runtime and model status.
-         */
-        get: operations["get_ai_status_api_v2_ai_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/auth/configure/password": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Configure Password
-         * @description Configure a custom username/password for local authentication.
-         *
-         *     Requires an active authenticated session (admin).
-         *     Generates a bcrypt hash and stores it in the security config.
-         */
-        post: operations["configure_password_api_v2_auth_configure_password_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/auth/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Auth Login */
-        post: operations["auth_login_api_v2_auth_login_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/auth/logout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Auth Logout */
-        post: operations["auth_logout_api_v2_auth_logout_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/auth/profile": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Auth Profile */
-        get: operations["auth_profile_api_v2_auth_profile_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/auth/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Auth Refresh */
-        post: operations["auth_refresh_api_v2_auth_refresh_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/camera/frame": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Current Frame
-         * @description Get the most recent camera frame as JPEG.
-         */
-        get: operations["get_current_frame_api_v2_camera_frame_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/camera/start": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start Camera
-         * @description Start camera streaming.
-         */
-        post: operations["start_camera_api_v2_camera_start_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/camera/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Camera Status
-         * @description Get camera service status.
-         */
-        get: operations["get_camera_status_api_v2_camera_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/camera/stop": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Stop Camera
-         * @description Stop camera streaming.
-         */
-        post: operations["stop_camera_api_v2_camera_stop_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/camera/stream.mjpeg": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Stream Mjpeg
-         * @description Stream camera frames as Motion JPEG.
-         */
-        get: operations["stream_mjpeg_api_v2_camera_stream_mjpeg_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/blade": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Control Blade V2
-         * @description Execute blade command with safety interlocks and audit logging.
-         */
-        post: operations["control_blade_v2_api_v2_control_blade_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/diagnose/heading-validation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Diagnose Heading Validation
-         * @description Validate heading by comparing GPS Course-Over-Ground vs IMU yaw.
-         *
-         *     POST /api/v2/control/diagnose/heading-validation
-         *     Body: {
-         *         "session_id": "<session>",
-         *         "distance_m": 5.0,       # Drive forward this far
-         *         "samples": 10            # Collect this many GPS/IMU samples
-         *     }
-         *
-         *     Returns:
-         *     {
-         *         "ok": true,
-         *         "heading_source": "gps|imu|conflict",
-         *         "gps_cog": 45.2,
-         *         "imu_yaw": 45.5,
-         *         "difference": 0.3,
-         *         "confidence": 0.95,
-         *         "recommendation": "GPS source is reliable" | "IMU appears inverted" | "Conflict detected"
-         *     }
-         */
-        post: operations["diagnose_heading_validation_api_v2_control_diagnose_heading_validation_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/diagnose/stiffness": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Diagnose Stiffness Progressive
-         * @description Start progressive stiffness detection test (slowly increase turn effort until stuck).
-         *
-         *     POST /api/v2/control/diagnose/stiffness
-         *     Body: {
-         *         "session_id": "<session>",
-         *         "direction": "left|right",
-         *         "initial_effort": 0.1,  # Start at 10% effort, optional
-         *         "step": 0.05,            # Increase by 5% each iteration, optional
-         *         "max_effort": 1.0        # Stop at 100%, optional
-         *     }
-         *
-         *     Returns:
-         *     {
-         *         "ok": true,
-         *         "test_active": true,
-         *         "current_effort": 0.10,
-         *         "heading": 45.2,
-         *         "heading_delta": 0.0,  # degrees changed since last step
-         *         "status": "testing|stuck|completed"
-         *     }
-         */
-        post: operations["diagnose_stiffness_progressive_api_v2_control_diagnose_stiffness_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/drive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Control Drive V2
-         * @description Execute drive command with safety checks and audit logging
-         */
-        post: operations["control_drive_v2_api_v2_control_drive_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/emergency": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Control Emergency V2
-         * @description Trigger emergency stop with immediate hardware shutdown
-         */
-        post: operations["control_emergency_v2_api_v2_control_emergency_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/emergency-stop": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Control Emergency Stop Alias
-         * @description Integration-friendly alias that always returns 200 and a simple flag.
-         */
-        post: operations["control_emergency_stop_alias_api_v2_control_emergency_stop_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/emergency_clear": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Clear Emergency Stop
-         * @description Clear emergency stop after explicit operator confirmation.
-         */
-        post: operations["clear_emergency_stop_api_v2_control_emergency_clear_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/manual-unlock": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Manual Unlock */
-        post: operations["manual_unlock_api_v2_control_manual_unlock_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/manual-unlock/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Manual Unlock Status */
-        get: operations["manual_unlock_status_api_v2_control_manual_unlock_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Control Pause Navigation
-         * @description Pause autonomous navigation while preserving the current path.
-         */
-        post: operations["control_pause_navigation_api_v2_control_pause_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/preset-turn": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Control Preset Turn
-         * @description Execute a closed-loop preset turn using IMU heading feedback.
-         *
-         *     POST /api/v2/control/preset-turn
-         *     Body: {
-         *         "session_id": "<session>",
-         *         "target_degrees": 90.0,    # positive = CW (right), negative = CCW (left)
-         *         "speed": 0.5               # optional, default 0.5
-         *     }
-         *
-         *     Returns:
-         *     {
-         *         "ok": bool,
-         *         "target_degrees": float,
-         *         "actual_degrees": float,
-         *         "duration_ms": int,
-         *         "method": "imu" | "timed"
-         *     }
-         */
-        post: operations["control_preset_turn_api_v2_control_preset_turn_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Control Resume Navigation
-         * @description Resume navigation after a pause.
-         */
-        post: operations["control_resume_navigation_api_v2_control_resume_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/return-home": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Control Return Home
-         * @description Start a return-to-home navigation sequence when home and position are available.
-         */
-        post: operations["control_return_home_api_v2_control_return_home_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/start": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Control Start Navigation
-         * @description Start autonomous navigation using the active planned path.
-         */
-        post: operations["control_start_navigation_api_v2_control_start_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Control Navigation Status
-         * @description Expose navigation control state for operator dashboards.
-         */
-        get: operations["control_navigation_status_api_v2_control_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/control/stop": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Control Stop Navigation
-         * @description Stop navigation and place the system back in idle.
-         */
-        post: operations["control_stop_navigation_api_v2_control_stop_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/dashboard/metrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Dashboard Metrics */
-        get: operations["get_dashboard_metrics_api_v2_dashboard_metrics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/dashboard/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Dashboard Status */
-        get: operations["dashboard_status_api_v2_dashboard_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/dashboard/telemetry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Dashboard Telemetry
-         * @description Get real-time telemetry from hardware sensors with RTK/IMU orientation states
-         */
-        get: operations["dashboard_telemetry_api_v2_dashboard_telemetry_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/debug/geofence": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Debug Geofence Set */
-        post: operations["debug_geofence_set_api_v2_debug_geofence_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/debug/gps/inject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Debug Gps Inject */
-        post: operations["debug_gps_inject_api_v2_debug_gps_inject_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/debug/sensors/inject-tilt": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Inject Tilt
-         * @description Debug-only: inject tilt (roll/pitch) to simulate IMU tilt event.
-         */
-        post: operations["inject_tilt_api_v2_debug_sensors_inject_tilt_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/debug/sensors/inject-tof": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Inject Tof
-         * @description Debug-only: inject a ToF distance reading (simulation/testing only).
-         *
-         *     This updates an in-memory override that SensorManager can read in future
-         *     iterations. For now, we simply store and acknowledge for contract tests.
-         */
-        post: operations["inject_tof_api_v2_debug_sensors_inject_tof_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/docs/bundle": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Docs Bundle */
-        get: operations["get_docs_bundle_api_v2_docs_bundle_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/docs/checksums": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Docs Checksums */
-        get: operations["get_docs_checksums_api_v2_docs_checksums_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/docs/freshness": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Docs Freshness */
-        get: operations["get_docs_freshness_api_v2_docs_freshness_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/docs/list": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Docs List */
-        get: operations["get_docs_list_api_v2_docs_list_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/docs/{doc_path}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Doc Contents */
-        get: operations["get_doc_contents_api_v2_docs__doc_path__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/fusion/state": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Fused State
-         * @description Return a fused navigation state (SIM_MODE-friendly scaffold).
-         *
-         *     In SIM_MODE, advance the model slightly each call to emulate motion and set
-         *     stable quality metrics. This keeps CI safe and enables placeholder tests.
-         */
-        get: operations["get_fused_state_api_v2_fusion_state_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/hardware/robohat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Robohat Status
-         * @description Get RoboHAT firmware health and watchdog status with safety summary.
-         */
-        get: operations["get_robohat_status_api_v2_hardware_robohat_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Health Api V2
-         * @description Expose health report under the versioned API namespace.
-         */
-        get: operations["health_api_v2_api_v2_health_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/health/liveness": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Health Liveness
-         * @description Simple liveness probe for container orchestration.
-         */
-        get: operations["health_liveness_api_v2_health_liveness_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/health/readiness": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Health Readiness
-         * @description Readiness probe including subsystem rollup.
-         */
-        get: operations["health_readiness_api_v2_health_readiness_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/maintenance/imu/calibrate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Calibration Status
-         * @description Return current calibration activity state and the most recent result.
-         */
-        get: operations["get_calibration_status_api_v2_maintenance_imu_calibrate_get"];
-        put?: never;
-        /**
-         * Post Calibrate Imu
-         * @description Execute the IMU calibration routine and return the resulting summary.
-         */
-        post: operations["post_calibrate_imu_api_v2_maintenance_imu_calibrate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/map/configuration": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Map Configuration */
-        get: operations["get_map_configuration_api_v2_map_configuration_get"];
-        /** Put Map Configuration */
-        put: operations["put_map_configuration_api_v2_map_configuration_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/map/locations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Map Locations */
-        get: operations["get_map_locations_api_v2_map_locations_get"];
-        /** Put Map Locations */
-        put: operations["put_map_locations_api_v2_map_locations_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/map/provider-fallback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Trigger Map Provider Fallback */
-        post: operations["trigger_map_provider_fallback_api_v2_map_provider_fallback_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/map/zones": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Map Zones */
-        get: operations["get_map_zones_api_v2_map_zones_get"];
-        put?: never;
-        /** Post Map Zones */
-        post: operations["post_map_zones_api_v2_map_zones_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/map/zones/{zone_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Map Zone */
-        get: operations["get_map_zone_api_v2_map_zones__zone_id__get"];
-        /** Put Map Zone */
-        put: operations["put_map_zone_api_v2_map_zones__zone_id__put"];
-        post?: never;
-        /** Delete Map Zone */
-        delete: operations["delete_map_zone_api_v2_map_zones__zone_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/missions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete All Missions
-         * @description Hard-delete all missions that are not currently running or paused.
-         */
-        delete: operations["delete_all_missions_api_v2_missions_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/missions/create": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create Mission
-         * @description Create a new mission.
-         */
-        post: operations["create_mission_api_v2_missions_create_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/missions/list": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Missions
-         * @description List all saved missions.
-         */
-        get: operations["list_missions_api_v2_missions_list_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/missions/{mission_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Mission
-         * @description Get a mission by ID.
-         */
-        get: operations["get_mission_api_v2_missions__mission_id__get"];
-        put?: never;
-        post?: never;
-        /**
-         * Delete Mission
-         * @description Hard-delete a mission and its execution state.
-         */
-        delete: operations["delete_mission_api_v2_missions__mission_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Update Mission
-         * @description Update a mission's name and/or waypoints in place.
-         */
-        patch: operations["update_mission_api_v2_missions__mission_id__patch"];
-        trace?: never;
-    };
-    "/api/v2/missions/{mission_id}/abort": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Abort Mission
-         * @description Abort a mission.
-         */
-        post: operations["abort_mission_api_v2_missions__mission_id__abort_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/missions/{mission_id}/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Pause Mission
-         * @description Pause a mission.
-         */
-        post: operations["pause_mission_api_v2_missions__mission_id__pause_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/missions/{mission_id}/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Resume Mission
-         * @description Resume a paused mission.
-         */
-        post: operations["resume_mission_api_v2_missions__mission_id__resume_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/missions/{mission_id}/start": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start Mission
-         * @description Start a mission.
-         */
-        post: operations["start_mission_api_v2_missions__mission_id__start_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/missions/{mission_id}/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Mission Status
-         * @description Get the status of a mission.
-         */
-        get: operations["get_mission_status_api_v2_missions__mission_id__status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/missions/{run_id}/summary": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Run Summary
-         * @description Return a post-run diagnostic summary for the given run_id.
-         */
-        get: operations["get_run_summary_api_v2_missions__run_id__summary_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/motors/drive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Drive */
-        post: operations["drive_api_v2_motors_drive_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/nav/coverage-plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Coverage Plan */
-        get: operations["get_coverage_plan_api_v2_nav_coverage_plan_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/nav/mode": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Set Mode */
-        post: operations["set_mode_api_v2_nav_mode_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/nav/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Nav Status */
-        get: operations["get_nav_status_api_v2_nav_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/nav/waypoints": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Set Waypoints */
-        post: operations["set_waypoints_api_v2_nav_waypoints_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/planning/jobs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Planning Jobs */
-        get: operations["list_planning_jobs_api_v2_planning_jobs_get"];
-        put?: never;
-        /** Create Planning Job */
-        post: operations["create_planning_job_api_v2_planning_jobs_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/planning/jobs/{job_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Delete Planning Job */
-        delete: operations["delete_planning_job_api_v2_planning_jobs__job_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/schedules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Schedules
-         * @description List all schedules (same backing store as GET /planning/jobs).
-         */
-        get: operations["list_schedules_api_v2_schedules_get"];
-        put?: never;
-        /**
-         * Create Schedule
-         * @description Create a schedule (same body as POST /planning/jobs).
-         */
-        post: operations["create_schedule_api_v2_schedules_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/schedules/{schedule_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Schedule
-         * @description Get a single schedule by ID (404 if not found).
-         */
-        get: operations["get_schedule_api_v2_schedules__schedule_id__get"];
-        /**
-         * Update Schedule
-         * @description Update an existing schedule (404 if not found).
-         */
-        put: operations["update_schedule_api_v2_schedules__schedule_id__put"];
-        post?: never;
-        /**
-         * Delete Schedule
-         * @description Delete a schedule (204 No Content; 404 if not found).
-         */
-        delete: operations["delete_schedule_api_v2_schedules__schedule_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/schedules/{schedule_id}/disable": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Disable Schedule
-         * @description Set enabled=False for the schedule.
-         */
-        post: operations["disable_schedule_api_v2_schedules__schedule_id__disable_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/schedules/{schedule_id}/enable": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Enable Schedule
-         * @description Set enabled=True for the schedule.
-         */
-        post: operations["enable_schedule_api_v2_schedules__schedule_id__enable_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/sensors/environmental/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Env Status */
-        get: operations["get_env_status_api_v2_sensors_environmental_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/sensors/gps/rtk/diagnostics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Rtk Diagnostics
-         * @description Return combined RTK/NTRIP diagnostics without stealing the serial port.
-         *
-         *     - Exposes current GPS reading and mode
-         *     - Reports NTRIP forwarder runtime stats when configured
-         *     - Includes minimal hardware GPS flags from app state
-         */
-        get: operations["get_rtk_diagnostics_api_v2_sensors_gps_rtk_diagnostics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/sensors/gps/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Gps Status */
-        get: operations["get_gps_status_api_v2_sensors_gps_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/sensors/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Sensors Health
-         * @description Return minimal sensor health snapshot.
-         *
-         *     Uses SensorManager when available. Safe in SIM_MODE and CI.
-         */
-        get: operations["get_sensors_health_api_v2_sensors_health_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/sensors/imu/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Imu Status */
-        get: operations["get_imu_status_api_v2_sensors_imu_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/sensors/power/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Power Status */
-        get: operations["get_power_status_api_v2_sensors_power_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/sensors/tof/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Tof Status
-         * @description Detailed ToF driver status for hardware verification.
-         *
-         *     Returns per-sensor backend info (binding name), bus/address, and last reading.
-         *     Safe on systems without the VL53L0X binding: fields will be None.
-         */
-        get: operations["get_tof_status_api_v2_sensors_tof_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/settings": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Settings
-         * @description Get canonical settings profile payload with compatibility fields.
-         */
-        get: operations["get_settings_api_v2_settings_get"];
-        /**
-         * Update Settings
-         * @description Update canonical settings profile, accepting legacy compatibility fields too.
-         */
-        put: operations["update_settings_api_v2_settings_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/settings/gps-policy": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Gps Policy Settings */
-        get: operations["get_gps_policy_settings_api_v2_settings_gps_policy_get"];
-        /** Update Gps Policy Settings */
-        put: operations["update_gps_policy_settings_api_v2_settings_gps_policy_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/settings/maps": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Maps Settings */
-        get: operations["get_maps_settings_api_v2_settings_maps_get"];
-        /** Update Maps Settings */
-        put: operations["update_maps_settings_api_v2_settings_maps_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/settings/remote-access": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Remote Access Settings */
-        get: operations["get_remote_access_settings_api_v2_settings_remote_access_get"];
-        /** Update Remote Access Settings */
-        put: operations["update_remote_access_settings_api_v2_settings_remote_access_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/settings/safety": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Safety Settings
-         * @description Return the current safety limits from limits.yaml.
-         */
-        get: operations["get_safety_settings_api_v2_settings_safety_get"];
-        /**
-         * Put Safety Settings
-         * @description Update safety limits, write to limits.yaml, and hot-reload runtime.
-         *
-         *     Accepts a partial JSON object — only supplied keys are changed.
-         */
-        put: operations["put_safety_settings_api_v2_settings_safety_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/settings/security": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Security Settings */
-        get: operations["get_security_settings_api_v2_settings_security_get"];
-        /** Update Security Settings */
-        put: operations["update_security_settings_api_v2_settings_security_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/settings/system": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get System Settings */
-        get: operations["get_system_settings_api_v2_settings_system_get"];
-        /** Update System Settings */
-        put: operations["update_system_settings_api_v2_settings_system_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/settings/telemetry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Telemetry Settings */
-        get: operations["get_telemetry_settings_api_v2_settings_telemetry_get"];
-        /** Update Telemetry Settings */
-        put: operations["update_telemetry_settings_api_v2_settings_telemetry_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Status V2
-         * @description Return current robot state in a simplified schema for contract tests.
-         */
-        get: operations["get_status_v2_api_v2_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/system/selftest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * System Selftest
-         * @description Run on-device hardware self-test.
-         *
-         *     Safe to run on systems without hardware; returns a structured report.
-         */
-        get: operations["system_selftest_api_v2_system_selftest_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/system/timezone": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get System Timezone
-         * @description Return the mower's default timezone.
-         *
-         *     Strategy: prefer the Raspberry Pi's configured timezone. If unavailable,
-         *     fall back to UTC. A GPS-derived timezone may be added in future.
-         */
-        get: operations["get_system_timezone_api_v2_system_timezone_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/telemetry/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Export Telemetry Diagnostic
-         * @description Export telemetry diagnostic data including power metrics for troubleshooting
-         */
-        get: operations["export_telemetry_diagnostic_api_v2_telemetry_export_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/telemetry/ping": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Telemetry Ping
-         * @description Return latency percentiles and samples to meet contract tests
-         */
-        post: operations["telemetry_ping_api_v2_telemetry_ping_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/telemetry/stream": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Telemetry Stream
-         * @description Contract-shaped telemetry stream: items + latency_summary_ms + next_since
-         */
-        get: operations["get_telemetry_stream_api_v2_telemetry_stream_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/verification-artifacts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Verification Artifact */
-        post: operations["create_verification_artifact_api_v2_verification_artifacts_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/weather/current": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Current Weather
-         * @description Get current weather data from sensors or external API.
-         */
-        get: operations["get_current_weather_api_v2_weather_current_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/weather/planning": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Planning Advice
-         * @description Get mowing planning advice based on current weather.
-         */
-        get: operations["get_planning_advice_api_v2_weather_planning_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/weather/planning-advice": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Planning Advice Contract
-         * @description Contract-friendly planning advice payload.
-         */
-        get: operations["get_planning_advice_contract_api_v2_weather_planning_advice_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/ws/control": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Websocket Control Handshake */
-        get: operations["websocket_control_handshake_api_v2_ws_control_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/ws/notifications": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Websocket Notifications Handshake */
-        get: operations["websocket_notifications_handshake_api_v2_ws_notifications_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/ws/settings": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Websocket Settings Handshake */
-        get: operations["websocket_settings_handshake_api_v2_ws_settings_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v2/ws/telemetry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Websocket Telemetry Handshake */
-        get: operations["websocket_telemetry_handshake_api_v2_ws_telemetry_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Health Root Route
-         * @description Return aggregated health status for platform monitoring.
-         */
-        get: operations["health_root_route_health_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/healthz": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Healthz
-         * @description Tiny liveness endpoint for cheap probes.
-         */
-        get: operations["healthz_healthz_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/metrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Metrics
-         * @description Expose a Prometheus-compatible metrics snapshot.
-         */
-        get: operations["metrics_metrics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ws/control": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Websocket Control Handshake */
-        get: operations["websocket_control_handshake_ws_control_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ws/telemetry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Websocket Telemetry Handshake */
-        get: operations["websocket_telemetry_handshake_ws_telemetry_get"];
+        /** Root */
+        get: operations["root__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2313,61 +2317,61 @@ export interface components {
         AuthLoginRequest: {
             /** Credential */
             credential?: string | null;
-            /** Password */
-            password?: string | null;
             /** Username */
             username?: string | null;
+            /** Password */
+            password?: string | null;
         };
         /**
          * BoundingBox
          * @description Object detection bounding box
          */
         BoundingBox: {
-            /** Height */
-            height: number;
-            /** Width */
-            width: number;
             /** X */
             x: number;
             /** Y */
             y: number;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
         };
         /** ControlResponseV2 */
         ControlResponseV2: {
             /** Accepted */
             accepted: boolean;
-            /**
-             * Active Interlocks
-             * @default []
-             */
-            active_interlocks: string[];
             /** Audit Id */
             audit_id: string;
-            /** Remediation */
-            remediation?: {
-                [key: string]: string;
-            } | null;
             /** Result */
             result: string;
+            /** Status Reason */
+            status_reason?: string | null;
+            /** Watchdog Echo */
+            watchdog_echo?: string | null;
+            /** Watchdog Latency Ms */
+            watchdog_latency_ms?: number | null;
             /**
              * Safety Checks
              * @default []
              */
             safety_checks: string[];
-            /** Status Reason */
-            status_reason?: string | null;
+            /**
+             * Active Interlocks
+             * @default []
+             */
+            active_interlocks: string[];
+            /** Remediation */
+            remediation?: {
+                [key: string]: string;
+            } | null;
             /** Telemetry Snapshot */
             telemetry_snapshot?: {
                 [key: string]: unknown;
             } | null;
-            /** Timestamp */
-            timestamp: string;
             /** Until */
             until?: string | null;
-            /** Watchdog Echo */
-            watchdog_echo?: string | null;
-            /** Watchdog Latency Ms */
-            watchdog_latency_ms?: number | null;
+            /** Timestamp */
+            timestamp: string;
         };
         /** DatasetExportRequest */
         DatasetExportRequest: {
@@ -2389,15 +2393,15 @@ export interface components {
          * @description Detected object with classification
          */
         DetectedObject: {
-            bounding_box: components["schemas"]["BoundingBox"];
+            /** Object Id */
+            object_id: string;
             /** Class Name */
             class_name: string;
             /** Confidence */
             confidence: number;
+            bounding_box: components["schemas"]["BoundingBox"];
             /** Distance Estimate */
             distance_estimate?: number | null;
-            /** Object Id */
-            object_id: string;
             /** Relative Bearing */
             relative_bearing?: number | null;
             /** Tracking Id */
@@ -2434,41 +2438,46 @@ export interface components {
         EnvSummary: {
             /** Initialized */
             initialized?: boolean | null;
+            /** Running */
+            running?: boolean | null;
             /** Last Read Age S */
             last_read_age_s?: number | null;
             /** Last Reading */
             last_reading?: {
                 [key: string]: unknown;
             } | null;
-            /** Running */
-            running?: boolean | null;
         };
         /** GPSInject */
         GPSInject: {
-            /** Accuracy M */
-            accuracy_m?: number | null;
             /** Latitude */
             latitude: number;
             /** Longitude */
             longitude: number;
+            /** Accuracy M */
+            accuracy_m?: number | null;
         };
         /** GPSSummary */
         GPSSummary: {
+            /** Mode */
+            mode?: string | null;
             /** Initialized */
             initialized?: boolean | null;
+            /** Running */
+            running?: boolean | null;
             /** Last Read Age S */
             last_read_age_s?: number | null;
             /** Last Reading */
             last_reading?: {
                 [key: string]: unknown;
             } | null;
-            /** Mode */
-            mode?: string | null;
-            /** Running */
-            running?: boolean | null;
         };
         /** GeofenceIn */
         GeofenceIn: {
+            /**
+             * Geofence Id
+             * @default default
+             */
+            geofence_id: string;
             /** Boundary */
             boundary: components["schemas"]["LatLng"][];
             /**
@@ -2476,11 +2485,6 @@ export interface components {
              * @default 0
              */
             buffer_distance_m: number;
-            /**
-             * Geofence Id
-             * @default default
-             */
-            geofence_id: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2490,31 +2494,21 @@ export interface components {
         /** IMUCalibrationResultPayload */
         IMUCalibrationResultPayload: {
             /**
-             * Calibration Score
-             * @description Normalized score from 0-3.
-             * @default 0
+             * Status
+             * @description High-level outcome for the calibration run.
              */
-            calibration_score: number;
+            status: string;
             /**
              * Calibration Status
              * @description Raw status reported by the IMU.
              */
             calibration_status?: string | null;
             /**
-             * Notes
-             * @description Additional guidance for the operator.
+             * Calibration Score
+             * @description Normalized score from 0-3.
+             * @default 0
              */
-            notes?: string | null;
-            /**
-             * Started At
-             * @description Timestamp when the calibration routine began.
-             */
-            started_at?: string | null;
-            /**
-             * Status
-             * @description High-level outcome for the calibration run.
-             */
-            status: string;
+            calibration_score: number;
             /**
              * Steps
              * @description Diagnostic step snapshots captured during calibration.
@@ -2527,6 +2521,16 @@ export interface components {
              * @description Completion timestamp (ISO 8601).
              */
             timestamp: string;
+            /**
+             * Started At
+             * @description Timestamp when the calibration routine began.
+             */
+            started_at?: string | null;
+            /**
+             * Notes
+             * @description Additional guidance for the operator.
+             */
+            notes?: string | null;
         };
         /** IMUCalibrationStatusResponse */
         IMUCalibrationStatusResponse: {
@@ -2542,74 +2546,74 @@ export interface components {
         IMUSummary: {
             /** Initialized */
             initialized?: boolean | null;
+            /** Running */
+            running?: boolean | null;
             /** Last Read Age S */
             last_read_age_s?: number | null;
             /** Last Reading */
             last_reading?: {
                 [key: string]: unknown;
             } | null;
-            /** Running */
-            running?: boolean | null;
         };
         /**
          * InferenceResult
          * @description Results from AI model inference
          */
         InferenceResult: {
-            /** Classification Confidence */
-            classification_confidence?: number | null;
-            /** Classification Result */
-            classification_result?: string | null;
-            /**
-             * Confidence Threshold
-             * @default 0.5
-             */
-            confidence_threshold: number;
-            /** Detected Objects */
-            detected_objects?: components["schemas"]["DetectedObject"][];
             /** Inference Id */
             inference_id: string;
+            task: components["schemas"]["InferenceTask"];
+            /** Model Name */
+            model_name: string;
+            /**
+             * Timestamp
+             * Format: date-time
+             */
+            timestamp?: string;
+            /** Input Frame Id */
+            input_frame_id: string;
+            /** Input Width */
+            input_width: number;
+            /** Input Height */
+            input_height: number;
+            /** Detected Objects */
+            detected_objects?: components["schemas"]["DetectedObject"][];
+            /** Classification Result */
+            classification_result?: string | null;
+            /** Classification Confidence */
+            classification_confidence?: number | null;
+            /** Segmentation Mask */
+            segmentation_mask?: string | null;
             /**
              * Inference Time Ms
              * @default 0
              */
             inference_time_ms: number;
-            /** Input Frame Id */
-            input_frame_id: string;
-            /** Input Height */
-            input_height: number;
-            /** Input Width */
-            input_width: number;
-            /** Model Name */
-            model_name: string;
             /**
-             * Model Version
-             * @default 1.0
+             * Preprocessing Time Ms
+             * @default 0
              */
-            model_version: string;
+            preprocessing_time_ms: number;
             /**
              * Postprocessing Time Ms
              * @default 0
              */
             postprocessing_time_ms: number;
             /**
-             * Preprocessing Time Ms
-             * @default 0
-             */
-            preprocessing_time_ms: number;
-            /** Segmentation Mask */
-            segmentation_mask?: string | null;
-            task: components["schemas"]["InferenceTask"];
-            /**
-             * Timestamp
-             * Format: date-time
-             */
-            timestamp?: string;
-            /**
              * Total Time Ms
              * @default 0
              */
             total_time_ms: number;
+            /**
+             * Model Version
+             * @default 1.0
+             */
+            model_version: string;
+            /**
+             * Confidence Threshold
+             * @default 0.5
+             */
+            confidence_threshold: number;
         };
         /**
          * InferenceTask
@@ -2619,50 +2623,50 @@ export interface components {
         InferenceTask: "obstacle_detection" | "grass_quality" | "boundary_detection" | "navigation_aid" | "object_classification" | "safety_monitoring";
         /** InjectTiltRequest */
         InjectTiltRequest: {
-            /** Pitch Deg */
-            pitch_deg?: number | null;
             /** Roll Deg */
             roll_deg?: number | null;
+            /** Pitch Deg */
+            pitch_deg?: number | null;
         };
         /** InjectToFRequest */
         InjectToFRequest: {
-            /** Distance M */
-            distance_m: number;
             /** Position */
             position: string;
+            /** Distance M */
+            distance_m: number;
         };
         /** Job */
         Job: {
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at?: string;
-            /**
-             * Enabled
-             * @default true
-             */
-            enabled: boolean;
             /** Id */
             id: string;
-            /** Last Run */
-            last_run?: string | null;
             /** Name */
             name: string;
+            /** Schedule */
+            schedule: string;
+            /** Zones */
+            zones: string[];
             /**
              * Priority
              * @default 1
              */
             priority: number;
-            /** Schedule */
-            schedule: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
             /**
              * Status
              * @default pending
              */
             status: string;
-            /** Zones */
-            zones: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at?: string;
+            /** Last Run */
+            last_run?: string | null;
         };
         /** LatLng */
         LatLng: {
@@ -2684,12 +2688,12 @@ export interface components {
         ManualUnlockResponse: {
             /** Authorized */
             authorized: boolean;
+            /** Session Id */
+            session_id: string;
             /** Expires At */
             expires_at: string;
             /** Principal */
             principal?: string | null;
-            /** Session Id */
-            session_id: string;
             /**
              * Source
              * @default manual_control
@@ -2700,19 +2704,19 @@ export interface components {
         ManualUnlockStatusResponse: {
             /** Authorized */
             authorized: boolean;
+            /** Session Id */
+            session_id?: string | null;
             /** Expires At */
             expires_at?: string | null;
             /** Principal */
             principal?: string | null;
             /** Reason */
             reason?: string | null;
-            /** Session Id */
-            session_id?: string | null;
         };
         /** MapLocations */
         MapLocations: {
-            am_sun?: components["schemas"]["Position"] | null;
             home?: components["schemas"]["Position"] | null;
+            am_sun?: components["schemas"]["Position"] | null;
             pm_sun?: components["schemas"]["Position"] | null;
         };
         /**
@@ -2720,11 +2724,6 @@ export interface components {
          * @description Represents a sequence of waypoints for the mower to follow.
          */
         Mission: {
-            /**
-             * Created At
-             * @description ISO 8601 timestamp of when the mission was created.
-             */
-            created_at: string;
             /** Id */
             id?: string;
             /**
@@ -2737,21 +2736,26 @@ export interface components {
              * @description List of waypoints in the mission.
              */
             waypoints?: components["schemas"]["MissionWaypoint"][];
+            /**
+             * Created At
+             * @description ISO 8601 timestamp of when the mission was created.
+             */
+            created_at: string;
         };
         /** MissionCreationRequest */
         MissionCreationRequest: {
             /** Name */
             name: string;
+            /** Waypoints */
+            waypoints?: components["schemas"]["MissionWaypoint"][] | null;
+            /** Zone Id */
+            zone_id?: string | null;
             /** Pattern */
             pattern?: string | null;
             /** Pattern Params */
             pattern_params?: {
                 [key: string]: unknown;
             } | null;
-            /** Waypoints */
-            waypoints?: components["schemas"]["MissionWaypoint"][] | null;
-            /** Zone Id */
-            zone_id?: string | null;
         };
         /**
          * MissionLifecycleStatus
@@ -2760,23 +2764,23 @@ export interface components {
         MissionLifecycleStatus: "idle" | "running" | "paused" | "completed" | "aborted" | "failed";
         /** MissionStatus */
         MissionStatus: {
+            /** Mission Id */
+            mission_id: string;
+            status: components["schemas"]["MissionLifecycleStatus"];
+            /** Current Waypoint Index */
+            current_waypoint_index?: number | null;
             /**
              * Completion Percentage
              * @default 0
              */
             completion_percentage: number;
-            /** Current Waypoint Index */
-            current_waypoint_index?: number | null;
-            /** Detail */
-            detail?: string | null;
-            /** Mission Id */
-            mission_id: string;
-            status: components["schemas"]["MissionLifecycleStatus"];
             /**
              * Total Waypoints
              * @default 0
              */
             total_waypoints: number;
+            /** Detail */
+            detail?: string | null;
         };
         /** MissionUpdateRequest */
         MissionUpdateRequest: {
@@ -2790,12 +2794,6 @@ export interface components {
          * @description A single waypoint in a mission.
          */
         MissionWaypoint: {
-            /**
-             * Blade On
-             * @description Whether the blade is active for this waypoint.
-             * @default false
-             */
-            blade_on: boolean;
             /** Id */
             id?: string;
             /**
@@ -2809,6 +2807,12 @@ export interface components {
              */
             lon: number;
             /**
+             * Blade On
+             * @description Whether the blade is active for this waypoint.
+             * @default false
+             */
+            blade_on: boolean;
+            /**
              * Speed
              * @description Mower speed at this waypoint (0-100%).
              * @default 50
@@ -2821,11 +2825,32 @@ export interface components {
         };
         /** MowerStatus */
         MowerStatus: {
+            position?: components["schemas"]["Position"] | null;
             /**
              * Battery Percentage
              * @default 0
              */
             battery_percentage: number;
+            /**
+             * Power Mode
+             * @default NORMAL
+             */
+            power_mode: string;
+            /**
+             * Navigation State
+             * @default IDLE
+             */
+            navigation_state: string;
+            /**
+             * @default {
+             *       "emergency_stop_active": false,
+             *       "tilt_detected": false,
+             *       "obstacle_detected": false,
+             *       "blade_safety_ok": true,
+             *       "safety_interlocks": []
+             *     }
+             */
+            safety_status: components["schemas"]["SafetyStatus"];
             /**
              * Blade Active
              * @default false
@@ -2836,27 +2861,6 @@ export interface components {
              * Format: date-time
              */
             last_updated?: string;
-            /**
-             * Navigation State
-             * @default IDLE
-             */
-            navigation_state: string;
-            position?: components["schemas"]["Position"] | null;
-            /**
-             * Power Mode
-             * @default NORMAL
-             */
-            power_mode: string;
-            /**
-             * @default {
-             *       "blade_safety_ok": true,
-             *       "emergency_stop_active": false,
-             *       "obstacle_detected": false,
-             *       "safety_interlocks": [],
-             *       "tilt_detected": false
-             *     }
-             */
-            safety_status: components["schemas"]["SafetyStatus"];
         };
         /**
          * NavigationMode
@@ -2865,36 +2869,42 @@ export interface components {
         NavigationMode: "IDLE" | "MANUAL" | "AUTONOMOUS" | "EMERGENCY_STOP";
         /** PlanningJobResponse */
         PlanningJobResponse: {
-            /** Created At */
-            created_at?: string | null;
-            /**
-             * Enabled
-             * @default true
-             */
-            enabled: boolean;
             /** Id */
             id: string;
-            /** Last Run */
-            last_run?: string | null;
             /** Name */
             name: string;
-            /**
-             * Priority
-             * @default 1
-             */
-            priority: number;
             /** Schedule */
             schedule?: string | null;
-            /**
-             * Status
-             * @default pending
-             */
-            status: string;
             /**
              * Zones
              * @default []
              */
             zones: unknown[];
+            /**
+             * Priority
+             * @default 1
+             */
+            priority: number;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Created At */
+            created_at?: string | null;
+            /** Last Run */
+            last_run?: string | null;
+            /**
+             * Status
+             * @default pending
+             */
+            status: string;
+            /** Pattern */
+            pattern?: string | null;
+            /** Pattern Params */
+            pattern_params?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** Point */
         Point: {
@@ -2905,44 +2915,34 @@ export interface components {
         };
         /** Position */
         Position: {
-            /** Accuracy */
-            accuracy?: number | null;
-            /** Altitude */
-            altitude?: number | null;
-            /** Gps Mode */
-            gps_mode?: string | null;
             /** Latitude */
             latitude?: number | null;
             /** Longitude */
             longitude?: number | null;
+            /** Altitude */
+            altitude?: number | null;
+            /** Accuracy */
+            accuracy?: number | null;
+            /** Gps Mode */
+            gps_mode?: string | null;
         };
         /** PowerSummary */
         PowerSummary: {
             /** Initialized */
             initialized?: boolean | null;
+            /** Running */
+            running?: boolean | null;
             /** Last Read Age S */
             last_read_age_s?: number | null;
             /** Last Reading */
             last_reading?: {
                 [key: string]: unknown;
             } | null;
-            /** Running */
-            running?: boolean | null;
         };
         /** RefreshResponse */
         RefreshResponse: {
             /** Access Token */
             access_token: string;
-            /**
-             * Expires At
-             * Format: date-time
-             */
-            expires_at: string;
-            /**
-             * Expires In
-             * @default 3600
-             */
-            expires_in: number;
             /** Token */
             token: string;
             /**
@@ -2950,9 +2950,23 @@ export interface components {
              * @default bearer
              */
             token_type: string;
+            /**
+             * Expires In
+             * @default 3600
+             */
+            expires_in: number;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
         };
         /** RtkDiagnosticsResponse */
         RtkDiagnosticsResponse: {
+            /** Ntrip */
+            ntrip: {
+                [key: string]: unknown;
+            };
             /** Gps */
             gps: {
                 [key: string]: unknown;
@@ -2961,99 +2975,85 @@ export interface components {
             hardware: {
                 [key: string]: unknown;
             };
-            /** Ntrip */
-            ntrip: {
-                [key: string]: unknown;
-            };
         };
         /** RunSummary */
         RunSummary: {
-            /** Average Pose Quality */
-            average_pose_quality: string | null;
-            /** Blocked Command Count */
-            blocked_command_count: number;
-            /** Heading Alignment Samples */
-            heading_alignment_samples: number;
-            /** Mission Id */
-            mission_id: string | null;
             /** Run Id */
             run_id: string;
+            /** Mission Id */
+            mission_id: string | null;
             /** Total Distance M */
             total_distance_m: number;
+            /** Average Pose Quality */
+            average_pose_quality: string | null;
+            /** Heading Alignment Samples */
+            heading_alignment_samples: number;
+            /** Blocked Command Count */
+            blocked_command_count: number;
             waypoint_inefficiency_metrics: components["schemas"]["WaypointInefficiencyMetrics"];
         };
         /** SafetyStatus */
         SafetyStatus: {
-            /**
-             * Blade Safety Ok
-             * @default true
-             */
-            blade_safety_ok: boolean;
             /**
              * Emergency Stop Active
              * @default false
              */
             emergency_stop_active: boolean;
             /**
+             * Tilt Detected
+             * @default false
+             */
+            tilt_detected: boolean;
+            /**
              * Obstacle Detected
              * @default false
              */
             obstacle_detected: boolean;
             /**
+             * Blade Safety Ok
+             * @default true
+             */
+            blade_safety_ok: boolean;
+            /**
              * Safety Interlocks
              * @default []
              */
             safety_interlocks: string[];
-            /**
-             * Tilt Detected
-             * @default false
-             */
-            tilt_detected: boolean;
         };
         /** SensorHealthResponse */
         SensorHealthResponse: {
+            /** Initialized */
+            initialized: boolean;
             /** Components */
             components: {
                 [key: string]: {
                     [key: string]: unknown;
                 };
             };
-            /** Initialized */
-            initialized: boolean;
             /** Timestamp */
             timestamp: string;
         };
         /** SetPasswordRequest */
         SetPasswordRequest: {
-            /** Password */
-            password: string;
             /** Username */
             username: string;
+            /** Password */
+            password: string;
         };
         /** SetPasswordResponse */
         SetPasswordResponse: {
+            /** Ok */
+            ok: boolean;
             /**
              * Message
              * @default Password configured successfully
              */
             message: string;
-            /** Ok */
-            ok: boolean;
         };
         /** SystemStatus */
         SystemStatus: {
             /** Battery Percentage */
             battery_percentage?: number | null;
-            /**
-             * Last Updated
-             * Format: date-time
-             */
-            last_updated?: string;
-            /**
-             * Motor Status
-             * @default idle
-             */
-            motor_status: string;
             /**
              * Navigation State
              * @default IDLE
@@ -3061,14 +3061,24 @@ export interface components {
             navigation_state: string;
             /**
              * @default {
-             *       "blade_safety_ok": true,
              *       "emergency_stop_active": false,
+             *       "tilt_detected": false,
              *       "obstacle_detected": false,
-             *       "safety_interlocks": [],
-             *       "tilt_detected": false
+             *       "blade_safety_ok": true,
+             *       "safety_interlocks": []
              *     }
              */
             safety_status: components["schemas"]["SafetyStatus"];
+            /**
+             * Motor Status
+             * @default idle
+             */
+            motor_status: string;
+            /**
+             * Last Updated
+             * Format: date-time
+             */
+            last_updated?: string;
         };
         /** TelemetryPingRequest */
         TelemetryPingRequest: {
@@ -3082,74 +3092,70 @@ export interface components {
         };
         /** TimezoneResponse */
         TimezoneResponse: {
-            /** Source */
-            source: string;
             /** Timezone */
             timezone: string;
+            /** Source */
+            source: string;
         };
         /** ToFProbe */
         ToFProbe: {
+            /** Sensor Side */
+            sensor_side: string;
             /** Backend */
             backend?: string | null;
-            /** I2C Address */
-            i2c_address?: string | null;
             /** I2C Bus */
             i2c_bus?: number | null;
+            /** I2C Address */
+            i2c_address?: string | null;
             /** Initialized */
             initialized?: boolean | null;
+            /** Running */
+            running?: boolean | null;
             /** Last Distance Mm */
             last_distance_mm?: number | null;
             /** Last Read Age S */
             last_read_age_s?: number | null;
-            /** Running */
-            running?: boolean | null;
-            /** Sensor Side */
-            sensor_side: string;
         };
         /** ToFStatusResponse */
         ToFStatusResponse: {
-            left: components["schemas"]["ToFProbe"] | null;
-            right: components["schemas"]["ToFProbe"] | null;
             /** Sim Mode */
             sim_mode: boolean;
+            left: components["schemas"]["ToFProbe"] | null;
+            right: components["schemas"]["ToFProbe"] | null;
             /** Timestamp */
             timestamp: string;
         };
         /** UserOut */
         UserOut: {
+            /** Id */
+            id: string;
+            /** Username */
+            username: string;
+            /**
+             * Role
+             * @default admin
+             */
+            role: string;
             /**
              * Created At
              * Format: date-time
              */
             created_at?: string;
-            /** Id */
-            id: string;
-            /**
-             * Role
-             * @default admin
-             */
-            role: string;
-            /** Username */
-            username: string;
         };
         /** UserResponse */
         UserResponse: {
             /** Id */
             id: string;
+            /** Username */
+            username: string;
             /**
              * Role
              * @default admin
              */
             role: string;
-            /** Username */
-            username: string;
         };
         /** ValidationError */
         ValidationError: {
-            /** Context */
-            ctx?: Record<string, never>;
-            /** Input */
-            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
@@ -3159,47 +3165,47 @@ export interface components {
         };
         /** VerificationArtifactCreateRequest */
         VerificationArtifactCreateRequest: {
-            /**
-             * Created By
-             * @default automation
-             */
-            created_by: string;
-            /** Linked Requirements */
-            linked_requirements?: string[];
+            /** Type */
+            type: string;
             /** Location */
             location: string;
-            /** Metadata */
-            metadata?: {
-                [key: string]: unknown;
-            };
             /**
              * Summary
              * @default
              */
             summary: string;
-            /** Type */
-            type: string;
+            /** Linked Requirements */
+            linked_requirements?: string[];
+            /**
+             * Created By
+             * @default automation
+             */
+            created_by: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
         };
         /** WaypointIn */
         WaypointIn: {
+            /** Waypoint Id */
+            waypoint_id: string;
+            /** Latitude */
+            latitude: number;
+            /** Longitude */
+            longitude: number;
             /**
              * Arrival Threshold M
              * @default 1
              */
             arrival_threshold_m: number;
-            /** Latitude */
-            latitude: number;
-            /** Longitude */
-            longitude: number;
-            /** Waypoint Id */
-            waypoint_id: string;
         };
         /** WaypointInefficiencyMetrics */
         WaypointInefficiencyMetrics: {
-            /** Average Approach Distance M */
-            average_approach_distance_m: number | null;
             /** Waypoint Count */
             waypoint_count: number;
+            /** Average Approach Distance M */
+            average_approach_distance_m: number | null;
         };
         /** WaypointList */
         WaypointList: {
@@ -3207,12 +3213,7 @@ export interface components {
             waypoints: components["schemas"]["WaypointIn"][];
         };
         /** Zone */
-        Zone: {
-            /**
-             * Exclusion Zone
-             * @default false
-             */
-            exclusion_zone: boolean;
+        backend__src__api__rest__Zone: {
             /** Id */
             id: string;
             /** Name */
@@ -3224,45 +3225,75 @@ export interface components {
              * @default 0
              */
             priority: number;
+            /**
+             * Exclusion Zone
+             * @default false
+             */
+            exclusion_zone: boolean;
+            /**
+             * Zone Kind
+             * @default boundary
+             * @enum {string}
+             */
+            zone_kind: "boundary" | "exclusion" | "mow";
         };
         /** AuthResponse */
         backend__src__api__rest_v1__AuthResponse: {
             /** Access Token */
             access_token: string;
             /**
-             * Expires In
-             * @default 3600
-             */
-            expires_in: number;
-            /**
              * Token Type
              * @default bearer
              */
             token_type: string;
+            /**
+             * Expires In
+             * @default 3600
+             */
+            expires_in: number;
             user: components["schemas"]["UserResponse"];
+        };
+        /** Zone */
+        backend__src__api__rest_v1__Zone: {
+            /** Id */
+            id: string;
+            /** Name */
+            name?: string | null;
+            /** Polygon */
+            polygon: components["schemas"]["Point"][];
+            /**
+             * Priority
+             * @default 0
+             */
+            priority: number;
+            /**
+             * Exclusion Zone
+             * @default false
+             */
+            exclusion_zone: boolean;
         };
         /** AuthResponse */
         backend__src__api__routers__auth__AuthResponse: {
             /** Access Token */
             access_token: string;
             /**
-             * Expires At
-             * Format: date-time
+             * Token Type
+             * @default bearer
              */
-            expires_at: string;
+            token_type: string;
             /**
              * Expires In
              * @default 3600
              */
             expires_in: number;
+            user: components["schemas"]["UserOut"];
             /** Token */
             token: string;
             /**
-             * Token Type
-             * @default bearer
+             * Expires At
+             * Format: date-time
              */
-            token_type: string;
-            user: components["schemas"]["UserOut"];
+            expires_at: string;
         };
     };
     responses: never;
@@ -3273,7 +3304,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    root__get: {
+    get_map_zones_api_v2_map_zones_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3288,21 +3319,23 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["backend__src__api__rest__Zone"][];
                 };
             };
         };
     };
-    auth_login_api_v1_auth_login_post: {
+    post_map_zones_api_v2_map_zones_post: {
         parameters: {
-            query?: never;
+            query?: {
+                bulk?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AuthLoginRequest"];
+                "application/json": components["schemas"]["backend__src__api__rest__Zone"][];
             };
         };
         responses: {
@@ -3312,7 +3345,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["backend__src__api__rest_v1__AuthResponse"];
+                    "application/json": components["schemas"]["backend__src__api__rest__Zone"][];
                 };
             };
             /** @description Validation Error */
@@ -3326,11 +3359,13 @@ export interface operations {
             };
         };
     };
-    get_zones_api_v1_maps_zones_get: {
+    get_map_zone_api_v2_map_zones__zone_id__get: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                zone_id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -3341,31 +3376,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Zone"][];
-                };
-            };
-        };
-    };
-    create_zones_api_v1_maps_zones_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Zone"][];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Zone"][];
+                    "application/json": components["schemas"]["backend__src__api__rest__Zone"];
                 };
             };
             /** @description Validation Error */
@@ -3379,14 +3390,20 @@ export interface operations {
             };
         };
     };
-    get_jobs_api_v1_mow_jobs_get: {
+    put_map_zone_api_v2_map_zones__zone_id__put: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                zone_id: string;
+            };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["backend__src__api__rest__Zone"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -3394,23 +3411,32 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Job"][];
+                    "application/json": components["schemas"]["backend__src__api__rest__Zone"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    create_job_api_v1_mow_jobs_post: {
+    post_map_zone_single_api_v2_map_zones__zone_id__post: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                zone_id: string;
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
+                "application/json": components["schemas"]["backend__src__api__rest__Zone"];
             };
         };
         responses: {
@@ -3420,7 +3446,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Job"];
+                    "application/json": components["schemas"]["backend__src__api__rest__Zone"];
                 };
             };
             /** @description Validation Error */
@@ -3434,1429 +3460,23 @@ export interface operations {
             };
         };
     };
-    get_status_api_v1_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SystemStatus"];
-                };
-            };
-        };
-    };
-    list_ai_datasets_api_v2_ai_datasets_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    export_ai_dataset_api_v2_ai_datasets__dataset_id__export_post: {
+    delete_map_zone_api_v2_map_zones__zone_id__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                dataset_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DatasetExportRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    run_uploaded_inference_api_v2_ai_inference_post: {
-        parameters: {
-            query?: {
-                task?: components["schemas"]["InferenceTask"];
-                confidence_threshold?: number | null;
-                frame_id?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InferenceResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    run_latest_frame_inference_api_v2_ai_inference_latest_post: {
-        parameters: {
-            query?: {
-                task?: components["schemas"]["InferenceTask"];
-                confidence_threshold?: number | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InferenceResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_recent_results_api_v2_ai_results_recent_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InferenceResult"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_ai_status_api_v2_ai_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    configure_password_api_v2_auth_configure_password_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetPasswordRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SetPasswordResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    auth_login_api_v2_auth_login_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AuthLoginRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["backend__src__api__routers__auth__AuthResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    auth_logout_api_v2_auth_logout_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    auth_profile_api_v2_auth_profile_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserOut"];
-                };
-            };
-        };
-    };
-    auth_refresh_api_v2_auth_refresh_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RefreshResponse"];
-                };
-            };
-        };
-    };
-    get_current_frame_api_v2_camera_frame_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    start_camera_api_v2_camera_start_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                } | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_camera_status_api_v2_camera_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    stop_camera_api_v2_camera_stop_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                } | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    stream_mjpeg_api_v2_camera_stream_mjpeg_get: {
-        parameters: {
-            query?: {
-                client?: string | null;
-                session_id?: string | null;
-                ts?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    control_blade_v2_api_v2_control_blade_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    diagnose_heading_validation_api_v2_control_diagnose_heading_validation_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    diagnose_stiffness_progressive_api_v2_control_diagnose_stiffness_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    control_drive_v2_api_v2_control_drive_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ControlResponseV2"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    control_emergency_v2_api_v2_control_emergency_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                } | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ControlResponseV2"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    control_emergency_stop_alias_api_v2_control_emergency_stop_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    clear_emergency_stop_api_v2_control_emergency_clear_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EmergencyClearRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    manual_unlock_api_v2_control_manual_unlock_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ManualUnlockRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ManualUnlockResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    manual_unlock_status_api_v2_control_manual_unlock_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ManualUnlockStatusResponse"];
-                };
-            };
-        };
-    };
-    control_pause_navigation_api_v2_control_pause_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    control_preset_turn_api_v2_control_preset_turn_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    control_resume_navigation_api_v2_control_resume_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    control_return_home_api_v2_control_return_home_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    control_start_navigation_api_v2_control_start_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    control_navigation_status_api_v2_control_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    control_stop_navigation_api_v2_control_stop_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    get_dashboard_metrics_api_v2_dashboard_metrics_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    dashboard_status_api_v2_dashboard_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MowerStatus"];
-                };
-            };
-        };
-    };
-    dashboard_telemetry_api_v2_dashboard_telemetry_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    debug_geofence_set_api_v2_debug_geofence_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GeofenceIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    debug_gps_inject_api_v2_debug_gps_inject_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GPSInject"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    inject_tilt_api_v2_debug_sensors_inject_tilt_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["InjectTiltRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    inject_tof_api_v2_debug_sensors_inject_tof_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["InjectToFRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_docs_bundle_api_v2_docs_bundle_get: {
-        parameters: {
-            query?: {
-                simulate_checksum_mismatch?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_docs_checksums_api_v2_docs_checksums_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    get_docs_freshness_api_v2_docs_freshness_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    get_docs_list_api_v2_docs_list_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
-                };
-            };
-        };
-    };
-    get_doc_contents_api_v2_docs__doc_path__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                doc_path: string;
+                zone_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            200: {
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_fused_state_api_v2_fusion_state_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    get_robohat_status_api_v2_hardware_robohat_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    health_api_v2_api_v2_health_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    health_liveness_api_v2_health_liveness_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    health_readiness_api_v2_health_readiness_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    get_calibration_status_api_v2_maintenance_imu_calibrate_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IMUCalibrationStatusResponse"];
-                };
-            };
-        };
-    };
-    post_calibrate_imu_api_v2_maintenance_imu_calibrate_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IMUCalibrationResultPayload"];
-                };
-            };
-        };
-    };
-    get_map_configuration_api_v2_map_configuration_get: {
-        parameters: {
-            query?: {
-                config_id?: string;
-                simulate_fallback?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_map_configuration_api_v2_map_configuration_put: {
-        parameters: {
-            query?: {
-                config_id?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -4909,694 +3529,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MapLocations"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    trigger_map_provider_fallback_api_v2_map_provider_fallback_post: {
-        parameters: {
-            query?: {
-                config_id?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_map_zones_api_v2_map_zones_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Zone"][];
-                };
-            };
-        };
-    };
-    post_map_zones_api_v2_map_zones_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Zone"][];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Zone"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_map_zone_api_v2_map_zones__zone_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                zone_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Zone"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_map_zone_api_v2_map_zones__zone_id__put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                zone_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Zone"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Zone"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_map_zone_api_v2_map_zones__zone_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                zone_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_all_missions_api_v2_missions_delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    create_mission_api_v2_missions_create_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MissionCreationRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Mission"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_missions_api_v2_missions_list_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Mission"][];
-                };
-            };
-        };
-    };
-    get_mission_api_v2_missions__mission_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                mission_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Mission"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_mission_api_v2_missions__mission_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                mission_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_mission_api_v2_missions__mission_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                mission_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MissionUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Mission"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    abort_mission_api_v2_missions__mission_id__abort_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                mission_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pause_mission_api_v2_missions__mission_id__pause_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                mission_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    resume_mission_api_v2_missions__mission_id__resume_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                mission_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    start_mission_api_v2_missions__mission_id__start_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                mission_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_mission_status_api_v2_missions__mission_id__status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                mission_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MissionStatus"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_run_summary_api_v2_missions__run_id__summary_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RunSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    drive_api_v2_motors_drive_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DriveCommand"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: {
-                            [key: string]: number;
-                        };
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_coverage_plan_api_v2_nav_coverage_plan_get: {
-        parameters: {
-            query?: {
-                config_id?: string;
-                spacing_m?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    set_mode_api_v2_nav_mode_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ModeIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_nav_status_api_v2_nav_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    set_waypoints_api_v2_nav_waypoints_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WaypointList"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -5672,6 +3604,1444 @@ export interface operations {
             path: {
                 job_id: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_map_configuration_api_v2_map_configuration_get: {
+        parameters: {
+            query?: {
+                config_id?: string;
+                simulate_fallback?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_map_configuration_api_v2_map_configuration_put: {
+        parameters: {
+            query?: {
+                config_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_map_provider_fallback_api_v2_map_provider_fallback_post: {
+        parameters: {
+            query?: {
+                config_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_robohat_status_api_v2_hardware_robohat_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    control_drive_v2_api_v2_control_drive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlResponseV2"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    control_preset_turn_api_v2_control_preset_turn_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    control_blade_v2_api_v2_control_blade_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    control_emergency_v2_api_v2_control_emergency_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlResponseV2"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    control_emergency_stop_alias_api_v2_control_emergency_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    control_start_navigation_api_v2_control_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    control_pause_navigation_api_v2_control_pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    control_resume_navigation_api_v2_control_resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    control_stop_navigation_api_v2_control_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    control_return_home_api_v2_control_return_home_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    control_navigation_status_api_v2_control_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    diagnose_stiffness_progressive_api_v2_control_diagnose_stiffness_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    diagnose_heading_validation_api_v2_control_diagnose_heading_validation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auth_login_api_v2_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backend__src__api__routers__auth__AuthResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auth_refresh_api_v2_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshResponse"];
+                };
+            };
+        };
+    };
+    auth_logout_api_v2_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    configure_password_api_v2_auth_configure_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetPasswordResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auth_profile_api_v2_auth_profile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOut"];
+                };
+            };
+        };
+    };
+    manual_unlock_status_api_v2_control_manual_unlock_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualUnlockStatusResponse"];
+                };
+            };
+        };
+    };
+    manual_unlock_api_v2_control_manual_unlock_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualUnlockRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualUnlockResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    websocket_telemetry_handshake_api_v2_ws_telemetry_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    websocket_control_handshake_api_v2_ws_control_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    websocket_settings_handshake_api_v2_ws_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    websocket_notifications_handshake_api_v2_ws_notifications_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_telemetry_stream_api_v2_telemetry_stream_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                since?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_telemetry_diagnostic_api_v2_telemetry_export_get: {
+        parameters: {
+            query?: {
+                component?: string | null;
+                start?: string | null;
+                end?: string | null;
+                /** @description Export format: json or csv */
+                format?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    telemetry_ping_api_v2_telemetry_ping_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelemetryPingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dashboard_telemetry_api_v2_dashboard_telemetry_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    dashboard_status_api_v2_dashboard_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MowerStatus"];
+                };
+            };
+        };
+    };
+    get_sensors_health_api_v2_sensors_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SensorHealthResponse"];
+                };
+            };
+        };
+    };
+    get_tof_status_api_v2_sensors_tof_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToFStatusResponse"];
+                };
+            };
+        };
+    };
+    get_gps_status_api_v2_sensors_gps_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GPSSummary"];
+                };
+            };
+        };
+    };
+    get_rtk_diagnostics_api_v2_sensors_gps_rtk_diagnostics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RtkDiagnosticsResponse"];
+                };
+            };
+        };
+    };
+    get_imu_status_api_v2_sensors_imu_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IMUSummary"];
+                };
+            };
+        };
+    };
+    get_env_status_api_v2_sensors_environmental_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvSummary"];
+                };
+            };
+        };
+    };
+    get_power_status_api_v2_sensors_power_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PowerSummary"];
+                };
+            };
+        };
+    };
+    inject_tof_api_v2_debug_sensors_inject_tof_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InjectToFRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inject_tilt_api_v2_debug_sensors_inject_tilt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InjectTiltRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    system_selftest_api_v2_system_selftest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    health_liveness_api_v2_health_liveness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    health_readiness_api_v2_health_readiness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_system_timezone_api_v2_system_timezone_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimezoneResponse"];
+                };
+            };
+        };
+    };
+    get_calibration_status_api_v2_maintenance_imu_calibrate_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IMUCalibrationStatusResponse"];
+                };
+            };
+        };
+    };
+    post_calibrate_imu_api_v2_maintenance_imu_calibrate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IMUCalibrationResultPayload"];
+                };
+            };
+        };
+    };
+    get_camera_status_api_v2_camera_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    start_camera_api_v2_camera_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_camera_api_v2_camera_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_current_frame_api_v2_camera_frame_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    stream_mjpeg_api_v2_camera_stream_mjpeg_get: {
+        parameters: {
+            query?: {
+                client?: string | null;
+                session_id?: string | null;
+                ts?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_current_weather_api_v2_weather_current_get: {
+        parameters: {
+            query?: {
+                latitude?: number | null;
+                longitude?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_planning_advice_api_v2_weather_planning_get: {
+        parameters: {
+            query?: {
+                latitude?: number | null;
+                longitude?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_planning_advice_contract_api_v2_weather_planning_advice_get: {
+        parameters: {
+            query?: {
+                latitude?: number | null;
+                longitude?: number | null;
+            };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -5848,37 +5218,6 @@ export interface operations {
             };
         };
     };
-    disable_schedule_api_v2_schedules__schedule_id__disable_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                schedule_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PlanningJobResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     enable_schedule_api_v2_schedules__schedule_id__enable_post: {
         parameters: {
             query?: never;
@@ -5910,11 +5249,13 @@ export interface operations {
             };
         };
     };
-    get_env_status_api_v2_sensors_environmental_status_get: {
+    disable_schedule_api_v2_schedules__schedule_id__disable_post: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                schedule_id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -5925,127 +5266,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvSummary"];
+                    "application/json": components["schemas"]["PlanningJobResponse"];
                 };
             };
-        };
-    };
-    get_rtk_diagnostics_api_v2_sensors_gps_rtk_diagnostics_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RtkDiagnosticsResponse"];
-                };
-            };
-        };
-    };
-    get_gps_status_api_v2_sensors_gps_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GPSSummary"];
-                };
-            };
-        };
-    };
-    get_sensors_health_api_v2_sensors_health_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SensorHealthResponse"];
-                };
-            };
-        };
-    };
-    get_imu_status_api_v2_sensors_imu_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IMUSummary"];
-                };
-            };
-        };
-    };
-    get_power_status_api_v2_sensors_power_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PowerSummary"];
-                };
-            };
-        };
-    };
-    get_tof_status_api_v2_sensors_tof_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ToFStatusResponse"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -6071,266 +5301,6 @@ export interface operations {
         };
     };
     update_settings_api_v2_settings_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_gps_policy_settings_api_v2_settings_gps_policy_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    update_gps_policy_settings_api_v2_settings_gps_policy_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_maps_settings_api_v2_settings_maps_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    update_maps_settings_api_v2_settings_maps_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_remote_access_settings_api_v2_settings_remote_access_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    update_remote_access_settings_api_v2_settings_remote_access_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_safety_settings_api_v2_settings_safety_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    put_safety_settings_api_v2_settings_safety_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    get_security_settings_api_v2_settings_security_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    update_security_settings_api_v2_settings_security_put: {
         parameters: {
             query?: never;
             header?: never;
@@ -6420,6 +5390,226 @@ export interface operations {
             };
         };
     };
+    get_security_settings_api_v2_settings_security_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    update_security_settings_api_v2_settings_security_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_remote_access_settings_api_v2_settings_remote_access_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    update_remote_access_settings_api_v2_settings_remote_access_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_maps_settings_api_v2_settings_maps_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    update_maps_settings_api_v2_settings_maps_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_gps_policy_settings_api_v2_settings_gps_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    update_gps_policy_settings_api_v2_settings_gps_policy_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_telemetry_settings_api_v2_settings_telemetry_get: {
         parameters: {
             query?: never;
@@ -6475,6 +5665,106 @@ export interface operations {
             };
         };
     };
+    get_safety_settings_api_v2_settings_safety_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    put_safety_settings_api_v2_settings_safety_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    websocket_telemetry_handshake_ws_telemetry_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    websocket_control_handshake_ws_control_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    metrics_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     get_status_v2_api_v2_status_get: {
         parameters: {
             query?: never;
@@ -6495,82 +5785,7 @@ export interface operations {
             };
         };
     };
-    system_selftest_api_v2_system_selftest_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    get_system_timezone_api_v2_system_timezone_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TimezoneResponse"];
-                };
-            };
-        };
-    };
-    export_telemetry_diagnostic_api_v2_telemetry_export_get: {
-        parameters: {
-            query?: {
-                component?: string | null;
-                start?: string | null;
-                end?: string | null;
-                /** @description Export format: json or csv */
-                format?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    telemetry_ping_api_v2_telemetry_ping_post: {
+    debug_gps_inject_api_v2_debug_gps_inject_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -6579,7 +5794,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TelemetryPingRequest"];
+                "application/json": components["schemas"]["GPSInject"];
             };
         };
         responses: {
@@ -6603,11 +5818,901 @@ export interface operations {
             };
         };
     };
-    get_telemetry_stream_api_v2_telemetry_stream_get: {
+    debug_geofence_set_api_v2_debug_geofence_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeofenceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_waypoints_api_v2_nav_waypoints_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WaypointList"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_mode_api_v2_nav_mode_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_nav_status_api_v2_nav_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_coverage_plan_api_v2_nav_coverage_plan_get: {
+        parameters: {
+            query?: {
+                config_id?: string;
+                spacing_m?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    drive_api_v2_motors_drive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DriveCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: {
+                            [key: string]: number;
+                        };
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_emergency_stop_api_v2_control_emergency_clear_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmergencyClearRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fused_state_api_v2_fusion_state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_dashboard_metrics_api_v2_dashboard_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    health_root_route_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    health_api_v2_api_v2_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    healthz_healthz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    create_mission_api_v2_missions_create_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MissionCreationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mission"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_mission_api_v2_missions__mission_id__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_mission_api_v2_missions__mission_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_mission_api_v2_missions__mission_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    abort_mission_api_v2_missions__mission_id__abort_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_missions_api_v2_missions_list_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mission"][];
+                };
+            };
+        };
+    };
+    get_mission_status_api_v2_missions__mission_id__status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mission_api_v2_missions__mission_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mission"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_mission_api_v2_missions__mission_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_mission_api_v2_missions__mission_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MissionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mission"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_all_missions_api_v2_missions_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_ai_datasets_api_v2_ai_datasets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    export_ai_dataset_api_v2_ai_datasets__dataset_id__export_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dataset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatasetExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_status_api_v2_ai_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_recent_results_api_v2_ai_results_recent_get: {
         parameters: {
             query?: {
                 limit?: number;
-                since?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceResult"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_uploaded_inference_api_v2_ai_inference_post: {
+        parameters: {
+            query?: {
+                task?: components["schemas"]["InferenceTask"];
+                confidence_threshold?: number | null;
+                frame_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_latest_frame_inference_api_v2_ai_inference_latest_post: {
+        parameters: {
+            query?: {
+                task?: components["schemas"]["InferenceTask"];
+                confidence_threshold?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_docs_list_api_v2_docs_list_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    get_docs_checksums_api_v2_docs_checksums_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_docs_freshness_api_v2_docs_freshness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_docs_bundle_api_v2_docs_bundle_get: {
+        parameters: {
+            query?: {
+                simulate_checksum_mismatch?: string | null;
             };
             header?: never;
             path?: never;
@@ -6668,14 +6773,13 @@ export interface operations {
             };
         };
     };
-    get_current_weather_api_v2_weather_current_get: {
+    get_doc_contents_api_v2_docs__doc_path__get: {
         parameters: {
-            query?: {
-                latitude?: number | null;
-                longitude?: number | null;
-            };
+            query?: never;
             header?: never;
-            path?: never;
+            path: {
+                doc_path: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -6700,14 +6804,13 @@ export interface operations {
             };
         };
     };
-    get_planning_advice_api_v2_weather_planning_get: {
+    get_run_summary_api_v2_missions__run_id__summary_get: {
         parameters: {
-            query?: {
-                latitude?: number | null;
-                longitude?: number | null;
-            };
+            query?: never;
             header?: never;
-            path?: never;
+            path: {
+                run_id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -6718,7 +6821,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["RunSummary"];
                 };
             };
             /** @description Validation Error */
@@ -6732,12 +6835,9 @@ export interface operations {
             };
         };
     };
-    get_planning_advice_contract_api_v2_weather_planning_advice_get: {
+    get_status_api_v1_status_get: {
         parameters: {
-            query?: {
-                latitude?: number | null;
-                longitude?: number | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -6750,7 +6850,31 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SystemStatus"];
+                };
+            };
+        };
+    };
+    auth_login_api_v1_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backend__src__api__rest_v1__AuthResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6764,7 +6888,7 @@ export interface operations {
             };
         };
     };
-    websocket_control_handshake_api_v2_ws_control_get: {
+    get_zones_api_v1_maps_zones_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -6779,12 +6903,45 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["backend__src__api__rest_v1__Zone"][];
                 };
             };
         };
     };
-    websocket_notifications_handshake_api_v2_ws_notifications_get: {
+    create_zones_api_v1_maps_zones_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["backend__src__api__rest_v1__Zone"][];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backend__src__api__rest_v1__Zone"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_jobs_api_v1_mow_jobs_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -6799,136 +6956,47 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Job"][];
                 };
             };
         };
     };
-    websocket_settings_handshake_api_v2_ws_settings_get: {
+    create_job_api_v1_mow_jobs_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Job"];
                 };
             };
-        };
-    };
-    websocket_telemetry_handshake_api_v2_ws_telemetry_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    health_root_route_health_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    healthz_healthz_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
-    metrics_metrics_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    websocket_control_handshake_ws_control_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    websocket_telemetry_handshake_ws_telemetry_get: {
+    root__get: {
         parameters: {
             query?: never;
             header?: never;

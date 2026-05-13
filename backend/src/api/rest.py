@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Any
+from typing import Optional, Any, Literal
 import json
 import hashlib
 import logging
@@ -98,6 +98,15 @@ class Zone(BaseModel):
     polygon: list[Point]
     priority: int = 0
     exclusion_zone: bool = False
+    zone_kind: Literal["boundary", "exclusion", "mow"] = "boundary"
+
+    @model_validator(mode="after")
+    def _sync_exclusion(self) -> "Zone":
+        if self.zone_kind == "exclusion":
+            self.exclusion_zone = True
+        elif self.exclusion_zone and self.zone_kind == "boundary":
+            self.zone_kind = "exclusion"
+        return self
 
 
 _zones_last_modified: datetime = datetime.now(timezone.utc)
@@ -149,8 +158,17 @@ def get_map_zones(request: Request, runtime: RuntimeContext = Depends(get_runtim
 
 
 @router.post("/map/zones", response_model=list[Zone])
-async def post_map_zones(zones: list[Zone], runtime: RuntimeContext = Depends(get_runtime)):
+async def post_map_zones(
+    zones: list[Zone],
+    bulk: bool = Query(False),
+    runtime: RuntimeContext = Depends(get_runtime),
+):
     global _zones_last_modified
+    if not bulk:
+        raise HTTPException(
+            status_code=400,
+            detail="Bulk zone replace requires ?bulk=true. For single-zone creation use POST /map/zones/{id}.",
+        )
     repo = getattr(runtime, "map_repository", None)
     zone_dicts = [z.model_dump(mode="json") for z in zones]
     if repo is not None:
@@ -160,6 +178,41 @@ async def post_map_zones(zones: list[Zone], runtime: RuntimeContext = Depends(ge
     for z in zones:
         await _emit_zone_changed(hub, z.id, "bulk_replace")
     return zone_dicts
+
+
+@router.post("/map/zones/{zone_id}", response_model=Zone, status_code=201)
+async def post_map_zone_single(
+    zone_id: str,
+    zone: Zone,
+    runtime: RuntimeContext = Depends(get_runtime),
+):
+    """Atomically create a single zone. 409 if zone_id already exists."""
+    global _zones_last_modified
+    if zone.id != zone_id:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Zone id in body '{zone.id}' does not match path id '{zone_id}'",
+        )
+    repo = getattr(runtime, "map_repository", None)
+    if repo is not None:
+        if repo.get_zone(zone_id) is not None:
+            raise HTTPException(status_code=409, detail=f"Zone '{zone_id}' already exists.")
+        existing = repo.list_zones()
+        conflicts = _validate_zone_against_existing(zone, existing)
+        if conflicts:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Zone overlaps with existing zones: {conflicts}",
+            )
+        import sqlite3 as _sqlite3
+        try:
+            repo.save_zone(zone.model_dump(mode="json"))
+        except _sqlite3.IntegrityError:
+            raise HTTPException(status_code=409, detail=f"Zone '{zone_id}' already exists.")
+    _zones_last_modified = datetime.now(timezone.utc)
+    hub = getattr(runtime, "websocket_hub", None)
+    await _emit_zone_changed(hub, zone_id, "created")
+    return zone.model_dump(mode="json")
 
 
 @router.get("/map/zones/{zone_id}", response_model=Zone)
@@ -466,6 +519,56 @@ def _geometry_conflicts(
                     conflicts.add(other_zone_id)
 
     return sorted(conflicts)
+
+
+def _validate_zone_against_existing(
+    new_zone: "Zone",
+    existing_zones: list[dict],
+    *,
+    skip_id: str | None = None,
+) -> list[str]:
+    """Return a list of zone ids that overlap with new_zone.
+
+    existing_zones is a list of dicts from MapRepository.list_zones().
+    skip_id allows excluding an existing zone (e.g. during update of self).
+    """
+    new_ring = [(p.latitude, p.longitude) for p in new_zone.polygon]
+    if len(new_ring) < 3:
+        return []
+
+    candidate_rings: list[tuple[str, list]] = [(new_zone.id, new_ring)]
+    for z in existing_zones:
+        if z.get("id") == skip_id:
+            continue
+        polygon = z.get("polygon", [])
+        ring = []
+        for p in polygon:
+            if isinstance(p, dict):
+                ring.append((p.get("latitude", 0), p.get("longitude", 0)))
+        if len(ring) >= 3:
+            candidate_rings.append((z["id"], ring))
+
+    if len(candidate_rings) < 2:
+        return []
+
+    try:
+        from shapely.geometry import Polygon as ShapelyPolygon
+        polys = []
+        for zid, ring in candidate_rings:
+            poly = ShapelyPolygon(ring)
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if not poly.is_empty:
+                polys.append((zid, poly))
+
+        new_id, new_poly = polys[0]
+        conflict_set: set[str] = set()
+        for other_id, other_poly in polys[1:]:
+            if new_poly.intersects(other_poly) and not new_poly.touches(other_poly):
+                conflict_set.add(other_id)
+        return sorted(conflict_set)
+    except Exception:
+        return []
 
 
 def _legacy_polygon_zones(entries: Any, *, zone_type: str) -> list[dict[str, Any]]:

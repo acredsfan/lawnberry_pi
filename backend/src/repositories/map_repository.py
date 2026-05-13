@@ -39,6 +39,13 @@ class MapRepository(BaseRepository):
             );
             """,
         ),
+        (
+            2,
+            """
+            ALTER TABLE map_zones ADD COLUMN zone_kind TEXT NOT NULL DEFAULT 'boundary';
+            UPDATE map_zones SET zone_kind = CASE WHEN exclusion_zone = 1 THEN 'exclusion' ELSE 'boundary' END;
+            """,
+        ),
     ]
 
     @property
@@ -58,14 +65,15 @@ class MapRepository(BaseRepository):
             conn.execute("DELETE FROM map_zones")
             for zone in zones:
                 conn.execute(
-                    "INSERT INTO map_zones (id, name, polygon_json, priority, exclusion_zone) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO map_zones (id, name, polygon_json, priority, exclusion_zone, zone_kind) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         zone["id"],
                         zone.get("name"),
                         json.dumps(zone["polygon"]),
                         zone.get("priority", 0),
                         int(bool(zone.get("exclusion_zone", False))),
+                        zone.get("zone_kind", "boundary"),
                     ),
                 )
             conn.commit()
@@ -96,18 +104,36 @@ class MapRepository(BaseRepository):
         """Update a single zone by id. Returns True if a row was updated."""
         with self._get_connection() as conn:
             cursor = conn.execute(
-                "UPDATE map_zones SET name = ?, polygon_json = ?, priority = ?, exclusion_zone = ? "
+                "UPDATE map_zones SET name = ?, polygon_json = ?, priority = ?, exclusion_zone = ?, zone_kind = ? "
                 "WHERE id = ?",
                 (
                     zone.get("name"),
                     json.dumps(zone["polygon"]),
                     zone.get("priority", 0),
                     int(bool(zone.get("exclusion_zone", False))),
+                    zone.get("zone_kind", "boundary"),
                     zone["id"],
                 ),
             )
             conn.commit()
             return cursor.rowcount > 0
+
+    def save_zone(self, zone: dict[str, Any]) -> None:
+        """Insert a single zone. Raises sqlite3.IntegrityError if id already exists."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO map_zones (id, name, polygon_json, priority, exclusion_zone, zone_kind) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    zone["id"],
+                    zone.get("name"),
+                    json.dumps(zone["polygon"]),
+                    zone.get("priority", 0),
+                    int(bool(zone.get("exclusion_zone", False))),
+                    zone.get("zone_kind", "boundary"),
+                ),
+            )
+            conn.commit()
 
     def delete_zone(self, zone_id: str) -> bool:
         """Delete a single zone by id. Returns True if a row was deleted."""

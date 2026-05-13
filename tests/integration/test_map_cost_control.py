@@ -116,7 +116,7 @@ async def test_map_provider_switching_preserves_zones():
             "exclusion_zone": False
         }]
         
-        zone_response = await client.post("/api/v2/map/zones", json=test_zone)
+        zone_response = await client.post("/api/v2/map/zones?bulk=true", json=test_zone)
         assert zone_response.status_code == 200
         
         # Switch to OSM

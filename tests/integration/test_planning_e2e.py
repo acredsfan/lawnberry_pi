@@ -95,9 +95,9 @@ def test_create_zone_then_schedule_then_observe_mission():
                 "exclusion_zone": False,
             }
         ]
-        zone_resp = client.post("/api/v2/map/zones", json=zone_payload)
+        zone_resp = client.post("/api/v2/map/zones?bulk=true", json=zone_payload)
         assert zone_resp.status_code == 200, (
-            f"Expected 200 from POST /api/v2/map/zones, got {zone_resp.status_code}: "
+            f"Expected 200 from POST /api/v2/map/zones?bulk=true, got {zone_resp.status_code}: "
             f"{zone_resp.text}"
         )
         zones = zone_resp.json()

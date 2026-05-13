@@ -101,7 +101,7 @@ def _zone_payload(zone_id: str, name: str, priority: int = 0, lat_offset: float 
 
 
 async def _post_zones(client: httpx.AsyncClient, *zone_payloads: dict) -> httpx.Response:
-    return await client.post("/api/v2/map/zones", json=list(zone_payloads))
+    return await client.post("/api/v2/map/zones?bulk=true", json=list(zone_payloads))
 
 
 # ---------------------------------------------------------------------------
