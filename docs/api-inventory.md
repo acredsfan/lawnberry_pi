@@ -36,6 +36,7 @@ Canonical surface is `/api/v2/*`. All new frontend code must use canonical endpo
 | POST | `/api/v2/missions/{id}/abort` | `canonical` | `api/mission.py` | |
 | GET  | `/api/v2/missions/{id}/status` | `canonical` | `api/mission.py` | |
 | GET  | `/api/v2/missions/list` | `canonical` | `api/mission.py` | |
+| DELETE | `/api/v2/missions` | `canonical` | `api/mission.py` | Bulk delete; returns `{deleted: int, skipped: [{id, name, reason}]}` — skips running missions instead of raising an error |
 
 ## Navigation
 
@@ -51,14 +52,15 @@ Canonical surface is `/api/v2/*`. All new frontend code must use canonical endpo
 | Method | Path | Label | Router file | Notes |
 |---|---|---|---|---|
 | GET  | `/api/v2/map/zones` | `canonical` | `api/rest.py` | Backed by MapRepository (SQLite) |
-| POST | `/api/v2/map/zones` | `canonical` | `api/rest.py` | Bulk replace; triggers WS `planning.zone.changed` |
+| POST | `/api/v2/map/zones` | `canonical` | `api/rest.py` | **Requires `?bulk=true`** (returns 400 without it); atomic bulk replace; triggers WS `planning.zone.changed` |
 | GET  | `/api/v2/map/zones/{zone_id}` | `canonical` | `api/rest.py` | Per-zone lookup (404 if not found) |
+| POST | `/api/v2/map/zones/{zone_id}` | `canonical` | `api/rest.py` | Atomic single-zone create (201); 409 if ID already exists; 422 on validation failure |
 | PUT  | `/api/v2/map/zones/{zone_id}` | `canonical` | `api/rest.py` | Update a single zone |
 | DELETE | `/api/v2/map/zones/{zone_id}` | `canonical` | `api/rest.py` | Delete a single zone (204) |
 | GET  | `/api/v2/map/locations` | `canonical` | `api/rest.py` | |
 | PUT  | `/api/v2/map/locations` | `canonical` | `api/rest.py` | |
-| GET  | `/api/v2/map/configuration` | `canonical` | `api/rest.py` | |
-| PUT  | `/api/v2/map/configuration` | `canonical` | `api/rest.py` | |
+| GET  | `/api/v2/map/configuration` | `canonical` | `api/rest.py` | Response includes `_zones_source: "map_zones"` |
+| PUT  | `/api/v2/map/configuration` | `canonical` | `api/rest.py` | Returns **410 Gone** if body contains `zones`, `boundaries`, or `exclusion_zones` — use zone endpoints instead |
 | POST | `/api/v2/map/provider-fallback` | `canonical` | `api/rest.py` | |
 
 ## Planning

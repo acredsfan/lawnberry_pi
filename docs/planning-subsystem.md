@@ -14,14 +14,31 @@ waypoints.  It was built incrementally across Tasks T1–T12 of the Phase 3 plan
 
 ### Zones (`MapRepository`)
 
-Zones are persistent GeoJSON-style polygons stored in SQLite by `MapRepository`.
+Zones are persistent GeoJSON-style polygons stored in SQLite by `MapRepository` in the
+`map_zones` table.  All zone data is read from this table — it is the single source of
+truth for spatial data and is **not** embedded in the map configuration envelope
+(`map_config`).
 
-- **Boundary zones** (`exclusion_zone=False`) define areas to mow.
-- **Exclusion zones** (`exclusion_zone=True`) are automatically subtracted from
-  coverage paths.
-- API surface: `GET/POST /api/v2/map/zones` (bulk) and
-  `GET/PUT/DELETE /api/v2/map/zones/{zone_id}` (per-zone CRUD).
+The `zone_kind` column distinguishes zone roles:
+
+| `zone_kind` | Planning role |
+|---|---|
+| `boundary` | Outer operating boundary; defines the gross mow area |
+| `exclusion` | Obstacle / no-go; subtracted from coverage paths automatically |
+| `mow` | Explicit mow polygon; path planner constrains scanlines to this area |
+
+`PlanningService` queries `MapRepository` and filters rows by `zone_kind` to separate
+the boundary polygon from exclusions and explicit mow zones before invoking the coverage
+planner.
+
+The legacy `exclusion_zone` boolean column is still present for backward compatibility
+but `zone_kind` is authoritative.  New code must write and read `zone_kind`.
+
+- API surface: `GET/POST?bulk=true /api/v2/map/zones` (bulk) and
+  `GET/POST/PUT/DELETE /api/v2/map/zones/{zone_id}` (per-zone CRUD).
 - Zone mutations broadcast a `planning.zone.changed` WebSocket event.
+- See `docs/map-storage.md` for the full table schema, audit log format, and
+  deprecated endpoint behaviour.
 
 ### Schedules / Jobs (unified SQLite backing store)
 
