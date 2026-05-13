@@ -19,9 +19,31 @@ export async function getMapZones(): Promise<Zone[]> {
   return response.data
 }
 
-export async function postMapZones(zones: Zone[]): Promise<Zone[]> {
-  const response = await apiService.post<Zone[]>('/api/v2/map/zones', zones)
+export async function bulkReplaceMapZones(zones: Zone[]): Promise<Zone[]> {
+  const response = await apiService.post<Zone[]>('/api/v2/map/zones?bulk=true', zones)
   return response.data
+}
+
+/** @deprecated Use bulkReplaceMapZones with explicit ?bulk=true intent */
+export const postMapZones = bulkReplaceMapZones
+
+export async function getMapZone(id: string): Promise<Zone> {
+  const response = await apiService.get<Zone>(`/api/v2/map/zones/${id}`)
+  return response.data
+}
+
+export async function createMapZone(zone: Zone): Promise<Zone> {
+  const response = await apiService.post<Zone>(`/api/v2/map/zones/${zone.id}`, zone)
+  return response.data
+}
+
+export async function putMapZone(id: string, zone: Zone): Promise<Zone> {
+  const response = await apiService.put<Zone>(`/api/v2/map/zones/${id}`, zone)
+  return response.data
+}
+
+export async function deleteMapZone(id: string): Promise<void> {
+  await apiService.delete(`/api/v2/map/zones/${id}`)
 }
 
 export async function getMapLocations(): Promise<MapLocations> {
