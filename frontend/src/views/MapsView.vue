@@ -748,7 +748,7 @@ function addExclusionZoneOnMap() {
   mapStore.setEditMode('exclusion')
 }
 
-function addSyntheticMowingZone() {
+async function addSyntheticMowingZone() {
   if (!mapStore.configuration) return
   const zoneId = `test-zone-${Date.now().toString(36)}`
   const baseLat = 37.7749
@@ -759,13 +759,18 @@ function addSyntheticMowingZone() {
     { latitude: baseLat + 0.0009, longitude: baseLon + 0.0012 },
     { latitude: baseLat, longitude: baseLon + 0.0012 },
   ]
-  mapStore.addMowingZone({
-    id: zoneId,
-    name: `Test Zone ${mapStore.configuration.mowing_zones.length + 1}`,
-    zone_type: 'mow',
-    polygon,
-  })
-  showStatus('Synthetic mowing zone added', true)
+  try {
+    await mapStore.addMowingZone({
+      id: zoneId,
+      name: `Test Zone ${mapStore.configuration.mowing_zones.length + 1}`,
+      zone_type: 'mow',
+      zone_kind: 'mow',
+      polygon,
+    })
+    showStatus('Synthetic mowing zone added', true)
+  } catch (e) {
+    showStatus('Failed to add synthetic zone', false)
+  }
 }
 
 async function saveConfigurationForTest() {
@@ -793,8 +798,7 @@ function iconForMarker(type: string) {
 async function removeMow(z: any) {
   if (!confirm(`Delete mowing zone "${z.name}"?`)) return
   try {
-    mapStore.removeMowingZone(z.id)
-    await mapStore.saveConfiguration()
+    await mapStore.deleteZone(z.id)
     toast.show('Mowing zone removed', 'success', 1500)
   } catch (error) {
     console.error(error)
@@ -805,9 +809,18 @@ async function removeMow(z: any) {
 async function renameZone(z: any) {
   const name = prompt('Zone name', z.name)
   if (!name) return
-  mapStore.updateZoneName(z.id, name)
+  mapStore.updateZoneName(z.id, name)  // update local state first
   try {
-    await mapStore.saveConfiguration()
+    // Find the updated zone to get its polygon
+    const allZones = [
+      mapStore.configuration?.boundary_zone,
+      ...(mapStore.configuration?.exclusion_zones || []),
+      ...(mapStore.configuration?.mowing_zones || []),
+    ].filter(Boolean)
+    const zone = allZones.find((zone: any) => zone.id === z.id)
+    if (zone) {
+      await mapStore.updateZone(z.id, zone.polygon)
+    }
     toast.show('Zone renamed', 'success', 1500)
   } catch (error) {
     console.error(error)
@@ -818,8 +831,7 @@ async function renameZone(z: any) {
 async function removeExclusion(z: any) {
   if (!confirm(`Delete exclusion zone "${z.name}"?`)) return
   try {
-    mapStore.removeExclusionZone(z.id)
-    await mapStore.saveConfiguration()
+    await mapStore.deleteZone(z.id)
     toast.show('Exclusion zone removed', 'success', 1500)
   } catch (error) {
     console.error(error)
