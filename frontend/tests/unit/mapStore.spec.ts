@@ -1,6 +1,20 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { useMapStore } from '@/stores/map'
+
+// Mock mapsClient (used by zone actions in the store)
+const mockGetMapZones = vi.fn()
+const mockCreateMapZone = vi.fn()
+const mockPutMapZone = vi.fn()
+const mockDeleteMapZone = vi.fn()
+
+vi.mock('@/services/mapsClient', () => ({
+  getMapZones: mockGetMapZones,
+  createMapZone: mockCreateMapZone,
+  putMapZone: mockPutMapZone,
+  deleteMapZone: mockDeleteMapZone,
+}))
+
+const { useMapStore } = await import('@/stores/map')
 import apiService from '@/services/api'
 
 const mockedApi = apiService as unknown as {
@@ -68,6 +82,8 @@ describe('Map Store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    // Default: getMapZones returns empty list (zones loaded separately in mapStore.test.ts)
+    mockGetMapZones.mockResolvedValue([])
   })
 
   describe('initialization', () => {
@@ -87,10 +103,25 @@ describe('Map Store', () => {
       const envelope = createEnvelope()
 
       mockedApi.get.mockResolvedValue({ data: envelope })
+      // loadConfiguration calls _reloadZonesFromServer() which calls getMapZones
+      // Return a boundary zone so the config is populated
+      mockGetMapZones.mockResolvedValue([{
+        id: 'boundary',
+        name: 'Main boundary',
+        zone_kind: 'boundary',
+        polygon: [
+          { latitude: 40.0, longitude: -75.0 },
+          { latitude: 40.0, longitude: -74.9 },
+          { latitude: 39.9, longitude: -74.9 },
+        ],
+        priority: 0,
+        exclusion_zone: false,
+      }])
 
       await store.loadConfiguration('config1')
 
       expect(mockedApi.get).toHaveBeenCalledWith('/api/v2/map/configuration?config_id=config1')
+      expect(mockGetMapZones).toHaveBeenCalledTimes(1)
       expect(store.configuration?.config_id).toBe('config1')
       expect(store.configuration?.boundary_zone?.polygon[0]).toMatchObject({
         latitude: 40.0,
@@ -135,13 +166,11 @@ describe('Map Store', () => {
     it('saves configuration successfully', async () => {
       const store = useMapStore()
       const config = createConfig('config1')
-      const envelope = createEnvelope()
 
       store.configuration = { ...config }
       store.isDirty = true
 
       mockedApi.put.mockResolvedValue({ data: { success: true } })
-      mockedApi.get.mockResolvedValue({ data: envelope })
 
       await store.saveConfiguration()
 
@@ -149,12 +178,13 @@ describe('Map Store', () => {
       const [url, payload] = mockedApi.put.mock.calls[0]
       expect(url).toBe('/api/v2/map/configuration?config_id=config1')
       expect(payload).toMatchObject({ provider: 'osm', markers: [] })
-      expect(payload.zones[0]).toMatchObject({ zone_type: 'boundary', zone_id: 'boundary' })
+      // saveConfiguration now sends non-spatial only — no zones field
+      expect(payload.zones).toBeUndefined()
       expect(store.isDirty).toBe(false)
       expect(store.error).toBe('')
     })
 
-    it('handles save errors with remediation link', async () => {
+    it('handles save errors', async () => {
       const store = useMapStore()
       const config = createConfig('config1')
       store.configuration = { ...config }
@@ -164,10 +194,6 @@ describe('Map Store', () => {
         response: {
           data: {
             error: 'Validation failed',
-            remediation: {
-              message: 'Adjust boundary',
-              docs_link: '/docs/maps#validation',
-            },
           },
         },
       }
@@ -177,7 +203,6 @@ describe('Map Store', () => {
       await expect(store.saveConfiguration()).rejects.toEqual(error)
 
       expect(store.error).toContain('Validation failed')
-      expect(store.error).toContain('/docs/maps#validation')
       expect(store.isDirty).toBe(true)
     })
 
@@ -189,7 +214,7 @@ describe('Map Store', () => {
   })
 
   describe('addExclusionZone', () => {
-    it('adds new exclusion zone to configuration', () => {
+    it('adds new exclusion zone to configuration via server', async () => {
       const store = useMapStore()
       store.configuration = createConfig()
 
@@ -204,21 +229,34 @@ describe('Map Store', () => {
         ],
       }
 
-      store.addExclusionZone(zone as any)
+      const apiZone = {
+        id: 'zone1',
+        name: 'Flower Bed',
+        zone_kind: 'exclusion',
+        polygon: zone.polygon,
+        priority: 0,
+        exclusion_zone: true,
+      }
+      // putMapZone returns 404 → createMapZone is called
+      const notFound = { response: { status: 404 } }
+      mockPutMapZone.mockRejectedValue(notFound)
+      mockCreateMapZone.mockResolvedValue(apiZone)
+      mockGetMapZones.mockResolvedValue([apiZone])
+
+      await store.addExclusionZone(zone as any)
 
       expect(store.configuration!.exclusion_zones).toHaveLength(1)
       expect(store.configuration!.exclusion_zones[0]).toMatchObject({
         id: 'zone1',
-        polygon: zone.polygon,
       })
-      expect(store.isDirty).toBe(true)
+      expect(store.isDirty).toBe(false)
     })
 
-    it('throws error when no configuration loaded', () => {
+    it('throws error when no configuration loaded', async () => {
       const store = useMapStore()
 
-      expect(() => store.addExclusionZone({ id: 'zone1', polygon: [] } as any))
-        .toThrow('No configuration loaded')
+      await expect(store.addExclusionZone({ id: 'zone1', polygon: [] } as any))
+        .rejects.toThrow('No configuration loaded')
     })
   })
 

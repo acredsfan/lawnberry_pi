@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import type { AxiosResponse } from 'axios';
 import apiService from '../services/api';
+import { getMapZones, createMapZone, putMapZone, deleteMapZone, type Zone as ApiZone } from '../services/mapsClient';
 
 const MAP_CONFIG_STORAGE_KEY = 'lawnberry_map_configuration_v2';
 
@@ -31,7 +32,8 @@ export interface MarkerSchedule {
 export interface Zone {
   id: string;
   name: string;
-  zone_type: string;
+  zone_type: string;         // keep for backwards compat
+  zone_kind?: 'boundary' | 'exclusion' | 'mow';  // new field
   polygon: Point[];
   priority?: number;
   enabled?: boolean;
@@ -171,14 +173,22 @@ export const useMapStore = defineStore('map', () => {
   const selectedZoneId = ref<string | null>(null);
   const editMode = ref<'view' | 'boundary' | 'exclusion' | 'mowing' | 'marker'>('view');
   const providerFallbackActive = ref(false);
+  const lastError = ref<string | null>(null);
 
-  // Watch for changes and save to localStorage
+  // Watch for changes and save non-spatial fields to localStorage
+  // Zones are loaded from server on demand — do not cache them locally
   watch(
     configuration,
     (newConfig) => {
       if (newConfig) {
         try {
-          localStorage.setItem(MAP_CONFIG_STORAGE_KEY, JSON.stringify(newConfig));
+          // Cache only non-spatial fields — zones are loaded from server on demand
+          localStorage.setItem(MAP_CONFIG_STORAGE_KEY, JSON.stringify({
+            config_id: newConfig.config_id,
+            provider: newConfig.provider,
+            markers: newConfig.markers,
+            last_modified: newConfig.last_modified,
+          }));
         } catch (error) {
           console.error('Failed to save map configuration to localStorage:', error);
         }
@@ -218,55 +228,54 @@ export const useMapStore = defineStore('map', () => {
     isLoading.value = true;
     error.value = '';
 
-    // Try loading from localStorage first
-    try {
-      const storedConfig = localStorage.getItem(MAP_CONFIG_STORAGE_KEY);
-      if (storedConfig) {
-        const parsedConfig = JSON.parse(storedConfig);
-        // Basic validation
-        if (parsedConfig && parsedConfig.config_id) {
-          configuration.value = parsedConfig as MapConfiguration;
-          isDirty.value = false;
-          loading.value = false;
-          isLoading.value = false;
-          // Still fetch from server in the background to get updates
-          apiService.get(`/api/v2/map/configuration?config_id=${configId}`).then(response => {
-            if (response?.data) {
-              const serverConfig = response.data?.zones ? envelopeToConfig(configId, response.data) : response.data as MapConfiguration;
-              // A simple timestamp check to see if the server has a newer version
-              if (new Date(serverConfig.last_modified) > new Date(configuration.value?.last_modified || 0)) {
-                configuration.value = serverConfig;
-              }
-            }
-          }).catch(e => {
-            console.warn('Background map configuration sync failed:', e);
-          });
-          return;
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load map configuration from localStorage:', e);
-    }
-
     try {
       const response: AxiosResponse<any> = await apiService.get(
-          `/api/v2/map/configuration?config_id=${configId}`
-        );
-        // Support contract envelope from backend
-        if (response?.data?.zones) {
-          configuration.value = envelopeToConfig(configId, response.data);
-        } else if (response?.data) {
-          configuration.value = response.data as MapConfiguration;
-        } else if (response) {
-          configuration.value = response as unknown as MapConfiguration;
-        }
-
-        if (configuration.value) {
-          configuration.value.exclusion_zones = configuration.value.exclusion_zones || []
-          configuration.value.mowing_zones = configuration.value.mowing_zones || []
-          configuration.value.markers = configuration.value.markers || []
-        }
+        `/api/v2/map/configuration?config_id=${configId}`
+      );
+      const env = response?.data || {};
+      // Build base config from envelope (non-spatial fields only)
+      const cfg: MapConfiguration = {
+        config_id: configId,
+        config_version: 1,
+        provider: (env.provider === 'google-maps' ? 'google_maps' : 'osm'),
+        provider_metadata: {},
+        boundary_zone: null,
+        exclusion_zones: [],
+        mowing_zones: [],
+        markers: [],
+        center_point: null,
+        zoom_level: 18,
+        map_rotation_deg: 0,
+        validation_errors: [],
+        last_modified: env.updated_at || new Date().toISOString(),
+        created_at: env.updated_at || new Date().toISOString(),
+      };
+      // Load markers from envelope
+      if (Array.isArray(env.markers)) {
+        cfg.markers = env.markers.map((m: any) => ({
+          marker_id: String(m.marker_id || `marker_${Date.now()}`),
+          marker_type: (['home', 'am_sun', 'pm_sun', 'custom'].includes(m.marker_type) ? m.marker_type : 'custom') as MapMarker['marker_type'],
+          position: { latitude: Number(m.position?.latitude || 0), longitude: Number(m.position?.longitude || 0) },
+          label: m.label ?? null,
+          icon: m.icon ?? null,
+          metadata: m.metadata || {},
+          schedule: m.schedule ?? null,
+          is_home: Boolean(m.is_home || m.marker_type === 'home'),
+        }));
+      }
+      configuration.value = cfg;
+      // Load zones from map_zones table (authoritative source)
+      await _reloadZonesFromServer();
       isDirty.value = false;
+      // Update localStorage cache (non-spatial only — no zones)
+      try {
+        localStorage.setItem(MAP_CONFIG_STORAGE_KEY, JSON.stringify({
+          config_id: cfg.config_id,
+          provider: cfg.provider,
+          markers: cfg.markers,
+          last_modified: cfg.last_modified,
+        }));
+      } catch {}
       return response;
     } catch (e: any) {
       error.value = e?.response?.data?.error || e?.message || 'Failed to load map configuration';
@@ -281,27 +290,36 @@ export const useMapStore = defineStore('map', () => {
     if (!configuration.value) {
       throw new Error('No configuration to save');
     }
-    
+
     loading.value = true;
     isLoading.value = true;
     error.value = '';
     try {
-      const env = configToEnvelope(configuration.value);
-      const response = await apiService.put(
-        `/api/v2/map/configuration?config_id=${configuration.value.config_id}`,
-        env
+      const cfg = configuration.value;
+      const provider = cfg.provider === 'google_maps' ? 'google-maps' : 'osm';
+      const markers = (cfg.markers || []).map(m => ({
+        marker_id: m.marker_id,
+        marker_type: m.marker_type,
+        position: { latitude: m.position.latitude, longitude: m.position.longitude },
+        label: m.label ?? null,
+        icon: m.icon ?? null,
+        metadata: m.metadata || {},
+        is_home: Boolean(m.is_home || m.marker_type === 'home'),
+      }));
+      // Non-spatial only — no zones field
+      const nonSpatialEnvelope = {
+        provider,
+        markers,
+        updated_by: 'user',
+      };
+      await apiService.put(
+        `/api/v2/map/configuration?config_id=${cfg.config_id}`,
+        nonSpatialEnvelope
       );
-      // Re-load to reflect backend's persisted state
-      await loadConfiguration(configuration.value.config_id);
       isDirty.value = false;
-      return configuration.value;
+      return cfg;
     } catch (e: any) {
-      error.value = e?.response?.data?.error || e?.message || 'Failed to save map configuration';
-      // Check for remediation metadata
-      if (e?.response?.data?.remediation) {
-        const remediation = e.response.data.remediation;
-        error.value = `${error.value}\n${remediation.message || ''}\nSee: ${remediation.docs_link || ''}`;
-      }
+      error.value = e?.response?.data?.detail || e?.response?.data?.error || e?.message || 'Failed to save map configuration';
       throw e;
     } finally {
       loading.value = false;
@@ -453,34 +471,135 @@ export const useMapStore = defineStore('map', () => {
     configuration.value.last_modified = new Date().toISOString();
   }
 
-  function setBoundaryZone(zone: Zone) {
+  // --- Zone CRUD helpers ---
+
+  function zoneToApiPayload(zone: Zone, zoneKind: 'boundary' | 'exclusion' | 'mow') {
+    return {
+      id: zone.id,
+      name: zone.name || zone.id,
+      polygon: zone.polygon.map(p => ({ latitude: p.latitude, longitude: p.longitude })),
+      priority: zone.priority ?? 0,
+      exclusion_zone: zoneKind === 'exclusion',
+      zone_kind: zoneKind,
+    } as unknown as ApiZone;
+  }
+
+  async function _reloadZonesFromServer() {
+    const apiZones = await getMapZones();
     if (!configuration.value) return;
-    configuration.value.boundary_zone = {
-      ...zone,
-      polygon: clonePolygon(zone.polygon),
-    };
+    // Convert API zones (mapsClient Zone format) to local Zone format
+    const toLocalZone = (z: ApiZone): Zone => ({
+      id: z.id,
+      name: (z.name || z.id) as string,
+      zone_type: z.zone_kind as string,  // map zone_kind to zone_type for compat
+      zone_kind: z.zone_kind as 'boundary' | 'exclusion' | 'mow',
+      polygon: ((z.polygon || []) as any[]).map((p: any) => ({ latitude: p.latitude, longitude: p.longitude })),
+      priority: (z.priority ?? 0) as number,
+      exclusion_zone: (z.exclusion_zone ?? false) as boolean,
+    });
+    configuration.value.boundary_zone = apiZones.filter(z => z.zone_kind === 'boundary').map(toLocalZone)[0] ?? null;
+    configuration.value.exclusion_zones = apiZones.filter(z => z.zone_kind === 'exclusion').map(toLocalZone);
+    configuration.value.mowing_zones = apiZones.filter(z => z.zone_kind === 'mow').map(toLocalZone);
     configuration.value.last_modified = new Date().toISOString();
   }
 
-  function addExclusionZone(zone: Zone) {
+  async function setBoundaryZone(zone: Zone) {
+    lastError.value = null;
+    const payload = zoneToApiPayload(zone, 'boundary');
+    try {
+      // Try update first; if 404, create
+      try {
+        await putMapZone(zone.id, payload);
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          await createMapZone(payload);
+        } else {
+          throw e;
+        }
+      }
+      await _reloadZonesFromServer();
+      isDirty.value = false;
+    } catch (e: any) {
+      lastError.value = e?.response?.data?.detail || e?.message || 'Failed to save boundary zone';
+      throw e;
+    }
+  }
+
+  async function addExclusionZone(zone: Zone) {
+    lastError.value = null;
     if (!configuration.value) {
       throw new Error('No configuration loaded');
     }
-    configuration.value.exclusion_zones.push({
-      ...zone,
-      polygon: clonePolygon(zone.polygon),
-    });
-    configuration.value.last_modified = new Date().toISOString();
-    isDirty.value = true;
+    const payload = zoneToApiPayload(zone, 'exclusion');
+    try {
+      try {
+        await putMapZone(zone.id, payload);
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          await createMapZone(payload);
+        } else {
+          throw e;
+        }
+      }
+      await _reloadZonesFromServer();
+      isDirty.value = false;
+    } catch (e: any) {
+      lastError.value = e?.response?.data?.detail || e?.message || 'Failed to save exclusion zone';
+      throw e;
+    }
   }
 
-  function addMowingZone(zone: Zone) {
-    if (!configuration.value) return;
-    configuration.value.mowing_zones.push({
-      ...zone,
-      polygon: clonePolygon(zone.polygon),
-    });
-    configuration.value.last_modified = new Date().toISOString();
+  async function addMowingZone(zone: Zone) {
+    lastError.value = null;
+    const payload = zoneToApiPayload(zone, 'mow');
+    try {
+      try {
+        await putMapZone(zone.id, payload);
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          await createMapZone(payload);
+        } else {
+          throw e;
+        }
+      }
+      await _reloadZonesFromServer();
+      isDirty.value = false;
+    } catch (e: any) {
+      lastError.value = e?.response?.data?.detail || e?.message || 'Failed to save mowing zone';
+      throw e;
+    }
+  }
+
+  async function updateZone(zoneId: string, polygon: Point[]) {
+    lastError.value = null;
+    // Find the zone to get its current kind
+    const allZones = [
+      configuration.value?.boundary_zone,
+      ...(configuration.value?.exclusion_zones || []),
+      ...(configuration.value?.mowing_zones || []),
+    ].filter(Boolean) as Zone[];
+    const existing = allZones.find(z => z.id === zoneId);
+    if (!existing) throw new Error(`Zone ${zoneId} not found`);
+    const zoneKind = (existing.zone_kind || existing.zone_type || 'boundary') as 'boundary' | 'exclusion' | 'mow';
+    const payload = zoneToApiPayload({ ...existing, polygon }, zoneKind);
+    try {
+      await putMapZone(zoneId, payload);
+      await _reloadZonesFromServer();
+    } catch (e: any) {
+      lastError.value = e?.response?.data?.detail || e?.message || 'Failed to update zone';
+      throw e;
+    }
+  }
+
+  async function deleteZone(zoneId: string) {
+    lastError.value = null;
+    try {
+      await deleteMapZone(zoneId);
+      await _reloadZonesFromServer();
+    } catch (e: any) {
+      lastError.value = e?.response?.data?.detail || e?.message || 'Failed to delete zone';
+      throw e;
+    }
   }
 
   function removeExclusionZone(zoneId: string) {
@@ -555,6 +674,7 @@ export const useMapStore = defineStore('map', () => {
   }
 
   // Helpers: convert between MapConfiguration and envelope
+  // Still used by legacy callers during T8/T9 migration
   function configToEnvelope(cfg: MapConfiguration) {
     const zones: any[] = [];
     const toCoords = (poly: Point[]) => {
@@ -794,7 +914,8 @@ export const useMapStore = defineStore('map', () => {
     selectedZoneId,
     editMode,
     providerFallbackActive,
-    
+    lastError,
+
     // Computed
     hasConfiguration,
     hasUnsavedChanges,
@@ -802,7 +923,7 @@ export const useMapStore = defineStore('map', () => {
     currentProvider,
     homeMarker,
     sunMarkers,
-    
+
     // Actions
     loadConfiguration,
     saveConfiguration,
@@ -812,13 +933,15 @@ export const useMapStore = defineStore('map', () => {
     updateMarker,
     setBoundaryZone,
     addExclusionZone,
-  addMowingZone,
+    addMowingZone,
     removeExclusionZone,
-  removeMowingZone,
+    removeMowingZone,
+    updateZone,
+    deleteZone,
     updateZoneName,
     updateZonePolygon,
     setEditMode,
     selectZone,
-    clearError
+    clearError,
   };
 });
