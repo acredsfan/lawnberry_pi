@@ -859,11 +859,10 @@ class MissionService:
         where each skipped item is {"id": str, "name": str, "reason": str}.
         Running and paused missions are skipped (not deleted); all others are deleted.
         """
-        _ACTIVE = (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED)
-        skipped: list[dict] = []
         to_delete: list[str] = []
+        skipped: list[dict] = []
         for mid, st in list(self.mission_statuses.items()):
-            if st.status in _ACTIVE:
+            if st.status in (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED):
                 mission = self.missions.get(mid)
                 skipped.append({
                     "id": mid,
@@ -872,15 +871,34 @@ class MissionService:
                 })
             else:
                 to_delete.append(mid)
-        # Also include missions with no status entry (treat as deletable)
+        # Include missions present in self.missions but not in self.mission_statuses
         for mid in list(self.missions.keys()):
             if mid not in self.mission_statuses and mid not in to_delete:
                 to_delete.append(mid)
-        deleted = 0
-        for mission_id in to_delete:
-            await self.delete_mission(mission_id)
-            deleted += 1
-        return {"deleted": deleted, "skipped": skipped}
+
+        if to_delete:
+            if self._mission_repo is not None:
+                self._mission_repo.delete_missions_bulk(to_delete)
+            else:
+                with persistence.get_connection() as conn:
+                    placeholders = ",".join("?" * len(to_delete))
+                    conn.execute(
+                        f"DELETE FROM missions WHERE id IN ({placeholders})", to_delete
+                    )
+                    conn.commit()
+            for mid in to_delete:
+                self.missions.pop(mid, None)
+                self.mission_statuses.pop(mid, None)
+                self.mission_tasks.pop(mid, None)
+                if self._websocket_hub is not None:
+                    try:
+                        await self._websocket_hub.broadcast_to_topic(
+                            "mission.deleted", {"mission_id": mid}
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to broadcast mission.deleted: %s", exc)
+
+        return {"deleted": len(to_delete), "skipped": skipped}
 
     async def delete_mission(self, mission_id: str) -> None:
         self._require_mission(mission_id)
@@ -889,13 +907,11 @@ class MissionService:
             raise MissionConflictError("Cannot delete a running or paused mission.")
         task = self.mission_tasks.get(mission_id)
         if task is not None and not task.done():
-            if status.status in (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED):
-                raise MissionConflictError("Mission task still active.")
-            # Terminal mission with a stale asyncio task — cancel it and proceed.
+            # Terminal mission with stale asyncio task — cancel and proceed
             task.cancel()
             try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(task, timeout=1.0)
+            except (asyncio.CancelledError, TimeoutError):
                 pass
         if self._mission_repo is not None:
             self._mission_repo.delete_mission(mission_id)

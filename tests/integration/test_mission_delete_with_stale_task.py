@@ -22,7 +22,6 @@ from backend.src.models.mission import (
 from backend.src.repositories.mission_repository import MissionRepository
 from backend.src.services.mission_service import MissionConflictError, MissionService
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

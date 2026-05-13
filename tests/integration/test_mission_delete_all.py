@@ -1,7 +1,6 @@
 """Integration tests for delete_all_missions with mixed lifecycle states."""
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -16,7 +15,6 @@ from backend.src.models.mission import (
 )
 from backend.src.repositories.mission_repository import MissionRepository
 from backend.src.services.mission_service import MissionService
-
 
 # ---------------------------------------------------------------------------
 # Helpers
