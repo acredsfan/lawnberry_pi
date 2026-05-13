@@ -431,6 +431,34 @@ class PersistenceLayer:
                 return result["config_json"]
             return None
 
+    async def update_map_configuration_provider(self, config_id: str, provider: str) -> None:
+        """Update only the provider field of a map configuration using JSON_SET.
+
+        Safer than load+rewrite: preserves all other fields atomically.
+        """
+        now = datetime.now(UTC).isoformat()
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE map_config
+                SET config_json = JSON_SET(config_json, '$.provider', ?, '$.updated_at', ?),
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (provider, now, now, config_id),
+            )
+            conn.commit()
+            if cursor.rowcount == 0:
+                # Config didn't exist; create a minimal record
+                default = {
+                    "config_id": config_id,
+                    "provider": provider,
+                    "markers": [],
+                    "updated_at": now,
+                    "updated_by": "provider-fallback",
+                }
+                await self.save_map_configuration(config_id, json.dumps(default))
+
     # Audit Logs
     def add_audit_log(
         self,

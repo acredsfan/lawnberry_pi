@@ -50,9 +50,11 @@ async def test_get_map_configuration_exposes_envelope_with_fallback_status():
 
 
 @pytest.mark.asyncio
-async def test_put_map_configuration_persists_zones_and_returns_timestamp():
-    """PUT /api/v2/map/configuration should accept envelope and confirm persistence."""
+async def test_put_map_configuration_with_zones_returns_410():
+    """PUT /api/v2/map/configuration with zones key must return 410 Gone (T4 invariant).
 
+    Zones are now owned by map_zones table. Use POST/PUT /api/v2/map/zones/{id}.
+    """
     envelope = {
         "zones": [
             _sample_zone(
@@ -83,20 +85,31 @@ async def test_put_map_configuration_persists_zones_and_returns_timestamp():
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         put_response = await client.put("/api/v2/map/configuration", json=envelope)
 
+        assert put_response.status_code == 410, put_response.text
+
+
+@pytest.mark.asyncio
+async def test_put_map_configuration_non_spatial_fields_accepted():
+    """PUT /api/v2/map/configuration without spatial keys accepts provider and markers."""
+    envelope = {
+        "provider": "google-maps",
+        "updated_by": "contract-test",
+        "markers": [{"id": "m1", "lat": 40.7, "lng": -74.0}],
+    }
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        put_response = await client.put("/api/v2/map/configuration", json=envelope)
+
         assert put_response.status_code == 200, put_response.text
         body = put_response.json()
         assert body.get("status") == "accepted"
         assert body.get("updated_at"), "Updated timestamp missing"
 
-        get_response = await client.get("/api/v2/map/configuration")
-        assert get_response.status_code == 200
-        retrieved = get_response.json()
-        assert any(zone["zone_id"] == "boundary-1" for zone in retrieved.get("zones", []))
-
 
 @pytest.mark.asyncio
-async def test_put_map_configuration_rejects_overlapping_polygons():
-    """Overlapping boundary polygons should be rejected with validation detail."""
+async def test_put_map_configuration_with_zones_returns_410_not_400():
+    """PUT with zones always returns 410 (not 400 geometry overlap) — zones rejected before validation."""
 
     overlapping_envelope = {
         "zones": [
@@ -120,10 +133,7 @@ async def test_put_map_configuration_rejects_overlapping_polygons():
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         response = await client.put("/api/v2/map/configuration", json=overlapping_envelope)
 
-        assert response.status_code == 400, response.text
-        detail = response.json()
-        assert detail.get("error_code") == "GEOMETRY_OVERLAP"
-        assert "boundary-a" in detail.get("conflicts", [])
+        assert response.status_code == 410, response.text
 
 
 @pytest.mark.asyncio
@@ -155,7 +165,6 @@ async def test_post_map_provider_fallback_switches_provider_to_osm():
         put_response = await client.put(
             "/api/v2/map/configuration",
             json={
-                "zones": [],
                 "provider": "google-maps",
                 "updated_by": "contract-test",
             },

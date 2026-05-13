@@ -379,7 +379,6 @@ def _default_map_configuration_envelope(config_id: str) -> dict[str, Any]:
     timestamp = datetime.now(timezone.utc).isoformat()
     return {
         "config_id": config_id,
-        "zones": [],
         "markers": [],
         "provider": _map_provider_from_settings(),
         "updated_at": timestamp,
@@ -387,30 +386,52 @@ def _default_map_configuration_envelope(config_id: str) -> dict[str, Any]:
     }
 
 
-async def _load_map_configuration_envelope(config_id: str) -> dict[str, Any]:
+async def _load_map_configuration_envelope(
+    config_id: str,
+    map_repository=None,
+) -> dict[str, Any]:
     default_envelope = _default_map_configuration_envelope(config_id)
     raw = await persistence.load_map_configuration(config_id)
     if not raw:
-        return default_envelope
+        envelope = default_envelope
+    else:
+        try:
+            payload = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            logger.warning(
+                "Stored map configuration %s is not valid JSON; using defaults", config_id
+            )
+            payload = {}
 
-    try:
-        payload = json.loads(raw)
-    except (TypeError, json.JSONDecodeError):
-        logger.warning("Stored map configuration %s is not valid JSON; using defaults", config_id)
-        return default_envelope
+        if not isinstance(payload, dict):
+            payload = {}
 
-    if not isinstance(payload, dict):
-        return default_envelope
+        envelope = {**default_envelope, **payload}
+        envelope["config_id"] = config_id
+        markers = envelope.get("markers")
+        envelope["markers"] = markers if isinstance(markers, (list, dict)) else []
+        envelope["provider"] = _normalize_map_provider(envelope.get("provider"))
+        envelope["updated_at"] = str(envelope.get("updated_at") or default_envelope["updated_at"])
+        envelope["updated_by"] = str(envelope.get("updated_by") or "system")
 
-    envelope = {**default_envelope, **payload}
-    envelope["config_id"] = config_id
-    envelope["zones"] = envelope.get("zones") if isinstance(envelope.get("zones"), list) else []
-    markers = envelope.get("markers")
-    envelope["markers"] = markers if isinstance(markers, (list, dict)) else []
-    envelope["provider"] = _normalize_map_provider(envelope.get("provider"))
-    envelope["updated_at"] = str(envelope.get("updated_at") or default_envelope["updated_at"])
-    envelope["updated_by"] = str(envelope.get("updated_by") or "system")
+    # Compose zones from map_zones table (the authoritative source)
+    if map_repository is not None:
+        try:
+            zones_from_db = map_repository.list_zones()
+            envelope["zones"] = zones_from_db
+            envelope["_zones_source"] = "map_zones"
+        except Exception as exc:
+            logger.warning("Failed to load zones from map_repository: %s", exc)
+            envelope["zones"] = []
+            envelope["_zones_source"] = "error"
+    else:
+        envelope["zones"] = []
+        envelope["_zones_source"] = "no_repository"
+
     return envelope
+
+
+_SPATIAL_KEYS = frozenset({"zones", "boundaries", "exclusion_zones"})
 
 
 async def _save_map_configuration_envelope(
@@ -419,12 +440,31 @@ async def _save_map_configuration_envelope(
     *,
     updated_by: str | None = None,
 ) -> dict[str, Any]:
+    # Strip spatial keys — zones are owned by map_zones table, not this envelope
+    spatial_keys_present = [k for k in _SPATIAL_KEYS if k in envelope]
+    if spatial_keys_present:
+        logger.warning(
+            "Spatial keys %s stripped from map configuration envelope for config_id=%s. "
+            "Use POST/PUT /api/v2/map/zones/{id} to manage zones.",
+            spatial_keys_present,
+            config_id,
+        )
+
+    # Load existing to preserve markers if not explicitly provided
+    existing_raw = await persistence.load_map_configuration(config_id)
+    existing: dict[str, Any] = {}
+    if existing_raw:
+        try:
+            existing = json.loads(existing_raw)
+        except (TypeError, json.JSONDecodeError):
+            pass
+
     saved = {
         **_default_map_configuration_envelope(config_id),
-        **envelope,
+        **{k: v for k, v in existing.items() if k not in _SPATIAL_KEYS},
+        **{k: v for k, v in envelope.items() if k not in _SPATIAL_KEYS},
     }
     saved["config_id"] = config_id
-    saved["zones"] = saved.get("zones") if isinstance(saved.get("zones"), list) else []
     markers = saved.get("markers")
     saved["markers"] = markers if isinstance(markers, (list, dict)) else []
     saved["provider"] = _normalize_map_provider(saved.get("provider"))
@@ -633,8 +673,10 @@ def _persist_map_provider_setting(provider: str) -> None:
 async def get_map_configuration(
     config_id: str = Query("default"),
     simulate_fallback: str | None = Query(default=None),
+    runtime: RuntimeContext = Depends(get_runtime),
 ):
-    envelope = await _load_map_configuration_envelope(config_id)
+    map_repo = getattr(runtime, "map_repository", None)
+    envelope = await _load_map_configuration_envelope(config_id, map_repository=map_repo)
     provider = envelope["provider"]
     fallback_active = False
     fallback_reason = None
@@ -658,41 +700,27 @@ async def get_map_configuration(
 async def put_map_configuration(
     envelope: dict[str, Any],
     config_id: str = Query("default"),
+    runtime: RuntimeContext = Depends(get_runtime),
 ):
-    zones = envelope.get("zones")
-    if zones is not None and not isinstance(zones, list):
-        raise HTTPException(status_code=422, detail="zones must be a list")
+    # 410 Gone: zones are no longer stored in the configuration envelope
+    spatial_keys = [k for k in ("zones", "boundaries", "exclusion_zones") if k in envelope]
+    if spatial_keys:
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "Zones are no longer stored on /map/configuration. "
+                "Use POST/PUT/DELETE /api/v2/map/zones/{id}."
+            ),
+        )
 
     markers = envelope.get("markers")
     if markers is not None and not isinstance(markers, (list, dict)):
         raise HTTPException(status_code=422, detail="markers must be a list or object")
 
-    legacy_boundaries = _legacy_polygon_zones(envelope.get("boundaries"), zone_type="boundary")
-    legacy_exclusions = _legacy_polygon_zones(
-        envelope.get("exclusion_zones"), zone_type="exclusion"
-    )
-    zone_list = zones if isinstance(zones, list) else [*legacy_boundaries, *legacy_exclusions]
-
-    conflicts = _geometry_conflicts(
-        zone_list,
-        zone_types={"boundary"} if isinstance(zones, list) else {"boundary", "exclusion"},
-    )
-    if conflicts:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "error_code": "GEOMETRY_OVERLAP",
-                "detail": "Geometry overlap conflict detected",
-                "message": "Overlapping boundary polygons detected",
-                "conflicts": conflicts,
-            },
-        )
-
     saved = await _save_map_configuration_envelope(
         config_id,
         {
             **envelope,
-            "zones": zone_list,
             "markers": markers if markers is not None else envelope.get("markers", []),
         },
         updated_by=str(envelope.get("updated_by") or "api"),
@@ -710,14 +738,9 @@ async def put_map_configuration(
 async def trigger_map_provider_fallback(config_id: str = Query("default")):
     from ..services.maps_service import maps_service
 
-    envelope = await _load_map_configuration_envelope(config_id)
-    envelope["provider"] = "osm"
-    saved = await _save_map_configuration_envelope(
-        config_id,
-        envelope,
-        updated_by="provider-fallback",
-    )
+    await persistence.update_map_configuration_provider(config_id, "osm")
     _persist_map_provider_setting("osm")
+    now = datetime.now(timezone.utc).isoformat()
     try:
         maps_service.configure("osm")
     except Exception:
@@ -725,7 +748,7 @@ async def trigger_map_provider_fallback(config_id: str = Query("default")):
     return {
         "success": True,
         "provider": "osm",
-        "updated_at": saved["updated_at"],
+        "updated_at": now,
         "fallback": {
             "active": True,
             "reason": "MANUAL_PROVIDER_FALLBACK",

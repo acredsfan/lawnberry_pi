@@ -1,47 +1,92 @@
-"""Contract tests for the navigation coverage plan endpoint."""
+"""Contract tests for the navigation coverage plan endpoint.
+
+T4: Coverage plan reads from map_zones table (via map_repository), not the config envelope.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
+from backend.src.control.command_gateway import MotorCommandGateway
+from backend.src.core import globals as _g
+from backend.src.core.runtime import RuntimeContext, get_runtime
 from backend.src.main import app
+from backend.src.repositories.map_repository import MapRepository
 
 BASE_URL = "http://test"
 
 
-def _boundary_zone() -> dict:
+def _boundary_zone_repo() -> dict:
+    """A boundary zone in MapRepository format (polygon list of dicts)."""
     return {
-        "zone_id": "boundary-1",
-        "zone_type": "boundary",
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [
-                [
-                    [-74.0060, 40.7128],
-                    [-74.0056, 40.7128],
-                    [-74.0056, 40.7132],
-                    [-74.0060, 40.7132],
-                    [-74.0060, 40.7128],
-                ]
-            ],
-        },
+        "id": "boundary-1",
+        "name": "Boundary",
+        "polygon": [
+            {"latitude": 40.7128, "longitude": -74.0060},
+            {"latitude": 40.7132, "longitude": -74.0060},
+            {"latitude": 40.7132, "longitude": -74.0056},
+            {"latitude": 40.7128, "longitude": -74.0056},
+        ],
+        "priority": 0,
+        "exclusion_zone": False,
+        "zone_kind": "boundary",
     }
 
 
+@pytest.fixture
+def map_repo(tmp_path: Path) -> MapRepository:
+    return MapRepository(db_path=tmp_path / "coverage_contract.db")
+
+
+@pytest.fixture(autouse=True)
+def _override_runtime_with_repo(map_repo: MapRepository):
+    """Provide a runtime with a real MapRepository so coverage-plan can find zones.
+
+    This fixture unconditionally sets the override so it wins over the conftest
+    default (which provides a runtime without map_repository=None).
+    """
+    _gw = MotorCommandGateway(
+        safety_state=_g._safety_state,
+        blade_state=_g._blade_state,
+        client_emergency=_g._client_emergency,
+        robohat=MagicMock(status=MagicMock(serial_connected=False)),
+        persistence=MagicMock(),
+    )
+    runtime = RuntimeContext(
+        config_loader=MagicMock(),
+        hardware_config=MagicMock(),
+        safety_limits=MagicMock(),
+        navigation=MagicMock(),
+        mission_service=MagicMock(),
+        safety_state=_g._safety_state,
+        blade_state=_g._blade_state,
+        robohat=MagicMock(),
+        websocket_hub=MagicMock(),
+        persistence=MagicMock(),
+        command_gateway=_gw,
+        map_repository=map_repo,
+    )
+    # Unconditionally override so this module's fixture wins over the conftest default.
+    prev = app.dependency_overrides.get(get_runtime)
+    app.dependency_overrides[get_runtime] = lambda: runtime
+    yield
+    if prev is None:
+        app.dependency_overrides.pop(get_runtime, None)
+    else:
+        app.dependency_overrides[get_runtime] = prev
+
+
 @pytest.mark.asyncio
-async def test_get_coverage_plan_returns_linestring_for_saved_boundary():
+async def test_get_coverage_plan_returns_linestring_for_saved_boundary(map_repo: MapRepository):
+    """Coverage plan succeeds when a boundary zone exists in map_zones."""
+    map_repo.save_zones([_boundary_zone_repo()])
+
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
-        put_response = await client.put(
-            "/api/v2/map/configuration",
-            params={"config_id": "coverage-test"},
-            json={
-                "zones": [_boundary_zone()],
-                "provider": "osm",
-                "updated_by": "coverage-contract",
-            },
-        )
-        assert put_response.status_code == 200, put_response.text
-
         response = await client.get(
             "/api/v2/nav/coverage-plan",
             params={"config_id": "coverage-test", "spacing_m": 0.6},
@@ -59,20 +104,11 @@ async def test_get_coverage_plan_returns_linestring_for_saved_boundary():
 
 
 @pytest.mark.asyncio
-async def test_get_coverage_plan_requires_boundary_zone():
+async def test_get_coverage_plan_requires_boundary_zone(map_repo: MapRepository):
+    """Coverage plan returns 404 when no boundary zone is in map_zones."""
+    # map_repo is empty
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
-        put_response = await client.put(
-            "/api/v2/map/configuration",
-            params={"config_id": "coverage-empty"},
-            json={
-                "zones": [],
-                "provider": "osm",
-                "updated_by": "coverage-contract",
-            },
-        )
-        assert put_response.status_code == 200, put_response.text
-
         response = await client.get(
             "/api/v2/nav/coverage-plan",
             params={"config_id": "coverage-empty"},

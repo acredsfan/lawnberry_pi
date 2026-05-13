@@ -1,14 +1,13 @@
 from __future__ import annotations
 # ruff: noqa: I001
 
-import json
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from ..core.persistence import persistence
 from ..core.robot_state_manager import get_robot_state_manager
+from ..core.runtime import RuntimeContext, get_runtime
 from ..models.geofence import Geofence, LatLng
 from ..models.robot_state import NavigationMode
 from ..nav.coverage_planner import plan_coverage
@@ -137,6 +136,7 @@ def _zone_polygons_from_envelope(
     *,
     zone_type: str,
 ) -> list[list[tuple[float, float]]]:
+    # Deprecated — use map_zones table via map_repository instead
     polygons: list[list[tuple[float, float]]] = []
     for zone in envelope.get("zones", []):
         if not isinstance(zone, dict) or str(zone.get("zone_type") or "") != zone_type:
@@ -170,27 +170,44 @@ def _zone_polygons_from_envelope(
 async def get_coverage_plan(
     config_id: str = Query("default"),
     spacing_m: float = Query(0.6, gt=0.0, le=5.0),
+    runtime: RuntimeContext = Depends(get_runtime),
 ):
-    raw = await persistence.load_map_configuration(config_id)
-    if not raw:
-        raise HTTPException(status_code=404, detail="Map configuration not found")
-
-    try:
-        envelope = json.loads(raw)
-    except (TypeError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail="Stored map configuration is invalid") from exc
-
-    if not isinstance(envelope, dict):
-        raise HTTPException(status_code=500, detail="Stored map configuration is invalid")
-
-    boundary_polygons = _zone_polygons_from_envelope(envelope, zone_type="boundary")
-    if not boundary_polygons:
+    repo = getattr(runtime, "map_repository", None)
+    if repo is None:
         raise HTTPException(status_code=404, detail="Boundary zone not configured")
 
-    exclusion_polygons = _zone_polygons_from_envelope(envelope, zone_type="exclusion")
+    zones = repo.list_zones()
+
+    boundary_polys: list[list[tuple[float, float]]] = []
+    for z in zones:
+        if z.get("zone_kind") != "boundary":
+            continue
+        poly_pts = z.get("polygon", [])
+        ring: list[tuple[float, float]] = []
+        for p in poly_pts:
+            if isinstance(p, dict):
+                ring.append((p.get("latitude", 0), p.get("longitude", 0)))
+        if len(ring) >= 3:
+            boundary_polys.append(ring)
+
+    if not boundary_polys:
+        raise HTTPException(status_code=404, detail="Boundary zone not configured")
+
+    exclusion_polys: list[list[tuple[float, float]]] = []
+    for z in zones:
+        if z.get("zone_kind") not in ("exclusion",):
+            continue
+        poly_pts = z.get("polygon", [])
+        ring = []
+        for p in poly_pts:
+            if isinstance(p, dict):
+                ring.append((p.get("latitude", 0), p.get("longitude", 0)))
+        if len(ring) >= 3:
+            exclusion_polys.append(ring)
+
     path, row_count, length_m = plan_coverage(
-        boundary_polygons[0],
-        exclusion_polys=exclusion_polygons,
+        boundary_polys[0],
+        exclusion_polys=exclusion_polys,
         spacing_m=spacing_m,
     )
     coordinates = [[lng, lat] for lat, lng in path]

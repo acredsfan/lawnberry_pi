@@ -67,10 +67,11 @@ async def test_map_configuration_boundary_polygons():
         }
         
         put_response = await client.put("/api/v2/map/configuration", json=config)
-        
-        # May not be implemented yet (TDD)
-        assert put_response.status_code in [200, 201, 400, 404, 422, 501]
-        
+
+        # 410 Gone is returned when spatial keys are present (T4 invariant).
+        # Other codes accepted for older callers or placeholder tests.
+        assert put_response.status_code in [200, 201, 400, 404, 410, 422, 501]
+
         if put_response.status_code in [200, 201]:
             # Verify backend acknowledged
             data = put_response.json()
@@ -102,7 +103,8 @@ async def test_map_configuration_exclusion_zones():
         }
         
         put_response = await client.put("/api/v2/map/configuration", json=config)
-        assert put_response.status_code in [200, 201, 400, 404, 422, 501]
+        # 410 Gone is returned when spatial keys are present (T4 invariant).
+        assert put_response.status_code in [200, 201, 400, 404, 410, 422, 501]
 
 
 @pytest.mark.asyncio
@@ -143,11 +145,11 @@ async def test_map_configuration_overlap_rejection():
         }
         
         put_response = await client.put("/api/v2/map/configuration", json=config)
-        
-        # Should reject with 400 Bad Request due to overlap
-        # May not be implemented yet (TDD)
-        assert put_response.status_code in [400, 422, 404, 501]
-        
+
+        # 410 Gone is returned when spatial keys are present (T4 invariant).
+        # Overlap detection via /api/v2/map/zones endpoints instead.
+        assert put_response.status_code in [400, 410, 422, 404, 501]
+
         if put_response.status_code in [400, 422]:
             error_data = put_response.json()
             assert "overlap" in error_data.get("detail", "").lower() or \
