@@ -658,17 +658,17 @@ async function deleteEditingZone() {
   if (!editingZoneId.value) return;
   const zoneId = editingZoneId.value;
   try {
-    if (mode.value === 'mowing') {
+    if (mode.value === 'boundary') {
+      if (!confirm('Delete the boundary zone?')) return;
+    } else if (mode.value === 'mowing') {
       if (!confirm('Delete this mowing zone?')) return;
-      mapStore.removeMowingZone(zoneId);
     } else if (mode.value === 'exclusion') {
       if (!confirm('Delete this exclusion zone?')) return;
-      mapStore.removeExclusionZone(zoneId);
     } else {
       return;
     }
 
-    await mapStore.saveConfiguration();
+    await mapStore.deleteZone(zoneId);
     toast.show('Zone deleted', 'success', 2000);
     currentPolygon.value = [];
     currentPolygonClosed.value = false;
@@ -676,7 +676,7 @@ async function deleteEditingZone() {
     hasUnsavedChanges.value = false;
     mapStore.setEditMode('view');
   } catch (err: any) {
-    const msg = err?.message || 'Failed to delete zone';
+    const msg = mapStore.lastError || err?.message || 'Failed to delete zone';
     toast.show(msg, 'error', 3000);
   }
 }
@@ -706,24 +706,26 @@ async function saveChanges() {
       if (result.collapsed) {
         throw new Error('Clipped zone collapsed; adjust points to stay within boundary');
       }
-      mapStore.updateZonePolygon(editingZoneId.value, result.polygon);
+      await mapStore.updateZone(editingZoneId.value, result.polygon);
       clippedNotice = result.clipped;
     } else if (mode.value === 'boundary') {
       const polygonCopy = clonePolygon(currentPolygon.value);
-      mapStore.setBoundaryZone({
+      await mapStore.setBoundaryZone({
         id: mapStore.configuration?.boundary_zone?.id || `boundary_${Date.now()}`,
         name: 'Mowing Boundary',
         zone_type: 'boundary',
+        zone_kind: 'boundary',
         polygon: polygonCopy,
         priority: 10,
         enabled: true
       });
     } else if (mode.value === 'exclusion') {
       const polygonCopy = clonePolygon(currentPolygon.value);
-      mapStore.addExclusionZone({
+      await mapStore.addExclusionZone({
         id: `exclusion_${Date.now()}`,
         name: 'Exclusion Zone',
-        zone_type: 'exclusion_zone',
+        zone_type: 'exclusion',
+        zone_kind: 'exclusion',
         polygon: polygonCopy,
         priority: 5,
         enabled: true,
@@ -734,10 +736,11 @@ async function saveChanges() {
       if (result.collapsed) {
         throw new Error('Mowing zone collapsed after clipping; adjust points and try again');
       }
-      mapStore.addMowingZone({
+      await mapStore.addMowingZone({
         id: `mow_${Date.now()}`,
         name: 'Mowing Zone',
-        zone_type: 'mow_zone',
+        zone_type: 'mow',
+        zone_kind: 'mow',
         polygon: result.polygon,
         priority: 3,
         enabled: true,
@@ -746,7 +749,6 @@ async function saveChanges() {
       clippedNotice = result.clipped;
     }
 
-    await mapStore.saveConfiguration();
     if (clippedNotice) {
       toast.show('Mowing zone clipped to boundary', 'warning', 2800);
     }
@@ -762,8 +764,8 @@ async function saveChanges() {
       successMessage.value = null;
     }, 3000);
   } catch (e: any) {
-    error.value = mapStore.error || e?.message || 'Failed to save changes';
-    toast.show(error.value, 'error', 4000)
+    error.value = mapStore.lastError || e?.message || 'Failed to save changes';
+    toast.show(error.value, 'error', 4000);
   }
 }
 
