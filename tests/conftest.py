@@ -80,6 +80,7 @@ def setup_test_environment():
     # Ensure simulation mode for tests
     os.environ["SIM_MODE"] = "1"
     # Set test database path if needed
+    # TODO(v2): enforce in-memory DB for integration/contract tests to prevent fixture leakage - Issue #1
     os.environ.setdefault("DB_PATH", ":memory:")
     # Reduce log noise in tests
     os.environ.setdefault("LOG_LEVEL", "WARNING")
