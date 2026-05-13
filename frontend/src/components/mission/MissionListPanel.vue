@@ -110,7 +110,11 @@ async function deleteMission(m: Mission) {
 async function deleteAll() {
   if (!confirm(`Delete all ${missionStore.missions.length} saved missions? This cannot be undone.`)) return
   try {
-    await missionStore.deleteAllMissions()
+    const result = await missionStore.deleteAllMissions()
+    if (result?.skipped?.length) {
+      const names = result.skipped.map((s: any) => s.name).join(', ')
+      alert(`Deleted ${result.deleted} missions. Skipped ${result.skipped.length} active: ${names}`)
+    }
   } catch {
     alert('Failed to delete all missions.')
   }

@@ -208,17 +208,20 @@ export const useMissionStore = defineStore('mission', () => {
     }
   };
 
-  const deleteAllMissions = async () => {
+  const deleteAllMissions = async (): Promise<{deleted: number; skipped: Array<{id: string; name: string; reason: string}>}> => {
     try {
-      await apiService.delete('/api/v2/missions');
-      missions.value = [];
-      if (currentMission.value) {
+      const result = await apiService.delete('/api/v2/missions');
+      const data = result?.data ?? result;
+      const skippedIds = new Set((data?.skipped ?? []).map((s: any) => s.id));
+      missions.value = missions.value.filter(m => skippedIds.has(m.id));
+      if (currentMission.value && !skippedIds.has(currentMission.value.id)) {
         currentMission.value = null;
         waypoints.value = [];
         _persistCurrentMissionId(null);
         stopStatusPolling();
         missionStatus.value = 'idle';
       }
+      return data;
     } catch (error) {
       const msg = extractMissionErrorMessage(error, 'Unable to delete all missions.');
       statusDetail.value = msg;

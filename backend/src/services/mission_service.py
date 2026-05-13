@@ -851,18 +851,36 @@ class MissionService:
                 logger.warning("Failed to broadcast mission.updated: %s", exc)
         return mission
 
-    async def delete_all_missions(self) -> int:
-        """Delete all missions that are not running or paused. Returns count deleted."""
-        blocked = [
-            mid for mid, st in self.mission_statuses.items()
-            if st.status in (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED)
-        ]
-        if blocked:
-            raise MissionConflictError("Cannot delete all missions while one is running or paused.")
-        ids = list(self.missions.keys())
-        for mission_id in ids:
+    async def delete_all_missions(self) -> dict:
+        """Delete all missions that are not running or paused.
+
+        Returns a dict with shape:
+          {"deleted": int, "skipped": list[dict]}
+        where each skipped item is {"id": str, "name": str, "reason": str}.
+        Running and paused missions are skipped (not deleted); all others are deleted.
+        """
+        _ACTIVE = (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED)
+        skipped: list[dict] = []
+        to_delete: list[str] = []
+        for mid, st in list(self.mission_statuses.items()):
+            if st.status in _ACTIVE:
+                mission = self.missions.get(mid)
+                skipped.append({
+                    "id": mid,
+                    "name": mission.name if mission else mid,
+                    "reason": st.status.value,
+                })
+            else:
+                to_delete.append(mid)
+        # Also include missions with no status entry (treat as deletable)
+        for mid in list(self.missions.keys()):
+            if mid not in self.mission_statuses and mid not in to_delete:
+                to_delete.append(mid)
+        deleted = 0
+        for mission_id in to_delete:
             await self.delete_mission(mission_id)
-        return len(ids)
+            deleted += 1
+        return {"deleted": deleted, "skipped": skipped}
 
     async def delete_mission(self, mission_id: str) -> None:
         self._require_mission(mission_id)
@@ -871,7 +889,14 @@ class MissionService:
             raise MissionConflictError("Cannot delete a running or paused mission.")
         task = self.mission_tasks.get(mission_id)
         if task is not None and not task.done():
-            raise MissionConflictError("Mission task still active.")
+            if status.status in (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED):
+                raise MissionConflictError("Mission task still active.")
+            # Terminal mission with a stale asyncio task — cancel it and proceed.
+            task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
         if self._mission_repo is not None:
             self._mission_repo.delete_mission(mission_id)
         else:

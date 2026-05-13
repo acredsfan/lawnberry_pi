@@ -154,11 +154,11 @@ async def update_mission(
 async def delete_all_missions(
     runtime: RuntimeContext = Depends(get_runtime),
 ):
-    """Hard-delete all missions that are not currently running or paused."""
+    """Hard-delete all missions that are not currently running or paused. Skips running/paused."""
     mission_service = runtime.mission_service
     try:
-        count = await mission_service.delete_all_missions()
-        return {"deleted": count}
+        result = await mission_service.delete_all_missions()
+        return result
     except Exception as e:
         _raise_mission_http_error(e)
 

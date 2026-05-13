@@ -118,6 +118,21 @@ class MissionRepository(BaseRepository):
             conn.commit()
             return cursor.rowcount > 0
 
+    def delete_missions_bulk(self, ids: list[str]) -> int:
+        """Delete multiple missions in a single transaction. Returns deleted count.
+
+        ``mission_execution_state`` rows are removed automatically via ON DELETE CASCADE.
+        """
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                f"DELETE FROM missions WHERE id IN ({placeholders})", ids
+            )
+            conn.commit()
+            return cursor.rowcount
+
     # ------------------------------------------------------------------
     # Execution state
     # ------------------------------------------------------------------
