@@ -203,6 +203,22 @@ class MissionExecutor:
         _gps_stall_escape_phase: str | None = None  # None | "pivot" | "forward" | "recheck"
         _gps_stall_pivot_dir: float = 1.0   # +1 pivot right, -1 pivot left
 
+        # Encoder-aware stuck detectors (Part 3)
+        # Trigger A — motor stall: wheels commanded but not turning
+        _motor_stall_start: float | None = None
+        _MOTOR_STALL_ARM_S: float = 3.0    # seconds of RPM≈0 with command > threshold
+        _MOTOR_STALL_ABORT_S: float = 6.0  # abort after this long without recovery
+        _MOTOR_STALL_RPM_THRESHOLD: float = 2.0   # RPM below this = stall
+        _MOTOR_STALL_CMD_THRESHOLD: float = 0.2   # min command to arm
+
+        # Trigger B — wheel spin: wheels turning but GPS not moving
+        _wheel_spin_ref_lat: float | None = None
+        _wheel_spin_ref_lon: float | None = None
+        _wheel_spin_ref_time: float | None = None
+        _WHEEL_SPIN_ARM_S: float = 5.0     # seconds of high-RPM + no-GPS-movement
+        _WHEEL_SPIN_RPM_THRESHOLD: float = 10.0  # RPM above this = wheels turning
+        _WHEEL_SPIN_MIN_M: float = 0.15    # GPS must move this far to reset
+
         # Tank-turn hysteresis state
         _in_tank_mode: bool = False
         _TANK_TURN_TIMEOUT_S: float = 25.0
@@ -420,6 +436,11 @@ class MissionExecutor:
                     _gps_stall_ref_lat = None
                     _gps_stall_ref_lon = None
                     _gps_stall_ref_time = None
+                # NEW: reset encoder-aware detectors when stopped
+                _motor_stall_start = None
+                _wheel_spin_ref_lat = None
+                _wheel_spin_ref_lon = None
+                _wheel_spin_ref_time = None
             else:
                 # Motors were running — track GPS displacement.
                 _cur_lat = current_position.latitude
@@ -513,6 +534,93 @@ class MissionExecutor:
                                     "Mower physically stuck: GPS position did not change "
                                     "after escape maneuver"
                                 )
+
+            # --- Encoder-aware stuck detectors ---
+            # Get encoder RPM for this tick (0.0 if provider unavailable)
+            _enc_rpm_a, _enc_rpm_b = (
+                self._encoder_rpm_provider()
+                if self._encoder_rpm_provider is not None
+                else (0.0, 0.0)
+            )
+            _max_enc_rpm = max(abs(_enc_rpm_a), abs(_enc_rpm_b))
+            _max_cmd = max(abs(_prev_left_speed), abs(_prev_right_speed))
+
+            # Trigger A: motor stall — commanded but not turning
+            if (
+                _max_cmd > _MOTOR_STALL_CMD_THRESHOLD
+                and _max_enc_rpm < _MOTOR_STALL_RPM_THRESHOLD
+                and not _force_gps_pivot
+                and not _force_gps_forward
+                and _gps_stall_escape_phase is None
+            ):
+                if _motor_stall_start is None:
+                    _motor_stall_start = time.monotonic()
+                    logger.debug(
+                        "Motor-stall detector armed: cmd=%.2f rpm=%.1f",
+                        _max_cmd, _max_enc_rpm,
+                    )
+                else:
+                    _stall_elapsed = time.monotonic() - _motor_stall_start
+                    if _stall_elapsed >= _MOTOR_STALL_ABORT_S:
+                        logger.error(
+                            "Motor stall: RPM≈0 for %.1f s with cmd=%.2f — aborting",
+                            _stall_elapsed, _max_cmd,
+                        )
+                        await self._deliver_stop_command(reason="motor stall abort")
+                        raise RuntimeError(
+                            "Motor stall: encoder RPM ~0 despite active command"
+                        )
+                    elif _stall_elapsed >= _MOTOR_STALL_ARM_S:
+                        if not _force_reverse_escape and not _stall_active:
+                            _force_reverse_escape = True
+                            logger.warning(
+                                "Motor-stall escape: RPM≈0 for %.1f s — "
+                                "triggering reverse kick (cmd=%.2f)",
+                                _stall_elapsed, _max_cmd,
+                            )
+            else:
+                _motor_stall_start = None
+
+            # Trigger B: wheel spin — turning but not moving
+            if (
+                _max_enc_rpm > _WHEEL_SPIN_RPM_THRESHOLD
+                and _max_cmd > _MOTOR_STALL_CMD_THRESHOLD
+                and not _force_gps_pivot
+                and not _force_gps_forward
+                and _gps_stall_escape_phase is None
+            ):
+                _cur_lat = current_position.latitude
+                _cur_lon = current_position.longitude
+                if _wheel_spin_ref_lat is None:
+                    _wheel_spin_ref_lat = _cur_lat
+                    _wheel_spin_ref_lon = _cur_lon
+                    _wheel_spin_ref_time = time.monotonic()
+                else:
+                    _spin_moved_m = planner.calculate_distance(
+                        Position(latitude=_wheel_spin_ref_lat, longitude=_wheel_spin_ref_lon),
+                        Position(latitude=_cur_lat, longitude=_cur_lon),
+                    )
+                    if _spin_moved_m >= _WHEEL_SPIN_MIN_M:
+                        _wheel_spin_ref_lat = _cur_lat
+                        _wheel_spin_ref_lon = _cur_lon
+                        _wheel_spin_ref_time = time.monotonic()
+                    else:
+                        _spin_no_move_s = time.monotonic() - (
+                            _wheel_spin_ref_time or time.monotonic()
+                        )
+                        if _spin_no_move_s >= _WHEEL_SPIN_ARM_S and _gps_stall_escape_phase is None:
+                            _gps_stall_escape_start = time.monotonic()
+                            _gps_stall_escape_phase = "pivot"
+                            _gps_stall_pivot_dir = -1.0 if err >= 0 else 1.0
+                            logger.warning(
+                                "Wheel-spin stall: RPM=%.1f but only %.3f m in %.1f s — "
+                                "triggering pivot escape",
+                                _max_enc_rpm, _spin_moved_m, _spin_no_move_s,
+                            )
+            else:
+                _wheel_spin_ref_lat = None
+                _wheel_spin_ref_lon = None
+                _wheel_spin_ref_time = None
 
             if _raw_abs_err > 20 and (not _in_tank_mode or _stall_active):
                 if _stall_start is None:
