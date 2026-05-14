@@ -116,19 +116,16 @@ These are **not regressions** — do not spend time fixing them:
 
 | File | Reason |
 |------|--------|
-| `tests/unit/test_sensor_cli_format.py` | `typer` version mismatch (`module 'typer' has no attribute 'command'`) — collection error |
-| `tests/unit/test_nav_coverage_patterns.py` | Shapely 2.x `__slots__` issue with `Polygon.origin_lat` — xfail |
-| `tests/unit/test_nav_geofence_validator.py` | Same Shapely issue — xfail |
-| `tests/unit/test_dead_reckoning.py` | Reset behavior divergence — xfail |
+| `tests/unit/test_nav_coverage_patterns.py` | File does not exist (Shapely placeholder) |
+| `tests/unit/test_nav_geofence_validator.py` | File does not exist (Shapely placeholder) |
+| `tests/unit/test_dead_reckoning.py` | File does not exist |
 | `tests/unit/test_global_rate_limiter.py` | conftest env-override ordering — xfail |
-| `tests/unit/test_navigation_service.py` (2) | Singleton state isolation — xfail |
-| `tests/unit/test_consistency_guard.py` (2) | Hardcoded CI paths — xfail |
-| `tests/unit/test_rest_api_control.py` | Telemetry interlock ordering — xfail |
-| `tests/unit/test_robohat_service_usb_control.py` | CI-only serial branch — xfail |
-| `tests/unit/test_hardware_selftest.py` | Requires `RUN_HW_TESTS=1` — skipif |
+| `tests/unit/test_navigation_service.py` (some) | Singleton state isolation — xfail |
+| `tests/unit/test_rest_api_control.py` | File does not exist |
+| `tests/unit/test_hardware_selftest.py` | File does not exist (requires `RUN_HW_TESTS=1`) |
+| `tests/unit/test_auth_security_levels_unit.py` (2) | Skipped when `google-auth` not installed |
 
-The `test_sensor_cli_format.py` collection error interrupts the entire run when collecting `tests/unit/`.
-Work around it by targeting specific test files or directories instead of `tests/unit/` as a whole.
+All other unit and integration tests should pass. `test_sensor_cli_format.py` passes on its own; it only caused a collection error before the typer fix.
 
 ---
 
