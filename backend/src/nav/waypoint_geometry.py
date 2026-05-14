@@ -206,7 +206,7 @@ def stanley_steer(
         cte_m: Signed cross-track error from cross_track_error().
             Positive = vehicle is to the RIGHT of the path.
         velocity_mps: Current forward speed.
-        k_cte: Stanley gain (rad·(m/s)/m).  Default 0.6.
+        k_cte: Stanley gain (rad·(m/s)/m).  Default 0.25.
         v_floor: Minimum speed used in the denominator (prevents ÷0 at standstill).
         max_steer_deg: Output is clipped to ±this value.
         dead_band_m: CTE magnitudes below this are zeroed (suppresses GPS jitter).
