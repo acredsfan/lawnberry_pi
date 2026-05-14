@@ -170,10 +170,24 @@ class MissionExecutor:
         heading_wait_start: float | None = None
         _last_nav_log: float = 0.0
 
-        # Stall detection + escape ladder
+        # Heading stall detection + escape ladder
         _stall_start: float | None = None
         _stall_heading: float | None = None
         _stall_escape_stage: str | None = None
+
+        # GPS position stall detection — fires when mower stops physically moving
+        # while motors are running, independent of heading error.
+        _GPS_STALL_ARM_S: float = 8.0       # seconds without movement → trigger escape
+        _GPS_STALL_MIN_M: float = 0.15      # meters needed to reset the stall timer
+        _GPS_STALL_PIVOT_S: float = 2.0     # pivot phase duration (s)
+        _GPS_STALL_FWD_S: float = 2.5       # forward drive phase duration (s)
+        _GPS_STALL_RECHECK_S: float = 10.0  # recheck window after escape (s)
+        _gps_stall_ref_lat: float | None = None
+        _gps_stall_ref_lon: float | None = None
+        _gps_stall_ref_time: float | None = None
+        _gps_stall_escape_start: float | None = None
+        _gps_stall_escape_phase: str | None = None  # None | "pivot" | "forward" | "recheck"
+        _gps_stall_pivot_dir: float = 1.0   # +1 pivot right, -1 pivot left
 
         # Tank-turn hysteresis state
         _in_tank_mode: bool = False
@@ -369,7 +383,7 @@ class MissionExecutor:
                 )
                 _last_nav_log = _now
 
-            # Stall detection + staged escape ladder.
+            # Heading stall detection + staged escape ladder.
             # ALL arm/clear decisions use raw IMU heading (never dead-reckoned).
             # When Stage B forces _in_tank_mode=True, current_heading switches to
             # _tank_dr_heading, which has a very high angular rate model and laps
@@ -378,9 +392,117 @@ class MissionExecutor:
             _stall_boost = 0.0
             _force_tank_escape = False
             _force_reverse_escape = False
+            _force_gps_pivot = False
+            _force_gps_forward = False
             _stall_active = _stall_start is not None
             _imu_heading = raw_heading if raw_heading is not None else current_heading
             _raw_abs_err = abs(heading_error(target=heading_to_target, current=_imu_heading))
+
+            # --- GPS position stall detection ---
+            # Tracks whether the mower is physically moving while motors run.
+            # Operates independently of heading error — catches the case where
+            # heading is aligned but the mower is spinning in place or blocked.
+            if _prev_left_speed == 0.0 and _prev_right_speed == 0.0:
+                # Motors were stopped last iteration; reset the reference so the
+                # stall timer starts fresh when motors restart (avoids false stall
+                # accumulation across position-hold pauses).
+                if _gps_stall_escape_phase is None:
+                    _gps_stall_ref_lat = None
+                    _gps_stall_ref_lon = None
+                    _gps_stall_ref_time = None
+            else:
+                # Motors were running — track GPS displacement.
+                _cur_lat = current_position.latitude
+                _cur_lon = current_position.longitude
+                if _gps_stall_ref_lat is None:
+                    _gps_stall_ref_lat = _cur_lat
+                    _gps_stall_ref_lon = _cur_lon
+                    _gps_stall_ref_time = time.monotonic()
+                else:
+                    _gps_moved_m = planner.calculate_distance(
+                        Position(latitude=_gps_stall_ref_lat, longitude=_gps_stall_ref_lon),
+                        Position(latitude=_cur_lat, longitude=_cur_lon),
+                    )
+                    if _gps_moved_m >= _GPS_STALL_MIN_M:
+                        # Moved enough — reset reference and clear any escape.
+                        _gps_stall_ref_lat = _cur_lat
+                        _gps_stall_ref_lon = _cur_lon
+                        _gps_stall_ref_time = time.monotonic()
+                        if _gps_stall_escape_phase == "recheck":
+                            logger.info(
+                                "GPS stall: movement detected (%.2f m) after escape — "
+                                "resuming normal navigation",
+                                _gps_moved_m,
+                            )
+                        _gps_stall_escape_phase = None
+                        _gps_stall_escape_start = None
+                    else:
+                        _gps_no_move_s = time.monotonic() - (
+                            _gps_stall_ref_time or time.monotonic()
+                        )
+                        if _gps_stall_escape_phase is None:
+                            if _gps_no_move_s >= _GPS_STALL_ARM_S:
+                                _gps_stall_escape_start = time.monotonic()
+                                _gps_stall_escape_phase = "pivot"
+                                # Pivot opposite to heading error: try to get different wheel
+                                # contact before retrying the original direction.
+                                _gps_stall_pivot_dir = -1.0 if err >= 0 else 1.0
+                                logger.warning(
+                                    "GPS position stall: no movement (%.2f m) in %.1f s — "
+                                    "escape pivot starting (dir=%+.0f, hdg=%.1f°)",
+                                    _gps_moved_m,
+                                    _gps_no_move_s,
+                                    _gps_stall_pivot_dir,
+                                    _imu_heading,
+                                )
+                        elif _gps_stall_escape_phase == "pivot":
+                            _esc_t = time.monotonic() - (
+                                _gps_stall_escape_start or time.monotonic()
+                            )
+                            if _esc_t < _GPS_STALL_PIVOT_S:
+                                _force_gps_pivot = True
+                            else:
+                                _gps_stall_escape_phase = "forward"
+                                logger.info(
+                                    "GPS stall escape: pivot complete (%.1f s), "
+                                    "switching to forward drive",
+                                    _esc_t,
+                                )
+                                _force_gps_forward = True
+                        elif _gps_stall_escape_phase == "forward":
+                            _esc_t = time.monotonic() - (
+                                _gps_stall_escape_start or time.monotonic()
+                            )
+                            if _esc_t < _GPS_STALL_PIVOT_S + _GPS_STALL_FWD_S:
+                                _force_gps_forward = True
+                            else:
+                                _gps_stall_escape_phase = "recheck"
+                                _gps_stall_ref_lat = _cur_lat
+                                _gps_stall_ref_lon = _cur_lon
+                                _gps_stall_ref_time = time.monotonic()
+                                logger.info(
+                                    "GPS stall escape: forward drive complete — "
+                                    "rechecking for %.0f s",
+                                    _GPS_STALL_RECHECK_S,
+                                )
+                        elif _gps_stall_escape_phase == "recheck":
+                            _recheck_s = time.monotonic() - (
+                                _gps_stall_ref_time or time.monotonic()
+                            )
+                            if _recheck_s >= _GPS_STALL_RECHECK_S:
+                                logger.error(
+                                    "GPS position stall: no movement (%.2f m) in %.1f s "
+                                    "after escape maneuver — stopping mission",
+                                    _gps_moved_m,
+                                    _recheck_s,
+                                )
+                                await self._deliver_stop_command(
+                                    reason="GPS position stall after escape"
+                                )
+                                raise RuntimeError(
+                                    "Mower physically stuck: GPS position did not change "
+                                    "after escape maneuver"
+                                )
 
             if _raw_abs_err > 20 and (not _in_tank_mode or _stall_active):
                 if _stall_start is None:
@@ -506,7 +628,26 @@ class MissionExecutor:
             if _force_tank_escape:
                 _in_tank_mode = True
 
-            if _force_reverse_escape:
+            if _force_gps_pivot:
+                # GPS stall escape phase 1: tank pivot to break contact and get new traction.
+                _pivot_spd = self.max_speed * 0.5
+                left_speed = _pivot_spd * _gps_stall_pivot_dir
+                right_speed = -_pivot_spd * _gps_stall_pivot_dir
+                _tank_turn_start = None
+                logger.debug(
+                    "GPS stall escape: pivot dir=%+.0f spd=%.2f hdg=%.1f°",
+                    _gps_stall_pivot_dir, _pivot_spd, current_heading,
+                )
+            elif _force_gps_forward:
+                # GPS stall escape phase 2: straight forward to move to new ground.
+                left_speed = self.cruise_speed
+                right_speed = self.cruise_speed
+                _tank_turn_start = None
+                logger.debug(
+                    "GPS stall escape: forward drive spd=%.2f hdg=%.1f°",
+                    self.cruise_speed, current_heading,
+                )
+            elif _force_reverse_escape:
                 # Stage C: straight reverse to change ground contact
                 left_speed, right_speed = -0.35, -0.35
                 _tank_turn_start = None
