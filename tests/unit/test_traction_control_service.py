@@ -1,8 +1,8 @@
 """Unit tests for TractionControlService — underpower-based adaptive boost."""
 
-import pytest
-import time
 from unittest.mock import patch
+
+import pytest
 
 
 class TestTractionControlService:

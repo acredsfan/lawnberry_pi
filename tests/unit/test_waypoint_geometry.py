@@ -1,13 +1,13 @@
 """Tests for pure waypoint geometry helpers in backend.src.nav.waypoint_geometry."""
 
-import math
 import pytest
+
 from backend.src.nav.waypoint_geometry import (
-    heading_error,
-    compute_tank_speeds,
     compute_blend_speeds,
-    is_in_tank_mode,
+    compute_tank_speeds,
     cross_track_error,
+    heading_error,
+    is_in_tank_mode,
     stanley_steer,
 )
 
@@ -186,7 +186,6 @@ def test_cross_track_eastward_path():
     """Right side of an eastward path is to the south (negative lat offset)."""
     a = (0.0, 0.0)
     b = (0.0, 0.001)   # eastward path
-    p = (0.0, 0.0005)
     # Point due south of midpoint (right of eastward path)
     p_south = (-0.00001, 0.0005)
     assert cross_track_error(p_south, a, b) > 0.0

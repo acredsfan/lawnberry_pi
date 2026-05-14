@@ -8,13 +8,11 @@ from __future__ import annotations
 import asyncio
 import types
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.src.models import NavigationMode, PathStatus, Position
+from backend.src.models import Position
 from backend.src.models.mission import MissionLifecycleStatus
-
 
 # ---------------------------------------------------------------------------
 # Shared fakes
@@ -166,7 +164,7 @@ async def test_deliver_stop_returns_false_when_all_retries_fail():
 
 def _make_mission(waypoints_dicts):
     """Build a minimal Mission object for testing."""
-    from backend.src.models.mission import Mission, MissionWaypoint, MissionStatus, MissionLifecycleStatus
+    from backend.src.models.mission import Mission, MissionWaypoint
 
     wps = [MissionWaypoint(**d) for d in waypoints_dicts]
     mission = Mission(name="test", waypoints=wps, created_at=datetime.now(UTC).isoformat())
@@ -174,7 +172,7 @@ def _make_mission(waypoints_dicts):
 
 
 def _make_status(mission, status=None):
-    from backend.src.models.mission import MissionStatus, MissionLifecycleStatus
+    from backend.src.models.mission import MissionStatus
 
     if status is None:
         status = MissionLifecycleStatus.RUNNING
@@ -223,7 +221,6 @@ async def test_go_to_waypoint_returns_true_when_already_at_target():
 @pytest.mark.asyncio
 async def test_go_to_waypoint_returns_false_when_mission_aborted():
     from backend.src.services.mission_executor import MissionExecutor
-    from backend.src.models.mission import MissionLifecycleStatus
 
     loc = FakeLocalization(
         position=Position(latitude=0.0, longitude=0.0, accuracy=0.5),
@@ -251,8 +248,8 @@ async def test_go_to_waypoint_returns_false_when_mission_aborted():
 
 @pytest.mark.asyncio
 async def test_go_to_waypoint_holds_when_paused():
+    from backend.src.models.mission import MissionStatus
     from backend.src.services.mission_executor import MissionExecutor
-    from backend.src.models.mission import MissionLifecycleStatus, MissionStatus
 
     loc = FakeLocalization(
         position=Position(latitude=0.0, longitude=0.0, accuracy=0.5),
@@ -315,7 +312,6 @@ async def test_go_to_waypoint_blocked_by_emergency():
 @pytest.mark.asyncio
 async def test_execute_mission_completes_when_all_waypoints_reached():
     from backend.src.services.mission_executor import MissionExecutor
-    from backend.src.models.mission import MissionLifecycleStatus
 
     # Position already within tolerance of every waypoint
     loc = FakeLocalization(
@@ -349,8 +345,8 @@ async def test_execute_mission_completes_when_all_waypoints_reached():
 
 @pytest.mark.asyncio
 async def test_execute_mission_waits_while_paused():
+    from backend.src.models.mission import MissionStatus
     from backend.src.services.mission_executor import MissionExecutor
-    from backend.src.models.mission import MissionLifecycleStatus, MissionStatus
 
     loc = FakeLocalization(
         position=Position(latitude=0.1, longitude=0.1, accuracy=0.3),
@@ -383,8 +379,8 @@ async def test_execute_mission_waits_while_paused():
 
 @pytest.mark.asyncio
 async def test_execute_mission_marks_failure_on_waypoint_error():
+    from backend.src.models.mission import MissionStatus
     from backend.src.services.mission_executor import MissionExecutor
-    from backend.src.models.mission import MissionLifecycleStatus, MissionStatus
 
     loc = FakeLocalization(
         position=Position(latitude=0.0, longitude=0.0, accuracy=0.3),
@@ -422,7 +418,6 @@ async def test_execute_mission_marks_failure_on_waypoint_error():
 # Part 3: Encoder-aware stuck detectors
 # ---------------------------------------------------------------------------
 
-import math
 from unittest.mock import patch as _patch
 
 
@@ -522,7 +517,7 @@ async def test_motor_stall_triggers_reverse_escape():
                 executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader),
                 timeout=5.0,
             )
-    except (RuntimeError, asyncio.TimeoutError):
+    except (TimeoutError, RuntimeError):
         pass
 
     # Should have dispatched at least one reverse command
@@ -587,7 +582,7 @@ async def test_wheel_spin_triggers_pivot_escape():
                 executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader),
                 timeout=10.0,
             )
-    except (RuntimeError, asyncio.TimeoutError):
+    except (TimeoutError, RuntimeError):
         pass
 
     assert len(pivot_dispatched) > 0, (
@@ -598,8 +593,9 @@ async def test_wheel_spin_triggers_pivot_escape():
 @pytest.mark.asyncio
 async def test_traction_boost_not_applied_during_motor_stall_escape():
     """Once motor stall triggers reverse escape, boost must not interfere."""
-    from backend.src.services.mission_executor import MissionExecutor
     import os
+
+    from backend.src.services.mission_executor import MissionExecutor
 
     # Ensure boost is enabled
     env = os.environ.copy()
@@ -641,11 +637,11 @@ async def test_traction_boost_not_applied_during_motor_stall_escape():
                 executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader),
                 timeout=5.0,
             )
-    except (RuntimeError, asyncio.TimeoutError):
+    except (TimeoutError, RuntimeError):
         pass
 
     # Check that any reverse command is exactly -0.35 (not boosted beyond that)
-    reverse_calls = [(l, r) for l, r in gw.drive_calls if l < -0.1 and r < -0.1]
+    reverse_calls = [(lv, rv) for lv, rv in gw.drive_calls if lv < -0.1 and rv < -0.1]
     for left, right in reverse_calls:
         assert abs(left) <= 0.45, f"Reverse left boosted too high: {left}"
         assert abs(right) <= 0.45, f"Reverse right boosted too high: {right}"
