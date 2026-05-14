@@ -323,6 +323,7 @@ class NavigationService:
         self._mission_executor = MissionExecutor(
             localization=self._localization_adapter,
             gateway=self._gateway_adapter,
+            encoder_rpm_provider=self._get_encoder_rpms,
             max_speed=self.max_speed,
             cruise_speed=self.cruise_speed,
             waypoint_tolerance=self.waypoint_tolerance,
@@ -1827,6 +1828,14 @@ class NavigationService:
                 best_dist = d
                 best = pt
         return best
+
+    def _get_encoder_rpms(self) -> tuple[float, float]:
+        """Return (enc1_rpm, enc2_rpm) from RoboHAT status for traction control."""
+        from .robohat_service import get_robohat_service
+        robohat = get_robohat_service()
+        if robohat is None:
+            return 0.0, 0.0
+        return robohat.status.encoder_1_rpm, robohat.status.encoder_2_rpm
 
     def get_pose(self) -> Pose2D | None:
         """Return the current fused Pose2D. None until first GPS fix."""

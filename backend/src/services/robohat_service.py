@@ -52,6 +52,8 @@ class RoboHATStatus:
     encoder_1_position: int = 0
     encoder_2_position: int = 0
     encoder_rpm: float = 0.0
+    encoder_1_rpm: float = 0.0   # RPM computed from encoder 1
+    encoder_2_rpm: float = 0.0   # RPM computed from encoder 2
     timestamp: datetime = None
 
     def __post_init__(self):
@@ -75,6 +77,8 @@ class RoboHATStatus:
             "encoder_1_position": self.encoder_1_position,
             "encoder_2_position": self.encoder_2_position,
             "encoder_rpm": round(self.encoder_rpm, 1),
+            "encoder_1_rpm": round(self.encoder_1_rpm, 1),
+            "encoder_2_rpm": round(self.encoder_2_rpm, 1),
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "health_status": self.get_health_status(),
         }
@@ -768,19 +772,35 @@ class RoboHATService:
                 await asyncio.sleep(0.1)
 
     def _update_encoder_velocity(self, enc1: int, enc2: int | None = None) -> None:
-        """Compute RPM from cumulative encoder tick delta (encoder 1)."""
+        """Compute RPM from cumulative encoder tick delta (both encoders)."""
         now = time.monotonic()
+        # Encoder 1
         if self._enc_prev_pos is not None and self._enc_prev_time is not None:
             elapsed = now - self._enc_prev_time
             if elapsed >= 0.05:
                 delta = abs(enc1 - self._enc_prev_pos)
                 ticks_per_sec = delta / elapsed
-                self.status.encoder_rpm = ticks_per_sec * (60.0 / self._ENCODER_MAGNETS_PER_WHEEL)
+                rpm = ticks_per_sec * (60.0 / self._ENCODER_MAGNETS_PER_WHEEL)
+                self.status.encoder_rpm = rpm
+                self.status.encoder_1_rpm = rpm
                 self._enc_prev_pos = enc1
                 self._enc_prev_time = now
         else:
             self._enc_prev_pos = enc1
             self._enc_prev_time = now
+        # Encoder 2
+        if enc2 is not None:
+            if self._enc2_prev_pos is not None and self._enc2_prev_time is not None:
+                elapsed2 = now - self._enc2_prev_time
+                if elapsed2 >= 0.05:
+                    delta2 = abs(enc2 - self._enc2_prev_pos)
+                    ticks_per_sec2 = delta2 / elapsed2
+                    self.status.encoder_2_rpm = ticks_per_sec2 * (60.0 / self._ENCODER_MAGNETS_PER_WHEEL)
+                    self._enc2_prev_pos = enc2
+                    self._enc2_prev_time = now
+            else:
+                self._enc2_prev_pos = enc2
+                self._enc2_prev_time = now
 
     @staticmethod
     def _parse_encoder_from_line(line: str) -> tuple[int | None, int | None]:

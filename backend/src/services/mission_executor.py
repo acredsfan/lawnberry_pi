@@ -59,6 +59,7 @@ class MissionExecutor:
         *,
         localization: Any,
         gateway: Any,
+        encoder_rpm_provider: Any = None,
         max_speed: float = 0.8,
         cruise_speed: float = 0.5,
         waypoint_tolerance: float = 0.5,
@@ -74,6 +75,14 @@ class MissionExecutor:
         self.max_waypoint_fix_age_seconds = max_waypoint_fix_age_seconds
         self.max_waypoint_accuracy_m = max_waypoint_accuracy_m
         self.position_verification_timeout_seconds = position_verification_timeout_seconds
+        self._encoder_rpm_provider = encoder_rpm_provider
+        import os
+        _boost_disabled = os.environ.get("LAWNBERRY_DISABLE_TRACTION_BOOST", "").strip() == "1"
+        if _boost_disabled:
+            self._tc = None
+        else:
+            from .traction_control_service import get_traction_control_service
+            self._tc = get_traction_control_service()
         self._path_planner = PathPlanner()
         # Mutable mission state — reset by execute_mission()
         self.current_waypoint_index: int = 0
@@ -723,6 +732,29 @@ class MissionExecutor:
                     stall_boost=_stall_boost,
                     max_speed=self.max_speed,
                     in_heading_bootstrap=_in_heading_bootstrap,
+                )
+
+            # Adaptive traction boost — suppressed during any escape phase or existing stall boost
+            if (
+                self._tc is not None
+                and not _force_reverse_escape
+                and not _force_tank_escape
+                and not _force_gps_pivot
+                and not _force_gps_forward
+                and not (_stall_boost > 0)
+            ):
+                _enc1, _enc2 = (
+                    self._encoder_rpm_provider()
+                    if self._encoder_rpm_provider is not None
+                    else (0.0, 0.0)
+                )
+                self._tc.update_motor_feedback(_enc1, _enc2)
+                self._tc.update_velocity_feedback(
+                    base_speed,
+                    getattr(getattr(self._loc, "state", None), "velocity", None) or 0.0,
+                )
+                left_speed, right_speed = self._tc.apply_boost_to_command(
+                    left_speed, right_speed, max_speed=self.max_speed
                 )
 
             # Dispatch drive command through gateway
