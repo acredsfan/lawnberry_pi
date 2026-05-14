@@ -15,19 +15,30 @@ class _StubSerial:
 
 
 class _ResponsiveSerial(_StubSerial):
+    """Serial mock backed by a real byte buffer.
+
+    _read_available_lines uses serial_conn.read(in_waiting) — not readline() —
+    so the mock must expose in_waiting as actual byte count and implement read().
+    """
+
     def __init__(self, lines: list[str]):
         super().__init__()
-        self._lines = [line.encode("utf-8") + b"\n" for line in lines]
+        self._buffer: bytes = b"".join(line.encode("utf-8") + b"\n" for line in lines)
         self.writes: list[bytes] = []
         self.write_timeout = 1.0
 
     @property
     def in_waiting(self):
-        return int(bool(self._lines))
+        return len(self._buffer)
 
     @in_waiting.setter
     def in_waiting(self, _value):
         return None
+
+    def read(self, size: int) -> bytes:
+        chunk = self._buffer[:size]
+        self._buffer = self._buffer[size:]
+        return chunk
 
     def write(self, payload: bytes):
         self.writes.append(payload)
@@ -37,15 +48,20 @@ class _ResponsiveSerial(_StubSerial):
         return None
 
     def readline(self):
-        if self._lines:
-            return self._lines.pop(0)
-        return b""
+        pos = self._buffer.find(b"\n")
+        if pos == -1:
+            line, self._buffer = self._buffer, b""
+        else:
+            line, self._buffer = self._buffer[:pos + 1], self._buffer[pos + 1:]
+        return line
 
     def close(self):
         self.is_open = False
 
 
 class _DelayedResponsiveSerial(_ResponsiveSerial):
+    """Delays making bytes available until after N in_waiting checks."""
+
     def __init__(self, lines: list[str], ready_after_checks: int):
         super().__init__(lines)
         self._ready_after_checks = ready_after_checks
@@ -56,7 +72,7 @@ class _DelayedResponsiveSerial(_ResponsiveSerial):
         self._checks += 1
         if self._checks <= self._ready_after_checks:
             return 0
-        return int(bool(self._lines))
+        return len(self._buffer)
 
     @in_waiting.setter
     def in_waiting(self, _value):
@@ -301,7 +317,9 @@ async def test_probe_firmware_response_accepts_robohat_lines():
     assert ok is True
     assert svc.status.motor_controller_ok is True
     assert svc.status.last_error is None
-    assert svc.serial_conn.writes == [b"rc=disable\n"]
+    # Probe returns True from settle window — no rc=disable needed when firmware
+    # already responds; the command-send phase is never reached.
+    assert svc.serial_conn.writes == []
 
 
 @pytest.mark.asyncio
@@ -641,12 +659,14 @@ async def test_reconnect_resets_last_pwm_cache():
     """Verify _send_safe_state_on_reconnect resets _last_pwm to neutral (Issue #1)."""
     svc = RoboHATService.__new__(RoboHATService)
     svc.status = types.SimpleNamespace(serial_connected=False)
+    # serial_conn=None so _set_rc_enabled returns early without AttributeError
+    svc.serial_conn = None
     sent_lines = []
-    
+
     async def fake_send_line(line: str) -> bool:
         sent_lines.append(line)
         return True
-    
+
     svc._send_line = fake_send_line
     # Simulate pre-disconnect motion state
     svc._last_pwm = (1675, 1675)

@@ -2,7 +2,37 @@ import pytest
 
 from backend.src.api.rest import _safety_state
 from backend.src.cli import safety_commands
+from backend.src.core.globals import _blade_state, _client_emergency
+from backend.src.control.command_gateway import MotorCommandGateway
+from backend.src.core.runtime import RuntimeContext
 from backend.src.main import app as fastapi_app
+
+
+@pytest.fixture(autouse=True)
+def _setup_runtime():
+    """Wire a minimal RuntimeContext so the emergency_clear endpoint works."""
+    gw = MotorCommandGateway(
+        safety_state=_safety_state,
+        blade_state=_blade_state,
+        client_emergency=_client_emergency,
+        robohat=None,
+        persistence=None,
+    )
+    fastapi_app.state.runtime = RuntimeContext(
+        config_loader=None,
+        hardware_config=None,
+        safety_limits=None,
+        navigation=None,
+        mission_service=None,
+        safety_state=_safety_state,
+        blade_state=_blade_state,
+        robohat=None,
+        websocket_hub=None,
+        persistence=None,
+        command_gateway=gw,
+    )
+    yield
+    del fastapi_app.state.runtime
 
 
 @pytest.mark.asyncio

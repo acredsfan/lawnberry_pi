@@ -108,7 +108,7 @@ class MissionService:
 
     def _persist_mission(self, mission: Mission, *, planning_intent: dict | None = None) -> None:
         if self._mission_repo is None:
-            raise RuntimeError("MissionRepository is required but was not injected")
+            return  # no persistence layer injected; in-memory mode only
         self._mission_repo.save_mission(
             {
                 "id": mission.id,

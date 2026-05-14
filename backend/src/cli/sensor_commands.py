@@ -66,9 +66,10 @@ async def sensors_live_loop(interval_s: float = 1.0) -> None:
 
 
 if _HAS_TYPER:
+    app = typer.Typer()
 
-    @typer.command()
-    def test(live: bool = True):
+    @app.command()
+    def sensors(live: bool = True):
         """Run sensor diagnostics live table (1 Hz)."""
         if live:
             asyncio.run(sensors_live_loop())

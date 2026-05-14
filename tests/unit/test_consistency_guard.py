@@ -12,7 +12,6 @@ consistency_guard = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(consistency_guard)
 
 
-@pytest.mark.xfail(reason="pre-existing CI-only failure: test payload hardcodes '/home/pi/lawnberry/...' so the hook policy doesn't match CI's checkout at /home/runner/work/.... Passes locally on the Pi. Tracked for CI cleanup.")
 def test_pre_tool_use_requests_approval_for_hook_patch():
     payload = {
         "hookEventName": "PreToolUse",
@@ -29,7 +28,6 @@ def test_pre_tool_use_requests_approval_for_hook_patch():
     assert "scripts/hooks/consistency_guard.py" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
-@pytest.mark.xfail(reason="pre-existing CI-only failure: same /home/pi/lawnberry/ hardcoded path; passes locally on the Pi, fails in CI checkout. Tracked for CI cleanup.")
 def test_post_tool_use_adds_structural_doc_reminder():
     payload = {
         "hookEventName": "PostToolUse",

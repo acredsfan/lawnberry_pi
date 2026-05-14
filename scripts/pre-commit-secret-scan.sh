@@ -34,8 +34,12 @@ EXCLUDE_PATTERN='(:\s*(Optional\[|List\[|Dict\[|str|int|bool|float|bytes|None\b)
 FOUND=0
 
 while IFS= read -r file; do
-  # Skip example, dist, and the scanner script itself (its own pattern comments trigger false positives)
-  if [[ "$file" =~ \.example$ ]] || [[ "$file" =~ (^|/)dist/ ]] || [[ "$file" == "scripts/pre-commit-secret-scan.sh" ]]; then
+  # Skip example, dist, the scanner script itself, and test fixtures.
+  # Test files legitimately contain dummy credential strings as fixtures
+  # and should not be flagged for those intentional placeholders.
+  if [[ "$file" =~ \.example$ ]] || [[ "$file" =~ (^|/)dist/ ]] || \
+     [[ "$file" == "scripts/pre-commit-secret-scan.sh" ]] || \
+     [[ "$file" =~ (^|/)tests/ ]]; then
     continue
   fi
   if git show :"$file" | grep -E -n "$PATTERN" | grep -Ev "$EXCLUDE_PATTERN" >/tmp/secret-scan.out 2>/dev/null; then

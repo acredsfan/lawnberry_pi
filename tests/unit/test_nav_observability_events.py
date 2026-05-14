@@ -52,8 +52,9 @@ async def test_heading_aligned_event_emitted_after_gps_cog_snap():
     nav._heading_alignment_sample_count = 0
     nav._bootstrap_start_time = 1.0
 
-    # Simulate a GPS COG snap by providing moving GPS + IMU
-    for _ in range(3):
+    # Simulate a GPS COG snap by providing moving GPS + IMU.
+    # going_straight requires >= 5 consecutive entries in _gps_cog_history.
+    for _ in range(5):
         sensor_data = SensorData(
             gps=GpsReading(latitude=37.0, longitude=-122.0, accuracy=0.5,
                            speed=0.6, heading=90.0),

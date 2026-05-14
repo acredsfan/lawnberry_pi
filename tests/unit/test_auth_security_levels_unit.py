@@ -8,6 +8,16 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+try:
+    import google.auth  # noqa: F401
+    _GOOGLE_AUTH_AVAILABLE = True
+except ImportError:
+    _GOOGLE_AUTH_AVAILABLE = False
+
+_needs_google_auth = pytest.mark.skipif(
+    not _GOOGLE_AUTH_AVAILABLE, reason="google-auth not installed"
+)
+
 from backend.src.models.auth_security_config import (
     AuthSecurityConfig,
     GoogleAuthConfig,
@@ -197,6 +207,7 @@ class TestAuthSecurityLevels:
                 # Backup code should be marked as used
                 assert "123456" not in auth_config_totp.totp_config.backup_codes
 
+    @_needs_google_auth
     @pytest.mark.asyncio
     async def test_google_oauth_authentication_success(self, auth_config_google):
         """Test successful Google OAuth authentication."""
@@ -225,6 +236,7 @@ class TestAuthSecurityLevels:
                     assert result.security_level == SecurityLevel.GOOGLE_OAUTH
                     assert result.oauth_provider == "google"
 
+    @_needs_google_auth
     @pytest.mark.asyncio
     async def test_google_oauth_domain_restriction(self, auth_config_google):
         """Test Google OAuth domain restriction enforcement."""
