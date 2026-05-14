@@ -187,6 +187,11 @@ def _sync_legacy_settings_to_sections(
     system["unit_system"] = unit_system
     maps["provider"] = legacy_payload["map_provider"]
     if maps_patch:
+        # Never let an incoming empty google_api_key wipe out a saved one.
+        existing_key = str(maps.get("google_api_key") or "").strip()
+        if existing_key and not str(maps_patch.get("google_api_key") or "").strip():
+            maps_patch = {**maps_patch}
+            maps_patch.pop("google_api_key", None)
         maps.update(maps_patch)
     sections["system"] = SystemSectionResponse.model_validate(system).model_dump()
     sections["maps"] = _normalize_maps_section({**sections.get("maps", {}), **maps})
@@ -926,7 +931,12 @@ async def get_maps_settings(request: Request):
 async def update_maps_settings(settings: dict[str, Any], request: Request):
     sections = _load_ui_settings(request)
     current = {**sections.get("maps", {})}
-    payload = _normalize_maps_section({**current, **settings})
+    merged = {**current, **settings}
+    # Preserve a saved API key if the incoming payload omits or blanks it out.
+    existing_key = str(current.get("google_api_key") or "").strip()
+    if existing_key and not str(merged.get("google_api_key") or "").strip():
+        merged["google_api_key"] = existing_key
+    payload = _normalize_maps_section(merged)
     sections["maps"] = payload
     _save_ui_settings(sections, request)
     return _maps_response_payload(payload)
