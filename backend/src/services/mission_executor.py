@@ -16,11 +16,16 @@ from typing import TYPE_CHECKING, Any
 from ..models import Position
 from ..nav.path_planner import PathPlanner
 from ..nav.waypoint_geometry import (
+    HEADING_EMA_ALPHA_GPS,
+    HEADING_EMA_ALPHA_IMU,
+    HEADING_SLEW_DEG_PER_TICK_GPS,
+    HEADING_SLEW_DEG_PER_TICK_IMU,
     compute_blend_speeds,
     compute_tank_speeds,
     cross_track_error,
     heading_error,
     is_in_tank_mode,
+    smooth_heading,
     stanley_steer,
 )
 
@@ -220,6 +225,11 @@ class MissionExecutor:
         )
         _path_bearing: float | None = None
         _heading_ema: float | None = None
+        # Detect once per leg whether we are GPS-only (no IMU) for EMA tuning
+        _loc_state_init = getattr(self._loc, "state", None)
+        _imu_valid_for_leg = bool(getattr(_loc_state_init, "imu_valid", False))
+        _ema_alpha = HEADING_EMA_ALPHA_IMU if _imu_valid_for_leg else HEADING_EMA_ALPHA_GPS
+        _ema_slew = HEADING_SLEW_DEG_PER_TICK_IMU if _imu_valid_for_leg else HEADING_SLEW_DEG_PER_TICK_GPS
 
         while True:
             status = mission_service.mission_statuses.get(mission.id)
@@ -311,23 +321,13 @@ class MissionExecutor:
             raw_heading = self._loc.heading
             _in_heading_bootstrap = raw_heading is None
 
-            # Update EMA-filtered heading (α=0.3 at 5 Hz ≈ 3-tick smoothing window).
-            # Apply a soft GPS COG correction when moving to bound IMU drift.
+            # Update EMA-filtered heading using smooth_heading() which applies
+            # a shortest-arc EMA with a per-tick slew cap.  GPS-only legs use
+            # tighter alpha/slew to suppress noisy COG jumps.
             if raw_heading is not None:
-                if _heading_ema is None:
-                    _heading_ema = raw_heading
-                else:
-                    _hdg_diff = (raw_heading - _heading_ema + 180.0) % 360.0 - 180.0
-                    _heading_ema = (_heading_ema + 0.3 * _hdg_diff) % 360.0
-                _loc_state = getattr(self._loc, "state", None)
-                if _loc_state is not None:
-                    _gps_cog = getattr(_loc_state, "gps_cog", None)
-                    _loc_vel = getattr(_loc_state, "velocity", None) or 0.0
-                    if _gps_cog is not None and _loc_vel > 0.3:
-                        _cog_diff = (_gps_cog - _heading_ema + 180.0) % 360.0 - 180.0
-                        _heading_ema = (
-                            _heading_ema + max(-2.0, min(2.0, 0.1 * _cog_diff))
-                        ) % 360.0
+                _heading_ema = smooth_heading(
+                    _heading_ema, raw_heading, alpha=_ema_alpha, max_step_deg=_ema_slew
+                )
 
             if raw_heading is None:
                 if heading_wait_start is None:
@@ -368,7 +368,8 @@ class MissionExecutor:
                 current_heading = raw_heading
                 heading_wait_start = None
 
-            err = heading_error(target=heading_to_target, current=current_heading)
+            control_heading = _heading_ema if _heading_ema is not None else current_heading
+            err = heading_error(target=heading_to_target, current=control_heading)
             abs_err = abs(err)
 
             _now = time.monotonic()
@@ -686,15 +687,17 @@ class MissionExecutor:
                 # cross-track-error correction.  Falls back to raw heading error
                 # during bootstrap (no IMU) or before path anchor is established.
                 _steer = err
+                _loc_state = getattr(self._loc, "state", None)
+                _loc_vel = (
+                    getattr(_loc_state, "velocity", None) if _loc_state is not None else None
+                ) or 0.0
+                _use_gps_smoothing = not _imu_valid_for_leg
                 if (
                     not _in_heading_bootstrap
                     and _path_a_lat is not None
                     and _heading_ema is not None
+                    and not (_use_gps_smoothing and _loc_vel < 0.3)
                 ):
-                    _loc_state = getattr(self._loc, "state", None)
-                    _loc_vel = (
-                        getattr(_loc_state, "velocity", None) if _loc_state is not None else None
-                    ) or 0.0
                     _cte = cross_track_error(
                         (current_position.latitude, current_position.longitude),
                         (_path_a_lat, _path_a_lon),

@@ -233,3 +233,49 @@ def test_stanley_max_steer_clip():
     # 80° heading err + large leftward CTE adding ~80° → raw steer ≈ 160° → clips to 60°
     steer = stanley_steer(80.0, -5.0, 0.5, max_steer_deg=60.0)
     assert steer == pytest.approx(60.0, abs=0.01)
+
+
+# --- smooth_heading helper ---
+
+def test_smooth_heading_clamps_large_jump():
+    """A 30° raw jump with max_step_deg=8 should only advance by 8°."""
+    from backend.src.nav.waypoint_geometry import smooth_heading
+    result = smooth_heading(10.0, 40.0, alpha=0.12, max_step_deg=8.0)
+    assert result == pytest.approx(18.0, abs=0.01)
+
+
+def test_smooth_heading_wraps_across_zero():
+    """359° → 5° should be treated as a +6° turn, not a -354° turn."""
+    from backend.src.nav.waypoint_geometry import smooth_heading
+    result = smooth_heading(359.0, 5.0, alpha=1.0, max_step_deg=90.0)
+    # alpha=1.0 means fully adopt raw; shortest arc from 359→5 is +6°
+    assert result == pytest.approx(5.0, abs=0.1)
+
+
+def test_smooth_heading_wraps_across_360_backward():
+    """5° → 359° should be treated as a -6° turn."""
+    from backend.src.nav.waypoint_geometry import smooth_heading
+    result = smooth_heading(5.0, 359.0, alpha=1.0, max_step_deg=90.0)
+    assert result == pytest.approx(359.0, abs=0.1)
+
+
+def test_smooth_heading_none_prev_returns_raw():
+    """When prev is None, return raw unchanged."""
+    from backend.src.nav.waypoint_geometry import smooth_heading
+    result = smooth_heading(None, 135.0, alpha=0.3, max_step_deg=30.0)
+    assert result == pytest.approx(135.0, abs=0.01)
+
+
+# --- Stanley parameter validation (fail with current defaults) ---
+
+def test_stanley_one_meter_cte_low_speed_stays_under_30deg():
+    """With new defaults, 1m CTE at v=0.1 must produce ≤30° correction (not 71° as before)."""
+    steer = stanley_steer(0.0, 1.0, 0.1)
+    assert abs(steer) <= 30.0, f"steer={steer:.1f}° exceeds 30° limit"
+
+
+def test_stanley_one_meter_cte_does_not_trigger_tank_mode():
+    """1m CTE should never produce a steer large enough to enter tank mode (>60°)."""
+    steer = stanley_steer(0.0, 1.0, 0.1)
+    assert not is_in_tank_mode(abs(steer), currently_in_tank=False), \
+        f"steer={steer:.1f}° would trigger tank mode"

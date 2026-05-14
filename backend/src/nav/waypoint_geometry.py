@@ -8,6 +8,32 @@ from __future__ import annotations
 
 import math
 
+# --- Heading smoothing constants ---
+HEADING_EMA_ALPHA_IMU = 0.3        # responsive when IMU is the source
+HEADING_EMA_ALPHA_GPS = 0.12       # ~5-tick window @ 5 Hz when only GPS COG
+HEADING_SLEW_DEG_PER_TICK_IMU = 30.0   # essentially uncapped
+HEADING_SLEW_DEG_PER_TICK_GPS = 8.0    # caps a 30° COG jump to 8°/200 ms
+
+
+def smooth_heading(
+    prev: float | None,
+    raw: float,
+    *,
+    alpha: float,
+    max_step_deg: float,
+) -> float:
+    """Shortest-arc EMA with per-tick slew limit. Returns value in [0, 360)."""
+    if prev is None:
+        return raw % 360.0
+    delta = (raw - prev + 180.0) % 360.0 - 180.0   # shortest arc in [-180, 180)
+    if abs(delta) > max_step_deg:
+        # Slew cap: advance by exactly max_step_deg toward raw (alpha not applied)
+        step = math.copysign(max_step_deg, delta)
+    else:
+        # Within slew range: apply EMA smoothing
+        step = alpha * delta
+    return (prev + step) % 360.0
+
 
 def heading_error(target: float, current: float) -> float:
     """Return the signed shortest heading delta from *current* to *target* (degrees).
@@ -158,10 +184,10 @@ def stanley_steer(
     cte_m: float,
     velocity_mps: float,
     *,
-    k_cte: float = 0.6,
-    v_floor: float = 0.2,
-    max_steer_deg: float = 60.0,
-    dead_band_m: float = 0.1,
+    k_cte: float = 0.25,
+    v_floor: float = 0.4,
+    max_steer_deg: float = 30.0,
+    dead_band_m: float = 0.15,
 ) -> float:
     """Stanley path-tracking steer command (degrees).
 
