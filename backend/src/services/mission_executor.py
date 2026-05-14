@@ -551,6 +551,8 @@ class MissionExecutor:
                 and _max_enc_rpm < _MOTOR_STALL_RPM_THRESHOLD
                 and not _force_gps_pivot
                 and not _force_gps_forward
+                and not _force_reverse_escape
+                and not _stall_active
                 and _gps_stall_escape_phase is None
             ):
                 if _motor_stall_start is None:
@@ -568,7 +570,7 @@ class MissionExecutor:
                         )
                         await self._deliver_stop_command(reason="motor stall abort")
                         raise RuntimeError(
-                            "Motor stall: encoder RPM ~0 despite active command"
+                            "Motor stall: encoder RPM ~0 with active command"
                         )
                     elif _stall_elapsed >= _MOTOR_STALL_ARM_S:
                         if not _force_reverse_escape and not _stall_active:
@@ -579,7 +581,10 @@ class MissionExecutor:
                                 _stall_elapsed, _max_cmd,
                             )
             else:
-                _motor_stall_start = None
+                # Clear only on clear recovery (5× threshold) or zero command,
+                # so transient gear-lash blips don't reset accumulated stall time.
+                if _max_enc_rpm >= _MOTOR_STALL_RPM_THRESHOLD * 5.0 or _max_cmd <= _MOTOR_STALL_CMD_THRESHOLD:
+                    _motor_stall_start = None
 
             # Trigger B: wheel spin — turning but not moving
             if (
@@ -587,6 +592,7 @@ class MissionExecutor:
                 and _max_cmd > _MOTOR_STALL_CMD_THRESHOLD
                 and not _force_gps_pivot
                 and not _force_gps_forward
+                and not _stall_active
                 and _gps_stall_escape_phase is None
             ):
                 _cur_lat = current_position.latitude
@@ -617,11 +623,6 @@ class MissionExecutor:
                                 "triggering pivot escape",
                                 _max_enc_rpm, _spin_moved_m, _spin_no_move_s,
                             )
-            else:
-                _wheel_spin_ref_lat = None
-                _wheel_spin_ref_lon = None
-                _wheel_spin_ref_time = None
-
             if _raw_abs_err > 20 and (not _in_tank_mode or _stall_active):
                 if _stall_start is None:
                     _stall_start = time.monotonic()

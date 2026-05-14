@@ -6,6 +6,7 @@ so no hardware, RoboHAT, or NavigationService instance is required.
 from __future__ import annotations
 
 import asyncio
+import types
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
@@ -442,13 +443,11 @@ class FakeLocalizationWithState:
         self._dead_reckoning_active = dead_reckoning_active
         self._last_gps_fix = last_gps_fix or datetime.now(UTC)
 
-        class _State:
-            imu_valid = False
-            gps_cog = heading
-            velocity = 0.5
-
-        _State.velocity = velocity
-        self.state = _State()
+        self.state = types.SimpleNamespace(
+            imu_valid=False,
+            gps_cog=heading,
+            velocity=velocity,
+        )
 
     @property
     def current_position(self):
