@@ -20,6 +20,7 @@ PlanningService) run end-to-end through the app lifespan.
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,6 +28,35 @@ from fastapi.testclient import TestClient
 from backend.src.core.persistence import persistence
 from backend.src.core.runtime import get_runtime
 from backend.src.main import app
+from backend.src.repositories.map_repository import MapRepository
+from backend.src.repositories.mission_repository import MissionRepository
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_E2E_PREFIX = "E2E Smoke"
+
+
+# This test exercises the real app lifespan and real database — always use the
+# production db path, never the :memory: override used by other integration tests.
+_PROD_DB = Path(__file__).parents[2] / "data" / "lawnberry.db"
+
+
+def _mission_repo() -> MissionRepository:
+    return MissionRepository(db_path=_PROD_DB)
+
+
+def _map_repo() -> MapRepository:
+    return MapRepository(db_path=_PROD_DB)
+
+
+def _delete_e2e_missions() -> None:
+    repo = _mission_repo()
+    for m in repo.list_missions():
+        if m.get("name", "").startswith(_E2E_PREFIX):
+            repo.delete_mission(m["id"])
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -35,24 +65,45 @@ from backend.src.main import app
 
 @pytest.fixture(autouse=True)
 def _clean_state():
-    """Remove planning jobs created during this test before and after,
-    and ensure the real runtime (from the lifespan) is used instead of
-    the mock injected by the integration conftest."""
-    # Remove any stale planning jobs
+    """Isolate E2E test artifacts so real user data is never modified.
+
+    Strategy:
+    - Snapshot real zones before the test; restore them exactly after.
+    - Delete any E2E Smoke missions created during the test.
+    - Delete planning jobs (schedules) before and after.
+    - Use the real lifespan runtime instead of the integration conftest mock.
+    """
+    map_repo = _map_repo()
+
+    # Snapshot real zones so we can restore them after the test
+    real_zones = map_repo.list_zones()
+
+    # Remove stale artifacts from any previous failed run
     for job in persistence.load_planning_jobs():
         persistence.delete_planning_job(job["id"])
+    _delete_e2e_missions()
+    for z in map_repo.list_zones():
+        if z.get("name", "").startswith(_E2E_PREFIX):
+            map_repo.delete_zone(z["id"])
 
     # Clear the mock dependency override so the real lifespan runtime is used.
-    # The integration conftest sets get_runtime → mock; we remove it here so
-    # the real app.state.runtime (set by TestClient's lifespan) is used instead.
     app.dependency_overrides.pop(get_runtime, None)
 
     yield
 
-    # Restore: re-register if the conftest put something there (it won't after
-    # yield, so this is just hygiene — the conftest teardown clears it anyway).
+    # Post-test: delete E2E artifacts
     for job in persistence.load_planning_jobs():
         persistence.delete_planning_job(job["id"])
+    _delete_e2e_missions()
+    for z in map_repo.list_zones():
+        if z.get("name", "").startswith(_E2E_PREFIX):
+            map_repo.delete_zone(z["id"])
+
+    # Restore real zones exactly as they were
+    current_ids = {z["id"] for z in map_repo.list_zones()}
+    for zone in real_zones:
+        if zone["id"] not in current_ids:
+            map_repo.save_zone(zone)
 
 
 # A tiny square zone (~10 m × 10 m) centred near GPS origin.
@@ -84,26 +135,22 @@ def test_create_zone_then_schedule_then_observe_mission():
 
     with TestClient(app) as client:
         # ------------------------------------------------------------------
-        # Step 1: Create a mowing boundary zone
+        # Step 1: Create a mowing boundary zone (single-zone add, not bulk
+        # replace — bulk replace would wipe the user's real zones).
         # ------------------------------------------------------------------
-        zone_payload = [
-            {
-                "id": zone_id,
-                "name": "E2E Smoke Zone",
-                "polygon": _ZONE_POLYGON,
-                "priority": 1,
-                "exclusion_zone": False,
-            }
-        ]
-        zone_resp = client.post("/api/v2/map/zones?bulk=true", json=zone_payload)
-        assert zone_resp.status_code == 200, (
-            f"Expected 200 from POST /api/v2/map/zones?bulk=true, got {zone_resp.status_code}: "
-            f"{zone_resp.text}"
+        zone_payload = {
+            "id": zone_id,
+            "name": "E2E Smoke Zone",
+            "polygon": _ZONE_POLYGON,
+            "priority": 1,
+            "exclusion_zone": False,
+        }
+        zone_resp = client.post(f"/api/v2/map/zones/{zone_id}", json=zone_payload)
+        assert zone_resp.status_code == 201, (
+            f"Expected 201 from POST /api/v2/map/zones/{zone_id}, "
+            f"got {zone_resp.status_code}: {zone_resp.text}"
         )
-        zones = zone_resp.json()
-        assert any(z["id"] == zone_id for z in zones), (
-            f"Zone {zone_id!r} not present in response: {zones}"
-        )
+        assert zone_resp.json()["id"] == zone_id
 
         # ------------------------------------------------------------------
         # Step 2: Create a schedule referencing the zone
