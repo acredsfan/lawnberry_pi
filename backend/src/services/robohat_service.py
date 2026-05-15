@@ -427,6 +427,11 @@ class RoboHATService:
             # Claim USB control immediately on first connect (same as reconnect path).
             await self._send_safe_state_on_reconnect()
 
+            # probe may have set _in_repl=True during REPL recovery; clear now
+            # firmware is confirmed online so the watchdog doesn't trigger an
+            # immediate redundant soft-reset.
+            self._in_repl = False
+
             logger.info("RoboHAT service initialized successfully")
             return True
 
