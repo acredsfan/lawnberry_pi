@@ -329,7 +329,10 @@ def main() -> None:
     blade_pwm.duty_cycle = 0
     set_led(True, force=True)
     startup_msg = f"▶ RoboHAT Advanced RC Control ready (CircuitPython {get_circuitpython_version()})"
-    print(startup_msg)
+    try:
+        print(startup_msg)
+    except Exception:  # USB CDC write can raise OSError in CP10 before host is ready
+        pass
     uart_write(startup_msg)
 
     hb_t   = time.monotonic()
