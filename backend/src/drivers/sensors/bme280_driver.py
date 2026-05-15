@@ -8,6 +8,7 @@ with standard Bosch compensation formulas.
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import time
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from typing import Any
 
 from ...core.simulation import is_simulation_mode
 from ..base import HardwareDriver
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -56,6 +59,7 @@ class BME280Driver(HardwareDriver):
         self._last_env: dict[str, float] | None = None
         self._cycle: int = 0
         self._last_read_ts: float | None = None
+        self._last_init_attempt: float = 0.0
 
     async def initialize(self) -> None:  # noqa: D401
         self.initialized = True
@@ -123,7 +127,11 @@ class BME280Driver(HardwareDriver):
                 )
 
             self._calibration = await asyncio.to_thread(_load)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "BME280 calibration read failed at 0x%02X: %s — will retry on next read",
+                self._address, exc,
+            )
             self._calibration = None
 
     async def start(self) -> None:  # noqa: D401
@@ -176,7 +184,10 @@ class BME280Driver(HardwareDriver):
             return self._last_env
 
         if self._calibration is None:
-            await self.initialize()
+            now = time.time()
+            if now - self._last_init_attempt >= 30.0:
+                self._last_init_attempt = now
+                await self.initialize()
             if self._calibration is None:
                 return self._last_env
 

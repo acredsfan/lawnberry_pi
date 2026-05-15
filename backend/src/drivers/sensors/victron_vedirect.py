@@ -58,6 +58,8 @@ class VictronVeDirectDriver(HardwareDriver):
         self._bg_refresh_interval_s = float(
             cfg.get("bg_refresh_interval_s", self._DEFAULT_BG_REFRESH_INTERVAL_S)
         )
+        self._yield_today_unit = str(cfg.get("yield_today_unit", "wh")).lower()
+        self._solar_panel_max_wh = float(cfg.get("solar_panel_max_wh", 1000.0))
         self._adapter_warned = False
         self._last_payload: dict[str, Any] | None = None
         self._last_timestamp: float | None = None
@@ -141,7 +143,11 @@ class VictronVeDirectDriver(HardwareDriver):
             async with self._read_lock:
                 frame = await loop.run_in_executor(_VICTRON_EXECUTOR, self._read_victron_cli_frame)
             if frame:
-                parsed = self._convert_frame(frame)
+                parsed = self._convert_frame(
+                    frame,
+                    yield_today_unit=self._yield_today_unit,
+                    solar_panel_max_wh=self._solar_panel_max_wh,
+                )
                 if parsed:
                     self._last_payload = parsed
                     self._last_timestamp = time.time()
@@ -281,7 +287,11 @@ class VictronVeDirectDriver(HardwareDriver):
     # legacy serial reader removed - BLE CLI is used
 
     @staticmethod
-    def _convert_frame(frame: dict[str, Any]) -> dict[str, Any] | None:
+    def _convert_frame(
+        frame: dict[str, Any],
+        yield_today_unit: str = "wh",
+        solar_panel_max_wh: float = 1000.0,
+    ) -> dict[str, Any] | None:
         payload = frame
         meta: dict[str, Any] = {}
         if isinstance(frame, dict) and "payload" in frame and isinstance(frame["payload"], dict):
@@ -422,18 +432,23 @@ class VictronVeDirectDriver(HardwareDriver):
             if optional_key in payload:
                 result.setdefault("meta", {})[optional_key] = payload[optional_key]
 
-        # Surface daily solar yield as Wh if available. Victron sources sometimes
-        # report yield_today in kWh; if the numeric value is small, assume kWh
-        # and convert to Wh. Otherwise treat as Wh.
+        # Surface daily solar yield as Wh if available. Use yield_today_unit param
+        # ("wh" default or "kwh") to determine conversion; no ambiguous heuristic.
         try:
             yt_raw = payload.get("yield_today")
             yt_val = _to_float(yt_raw)
             if yt_val is not None:
-                # Heuristic: values <= 10 are very likely kWh
-                if yt_val <= 10.0:
-                    result["solar_yield_today_wh"] = round(yt_val * 1000.0, 1)
+                if yield_today_unit == "kwh":
+                    wh = round(yt_val * 1000.0, 1)
                 else:
-                    result["solar_yield_today_wh"] = round(yt_val, 1)
+                    wh = round(yt_val, 1)
+                # Physical sanity clamp: log a warning if value exceeds configured max
+                if wh > solar_panel_max_wh:
+                    logger.warning(
+                        "solar_yield_today_wh=%s exceeds physical max %s Wh — check yield_today_unit config",
+                        wh, solar_panel_max_wh,
+                    )
+                result["solar_yield_today_wh"] = wh
         except Exception:
             pass
 
