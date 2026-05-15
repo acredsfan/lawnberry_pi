@@ -32,6 +32,11 @@ class _Ina3221Config:
     shunt_ohms_ch1: float = 0.0025  # Solar input (default for new hardware)
     shunt_ohms_ch2: float = 0.01  # Reserved
     shunt_ohms_ch3: float = 0.0015  # Battery pack (default for new hardware)
+    battery_voltage_offset_v: float = 0.0
+    battery_voltage_scale: float = 1.0
+    solar_voltage_offset_v: float = 0.0
+    solar_voltage_scale: float = 1.0
+    battery_current_offset_a: float = 0.0
 
 
 class INA3221Driver(HardwareDriver):
@@ -94,6 +99,11 @@ class INA3221Driver(HardwareDriver):
             shunt_ohms_ch1=_resolve_shunt(1, base_cfg.shunt_ohms_ch1),
             shunt_ohms_ch2=_resolve_shunt(2, base_cfg.shunt_ohms_ch2),
             shunt_ohms_ch3=_resolve_shunt(3, base_cfg.shunt_ohms_ch3),
+            battery_voltage_offset_v=float(cfg.get("battery_voltage_offset_v", 0.0)),
+            battery_voltage_scale=float(cfg.get("battery_voltage_scale", 1.0)),
+            solar_voltage_offset_v=float(cfg.get("solar_voltage_offset_v", 0.0)),
+            solar_voltage_scale=float(cfg.get("solar_voltage_scale", 1.0)),
+            battery_current_offset_a=float(cfg.get("battery_current_offset_a", 0.0)),
         )
         # Allow environment overrides. Two forms are supported:
         #  - Direct ohms value: INA3221_SHUNT_OHMS_CH1=0.0025
@@ -209,9 +219,9 @@ class INA3221Driver(HardwareDriver):
                     else:
                         currents.append(sv / sh)
 
-                battery_voltage = bus_voltages[2]
-                battery_current = currents[2] if currents[2] is not None else None
-                solar_voltage = bus_voltages[0]
+                battery_voltage = bus_voltages[2] * self._cfg.battery_voltage_scale + self._cfg.battery_voltage_offset_v
+                battery_current = (currents[2] + self._cfg.battery_current_offset_a) if currents[2] is not None else None
+                solar_voltage = bus_voltages[0] * self._cfg.solar_voltage_scale + self._cfg.solar_voltage_offset_v
                 solar_current = currents[0] if currents[0] is not None else None
 
                 return {

@@ -232,19 +232,29 @@ async def _ensure_gpio_provider() -> str | None:
         return _gpio_provider
     # Try lgpio (fast on Pi 5), then periphery, then RPi.GPIO
     try:
+        import lgpio as _lgpio  # noqa: F401
         _gpio_provider = "lgpio"
         return _gpio_provider
     except Exception:
-        try:
-            _gpio_provider = "periphery"
-            return _gpio_provider
-        except Exception:
-            try:
-                _gpio_provider = "rpi_gpio"
-                return _gpio_provider
-            except Exception:
-                _gpio_provider = None
-                return _gpio_provider
+        pass
+    try:
+        import periphery as _periphery  # noqa: F401
+        _gpio_provider = "periphery"
+        return _gpio_provider
+    except Exception:
+        pass
+    try:
+        import RPi.GPIO as _rpi_gpio  # noqa: F401
+        _gpio_provider = "rpi_gpio"
+        return _gpio_provider
+    except Exception:
+        pass
+    import logging as _log
+    _log.getLogger(__name__).warning(
+        "No GPIO library available (lgpio/periphery/RPi.GPIO). VL53L0X XSHUT pair-init will not work."
+    )
+    _gpio_provider = None
+    return None
 
 
 # Module-level GPIO state singletons — safer than function-attribute caching.

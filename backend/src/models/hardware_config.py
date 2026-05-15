@@ -26,6 +26,21 @@ class Ina3221Config(BaseModel):
     shunt_spec_ch3: str | None = Field(
         default=None, description="Channel 3 shunt spec, e.g. '50A/75mV'"
     )
+    battery_voltage_offset_v: float = Field(
+        default=0.0, description="Additive calibration offset for battery (ch3) bus voltage reading"
+    )
+    battery_voltage_scale: float = Field(
+        default=1.0, description="Multiplicative scale for battery bus voltage"
+    )
+    solar_voltage_offset_v: float = Field(
+        default=0.0, description="Additive calibration offset for solar (ch1) bus voltage reading"
+    )
+    solar_voltage_scale: float = Field(
+        default=1.0, description="Multiplicative scale for solar bus voltage"
+    )
+    battery_current_offset_a: float = Field(
+        default=0.0, description="Additive offset for battery current reading"
+    )
 
 
 class VictronBleConfig(BaseModel):
