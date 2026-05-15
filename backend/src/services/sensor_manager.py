@@ -748,12 +748,18 @@ class PowerSensorInterface:
         except Exception:
             solar_yield_today_wh = None
 
-        # Coherence guard: solar fields must be all-or-nothing.
-        # If voltage source is unavailable, current/power/yield are meaningless.
+        # Coherence guard: INA3221 ch1 reports physically-impossible current/power when
+        # its bus voltage pin is ≤0.05 V (PV sense wire absent or panel disconnected).
+        # Victron BLE provides solar_power and yield_today independently of PV voltage —
+        # those are always valid and must pass through even when solar_voltage is null.
         if solar_voltage is None:
-            solar_current = None
-            solar_power = None
-            solar_yield_today_wh = None
+            ina_solar_v_raw = ina.get("solar_voltage") if ina else None
+            ina_bus_zero = ina_solar_v_raw is None or abs(float(ina_solar_v_raw or 0)) < 0.05
+            if ina_bus_zero:
+                solar_current = None  # suppress physically-impossible INA ch1 current
+                if victron_solar_power is None:
+                    # No Victron power measurement — INA-derived power is garbage at 0 V bus
+                    solar_power = None
 
         reading = PowerReading(
             battery_voltage=battery_voltage,
