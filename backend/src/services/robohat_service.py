@@ -418,6 +418,8 @@ class RoboHATService:
 
             self.status.serial_connected = True
             self.running = True
+            # Clear any REPL flag set during probe before background tasks can observe it.
+            self._in_repl = False
             await self._apply_estop_if_pending()  # honour any e-stop received while disconnected
 
             # Start background tasks
@@ -426,11 +428,6 @@ class RoboHATService:
 
             # Claim USB control immediately on first connect (same as reconnect path).
             await self._send_safe_state_on_reconnect()
-
-            # probe may have set _in_repl=True during REPL recovery; clear now
-            # firmware is confirmed online so the watchdog doesn't trigger an
-            # immediate redundant soft-reset.
-            self._in_repl = False
 
             logger.info("RoboHAT service initialized successfully")
             return True
