@@ -151,13 +151,23 @@ def set_pwm(steer_us: int, thr_us: int) -> None:
 def drain_pulsein(pin: PulseIn) -> list[int]:
     """Return all pulses then clear the buffer. Works in CP 9 & 10."""
     pulses: list[int] = []
-    # CP ≤9 supported iteration; CP 10 does not
+    # CP ≤9 supported iteration; CP 10 does not.
+    # RuntimeError: buffer overrun is raised by CP when RC noise fills the
+    # 100-slot PulseIn buffer before we drain it -- catch it to avoid a crash.
     try:
         pulses = list(pin)
         pin.clear()
     except TypeError:
-        while len(pin):
-            pulses.append(pin.popleft())
+        try:
+            while len(pin):
+                pulses.append(pin.popleft())
+        except Exception:  # noqa: BLE001
+            pin.clear()
+    except Exception:  # noqa: BLE001 -- RuntimeError: buffer overrun, etc.
+        try:
+            pin.clear()
+        except Exception:  # noqa: BLE001
+            pass
     return pulses
 
 
@@ -327,141 +337,150 @@ def main() -> None:
 
     while True:
         wdt.feed()
-        now = time.monotonic()
+        try:
+            now = time.monotonic()
 
-        # --- serial commands (USB CDC or hardware UART) --- #
-        usb_line  = read_serial_line()
-        uart_line = read_uart_line()
+            # --- serial commands (USB CDC or hardware UART) --- #
+            usb_line  = read_serial_line()
+            uart_line = read_uart_line()
 
-        for raw_line, source in ((usb_line, "USB"), (uart_line, "UART")):
-            if not raw_line:
-                continue
-            tag = f"[{source}]"
-            # Any received command resets the USB-timeout clock so that
-            # status queries (get_rc_status, enc=zero, blade=…) do not
-            # inadvertently drain the 2 s budget while RC is disabled.
-            last_serial_time = now
-            cmd, param1, param2 = parse_cmd(raw_line)
+            for raw_line, source in ((usb_line, "USB"), (uart_line, "UART")):
+                if not raw_line:
+                    continue
+                tag = f"[{source}]"
+                # Any received command resets the USB-timeout clock so that
+                # status queries (get_rc_status, enc=zero, blade=…) do not
+                # inadvertently drain the 2 s budget while RC is disabled.
+                last_serial_time = now
+                cmd, param1, param2 = parse_cmd(raw_line)
 
-            def respond(msg: str) -> None:
-                full = f"{tag} {msg}"
-                print(full)
-                uart_write(full)
+                def respond(msg: str) -> None:
+                    full = f"{tag} {msg}"
+                    try:
+                        print(full)
+                    except Exception:  # noqa: BLE001 -- USB CDC write can raise OSError in CP10
+                        pass
+                    uart_write(full)
 
-            if cmd == "rc_enable":
+                if cmd == "rc_enable":
+                    rc_enabled = True
+                    set_led(rc_enabled)
+                    respond(f"RC enabled, mode: {rc_mode}")
+                elif cmd == "rc_disable":
+                    rc_enabled = False
+                    last_serial_time = now
+                    set_led(rc_enabled)
+                    respond("RC disabled – serial control")
+                elif cmd == "rc_mode":
+                    rc_mode = param1
+                    respond(f"RC mode set to: {rc_mode}")
+                elif cmd == "blade":
+                    blade_enabled = (param1 == "on")
+                    blade_pwm.duty_cycle = us_to_dc(2000) if blade_enabled else 0
+                    respond(f"Blade {'enabled' if blade_enabled else 'disabled'}")
+                elif cmd == "get_rc_status":
+                    signal_lost = is_rc_signal_lost()
+                    status = {
+                        "rc_enabled": rc_enabled,
+                        "rc_mode": rc_mode,
+                        "signal_lost": signal_lost,
+                        "blade_enabled": blade_enabled,
+                        "channels": channel_data,
+                        "encoder_1": _enc1_count,
+                        "encoder_2": _enc2_count,
+                    }
+                    respond(f"STATUS {status}")
+                elif cmd == "enc_zero":
+                    _enc1_count = 0
+                    _enc1_prev = _enc1_pin.value
+                    _enc2_count = 0
+                    _enc2_prev = _enc2_pin.value
+                    respond("Encoder counters reset")
+                elif cmd == "pwm" and not rc_enabled:
+                    set_pwm(int(param1), int(param2))
+                    last_serial_time = now
+                    respond(f"PWM set → steer={param1} µs throttle={param2} µs")
+                else:
+                    respond(f"Invalid: {raw_line}")
+
+            # --- serial timeout (no serial commands for SERIAL_TIMEOUT seconds) --- #
+            if not rc_enabled and (now - last_serial_time) > SERIAL_TIMEOUT:
                 rc_enabled = True
                 set_led(rc_enabled)
-                respond(f"RC enabled, mode: {rc_mode}")
-            elif cmd == "rc_disable":
-                rc_enabled = False
-                last_serial_time = now
-                set_led(rc_enabled)
-                respond("RC disabled – serial control")
-            elif cmd == "rc_mode":
-                rc_mode = param1
-                respond(f"RC mode set to: {rc_mode}")
-            elif cmd == "blade":
-                blade_enabled = (param1 == "on")
-                blade_pwm.duty_cycle = us_to_dc(2000) if blade_enabled else 0
-                respond(f"Blade {'enabled' if blade_enabled else 'disabled'}")
-            elif cmd == "get_rc_status":
-                signal_lost = is_rc_signal_lost()
-                status = {
-                    "rc_enabled": rc_enabled,
-                    "rc_mode": rc_mode,
-                    "signal_lost": signal_lost,
-                    "blade_enabled": blade_enabled,
-                    "channels": channel_data,
-                    "encoder_1": _enc1_count,
-                    "encoder_2": _enc2_count,
-                }
-                respond(f"STATUS {status}")
-            elif cmd == "enc_zero":
-                _enc1_count = 0
-                _enc1_prev = _enc1_pin.value
-                _enc2_count = 0
-                _enc2_prev = _enc2_pin.value
-                respond("Encoder counters reset")
-            elif cmd == "pwm" and not rc_enabled:
-                set_pwm(int(param1), int(param2))
-                last_serial_time = now
-                respond(f"PWM set → steer={param1} µs throttle={param2} µs")
-            else:
-                respond(f"Invalid: {raw_line}")
+                timeout_msg = f"[SERIAL] Timeout – back to RC mode: {rc_mode}"
+                print(timeout_msg)
+                uart_write(timeout_msg)
 
-        # --- serial timeout (no serial commands for SERIAL_TIMEOUT seconds) --- #
-        if not rc_enabled and (now - last_serial_time) > SERIAL_TIMEOUT:
-            rc_enabled = True
-            set_led(rc_enabled)
-            timeout_msg = f"[SERIAL] Timeout – back to RC mode: {rc_mode}"
-            print(timeout_msg)
-            uart_write(timeout_msg)
-
-        # --- control path --- #
-        if rc_enabled:
-            channel_values = read_rc()
+            # --- control path --- #
+            if rc_enabled:
+                channel_values = read_rc()
             
-            # Handle signal loss
-            if is_rc_signal_lost():
-                # Emergency failsafe - center all controls
-                set_pwm(1500, 1500)
-                blade_pwm.duty_cycle = 0
-                blade_enabled = False
-                pixel[0] = (255, 255, 0)  # Yellow for signal loss
-                pixel.show()
-            else:
-                # Normal RC control based on mode
-                steer_val = channel_values.get(1, 1500)
-                throttle_val = channel_values.get(2, 1500)
-                
-                # Emergency stop check (channel 5)
-                emergency_val = channel_values.get(5, 1500)
-                if emergency_val < 1200:  # Emergency stop triggered
+                # Handle signal loss
+                if is_rc_signal_lost():
+                    # Emergency failsafe - center all controls
                     set_pwm(1500, 1500)
                     blade_pwm.duty_cycle = 0
                     blade_enabled = False
-                    pixel[0] = (255, 0, 0)  # Red for emergency stop
+                    pixel[0] = (255, 255, 0)  # Yellow for signal loss
                     pixel.show()
                 else:
-                    # Normal operation
-                    set_pwm(steer_val, throttle_val)
-                    
-                    # Blade control (channel 3)
-                    blade_val = channel_values.get(3, 1500)
-                    if rc_mode in [RCMode.MANUAL, RCMode.ASSISTED] and blade_val > 1700:
-                        blade_enabled = True
-                        blade_pwm.duty_cycle = us_to_dc(2000)
-                    else:
-                        blade_enabled = False
+                    # Normal RC control based on mode
+                    steer_val = channel_values.get(1, 1500)
+                    throttle_val = channel_values.get(2, 1500)
+                
+                    # Emergency stop check (channel 5)
+                    emergency_val = channel_values.get(5, 1500)
+                    if emergency_val < 1200:  # Emergency stop triggered
+                        set_pwm(1500, 1500)
                         blade_pwm.duty_cycle = 0
+                        blade_enabled = False
+                        pixel[0] = (255, 0, 0)  # Red for emergency stop
+                        pixel.show()
+                    else:
+                        # Normal operation
+                        set_pwm(steer_val, throttle_val)
                     
-                    set_led(rc_enabled)
+                        # Blade control (channel 3)
+                        blade_val = channel_values.get(3, 1500)
+                        if rc_mode in [RCMode.MANUAL, RCMode.ASSISTED] and blade_val > 1700:
+                            blade_enabled = True
+                            blade_pwm.duty_cycle = us_to_dc(2000)
+                        else:
+                            blade_enabled = False
+                            blade_pwm.duty_cycle = 0
+                    
+                        set_led(rc_enabled)
 
-        # --- heartbeat --- #
-        if now - hb_t >= 5:
-            control_source = f"RC-{rc_mode}" if rc_enabled else "SERIAL"
-            signal_status = "LOST" if is_rc_signal_lost() else "OK"
-            hb_msg = (
-                f"[{control_source}] signal={signal_status} "
-                f"steer={channel_values.get(1, 1500)} µs "
-                f"thr={channel_values.get(2, 1500)} µs "
-                f"blade={'ON' if blade_enabled else 'OFF'} "
-                f"enc_1={_enc1_count} enc_2={_enc2_count}"
-            )
-            print(hb_msg)
-            uart_write(hb_msg)
-            hb_t = now
+            # --- heartbeat --- #
+            if now - hb_t >= 5:
+                control_source = f"RC-{rc_mode}" if rc_enabled else "SERIAL"
+                signal_status = "LOST" if is_rc_signal_lost() else "OK"
+                hb_msg = (
+                    f"[{control_source}] signal={signal_status} "
+                    f"steer={channel_values.get(1, 1500)} µs "
+                    f"thr={channel_values.get(2, 1500)} µs "
+                    f"blade={'ON' if blade_enabled else 'OFF'} "
+                    f"enc_1={_enc1_count} enc_2={_enc2_count}"
+                )
+                print(hb_msg)
+                uart_write(hb_msg)
+                hb_t = now
 
-        # Software edge-count for both encoders (GP8/GP13; countio not usable, see init)
-        _enc1_now = _enc1_pin.value
-        if _enc1_now != _enc1_prev:  # any transition = magnet edge
-            _enc1_count += 1
-        _enc1_prev = _enc1_now
-        _enc2_now = _enc2_pin.value
-        if _enc2_now != _enc2_prev:  # any transition = magnet edge
-            _enc2_count += 1
-        _enc2_prev = _enc2_now
-        time.sleep(0.002)
+            # Software edge-count for both encoders (GP8/GP13; countio not usable, see init)
+            _enc1_now = _enc1_pin.value
+            if _enc1_now != _enc1_prev:  # any transition = magnet edge
+                _enc1_count += 1
+            _enc1_prev = _enc1_now
+            _enc2_now = _enc2_pin.value
+            if _enc2_now != _enc2_prev:  # any transition = magnet edge
+                _enc2_count += 1
+            _enc2_prev = _enc2_now
+            time.sleep(0.002)
+        except Exception as _loop_err:  # noqa: BLE001
+            try:
+                uart_write(f"[ERROR] loop: {_loop_err!r}")
+            except Exception:  # noqa: BLE001
+                pass
 
 
 if __name__ == "__main__":
