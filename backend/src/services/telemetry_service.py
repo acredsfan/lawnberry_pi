@@ -7,25 +7,7 @@ from typing import Any
 from ..core.state_manager import AppState
 from ..models.sensor_data import SensorData
 from ..nav.geoutils import body_offset_to_north_east, offset_lat_lon
-from ..utils.battery import voltage_to_soc
-try:
-    from ..utils.battery import voltage_current_to_soc
-except ImportError:
-    # voltage_current_to_soc not yet available — fall back to voltage-only path
-    def voltage_current_to_soc(  # type: ignore[misc]
-        voltage: float | None,
-        battery_current_a: float | None = None,
-        solar_current_a: float | None = None,
-        min_voltage: float | None = None,
-        max_voltage: float | None = None,
-        chemistry: str = "lifepo4",
-    ) -> float | None:
-        kwargs: dict = {}
-        if min_voltage is not None:
-            kwargs["min_voltage"] = min_voltage
-        if max_voltage is not None:
-            kwargs["max_voltage"] = max_voltage
-        return voltage_to_soc(voltage, chemistry=chemistry, **kwargs)
+from ..utils.battery import voltage_current_to_soc, voltage_to_soc
 
 logger = logging.getLogger(__name__)
 
