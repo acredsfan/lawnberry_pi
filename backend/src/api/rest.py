@@ -931,6 +931,26 @@ async def get_robohat_status():
     return payload
 
 
+@router.post("/hardware/robohat/soft-reset")
+async def robohat_soft_reset():
+    """Send a CircuitPython soft-reload (Ctrl+D) to restart the RoboHAT firmware.
+
+    Use when the motor controller is stuck in REPL mode, the RC handshake is
+    stalled, or PWM commands are not being acknowledged.  Safe to call at any
+    time — neutral PWM is sent before the reset signal.
+    """
+    from ..services.robohat_service import get_robohat_service
+
+    robohat = get_robohat_service()
+    if robohat is None:
+        return {"success": False, "message": "RoboHAT service not initialised"}
+
+    result = await robohat.soft_reset()
+    status_code = 200 if result["success"] else 503
+    from fastapi.responses import JSONResponse
+    return JSONResponse(content=result, status_code=status_code)
+
+
 class Vector2D(BaseModel):
     linear: float
     angular: float

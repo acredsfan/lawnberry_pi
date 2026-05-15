@@ -643,6 +643,45 @@ class RoboHATService:
         except Exception as exc:
             logger.warning("Failed to apply safe state after RoboHAT reconnect: %s", exc)
 
+    async def soft_reset(self) -> dict:
+        """Send a CircuitPython soft-reload (Ctrl+D) to restart firmware code.py.
+
+        Safe to call whenever the firmware appears stuck (REPL mode, no PWM acks,
+        RC handshake stalled).  If serial is disconnected, triggers a full
+        reconnect instead.  Returns {"success": bool, "message": str}.
+        """
+        if not self.serial_conn or not self.serial_conn.is_open:
+            logger.info("RoboHAT soft reset: serial not open, triggering reconnect")
+            if not self._reconnecting:
+                asyncio.create_task(self._reconnect())
+            return {"success": False, "message": "Serial not connected — reconnect scheduled"}
+
+        logger.info("RoboHAT soft reset: sending Enter+Ctrl+D to restart code.py")
+        try:
+            # Neutral PWM first so firmware doesn't drive motors on restart
+            await asyncio.to_thread(self.serial_conn.write, b"pwm,1500,1500\r\n")
+            await asyncio.sleep(0.05)
+            await asyncio.to_thread(self.serial_conn.write, b"\r\n\x04")
+        except Exception as exc:
+            return {"success": False, "message": f"Write failed: {exc}"}
+
+        # Wait up to 8 s for the firmware banner / first heartbeat
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline:
+            try:
+                for line in await asyncio.to_thread(self._read_available_lines):
+                    self._process_line(line)
+                    if self._is_robohat_response_line(line):
+                        self._last_robohat_line_at = time.monotonic()
+                        await self._send_safe_state_on_reconnect()
+                        logger.info("RoboHAT soft reset successful")
+                        return {"success": True, "message": "Soft reset complete — firmware online"}
+            except Exception:
+                pass
+            await asyncio.sleep(0.1)
+
+        return {"success": False, "message": "Soft reset sent but firmware did not respond within 8 s"}
+
     async def _reconnect(self) -> None:
         """Attempt to re-open the serial connection after a disconnect.
 

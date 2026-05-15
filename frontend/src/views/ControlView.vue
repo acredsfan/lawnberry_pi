@@ -171,6 +171,15 @@
             <button class="btn btn-success" :disabled="performing" @click="resumeSystem">
               ▶️ Resume System
             </button>
+
+            <button
+              class="btn btn-warning"
+              :disabled="performing || robohatResetInProgress"
+              :title="motorControllerState.message || 'Restart RoboHAT firmware (CircuitPython soft-reload)'"
+              @click="softResetRobohat"
+            >
+              {{ robohatResetInProgress ? '⏳ Resetting…' : '🔄 Reset RoboHAT' }}
+            </button>
           </div>
         </div>
       </div>
@@ -335,6 +344,7 @@ const joystickRef = ref<JoystickHandle | null>(null)
 const presetActive = ref(false)
 const presetLabel = ref('')
 let presetCancelFn: (() => void) | null = null
+const robohatResetInProgress = ref(false)
 
 const displaySpeed = computed(() => {
   const value = Number(currentSpeed.value)
@@ -629,6 +639,24 @@ async function resumeSystem() {
   } catch (error) {
     showStatus(getApiErrorMessage(error, 'Failed to resume system'), false, 6000)
   } finally {
+    performing.value = false
+  }
+}
+
+async function softResetRobohat() {
+  if (robohatResetInProgress.value) return
+  robohatResetInProgress.value = true
+  performing.value = true
+  showStatus('Sending soft reset to RoboHAT…', true, 0)
+  try {
+    const response = await api.post('/api/v2/hardware/robohat/soft-reset', {})
+    const success = response.data?.success === true
+    const message = response.data?.message || (success ? 'RoboHAT reset complete' : 'Reset did not confirm')
+    showStatus(message, success, 6000)
+  } catch (error) {
+    showStatus(getApiErrorMessage(error, 'RoboHAT soft reset failed'), false, 6000)
+  } finally {
+    robohatResetInProgress.value = false
     performing.value = false
   }
 }
