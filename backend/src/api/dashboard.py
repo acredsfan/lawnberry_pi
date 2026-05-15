@@ -78,7 +78,11 @@ def _battery_block(sensor_data: SensorData | None, sm: SensorManager | None) -> 
         pr = power_reading
         if sm is not None:
             try:
-                pct = sm._estimate_battery_soc(pr.battery_voltage) or 0.0
+                pct = sm._estimate_battery_soc(
+                    pr.battery_voltage,
+                    battery_current_a=getattr(pr, "battery_current", None),
+                    solar_current_a=getattr(pr, "solar_current", None),
+                ) or 0.0
             except Exception:
                 pct = _estimate_soc_from_voltage(pr.battery_voltage)
         else:

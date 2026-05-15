@@ -31,7 +31,7 @@ from ..models import (
     ToFData,
     TofReading,
 )
-from ..utils.battery import battery_health_label, voltage_to_soc
+from ..utils.battery import battery_health_label, voltage_current_to_soc, voltage_to_soc
 
 logger = logging.getLogger(__name__)
 
@@ -122,15 +122,8 @@ class GPSSensorInterface:
                     # Keep last_reading if available
                     reading = self.last_reading
             else:
-                # Placeholder data
-                reading = GpsReading(
-                    latitude=40.7128,
-                    longitude=-74.0060,
-                    altitude=10.0,
-                    accuracy=3.0,
-                    satellites=8,
-                    mode=self.gps_mode,
-                )
+                # No driver available — return None so the dashboard shows "—"
+                reading = self.last_reading
 
             self.last_reading = reading
             return reading
@@ -247,6 +240,24 @@ class ToFSensorInterface:
         """Initialize VL53L0X sensors"""
         try:
             if self._left is not None and self._right is not None:
+                # Run the XSHUT pair-addressing sequence before individual inits.
+                # Both sensors boot at 0x29; the sequence holds one in reset while
+                # the other is assigned its unique address.
+                try:
+                    from ..drivers.sensors.vl53l0x_driver import ensure_pair_addressing
+                    left_gpio = getattr(self._left, "_xshut_gpio", None)
+                    right_gpio = getattr(self._right, "_xshut_gpio", None)
+                    right_addr = getattr(self._right, "_i2c_address", 0x30)
+                    if left_gpio is not None and right_gpio is not None:
+                        paired = await ensure_pair_addressing(left_gpio, right_gpio, right_addr)
+                        if not paired:
+                            logger.warning(
+                                "VL53L0X XSHUT pair-addressing failed (GPIO %s/%s) — "
+                                "attempting single-sensor init",
+                                left_gpio, right_gpio,
+                            )
+                except Exception as pair_exc:
+                    logger.warning("VL53L0X pair-addressing error: %s — falling back to individual init", pair_exc)
                 await self._left.initialize()
                 await self._right.initialize()
                 await self._left.start()
@@ -737,6 +748,13 @@ class PowerSensorInterface:
         except Exception:
             solar_yield_today_wh = None
 
+        # Coherence guard: solar fields must be all-or-nothing.
+        # If voltage source is unavailable, current/power/yield are meaningless.
+        if solar_voltage is None:
+            solar_current = None
+            solar_power = None
+            solar_yield_today_wh = None
+
         reading = PowerReading(
             battery_voltage=battery_voltage,
             battery_current=battery_current,
@@ -1148,11 +1166,18 @@ class SensorManager:
         else:
             return ComponentStatus.WARNING
 
-    def _estimate_battery_soc(self, voltage: float | None) -> float | None:
-        """Estimate SOC using the shared battery utility (LiFePO4 OCV table by default)."""
+    def _estimate_battery_soc(
+        self,
+        voltage: float | None,
+        battery_current_a: float | None = None,
+        solar_current_a: float | None = None,
+    ) -> float | None:
+        """Estimate SOC using the shared battery utility with tail-current heuristic."""
         bc = self._battery_config
-        return voltage_to_soc(
+        return voltage_current_to_soc(
             voltage,
+            battery_current_a=battery_current_a,
+            solar_current_a=solar_current_a,
             min_voltage=bc.min_voltage if bc else None,
             max_voltage=bc.max_voltage if bc else None,
             chemistry=bc.chemistry if bc else "lifepo4",
