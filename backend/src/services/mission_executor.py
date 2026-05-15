@@ -887,10 +887,45 @@ class MissionExecutor:
                 logger.error(
                     "All %d motor command attempts failed: %s", _motor_attempts, _motor_last_exc
                 )
-                await self._deliver_stop_command(reason="navigation command failure")
-                raise RuntimeError(
-                    "Failed to deliver navigation motor command"
-                ) from _motor_last_exc
+                # Before aborting the mission: check whether the RoboHAT watchdog
+                # has detected a firmware crash (REPL mode or freeze) and is in the
+                # process of auto-recovering.  Wait up to 15 s for motor_controller_ok
+                # to become True, then retry once so the mission can continue.
+                # Skip the wait if auto-recovery has been throttled — that means the
+                # firmware keeps crashing and operator intervention is needed.
+                try:
+                    from .robohat_service import get_robohat_service as _get_robohat
+                    _robohat = _get_robohat()
+                    if (
+                        _robohat is not None
+                        and _robohat.status.serial_connected
+                        and not _robohat.recovery_throttled
+                        and (_robohat._in_soft_reset or _robohat._in_repl)
+                    ):
+                        logger.warning(
+                            "RoboHAT firmware recovery in progress; suspending mission up to 15 s"
+                        )
+                        _recovery_deadline = time.monotonic() + 15.0
+                        while time.monotonic() < _recovery_deadline:
+                            if _robohat.status.motor_controller_ok:
+                                break
+                            await asyncio.sleep(0.5)
+                        if _robohat.status.motor_controller_ok:
+                            logger.info("RoboHAT recovered; retrying drive command")
+                            try:
+                                ok = await self._gw.dispatch_drive_speeds(left_speed, right_speed)
+                                if ok:
+                                    _motor_last_exc = None
+                            except Exception as exc:
+                                _motor_last_exc = exc
+                except Exception:
+                    pass  # recovery-wait is best-effort; original failure path applies
+
+                if _motor_last_exc is not None:
+                    await self._deliver_stop_command(reason="navigation command failure")
+                    raise RuntimeError(
+                        "Failed to deliver navigation motor command"
+                    ) from _motor_last_exc
 
             # Store for next-iteration dead-reckoning
             _prev_left_speed = left_speed

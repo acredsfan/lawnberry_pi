@@ -151,6 +151,23 @@ class RoboHATService:
         # Updated from drain, probe settle, and read_loop so the probe can short-
         # circuit if the firmware was already identified before the command phase.
         self._last_robohat_line_at: float = 0.0
+        # ── Auto-recovery state ───────────────────────────────────────────────────
+        # Set True in _process_line when REPL indicators (>>>, Traceback) appear.
+        self._in_repl: bool = False
+        # Guard: True while soft_reset() is running so _watchdog_loop does not
+        # schedule a second recovery concurrently.
+        self._in_soft_reset: bool = False
+        # Timestamps of recent auto-recovery completions; used to throttle so that
+        # a persistent firmware crash does not loop forever.
+        self._auto_recovery_times: list[float] = []
+        _FIRMWARE_FREEZE_S = 12.0      # silence threshold before auto soft-reset
+        _MAX_AUTO_RECOVERIES = 2       # max auto-resets in _RECOVERY_WINDOW_S
+        _RECOVERY_WINDOW_S = 300.0     # 5-minute window for throttle counter
+        self._FIRMWARE_FREEZE_S: float = _FIRMWARE_FREEZE_S
+        self._MAX_AUTO_RECOVERIES: int = _MAX_AUTO_RECOVERIES
+        self._RECOVERY_WINDOW_S: float = _RECOVERY_WINDOW_S
+        # ─────────────────────────────────────────────────────────────────────────
+
         # Encoder enabled flag — False when hall sensors are missing/unreliable.
         # Loaded from config/hardware.yaml encoders.enabled (default True).
         self._encoder_enabled: bool = True
@@ -537,6 +554,24 @@ class RoboHATService:
                     self.status.watchdog_active = False
                     self.status.watchdog_latency_ms = 0.0
 
+                # ── Auto-recovery: REPL or firmware freeze detection ───────────
+                # Trigger a soft reset when code.py has crashed (REPL indicators
+                # seen) or when the firmware has been completely silent for
+                # _FIRMWARE_FREEZE_S seconds despite the serial connection being
+                # open.  The guard prevents concurrent recovery tasks.
+                if not self._in_soft_reset and not self._reconnecting:
+                    _repl_trigger = self._in_repl
+                    _freeze_trigger = (
+                        self.status.serial_connected
+                        and self.serial_conn is not None
+                        and self.serial_conn.is_open
+                        and self._last_robohat_line_at > 0
+                        and (now - self._last_robohat_line_at) > self._FIRMWARE_FREEZE_S
+                    )
+                    if _repl_trigger or _freeze_trigger:
+                        asyncio.create_task(self._auto_soft_reset())
+                # ─────────────────────────────────────────────────────────────
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -642,6 +677,46 @@ class RoboHATService:
             logger.info("RoboHAT safe state applied after reconnect")
         except Exception as exc:
             logger.warning("Failed to apply safe state after RoboHAT reconnect: %s", exc)
+
+    @property
+    def recovery_throttled(self) -> bool:
+        """True when auto-recovery has fired too often recently.
+
+        Prevents an endlessly crash-looping firmware from halting the event
+        loop with back-to-back soft resets.  The operator must intervene once
+        the threshold is reached.
+        """
+        cutoff = time.monotonic() - self._RECOVERY_WINDOW_S
+        recent = [t for t in self._auto_recovery_times if t > cutoff]
+        return len(recent) >= self._MAX_AUTO_RECOVERIES
+
+    async def _auto_soft_reset(self) -> None:
+        """Internal: auto-recovery triggered by watchdog when REPL or freeze detected."""
+        if self._in_soft_reset:
+            return
+        if self.recovery_throttled:
+            logger.error(
+                "RoboHAT auto-recovery throttled: %d resets in last %.0f s; manual intervention required",
+                self._MAX_AUTO_RECOVERIES,
+                self._RECOVERY_WINDOW_S,
+            )
+            return
+
+        logger.warning(
+            "RoboHAT firmware appears stuck (REPL=%s); triggering auto soft reset",
+            self._in_repl,
+        )
+        self._in_soft_reset = True
+        try:
+            result = await self.soft_reset()
+            if result["success"]:
+                self._auto_recovery_times.append(time.monotonic())
+                self._in_repl = False
+                logger.info("RoboHAT auto-recovery succeeded: %s", result["message"])
+            else:
+                logger.error("RoboHAT auto-recovery failed: %s", result["message"])
+        finally:
+            self._in_soft_reset = False
 
     async def soft_reset(self) -> dict:
         """Send a CircuitPython soft-reload (Ctrl+D) to restart firmware code.py.
@@ -1006,6 +1081,26 @@ class RoboHATService:
                 if enc2 is not None:
                     self.status.encoder_2_position = enc2
                 self.status.encoder_feedback_ok = True
+            return
+
+        # Detect CircuitPython REPL mode — code.py has crashed.
+        # These patterns are output by CircuitPython when the supervisor drops
+        # back to the interactive REPL after an unhandled exception or a forced
+        # Ctrl+C.  Recognising them early lets the watchdog trigger a soft reset
+        # instead of waiting for the 12-second firmware-freeze timeout.
+        stripped = line.strip()
+        if (
+            stripped.startswith(">>>")
+            or stripped.startswith("Traceback (most recent call last)")
+            or stripped.startswith("Code stopped by auto-reload")
+            or stripped.startswith("Auto-reload is off")
+            or "code.py output:" not in line_lower
+            and "adafruit circuitpython" in line_lower
+            and "repl" in line_lower
+        ):
+            if not self._in_repl:
+                logger.warning("RoboHAT: CircuitPython REPL detected — firmware code.py has crashed")
+                self._in_repl = True
             return
 
         # For everything else, keep a debug breadcrumb without polluting logs.
