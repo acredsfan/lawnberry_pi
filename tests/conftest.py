@@ -228,6 +228,11 @@ def isolate_ui_settings_storage(tmp_path, monkeypatch):
 
     This prevents settings-related API tests from creating or mutating the
     repository's runtime artifact at ``data/ui_settings.json``.
+
+    Also clears app.state.runtime.settings_repository for the duration of each
+    test so that _get_settings_repository() (called directly, bypassing
+    dependency_overrides) falls back to the isolated file path rather than the
+    shared data/lawnberry.db that is left behind by TestClient lifespan tests.
     """
 
     from backend.src.api.routers import settings as settings_router
@@ -238,6 +243,17 @@ def isolate_ui_settings_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(settings_router, "DATA_DIR", data_dir)
     monkeypatch.setattr(settings_router, "SETTINGS_FILE", settings_file)
     monkeypatch.setattr(settings_router, "UI_SETTINGS_FILE", ui_settings_file)
+
+    # Temporarily clear the settings_repository on app.state.runtime (if one
+    # was wired by a previous TestClient lifespan test).  monkeypatch restores
+    # the original value automatically after the test.
+    try:
+        from backend.src.main import app as _main_app
+        _runtime = getattr(_main_app.state, "runtime", None)
+        if _runtime is not None and getattr(_runtime, "settings_repository", None) is not None:
+            monkeypatch.setattr(_runtime, "settings_repository", None)
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)
