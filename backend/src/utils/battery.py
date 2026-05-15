@@ -137,6 +137,36 @@ def voltage_to_soc(
     return linear_voltage_to_soc(v, min_voltage, max_voltage)
 
 
+def voltage_current_to_soc(
+    voltage: float | None,
+    battery_current_a: float | None = None,
+    solar_current_a: float | None = None,
+    chemistry: str = "lifepo4",
+    min_voltage: float = 10.0,
+    max_voltage: float = 14.6,
+) -> float | None:
+    """Estimate SOC combining voltage OCV table with tail-current context.
+
+    Uses current-state context to improve accuracy in the LiFePO4 flat plateau:
+    - If voltage >= 13.40 V and |battery_current| < 0.5 A: settled high state, clamp to >= 95%
+    - If voltage >= 13.30 V and solar_current > 0.3 A and |battery_current| < 1.0 A: MPPT float, clamp to >= 90%
+    - Otherwise: fall through to pure OCV table
+    """
+    base = voltage_to_soc(voltage, chemistry=chemistry, min_voltage=min_voltage, max_voltage=max_voltage)
+    if base is None or voltage is None:
+        return base
+    v = float(voltage)
+    bc = abs(float(battery_current_a)) if isinstance(battery_current_a, (int, float)) else None
+    sc = float(solar_current_a) if isinstance(solar_current_a, (int, float)) else None
+    # High-voltage settled resting: pack is effectively full
+    if v >= 13.40 and bc is not None and bc < 0.5:
+        return max(95.0, base)
+    # Float phase: MPPT trickling in, no significant draw
+    if v >= 13.30 and sc is not None and sc > 0.3 and bc is not None and bc < 1.0:
+        return max(90.0, base)
+    return base
+
+
 def battery_health_label(
     voltage: float,
     min_voltage: float = 10.0,
