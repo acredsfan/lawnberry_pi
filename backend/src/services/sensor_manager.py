@@ -709,15 +709,17 @@ class PowerSensorInterface:
             and solar_current is not None
             and abs(solar_current) > 1e-6
         ):
-            # Derive voltage from power/current only when both came from Victron or both from INA.
-            # Skip INA-based derivation when INA bus voltage is 0.0 — that indicates a bad/missing
-            # bus-voltage reference wire, and INA solar_power_w would also be 0.0 (0V × current),
-            # which would produce a spurious 0.0V result.
+            # Derive panel voltage from P/I. Prefer same-source pairs; fall back to
+            # cross-source (Victron panel power + INA panel-side current) because the
+            # INA3221 is wired low-side on the solar negative return — it measures real
+            # panel current even though it cannot measure panel voltage directly.
             ina_solar_v_raw = ina.get("solar_voltage") if ina else None
             ina_bus_valid = ina_solar_v_raw is not None and abs(float(ina_solar_v_raw)) >= 0.05
+            ina_current_val = ina_solar_current if ina_solar_current is not None else None
             derived = None
             try:
                 if victron_solar_power is not None and victron_solar_current is not None:
+                    # Both from Victron (e.g. VE.Direct)
                     derived = float(victron_solar_power) / float(victron_solar_current)
                 elif (
                     ina_bus_valid
@@ -725,10 +727,18 @@ class PowerSensorInterface:
                     and ina_solar_current is not None
                     and abs(float(ina_solar_current)) > 1e-6
                 ):
+                    # Both from INA (high-side wiring)
                     derived = float(ina_solar_power) / float(ina_solar_current)
+                elif (
+                    victron_solar_power is not None
+                    and ina_current_val is not None
+                    and abs(float(ina_current_val)) > 1e-6
+                ):
+                    # Cross-source: Victron panel power + INA low-side panel current
+                    derived = float(victron_solar_power) / float(ina_current_val)
             except Exception:
                 derived = None
-            # Guard against zero or near-zero derived values that signal bad source data
+            # Guard against implausible derived values
             if derived is not None and abs(derived) >= 0.05:
                 solar_voltage = round(derived, 3)
 

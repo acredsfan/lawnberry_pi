@@ -24,26 +24,27 @@ def test_solar_current_and_ina_power_nulled_when_no_voltage():
     assert result.solar_power is None  # INA-derived power suppressed when bus is 0 V
 
 
-def test_victron_solar_power_passes_through_when_voltage_null():
-    """Victron solar_power and yield_today are valid without PV voltage (BLE MPPT)."""
+def test_victron_solar_power_and_voltage_derived_from_ina_current():
+    """Victron solar_power + INA current derive panel voltage; yield passes through."""
     ina = {
         "battery_voltage": 13.06,
         "battery_current_amps": -0.2,
-        "solar_voltage": 0.0,  # rejected
+        "solar_voltage": 0.0,  # rejected — low-side wiring, bus always 0 V
         "solar_current_amps": 1.4,
     }
     victron = {
         "battery_voltage": 13.31,
         "solar_voltage": None,  # SmartSolar BLE has no panel voltage field
-        "solar_power_w": 6.0,   # MPPT controller measurement — independently valid
+        "solar_power_w": 6.0,   # MPPT controller measurement
         "solar_yield_today_wh": 40.0,
     }
     result = _merge(ina=ina, victron=victron)
     assert result is not None
-    assert result.solar_voltage is None      # no PV voltage from any source
-    assert result.solar_current is None      # INA current suppressed (bus is 0 V)
-    assert result.solar_power == pytest.approx(6.0)      # Victron power passes through
-    assert result.solar_yield_today_wh == pytest.approx(40.0)  # Victron yield passes through
+    # solar_voltage derived from Victron power / INA current: 6.0 / 1.4 ≈ 4.286 V
+    assert result.solar_voltage == pytest.approx(6.0 / 1.4, rel=1e-3)
+    assert result.solar_current == pytest.approx(1.4)   # INA current valid (voltage now derived)
+    assert result.solar_power == pytest.approx(6.0)
+    assert result.solar_yield_today_wh == pytest.approx(40.0)
 
 
 def test_solar_all_none_when_both_sources_unavailable():
