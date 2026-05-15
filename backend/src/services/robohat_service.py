@@ -297,11 +297,34 @@ class RoboHATService:
             self.status.last_error = None
             return True
 
-        # No firmware response in the settle window.  The device may be in
-        # CircuitPython REPL mode (code.py crashed or was interrupted).
-        # Send Ctrl+D (soft reload) to restart code.py, then wait for the
-        # firmware banner / first heartbeat.  CP10 takes ~5 s to boot after
-        # a soft reload, so allow 7 s before giving up.
+        # No firmware response in the settle window.
+        # For UART ports: the firmware heartbeat period is 5 s — the 0.3 s settle
+        # window often misses it.  Query with get_rc_status first; it triggers an
+        # immediate response without resetting the firmware.  Only fall back to
+        # Ctrl+D if that also times out (firmware is silent / in REPL).
+        # For USB CDC ports: DTR already reset the firmware on open, so go straight
+        # to Ctrl+D if the 3 s settle caught nothing.
+        if self._is_uart_port(port_name):
+            try:
+                await asyncio.to_thread(self.serial_conn.write, b"get_rc_status\n")
+            except Exception as exc:
+                logger.warning("RoboHAT probe: get_rc_status write failed on %s: %s", port_name, exc)
+                return False
+            deadline = time.monotonic() + 1.5
+            while time.monotonic() < deadline:
+                try:
+                    for line in await asyncio.to_thread(self._read_available_lines):
+                        self._process_line(line)
+                        if self._is_robohat_response_line(line):
+                            self.status.last_error = None
+                            return True
+                    await asyncio.sleep(0.05)
+                except Exception:
+                    await asyncio.sleep(0.05)
+
+        # Firmware did not respond to passive reading or active query.
+        # It may be in CircuitPython REPL mode — send Ctrl+D to restart code.py.
+        # CP10 takes ~5 s to boot after a soft reload, so allow 7 s.
         try:
             # Send Enter first to flush any pending REPL input (e.g. a stale
             # rc=disable command left in the buffer), then Ctrl+D (soft reload).
@@ -1471,16 +1494,20 @@ def _known_gps_devices() -> set[str]:
 def _candidate_serial_ports(explicit: str | None = None) -> list[str]:
     """Build an ordered list of serial ports to try for RoboHAT.
 
-    Priority order:
+    Priority order — UART always before USB:
       1. Explicit argument or ROBOHAT_PORT / LAWN_ROBOHAT_PORT env vars
       2. motor_controller_port from hardware.yaml
-      3. Stable udev symlink /dev/robohat (USB, by serial number)
-      4. /dev/serial/by-id RP2040/CircuitPython entries (USB, stable)
-      5. /dev/serial0 → ttyAMA0 (GPIO UART header — RoboHAT GPIO connection)
-      6. Additional ttyAMA* UART ports (excluding the IMU on ttyAMA4)
-      7. list_ports descriptors matching RoboHAT/RP2040 keywords
+      3. /dev/serial0 → ttyAMA0 (GPIO UART header — primary hardware UART)
+      4. Additional ttyAMA* UART ports (excluding the IMU on ttyAMA4)
+      5. list_ports descriptors matching RoboHAT/RP2040 UART keywords
+      6. Stable udev symlink /dev/robohat (USB CDC — fallback only)
+      7. /dev/serial/by-id RP2040/CircuitPython entries (USB CDC)
       8. ttyACM* and ttyUSB* (USB CDC, last resort)
       9. Historic default /dev/ttyACM0
+
+    USB CDC is kept as a fallback because opening a USB CDC port asserts DTR,
+    which hard-resets the RP2040 firmware — disruptive to a running mow session.
+    UART does not assert DTR and never resets the firmware on open.
 
     GPS and IMU ports are always excluded to avoid wasting probe time or
     corrupting other devices' data streams.
@@ -1522,20 +1549,23 @@ def _candidate_serial_ports(explicit: str | None = None) -> list[str]:
     # Explicit hardware.yaml config beats all autodiscovery
     add(_read_hardware_yaml_robohat_port())
 
-    # Stable udev symlink created by 99-robohat-rp2040.rules — always try first.
-    add("/dev/robohat", require_exists=True)
-
-    for path in _serial_by_id_candidates():
-        add(path, require_exists=True)
-
-    # UART candidates: /dev/serial0 is the primary GPIO UART (→ ttyAMA0).
-    # The RoboHAT connects via the GPIO header over this UART in addition to USB.
+    # ── UART candidates first ────────────────────────────────────────────────
+    # UART open does NOT assert DTR so the firmware never resets on probe.
+    # /dev/serial0 is the primary GPIO UART (→ ttyAMA0).
     # ttyAMA4 (IMU) is already in excluded_devices and will be silently skipped.
     add("/dev/serial0", require_exists=True)
     for path in sorted(glob.glob("/dev/ttyAMA[0-9]*")):
         add(path, require_exists=True)
 
     for path in _list_ports_candidates():
+        add(path, require_exists=True)
+
+    # ── USB CDC candidates last (fallback) ───────────────────────────────────
+    # Opening any USB CDC port asserts DTR and hard-resets the RP2040 firmware.
+    # Only try USB after all UART paths are exhausted.
+    add("/dev/robohat", require_exists=True)
+
+    for path in _serial_by_id_candidates():
         add(path, require_exists=True)
 
     for path in sorted(glob.glob("/dev/ttyACM*")):
