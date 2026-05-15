@@ -45,6 +45,7 @@ export function useDashboardTelemetry() {
       ...(orientationData.value ?? {}),
       speed: linear?.x ?? pos?.speed,
       heading: data.nav_heading ?? pos?.heading,
+      navHeadingSource: data.nav_heading_source ?? null,
     }
   }
 

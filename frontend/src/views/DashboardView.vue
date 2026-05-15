@@ -182,6 +182,7 @@ const imuPitch = ref<number | null>(null)
 const imuRoll = ref<number | null>(null)
 const gpsHeading = ref<number | null>(null)
 const navHeading = ref<number | null>(null)
+const navHeadingSource = ref<string | null>(null)
 
 const temperature = ref<number | null>(null)
 const humidity = ref<number | null>(null)
@@ -467,6 +468,7 @@ const batteryDisplayData = computed<Record<string, unknown>>(() => ({
 const orientationDisplayData = computed<Record<string, unknown>>(() => ({
   speed: speed.value,
   heading: navHeading.value,
+  navHeadingSource: navHeadingSource.value,
   gpsHeading: gpsHeading.value,
   yaw: imuYaw.value,
   pitch: imuPitch.value,
@@ -1169,6 +1171,7 @@ const loadTelemetryData = async () => {
     }
     if (typeof telemetry.position?.heading === 'number') gpsHeading.value = telemetry.position.heading
     if (typeof telemetry.nav_heading === 'number') navHeading.value = telemetry.nav_heading
+    if (typeof telemetry.nav_heading_source === 'string') navHeadingSource.value = telemetry.nav_heading_source
 
     // Update environmental data
     if (telemetry.environmental) {
@@ -1261,6 +1264,7 @@ function applyRealtimeTelemetrySnapshot(telemetry: any) {
   }
   if (typeof telemetry.position?.heading === 'number') gpsHeading.value = telemetry.position.heading
   if (typeof telemetry.nav_heading === 'number') navHeading.value = telemetry.nav_heading
+  if (typeof telemetry.nav_heading_source === 'string') navHeadingSource.value = telemetry.nav_heading_source
 
   if (telemetry.environmental) {
     const env = telemetry.environmental
@@ -1345,6 +1349,7 @@ function registerTelemetrySubscriptions() {
     }
     if (typeof data.position?.heading === 'number') gpsHeading.value = data.position.heading
     if (typeof data.nav_heading === 'number') navHeading.value = data.nav_heading
+    if (typeof data.nav_heading_source === 'string') navHeadingSource.value = data.nav_heading_source
   })
 
   subscribe('telemetry.motors', (data) => {

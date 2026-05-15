@@ -342,7 +342,10 @@ class LocalizationService:
             elif gps_cog is not None:
                 self.state.heading = gps_cog
             else:
-                self.state.heading = None
+                # No GPS COG and alignment not ready (mission not started yet).
+                # Provide raw adjusted IMU yaw for display — navigation control
+                # layers must still wait for alignment_ready before using heading.
+                self.state.heading = adjusted_yaw
 
             # GPS COG comparison and session alignment update during bootstrap
             if gps_cog is not None:

@@ -8,6 +8,24 @@ from ..core.state_manager import AppState
 from ..models.sensor_data import SensorData
 from ..nav.geoutils import body_offset_to_north_east, offset_lat_lon
 from ..utils.battery import voltage_to_soc
+try:
+    from ..utils.battery import voltage_current_to_soc
+except ImportError:
+    # voltage_current_to_soc not yet available — fall back to voltage-only path
+    def voltage_current_to_soc(  # type: ignore[misc]
+        voltage: float | None,
+        battery_current_a: float | None = None,
+        solar_current_a: float | None = None,
+        min_voltage: float | None = None,
+        max_voltage: float | None = None,
+        chemistry: str = "lifepo4",
+    ) -> float | None:
+        kwargs: dict = {}
+        if min_voltage is not None:
+            kwargs["min_voltage"] = min_voltage
+        if max_voltage is not None:
+            kwargs["max_voltage"] = max_voltage
+        return voltage_to_soc(voltage, chemistry=chemistry, **kwargs)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +66,39 @@ class TelemetryService:
             return float(heading) if isinstance(heading, (int, float)) else None
         except Exception:
             return None
+
+    def _get_motor_status(self) -> str:
+        try:
+            from . import mission_service as _ms_mod
+            mission = getattr(_ms_mod, "_mission_service_instance", None)
+            if mission is None:
+                raise LookupError("no mission instance")
+            status = getattr(mission, "status", None) or getattr(mission, "_status", None)
+            if status is not None:
+                status_str = str(status.value if hasattr(status, "value") else status).lower()
+                # Normalize known mission states to dashboard-friendly strings
+                _map = {
+                    "running": "mowing",
+                    "active": "mowing",
+                    "mowing": "mowing",
+                    "returning": "returning",
+                    "paused": "paused",
+                    "emergency_stop": "emergency_stop",
+                    "idle": "idle",
+                    "completed": "idle",
+                    "failed": "idle",
+                    "cancelled": "idle",
+                }
+                return _map.get(status_str, status_str)
+        except Exception:
+            pass
+        try:
+            # Check safety state for emergency stop override
+            if self.app_state.safety_state.get("emergency_stop_active"):
+                return "emergency_stop"
+        except Exception:
+            pass
+        return "idle"
 
     def _apply_position_offsets(
         self,
@@ -275,21 +326,20 @@ class TelemetryService:
 
         if data and data.power:
             batt_v = float(data.power.battery_voltage or 0.0)
-            batt_cur = getattr(data.power, "battery_current", 0.0)
+            batt_cur = getattr(data.power, "battery_current", None)
+            solar_cur = getattr(data.power, "solar_current", None)
             bc = getattr(getattr(self.app_state, "hardware_config", None), "battery_config", None)
-            soc = (
-                voltage_to_soc(
+            battery_pct = (
+                voltage_current_to_soc(
                     batt_v,
+                    battery_current_a=batt_cur,
+                    solar_current_a=solar_cur,
                     min_voltage=bc.min_voltage if bc else None,
                     max_voltage=bc.max_voltage if bc else None,
                     chemistry=bc.chemistry if bc else "lifepo4",
                 )
                 or 0.0
             )
-            if isinstance(batt_cur, (int, float)) and batt_cur > 0.05:
-                battery_pct = min(99.0, soc)
-            else:
-                battery_pct = soc
 
         # Position handling with caching
         pos = data.gps if data else None
@@ -317,6 +367,16 @@ class TelemetryService:
                 current_pos[k] = self._last_position[k]
 
         nav_heading = self._get_navigation_heading()
+        nav_heading_source = "localization"
+        # Fall back to raw IMU yaw when localization hasn't established heading yet.
+        # Only use IMU fallback when sensor is fully calibrated — not for safety/control,
+        # but display layer must not be dark before first GPS COG alignment.
+        if nav_heading is None and imu is not None:
+            imu_cal = getattr(imu, "calibration_status", None)
+            if imu_cal in {"fully_calibrated", "calibrated", "imu_calibrated"}:
+                nav_heading = getattr(imu, "yaw", None)
+                if nav_heading is not None:
+                    nav_heading_source = "imu_raw"
         current_pos, raw_position, position_correction = self._apply_position_offsets(
             current_pos,
             nav_heading=nav_heading,
@@ -350,10 +410,18 @@ class TelemetryService:
                 "calibration_status": cal_status,
             },
             "velocity": {
-                "linear": {"x": current_pos.get("speed"), "y": None, "z": None},
-                "angular": {"x": None, "y": None, "z": getattr(imu, "gyro_z", None)},
+                "linear": {
+                    "x": current_pos.get("speed"),
+                    "y": 0.0,   # ground vehicle: no lateral motion
+                    "z": 0.0,   # ground vehicle: no vertical motion
+                },
+                "angular": {
+                    "x": getattr(imu, "gyro_x", None),
+                    "y": getattr(imu, "gyro_y", None),
+                    "z": getattr(imu, "gyro_z", None),
+                },
             },
-            "motor_status": "idle",  # Placeholder
+            "motor_status": self._get_motor_status(),
             "safety_state": "emergency_stop"
             if self.app_state.safety_state.get("emergency_stop_active")
             else "nominal",
@@ -362,6 +430,7 @@ class TelemetryService:
 
         # Add fused navigation heading from NavigationService (IMU yaw preferred, GPS COG fallback)
         telemetry["nav_heading"] = nav_heading
+        telemetry["nav_heading_source"] = nav_heading_source
         if raw_position is not None:
             telemetry["raw_position"] = raw_position
         if position_correction is not None:

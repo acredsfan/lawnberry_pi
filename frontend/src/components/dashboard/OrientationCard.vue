@@ -13,6 +13,11 @@
       <div class="orient-row">
         <span class="metric-label">Heading (Nav)</span>
         <span class="metric-value">{{ formatHeading(data?.heading) }}</span>
+        <span
+          v-if="data?.navHeadingSource === 'imu_raw'"
+          class="heading-source-tag"
+          title="Source: IMU raw (localization alignment pending)"
+        >(IMU)</span>
       </div>
       <div class="orient-row">
         <span class="metric-label">IMU Yaw</span>
@@ -124,4 +129,12 @@ function fmtDeg(v: unknown) {
 .speed-trend.trend-up { color: #00ff00; text-shadow: 0 0 8px rgba(0, 255, 0, 0.7); }
 .speed-trend.trend-down { color: #ff0040; text-shadow: 0 0 8px rgba(255, 0, 64, 0.7); }
 .speed-trend.trend-stable { color: #ffff00; text-shadow: 0 0 8px rgba(255, 255, 0, 0.7); }
+
+.heading-source-tag {
+  font-size: 0.75rem;
+  color: rgba(255, 165, 0, 0.85);
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.5px;
+  cursor: default;
+}
 </style>
