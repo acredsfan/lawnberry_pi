@@ -95,25 +95,6 @@ def test_format_telemetry_applies_gps_antenna_offset_to_displayed_position():
     assert telemetry["position_correction"]["applied"] == ["gps_antenna_offset"]
 
 
-def test_format_telemetry_applies_map_display_offset_without_navigation_heading():
-    service = TelemetryService()
-    mock_app_state = MagicMock()
-    mock_app_state.hardware_config = HardwareConfig(
-        gps_map_display_offset_north_m=0.0,
-        gps_map_display_offset_east_m=0.5,
-    )
-    service.app_state = mock_app_state
-    service._get_navigation_heading = lambda: None
-
-    telemetry = service._format_telemetry(
-        SensorData(gps=GpsReading(latitude=40.0, longitude=-75.0, accuracy=0.03)),
-        sim_mode=False,
-    )
-
-    assert telemetry["position"]["latitude"] == pytest.approx(40.0)
-    assert telemetry["position"]["longitude"] > -75.0
-    assert telemetry["position_correction"]["applied"] == ["map_display_offset"]
-
 
 @pytest.mark.asyncio
 async def test_initialize_sensors_uses_hardware_config_for_zed_f9p_usb():

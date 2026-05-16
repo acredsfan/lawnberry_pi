@@ -7,10 +7,6 @@ gps:
   # Positive forward/right; negative behind/left. 1.5 ft ≈ 0.46 m.
   antenna_offset_forward_m: -0.46
   antenna_offset_right_m: 0.0
-  # Fixed display-only nudge for local map imagery alignment.
-  # Positive north/east; negative south/west. This does not affect navigation.
-  map_display_offset_north_m: 0.0
-  map_display_offset_east_m: 0.0
 imu:
   type: BNO085
   port: /dev/ttyAMA4

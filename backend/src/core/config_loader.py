@@ -171,8 +171,6 @@ class ConfigLoader:
             "gps_ntrip_enabled",
             "gps_antenna_offset_forward_m",
             "gps_antenna_offset_right_m",
-            "gps_map_display_offset_north_m",
-            "gps_map_display_offset_east_m",
             "imu_type",
             "tof_sensors",
             "env_sensor",
@@ -212,8 +210,6 @@ class ConfigLoader:
         gps_float_keys = {
             "antenna_offset_forward_m": "gps_antenna_offset_forward_m",
             "antenna_offset_right_m": "gps_antenna_offset_right_m",
-            "map_display_offset_north_m": "gps_map_display_offset_north_m",
-            "map_display_offset_east_m": "gps_map_display_offset_east_m",
         }
         if isinstance(gps, dict):
             for source_key, target_key in gps_float_keys.items():

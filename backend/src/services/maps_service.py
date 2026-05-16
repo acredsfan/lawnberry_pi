@@ -186,9 +186,12 @@ class MapsService:
         if not self.google_api_key:
             raise ValueError("Google API key not configured")
         url = "https://maps.googleapis.com/maps/api/staticmap"
-        lat, lng = self._tile_to_lat_lng(zoom, x, y)
+        lat_nw, lng_nw = self._tile_to_lat_lng(zoom, x, y)
+        lat_se, lng_se = self._tile_to_lat_lng(zoom, x + 1, y + 1)
+        lat_center = (lat_nw + lat_se) / 2.0
+        lng_center = (lng_nw + lng_se) / 2.0
         params = {
-            "center": f"{lat},{lng}",
+            "center": f"{lat_center},{lng_center}",
             "zoom": zoom,
             "size": "256x256",
             "maptype": "satellite",

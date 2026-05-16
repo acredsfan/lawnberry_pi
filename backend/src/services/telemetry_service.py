@@ -96,15 +96,8 @@ class TelemetryService:
         hardware = getattr(self.app_state, "hardware_config", None)
         antenna_forward_m = float(getattr(hardware, "gps_antenna_offset_forward_m", 0.0) or 0.0)
         antenna_right_m = float(getattr(hardware, "gps_antenna_offset_right_m", 0.0) or 0.0)
-        display_north_m = float(getattr(hardware, "gps_map_display_offset_north_m", 0.0) or 0.0)
-        display_east_m = float(getattr(hardware, "gps_map_display_offset_east_m", 0.0) or 0.0)
 
-        if (
-            antenna_forward_m == 0.0
-            and antenna_right_m == 0.0
-            and display_north_m == 0.0
-            and display_east_m == 0.0
-        ):
+        if antenna_forward_m == 0.0 and antenna_right_m == 0.0:
             return position, None, None
 
         corrected = dict(position)
@@ -129,15 +122,6 @@ class TelemetryService:
                 )
                 applied.append("gps_antenna_offset")
 
-        if display_north_m != 0.0 or display_east_m != 0.0:
-            latitude, longitude = offset_lat_lon(
-                latitude,
-                longitude,
-                north_m=display_north_m,
-                east_m=display_east_m,
-            )
-            applied.append("map_display_offset")
-
         corrected["latitude"] = latitude
         corrected["longitude"] = longitude
         correction = {
@@ -145,8 +129,6 @@ class TelemetryService:
             "pending": pending,
             "antenna_offset_forward_m": antenna_forward_m,
             "antenna_offset_right_m": antenna_right_m,
-            "map_display_offset_north_m": display_north_m,
-            "map_display_offset_east_m": display_east_m,
         }
         return corrected, raw_position, correction
 

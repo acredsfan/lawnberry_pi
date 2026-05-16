@@ -54,8 +54,6 @@ def test_config_loader_maps_gps_position_offsets(tmp_path: Path):
               type: ZED-F9P
               antenna_offset_forward_m: -0.46
               antenna_offset_right_m: 0.08
-              map_display_offset_north_m: 0.2
-              map_display_offset_east_m: -0.1
             """
         )
     )
@@ -66,8 +64,6 @@ def test_config_loader_maps_gps_position_offsets(tmp_path: Path):
 
     assert hardware.gps_antenna_offset_forward_m == pytest.approx(-0.46)
     assert hardware.gps_antenna_offset_right_m == pytest.approx(0.08)
-    assert hardware.gps_map_display_offset_north_m == pytest.approx(0.2)
-    assert hardware.gps_map_display_offset_east_m == pytest.approx(-0.1)
 
 
 def test_config_loader_local_override(tmp_path: Path):
