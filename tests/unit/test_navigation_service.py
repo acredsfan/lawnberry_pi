@@ -687,3 +687,156 @@ async def test_update_navigation_state_records_tick_duration_metric():
     assert timer["avg"] >= 0.0
     assert timer["min"] >= 0.0
     assert timer["max"] >= timer["min"]
+
+
+# ---------------------------------------------------------------------------
+# _load_saved_alignment_for_mission_start
+# ---------------------------------------------------------------------------
+
+def _make_alignment_file(tmp_path, value=11.1, samples=1, source="gps_cog_snap", age_hours=0.5):
+    """Write a fake imu_alignment.json and return its Path."""
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    last_updated = (datetime.now(UTC) - timedelta(hours=age_hours)).isoformat()
+    p = tmp_path / "imu_alignment.json"
+    p.write_text(json.dumps({
+        "session_heading_alignment": value,
+        "sample_count": samples,
+        "source": source,
+        "last_updated": last_updated,
+    }))
+    return p
+
+
+def test_load_saved_alignment_valid(tmp_path):
+    """Fresh alignment (< 24h, source=gps_cog_snap) is returned."""
+    nav = NavigationService()
+    nav._ALIGNMENT_FILE = _make_alignment_file(tmp_path, value=11.1, samples=1, age_hours=0.5)
+    nav._calibration_repo = None
+
+    result = nav._load_saved_alignment_for_mission_start()
+
+    assert result is not None
+    value, samples, age_s = result
+    assert value == pytest.approx(11.1, abs=0.01)
+    assert samples == 1
+    assert 0 < age_s < 3600 * 2  # ~30 min
+
+
+def test_load_saved_alignment_stale(tmp_path):
+    """Alignment older than 24h is rejected."""
+    nav = NavigationService()
+    nav._ALIGNMENT_FILE = _make_alignment_file(tmp_path, value=11.1, samples=1, age_hours=25)
+    nav._calibration_repo = None
+
+    result = nav._load_saved_alignment_for_mission_start()
+    assert result is None
+
+
+def test_load_saved_alignment_mission_start_reset_source(tmp_path):
+    """Alignment with source='mission_start_reset' is rejected."""
+    nav = NavigationService()
+    nav._ALIGNMENT_FILE = _make_alignment_file(tmp_path, value=11.1, samples=1, source="mission_start_reset", age_hours=0.1)
+    nav._calibration_repo = None
+
+    result = nav._load_saved_alignment_for_mission_start()
+    assert result is None
+
+
+def test_load_saved_alignment_missing_file(tmp_path):
+    """No alignment file returns None gracefully."""
+    nav = NavigationService()
+    nav._ALIGNMENT_FILE = tmp_path / "nonexistent.json"
+    nav._calibration_repo = None
+
+    result = nav._load_saved_alignment_for_mission_start()
+    assert result is None
+
+
+def test_load_saved_alignment_uses_calibration_repo(tmp_path):
+    """When calibration_repo is set, it is used instead of _ALIGNMENT_FILE."""
+    from unittest.mock import MagicMock
+    from datetime import UTC, datetime, timedelta
+
+    nav = NavigationService()
+    nav._calibration_repo = MagicMock()
+    nav._calibration_repo.load_imu_alignment.return_value = {
+        "session_heading_alignment": 22.5,
+        "sample_count": 3,
+        "source": "gps_cog_snap",
+        "last_updated": (datetime.now(UTC) - timedelta(minutes=10)).isoformat(),
+    }
+
+    result = nav._load_saved_alignment_for_mission_start()
+
+    assert result is not None
+    value, samples, age_s = result
+    assert value == pytest.approx(22.5, abs=0.01)
+    assert samples == 3
+
+
+@pytest.mark.asyncio
+async def test_execute_mission_loads_saved_alignment_when_valid(tmp_path, monkeypatch):
+    """execute_mission restores a valid saved alignment instead of resetting to 0°.
+
+    We verify alignment state by raising from go_to_waypoint (matching the pattern
+    used by test_execute_mission_marks_navigation_failed_on_waypoint_error) and
+    then inspecting nav state, which is set before any waypoint execution.
+    """
+    nav = NavigationService()
+    # Inject a fresh alignment file
+    align_file = _make_alignment_file(tmp_path, value=15.5, samples=1, source="gps_cog_snap", age_hours=1)
+    nav._ALIGNMENT_FILE = align_file
+    nav._calibration_repo = None
+
+    mission_svc = MissionService(nav)
+    mission_service_module._mission_service_instance = mission_svc
+    mission = await mission_svc.create_mission(
+        "alignment_test",
+        [{"lat": 0.1, "lon": 0.2, "blade_on": False, "speed": 50}],
+    )
+    mission_svc.mission_statuses[mission.id].status = MissionLifecycleStatus.RUNNING
+
+    async def raise_after_one_tick(*a, **kw):
+        raise RuntimeError("test sentinel")
+
+    monkeypatch.setattr(nav, "_run_bootstrap_and_check_geofence", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(nav._mission_executor, "go_to_waypoint", raise_after_one_tick)
+
+    with pytest.raises(RuntimeError, match="test sentinel"):
+        await nav.execute_mission(mission, mission_svc)
+
+    assert nav._session_heading_alignment == pytest.approx(15.5, abs=0.01)
+    assert nav._heading_alignment_sample_count >= 1
+    assert nav._require_gps_heading_alignment is True
+
+
+@pytest.mark.asyncio
+async def test_execute_mission_resets_to_zero_when_alignment_stale(tmp_path, monkeypatch):
+    """execute_mission falls back to 0° reset when saved alignment is stale (> 24h)."""
+    nav = NavigationService()
+    align_file = _make_alignment_file(tmp_path, value=15.5, samples=1, source="gps_cog_snap", age_hours=25)
+    nav._ALIGNMENT_FILE = align_file
+    nav._calibration_repo = None
+
+    mission_svc = MissionService(nav)
+    mission_service_module._mission_service_instance = mission_svc
+    mission = await mission_svc.create_mission(
+        "stale_test",
+        [{"lat": 0.1, "lon": 0.2, "blade_on": False, "speed": 50}],
+    )
+    mission_svc.mission_statuses[mission.id].status = MissionLifecycleStatus.RUNNING
+
+    async def raise_after_one_tick(*a, **kw):
+        raise RuntimeError("test sentinel")
+
+    monkeypatch.setattr(nav, "_run_bootstrap_and_check_geofence", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(nav._mission_executor, "go_to_waypoint", raise_after_one_tick)
+
+    with pytest.raises(RuntimeError, match="test sentinel"):
+        await nav.execute_mission(mission, mission_svc)
+
+    assert nav._session_heading_alignment == pytest.approx(0.0, abs=0.01)
+    assert nav._heading_alignment_sample_count == 0
+    assert nav._require_gps_heading_alignment is True

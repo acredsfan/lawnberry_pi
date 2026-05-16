@@ -429,21 +429,36 @@ class NavigationService:
         ]
         self.navigation_state.operation_start_time = datetime.now(UTC)
 
-        # Reset heading alignment state for new mission (localization bootstrap)
-        self._session_heading_alignment = 0.0
-        self._heading_alignment_sample_count = 0
+        # Reset heading alignment state for new mission (localization bootstrap).
+        # Prefer the last saved alignment so IMU heading works immediately while
+        # a fresh GPS COG bootstrap snap validates/refines it.  Only fall back to
+        # 0° if the saved alignment is stale (> 24 h) or was itself a reset record.
+        saved = self._load_saved_alignment_for_mission_start()
         self._gps_cog_history.clear()
         self._require_gps_heading_alignment = True
         self._last_gps_track_position = None
         self._last_gps_track_time = None
         self.navigation_state.heading = None
         self.navigation_state.gps_cog = None
-        self._save_alignment_to_disk("mission_start_reset")
-        # Mirror reset into LocalizationService when it owns pose state.
-        # Without this, _heading_alignment_sample_count loaded from the alignment
-        # file stays at 1, blocking the GPS-COG snap guard which requires == 0.
+        if saved is not None:
+            saved_value, saved_samples, saved_age_s = saved
+            self._session_heading_alignment = saved_value
+            self._heading_alignment_sample_count = max(1, saved_samples)
+            # Do NOT write "mission_start_reset" — the disk still holds the real snap.
+            logger.info(
+                "Mission start: loaded saved heading alignment %.1f° (age %.0fs) "
+                "— will validate via GPS COG bootstrap",
+                saved_value,
+                saved_age_s,
+            )
+        else:
+            self._session_heading_alignment = 0.0
+            self._heading_alignment_sample_count = 0
+            self._save_alignment_to_disk("mission_start_reset")
+            logger.info("Mission start: no valid saved alignment — GPS COG bootstrap required")
+        # Mirror state into LocalizationService when it owns pose state.
         if self._use_localization():
-            self._localization.reset_for_mission()
+            self._localization.reset_for_mission(saved_alignment=saved)
 
         # Reset ENU frame and pose filter for this mission
         self._enu_frame = ENUFrame()  # will anchor on first GPS fix
@@ -1612,6 +1627,62 @@ class NavigationService:
         except Exception as exc:
             logger.warning("Could not load IMU alignment file: %s", exc)
             self._session_heading_alignment = 0.0
+
+    _ALIGNMENT_MAX_AGE_S: float = 24.0 * 3600.0  # 24 hours
+
+    def _load_saved_alignment_for_mission_start(
+        self,
+    ) -> tuple[float, int, float] | None:
+        """Return (value_deg, sample_count, age_s) if a valid saved alignment exists.
+
+        Returns None when:
+        - No saved alignment file / repository data exists.
+        - The alignment is older than 24 hours (stale sensor drift risk).
+        - The source is "mission_start_reset" (the record is itself a reset, not a real snap).
+
+        When valid, the caller should apply the returned value instead of resetting to 0°,
+        while still setting ``_require_gps_heading_alignment = True`` so a fresh GPS COG
+        bootstrap snap is triggered to validate/refine the estimate.
+        """
+        try:
+            if self._calibration_repo is not None:
+                data = self._calibration_repo.load_imu_alignment()
+            else:
+                if not self._ALIGNMENT_FILE.exists():
+                    return None
+                data = json.loads(self._ALIGNMENT_FILE.read_text())
+
+            source = data.get("source", "default")
+            if source == "mission_start_reset":
+                return None
+
+            last_updated_str = data.get("last_updated")
+            if last_updated_str is None:
+                return None
+            try:
+                last_updated = datetime.fromisoformat(last_updated_str)
+            except ValueError:
+                return None
+
+            # Ensure tz-aware comparison
+            now = datetime.now(UTC)
+            if last_updated.tzinfo is None:
+                last_updated = last_updated.replace(tzinfo=UTC)
+            age_s = (now - last_updated).total_seconds()
+            if age_s > self._ALIGNMENT_MAX_AGE_S:
+                logger.info(
+                    "Mission start: saved alignment age %.0fs > %.0fs — discarding",
+                    age_s,
+                    self._ALIGNMENT_MAX_AGE_S,
+                )
+                return None
+
+            value = float(data.get("session_heading_alignment", 0.0)) % 360.0
+            samples = int(data.get("sample_count", 0))
+            return (value, samples, age_s)
+        except Exception as exc:
+            logger.warning("Could not check saved alignment for mission start: %s", exc)
+            return None
 
     def _save_alignment_to_disk(self, source: str) -> None:
         """Persist current session heading alignment to data/imu_alignment.json.

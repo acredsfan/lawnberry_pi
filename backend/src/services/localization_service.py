@@ -230,10 +230,19 @@ class LocalizationService:
 
     # ── Mission lifecycle ────────────────────────────────────────────────────
 
-    def reset_for_mission(self) -> None:
-        """Reset heading alignment for a new mission."""
-        self._session_heading_alignment = 0.0
-        self._heading_alignment_sample_count = 0
+    def reset_for_mission(
+        self,
+        saved_alignment: tuple[float, int, float] | None = None,
+    ) -> None:
+        """Reset heading alignment for a new mission.
+
+        Args:
+            saved_alignment: Optional ``(value_deg, sample_count, age_s)`` tuple
+                returned by ``NavigationService._load_saved_alignment_for_mission_start``.
+                When provided, the saved value is restored so IMU heading works
+                immediately while a fresh GPS COG bootstrap snap runs to validate it.
+                When None, falls back to the original 0° reset behaviour.
+        """
         self._gps_cog_history.clear()
         self._require_gps_heading_alignment = True
         self._last_gps_track_position = None
@@ -242,8 +251,16 @@ class LocalizationService:
         self.state.gps_cog = None
         self._odometry_integrator.reset_ticks()
         self._last_dr_time_s = time.monotonic()
-        if self._alignment_file is not None:
-            self.save_alignment(source="mission_start_reset")
+        if saved_alignment is not None:
+            saved_value, saved_samples, _age_s = saved_alignment
+            self._session_heading_alignment = saved_value
+            self._heading_alignment_sample_count = max(1, saved_samples)
+            # Disk already holds the valid snap; do not overwrite with a reset record.
+        else:
+            self._session_heading_alignment = 0.0
+            self._heading_alignment_sample_count = 0
+            if self._alignment_file is not None:
+                self.save_alignment(source="mission_start_reset")
 
     def begin_bootstrap(self) -> None:
         """Mark that the heading bootstrap drive has started."""

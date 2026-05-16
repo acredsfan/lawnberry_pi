@@ -282,3 +282,97 @@ def test_save_alignment_to_file(tmp_path):
     assert data["session_heading_alignment"] == pytest.approx(77.5, abs=0.01)
     assert data["sample_count"] == 2
     assert data["source"] == "test_save"
+
+
+# --- reset_for_mission with saved_alignment -----------------------------------
+
+def test_reset_for_mission_applies_saved_alignment():
+    """reset_for_mission(saved_alignment=...) restores heading instead of resetting to 0°."""
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(
+        imu_yaw_offset=0.0,
+        antenna_forward_m=0.0,
+        antenna_right_m=0.0,
+        max_fix_age_seconds=2.0,
+        max_accuracy_m=5.0,
+        alignment_file=None,
+    )
+    loc._session_heading_alignment = 99.9
+    loc._heading_alignment_sample_count = 10
+
+    loc.reset_for_mission(saved_alignment=(33.3, 2, 1800.0))
+
+    assert loc._session_heading_alignment == pytest.approx(33.3, abs=0.01)
+    assert loc._heading_alignment_sample_count == 2
+    assert loc._require_gps_heading_alignment is True
+    # alignment_ready: not require OR samples>0 → True
+    assert loc.alignment_ready is True
+
+
+def test_reset_for_mission_saved_alignment_enforces_min_one_sample():
+    """reset_for_mission clamps sample_count to at least 1 when saved is 0."""
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(
+        imu_yaw_offset=0.0,
+        antenna_forward_m=0.0,
+        antenna_right_m=0.0,
+        max_fix_age_seconds=2.0,
+        max_accuracy_m=5.0,
+        alignment_file=None,
+    )
+    loc.reset_for_mission(saved_alignment=(45.0, 0, 600.0))
+
+    assert loc._heading_alignment_sample_count == 1
+    assert loc.alignment_ready is True
+
+
+def test_reset_for_mission_none_still_resets_to_zero():
+    """reset_for_mission(saved_alignment=None) behaves like the original reset."""
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(
+        imu_yaw_offset=0.0,
+        antenna_forward_m=0.0,
+        antenna_right_m=0.0,
+        max_fix_age_seconds=2.0,
+        max_accuracy_m=5.0,
+        alignment_file=None,
+    )
+    loc._session_heading_alignment = 55.0
+    loc._heading_alignment_sample_count = 5
+
+    loc.reset_for_mission(saved_alignment=None)
+
+    assert loc._session_heading_alignment == pytest.approx(0.0)
+    assert loc._heading_alignment_sample_count == 0
+    assert loc.alignment_ready is False
+
+
+def test_reset_for_mission_saved_alignment_does_not_overwrite_disk(tmp_path):
+    """When saved_alignment is applied, the disk file is NOT overwritten with a reset record."""
+    import json
+    from backend.src.services.localization_service import LocalizationService
+
+    align_file = tmp_path / "imu_alignment.json"
+    align_file.write_text(json.dumps({
+        "session_heading_alignment": 11.1,
+        "sample_count": 1,
+        "source": "gps_cog_snap",
+    }))
+    loc = LocalizationService(
+        imu_yaw_offset=0.0,
+        antenna_forward_m=0.0,
+        antenna_right_m=0.0,
+        max_fix_age_seconds=2.0,
+        max_accuracy_m=5.0,
+        alignment_file=align_file,
+    )
+
+    loc.reset_for_mission(saved_alignment=(11.1, 1, 100.0))
+
+    data = json.loads(align_file.read_text())
+    assert data.get("source") == "gps_cog_snap", (
+        "Disk source should remain gps_cog_snap, not be overwritten with mission_start_reset"
+    )
