@@ -9,6 +9,9 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, 'src'),
     },
+    // Guarantee a single Leaflet instance across all chunks so that vue-leaflet
+    // (useGlobalLeaflet=true → window.L) and GoogleMutant share the same object.
+    dedupe: ['leaflet'],
   },
   server: {
     host: '0.0.0.0',

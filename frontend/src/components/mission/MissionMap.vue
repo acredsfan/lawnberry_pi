@@ -80,6 +80,11 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import googleMutantScriptUrl from 'leaflet.gridlayer.googlemutant/dist/Leaflet.GoogleMutant.js?url';
 
+// Expose the bundled Leaflet as window.L at module-load time so that:
+// (a) useGlobalLeaflet=true in LMap finds the same instance, and
+// (b) the GoogleMutant IIFE patches the same instance when loaded later.
+if (typeof window !== 'undefined') (window as any).L = L;
+
 import { useMapStore } from '@/stores/map';
 import { getOsmTileLayer, isSecureMapsContext, shouldUseGoogleProvider } from '@/utils/mapProviders';
 import type { TileLayerConfig } from '@/utils/mapProviders';
@@ -123,8 +128,10 @@ const tileLayerKey = ref(0);
 const providerBadge = ref('');
 const tileErrorMessage = ref<string | null>(null);
 let googleLayer: any = null;
-// Always use bundled Leaflet; we expose it as window.L ourselves before loading GoogleMutant.
-const useGlobalLeaflet = false;
+// useGlobalLeaflet=true ensures vue-leaflet and GoogleMutant share the same window.L instance.
+// With false, vue-leaflet's internal dynamic import can produce a separate Leaflet instance in
+// production builds, causing tiles and markers to use divergent coordinate transforms.
+const useGlobalLeaflet = true;
 const leafletOptions = {
   zoomSnap: 1,
   zoomDelta: 1,

@@ -313,6 +313,11 @@ import { LMap, LTileLayer, LMarker, LPolygon } from '@vue-leaflet/vue-leaflet';
 import { LPolyline } from '@vue-leaflet/vue-leaflet';
 import L from 'leaflet';
 import googleMutantScriptUrl from 'leaflet.gridlayer.googlemutant/dist/Leaflet.GoogleMutant.js?url';
+
+// Expose the bundled Leaflet as window.L at module-load time so that:
+// (a) useGlobalLeaflet=true in LMap finds the same instance, and
+// (b) the GoogleMutant IIFE patches the same instance when loaded later.
+if (typeof window !== 'undefined') (window as any).L = L;
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -398,8 +403,10 @@ const googleLayerActive = ref(false);
 // Reactive key to force tile layer re-rendering when style changes
 const tileLayerKey = ref(0);
 
-// Always use bundled Leaflet; we expose it as window.L ourselves before loading GoogleMutant.
-const useGlobalLeaflet = false;
+// useGlobalLeaflet=true ensures vue-leaflet and GoogleMutant share the same window.L instance.
+// With false, vue-leaflet's internal dynamic import can produce a separate Leaflet instance in
+// production builds, causing tiles and markers to use divergent coordinate transforms.
+const useGlobalLeaflet = true;
 const leafletOptions = computed(() => ({ attributionControl: !useGoogleMutant.value }));
 
 // Pending script loads — prevents resolving before the script has executed.
