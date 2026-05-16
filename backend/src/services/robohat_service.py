@@ -48,6 +48,7 @@ class RoboHATStatus:
     last_error: str | None = None
     motor_controller_ok: bool = False
     encoder_feedback_ok: bool = False
+    encoder_ever_incremented: bool = False  # True once any encoder tick > 0 seen
     encoder_position: int = 0   # encoder_1 (backward compat alias)
     encoder_1_position: int = 0
     encoder_2_position: int = 0
@@ -921,6 +922,8 @@ class RoboHATService:
             elapsed = now - self._enc_prev_time
             if elapsed >= 0.05:
                 delta = abs(enc1 - self._enc_prev_pos)
+                if delta > 0:
+                    self.status.encoder_ever_incremented = True
                 ticks_per_sec = delta / elapsed
                 rpm = ticks_per_sec * (60.0 / self._ENCODER_MAGNETS_PER_WHEEL)
                 self.status.encoder_rpm = rpm

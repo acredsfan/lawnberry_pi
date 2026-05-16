@@ -60,6 +60,7 @@ class MissionExecutor:
         localization: Any,
         gateway: Any,
         encoder_rpm_provider: Any = None,
+        encoder_active_provider: Any = None,
         max_speed: float = 0.8,
         cruise_speed: float = 0.5,
         waypoint_tolerance: float = 0.5,
@@ -76,6 +77,7 @@ class MissionExecutor:
         self.max_waypoint_accuracy_m = max_waypoint_accuracy_m
         self.position_verification_timeout_seconds = position_verification_timeout_seconds
         self._encoder_rpm_provider = encoder_rpm_provider
+        self._encoder_active_provider = encoder_active_provider
         import os
         _boost_disabled = os.environ.get("LAWNBERRY_DISABLE_TRACTION_BOOST", "").strip() == "1"
         if _boost_disabled:
@@ -467,6 +469,9 @@ class MissionExecutor:
                             )
                         _gps_stall_escape_phase = None
                         _gps_stall_escape_start = None
+                        # GPS confirms physical movement — reset encoder stall timer
+                        # so broken/disconnected encoders don't trigger a false abort.
+                        _motor_stall_start = None
                     else:
                         _gps_no_move_s = time.monotonic() - (
                             _gps_stall_ref_time or time.monotonic()
@@ -545,9 +550,18 @@ class MissionExecutor:
             _max_enc_rpm = max(abs(_enc_rpm_a), abs(_enc_rpm_b))
             _max_cmd = max(abs(_prev_left_speed), abs(_prev_right_speed))
 
-            # Trigger A: motor stall — commanded but not turning
+            # Trigger A: motor stall — commanded but not turning.
+            # Only arm when encoder_active_provider confirms sensors have ever
+            # incremented; if sensors are unconnected/broken they always read 0
+            # and would produce a permanent false positive.
+            _enc_active = (
+                self._encoder_active_provider()
+                if self._encoder_active_provider is not None
+                else True
+            )
             if (
-                _max_cmd > _MOTOR_STALL_CMD_THRESHOLD
+                _enc_active
+                and _max_cmd > _MOTOR_STALL_CMD_THRESHOLD
                 and _max_enc_rpm < _MOTOR_STALL_RPM_THRESHOLD
                 and not _force_gps_pivot
                 and not _force_gps_forward

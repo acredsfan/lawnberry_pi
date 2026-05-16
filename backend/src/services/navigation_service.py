@@ -324,6 +324,7 @@ class NavigationService:
             localization=self._localization_adapter,
             gateway=self._gateway_adapter,
             encoder_rpm_provider=self._get_encoder_rpms,
+            encoder_active_provider=self._get_encoder_active,
             max_speed=self.max_speed,
             cruise_speed=self.cruise_speed,
             waypoint_tolerance=self.waypoint_tolerance,
@@ -1836,6 +1837,14 @@ class NavigationService:
         if robohat is None:
             return 0.0, 0.0
         return robohat.status.encoder_1_rpm, robohat.status.encoder_2_rpm
+
+    def _get_encoder_active(self) -> bool:
+        """Return True only once encoders have shown at least one real tick."""
+        from .robohat_service import get_robohat_service
+        robohat = get_robohat_service()
+        if robohat is None:
+            return False
+        return robohat.status.encoder_ever_incremented
 
     def get_pose(self) -> Pose2D | None:
         """Return the current fused Pose2D. None until first GPS fix."""
