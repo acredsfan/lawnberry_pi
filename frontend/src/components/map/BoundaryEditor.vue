@@ -269,15 +269,15 @@
 
         <!-- Live mower location marker -->
         <LMarker
-          v-if="mowerLatLng && mowerIcon"
-          :lat-lng="mowerLatLng"
+          v-if="mowerDisplayLatLng && mowerIcon"
+          :lat-lng="mowerDisplayLatLng"
           :icon="mowerIcon"
         />
 
         <!-- GPS accuracy circle (approximate with polygon points) -->
         <LPolygon
-          v-if="mowerLatLng && gpsAccuracyMeters && gpsAccuracyMeters > 0 && accuracyCircleLatLngs.length > 0"
-          :lat-lngs="accuracyCircleLatLngs"
+          v-if="mowerDisplayLatLng && gpsAccuracyMeters && gpsAccuracyMeters > 0 && accuracyCircleDisplayLatLngs.length > 0"
+          :lat-lngs="accuracyCircleDisplayLatLngs"
           :color="'#3399ff'"
           :weight="1"
           :fill="true"
@@ -342,6 +342,8 @@ interface Props {
   googleApiKey?: string;
   // When true, a single map click will emit a pin coordinate instead of editing geometry
   pickForPin?: boolean;
+  satelliteDisplayNorthM?: number;
+  satelliteDisplayEastM?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -349,7 +351,9 @@ const props = withDefaults(defineProps<Props>(), {
   mapProvider: 'osm',
   mapStyle: 'standard',
   googleApiKey: '',
-  pickForPin: false
+  pickForPin: false,
+  satelliteDisplayNorthM: 0,
+  satelliteDisplayEastM: 0,
 });
 
 // State
@@ -367,6 +371,23 @@ const tileLoadingState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle');
 const tileErrorMessage = ref<string | null>(null);
 const fallbackToStandard = ref(false);
 const loadingTimeout = ref<number | null>(null);
+
+// Satellite imagery display offset helpers
+const _METERS_PER_LAT_DEG = 111320.0;
+function _applyDisplayOffset(lat: number, lon: number): [number, number] {
+  const northM = props.satelliteDisplayNorthM;
+  const eastM = props.satelliteDisplayEastM;
+  if (northM === 0 && eastM === 0) return [lat, lon];
+  const mpLon = _METERS_PER_LAT_DEG * Math.cos(lat * Math.PI / 180);
+  return [lat + northM / _METERS_PER_LAT_DEG, lon + eastM / mpLon];
+}
+function _removeDisplayOffset(lat: number, lon: number): [number, number] {
+  const northM = props.satelliteDisplayNorthM;
+  const eastM = props.satelliteDisplayEastM;
+  if (northM === 0 && eastM === 0) return [lat, lon];
+  const mpLon = _METERS_PER_LAT_DEG * Math.cos(lat * Math.PI / 180);
+  return [lat - northM / _METERS_PER_LAT_DEG, lon - eastM / mpLon];
+}
 
 // Map view state
 const mapRef = ref<any>(null);
@@ -564,13 +585,20 @@ async function ensureBaseLayer() {
   }
 }
 
-// Live mower marker (GPS position)
+// Live mower marker (GPS position — true WGS84)
 const mowerLatLng = ref<[number, number] | null>(null);
+// Display-offset version used for the marker on the map
+const mowerDisplayLatLng = computed(() =>
+  mowerLatLng.value ? _applyDisplayOffset(mowerLatLng.value[0], mowerLatLng.value[1]) : null
+);
 const mowerIcon = ref<L.Icon | null>(null);
 const firstLockCentered = ref(false);
 const followMower = ref(false);
 const gpsAccuracyMeters = ref<number | null>(null);
 const accuracyCircleLatLngs = ref<Array<[number, number]>>([]);
+const accuracyCircleDisplayLatLngs = computed(() =>
+  accuracyCircleLatLngs.value.map(([lat, lon]) => _applyDisplayOffset(lat, lon))
+);
 const showCoveragePlan = ref(false);
 const coverageLatLngs = ref<Array<[number, number]>>([]);
 const restPollTimer = ref<number | null>(null);
@@ -791,16 +819,19 @@ function onMapClick(e: any) {
   const { latlng } = e;
   if (!latlng) return;
 
+  // Remove display offset — clicks are in imagery-aligned view; store true WGS84
+  const [trueLat, trueLon] = _removeDisplayOffset(latlng.lat, latlng.lng);
+
   // If parent wants a pin coordinate, emit and do nothing else
   if (props.pickForPin) {
-    emit('pinPicked', { latitude: latlng.lat, longitude: latlng.lng });
+    emit('pinPicked', { latitude: trueLat, longitude: trueLon });
     return;
   }
 
   if (mode.value === 'boundary' || mode.value === 'exclusion' || mode.value === 'mowing') {
     if (currentPolygon.value.length >= 3) {
       const first = currentPolygon.value[0];
-      const d = distanceMeters(first.latitude, first.longitude, latlng.lat, latlng.lng);
+      const d = distanceMeters(first.latitude, first.longitude, trueLat, trueLon);
       // Close if click within 1 meter of first point
       if (d <= 1.0) {
         currentPolygonClosed.value = true;
@@ -809,7 +840,7 @@ function onMapClick(e: any) {
       }
     }
     if (!currentPolygonClosed.value) {
-      let pt: Point = { latitude: latlng.lat, longitude: latlng.lng };
+      let pt: Point = { latitude: trueLat, longitude: trueLon };
       if (snapToBoundary.value && mode.value !== 'boundary') {
         const snapped = snapPointToBoundary(pt);
         if (snapped) pt = snapped;
@@ -818,7 +849,7 @@ function onMapClick(e: any) {
       hasUnsavedChanges.value = true;
     }
   } else if (mode.value === 'marker') {
-    mapStore.addMarker(markerType.value, { latitude: latlng.lat, longitude: latlng.lng });
+    mapStore.addMarker(markerType.value, { latitude: trueLat, longitude: trueLon });
     hasUnsavedChanges.value = true;
     toast.show(`${markerType.value.replace('_',' ').toUpperCase()} marker placed`, 'info', 1800)
   }
@@ -828,7 +859,8 @@ function onVertexMoveEnd(idx: number, e: any) {
   try {
     const ll = e?.target?.getLatLng?.();
     if (!ll) return;
-    let pt: Point = { latitude: ll.lat, longitude: ll.lng };
+    const [trueLat, trueLon] = _removeDisplayOffset(ll.lat, ll.lng);
+    let pt: Point = { latitude: trueLat, longitude: trueLon };
     if (snapToBoundary.value && mode.value !== 'boundary') {
       const snapped = snapPointToBoundary(pt);
       if (snapped) pt = snapped;
@@ -846,7 +878,8 @@ function onMarkerMoveEnd(markerId: string, e: any) {
   try {
     const ll = e?.target?.getLatLng?.()
     if (!ll) return
-    mapStore.updateMarker(markerId, { position: { latitude: ll.lat, longitude: ll.lng } } as any)
+    const [trueLat, trueLon] = _removeDisplayOffset(ll.lat, ll.lng)
+    mapStore.updateMarker(markerId, { position: { latitude: trueLat, longitude: trueLon } } as any)
     hasUnsavedChanges.value = true
   } catch {/* ignore */}
 }

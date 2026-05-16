@@ -90,6 +90,8 @@ class MapsSectionResponse(BaseModel):
     mission_planner: MissionPlannerMapSectionResponse = Field(
         default_factory=MissionPlannerMapSectionResponse
     )
+    satellite_display_north_m: float = 0.0
+    satellite_display_east_m: float = 0.0
 
 
 class GpsPolicySectionResponse(BaseModel):

@@ -17,7 +17,8 @@
               <option value="terrain">Terrain</option>
             </select>
           </label>
-          <button class="btn" :disabled="!mowerLatLng" @click="recenterToMower">🎯 Recenter</button>
+          <button class="btn" :disabled="!mowerLatLng" @click="recenterToMower">Recenter</button>
+          <button class="btn btn-secondary" :disabled="!mowerLatLng" title="Click your mower's actual location in the satellite photo to align imagery" @click="missionMapRef?.startCalibration()">Align Satellite</button>
           <button class="btn" :disabled="missionStore.waypoints.length === 0" @click="undoLastWaypoint">↩️ Undo last</button>
           <button class="btn btn-danger" :disabled="missionStore.waypoints.length === 0" @click="clearAllWaypoints">🗑️ Clear all</button>
           <button
@@ -38,6 +39,7 @@
             @add-waypoint="handleAddWaypoint"
             @update-waypoint="handleUpdateWaypoint"
             @remove-waypoint="handleRemoveWaypoint"
+            @calibration-set="handleCalibrationSet"
           />
         </div>
         <MissionWaypointList />
@@ -74,6 +76,7 @@ import { useMapStore } from '@/stores/map'
 import { useToastStore } from '@/stores/toast'
 import { useMowerTelemetry } from '@/composables/useMowerTelemetry'
 import { useMissionMapSettings } from '@/composables/useMissionMapSettings'
+import { useApiService } from '@/services/api'
 
 const missionStore = useMissionStore()
 const mapStore = useMapStore()
@@ -87,7 +90,12 @@ const { mapDisplaySettings, mapStyle, loadSettings, persistStyleChange } = useMi
 const GMAP_FIELD = ['google', 'api', 'key'].join('_') as 'google_api_key'
 const adaptedMapSettings = computed(() => {
   const s = mapDisplaySettings.value
-  return { ...s, [GMAP_FIELD]: s.googleMapsKey }
+  return {
+    ...s,
+    [GMAP_FIELD]: s.googleMapsKey,
+    satellite_display_north_m: s.satelliteDisplayNorthM,
+    satellite_display_east_m: s.satelliteDisplayEastM,
+  }
 })
 
 const settingsLoaded = ref(false)
@@ -191,6 +199,22 @@ function clearAllWaypoints() {
 }
 
 function undoLastWaypoint() { missionStore.removeLastWaypoint() }
+
+async function handleCalibrationSet(northM: number, eastM: number) {
+  const prev = mapDisplaySettings.value
+  mapDisplaySettings.value = { ...prev, satelliteDisplayNorthM: northM, satelliteDisplayEastM: eastM }
+  try {
+    const api = useApiService()
+    await api.put('/api/v2/settings/maps', {
+      satellite_display_north_m: northM,
+      satellite_display_east_m: eastM,
+    })
+    toast.show('Satellite imagery aligned', 'success', 3000)
+  } catch {
+    mapDisplaySettings.value = prev
+    toast.show('Failed to save imagery alignment', 'error', 4000)
+  }
+}
 
 async function saveMissionChanges() {
   if (!missionStore.currentMission) return

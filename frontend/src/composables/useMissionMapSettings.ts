@@ -11,6 +11,8 @@ export interface MapDisplaySettings {
   provider: MapProvider
   style: MapStyle
   googleMapsKey: string
+  satelliteDisplayNorthM: number
+  satelliteDisplayEastM: number
 }
 
 export function useMissionMapSettings() {
@@ -20,6 +22,8 @@ export function useMissionMapSettings() {
     provider: 'osm',
     style: 'standard',
     googleMapsKey: '',
+    satelliteDisplayNorthM: 0,
+    satelliteDisplayEastM: 0,
   })
   const mapStyle = ref<MapStyle>('standard')
 
@@ -44,7 +48,11 @@ export function useMissionMapSettings() {
         : 'standard'
       const googleMapsKey =
         typeof payload[GMAPS_KEY_FIELD] === 'string' ? (payload[GMAPS_KEY_FIELD] as string) : ''
-      mapDisplaySettings.value = { provider, style, googleMapsKey }
+      const satelliteDisplayNorthM =
+        typeof payload.satellite_display_north_m === 'number' ? payload.satellite_display_north_m : 0
+      const satelliteDisplayEastM =
+        typeof payload.satellite_display_east_m === 'number' ? payload.satellite_display_east_m : 0
+      mapDisplaySettings.value = { provider, style, googleMapsKey, satelliteDisplayNorthM, satelliteDisplayEastM }
       mapStyle.value = style
     } catch (error) {
       console.warn('useMissionMapSettings: failed to load settings', error)

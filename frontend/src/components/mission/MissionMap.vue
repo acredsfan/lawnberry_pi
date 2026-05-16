@@ -1,5 +1,9 @@
 <template>
-  <div class="mission-map-editor" :class="{ 'cursor-crosshair': isDrawing }">
+  <div class="mission-map-editor" :class="{ 'cursor-crosshair': isDrawing || calibratingMode }">
+    <div v-if="calibratingMode" class="calibration-overlay">
+      Click on the mower's <strong>actual location</strong> in the satellite photo to align imagery
+      <button class="cal-cancel" @click="calibratingMode = false">Cancel</button>
+    </div>
     <LMap
       ref="mapRef"
       :zoom="zoom"
@@ -95,7 +99,7 @@ const props = defineProps<{
   waypoints: Waypoint[];
   mowerPosition: { lat: number; lon: number; accuracy: number; heading?: number | null } | null;
   followMower: boolean;
-  mapSettings?: { provider: 'google' | 'osm' | 'none'; style: 'standard' | 'satellite' | 'hybrid' | 'terrain'; google_api_key: string } | null;
+  mapSettings?: { provider: 'google' | 'osm' | 'none'; style: 'standard' | 'satellite' | 'hybrid' | 'terrain'; google_api_key: string; satellite_display_north_m?: number; satellite_display_east_m?: number } | null;
   pathTrace?: [number, number][];
 }>();
 
@@ -104,6 +108,7 @@ const emit = defineEmits<{
   (e: 'add-waypoint', lat: number, lon: number): void;
   (e: 'update-waypoint', waypoint: Waypoint): void;
   (e: 'remove-waypoint', id: string): void;
+  (e: 'calibration-set', northM: number, eastM: number): void;
 }>();
 
 // Component State
@@ -112,10 +117,29 @@ const mapRef = ref<any>(null);
 let map: L.Map | null = null;
 let isMounted = false;
 const overlayGroupRef = ref<any>(null);
+const calibratingMode = ref(false);
 
 const DEFAULT_MAP_MAX_ZOOM = 19;
 const EXTENDED_MAP_MAX_ZOOM = 22;
 const TERRAIN_MAP_MAX_ZOOM = 17;
+
+const METERS_PER_LAT_DEG = 111320.0;
+
+function applyDisplayOffset(lat: number, lon: number): [number, number] {
+  const northM = props.mapSettings?.satellite_display_north_m ?? 0;
+  const eastM = props.mapSettings?.satellite_display_east_m ?? 0;
+  if (northM === 0 && eastM === 0) return [lat, lon];
+  const metersPerLonDeg = METERS_PER_LAT_DEG * Math.cos(lat * Math.PI / 180);
+  return [lat + northM / METERS_PER_LAT_DEG, lon + eastM / metersPerLonDeg];
+}
+
+function removeDisplayOffset(lat: number, lon: number): [number, number] {
+  const northM = props.mapSettings?.satellite_display_north_m ?? 0;
+  const eastM = props.mapSettings?.satellite_display_east_m ?? 0;
+  if (northM === 0 && eastM === 0) return [lat, lon];
+  const metersPerLonDeg = METERS_PER_LAT_DEG * Math.cos(lat * Math.PI / 180);
+  return [lat - northM / METERS_PER_LAT_DEG, lon - eastM / metersPerLonDeg];
+}
 
 const zoom = ref(18);
 const center = ref<[number, number]>([37.7749, -122.4194]);
@@ -139,11 +163,16 @@ const leafletOptions = {
 };
 let resizeObserver: ResizeObserver | null = null;
 
-// Computed properties for rendering
-const waypointLatLngs = computed(() => props.waypoints.map(wp => [wp.lat, wp.lon]));
-const mowerLatLng = computed(() => (props.mowerPosition ? [props.mowerPosition.lat, props.mowerPosition.lon] : null));
+// Computed properties for rendering — display offset shifts all visual positions to align with imagery
+const waypointLatLngs = computed(() => props.waypoints.map(wp => applyDisplayOffset(wp.lat, wp.lon)));
+const mowerLatLng = computed(() => {
+  if (!props.mowerPosition) return null;
+  return applyDisplayOffset(props.mowerPosition.lat, props.mowerPosition.lon);
+});
 const accuracyRadius = computed(() => props.mowerPosition?.accuracy || 0);
-const traceLatLngs = computed<[number, number][]>(() => props.pathTrace ?? []);
+const traceLatLngs = computed<[number, number][]>(() =>
+  (props.pathTrace ?? []).map(([lat, lon]) => applyDisplayOffset(lat, lon))
+);
 
 function looksLikeGoogleOAuthClientId(value: string): boolean {
   return String(value || '').trim().toLowerCase().endsWith('.apps.googleusercontent.com');
@@ -397,12 +426,26 @@ async function loadMapsSettings(): Promise<{ provider: 'google'|'osm'|'none'; st
 
 // --- Event Handlers ---
 function onMapClick(e: L.LeafletMouseEvent) {
-  emit('add-waypoint', e.latlng.lat, e.latlng.lng);
+  if (calibratingMode.value) {
+    const gpsLat = props.mowerPosition?.lat;
+    const gpsLon = props.mowerPosition?.lon;
+    if (gpsLat != null && gpsLon != null) {
+      const metersPerLonDeg = METERS_PER_LAT_DEG * Math.cos(gpsLat * Math.PI / 180);
+      const northM = (e.latlng.lat - gpsLat) * METERS_PER_LAT_DEG;
+      const eastM = (e.latlng.lng - gpsLon) * metersPerLonDeg;
+      emit('calibration-set', northM, eastM);
+    }
+    calibratingMode.value = false;
+    return;
+  }
+  const [trueLat, trueLon] = removeDisplayOffset(e.latlng.lat, e.latlng.lng);
+  emit('add-waypoint', trueLat, trueLon);
 }
 
 function onWaypointDragEnd(waypoint: Waypoint, event: any) {
   const newPosition = event.target.getLatLng();
-  emit('update-waypoint', { ...waypoint, lat: newPosition.lat, lon: newPosition.lng });
+  const [trueLat, trueLon] = removeDisplayOffset(newPosition.lat, newPosition.lng);
+  emit('update-waypoint', { ...waypoint, lat: trueLat, lon: trueLon });
 }
 
 function onWaypointContextMenu(waypoint: Waypoint) {
@@ -447,7 +490,10 @@ function recenter(lat: number, lon: number, z?: number) {
   });
 }
 
-defineExpose({ recenter });
+function startCalibration() { calibratingMode.value = true; }
+function cancelCalibration() { calibratingMode.value = false; }
+
+defineExpose({ recenter, startCalibration, cancelCalibration });
 </script>
 
 <style scoped>
@@ -480,6 +526,32 @@ defineExpose({ recenter });
   border-radius: 6px;
   font-size: 0.85rem;
   z-index: 401;
+}
+.calibration-overlay {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 60, 10, 0.92);
+  color: #7fff7f;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.cal-cancel {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: #fff;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
 }
 </style>
 

@@ -19,6 +19,8 @@
           :map-style="settings.style"
           :google-api-key="settings.google_api_key"
           :pick-for-pin="pickForPin"
+          :satellite-display-north-m="settings.satellite_display_north_m ?? 0"
+          :satellite-display-east-m="settings.satellite_display_east_m ?? 0"
           @pinPicked="onPinPicked"
         />
       </div>
