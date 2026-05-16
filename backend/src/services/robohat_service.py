@@ -324,7 +324,8 @@ class RoboHATService:
 
         # Firmware did not respond to passive reading or active query.
         # It may be in CircuitPython REPL mode — send Ctrl+D to restart code.py.
-        # CP10 takes ~5 s to boot after a soft reload, so allow 7 s.
+        # After restart, the boot beacon appears within ~2 s and the first heartbeat
+        # within ~7 s, so allow 15 s to reliably catch both.
         try:
             # Send Enter first to flush any pending REPL input (e.g. a stale
             # rc=disable command left in the buffer), then Ctrl+D (soft reload).
@@ -333,11 +334,13 @@ class RoboHATService:
             logger.warning("RoboHAT probe: Enter+Ctrl+D write failed on %s: %s", port_name, exc)
             return False
 
-        _CTRLD_BOOT_TIMEOUT = 7.0
+        _CTRLD_BOOT_TIMEOUT = 15.0
         deadline = time.monotonic() + _CTRLD_BOOT_TIMEOUT
         while time.monotonic() < deadline:
             try:
                 for line in await asyncio.to_thread(self._read_available_lines):
+                    if line.strip():
+                        logger.warning("RoboHAT probe raw rx [%s]: %r", port_name, line)
                     self._process_line(line)
                     if self._is_robohat_response_line(line):
                         saw_robohat_line = True

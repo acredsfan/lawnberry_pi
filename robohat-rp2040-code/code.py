@@ -55,15 +55,17 @@ class SimpleNeoPixel(adafruit_pixelbuf.PixelBuf):
 
 pixel = SimpleNeoPixel(board.GP16, 1, brightness=0.3)
 
-# ---------- Hardware UART (GP0/GP1 = board.TX/RX) ---------- #
+# ---------- Hardware UART (GP0/GP1) ---------- #
 # Wiring: RP2040 GP0 (TX) → Pi GPIO15 (RXD / ttyAMA0 RX)
 #         RP2040 GP1 (RX) ← Pi GPIO14 (TXD / ttyAMA0 TX)
-# This gives a fully independent control path that works even when USB CDC
-# fails (e.g. USB protocol error -71, bad cable, enumeration failure).
+# Use board.GP0/GP1 explicitly — board.TX/board.RX may not be defined on all
+# CP10 board builds (Waveshare RP2040-Zero omits the TX/RX aliases).
 _hw_uart: busio.UART | None = None
 _uart_rx_buf: str = ""
 try:
-    _hw_uart = busio.UART(board.TX, board.RX, baudrate=115200, timeout=0)
+    _hw_uart = busio.UART(board.GP0, board.GP1, baudrate=115200, timeout=0)
+    # Send boot beacon immediately so the Pi probe can detect UART is live
+    _hw_uart.write(b"[status] boot uart=ok\r\n")
 except Exception as _uart_err:  # noqa: BLE001
     print(f"Warning: hardware UART init failed: {_uart_err}")
 
