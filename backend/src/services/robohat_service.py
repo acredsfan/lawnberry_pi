@@ -136,6 +136,9 @@ class RoboHATService:
         # Set True when emergency_stop() is called while serial is unavailable;
         # cleared once neutral PWM is delivered after reconnect.
         self._estop_pending: bool = False
+        # Set True when clear_emergency() is called while serial is unavailable;
+        # cleared once rc=disable is delivered after reconnect.
+        self._pending_emergency_clear: bool = False
         # Counter incremented each time the firmware acks a PWM command.  Using a
         # counter avoids the race where a [STATUS] message overwrites
         # last_watchdog_echo between the PWM send and the ack-poll iteration.
@@ -1201,6 +1204,8 @@ class RoboHATService:
     async def emergency_stop(self) -> bool:
         """Send emergency stop command to RoboHAT"""
         logger.critical("Sending emergency stop to RoboHAT")
+        # A new e-stop supersedes any pending clear.
+        self._pending_emergency_clear = False
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
             self._estop_pending = True
             logger.critical("Serial not available; e-stop queued for next reconnect")
@@ -1232,6 +1237,11 @@ class RoboHATService:
         """Clear emergency stop on RoboHAT"""
         logger.info("Clearing emergency stop on RoboHAT")
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
+            self._pending_emergency_clear = True
+            logger.warning(
+                "RoboHAT: emergency cleared in software but serial not connected"
+                " — will re-send rc=disable on reconnect"
+            )
             return False
 
         if not await self._ensure_usb_control(timeout=0.9, retries=2):
@@ -1239,6 +1249,7 @@ class RoboHATService:
         ok = await self._send_line("rc=disable")
         if ok:
             self._estop_pending = False
+            self._pending_emergency_clear = False
             self.status.last_error = None
         else:
             self.status.last_error = "clear_emergency_failed"
@@ -1254,15 +1265,24 @@ class RoboHATService:
         return self.status.firmware_version
 
     async def _apply_estop_if_pending(self) -> None:
-        """Send queued emergency stop if one was requested while disconnected."""
-        if not self._estop_pending:
+        """Send queued emergency stop or deferred emergency clear after serial reconnect."""
+        if self._estop_pending:
+            logger.critical("Applying queued emergency stop after serial reconnect")
+            await self._send_line("pwm,1500,1500")
+            await self._send_line("blade=off")
+            self._last_pwm = (1500, 1500)
+            self._last_pwm_at = time.monotonic()
+            self._estop_pending = False
+            # A queued e-stop supersedes any pending clear.
+            self._pending_emergency_clear = False
             return
-        logger.critical("Applying queued emergency stop after serial reconnect")
-        await self._send_line("pwm,1500,1500")
-        await self._send_line("blade=off")
-        self._last_pwm = (1500, 1500)
-        self._last_pwm_at = time.monotonic()
-        self._estop_pending = False
+
+        if self._pending_emergency_clear:
+            logger.info(
+                "RoboHAT: applied deferred emergency clear — rc=disable sent"
+            )
+            await self._send_line("rc=disable")
+            self._pending_emergency_clear = False
 
     @staticmethod
     def _mix_arcade_to_pwm(left_speed: float, right_speed: float) -> tuple[int, int]:

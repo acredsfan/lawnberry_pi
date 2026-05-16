@@ -830,3 +830,143 @@ def test_process_line_keeps_none_when_no_version_in_banner():
     svc.status.firmware_version = None
     svc._process_line("▶ LawnBerry RoboHAT booting...")
     assert svc.status.firmware_version is None
+
+
+# ---- Fix 3: deferred emergency clear when serial disconnected ----
+
+@pytest.mark.asyncio
+async def test_clear_emergency_sets_pending_when_serial_disconnected():
+    """clear_emergency() when serial is None must set _pending_emergency_clear."""
+    svc = RoboHATService()
+    svc.serial_conn = None
+    svc.running = False
+    svc._pending_emergency_clear = False
+
+    result = await svc.clear_emergency()
+
+    assert result is False
+    assert svc._pending_emergency_clear is True
+
+
+@pytest.mark.asyncio
+async def test_clear_emergency_sets_pending_when_serial_not_open():
+    """clear_emergency() when serial port is closed must set _pending_emergency_clear."""
+    svc = RoboHATService()
+    svc.serial_conn = _StubSerial()
+    svc.serial_conn.is_open = False
+    svc.running = True
+    svc._pending_emergency_clear = False
+
+    result = await svc.clear_emergency()
+
+    assert result is False
+    assert svc._pending_emergency_clear is True
+
+
+@pytest.mark.asyncio
+async def test_clear_emergency_clears_pending_flag_on_success(monkeypatch):
+    """clear_emergency() on connected serial must clear _pending_emergency_clear."""
+    svc = RoboHATService()
+    svc.serial_conn = _StubSerial()
+    svc.running = True
+    svc._pending_emergency_clear = True
+    svc._estop_pending = True
+
+    async def fake_ensure_usb_control(*, timeout=0.9, retries=2):  # noqa: ARG001
+        return True
+
+    async def fake_send_line(line: str) -> bool:  # noqa: ARG001
+        return True
+
+    monkeypatch.setattr(svc, "_ensure_usb_control", fake_ensure_usb_control)
+    monkeypatch.setattr(svc, "_send_line", fake_send_line)
+
+    result = await svc.clear_emergency()
+
+    assert result is True
+    assert svc._pending_emergency_clear is False
+    assert svc._estop_pending is False
+
+
+@pytest.mark.asyncio
+async def test_emergency_stop_cancels_pending_clear():
+    """emergency_stop() must cancel any pending clear (new e-stop supersedes cleared state)."""
+    svc = RoboHATService()
+    svc.serial_conn = None
+    svc.running = False
+    svc._pending_emergency_clear = True
+    svc._estop_pending = False
+
+    result = await svc.emergency_stop()
+
+    assert result is False
+    assert svc._pending_emergency_clear is False
+    assert svc._estop_pending is True
+
+
+@pytest.mark.asyncio
+async def test_apply_estop_if_pending_sends_rc_disable_for_deferred_clear():
+    """_apply_estop_if_pending must send rc=disable when _pending_emergency_clear is set."""
+    svc = RoboHATService.__new__(RoboHATService)
+    svc._estop_pending = False
+    svc._pending_emergency_clear = True
+    sent_lines: list[str] = []
+
+    async def fake_send_line(line: str) -> bool:
+        sent_lines.append(line)
+        return True
+
+    svc._send_line = fake_send_line
+
+    await svc._apply_estop_if_pending()
+
+    assert "rc=disable" in sent_lines
+    assert svc._pending_emergency_clear is False
+
+
+@pytest.mark.asyncio
+async def test_apply_estop_if_pending_estop_supersedes_pending_clear():
+    """When both _estop_pending and _pending_emergency_clear are set, e-stop wins."""
+    svc = RoboHATService.__new__(RoboHATService)
+    svc._estop_pending = True
+    svc._pending_emergency_clear = True
+    sent_lines: list[str] = []
+
+    import time as _time
+
+    svc._last_pwm = (1500, 1500)
+    svc._last_pwm_at = _time.monotonic()
+
+    async def fake_send_line(line: str) -> bool:
+        sent_lines.append(line)
+        return True
+
+    svc._send_line = fake_send_line
+
+    await svc._apply_estop_if_pending()
+
+    assert "pwm,1500,1500" in sent_lines
+    assert "blade=off" in sent_lines
+    # rc=disable must NOT appear (e-stop wins)
+    assert "rc=disable" not in sent_lines
+    assert svc._estop_pending is False
+    assert svc._pending_emergency_clear is False
+
+
+@pytest.mark.asyncio
+async def test_apply_estop_if_pending_noop_when_nothing_pending():
+    """_apply_estop_if_pending must not send anything when no pending state."""
+    svc = RoboHATService.__new__(RoboHATService)
+    svc._estop_pending = False
+    svc._pending_emergency_clear = False
+    sent_lines: list[str] = []
+
+    async def fake_send_line(line: str) -> bool:
+        sent_lines.append(line)
+        return True
+
+    svc._send_line = fake_send_line
+
+    await svc._apply_estop_if_pending()
+
+    assert sent_lines == []
