@@ -807,6 +807,7 @@ class ControlCommandV2(BaseModel):
 
 class ControlResponseV2(BaseModel):
     accepted: bool
+    motor_connected: bool = True
     audit_id: str
     result: str
     status_reason: Optional[str] = None
@@ -1114,9 +1115,11 @@ async def control_drive_v2(cmd: dict, request: Request, runtime: RuntimeContext 
         return JSONResponse(status_code=423, content=blocked_response.model_dump(mode="json"))
 
     accepted = outcome.status in (CommandStatus.ACCEPTED, CommandStatus.QUEUED)
+    motor_connected = outcome.status == CommandStatus.ACCEPTED
     result = outcome.status.value if accepted else "rejected"
     response = ControlResponseV2(
         accepted=accepted,
+        motor_connected=motor_connected,
         audit_id=outcome.audit_id,
         result=result,
         status_reason=outcome.status_reason,

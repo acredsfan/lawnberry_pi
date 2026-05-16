@@ -82,6 +82,9 @@
             <div v-else-if="joystickEngaged" class="movement-status-badge active">● DRIVING</div>
             <div v-else class="movement-status-badge">○ IDLE</div>
           </div>
+          <div v-if="!motorConnected" class="motor-queued-banner">
+            ⚠ Motor controller not connected — commands queued
+          </div>
 
           <!-- Preset maneuver buttons -->
           <div class="preset-row">
@@ -329,6 +332,7 @@ const remediationLink = computed(() => control.remediationLink)
 const lastEcho = computed(() => control.lastEcho)
 const lastCommandResult = computed(() => control.lastCommandResult)
 const lockoutDisplay = computed<LockoutDisplay>(() => control.lockoutDisplay)
+const motorConnected = computed(() => control.motorConnected)
 
 // ── UI state ──────────────────────────────────────────────────────────────────
 
@@ -937,6 +941,19 @@ onUnmounted(() => {
 
 .movement-status-badge.preset {
   color: #ffc107;
+}
+
+.motor-queued-banner {
+  background: rgba(255, 193, 7, 0.18);
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  color: #ffc107;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 0.25rem 0.5rem;
+  text-align: center;
+  width: 100%;
 }
 
 /* Preset maneuver button row */

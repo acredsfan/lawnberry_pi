@@ -2340,6 +2340,12 @@ export interface components {
         ControlResponseV2: {
             /** Accepted */
             accepted: boolean;
+            /**
+             * Motor Connected
+             * True when the command reached firmware (ACCEPTED); false when queued (serial not connected).
+             * @default true
+             */
+            motor_connected: boolean;
             /** Audit Id */
             audit_id: string;
             /** Result */

@@ -143,6 +143,24 @@ export const useControlStore = defineStore('control', () => {
   const robohatStatus = ref<RoboHATStatus | null>(null);
   const emergencyStopActive = ref(false);
   const emergencyStopReason = ref<string | null>(null);
+  const motorConnected = ref(true);
+
+  let _motorConnectedClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function _updateMotorConnected(connected: boolean) {
+    motorConnected.value = connected;
+    if (_motorConnectedClearTimer !== null) {
+      clearTimeout(_motorConnectedClearTimer);
+      _motorConnectedClearTimer = null;
+    }
+    if (connected) {
+      // Auto-clear the warning after 3 s of consecutive ACCEPTED responses.
+      _motorConnectedClearTimer = setTimeout(() => {
+        _motorConnectedClearTimer = null;
+        motorConnected.value = true;
+      }, 3000);
+    }
+  }
 
   let _lockoutClearTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -216,9 +234,12 @@ export const useControlStore = defineStore('control', () => {
     commandInProgress.value = true;
     isLoading.value = true;
     try {
-      const result = await sendControlCommand(command, payload) as ControlCommandResult;
+      const result = await sendControlCommand(command, payload) as ControlCommandResult & { motor_connected?: boolean };
       lastCommandResult.value = result;
       lastCommandEcho.value = result;
+      if (command === 'drive' && result.motor_connected !== undefined) {
+        _updateMotorConnected(result.motor_connected);
+      }
       if (result.result === 'blocked') {
         applyLockoutState(result, result.status_reason || 'SAFETY_LOCKOUT', result.until as string | undefined);
       }
@@ -325,6 +346,7 @@ export const useControlStore = defineStore('control', () => {
     robohatStatus,
     emergencyStopActive,
     emergencyStopReason,
+    motorConnected,
     canSubmitCommand,
     lockoutDisplay,
     lockoutTimeRemaining,
