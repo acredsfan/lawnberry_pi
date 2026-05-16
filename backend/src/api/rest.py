@@ -1005,6 +1005,12 @@ async def control_drive_v2(cmd: dict, request: Request, runtime: RuntimeContext 
                 content={"detail": "Emergency stop active - drive commands blocked"},
             )
 
+        if outcome.status in (CommandStatus.FIRMWARE_UNKNOWN, CommandStatus.FIRMWARE_INCOMPATIBLE):
+            return JSONResponse(
+                status_code=503,
+                content={"detail": f"Motor controller not ready: {outcome.status_reason}"},
+            )
+
         global _legacy_motors_active
         _legacy_motors_active = True
         body = {

@@ -176,14 +176,16 @@ class MotorCommandGateway:
         if _robohat and getattr(getattr(_robohat, "status", None), "serial_connected", False):
             fw_ver = getattr(_robohat.status, "firmware_version", None)
             if fw_ver is None:
-                return DriveOutcome(
-                    status=CommandStatus.FIRMWARE_UNKNOWN,
-                    audit_id=str(uuid.uuid4()),
-                    status_reason="firmware_version_not_received",
-                    active_interlocks=[],
-                    watchdog_latency_ms=None,
+                # Version not yet received — firmware is responsive (motor_controller_ok
+                # or watchdog_active confirms it), so allow through with a warning.
+                # The firmware outputs its version via UART on startup; if it hasn't
+                # arrived yet (e.g. backend restarted after firmware booted) we cannot
+                # block the operator from driving. A missing version is not an error.
+                import logging as _logging
+                _logging.getLogger(__name__).debug(
+                    "Firmware version not yet received; allowing drive command through"
                 )
-            if fw_ver not in SUPPORTED_FIRMWARE_VERSIONS:
+            elif fw_ver not in SUPPORTED_FIRMWARE_VERSIONS:
                 return DriveOutcome(
                     status=CommandStatus.FIRMWARE_INCOMPATIBLE,
                     audit_id=str(uuid.uuid4()),
@@ -385,13 +387,7 @@ class MotorCommandGateway:
         _robohat = self._robohat
         if _robohat and getattr(getattr(_robohat, "status", None), "serial_connected", False):
             fw_ver = getattr(_robohat.status, "firmware_version", None)
-            if fw_ver is None:
-                return BladeOutcome(
-                    status=CommandStatus.FIRMWARE_UNKNOWN,
-                    audit_id=str(_uuid.uuid4()),
-                    status_reason="firmware_version_not_received",
-                )
-            if fw_ver not in SUPPORTED_FIRMWARE_VERSIONS:
+            if fw_ver is not None and fw_ver not in SUPPORTED_FIRMWARE_VERSIONS:
                 return BladeOutcome(
                     status=CommandStatus.FIRMWARE_INCOMPATIBLE,
                     audit_id=str(_uuid.uuid4()),

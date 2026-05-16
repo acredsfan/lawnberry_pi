@@ -126,6 +126,8 @@ wdt = microcontroller.watchdog
 wdt.timeout = 8
 wdt.mode = WatchDogMode.RESET
 
+FIRMWARE_VERSION  = "10.0.0"
+
 # ---------- Globals ---------- #
 rc_enabled        = True
 rc_mode          = RCMode.EMERGENCY
@@ -461,7 +463,7 @@ def main() -> None:
                 control_source = f"RC-{rc_mode}" if rc_enabled else "SERIAL"
                 signal_status = "LOST" if is_rc_signal_lost() else "OK"
                 hb_msg = (
-                    f"[{control_source}] signal={signal_status} "
+                    f"[{control_source}] v{FIRMWARE_VERSION} signal={signal_status} "
                     f"steer={channel_values.get(1, 1500)} µs "
                     f"thr={channel_values.get(2, 1500)} µs "
                     f"blade={'ON' if blade_enabled else 'OFF'} "
