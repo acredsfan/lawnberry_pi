@@ -1039,7 +1039,7 @@ class RoboHATService:
             logger.info("RoboHAT reported USB control active")
             return
 
-        if line_lower.startswith("[usb] pwm"):
+        if line_lower.startswith("[usb] pwm") or line_lower.startswith("[uart] pwm"):
             self._last_status_at = time.monotonic()
             self._pwm_ack_count += 1
             self._pwm_ack_event.set()
@@ -1117,10 +1117,17 @@ class RoboHATService:
         # Ctrl+C.  Recognising them early lets the watchdog trigger a soft reset
         # instead of waiting for the 12-second firmware-freeze timeout.
         stripped = line.strip()
+        if stripped.startswith("Code stopped by auto-reload") or stripped.startswith(
+            "Auto-reload is on"
+        ):
+            # Normal CP10 auto-reload (filesystem write detected) — code.py is
+            # restarting on its own; wait for heartbeats, don't send Ctrl+D.
+            logger.debug("RoboHAT: CP10 auto-reload in progress")
+            return
+
         if (
             stripped.startswith(">>>")
             or stripped.startswith("Traceback (most recent call last)")
-            or stripped.startswith("Code stopped by auto-reload")
             or stripped.startswith("Auto-reload is off")
             or "code.py output:" not in line_lower
             and "adafruit circuitpython" in line_lower

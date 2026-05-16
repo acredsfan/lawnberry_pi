@@ -49,7 +49,7 @@ class SimpleNeoPixel(adafruit_pixelbuf.PixelBuf):
         super().__init__(n, brightness=brightness, byteorder=byteorder, auto_write=auto_write)
 
     # new requirement in adafruit_pixelbuf 9+
-    def _transmit(self, buf: memoryview) -> None:  # pylint: disable=invalid-name
+    def _transmit(self, buf: memoryview, **kwargs) -> None:  # pylint: disable=invalid-name
         neopixel_write.neopixel_write(self._pin, buf)
 
 
@@ -283,7 +283,7 @@ def read_uart_line() -> str | None:
         chunk = _hw_uart.read(_hw_uart.in_waiting)
         if not chunk:
             break
-        _uart_rx_buf += chunk.decode("utf-8", errors="ignore")
+        _uart_rx_buf += chunk.decode("utf-8", "ignore")
     if "\n" in _uart_rx_buf or "\r" in _uart_rx_buf:
         for sep in ("\r\n", "\n", "\r"):
             if sep in _uart_rx_buf:
