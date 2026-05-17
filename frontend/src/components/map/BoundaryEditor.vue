@@ -252,7 +252,7 @@
           v-for="(pt, idx) in currentPolygon"
           v-if="mode === 'boundary' || mode === 'exclusion' || mode === 'mowing'"
           :key="`vtx-${idx}`"
-          :lat-lng="[pt.latitude, pt.longitude]"
+          :lat-lng="_applyDisplayOffset(pt.latitude, pt.longitude)"
           :draggable="true"
           @moveend="(e:any) => onVertexMoveEnd(idx, e)"
         />
@@ -261,7 +261,7 @@
         <LMarker
           v-for="m in markers"
           :key="m.marker_id"
-          :lat-lng="[m.position.latitude, m.position.longitude]"
+          :lat-lng="_applyDisplayOffset(m.position.latitude, m.position.longitude)"
           :icon="markerDivIcon(m)"
           :draggable="mode === 'marker'"
           @moveend="(e:any) => onMarkerMoveEnd(m.marker_id, e)"
@@ -607,13 +607,13 @@ const snapToBoundary = ref(false);
 // Derived geometry from store
 const boundaryPolygon = computed(() => {
   const bz = mapStore.configuration?.boundary_zone;
-  return bz?.polygon?.map(p => [p.latitude, p.longitude]) || [];
+  return bz?.polygon?.map(p => _applyDisplayOffset(p.latitude, p.longitude)) || [];
 });
 
 const exclusionPolygons = computed(() => {
   return (mapStore.configuration?.exclusion_zones || []).map(z => ({
     id: z.id,
-    points: z.polygon.map(p => [p.latitude, p.longitude])
+    points: z.polygon.map(p => _applyDisplayOffset(p.latitude, p.longitude))
   }));
 });
 
@@ -622,11 +622,11 @@ const markers = computed(() => mapStore.configuration?.markers || []);
 const mowingPolygons = computed(() => {
   return (mapStore.configuration?.mowing_zones || []).map(z => ({
     id: z.id,
-    points: z.polygon.map(p => [p.latitude, p.longitude])
+    points: z.polygon.map(p => _applyDisplayOffset(p.latitude, p.longitude))
   }));
 });
 
-const currentPolygonLatLng = computed(() => currentPolygon.value.map(p => [p.latitude, p.longitude]));
+const currentPolygonLatLng = computed(() => currentPolygon.value.map(p => _applyDisplayOffset(p.latitude, p.longitude)));
 
 const isPolygonMode = computed(() => mode.value === 'boundary' || mode.value === 'exclusion' || mode.value === 'mowing');
 const showPolygonToolbar = computed(() => isPolygonMode.value && currentPolygon.value.length > 0 && !props.pickForPin);
