@@ -734,12 +734,14 @@ class PowerSensorInterface:
                     and ina_current_val is not None
                     and abs(float(ina_current_val)) > 1e-6
                 ):
-                    # Cross-source: Victron panel power + INA low-side panel current
-                    derived = float(victron_solar_power) / float(ina_current_val)
+                    # Cross-source: Victron panel power + INA low-side panel current.
+                    # Low-side shunt convention makes current sign negative; use abs
+                    # so derived panel voltage is always positive (V = P / |I|).
+                    derived = float(victron_solar_power) / abs(float(ina_current_val))
             except Exception:
                 derived = None
-            # Guard against implausible derived values
-            if derived is not None and abs(derived) >= 0.05:
+            # Solar panel voltage is always positive — discard non-positive derived values
+            if derived is not None and derived >= 0.05:
                 solar_voltage = round(derived, 3)
 
         load_current_sources: list[Any] = []

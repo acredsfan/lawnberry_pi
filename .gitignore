@@ -246,3 +246,9 @@ openapi.json
 # Local-only superpowers implementation plans
 # =============================================================
 docs/superpowers/plans/
+
+# Auto-added by pre-commit-gitignore-guard: Large file (88738 KB ≥ 2048 KB threshold)
+.forgemind/embeddings_cache/models--sentence-transformers--all-MiniLM-L6-v2/blobs/53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db
+
+# Auto-added by pre-commit-gitignore-guard: Private key or certificate
+frontend/config/secrets.json

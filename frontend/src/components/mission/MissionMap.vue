@@ -41,7 +41,7 @@
         <LMarker
           v-for="(wp, idx) in waypoints"
           :key="`wp-${wp.id}`"
-          :lat-lng="[wp.lat, wp.lon]"
+          :lat-lng="applyDisplayOffset(wp.lat, wp.lon)"
           :draggable="true"
           :icon="waypointIcon(idx + 1)"
           @dragend="(e) => onWaypointDragEnd(wp, e)"

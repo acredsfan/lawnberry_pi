@@ -25,17 +25,20 @@ from ..base import HardwareDriver
 class _Ina3221Config:
     address: int = 0x40
     bus: int = 1
-    # Ohmic values for each channel shunt resistor; tune via config if wiring differs
-    # Defaults tuned for recent hardware changes:
-    #  - Solar side: 30 A / 75 mV -> R = 0.075 V / 30 A = 0.0025 ohm
-    #  - Battery side: 50 A / 75 mV -> R = 0.075 V / 50 A = 0.0015 ohm
-    shunt_ohms_ch1: float = 0.0025  # Solar input (default for new hardware)
+    # Ohmic values for each channel shunt resistor; tune via config if wiring differs.
+    # Physical shunt specs (hardware rev B):
+    #  - Solar/charger (CH1): 50 A / 75 mV = 0.0015 ohm physical, but sense wire adds
+    #    ~4.8 mΩ series resistance — effective calibrated value in hardware.yaml is 0.0062 ohm.
+    #    IN+/IN- are reversed on CH1; solar_current_scale: -1.0 corrects the sign.
+    #  - Battery (CH3): 30 A / 75 mV -> R = 0.075 V / 30 A = 0.0025 ohm
+    shunt_ohms_ch1: float = 0.0062  # Solar/charger input (calibrated incl. sense wire)
     shunt_ohms_ch2: float = 0.01  # Reserved
-    shunt_ohms_ch3: float = 0.0015  # Battery pack (default for new hardware)
+    shunt_ohms_ch3: float = 0.0025  # Battery pack
     battery_voltage_offset_v: float = 0.0
     battery_voltage_scale: float = 1.0
     solar_voltage_offset_v: float = 0.0
     solar_voltage_scale: float = 1.0
+    solar_current_scale: float = 1.0
     battery_current_offset_a: float = 0.0
 
 
@@ -103,6 +106,7 @@ class INA3221Driver(HardwareDriver):
             battery_voltage_scale=float(cfg.get("battery_voltage_scale", 1.0)),
             solar_voltage_offset_v=float(cfg.get("solar_voltage_offset_v", 0.0)),
             solar_voltage_scale=float(cfg.get("solar_voltage_scale", 1.0)),
+            solar_current_scale=float(cfg.get("solar_current_scale", 1.0)),
             battery_current_offset_a=float(cfg.get("battery_current_offset_a", 0.0)),
         )
         # Allow environment overrides. Two forms are supported:
@@ -222,7 +226,7 @@ class INA3221Driver(HardwareDriver):
                 battery_voltage = bus_voltages[2] * self._cfg.battery_voltage_scale + self._cfg.battery_voltage_offset_v
                 battery_current = (currents[2] + self._cfg.battery_current_offset_a) if currents[2] is not None else None
                 solar_voltage = bus_voltages[0] * self._cfg.solar_voltage_scale + self._cfg.solar_voltage_offset_v
-                solar_current = currents[0] if currents[0] is not None else None
+                solar_current = (currents[0] * self._cfg.solar_current_scale) if currents[0] is not None else None
 
                 return {
                     "battery_voltage": battery_voltage,

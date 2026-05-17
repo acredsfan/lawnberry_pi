@@ -38,6 +38,9 @@ class Ina3221Config(BaseModel):
     solar_voltage_scale: float = Field(
         default=1.0, description="Multiplicative scale for solar bus voltage"
     )
+    solar_current_scale: float = Field(
+        default=1.0, description="Multiplicative scale for solar current (use -1.0 to invert sign when shunt IN+/IN- are reversed)"
+    )
     battery_current_offset_a: float = Field(
         default=0.0, description="Additive offset for battery current reading"
     )

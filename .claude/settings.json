@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"TOOL REMINDERS (mandatory, every message):\\n- Code search: ALWAYS use mcp__semble__search or mcp__semble__find_related first. repo=/home/pi/lawnberry. Never use grep/find/Bash for code lookups.\\n- Memory: ALWAYS use mcp__forgemind__memory_add / mcp__forgemind__memory_search. Forgemind is primary (cross-platform). File-based memory at ~/.claude/projects/.../memory/ is secondary.\"}}'"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"MANDATORY TOOL RULES - follow these every session without being reminded:\\n1. Code search: use mcp__semble__search or mcp__semble__find_related BEFORE any grep/find/Bash code lookup. Pass repo=/home/pi/lawnberry.\\n2. Memory: use mcp__forgemind__memory_add and mcp__forgemind__memory_search for ALL memory operations. Never write to the file-based memory directory at ~/.claude/projects/.../memory/.\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}
