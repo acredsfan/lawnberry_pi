@@ -267,7 +267,42 @@ class LocalizationService:
         self._bootstrap_start_time = time.monotonic()
 
     def end_bootstrap(self) -> None:
-        """Mark that the bootstrap drive has ended."""
+        """Mark that the bootstrap drive has ended.
+
+        If no consistent snap occurred during the drive, commit the mean of whatever
+        COG readings are buffered as a fallback. Bootstrap always completes.
+        """
+        if (
+            self._bootstrap_start_time is not None
+            and self._heading_alignment_sample_count == 0
+            and self._gps_cog_history
+        ):
+            sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
+            cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
+            fallback_cog = math.degrees(math.atan2(sin_c, cos_c)) % 360.0
+            spread = (
+                max(abs(heading_delta(c, fallback_cog)) for c in self._gps_cog_history)
+                if len(self._gps_cog_history) > 1
+                else 0.0
+            )
+            current_hdg = self.state.heading
+            if current_hdg is not None:
+                delta_fb = heading_delta(fallback_cog, current_hdg)
+                clamped = max(-180.0, min(180.0, delta_fb))
+                self._session_heading_alignment = wrap_heading(
+                    self._session_heading_alignment + clamped
+                )
+            self._heading_alignment_sample_count = 1
+            self._require_gps_heading_alignment = False
+            logger.warning(
+                "Bootstrap ending without consistent snap "
+                "(spread=%.1f°, samples=%d); falling back to mean=%.1f°",
+                spread,
+                len(self._gps_cog_history),
+                fallback_cog,
+            )
+            if self._alignment_file is not None:
+                self.save_alignment(source="gps_cog_snap_fallback")
         self._bootstrap_start_time = None
 
     # ── GPS age/accuracy policy ──────────────────────────────────────────────
@@ -406,7 +441,10 @@ class LocalizationService:
                         going_straight = max_dev < 15.0
 
                     if going_straight and self._heading_alignment_sample_count == 0:
-                        clamped_delta = max(-180.0, min(180.0, delta))
+                        # Use buffer mean rather than the current tick's COG to
+                        # filter GPS noise spikes that may still be in the window.
+                        snap_delta = heading_delta(cog_mean, adjusted_yaw)
+                        clamped_delta = max(-180.0, min(180.0, snap_delta))
                         self._session_heading_alignment = wrap_heading(
                             self._session_heading_alignment + clamped_delta
                         )

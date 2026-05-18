@@ -376,3 +376,147 @@ def test_reset_for_mission_saved_alignment_does_not_overwrite_disk(tmp_path):
     assert data.get("source") == "gps_cog_snap", (
         "Disk source should remain gps_cog_snap, not be overwritten with mission_start_reset"
     )
+
+
+# ---------------------------------------------------------------------------
+# Fix 5: Bootstrap multi-sample snap
+# ---------------------------------------------------------------------------
+
+def _make_sensor_fix5(gps_cog: float, imu_yaw: float = 90.0) -> SensorData:
+    """Build a SensorData tick with a controlled GPS COG (receiver-reported)."""
+    return SensorData(
+        gps=GpsReading(
+            latitude=37.0,
+            longitude=-122.0,
+            accuracy=0.03,
+            heading=gps_cog,
+            speed=1.0,
+        ),
+        imu=ImuReading(yaw=imu_yaw, calibration_status="fully_calibrated"),
+    )
+
+
+def _make_sensor_no_imu(gps_cog: float) -> SensorData:
+    """Build a SensorData tick with GPS COG but no IMU reading."""
+    return SensorData(
+        gps=GpsReading(
+            latitude=37.0,
+            longitude=-122.0,
+            accuracy=0.03,
+            heading=gps_cog,
+            speed=1.0,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_snap_uses_cog_mean_not_spike_reading():
+    """Snap delta uses mean of consistent COG buffer, rejecting a spike reading.
+
+    Sequence design:
+      Ticks 1-7 COG values: [210, 355(spike), 210, 210, 210, 225, 225]
+
+      - Tick 3: buffer=[210,355,210] — spike present, going_straight=False
+      - Ticks 4-5: spike still in buffer, no snap
+      - Tick 6: pop(0)=210 → buffer=[355,210,210,210,225] — spike still, no snap
+      - Tick 7: pop(0)=355 → buffer=[210,210,210,225,225]
+        cog_mean ≈ 216°, max_dev ≤ 9° → going_straight=True → SNAP fires.
+        current_tick cog=225, but cog_mean≈216°.
+
+    With the bug (uses current cog=225): heading ends up near 225°.
+    With the fix (uses cog_mean≈216°): heading ends up near 216°.
+    """
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(alignment_file=None)
+    loc.reset_for_mission()
+    loc.begin_bootstrap()
+
+    cog_sequence = [210.0, 355.0, 210.0, 210.0, 210.0, 225.0, 225.0]
+    for cog in cog_sequence:
+        await loc.update(_make_sensor_fix5(gps_cog=cog))
+
+    assert loc._heading_alignment_sample_count == 1, (
+        "Snap should have fired exactly once during the 7-tick sequence"
+    )
+    assert loc.alignment_ready is True
+    assert loc.state.heading is not None
+
+    from backend.src.nav.localization_helpers import heading_delta as hd
+
+    # cog_mean of [210,210,210,225,225] ≈ 216°.  Allow ±8° for circular mean
+    # rounding; the key is the heading must NOT be near 225° (the spike-tick cog).
+    assert abs(hd(loc.state.heading, 216.0)) < 8.0, (
+        f"Heading {loc.state.heading:.1f}° should be near cog_mean 216° "
+        f"(not the spike-tick cog 225°)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_end_bootstrap_fallback_commits_mean_when_no_snap():
+    """If bootstrap ends without a consistent snap, mean of buffer is committed."""
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(alignment_file=None)
+    loc.reset_for_mission()
+    loc.begin_bootstrap()
+
+    # Feed only 2 ticks — fewer than 3 required for going_straight → no snap fires.
+    for cog in [210.0, 211.0]:
+        await loc.update(_make_sensor_no_imu(gps_cog=cog))
+
+    assert loc._heading_alignment_sample_count == 0, "No snap should have fired yet"
+
+    # Call end_bootstrap() — fallback should commit the mean of [210, 211]
+    loc.end_bootstrap()
+
+    assert loc._heading_alignment_sample_count == 1
+    assert loc.alignment_ready is True
+    assert loc.state.heading is not None
+
+    from backend.src.nav.localization_helpers import heading_delta as hd
+
+    assert abs(hd(loc.state.heading, 210.5)) < 10.0, (
+        f"Heading {loc.state.heading:.1f}° should be near fallback mean 210.5°"
+    )
+
+
+@pytest.mark.asyncio
+async def test_end_bootstrap_fallback_logs_warning_when_spread_high(caplog):
+    """end_bootstrap() fallback logs WARNING when buffer spread exceeds 15°."""
+    import logging
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(alignment_file=None)
+    loc.reset_for_mission()
+    loc.begin_bootstrap()
+
+    # High-spread readings — 60° spread → never going_straight
+    for cog in [180.0, 220.0, 240.0]:
+        await loc.update(_make_sensor_no_imu(gps_cog=cog))
+
+    assert loc._heading_alignment_sample_count == 0
+
+    with caplog.at_level(logging.WARNING, logger="backend.src.services.localization_service"):
+        loc.end_bootstrap()
+
+    assert any("bootstrap" in r.message.lower() for r in caplog.records), (
+        "Expected bootstrap warning when spread > 15°"
+    )
+    assert loc._heading_alignment_sample_count == 1
+
+
+@pytest.mark.asyncio
+async def test_reset_for_mission_clears_cog_buffer():
+    """reset_for_mission() flushes the COG buffer so each mission starts clean."""
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(alignment_file=None)
+    loc.begin_bootstrap()
+    for cog in [180.0, 181.0, 182.0]:
+        await loc.update(_make_sensor_no_imu(gps_cog=cog))
+
+    assert len(loc._gps_cog_history) > 0
+
+    loc.reset_for_mission()
+    assert loc._gps_cog_history == [], "COG history should be cleared by reset_for_mission"
