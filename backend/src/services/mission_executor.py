@@ -155,6 +155,24 @@ class MissionExecutor:
         return self.waypoint_tolerance
 
     # ------------------------------------------------------------------
+    # Pre-rotation gate (Task 3)
+    # ------------------------------------------------------------------
+
+    _PRE_ROTATION_SPEED_CAP: float = 0.05
+    _PRE_ROTATION_ACTIVATE_DEG: float = 45.0
+    _PRE_ROTATION_CLEAR_DEG: float = 20.0
+
+    def _apply_heading_gate(
+        self, base_speed: float, abs_heading_error: float, pre_rotating: bool
+    ) -> float:
+        """Cap forward speed while pre-rotating to resolve large initial heading errors."""
+        if not pre_rotating:
+            return base_speed
+        if abs_heading_error < self._PRE_ROTATION_CLEAR_DEG:
+            return base_speed  # gate cleared — caller must set _pre_rotating = False
+        return min(base_speed, self._PRE_ROTATION_SPEED_CAP)
+
+    # ------------------------------------------------------------------
     # Stop delivery helper (Task 5)
     # ------------------------------------------------------------------
 
@@ -295,6 +313,9 @@ class MissionExecutor:
         _imu_valid_for_leg = bool(getattr(_loc_state_init, "imu_valid", False))
         _ema_alpha = HEADING_EMA_ALPHA_IMU if _imu_valid_for_leg else HEADING_EMA_ALPHA_GPS
         _ema_slew = HEADING_SLEW_DEG_PER_TICK_IMU if _imu_valid_for_leg else HEADING_SLEW_DEG_PER_TICK_GPS
+
+        _pre_rotating: bool = False
+        _pre_rotation_initialized: bool = False
 
         while True:
             status = mission_service.mission_statuses.get(mission.id)
@@ -476,6 +497,25 @@ class MissionExecutor:
             _stall_active = _stall_start is not None
             _imu_heading = raw_heading if raw_heading is not None else current_heading
             _raw_abs_err = abs(heading_error(target=heading_to_target, current=_imu_heading))
+
+            # Pre-rotation gate: initialize on first tick with a known bearing.
+            if not _pre_rotation_initialized and _path_bearing is not None:
+                _pre_rotation_initialized = True
+                if _raw_abs_err > self._PRE_ROTATION_ACTIVATE_DEG:
+                    _pre_rotating = True
+                    logger.info(
+                        "Pre-rotation gate active: initial heading error %.1f° > %.0f°",
+                        _raw_abs_err,
+                        self._PRE_ROTATION_ACTIVATE_DEG,
+                    )
+            elif _pre_rotating and _raw_abs_err < self._PRE_ROTATION_CLEAR_DEG:
+                _pre_rotating = False
+                _stall_start = None  # prevent stall timer inheriting pre-rotation time
+                logger.info(
+                    "Pre-rotation gate cleared: heading error %.1f° < %.0f°",
+                    _raw_abs_err,
+                    self._PRE_ROTATION_CLEAR_DEG,
+                )
 
             # --- GPS position stall detection ---
             # Tracks whether the mower is physically moving while motors run.
@@ -803,6 +843,9 @@ class MissionExecutor:
                     )
             except Exception:
                 base_speed = self.cruise_speed
+
+            # Apply pre-rotation speed cap (0.05 m/s until heading error < 20°)
+            base_speed = self._apply_heading_gate(base_speed, _raw_abs_err, _pre_rotating)
 
             # Tank/blend mode selection with hysteresis.
             # _force_tank_escape and _force_reverse_escape override normal mode selection

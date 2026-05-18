@@ -927,3 +927,37 @@ async def test_traction_boost_not_applied_during_motor_stall_escape():
     for left, right in reverse_calls:
         assert abs(left) <= 0.45, f"Reverse left boosted too high: {left}"
         assert abs(right) <= 0.45, f"Reverse right boosted too high: {right}"
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Pre-rotation gate helper
+# ---------------------------------------------------------------------------
+
+def test_heading_gate_caps_speed_when_pre_rotating():
+    from backend.src.services.mission_executor import MissionExecutor
+    executor = MissionExecutor(localization=FakeLocalization(), gateway=FakeGateway())
+    capped = executor._apply_heading_gate(0.5, abs_heading_error=100.0, pre_rotating=True)
+    assert capped == pytest.approx(0.05)
+
+
+def test_heading_gate_clears_and_returns_full_speed_below_20_degrees():
+    from backend.src.services.mission_executor import MissionExecutor
+    executor = MissionExecutor(localization=FakeLocalization(), gateway=FakeGateway())
+    # When pre_rotating=True but error < 20°, gate clears → returns full speed
+    capped = executor._apply_heading_gate(0.5, abs_heading_error=15.0, pre_rotating=True)
+    assert capped == pytest.approx(0.5)
+
+
+def test_heading_gate_inactive_does_not_cap():
+    from backend.src.services.mission_executor import MissionExecutor
+    executor = MissionExecutor(localization=FakeLocalization(), gateway=FakeGateway())
+    capped = executor._apply_heading_gate(0.5, abs_heading_error=50.0, pre_rotating=False)
+    assert capped == pytest.approx(0.5)
+
+
+def test_heading_gate_pre_rotation_cap_wins_over_higher_speed():
+    from backend.src.services.mission_executor import MissionExecutor
+    executor = MissionExecutor(localization=FakeLocalization(), gateway=FakeGateway())
+    # Even if base_speed is max_speed, cap is 0.05 while pre-rotating
+    capped = executor._apply_heading_gate(0.8, abs_heading_error=90.0, pre_rotating=True)
+    assert capped == pytest.approx(0.05)
