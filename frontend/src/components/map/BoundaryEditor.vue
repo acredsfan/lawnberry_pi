@@ -375,6 +375,7 @@ const loadingTimeout = ref<number | null>(null);
 // Satellite imagery display offset helpers
 const _METERS_PER_LAT_DEG = 111320.0;
 function _applyDisplayOffset(lat: number, lon: number): [number, number] {
+  if (props.mapStyle !== 'satellite' && props.mapStyle !== 'hybrid') return [lat, lon];
   const northM = props.satelliteDisplayNorthM;
   const eastM = props.satelliteDisplayEastM;
   if (northM === 0 && eastM === 0) return [lat, lon];
@@ -382,6 +383,7 @@ function _applyDisplayOffset(lat: number, lon: number): [number, number] {
   return [lat + northM / _METERS_PER_LAT_DEG, lon + eastM / mpLon];
 }
 function _removeDisplayOffset(lat: number, lon: number): [number, number] {
+  if (props.mapStyle !== 'satellite' && props.mapStyle !== 'hybrid') return [lat, lon];
   const northM = props.satelliteDisplayNorthM;
   const eastM = props.satelliteDisplayEastM;
   if (northM === 0 && eastM === 0) return [lat, lon];

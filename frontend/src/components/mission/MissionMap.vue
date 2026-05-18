@@ -126,6 +126,7 @@ const TERRAIN_MAP_MAX_ZOOM = 17;
 const METERS_PER_LAT_DEG = 111320.0;
 
 function applyDisplayOffset(lat: number, lon: number): [number, number] {
+  if (props.mapSettings?.style !== 'satellite' && props.mapSettings?.style !== 'hybrid') return [lat, lon];
   const northM = props.mapSettings?.satellite_display_north_m ?? 0;
   const eastM = props.mapSettings?.satellite_display_east_m ?? 0;
   if (northM === 0 && eastM === 0) return [lat, lon];
@@ -134,6 +135,7 @@ function applyDisplayOffset(lat: number, lon: number): [number, number] {
 }
 
 function removeDisplayOffset(lat: number, lon: number): [number, number] {
+  if (props.mapSettings?.style !== 'satellite' && props.mapSettings?.style !== 'hybrid') return [lat, lon];
   const northM = props.mapSettings?.satellite_display_north_m ?? 0;
   const eastM = props.mapSettings?.satellite_display_east_m ?? 0;
   if (northM === 0 && eastM === 0) return [lat, lon];
