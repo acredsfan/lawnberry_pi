@@ -173,7 +173,7 @@ class MissionExecutor:
         return min(base_speed, self._PRE_ROTATION_SPEED_CAP)
 
     # ------------------------------------------------------------------
-    # Deceleration taper (Task 4)
+    # Deceleration taper
     # ------------------------------------------------------------------
 
     _MIN_APPROACH_SPEED: float = 0.15
