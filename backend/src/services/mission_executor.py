@@ -499,6 +499,8 @@ class MissionExecutor:
             _raw_abs_err = abs(heading_error(target=heading_to_target, current=_imu_heading))
 
             # Pre-rotation gate: initialize on first tick with a known bearing.
+            # _path_bearing is set on the same tick as _raw_abs_err is first valid,
+            # so the gate initializes on the first tick with a real bearing.
             if not _pre_rotation_initialized and _path_bearing is not None:
                 _pre_rotation_initialized = True
                 if _raw_abs_err > self._PRE_ROTATION_ACTIVATE_DEG:
