@@ -746,6 +746,107 @@ async def test_go_to_waypoint_uses_per_waypoint_arrival_threshold():
     assert result is True
 
 
+# ---------------------------------------------------------------------------
+# Task 2: Position confidence tiers
+# ---------------------------------------------------------------------------
+
+def test_position_confidence_full_under_nominal_gps():
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=1.0),
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._position_confidence() == "full"
+
+
+def test_position_confidence_none_during_dead_reckoning():
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=1.0),
+        dead_reckoning_active=True,
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._position_confidence() == "none"
+
+
+def test_position_confidence_none_when_no_position():
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(position=None, last_gps_fix=datetime.now(UTC))
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._position_confidence() == "none"
+
+
+def test_position_confidence_degraded_when_accuracy_is_none():
+    from backend.src.services.mission_executor import MissionExecutor
+    # accuracy=None but fresh fix and not dead-reckoning → degraded
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=None),
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._position_confidence() == "degraded"
+
+
+def test_position_confidence_degraded_when_fix_marginally_stale():
+    from backend.src.services.mission_executor import MissionExecutor
+    from datetime import timedelta
+    # Fix age = 3.0s — beyond max_waypoint_fix_age_seconds (2.0s) but within 2.5× (5.0s)
+    stale_fix = datetime.now(UTC) - timedelta(seconds=3.0)
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=None),
+        dead_reckoning_active=False,
+        last_gps_fix=stale_fix,
+    )
+    executor = MissionExecutor(
+        localization=loc, gateway=FakeGateway(),
+        max_waypoint_fix_age_seconds=2.0,
+    )
+    assert executor._position_confidence() == "degraded"
+
+
+def test_position_confidence_none_when_fix_very_stale():
+    from backend.src.services.mission_executor import MissionExecutor
+    from datetime import timedelta
+    # Fix age = 6.0s — beyond 2.5× max_waypoint_fix_age_seconds (5.0s) → none
+    very_stale = datetime.now(UTC) - timedelta(seconds=6.0)
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=1.0),
+        dead_reckoning_active=False,
+        last_gps_fix=very_stale,
+    )
+    executor = MissionExecutor(
+        localization=loc, gateway=FakeGateway(),
+        max_waypoint_fix_age_seconds=2.0,
+    )
+    assert executor._position_confidence() == "none"
+
+
+def test_position_is_verified_shim_returns_true_for_full():
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=1.0),
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._position_is_verified() is True
+
+
+def test_position_is_verified_shim_returns_false_for_degraded():
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=None),
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._position_is_verified() is False
+
+
 @pytest.mark.asyncio
 async def test_traction_boost_not_applied_during_motor_stall_escape():
     """Once motor stall triggers reverse escape, boost must not interfere."""

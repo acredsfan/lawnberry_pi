@@ -11,7 +11,7 @@ import logging
 import math
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from ..models import Position
 from ..nav.path_planner import PathPlanner
@@ -102,19 +102,28 @@ class MissionExecutor:
             return False
         return (datetime.now(UTC) - last_fix).total_seconds() <= self.max_waypoint_fix_age_seconds
 
-    def _position_is_verified(self) -> bool:
-        """Return True when position is trustworthy enough to advance a waypoint."""
+    def _position_confidence(self) -> Literal["full", "degraded", "none"]:
+        """Return GPS confidence level for arrival detection."""
         position = self._loc.current_position
-        if position is None:
-            return False
-        if self._loc.dead_reckoning_active:
-            return False
-        if not self._gps_fix_is_fresh():
-            return False
+        if position is None or self._loc.dead_reckoning_active:
+            return "none"
+        last_fix = self._loc.last_gps_fix
+        if last_fix is None:
+            return "none"
+        age = (datetime.now(UTC) - last_fix).total_seconds()
+        if age > 2.5 * self.max_waypoint_fix_age_seconds:
+            return "none"
         accuracy = position.accuracy
-        if accuracy is None:
-            return False
-        return float(accuracy) <= self.max_waypoint_accuracy_m
+        is_full = (
+            age <= self.max_waypoint_fix_age_seconds
+            and accuracy is not None
+            and float(accuracy) <= self.max_waypoint_accuracy_m
+        )
+        return "full" if is_full else "degraded"
+
+    def _position_is_verified(self) -> bool:
+        """Shim: True when position confidence is 'full'."""
+        return self._position_confidence() == "full"
 
     # ------------------------------------------------------------------
     # RTK-tiered waypoint tolerance
@@ -320,7 +329,8 @@ class MissionExecutor:
                 await asyncio.sleep(0.5)
                 continue
 
-            if not self._position_is_verified():
+            _confidence = self._position_confidence()
+            if _confidence == "none":
                 heading_wait_start = None
                 await self._deliver_stop_command(reason="position verification hold")
                 _now_mono = time.monotonic()
@@ -351,6 +361,14 @@ class MissionExecutor:
                 if waypoint.arrival_threshold_m is not None
                 else self._tiered_waypoint_tolerance()
             )
+            if _confidence == "degraded":
+                _effective_tol *= 2.0
+                logger.warning(
+                    "Waypoint arrival check in degraded GPS mode "
+                    "(tol=%.2fm dist=%.2fm)",
+                    _effective_tol,
+                    distance_to_target,
+                )
             if distance_to_target <= _effective_tol:
                 logger.info(
                     "MissionExecutor: waypoint reached (%.6f, %.6f)",
