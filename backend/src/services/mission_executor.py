@@ -173,6 +173,20 @@ class MissionExecutor:
         return min(base_speed, self._PRE_ROTATION_SPEED_CAP)
 
     # ------------------------------------------------------------------
+    # Deceleration taper (Task 4)
+    # ------------------------------------------------------------------
+
+    _MIN_APPROACH_SPEED: float = 0.15
+    _DECEL_ZONE_FACTOR: float = 3.0  # decel starts at 3 × waypoint_tolerance
+
+    def _apply_decel_taper(self, base_speed: float, distance: float) -> float:
+        """Linearly taper speed in the approach zone; floor at MIN_APPROACH_SPEED."""
+        decel_start = self._DECEL_ZONE_FACTOR * self.waypoint_tolerance
+        if distance >= decel_start:
+            return base_speed
+        return max(self._MIN_APPROACH_SPEED, base_speed * (distance / decel_start))
+
+    # ------------------------------------------------------------------
     # Stop delivery helper (Task 5)
     # ------------------------------------------------------------------
 
@@ -846,7 +860,9 @@ class MissionExecutor:
             except Exception:
                 base_speed = self.cruise_speed
 
-            # Apply pre-rotation speed cap (0.05 m/s until heading error < 20°)
+            # Deceleration taper: reduce speed linearly when within 3× waypoint_tolerance
+            base_speed = self._apply_decel_taper(base_speed, distance_to_target)
+            # Pre-rotation cap overrides taper when active (most restrictive wins)
             base_speed = self._apply_heading_gate(base_speed, _raw_abs_err, _pre_rotating)
 
             # Tank/blend mode selection with hysteresis.

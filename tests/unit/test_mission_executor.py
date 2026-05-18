@@ -986,3 +986,51 @@ def test_pre_rotation_does_not_activate_at_30_degrees():
     # When gate is not active (pre_rotating=False), speed passes through unchanged
     result = executor._apply_heading_gate(0.5, abs_heading_error=30.0, pre_rotating=False)
     assert result == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Deceleration taper helper
+# ---------------------------------------------------------------------------
+
+def test_decel_taper_full_speed_at_decel_start_distance():
+    from backend.src.services.mission_executor import MissionExecutor
+    executor = MissionExecutor(
+        localization=FakeLocalization(), gateway=FakeGateway(),
+        cruise_speed=0.5, waypoint_tolerance=1.5,
+    )
+    decel_start = 3.0 * executor.waypoint_tolerance  # 4.5m
+    speed = executor._apply_decel_taper(0.5, distance=decel_start)
+    assert speed == pytest.approx(0.5)
+
+
+def test_decel_taper_half_speed_at_half_decel_distance():
+    from backend.src.services.mission_executor import MissionExecutor
+    executor = MissionExecutor(
+        localization=FakeLocalization(), gateway=FakeGateway(),
+        cruise_speed=0.5, waypoint_tolerance=1.5,
+    )
+    decel_start = 3.0 * executor.waypoint_tolerance  # 4.5m
+    speed = executor._apply_decel_taper(0.5, distance=decel_start / 2)
+    assert speed == pytest.approx(0.25)
+
+
+def test_decel_taper_clamps_to_min_approach_speed():
+    from backend.src.services.mission_executor import MissionExecutor
+    executor = MissionExecutor(
+        localization=FakeLocalization(), gateway=FakeGateway(),
+        cruise_speed=0.5, waypoint_tolerance=1.5,
+    )
+    # Very close to waypoint — should floor at MIN_APPROACH_SPEED (0.15)
+    speed = executor._apply_decel_taper(0.5, distance=0.1)
+    assert speed == pytest.approx(0.15)
+
+
+def test_decel_taper_no_change_beyond_decel_start():
+    from backend.src.services.mission_executor import MissionExecutor
+    executor = MissionExecutor(
+        localization=FakeLocalization(), gateway=FakeGateway(),
+        cruise_speed=0.5, waypoint_tolerance=1.5,
+    )
+    # Beyond decel start distance — no tapering
+    speed = executor._apply_decel_taper(0.5, distance=10.0)
+    assert speed == pytest.approx(0.5)
