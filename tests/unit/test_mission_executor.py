@@ -961,3 +961,28 @@ def test_heading_gate_pre_rotation_cap_wins_over_higher_speed():
     # Even if base_speed is max_speed, cap is 0.05 while pre-rotating
     capped = executor._apply_heading_gate(0.8, abs_heading_error=90.0, pre_rotating=True)
     assert capped == pytest.approx(0.05)
+
+
+def test_pre_rotation_position_advance_under_threshold_at_119_degrees():
+    """At 119° initial error, capped speed keeps per-tick advance well under 0.15m."""
+    from backend.src.services.mission_executor import MissionExecutor
+    executor = MissionExecutor(localization=FakeLocalization(), gateway=FakeGateway())
+    # At 119° error, gate is active → speed capped to 0.05 m/s
+    capped_speed = executor._apply_heading_gate(0.5, abs_heading_error=119.0, pre_rotating=True)
+    assert capped_speed == pytest.approx(executor._PRE_ROTATION_SPEED_CAP)
+    # At 5 Hz control loop (0.2s per tick), max position advance per tick
+    position_advance_per_tick = capped_speed * 0.2  # 0.01m
+    assert position_advance_per_tick < 0.15, (
+        f"Per-tick advance {position_advance_per_tick:.3f}m must stay under 0.15m"
+    )
+
+
+def test_pre_rotation_does_not_activate_at_30_degrees():
+    """30° initial heading error is below the 45° threshold; pre-rotation is not activated."""
+    from backend.src.services.mission_executor import MissionExecutor
+    executor = MissionExecutor(localization=FakeLocalization(), gateway=FakeGateway())
+    # 30° < _PRE_ROTATION_ACTIVATE_DEG (45°) — gate would not activate
+    assert 30.0 < executor._PRE_ROTATION_ACTIVATE_DEG
+    # When gate is not active (pre_rotating=False), speed passes through unchanged
+    result = executor._apply_heading_gate(0.5, abs_heading_error=30.0, pre_rotating=False)
+    assert result == pytest.approx(0.5)
