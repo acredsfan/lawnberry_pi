@@ -92,7 +92,7 @@ class MissionExecutor:
         self._failure_detail: str | None = None
 
     # ------------------------------------------------------------------
-    # Position verification helpers (Task 4)
+    # Position verification helpers
     # ------------------------------------------------------------------
 
     def _gps_fix_is_fresh(self) -> bool:
@@ -110,6 +110,9 @@ class MissionExecutor:
         last_fix = self._loc.last_gps_fix
         if last_fix is None:
             return "none"
+        # Handle naive datetimes by removing tzinfo if present
+        if last_fix.tzinfo is None:
+            last_fix = last_fix.replace(tzinfo=UTC)
         age = (datetime.now(UTC) - last_fix).total_seconds()
         if age > 2.5 * self.max_waypoint_fix_age_seconds:
             return "none"
@@ -356,19 +359,18 @@ class MissionExecutor:
 
             distance_to_target = planner.calculate_distance(current_position, target_pos)
 
-            _effective_tol = (
-                waypoint.arrival_threshold_m
-                if waypoint.arrival_threshold_m is not None
-                else self._tiered_waypoint_tolerance()
-            )
-            if _confidence == "degraded":
-                _effective_tol *= 2.0
+            if waypoint.arrival_threshold_m is not None:
+                _effective_tol = waypoint.arrival_threshold_m
+            elif _confidence == "degraded":
+                _effective_tol = self._tiered_waypoint_tolerance() * 2.0
                 logger.warning(
-                    "Waypoint arrival check in degraded GPS mode "
+                    "Waypoint arrival in degraded GPS mode "
                     "(tol=%.2fm dist=%.2fm)",
                     _effective_tol,
                     distance_to_target,
                 )
+            else:
+                _effective_tol = self._tiered_waypoint_tolerance()
             if distance_to_target <= _effective_tol:
                 logger.info(
                     "MissionExecutor: waypoint reached (%.6f, %.6f)",

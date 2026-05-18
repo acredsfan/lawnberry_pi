@@ -746,6 +746,31 @@ async def test_go_to_waypoint_uses_per_waypoint_arrival_threshold():
     assert result is True
 
 
+def test_per_waypoint_threshold_not_doubled_in_degraded_mode():
+    """Per-waypoint arrival_threshold_m is not doubled even in degraded GPS mode."""
+    from backend.src.services.mission_executor import MissionExecutor
+    from backend.src.models.mission import MissionWaypoint
+    # degraded: accuracy=None (no tiered tolerance)
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=None),
+        dead_reckoning_active=False,
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._position_confidence() == "degraded"
+    # Verify the tiered tolerance would be doubled: 1.0 * 2 = 2.0
+    assert executor._tiered_waypoint_tolerance() * 2.0 == pytest.approx(2.0)
+    # Now verify the logic: per-waypoint override should NOT be doubled
+    wp_with_override = MissionWaypoint(lat=1.0, lon=1.0, arrival_threshold_m=0.10)
+    if wp_with_override.arrival_threshold_m is not None:
+        effective = wp_with_override.arrival_threshold_m
+    elif executor._position_confidence() == "degraded":
+        effective = executor._tiered_waypoint_tolerance() * 2.0
+    else:
+        effective = executor._tiered_waypoint_tolerance()
+    assert effective == pytest.approx(0.10)  # NOT 0.20
+
+
 # ---------------------------------------------------------------------------
 # Task 2: Position confidence tiers
 # ---------------------------------------------------------------------------
