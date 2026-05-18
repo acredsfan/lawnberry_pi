@@ -524,6 +524,12 @@ class MissionExecutor:
                         _raw_abs_err,
                         self._PRE_ROTATION_ACTIVATE_DEG,
                     )
+                if _raw_abs_err > 30.0:
+                    logger.warning(
+                        "Bootstrap heading uncertain — first-leg error exceeds 30° (%.1f°); "
+                        "check imu_alignment.json",
+                        _raw_abs_err,
+                    )
             elif _pre_rotating and _raw_abs_err < self._PRE_ROTATION_CLEAR_DEG:
                 _pre_rotating = False
                 _stall_start = None  # prevent stall timer inheriting pre-rotation time
