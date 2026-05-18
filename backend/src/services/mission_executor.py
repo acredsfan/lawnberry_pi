@@ -48,7 +48,7 @@ class MissionExecutor:
             dispatch_drive_speeds(left, right) -> Awaitable[bool].
         max_speed: Maximum wheel speed (m/s-equivalent, default 0.8).
         cruise_speed: Default forward speed (m/s-equivalent, default 0.5).
-        waypoint_tolerance: Arrival radius in metres (default 0.5).
+        waypoint_tolerance: Fallback arrival radius in metres when GPS accuracy unavailable (default 1.0).
         max_waypoint_fix_age_seconds: GPS staleness threshold (default 2.0).
         max_waypoint_accuracy_m: GPS accuracy floor in metres (default 5.0).
         position_verification_timeout_seconds: Abort timeout (default 30.0).
@@ -63,7 +63,7 @@ class MissionExecutor:
         encoder_active_provider: Any = None,
         max_speed: float = 0.8,
         cruise_speed: float = 0.5,
-        waypoint_tolerance: float = 0.5,
+        waypoint_tolerance: float = 1.0,
         max_waypoint_fix_age_seconds: float = 2.0,
         max_waypoint_accuracy_m: float = 5.0,
         position_verification_timeout_seconds: float = 30.0,
@@ -115,6 +115,32 @@ class MissionExecutor:
         if accuracy is None:
             return False
         return float(accuracy) <= self.max_waypoint_accuracy_m
+
+    # ------------------------------------------------------------------
+    # RTK-tiered waypoint tolerance (Task 1)
+    # ------------------------------------------------------------------
+
+    # Tolerance tiers calibrated to mower half-width (150mm) and GPS accuracy bands.
+    _TOL_RTK_FIXED: float = 0.15   # RTK Fixed  ≤ 0.05m accuracy
+    _TOL_RTK_FLOAT: float = 0.30   # RTK Float  ≤ 0.25m accuracy
+    _TOL_STANDARD:  float = 0.65   # Standard GPS ≤ 1.0m accuracy
+
+    def _tiered_waypoint_tolerance(self) -> float:
+        """Return waypoint arrival radius scaled to current GPS accuracy tier."""
+        position = self._loc.current_position
+        if position is None:
+            return self.waypoint_tolerance
+        accuracy = position.accuracy
+        if accuracy is None:
+            return self.waypoint_tolerance
+        acc = float(accuracy)
+        if acc <= 0.05:
+            return self._TOL_RTK_FIXED
+        if acc <= 0.25:
+            return self._TOL_RTK_FLOAT
+        if acc <= 1.0:
+            return self._TOL_STANDARD
+        return self.waypoint_tolerance
 
     # ------------------------------------------------------------------
     # Stop delivery helper (Task 5)
@@ -320,7 +346,12 @@ class MissionExecutor:
 
             distance_to_target = planner.calculate_distance(current_position, target_pos)
 
-            if distance_to_target <= self.waypoint_tolerance:
+            _effective_tol = (
+                waypoint.arrival_threshold_m
+                if waypoint.arrival_threshold_m is not None
+                else self._tiered_waypoint_tolerance()
+            )
+            if distance_to_target <= _effective_tol:
                 logger.info(
                     "MissionExecutor: waypoint reached (%.6f, %.6f)",
                     waypoint.lat,

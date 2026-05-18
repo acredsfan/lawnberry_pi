@@ -82,7 +82,7 @@ class NavigationSettings(BaseModel):
     acceleration_ms2: float = 0.5  # Acceleration limit
 
     # Path planning
-    waypoint_tolerance_m: float = 0.5  # Distance tolerance for waypoints
+    waypoint_tolerance_m: float = 1.0  # Fallback tolerance (used when GPS accuracy unavailable)
     path_lookahead_m: float = 2.0  # Path planning lookahead distance
     obstacle_avoidance_distance_m: float = 1.0  # Obstacle avoidance trigger distance
 

@@ -25,6 +25,13 @@ class MissionWaypoint(BaseModel):
     speed: int = Field(
         default=50, ge=0, le=100, description="Mower speed at this waypoint (0-100%)."
     )
+    arrival_threshold_m: float | None = Field(
+        default=None,
+        description=(
+            "Per-waypoint arrival radius in metres. None uses RTK-tiered tolerance "
+            "(0.15m RTK Fixed, 0.30m RTK Float, 0.65m standard GPS, 1.0m fallback)."
+        ),
+    )
 
     @field_validator("lat")
     @classmethod

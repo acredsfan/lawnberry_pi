@@ -313,9 +313,13 @@ async def test_go_to_waypoint_blocked_by_emergency():
 async def test_execute_mission_completes_when_all_waypoints_reached():
     from backend.src.services.mission_executor import MissionExecutor
 
-    # Position already within tolerance of every waypoint
+    # Position already within tolerance of every waypoint.
+    # accuracy=2.0 (>1.0m threshold) triggers the fallback tier so waypoint_tolerance=20000.0
+    # is used. accuracy must be non-None and <= max_waypoint_accuracy_m (5.0 default) for
+    # _position_is_verified() to pass. Values > 1.0m fall through to the waypoint_tolerance
+    # fallback in _tiered_waypoint_tolerance().
     loc = FakeLocalization(
-        position=Position(latitude=0.1, longitude=0.1, accuracy=0.3),
+        position=Position(latitude=0.1, longitude=0.1, accuracy=2.0),
         heading=0.0,
         dead_reckoning_active=False,
         last_gps_fix=datetime.now(UTC),
@@ -588,6 +592,127 @@ async def test_wheel_spin_triggers_pivot_escape():
     assert len(pivot_dispatched) > 0, (
         f"Expected pivot escape, got drive calls: {gw.drive_calls[:10]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 1: RTK-tiered tolerance + per-waypoint field
+# ---------------------------------------------------------------------------
+
+def test_tiered_tolerance_rtk_fixed():
+    """accuracy ≤ 0.05m (RTK Fixed) → 0.15m (mower half-width)."""
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=0.03),
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._tiered_waypoint_tolerance() == pytest.approx(0.15)
+
+
+def test_tiered_tolerance_rtk_float():
+    """accuracy ≤ 0.25m (RTK Float) → 0.30m (full mower width)."""
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=0.20),
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._tiered_waypoint_tolerance() == pytest.approx(0.30)
+
+
+def test_tiered_tolerance_standard_gps():
+    """accuracy ≤ 1.0m (standard GPS) → 0.65m."""
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=0.80),
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    assert executor._tiered_waypoint_tolerance() == pytest.approx(0.65)
+
+
+def test_tiered_tolerance_fallback_when_accuracy_none():
+    """accuracy=None → waypoint_tolerance fallback (1.0m default)."""
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=None),
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway(), waypoint_tolerance=1.0)
+    assert executor._tiered_waypoint_tolerance() == pytest.approx(1.0)
+
+
+def test_tiered_tolerance_fallback_when_no_position():
+    """No position → waypoint_tolerance fallback."""
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(position=None)
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway(), waypoint_tolerance=1.0)
+    assert executor._tiered_waypoint_tolerance() == pytest.approx(1.0)
+
+
+def test_default_waypoint_tolerance_fallback_is_1_0m():
+    from backend.src.services.mission_executor import MissionExecutor
+    executor = MissionExecutor(localization=FakeLocalization(), gateway=FakeGateway())
+    assert executor.waypoint_tolerance == 1.0
+
+
+def test_system_config_waypoint_tolerance_default():
+    from backend.src.models.system_configuration import NavigationSettings
+    assert NavigationSettings().waypoint_tolerance_m == 1.0
+
+
+def test_mission_waypoint_has_arrival_threshold_field():
+    from backend.src.models.mission import MissionWaypoint
+    wp = MissionWaypoint(lat=1.0, lon=1.0)
+    assert wp.arrival_threshold_m is None  # default
+
+
+def test_mission_waypoint_arrival_threshold_can_be_set():
+    from backend.src.models.mission import MissionWaypoint
+    wp = MissionWaypoint(lat=1.0, lon=1.0, arrival_threshold_m=0.10)
+    assert wp.arrival_threshold_m == pytest.approx(0.10)
+
+
+def test_per_waypoint_threshold_bypasses_tier():
+    """arrival_threshold_m set → used directly, ignores GPS accuracy."""
+    from backend.src.services.mission_executor import MissionExecutor
+    # RTK Fixed accuracy, but per-waypoint override of 0.10m
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=0.03),
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(localization=loc, gateway=FakeGateway())
+    from backend.src.models.mission import MissionWaypoint
+    wp = MissionWaypoint(lat=1.0, lon=1.0, arrival_threshold_m=0.10)
+    tol = wp.arrival_threshold_m if wp.arrival_threshold_m is not None else executor._tiered_waypoint_tolerance()
+    assert tol == pytest.approx(0.10)
+
+
+@pytest.mark.asyncio
+async def test_go_to_waypoint_arrives_using_tiered_tolerance():
+    """Mower at waypoint with RTK Fixed accuracy triggers arrival at 0.15m tolerance."""
+    from backend.src.services.mission_executor import MissionExecutor
+    from backend.src.models.mission import Mission, MissionWaypoint, MissionLifecycleStatus
+    import uuid, types
+
+    WP_LAT, WP_LON = 39.000000, -84.000000
+    loc = FakeLocalization(
+        position=Position(latitude=WP_LAT, longitude=WP_LON, accuracy=0.03),
+        heading=0.0,
+        last_gps_fix=datetime.now(UTC),
+    )
+    gw = FakeGateway()
+    executor = MissionExecutor(localization=loc, gateway=gw, waypoint_tolerance=1.0)
+    wp = MissionWaypoint(lat=WP_LAT, lon=WP_LON)
+    mid = str(uuid.uuid4())
+    mission = Mission(id=mid, name="t", waypoints=[wp], created_at="2026-01-01T00:00:00Z")
+
+    class _MS:
+        mission_statuses = {mid: types.SimpleNamespace(status=MissionLifecycleStatus.RUNNING)}
+        async def update_waypoint_progress(self, a, b): pass
+
+    result = await executor.go_to_waypoint(waypoint=wp, mission=mission, mission_service=_MS())
+    assert result is True
 
 
 @pytest.mark.asyncio
