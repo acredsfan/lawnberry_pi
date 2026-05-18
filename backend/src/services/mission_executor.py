@@ -117,7 +117,7 @@ class MissionExecutor:
         return float(accuracy) <= self.max_waypoint_accuracy_m
 
     # ------------------------------------------------------------------
-    # RTK-tiered waypoint tolerance (Task 1)
+    # RTK-tiered waypoint tolerance
     # ------------------------------------------------------------------
 
     # Tolerance tiers calibrated to mower half-width (150mm) and GPS accuracy bands.
@@ -133,7 +133,7 @@ class MissionExecutor:
         accuracy = position.accuracy
         if accuracy is None:
             return self.waypoint_tolerance
-        acc = float(accuracy)
+        acc = accuracy
         if acc <= 0.05:
             return self._TOL_RTK_FIXED
         if acc <= 0.25:

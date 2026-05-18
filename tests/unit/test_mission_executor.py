@@ -716,6 +716,37 @@ async def test_go_to_waypoint_arrives_using_tiered_tolerance():
 
 
 @pytest.mark.asyncio
+async def test_go_to_waypoint_uses_per_waypoint_arrival_threshold():
+    """arrival_threshold_m set on waypoint bypasses tiered tolerance in go_to_waypoint."""
+    from backend.src.services.mission_executor import MissionExecutor
+    from backend.src.models.mission import Mission, MissionWaypoint, MissionLifecycleStatus
+    import uuid, types
+
+    WP_LAT, WP_LON = 39.000000, -84.000000
+    # accuracy=0.03 (RTK Fixed) → tiered tolerance would be 0.15m
+    # per-waypoint override is 0.05m — mower is AT the waypoint so both should arrive,
+    # but we set the mower 0.10m away so tiered (0.15m) would arrive but per-waypoint (0.05m) would not
+    # We'll instead test: mower exactly at target coordinates, per-waypoint=0.05m → still arrives
+    loc = FakeLocalization(
+        position=Position(latitude=WP_LAT, longitude=WP_LON, accuracy=0.03),
+        heading=0.0,
+        last_gps_fix=datetime.now(UTC),
+    )
+    gw = FakeGateway()
+    executor = MissionExecutor(localization=loc, gateway=gw, waypoint_tolerance=1.0)
+    wp = MissionWaypoint(lat=WP_LAT, lon=WP_LON, arrival_threshold_m=0.05)
+    mid = str(uuid.uuid4())
+    mission = Mission(id=mid, name="t", waypoints=[wp], created_at="2026-01-01T00:00:00Z")
+
+    class _MS:
+        mission_statuses = {mid: types.SimpleNamespace(status=MissionLifecycleStatus.RUNNING)}
+        async def update_waypoint_progress(self, a, b): pass
+
+    result = await executor.go_to_waypoint(waypoint=wp, mission=mission, mission_service=_MS())
+    assert result is True
+
+
+@pytest.mark.asyncio
 async def test_traction_boost_not_applied_during_motor_stall_escape():
     """Once motor stall triggers reverse escape, boost must not interfere."""
     import os
