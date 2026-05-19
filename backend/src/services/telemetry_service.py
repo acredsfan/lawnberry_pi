@@ -400,6 +400,15 @@ class TelemetryService:
         if position_correction is not None:
             telemetry["position_correction"] = position_correction
 
+        # Mission executor per-tick debug state (non-empty only during active navigation)
+        try:
+            from .navigation_service import NavigationService as _NavSvc
+            _nav_dbg = _NavSvc.get_instance().nav_debug
+            if _nav_dbg:
+                telemetry["nav_debug"] = _nav_dbg
+        except Exception:
+            pass
+
         # Add Power Data — always present so WebSocket hub always broadcasts the topic
         if data and data.power:
             telemetry["power"] = self._format_power_data(data.power)

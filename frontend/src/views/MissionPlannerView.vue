@@ -57,7 +57,7 @@
         />
         <p v-if="missionActionHint" class="mission-action-hint">{{ missionActionHint }}</p>
         <MissionStatusPanel />
-        <MissionDiagnosticsPanel class="diagnostics-panel" />
+        <MissionDebugPanel class="diagnostics-panel" />
       </div>
     </div>
   </div>
@@ -69,7 +69,7 @@ import MissionWaypointList from '@/components/MissionWaypointList.vue'
 import MissionMap from '@/components/mission/MissionMap.vue'
 import MissionControls from '@/components/mission/MissionControls.vue'
 import MissionStatusPanel from '@/components/mission/MissionStatusPanel.vue'
-import MissionDiagnosticsPanel from '@/components/mission/MissionDiagnosticsPanel.vue'
+import MissionDebugPanel from '@/components/mission/MissionDebugPanel.vue'
 import MissionListPanel from '@/components/mission/MissionListPanel.vue'
 import { useMissionStore, type Waypoint } from '@/stores/mission'
 import { useMapStore } from '@/stores/map'

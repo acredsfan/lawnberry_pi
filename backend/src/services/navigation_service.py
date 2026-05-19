@@ -363,6 +363,11 @@ class NavigationService:
             except Exception:
                 pass  # never let event emission crash the nav loop
 
+    @property
+    def nav_debug(self) -> dict:
+        """Return the latest per-tick debug snapshot from the mission executor."""
+        return self._mission_executor._debug_state if self._mission_executor is not None else {}
+
     def _current_pose_quality(self) -> str:
         """Map current GPS/IMU state to a pose quality string."""
         gps_qual = getattr(self.navigation_state, "gps_fix_quality", None)

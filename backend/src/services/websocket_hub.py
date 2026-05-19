@@ -279,6 +279,13 @@ class WebSocketHub:
         await self.broadcast_to_topic("telemetry.system", system_data)
         await self.broadcast_to_topic("system.health", system_data)
 
+        # Nav debug (mission executor per-tick state — only present during active navigation)
+        if "nav_debug" in telemetry_data:
+            await self.broadcast_to_topic(
+                "telemetry.nav_debug",
+                telemetry_data["nav_debug"],
+            )
+
         # Legacy full update
         await self.broadcast_to_topic("telemetry/updates", telemetry_data)
 

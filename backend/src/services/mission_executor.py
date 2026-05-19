@@ -90,6 +90,8 @@ class MissionExecutor:
         self.current_waypoint_index: int = 0
         self._active: bool = False
         self._failure_detail: str | None = None
+        # Per-tick debug snapshot — read by NavigationService for telemetry.nav_debug
+        self._debug_state: dict = {}
 
     # ------------------------------------------------------------------
     # Position verification helpers
@@ -370,6 +372,12 @@ class MissionExecutor:
         _pre_rotation_initialized: bool = False
 
         while True:
+            # Per-tick locals — reset so debug snapshot never reads stale Stanley values
+            _cte: float | None = None
+            _steer: float | None = None
+            _enc_rpm_a: float = 0.0
+            _enc_rpm_b: float = 0.0
+
             status = mission_service.mission_statuses.get(mission.id)
             if not status:
                 logger.info("Waypoint navigation interrupted: mission status missing.")
@@ -1137,6 +1145,32 @@ class MissionExecutor:
             _prev_left_speed = left_speed
             _prev_right_speed = right_speed
 
+            # Update per-tick debug snapshot (read by NavigationService → telemetry.nav_debug)
+            _tc_boost = self._tc.state.underpower_boost if self._tc is not None else 0.0
+            _k_cte_now, _db_now = self._tiered_stanley_params()
+            self._debug_state = {
+                "mode": "tank" if _in_tank_mode else ("pre_rotate" if _pre_rotating else "blend"),
+                "heading_error_deg": round(err, 1) if err is not None else None,
+                "raw_heading_error_deg": round(_raw_abs_err, 1),
+                "cross_track_error_m": round(_cte, 3) if _cte is not None else None,
+                "steer_deg": round(_steer, 1) if _steer is not None else None,
+                "stanley_k_cte": _k_cte_now,
+                "stanley_dead_band_m": _db_now,
+                "distance_to_waypoint_m": round(distance_to_target, 2),
+                "left_speed_cmd": round(left_speed, 3),
+                "right_speed_cmd": round(right_speed, 3),
+                "base_speed": round(base_speed, 3),
+                "stall_boost": round(_stall_boost, 2),
+                "traction_boost": round(_tc_boost, 2),
+                "enc_rpm_a": round(_enc_rpm_a, 1),
+                "enc_rpm_b": round(_enc_rpm_b, 1),
+                "pre_rotating": _pre_rotating,
+                "in_tank_mode": _in_tank_mode,
+                "gps_accuracy_m": round(current_position.accuracy, 3)
+                    if current_position.accuracy is not None
+                    else None,
+            }
+
             # Control loop at 5 Hz
             await asyncio.sleep(0.2)
 
@@ -1170,6 +1204,7 @@ class MissionExecutor:
         self._active = True
         self._failure_detail = None
         self.current_waypoint_index = 0
+        self._debug_state = {}
 
         if on_bootstrap is not None:
             await on_bootstrap()
