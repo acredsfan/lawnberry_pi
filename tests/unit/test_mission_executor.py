@@ -650,6 +650,83 @@ def test_tiered_tolerance_fallback_when_no_position():
     assert executor._tiered_waypoint_tolerance() == pytest.approx(1.0)
 
 
+# ---------------------------------------------------------------------------
+# _tiered_stanley_params
+# ---------------------------------------------------------------------------
+
+def _make_executor_with_accuracy(accuracy):
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=accuracy),
+        last_gps_fix=datetime.now(UTC),
+    )
+    return MissionExecutor(localization=loc, gateway=FakeGateway())
+
+
+def test_tiered_stanley_rtk_fixed():
+    """RTK Fixed (≤0.05m) → highest gain, tightest dead band."""
+    ex = _make_executor_with_accuracy(0.03)
+    k, db = ex._tiered_stanley_params()
+    assert k == pytest.approx(0.40)
+    assert db == pytest.approx(0.05)
+
+
+def test_tiered_stanley_rtk_float():
+    """RTK Float (≤0.25m) → moderate gain."""
+    ex = _make_executor_with_accuracy(0.20)
+    k, db = ex._tiered_stanley_params()
+    assert k == pytest.approx(0.20)
+    assert db == pytest.approx(0.12)
+
+
+def test_tiered_stanley_standard_gps():
+    """Standard GPS (≤1.0m) → conservative gain."""
+    ex = _make_executor_with_accuracy(0.80)
+    k, db = ex._tiered_stanley_params()
+    assert k == pytest.approx(0.12)
+    assert db == pytest.approx(0.25)
+
+
+def test_tiered_stanley_degraded_poor_accuracy():
+    """Poor fix (>1.0m) → minimal gain, wide dead band."""
+    ex = _make_executor_with_accuracy(2.5)
+    k, db = ex._tiered_stanley_params()
+    assert k == pytest.approx(0.05)
+    assert db == pytest.approx(0.40)
+
+
+def test_tiered_stanley_degraded_no_accuracy():
+    """accuracy=None → degraded tier."""
+    from backend.src.services.mission_executor import MissionExecutor
+    loc = FakeLocalization(
+        position=Position(latitude=1.0, longitude=1.0, accuracy=None),
+        last_gps_fix=datetime.now(UTC),
+    )
+    ex = MissionExecutor(localization=loc, gateway=FakeGateway())
+    k, db = ex._tiered_stanley_params()
+    assert k == pytest.approx(0.05)
+    assert db == pytest.approx(0.40)
+
+
+def test_tiered_stanley_degraded_no_position():
+    """No position → degraded tier."""
+    from backend.src.services.mission_executor import MissionExecutor
+    ex = MissionExecutor(localization=FakeLocalization(position=None), gateway=FakeGateway())
+    k, db = ex._tiered_stanley_params()
+    assert k == pytest.approx(0.05)
+    assert db == pytest.approx(0.40)
+
+
+def test_tiered_stanley_gain_increases_monotonically_with_accuracy():
+    """Better GPS accuracy must yield higher k_cte and tighter dead band."""
+    k_fixed, db_fixed = _make_executor_with_accuracy(0.03)._tiered_stanley_params()
+    k_float, db_float = _make_executor_with_accuracy(0.20)._tiered_stanley_params()
+    k_std,   db_std   = _make_executor_with_accuracy(0.80)._tiered_stanley_params()
+    k_deg,   db_deg   = _make_executor_with_accuracy(2.50)._tiered_stanley_params()
+    assert k_fixed > k_float > k_std > k_deg
+    assert db_fixed < db_float < db_std < db_deg
+
+
 def test_default_waypoint_tolerance_fallback_is_1_0m():
     from backend.src.services.mission_executor import MissionExecutor
     executor = MissionExecutor(localization=FakeLocalization(), gateway=FakeGateway())

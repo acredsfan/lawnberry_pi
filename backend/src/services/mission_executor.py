@@ -155,6 +155,36 @@ class MissionExecutor:
         return self.waypoint_tolerance
 
     # ------------------------------------------------------------------
+    # RTK-tiered Stanley path-tracking gains
+    # ------------------------------------------------------------------
+
+    # k_cte / dead_band_m pairs keyed to GPS accuracy tier.
+    # RTK Fixed (≤0.05m): CTE measurement is trustworthy to centimetres — use full gain.
+    # RTK Float (≤0.25m): moderate accuracy — moderate correction.
+    # Standard GPS (≤1.0m): metre-level noise — conservative gain, wide dead band.
+    # Degraded (>1.0m or no fix): CTE unreliable — near-open-loop forward drive.
+    _STANLEY_RTK_FIXED:  tuple[float, float] = (0.40, 0.05)   # (k_cte, dead_band_m)
+    _STANLEY_RTK_FLOAT:  tuple[float, float] = (0.20, 0.12)
+    _STANLEY_STANDARD:   tuple[float, float] = (0.12, 0.25)
+    _STANLEY_DEGRADED:   tuple[float, float] = (0.05, 0.40)
+
+    def _tiered_stanley_params(self) -> tuple[float, float]:
+        """Return (k_cte, dead_band_m) scaled to current GPS accuracy tier."""
+        position = self._loc.current_position
+        if position is None:
+            return self._STANLEY_DEGRADED
+        accuracy = position.accuracy
+        if accuracy is None:
+            return self._STANLEY_DEGRADED
+        if accuracy <= 0.05:
+            return self._STANLEY_RTK_FIXED
+        if accuracy <= 0.25:
+            return self._STANLEY_RTK_FLOAT
+        if accuracy <= 1.0:
+            return self._STANLEY_STANDARD
+        return self._STANLEY_DEGRADED
+
+    # ------------------------------------------------------------------
     # Pre-rotation gate (Task 3)
     # ------------------------------------------------------------------
 
@@ -994,15 +1024,21 @@ class MissionExecutor:
                     _heading_err_path = heading_error(
                         target=heading_to_target, current=_heading_ema
                     )
-                    _steer = stanley_steer(_heading_err_path, _cte, _loc_vel)
+                    _s_k_cte, _s_dead_band = self._tiered_stanley_params()
+                    _steer = stanley_steer(
+                        _heading_err_path, _cte, _loc_vel,
+                        k_cte=_s_k_cte, dead_band_m=_s_dead_band,
+                    )
                     logger.debug(
                         "STANLEY: path_bearing=%.1f° ema_hdg=%.1f° err=%.1f° "
-                        "cte=%.3fm steer=%.1f°",
+                        "cte=%.3fm steer=%.1f° k_cte=%.2f db=%.2fm",
                         heading_to_target,
                         _heading_ema,
                         _heading_err_path,
                         _cte,
                         _steer,
+                        _s_k_cte,
+                        _s_dead_band,
                     )
 
                 left_speed, right_speed = compute_blend_speeds(
