@@ -70,6 +70,18 @@ def test_compute_tank_speeds_stall_boost_increases_magnitude():
     assert abs(left_b) > abs(left_0)
 
 
+def test_compute_tank_speeds_base_speed_is_87pct_of_max():
+    """Without stall boost, tank turn uses 87.5% of max_speed (not old 0.5 cap)."""
+    left, _ = compute_tank_speeds(heading_err=80.0, max_speed=0.8, stall_boost=0.0)
+    assert abs(left) == pytest.approx(0.8 * 0.875, abs=0.001)
+
+
+def test_compute_tank_speeds_faster_than_old_0p5_cap():
+    """Tank turn speed must exceed the old 0.5 hard cap."""
+    left_speed, _ = compute_tank_speeds(heading_err=90.0, max_speed=0.8, stall_boost=0.0)
+    assert abs(left_speed) > 0.5
+
+
 def test_compute_blend_speeds_straight_ahead():
     left, right = compute_blend_speeds(heading_err=0.0, base_speed=0.5, stall_boost=0.0)
     assert left == pytest.approx(right, abs=0.01)
@@ -104,6 +116,17 @@ def test_compute_tank_speeds_zero_error_returns_zero():
     left, right = compute_tank_speeds(heading_err=0.0, max_speed=0.8, stall_boost=0.0)
     assert left == 0.0
     assert right == 0.0
+
+
+def test_compute_blend_speeds_low_base_speed_floored_at_0p15():
+    """Blend floor is 0.15, not 0.30 — decel taper can slow to 0.15 m/s."""
+    # base_speed=0.10 simulates a decel-taper result below the old 0.30 floor
+    left, right = compute_blend_speeds(heading_err=0.0, base_speed=0.10, stall_boost=0.0)
+    assert left >= 0.15
+    assert right >= 0.15
+    # Must NOT be floored to 0.30 (old behaviour)
+    assert left < 0.30
+    assert right < 0.30
 
 
 # --- stall_boost wired into blend (the actual root cause fix) ---

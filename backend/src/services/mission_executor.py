@@ -291,6 +291,14 @@ class MissionExecutor:
         _WHEEL_SPIN_RPM_THRESHOLD: float = 10.0  # RPM above this = wheels turning
         _WHEEL_SPIN_MIN_M: float = 0.15    # GPS must move this far to reset
 
+        # Trigger C — encoder asymmetry: one wheel significantly faster than the other
+        # during commanded equal-speed driving (shaft slip or mechanical fault indicator).
+        _ENC_ASYM_RATIO: float = 1.5      # flag when faster/slower RPM ratio >= this
+        _ENC_ASYM_MIN_RPM: float = 5.0    # minimum RPM on both wheels to bother checking
+        _ENC_ASYM_CMD_THRESHOLD: float = 0.3  # min equal-speed command to arm (avoids turns)
+        _ENC_ASYM_ARM_S: float = 3.0      # consecutive seconds before logging warning
+        _enc_asym_start: float | None = None
+
         # Tank-turn hysteresis state
         _in_tank_mode: bool = False
         _TANK_TURN_TIMEOUT_S: float = 25.0
@@ -750,6 +758,36 @@ class MissionExecutor:
                                 "triggering pivot escape",
                                 _max_enc_rpm, _spin_moved_m, _spin_no_move_s,
                             )
+            # Trigger C — encoder asymmetry during straight-line driving
+            _left_cmd = _prev_left_speed
+            _right_cmd = _prev_right_speed
+            _cmd_symmetric = (
+                abs(_left_cmd - _right_cmd) < 0.05
+                and min(abs(_left_cmd), abs(_right_cmd)) >= _ENC_ASYM_CMD_THRESHOLD
+            )
+            if (
+                _enc_active
+                and _cmd_symmetric
+                and abs(_enc_rpm_a) >= _ENC_ASYM_MIN_RPM
+                and abs(_enc_rpm_b) >= _ENC_ASYM_MIN_RPM
+                and max(abs(_enc_rpm_a), abs(_enc_rpm_b)) > 0
+                and min(abs(_enc_rpm_a), abs(_enc_rpm_b)) > 0
+                and (max(abs(_enc_rpm_a), abs(_enc_rpm_b)) / min(abs(_enc_rpm_a), abs(_enc_rpm_b))) >= _ENC_ASYM_RATIO
+            ):
+                if _enc_asym_start is None:
+                    _enc_asym_start = time.monotonic()
+                elif time.monotonic() - _enc_asym_start >= _ENC_ASYM_ARM_S:
+                    logger.warning(
+                        "Encoder asymmetry: rpm_a=%.1f rpm_b=%.1f ratio=%.2f "
+                        "during equal-speed cmd=%.2f — possible shaft slip",
+                        _enc_rpm_a, _enc_rpm_b,
+                        max(abs(_enc_rpm_a), abs(_enc_rpm_b)) / max(min(abs(_enc_rpm_a), abs(_enc_rpm_b)), 0.01),
+                        _left_cmd,
+                    )
+                    _enc_asym_start = time.monotonic()  # rate-limit to 1/arm_period
+            else:
+                _enc_asym_start = None
+
             if _raw_abs_err > 20 and (not _in_tank_mode or _stall_active):
                 if _stall_start is None:
                     _stall_start = time.monotonic()

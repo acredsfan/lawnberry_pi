@@ -212,7 +212,7 @@ class NavigationService:
 
         # Navigation parameters
         self.max_speed = 0.8  # m/s
-        self.cruise_speed = 0.5  # m/s
+        self.cruise_speed = 0.7  # m/s
         self.waypoint_tolerance = 1.0  # meters — fallback when GPS accuracy unavailable
         self.obstacle_avoidance_distance = 0.2  # meters
         self.max_waypoint_fix_age_seconds = 2.0

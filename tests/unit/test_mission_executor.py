@@ -1072,3 +1072,62 @@ async def test_decel_taper_mower_arrives_without_overshoot():
     taper_speed_at_1_5m = executor._apply_decel_taper(0.5, distance=1.5)
     assert taper_speed_at_1_5m < 0.5, f"Expected speed < cruise at 1.5m, got {taper_speed_at_1_5m}"
     assert taper_speed_at_1_5m >= executor._MIN_APPROACH_SPEED
+
+
+# ---------------------------------------------------------------------------
+# Encoder asymmetry (shaft slip detection)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_encoder_asymmetry_logs_warning_after_arm_period(caplog):
+    """Sustained RPM asymmetry during equal-speed command must produce a WARNING."""
+    import logging
+    from unittest.mock import patch as _patch
+    from backend.src.services.mission_executor import MissionExecutor
+
+    # Place mower far from target so it never arrives
+    loc = FakeLocalizationWithState(
+        position=Position(latitude=0.0, longitude=0.0, accuracy=0.5),
+        heading=0.0,
+        velocity=0.5,
+    )
+    gw = FakeGateway()
+
+    # One encoder reads 3× the other — well above the 1.5× ratio threshold
+    def asymmetric_encoder():
+        return (30.0, 10.0)
+
+    _call_count = [0]
+    _TIME_PER_CALL = 0.05
+
+    def mock_monotonic():
+        t = _call_count[0] * _TIME_PER_CALL
+        _call_count[0] += 1
+        return t
+
+    executor = MissionExecutor(
+        localization=loc,
+        gateway=gw,
+        encoder_rpm_provider=asymmetric_encoder,
+        encoder_active_provider=lambda: True,
+        waypoint_tolerance=0.001,
+        position_verification_timeout_seconds=60.0,
+    )
+    mission = _make_mission([{"lat": 1.0, "lon": 0.0, "blade_on": False, "speed": 50}])
+    status = _make_status(mission)
+    ms_reader = FakeMissionStatusReader(mission, status)
+
+    with caplog.at_level(logging.WARNING, logger="backend.src.services.mission_executor"):
+        with _patch("time.monotonic", mock_monotonic):
+            try:
+                await asyncio.wait_for(
+                    executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader),
+                    timeout=5.0,
+                )
+            except (TimeoutError, RuntimeError, asyncio.TimeoutError):
+                pass
+
+    asym_warnings = [r for r in caplog.records if "asymmetry" in r.message.lower() or "shaft slip" in r.message.lower()]
+    assert len(asym_warnings) >= 1, (
+        f"Expected encoder asymmetry warning. Records: {[r.message for r in caplog.records]}"
+    )

@@ -79,7 +79,7 @@ def compute_tank_speeds(
     if heading_err == 0.0:
         return 0.0, 0.0
     turn_sign = 1.0 if heading_err > 0 else -1.0
-    turn_speed = min(max_speed, 0.5 + stall_boost)
+    turn_speed = min(max_speed, max_speed * 0.875 + stall_boost)
     left_speed = turn_sign * turn_speed
     right_speed = -turn_sign * turn_speed
     left_speed = max(-max_speed, min(max_speed, left_speed))
@@ -123,7 +123,7 @@ def compute_blend_speeds(
     if in_heading_bootstrap:
         forward_speed = max(forward_speed, 0.15)
 
-    forward_speed = max(forward_speed, 0.3)
+    forward_speed = max(forward_speed, 0.15)
 
     if stall_boost > 0.0:
         forward_speed = min(max_speed, forward_speed * (1.0 + stall_boost))
@@ -184,10 +184,10 @@ def stanley_steer(
     cte_m: float,
     velocity_mps: float,
     *,
-    k_cte: float = 0.25,
+    k_cte: float = 0.12,
     v_floor: float = 0.4,
     max_steer_deg: float = 30.0,
-    dead_band_m: float = 0.15,
+    dead_band_m: float = 0.25,
 ) -> float:
     """Stanley path-tracking steer command (degrees).
 
