@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 @dataclass
 class WheelParams:
-    wheel_radius_m: float = 0.05  # 10cm diameter wheel
+    wheel_radius_m: float = 0.089628  # 184.80mm dia × 0.97 grass-sink factor → 179.256mm effective
     wheel_base_m: float = 0.30  # distance between wheels
     ticks_per_rev: int = 1024
 
