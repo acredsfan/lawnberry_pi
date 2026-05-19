@@ -89,6 +89,7 @@ async def test_sim_mode_obstacle_cycle_stays_in_range():
 @pytest.mark.asyncio
 async def test_sentinel_8190_filtered_to_none():
     """read_distance_mm() must return None when the hardware returns 8190."""
+    _orig_sim = os.environ.get("SIM_MODE", "1")
     os.environ.pop("SIM_MODE", None)
     drv = VL53L0XDriver("left")
     drv.initialized = True
@@ -117,12 +118,13 @@ async def test_sentinel_8190_filtered_to_none():
     assert isinstance(distance, int) and distance >= TOF_SENSOR_MAX_VALID_MM, \
         "8190 must be caught by the >= 8190 sentinel guard"
     # After the guard, distance becomes None and _last_distance_mm is NOT updated
-    os.environ["SIM_MODE"] = "1"  # restore safe state
+    os.environ["SIM_MODE"] = _orig_sim
 
 
 @pytest.mark.asyncio
 async def test_last_distance_not_poisoned_by_sentinel():
     """_last_distance_mm must NOT be updated when a sentinel reading is returned."""
+    _orig_sim = os.environ.get("SIM_MODE", "1")
     os.environ.pop("SIM_MODE", None)
     drv = VL53L0XDriver("left")
     drv.initialized = True
@@ -145,7 +147,7 @@ async def test_last_distance_not_poisoned_by_sentinel():
     assert result is None
     assert drv._last_distance_mm == 500, \
         "_last_distance_mm must not be overwritten by a sentinel read"
-    os.environ["SIM_MODE"] = "1"
+    os.environ["SIM_MODE"] = _orig_sim
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 @pytest.mark.asyncio
 async def test_bme280_init_failure_is_logged(caplog):
     import os
+    _orig_sim = os.environ.get("SIM_MODE", "1")
     os.environ["SIM_MODE"] = "0"
     try:
         from backend.src.drivers.sensors.bme280_driver import BME280Driver
@@ -31,4 +32,4 @@ async def test_bme280_init_failure_is_logged(caplog):
         assert any("BME280" in r.message or "calibration" in r.message.lower() for r in caplog.records), \
             f"Expected BME280 warning in logs, got: {[r.message for r in caplog.records]}"
     finally:
-        os.environ.pop("SIM_MODE", None)
+        os.environ["SIM_MODE"] = _orig_sim

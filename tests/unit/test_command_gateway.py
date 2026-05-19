@@ -1,5 +1,5 @@
 """Unit tests for MotorCommandGateway — Phase A: emergency lifecycle."""
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -184,18 +184,21 @@ async def test_reset_for_testing_clears_all_state():
 # ---- Phase E: firmware preflight ----
 
 @pytest.mark.asyncio
-async def test_dispatch_drive_blocked_firmware_unknown():
+async def test_dispatch_drive_allowed_firmware_version_not_yet_received():
+    # firmware_version=None means the version string hasn't arrived over UART yet
+    # (firmware is responsive). Drive commands must be allowed through — blocking
+    # here would prevent all motion immediately after backend startup.
     from backend.src.control.commands import CommandStatus, DriveCommand
 
     gw, _, _ = _make_gw()
-    # Simulate robohat connected but firmware_version is None
     gw._robohat = MagicMock(
         status=MagicMock(serial_connected=True, firmware_version=None)
     )
+    gw._robohat.send_motor_command = AsyncMock(return_value=True)
     outcome = await gw.dispatch_drive(
         DriveCommand(left=0.3, right=0.3, source="manual", duration_ms=200)
     )
-    assert outcome.status == CommandStatus.FIRMWARE_UNKNOWN
+    assert outcome.status not in (CommandStatus.FIRMWARE_UNKNOWN, CommandStatus.FIRMWARE_INCOMPATIBLE)
 
 
 @pytest.mark.asyncio
@@ -214,8 +217,8 @@ async def test_dispatch_drive_blocked_firmware_incompatible():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_blade_blocked_firmware_unknown():
-    """dispatch_blade must also enforce firmware preflight."""
+async def test_dispatch_blade_allowed_firmware_version_not_yet_received():
+    """firmware_version=None must not block blade commands — version arrives async at startup."""
     from backend.src.control.commands import BladeCommand, CommandStatus
 
     gw, _, _ = _make_gw()
@@ -225,7 +228,7 @@ async def test_dispatch_blade_blocked_firmware_unknown():
     outcome = await gw.dispatch_blade(
         BladeCommand(active=True, source="manual")
     )
-    assert outcome.status == CommandStatus.FIRMWARE_UNKNOWN
+    assert outcome.status not in (CommandStatus.FIRMWARE_UNKNOWN, CommandStatus.FIRMWARE_INCOMPATIBLE)
 
 
 @pytest.mark.asyncio

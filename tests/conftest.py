@@ -235,14 +235,16 @@ def isolate_ui_settings_storage(tmp_path, monkeypatch):
     shared data/lawnberry.db that is left behind by TestClient lifespan tests.
     """
 
-    from backend.src.api.routers import settings as settings_router
-
-    data_dir = tmp_path / "data"
-    settings_file = data_dir / "settings.json"
-    ui_settings_file = data_dir / "ui_settings.json"
-    monkeypatch.setattr(settings_router, "DATA_DIR", data_dir)
-    monkeypatch.setattr(settings_router, "SETTINGS_FILE", settings_file)
-    monkeypatch.setattr(settings_router, "UI_SETTINGS_FILE", ui_settings_file)
+    try:
+        from backend.src.api.routers import settings as settings_router
+        data_dir = tmp_path / "data"
+        settings_file = data_dir / "settings.json"
+        ui_settings_file = data_dir / "ui_settings.json"
+        monkeypatch.setattr(settings_router, "DATA_DIR", data_dir)
+        monkeypatch.setattr(settings_router, "SETTINGS_FILE", settings_file)
+        monkeypatch.setattr(settings_router, "UI_SETTINGS_FILE", ui_settings_file)
+    except Exception:
+        pass  # cv2 or other transitive import unavailable; skip path isolation
 
     # Temporarily clear the settings_repository on app.state.runtime (if one
     # was wired by a previous TestClient lifespan test).  monkeypatch restores
