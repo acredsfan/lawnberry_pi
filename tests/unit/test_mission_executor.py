@@ -1086,9 +1086,10 @@ def test_decel_taper_half_speed_at_half_decel_distance():
         localization=FakeLocalization(), gateway=FakeGateway(),
         cruise_speed=0.5, waypoint_tolerance=1.5,
     )
-    decel_start = 3.0 * executor.waypoint_tolerance  # 4.5m
+    decel_start = 3.0 * executor.waypoint_tolerance  # 4.5m (no GPS → fallback tolerance)
     speed = executor._apply_decel_taper(0.5, distance=decel_start / 2)
-    assert speed == pytest.approx(0.25)
+    # 0.5 * (2.25 / 4.5) = 0.25, but MIN_APPROACH_SPEED (0.30) floor applies
+    assert speed == pytest.approx(0.30)
 
 
 def test_decel_taper_clamps_to_min_approach_speed():
@@ -1097,9 +1098,9 @@ def test_decel_taper_clamps_to_min_approach_speed():
         localization=FakeLocalization(), gateway=FakeGateway(),
         cruise_speed=0.5, waypoint_tolerance=1.5,
     )
-    # Very close to waypoint — should floor at MIN_APPROACH_SPEED (0.15)
+    # Very close to waypoint — should floor at MIN_APPROACH_SPEED (0.30)
     speed = executor._apply_decel_taper(0.5, distance=0.1)
-    assert speed == pytest.approx(0.15)
+    assert speed == pytest.approx(0.30)
 
 
 def test_decel_taper_no_change_beyond_decel_start():

@@ -208,12 +208,12 @@ class MissionExecutor:
     # Deceleration taper
     # ------------------------------------------------------------------
 
-    _MIN_APPROACH_SPEED: float = 0.15
-    _DECEL_ZONE_FACTOR: float = 3.0  # decel starts at 3 × waypoint_tolerance
+    _MIN_APPROACH_SPEED: float = 0.30  # above grass stiction threshold (~0.15 was too slow)
+    _DECEL_ZONE_FACTOR: float = 3.0  # decel starts at 3 × effective waypoint tolerance
 
     def _apply_decel_taper(self, base_speed: float, distance: float) -> float:
         """Linearly taper speed in the approach zone; floor at MIN_APPROACH_SPEED."""
-        decel_start = self._DECEL_ZONE_FACTOR * self.waypoint_tolerance
+        decel_start = self._DECEL_ZONE_FACTOR * self._tiered_waypoint_tolerance()
         if distance >= decel_start:
             return base_speed
         return max(self._MIN_APPROACH_SPEED, base_speed * (distance / decel_start))

@@ -306,7 +306,7 @@ const {
 } = useCameraFeed(() => session.value?.session_id ?? null)
 
 // Speed level is ControlView-local (not in preferences store)
-const speedLevel = ref(50)
+const speedLevel = ref(75)
 
 // ── Preset maneuver constants ─────────────────────────────────────────────────
 // Fixed 50% speed for all presets so they're consistent regardless of the joystick slider.
