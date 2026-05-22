@@ -50,6 +50,7 @@ class LocalizationState:
         "dead_reckoning_drift",
         "last_gps_fix",
         "timestamp",
+        "target_velocity",
     )
 
     def __init__(self) -> None:
@@ -62,6 +63,7 @@ class LocalizationState:
         self.dead_reckoning_drift: float | None = None  # metres estimated drift
         self.last_gps_fix: datetime | None = None
         self.timestamp: datetime = datetime.now(UTC)
+        self.target_velocity: float = 0.0
 
 
 # ── Dead reckoning state (private inner class) ──────────────────────────────
@@ -330,11 +332,18 @@ class LocalizationService:
 
     # ── Main update loop ─────────────────────────────────────────────────────
 
-    async def update(self, sensor_data: SensorData) -> LocalizationState:
+    async def update(
+        self,
+        sensor_data: SensorData,
+        *,
+        target_velocity: float | None = None,
+    ) -> LocalizationState:
         """Consume one sensor tick and update pose state.
 
         Returns the updated LocalizationState (same object as self.state).
         """
+        if target_velocity is not None:
+            self.state.target_velocity = target_velocity
         # 1. Pre-resolve heading from IMU so dead reckoning in step 2 can use it.
         #    Full heading reconciliation with GPS COG happens in step 3.
         imu_valid = (

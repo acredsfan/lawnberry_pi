@@ -36,8 +36,11 @@ VELOCITY_TOL_MPS = 0.0
 
 
 @pytest.mark.asyncio
-async def test_synthetic_straight_drive_replays_with_parity():
+async def test_synthetic_straight_drive_replays_with_parity(monkeypatch, tmp_path):
     assert FIXTURE.exists(), f"missing golden fixture: {FIXTURE}"
+
+    # Isolate test from host state (e.g. data/imu_alignment.json) by patching alignment file path
+    monkeypatch.setattr(NavigationService, "_ALIGNMENT_FILE", tmp_path / "imu_alignment.json")
 
     # Reuse one NavigationService across all records to mirror the fixture's
     # generation path. Session state (GPS COG history, dead reckoning,

@@ -17,6 +17,8 @@ class TractionControlState:
 
     commanded_velocity_mps: float = 0.0
     measured_velocity_mps: float = 0.0
+    gps_accuracy: float | None = None
+    pose_quality: str | None = None
 
     underpower_start_time: float | None = None
     underpower_boost: float = 0.0
@@ -51,7 +53,13 @@ class TractionControlService:
         self.state.right_rpm = right_rpm
         self.state.last_update = time.monotonic()
 
-    def update_velocity_feedback(self, commanded_mps: float, measured_mps: float) -> None:
+    def update_velocity_feedback(
+        self,
+        commanded_mps: float,
+        measured_mps: float,
+        gps_accuracy: float | None = None,
+        pose_quality: str | None = None,
+    ) -> None:
         """Record commanded vs measured velocity each control tick.
 
         Starts the underpower timer when the condition first appears so that
@@ -61,6 +69,27 @@ class TractionControlService:
         prev_meas = self.state.measured_velocity_mps
         self.state.commanded_velocity_mps = commanded_mps
         self.state.measured_velocity_mps = measured_mps
+        self.state.gps_accuracy = gps_accuracy
+        self.state.pose_quality = pose_quality
+
+        # Check for GPS degradation or low-quality poses
+        gps_degraded = False
+        if gps_accuracy is not None and gps_accuracy > 0.25:
+            gps_degraded = True
+        if pose_quality is not None and pose_quality not in ("rtk_fixed", "gps_float"):
+            gps_degraded = True
+
+        if gps_degraded:
+            if self.state.underpower_boost > 0.0 or self.state.underpower_start_time is not None:
+                logger.warning(
+                    "Traction control boost suppressed: GPS accuracy degraded (accuracy=%s, quality=%s)",
+                    gps_accuracy,
+                    pose_quality,
+                )
+            self._reset_boost()
+            self.state.commanded_velocity_mps = 0.0
+            self.state.measured_velocity_mps = 0.0
+            return
 
         # Start underpower timer when condition transitions from clear to active.
         if (

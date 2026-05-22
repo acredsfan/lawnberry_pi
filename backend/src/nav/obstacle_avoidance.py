@@ -18,6 +18,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from shapely.geometry import Polygon  # type: ignore
 
 from ..models import Position, Waypoint
+from .geoutils import latlon_to_enu, enu_to_latlon
 
 
 @dataclass(frozen=True)
@@ -27,22 +28,12 @@ class AStarConfig:
     max_expansions: int = 20000
 
 
-def _deg_lat_m() -> float:
-    return 111_000.0
-
-
-def _deg_lon_m_at_lat(lat: float) -> float:
-    from math import cos, radians
-
-    return 111_000.0 * cos(radians(lat))
-
-
 def _to_xy(lat: float, lon: float, olat: float, olon: float) -> tuple[float, float]:
-    return ((lon - olon) * _deg_lon_m_at_lat(olat), (lat - olat) * _deg_lat_m())
+    return latlon_to_enu(lat, lon, olat, olon)
 
 
 def _to_ll(x: float, y: float, olat: float, olon: float) -> tuple[float, float]:
-    return (olat + y / _deg_lat_m(), olon + x / _deg_lon_m_at_lat(olat))
+    return enu_to_latlon(x, y, olat, olon)
 
 
 def _poly_from_positions(boundary: Sequence[Position], olat: float, olon: float):
@@ -88,6 +79,9 @@ def plan_path_astar(
     obstacles: Iterable[Sequence[Position]] | None = None,
     config: AStarConfig | None = None,
 ) -> list[Waypoint]:
+    from shapely.geometry import Point as SPoint  # type: ignore
+    from shapely.prepared import prep  # type: ignore
+
     cfg = config or AStarConfig()
     olat = start.latitude
     olon = start.longitude
@@ -100,14 +94,14 @@ def plan_path_astar(
             return []
         area = free
 
+    prepared_area = prep(area)
+
     sx, sy = _to_xy(start.latitude, start.longitude, olat, olon)
     gx, gy = _to_xy(goal.latitude, goal.longitude, olat, olon)
 
     step = cfg.grid_resolution_m
 
     def nbrs(nx: float, ny: float) -> list[tuple[float, float]]:
-        from shapely.geometry import Point as SPoint  # type: ignore
-
         # 8-connected grid
         dirs = [
             (step, 0),
@@ -122,7 +116,7 @@ def plan_path_astar(
         res: list[tuple[float, float]] = []
         for dx, dy in dirs:
             x2, y2 = nx + dx, ny + dy
-            if area.contains(SPoint(x2, y2)):
+            if prepared_area.contains(SPoint(x2, y2)):
                 res.append((x2, y2))
         return res
 

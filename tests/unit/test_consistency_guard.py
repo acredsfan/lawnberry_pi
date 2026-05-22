@@ -13,11 +13,12 @@ SPEC.loader.exec_module(consistency_guard)
 
 
 def test_pre_tool_use_requests_approval_for_hook_patch():
+    path = str(consistency_guard.REPO_ROOT / "scripts/hooks/consistency_guard.py")
     payload = {
         "hookEventName": "PreToolUse",
         "tool_name": "apply_patch",
         "tool_input": {
-            "input": "*** Begin Patch\n*** Update File: /home/pi/lawnberry/scripts/hooks/consistency_guard.py\n*** End Patch\n"
+            "input": f"*** Begin Patch\n*** Update File: {path}\n*** End Patch\n"
         },
     }
 
@@ -29,11 +30,12 @@ def test_pre_tool_use_requests_approval_for_hook_patch():
 
 
 def test_post_tool_use_adds_structural_doc_reminder():
+    path = str(consistency_guard.REPO_ROOT / "backend/src/services/example.py")
     payload = {
         "hookEventName": "PostToolUse",
         "tool_name": "apply_patch",
         "tool_input": {
-            "input": "*** Begin Patch\n*** Update File: /home/pi/lawnberry/backend/src/services/example.py\n*** End Patch\n"
+            "input": f"*** Begin Patch\n*** Update File: {path}\n*** End Patch\n"
         },
     }
     changed_paths = ["backend/src/services/example.py"]

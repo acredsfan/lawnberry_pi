@@ -31,7 +31,7 @@ def test_collect_system_metrics_handles_missing_f_available(monkeypatch):
             return False
         return real_exists(self)
 
-    monkeypatch.setattr(os, "statvfs", fake_statvfs)
+    monkeypatch.setattr(os, "statvfs", fake_statvfs, raising=False)
     monkeypatch.setattr(Path, "exists", fake_exists)
 
     metrics = collector.collect_system_metrics()

@@ -15,6 +15,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from shapely.geometry import Polygon  # type: ignore
 
 from ..models import Geofence, LatLng
+from .geoutils import latlon_to_enu, enu_to_latlon
 
 
 @dataclass(frozen=True)
@@ -25,22 +26,12 @@ class GeofenceShape:
     origin_lon: float
 
 
-def _deg_lat_m() -> float:
-    return 111_000.0
-
-
-def _deg_lon_m_at_lat(lat: float) -> float:
-    from math import cos, radians
-
-    return 111_000.0 * cos(radians(lat))
-
-
 def _to_xy(lat: float, lon: float, olat: float, olon: float) -> tuple[float, float]:
-    return ((lon - olon) * _deg_lon_m_at_lat(olat), (lat - olat) * _deg_lat_m())
+    return latlon_to_enu(lat, lon, olat, olon)
 
 
 def _to_ll(x: float, y: float, olat: float, olon: float) -> tuple[float, float]:
-    return (olat + y / _deg_lat_m(), olon + x / _deg_lon_m_at_lat(olat))
+    return enu_to_latlon(x, y, olat, olon)
 
 
 def _polygon_from_latlngs(points: Sequence[LatLng]):

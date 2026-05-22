@@ -6,6 +6,7 @@ import pytest
 
 def _make_gw():
     """Return (gateway, safety_state, blade_state) using a mocked rest module."""
+    from unittest.mock import AsyncMock, MagicMock
     from backend.src.control.command_gateway import MotorCommandGateway
 
     safety = {"emergency_stop_active": False, "estop_reason": None}
@@ -21,6 +22,7 @@ def _make_gw():
         persistence=MagicMock(),
         _rest_module=rest_mock,
     )
+    gw._check_manual_drive_interlocks = AsyncMock(return_value=[])
     return gw, safety, blade
 
 
@@ -217,14 +219,22 @@ async def test_dispatch_drive_blocked_firmware_incompatible():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_blade_allowed_firmware_version_not_yet_received():
+async def test_dispatch_blade_allowed_firmware_version_not_yet_received(monkeypatch):
     """firmware_version=None must not block blade commands — version arrives async at startup."""
+    from unittest.mock import AsyncMock
     from backend.src.control.commands import BladeCommand, CommandStatus
+    import backend.src.services.blade_service as bs_mod
 
     gw, _, _ = _make_gw()
     gw._robohat = MagicMock(
         status=MagicMock(serial_connected=True, firmware_version=None)
     )
+
+    mock_blade_service = AsyncMock()
+    mock_blade_service.initialize = AsyncMock(return_value=True)
+    mock_blade_service.set_active = AsyncMock(return_value=True)
+    monkeypatch.setattr(bs_mod, "get_blade_service", lambda: mock_blade_service)
+
     outcome = await gw.dispatch_blade(
         BladeCommand(active=True, source="manual")
     )

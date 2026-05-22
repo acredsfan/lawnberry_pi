@@ -2,8 +2,11 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+import sys
+import pytest
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Subprocess cannot run shell scripts natively on Windows")
 def test_backup_and_restore_roundtrip():
     # Create a temporary source directory with sample data
     with tempfile.TemporaryDirectory() as src_dir:

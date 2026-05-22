@@ -7,6 +7,8 @@ Use the semble MCP tools (`mcp__semble__search`, `mcp__semble__find_related`) fo
 ## Project Orientation
 
 - LawnBerry Pi is a Raspberry Pi autonomous mower system with a FastAPI backend, Vue 3 frontend, hardware drivers, systemd deployment units, and operations tooling.
+- **Target Runtime Environment:** The system is strictly designed and optimized to run on a **Raspberry Pi 5 (or 4B as a fallback) running Linux**. It is *not* a cross-platform production app. Keep core backend code, systemd configurations, host OS tools, and absolute paths (like `/home/pi/lawnberry`) clean, native, and optimized for Raspberry Pi OS. Do not characterize these target-specific choices as technical debt, and do not attempt to port production code for Windows or other operating systems.
+- **Local Developer & CI Support:** Local developer environments (such as Windows or macOS) and the `SIM_MODE=1` parameter are supported **strictly for offline testing, local validation, and CI checks**. Any portability layers or OS-specific mocks must be kept inside test cases, test mocks, or safely isolated within simulation branches, ensuring that the physical, on-device runtime remains pristine and direct.
 - Treat this as a live robotics/control system, not a greenfield web app. Safety, hardware state, and runtime drift matter.
 - Start substantial work by reading `docs/developer-toolkit.md`, then the task-relevant docs under `docs/`, `spec/hardware.yaml`, and `.github/copilot-instructions.md`.
 - Keep changes focused. Do not rewrite broad subsystems, rename files, or alter hardware conventions unless the task explicitly requires it.

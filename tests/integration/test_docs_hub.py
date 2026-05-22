@@ -84,7 +84,9 @@ def test_docs_checksum_validation(tmp_path, monkeypatch):
     docs_dir = tmp_path / 'docs'
     docs_dir.mkdir()
     hardware_content = '# Hardware Overview\nRaspberry Pi 5'
-    (docs_dir / 'hardware-overview.md').write_text(hardware_content, encoding='utf-8')
+    # Force LF line endings on all platforms to ensure correct checksum calculation
+    with open(docs_dir / 'hardware-overview.md', 'w', encoding='utf-8', newline='\n') as f:
+        f.write(hardware_content)
     
     from backend.src.api import rest as rest_mod
     monkeypatch.setattr(rest_mod, '_docs_root', lambda: docs_dir)
@@ -200,8 +202,8 @@ def test_docs_path_traversal_protection_comprehensive(tmp_path, monkeypatch):
         # If request succeeds, should reject with 4xx
         assert resp4.status_code >= 400 or resp4.status_code == 200
     except ValueError as e:
-        # Python's pathlib raises ValueError("embedded null byte") - this is acceptable
-        assert "null byte" in str(e)
+        # Python's pathlib raises ValueError("embedded null character") - this is acceptable
+        assert any(w in str(e).lower() for w in ("null byte", "null character"))
     
     # Positive test: Safe access should work
     resp_safe = client.get('/api/v2/docs/safe.md')

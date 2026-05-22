@@ -24,15 +24,20 @@ FIXTURE = (
 
 
 def _run_compare(extra_args: list[str] | None = None) -> subprocess.CompletedProcess[str]:
+    import os
     cmd = [sys.executable, str(SCRIPT), str(FIXTURE), "--compare"]
     if extra_args:
         cmd.extend(extra_args)
+    env = os.environ.copy()
+    env["SIM_MODE"] = "1"
+    if sys.platform != "win32":
+        env["PATH"] = "/usr/bin:/bin"
     return subprocess.run(
         cmd,
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        env={"SIM_MODE": "1", "PATH": "/usr/bin:/bin"},
+        env=env,
         timeout=60,
     )
 
@@ -88,12 +93,16 @@ def test_compare_json_report_flag() -> None:
             sys.executable, str(SCRIPT), str(FIXTURE),
             "--compare", "--report-json", report_path,
         ]
+        env = os.environ.copy()
+        env["SIM_MODE"] = "1"
+        if sys.platform != "win32":
+            env["PATH"] = "/usr/bin:/bin"
         result = subprocess.run(
             cmd,
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
-            env={"SIM_MODE": "1", "PATH": "/usr/bin:/bin"},
+            env=env,
             timeout=60,
         )
         assert result.returncode == 0, (
@@ -116,12 +125,17 @@ def test_compare_missing_fixture_exits_nonzero(tmp_path: Path) -> None:
         sys.executable, str(SCRIPT),
         str(tmp_path / "no-such.jsonl"), "--compare",
     ]
+    import os
+    env = os.environ.copy()
+    env["SIM_MODE"] = "1"
+    if sys.platform != "win32":
+        env["PATH"] = "/usr/bin:/bin"
     result = subprocess.run(
         cmd,
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        env={"SIM_MODE": "1", "PATH": "/usr/bin:/bin"},
+        env=env,
         timeout=10,
     )
     assert result.returncode != 0

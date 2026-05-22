@@ -1154,6 +1154,9 @@ class RoboHATService:
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
             return False
 
+        if self._in_soft_reset or self._reconnecting:
+            return False
+
         if self._estop_pending:
             logger.warning("Motor command refused: emergency stop pending")
             return False
@@ -1186,6 +1189,9 @@ class RoboHATService:
     async def send_blade_command(self, active: bool, speed: float = 1.0) -> bool:
         """Send blade motor command to RoboHAT"""
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
+            return False
+
+        if self._in_soft_reset or self._reconnecting:
             return False
 
         if not await self._ensure_usb_control(timeout=0.9, retries=2):

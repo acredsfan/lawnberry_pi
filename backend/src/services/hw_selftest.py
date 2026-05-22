@@ -8,7 +8,6 @@ Designed to be safe on CI and devices without hardware enabled:
 
 from __future__ import annotations
 
-import grp
 import os
 from typing import Any
 
@@ -28,6 +27,7 @@ SERIAL_CANDIDATES = [
 
 def _group_names() -> list[str]:
     try:
+        import grp
         gids = os.getgroups()
         names = []
         for g in gids:

@@ -13,10 +13,11 @@ import os
 from datetime import UTC, datetime
 from email.utils import format_datetime
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from ..core.runtime import RuntimeContext, get_runtime
 from ..services.auth_service import AuthenticationError, primary_auth_service
 
 router = APIRouter()
@@ -88,12 +89,6 @@ class Job(BaseModel):
     last_run: datetime | None = None
 
 
-# --- Storage (in-memory for now) ---
-_zones_store: list[Zone] = []
-_jobs_store: list[Job] = []
-_job_counter = 0
-
-
 # --- API Endpoints ---
 
 
@@ -148,10 +143,20 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
 
 
 @router.get("/maps/zones", response_model=list[Zone], deprecated=True)
-def get_zones(request: Request):
+def get_zones(request: Request, runtime: RuntimeContext = Depends(get_runtime)):
     """List all zones."""
-    # Create response data
-    data = [zone.model_dump(mode="json") for zone in _zones_store]
+    repo = getattr(runtime, "map_repository", None)
+    if repo is not None:
+        db_zones = repo.list_zones()
+        data = []
+        for z in db_zones:
+            try:
+                zone_obj = Zone(**z)
+                data.append(zone_obj.model_dump(mode="json"))
+            except Exception:
+                data.append(z)
+    else:
+        data = []
 
     # Generate ETag from content
     body = json.dumps(data, sort_keys=True).encode()
@@ -169,10 +174,8 @@ def get_zones(request: Request):
 
 
 @router.post("/maps/zones", response_model=list[Zone], deprecated=True)
-def create_zones(zones: list[Zone]):
+def create_zones(zones: list[Zone], runtime: RuntimeContext = Depends(get_runtime)):
     """Create or update zones."""
-    global _zones_store
-
     # Basic validation: ensure polygon has at least 3 points
     for zone in zones:
         if len(zone.polygon) < 3:
@@ -180,21 +183,33 @@ def create_zones(zones: list[Zone]):
                 status_code=422, detail=f"Zone {zone.id} polygon must have at least 3 points"
             )
 
-    _zones_store = zones
-    return _zones_store
+    repo = getattr(runtime, "map_repository", None)
+    zone_dicts = [z.model_dump(mode="json") for z in zones]
+    if repo is not None:
+        repo.save_zones(zone_dicts)
+    return zones
 
 
 @router.get("/mow/jobs", response_model=list[Job], deprecated=True)
-def get_jobs():
+def get_jobs(runtime: RuntimeContext = Depends(get_runtime)):
     """List all mowing jobs."""
-    return _jobs_store
+    persistence = getattr(runtime, "persistence", None)
+    if persistence is not None:
+        db_jobs = persistence.load_planning_jobs()
+        jobs = []
+        for j in db_jobs:
+            try:
+                jobs.append(Job(**j))
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error("Failed to parse Job: %s. Job data: %s", e, j)
+        return jobs
+    return []
 
 
 @router.post("/mow/jobs", response_model=Job, status_code=201, deprecated=True)
-def create_job(job_data: dict):
+def create_job(job_data: dict, runtime: RuntimeContext = Depends(get_runtime)):
     """Queue a new mowing job."""
-    global _job_counter, _jobs_store
-
     # Validation
     if not job_data.get("name"):
         raise HTTPException(status_code=422, detail="Job name is required")
@@ -214,10 +229,29 @@ def create_job(job_data: dict):
     except (ValueError, IndexError):
         raise HTTPException(status_code=422, detail="Invalid schedule format (use HH:MM)") from None
 
+    persistence = getattr(runtime, "persistence", None)
+    if persistence is not None:
+        db_jobs = persistence.load_planning_jobs()
+    else:
+        db_jobs = []
+
+    # Find max integer suffix from jobs with IDs like 'job-XXX'
+    max_idx = 0
+    for j in db_jobs:
+        jid = j.get("id", "")
+        if jid.startswith("job-"):
+            try:
+                idx = int(jid.split("-")[1])
+                if idx > max_idx:
+                    max_idx = idx
+            except (ValueError, IndexError):
+                pass
+    next_idx = max_idx + 1
+    job_id = f"job-{next_idx:03d}"
+
     # Create job
-    _job_counter += 1
     job = Job(
-        id=f"job-{_job_counter:03d}",
+        id=job_id,
         name=job_data["name"],
         schedule=schedule,
         zones=job_data["zones"],
@@ -225,5 +259,7 @@ def create_job(job_data: dict):
         enabled=job_data.get("enabled", True),
     )
 
-    _jobs_store.append(job)
+    if persistence is not None:
+        persistence.save_planning_job(job.model_dump(mode="json"))
+
     return job

@@ -475,12 +475,6 @@ async def inject_tilt(req: InjectTiltRequest):
 
         limits = get_config_loader().get()[1]
         safety = get_safety_trigger_manager()
-        if safety.trigger_obstacle(
-            req.roll_deg, limits.tilt_threshold_degrees
-        ) or safety.trigger_obstacle(req.pitch_deg, limits.tilt_threshold_degrees):
-            # Note: The original code in rest.py called safety.trigger_tilt(roll, pitch, limits.tilt_threshold_degrees)
-            # I should check the original code again to be exact.
-            pass
         roll = abs(_debug_overrides.get("imu_roll_deg", 0.0))
         pitch = abs(_debug_overrides.get("imu_pitch_deg", 0.0))
         over_threshold = safety.trigger_tilt(roll, pitch, limits.tilt_threshold_degrees)

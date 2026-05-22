@@ -51,6 +51,7 @@ class RuntimeContext:
     persistence: Any
     command_gateway: Any = None  # MotorCommandGateway; Any to avoid import cycle
     localization: Any = None     # LocalizationService; Any to avoid import cycle
+    watchdog: Any = None         # Software Watchdog
 
     # Repository fields — typed Any to avoid import cycle; cast at call site
     map_repository: Any = None       # MapRepository

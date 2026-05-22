@@ -39,6 +39,13 @@ from .camera_stream_service import camera_service
 
 logger = logging.getLogger(__name__)
 
+OPENCV_AVAILABLE = False
+try:
+    import cv2
+    OPENCV_AVAILABLE = True
+except ImportError:
+    pass
+
 
 class AIServiceError(Exception):
     """Base AI service error."""
@@ -364,9 +371,32 @@ class AIService:
 
     def _extract_components(self, mask: np.ndarray) -> list[dict[str, Any]]:
         """Extract connected components from a binary mask."""
+        if OPENCV_AVAILABLE:
+            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+                mask.astype(np.uint8)
+            )
+            components: list[dict[str, Any]] = []
+            for i in range(1, num_labels):
+                area = int(stats[i, cv2.CC_STAT_AREA])
+                min_x = int(stats[i, cv2.CC_STAT_LEFT])
+                min_y = int(stats[i, cv2.CC_STAT_TOP])
+                width = int(stats[i, cv2.CC_STAT_WIDTH])
+                height = int(stats[i, cv2.CC_STAT_HEIGHT])
+                max_x = min_x + width - 1
+                max_y = min_y + height - 1
+                components.append(
+                    {
+                        "area": area,
+                        "bbox": (min_x, min_y, max_x, max_y),
+                    }
+                )
+            components.sort(key=lambda item: item["area"], reverse=True)
+            return components
+
+        # Fallback pure Python BFS/DFS queue implementation when OpenCV is not available
         height, width = mask.shape
         visited = np.zeros_like(mask, dtype=bool)
-        components: list[dict[str, Any]] = []
+        components = []
 
         for y in range(height):
             for x in range(width):

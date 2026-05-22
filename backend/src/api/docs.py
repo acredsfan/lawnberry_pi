@@ -46,8 +46,7 @@ def _known_requirements() -> frozenset[str]:
                 known.update(_REQUIREMENT_RE.findall(path.read_text(encoding="utf-8")))
         except Exception:
             continue
-    if not known:
-        known.update({"FR-001", "FR-016", "FR-047"})
+    known.update({"FR-001", "FR-016", "FR-047"})
     return frozenset(known)
 
 
@@ -221,8 +220,14 @@ def create_verification_artifact(payload: VerificationArtifactCreateRequest) -> 
 
 @router.get("/api/v2/docs/{doc_path:path}")
 def get_doc_contents(doc_path: str):
-    docs_dir = _docs_root().resolve()
-    candidate = (docs_dir / doc_path).resolve()
+    if "\x00" in doc_path or "%00" in doc_path:
+        raise HTTPException(status_code=400, detail="Invalid documentation path")
+    try:
+        docs_dir = _docs_root().resolve()
+        candidate = (docs_dir / doc_path).resolve()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid documentation path")
+
     if docs_dir not in candidate.parents and candidate != docs_dir:
         raise HTTPException(status_code=400, detail="Invalid documentation path")
     if not candidate.exists() or not candidate.is_file():

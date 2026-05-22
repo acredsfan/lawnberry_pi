@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -212,6 +213,48 @@ async def lifespan(app: FastAPI):
         config_loader=loader,
     )
 
+    # Set up and start the software watchdog (Blueprint A)
+    from backend.src.safety.motor_authorization import MotorAuthorization
+    from backend.src.safety.estop_handler import EstopHandler
+    from backend.src.safety.watchdog import Watchdog
+
+    class GatewayEstopHandler(EstopHandler):
+        def __init__(self, auth: MotorAuthorization, gateway: Any) -> None:
+            super().__init__(auth)
+            self._gateway = gateway
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._loop = None
+
+        def trigger_estop(self, reason: str = "unknown") -> None:
+            super().trigger_estop(reason)
+            loop = self._loop
+            if loop is not None and loop.is_running():
+                from backend.src.control.commands import EmergencyTrigger
+                asyncio.run_coroutine_threadsafe(
+                    self._gateway.trigger_emergency(
+                        EmergencyTrigger(reason=reason, source="safety_trigger")
+                    ),
+                    loop
+                )
+            else:
+                try:
+                    from backend.src.core.robot_state_manager import get_robot_state_manager
+                    get_robot_state_manager().set_emergency_stop(True, reason)
+                    self._gateway._blade_state["active"] = False
+                except Exception:
+                    pass
+
+    _auth = MotorAuthorization()
+    _auth.authorize()
+    _estop_handler = GatewayEstopHandler(_auth, _command_gateway)
+    _watchdog_timeout_ms = getattr(safety_limits, "watchdog_timeout_ms", 1000) or 1000
+    _watchdog = Watchdog(_estop_handler, timeout_ms=_watchdog_timeout_ms)
+    await _watchdog.start()
+    app.state.watchdog = _watchdog
+    _command_gateway.set_watchdog(_watchdog)
+
     # Construct LocalizationService when not running in legacy navigation mode.
     # USE_LEGACY_NAVIGATION=1 keeps NavigationService running its original code path.
     _localization_service = None
@@ -289,6 +332,7 @@ async def lifespan(app: FastAPI):
         persistence=persistence,
         command_gateway=_command_gateway,
         localization=_localization_service,
+        watchdog=_watchdog,
         map_repository=_map_repo,
         mission_repository=_mission_repo,
         settings_repository=_settings_repo,
@@ -336,6 +380,8 @@ async def lifespan(app: FastAPI):
 
     yield
     # Shutdown
+    if getattr(app.state, "watchdog", None):
+        await app.state.watchdog.stop()
     set_safety_event_handler(None)
     if getattr(app.state, "gps_deg_monitor", None):
         await app.state.gps_deg_monitor.stop()

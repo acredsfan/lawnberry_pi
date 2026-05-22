@@ -1,8 +1,11 @@
 import json
 import os
+import sys
 import tempfile
 import shutil
 from datetime import datetime, timezone as dt_timezone
+
+import pytest
 
 from backend.src.services.timezone_service import TimezoneInfo, detect_system_timezone
 
@@ -23,6 +26,7 @@ def test_detect_timezone_from_etc_timezone_file():
         shutil.rmtree(base, ignore_errors=True)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Symlinks require admin privileges on Windows")
 def test_detect_timezone_from_localtime_symlink():
     base = tempfile.mkdtemp(prefix="tztest-")
     try:

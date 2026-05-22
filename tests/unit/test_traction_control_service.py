@@ -122,3 +122,32 @@ class TestTractionControlService:
         svc1 = get_traction_control_service()
         svc2 = get_traction_control_service()
         assert svc1 is svc2
+
+    def test_gps_accuracy_suppresses_boost(self):
+        """Boost is suppressed or reset when GPS accuracy is degraded (> 0.25) or pose quality is unacceptable."""
+        from backend.src.services.traction_control_service import TractionControlService
+        svc = TractionControlService(min_speed_for_detection=0.25)
+        
+        # 1. Underpower with good GPS -> boost activates
+        with patch("time.monotonic", return_value=0.0):
+            svc.update_velocity_feedback(0.5, 0.2, gps_accuracy=0.1, pose_quality="rtk_fixed")
+        with patch("time.monotonic", return_value=2.1):
+            boost = svc.detect_underpower()
+            assert boost == pytest.approx(0.15)
+            
+        # 2. Update with degraded accuracy -> boost resets to 0.0
+        svc.update_velocity_feedback(0.5, 0.2, gps_accuracy=0.5, pose_quality="rtk_fixed")
+        boost = svc.detect_underpower()
+        assert boost == 0.0
+        assert svc.state.underpower_boost == 0.0
+        
+        # 3. Update with unacceptable quality -> boost stays/resets to 0.0
+        with patch("time.monotonic", return_value=0.0):
+            svc.update_velocity_feedback(0.5, 0.2, gps_accuracy=0.1, pose_quality="rtk_fixed")
+        with patch("time.monotonic", return_value=2.1):
+            boost = svc.detect_underpower()
+            assert boost == pytest.approx(0.15)
+            
+        svc.update_velocity_feedback(0.5, 0.2, gps_accuracy=0.1, pose_quality="gps_invalid")
+        boost = svc.detect_underpower()
+        assert boost == 0.0

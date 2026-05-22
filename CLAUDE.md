@@ -84,6 +84,9 @@ spawning subagents for simple runtime checks. **Tier 3 is enabled** (full system
 **`SIM_MODE=1` is mandatory** for every test, script, and server run in an agent session.
 Hardware is never available. Leaving `SIM_MODE` unset defaults to hardware mode (`os.getenv("SIM_MODE", "0")`).
 
+> [!WARNING]
+> **Production Target Constraint:** The production runtime is strictly designed and optimized for Raspberry Pi 5/4B running Linux. Windows/macOS is **not** a production target. Do not modify production runtime components, systemd configs, absolute paths, or physical device paths to support Windows/macOS. Any cross-platform compatibility layers must be confined to test suites, local developer mocks, or simulator overrides (`SIM_MODE=1`).
+
 ---
 
 ## Running Tests

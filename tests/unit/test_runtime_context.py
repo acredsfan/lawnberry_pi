@@ -45,6 +45,7 @@ def test_runtime_context_holds_all_required_fields():
         "persistence",
         "command_gateway",
         "localization",
+        "watchdog",
         "map_repository",
         "mission_repository",
         "settings_repository",

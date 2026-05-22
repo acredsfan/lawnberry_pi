@@ -55,6 +55,7 @@ class MotorCommandGateway:
         self._event_store: Any | None = None
         self._obs_run_id: str = ""
         self._obs_mission_id: str = ""
+        self._watchdog: Any = None
 
     def _rest(self) -> Any:
         if self.__rest_module is not None:
@@ -67,6 +68,10 @@ class MotorCommandGateway:
         self._event_store = store
         self._obs_run_id = run_id
         self._obs_mission_id = mission_id
+
+    def set_watchdog(self, watchdog: Any) -> None:
+        """Attach a software safety watchdog."""
+        self._watchdog = watchdog
 
     def _emit_event(self, event: Any) -> None:
         if self._event_store is not None:
@@ -99,6 +104,8 @@ class MotorCommandGateway:
 
     async def trigger_emergency(self, cmd: EmergencyTrigger) -> EmergencyOutcome:
         audit_id = str(uuid.uuid4())
+        from backend.src.core.robot_state_manager import get_robot_state_manager
+        get_robot_state_manager().set_emergency_stop(True, cmd.reason)
         self._safety_state["emergency_stop_active"] = True
         self._safety_state["estop_reason"] = cmd.reason
         self._blade_state["active"] = False
@@ -143,6 +150,8 @@ class MotorCommandGateway:
                 hardware_confirmed=True,
                 idempotent=True,
             )
+        from backend.src.core.robot_state_manager import get_robot_state_manager
+        get_robot_state_manager().set_emergency_stop(False)
         self._safety_state["emergency_stop_active"] = False
         self._safety_state["estop_reason"] = None
         self._blade_state["active"] = False
@@ -164,6 +173,9 @@ class MotorCommandGateway:
         )
 
     async def dispatch_drive(self, cmd: DriveCommand, request: Any = None) -> DriveOutcome:
+        if self._watchdog is not None:
+            self._watchdog.heartbeat()
+
         import asyncio
         import os
         import uuid as _uuid
@@ -311,7 +323,8 @@ class MotorCommandGateway:
 
         interlocks: list[str] = []
         try:
-            telemetry = await self._websocket_hub.get_cached_telemetry()
+            from ..core.state_manager import AppState
+            telemetry = AppState.get_instance().last_telemetry
             source = telemetry.get("source")
             if source != "hardware":
                 interlocks.append("telemetry_unavailable")
@@ -428,6 +441,8 @@ class MotorCommandGateway:
             )
 
     def reset_for_testing(self) -> None:
+        from backend.src.core.robot_state_manager import get_robot_state_manager
+        get_robot_state_manager().set_emergency_stop(False)
         self._safety_state["emergency_stop_active"] = False
         self._safety_state["estop_reason"] = None
         self._blade_state["active"] = False

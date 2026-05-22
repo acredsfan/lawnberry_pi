@@ -14,6 +14,8 @@ class AppState:
     hardware_config: Any | None = None
     sensor_manager: Any | None = None
     ntrip_forwarder: Any | None = None
+    last_telemetry: dict[str, Any] = field(default_factory=lambda: {"source": "unavailable"})
+    last_telemetry_at: float = 0.0
 
     # Singleton instance
     _instance: Optional["AppState"] = None

@@ -1209,3 +1209,55 @@ async def test_encoder_asymmetry_logs_warning_after_arm_period(caplog):
     assert len(asym_warnings) >= 1, (
         f"Expected encoder asymmetry warning. Records: {[r.message for r in caplog.records]}"
     )
+
+
+@pytest.mark.asyncio
+async def test_encoder_continuity_watchdog_aborts_mission():
+    """If encoders are active and commanding speeds, but both drop to 0 for 2 consecutive ticks,
+
+    it aborts the mission.
+    """
+    from backend.src.services.mission_executor import MissionExecutor
+
+    # Mower at 0,0, targeting 1.0, 0.0 (north) so heading error is small
+    loc = FakeLocalizationWithState(
+        position=Position(latitude=0.0, longitude=0.0, accuracy=0.5),
+        heading=2.0,
+        velocity=0.1,
+    )
+    gw = FakeGateway()
+
+    # Encoders return non-zero at first to trigger activity, then drop to zero
+    _call_count = [0]
+    def fake_enc_provider():
+        if _call_count[0] == 0:
+            _call_count[0] += 1
+            return (10.0, 10.0)
+        return (0.0, 0.0)
+
+    executor = MissionExecutor(
+        localization=loc,
+        gateway=gw,
+        encoder_rpm_provider=fake_enc_provider,
+        encoder_active_provider=lambda: True,
+        waypoint_tolerance=0.001,
+        position_verification_timeout_seconds=60.0,
+    )
+
+    mission = _make_mission([{"lat": 1.0, "lon": 0.0, "blade_on": False, "speed": 50}])
+    status = _make_status(mission)
+    ms_reader = FakeMissionStatusReader(mission, status)
+
+    # Let's run the mission executor loop.
+    # On tick 1: _prev_left_speed and _prev_right_speed are 0.0. So _max_cmd is 0.0.
+    # We return (10.0, 10.0) for encoders. _encoder_had_activity becomes True.
+    # Then it dispatches speeds (e.g. 0.35, 0.35).
+    # On tick 2: _prev_left_speed and _prev_right_speed are 0.35. _max_cmd is 0.35 (> 0.3).
+    # Both encoders are 0.0. _encoder_drop_ticks becomes 1.
+    # On tick 3: Both encoders are 0.0. _encoder_drop_ticks becomes 2, triggering abort!
+    with pytest.raises(RuntimeError, match="encoder continuity fault / wire snap"):
+        await executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader)
+
+    # Stop command should have been dispatched
+    assert (0.0, 0.0) in gw.drive_calls
+

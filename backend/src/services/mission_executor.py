@@ -330,6 +330,8 @@ class MissionExecutor:
         _ENC_ASYM_CMD_THRESHOLD: float = 0.3  # min equal-speed command to arm (avoids turns)
         _ENC_ASYM_ARM_S: float = 3.0      # consecutive seconds before logging warning
         _enc_asym_start: float | None = None
+        _encoder_drop_ticks: int = 0
+        _encoder_had_activity: bool = False
 
         # Tank-turn hysteresis state
         _in_tank_mode: bool = False
@@ -708,6 +710,8 @@ class MissionExecutor:
             )
             _max_enc_rpm = max(abs(_enc_rpm_a), abs(_enc_rpm_b))
             _max_cmd = max(abs(_prev_left_speed), abs(_prev_right_speed))
+            if _max_enc_rpm > 0.0:
+                _encoder_had_activity = True
 
             # Trigger A: motor stall — commanded but not turning.
             # Only arm when encoder_active_provider confirms sensors have ever
@@ -718,6 +722,23 @@ class MissionExecutor:
                 if self._encoder_active_provider is not None
                 else True
             )
+
+            # High-Frequency Encoder Continuity Watchdog (Finding C)
+            if _enc_active and _encoder_had_activity and _max_cmd > 0.3:
+                if _enc_rpm_a == 0.0 and _enc_rpm_b == 0.0:
+                    _encoder_drop_ticks += 1
+                    if _encoder_drop_ticks >= 2:
+                        logger.error(
+                            "Encoder continuity watchdog: RPM fell to 0.0 with cmd=%.2f "
+                            "for %d consecutive ticks - possible wire snap/cable disconnect!",
+                            _max_cmd, _encoder_drop_ticks
+                        )
+                        await self._deliver_stop_command(reason="encoder continuity fault / wire snap")
+                        raise RuntimeError("encoder continuity fault / wire snap")
+                else:
+                    _encoder_drop_ticks = 0
+            else:
+                _encoder_drop_ticks = 0
             if (
                 _enc_active
                 and _max_cmd > _MOTOR_STALL_CMD_THRESHOLD
@@ -1072,9 +1093,15 @@ class MissionExecutor:
                     else (0.0, 0.0)
                 )
                 self._tc.update_motor_feedback(_enc1, _enc2)
+                _loc_state = getattr(self._loc, "state", None)
+                _pos = getattr(_loc_state, "current_position", None)
+                _accuracy = getattr(_pos, "accuracy", None)
+                _quality = getattr(_loc_state, "quality", None)
                 self._tc.update_velocity_feedback(
                     base_speed,
-                    getattr(getattr(self._loc, "state", None), "velocity", None) or 0.0,
+                    getattr(_loc_state, "velocity", None) or 0.0,
+                    gps_accuracy=_accuracy,
+                    pose_quality=_quality,
                 )
                 left_speed, right_speed = self._tc.apply_boost_to_command(
                     left_speed, right_speed, max_speed=self.max_speed

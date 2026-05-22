@@ -27,24 +27,31 @@ PLACEHOLDER_BASENAMES = {
 
 
 @pytest.fixture(autouse=True)
-def _ensure_runtime_for_contract_tests():
+def _ensure_runtime_for_contract_tests(tmp_path):
     """Inject a minimal RuntimeContext so contract tests can call gateway-wired endpoints.
 
     Contract tests use ASGITransport without running lifespan, so app.state.runtime
     is never built. This fixture provides a minimal runtime that covers emergency endpoint
     needs (command_gateway). Tests that need specific state should use dependency_overrides.
     """
+    from pathlib import Path
     from backend.src.control.command_gateway import MotorCommandGateway
     from backend.src.core import globals as _g
     from backend.src.core.runtime import RuntimeContext, get_runtime
+    from backend.src.core.persistence import PersistenceLayer
+    from backend.src.repositories.map_repository import MapRepository
     from backend.src.main import app
+
+    db_path = tmp_path / "lawnberry.db"
+    _persistence = PersistenceLayer(db_path=str(db_path))
+    _map_repo = MapRepository(db_path=db_path)
 
     _gw = MotorCommandGateway(
         safety_state=_g._safety_state,
         blade_state=_g._blade_state,
         client_emergency=_g._client_emergency,
         robohat=MagicMock(status=MagicMock(serial_connected=False)),
-        persistence=MagicMock(),
+        persistence=_persistence,
     )
     _runtime = RuntimeContext(
         config_loader=MagicMock(name="config_loader"),
@@ -56,7 +63,8 @@ def _ensure_runtime_for_contract_tests():
         blade_state=_g._blade_state,
         robohat=MagicMock(name="robohat"),
         websocket_hub=MagicMock(name="websocket_hub"),
-        persistence=MagicMock(name="persistence"),
+        persistence=_persistence,
+        map_repository=_map_repo,
         command_gateway=_gw,
     )
     # Only inject if the test hasn't already overridden get_runtime

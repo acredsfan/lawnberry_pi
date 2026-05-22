@@ -170,6 +170,12 @@ class NtripForwarder:
             return
         if serial is None:
             raise RuntimeError("pyserial is required for NTRIP forwarding but is not installed")
+        gps_device = os.getenv("GPS_DEVICE")
+        if gps_device and self._settings.serial_device == gps_device:
+            raise ValueError(
+                f"NTRIP forwarder serial device '{self._settings.serial_device}' conflicts with the "
+                "primary GPS_DEVICE. Ensure NTRIP_SERIAL_DEVICE is configured differently."
+            )
         self._stop_event.clear()
         try:
             self._started_monotonic = asyncio.get_running_loop().time()

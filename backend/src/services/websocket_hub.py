@@ -207,6 +207,11 @@ class WebSocketHub:
                 telemetry_data = await telemetry_service.get_telemetry(sim_mode=sim_mode)
 
                 # Cache the latest snapshot for drive-route safety validation.
+                from ..core.state_manager import AppState
+                app_state = AppState.get_instance()
+                app_state.last_telemetry = dict(telemetry_data)
+                app_state.last_telemetry_at = time.monotonic()
+
                 self._last_telemetry_snapshot = dict(telemetry_data)
                 self._last_telemetry_at = time.monotonic()
 

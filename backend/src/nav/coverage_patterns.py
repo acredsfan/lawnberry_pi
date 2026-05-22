@@ -19,6 +19,7 @@ if TYPE_CHECKING:  # pragma: no cover - import only for type checking
     pass  # type: ignore
 
 from ..models import Position, Waypoint
+from .geoutils import latlon_to_enu, enu_to_latlon
 
 
 @dataclass(frozen=True)
@@ -29,28 +30,12 @@ class CoverageConfig:
     waypoint_speed_ms: float = 0.5
 
 
-def _deg_lat_m() -> float:
-    # Approximate meters per degree latitude at mid-latitudes
-    return 111_000.0
-
-
-def _deg_lon_m_at_lat(lat: float) -> float:
-    # Longitude meters per degree varies with latitude; crude cosine model
-    from math import cos, radians
-
-    return 111_000.0 * cos(radians(lat))
-
-
 def _to_xy(lat: float, lon: float, origin_lat: float, origin_lon: float) -> tuple[float, float]:
-    mx = (lon - origin_lon) * _deg_lon_m_at_lat(origin_lat)
-    my = (lat - origin_lat) * _deg_lat_m()
-    return (mx, my)
+    return latlon_to_enu(lat, lon, origin_lat, origin_lon)
 
 
 def _to_ll(x: float, y: float, origin_lat: float, origin_lon: float) -> tuple[float, float]:
-    lat = origin_lat + y / _deg_lat_m()
-    lon = origin_lon + x / _deg_lon_m_at_lat(origin_lat)
-    return (lat, lon)
+    return enu_to_latlon(x, y, origin_lat, origin_lon)
 
 
 def _poly_from_positions(boundary: Sequence[Position]):

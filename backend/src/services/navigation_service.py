@@ -860,7 +860,7 @@ class NavigationService:
 
         return False
 
-    def _latch_global_emergency_state(self) -> None:
+    def _latch_global_emergency_state(self, reason: str | None = None) -> None:
         """Mirror the control API emergency latch for non-HTTP emergency paths."""
         try:
             from ..control.commands import EmergencyTrigger
@@ -870,7 +870,7 @@ class NavigationService:
             if gw is not None:
                 asyncio.ensure_future(
                     gw.trigger_emergency(
-                        EmergencyTrigger(reason="Navigation safety trigger", source="navigation")
+                        EmergencyTrigger(reason=reason or "Navigation safety trigger", source="navigation")
                     )
                 )
                 return
@@ -879,9 +879,9 @@ class NavigationService:
 
         # Legacy fallback when gateway unavailable (unit tests, early startup)
         try:
+            from ..core.robot_state_manager import get_robot_state_manager
+            get_robot_state_manager().set_emergency_stop(True, reason or "Navigation safety trigger")
             from ..core import globals as _g
-
-            _g._safety_state["emergency_stop_active"] = True
             _g._blade_state["active"] = False
         except Exception:
             logger.debug(
@@ -1002,7 +1002,10 @@ class NavigationService:
             # Delegate position, heading, GPS COG, dead reckoning, and quality to
             # LocalizationService. Mirror the results into NavigationState so all
             # callers of NavigationService see consistent data.
-            loc_state = await self._localization.update(sensor_data)
+            loc_state = await self._localization.update(
+                sensor_data,
+                target_velocity=self.navigation_state.target_velocity,
+            )
             self.navigation_state.current_position = loc_state.current_position
             self.navigation_state.heading = loc_state.heading
             self.navigation_state.gps_cog = loc_state.gps_cog
@@ -1749,15 +1752,7 @@ class NavigationService:
         self.navigation_state.navigation_mode = NavigationMode.EMERGENCY_STOP
         self.navigation_state.target_velocity = 0.0
         self.navigation_state.path_status = PathStatus.INTERRUPTED
-        self._latch_global_emergency_state()
-
-        # Record reason so the UI can show why the e-stop was activated
-        try:
-            from ..core import globals as _g
-
-            _g._safety_state["estop_reason"] = reason
-        except Exception:
-            pass
+        self._latch_global_emergency_state(reason)
 
         # Try to invoke controller-level emergency stop when available
         emergency_ok = True
