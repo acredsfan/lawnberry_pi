@@ -437,6 +437,10 @@ class HealthService:
 
     def _load_system_config(self) -> dict[str, Any]:
         path = self.system_config_path
+        if not path.exists() and path.name == "default.json":
+            template_path = path.with_name("default.example.json")
+            if template_path.exists():
+                path = template_path
         if not path.exists():
             return {}
         try:

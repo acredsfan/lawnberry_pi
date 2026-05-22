@@ -156,6 +156,7 @@ config/*.pem
 config/hardware.json
 config/network.json
 config/system.json
+config/default.json
 
 # =============================================================
 # Temporary files

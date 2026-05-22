@@ -193,7 +193,10 @@ Validate HTTPS/ACME locally (no real cert required):
 ```bash
 # Review tracked configuration first
 sed -n '1,220p' config/hardware.yaml
-sed -n '1,220p' config/default.json
+sed -n '1,220p' config/default.example.json
+
+# Create local runtime settings file (gitignored)
+cp -n config/default.example.json config/default.json
 ```
 
 ### 2. Test Installation

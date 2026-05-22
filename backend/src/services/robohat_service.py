@@ -1391,14 +1391,17 @@ def _settings_profile_paths() -> Iterable[Path]:
     if env_dir:
         base = Path(env_dir)
         yield base / "default.json"
+        yield base / "default.example.json"
         yield base / "settings.json"
 
     system_base = Path("./config")
     yield system_base / "default.json"
+    yield system_base / "default.example.json"
     yield system_base / "settings.json"
 
     project_base = Path(os.getcwd()) / "config"
     yield project_base / "default.json"
+    yield project_base / "default.example.json"
     yield project_base / "settings.json"
 
 

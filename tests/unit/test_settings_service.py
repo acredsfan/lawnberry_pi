@@ -167,6 +167,65 @@ class TestSettingsService:
             assert profile.hardware.sim_mode is False
             assert profile.system.log_level == "INFO"
 
+    def test_load_profile_bootstraps_default_from_template(self, mock_persistence, tmp_path):
+        """Test default.json is created from default.example.json when missing."""
+        mock_persistence.load_settings_profile.return_value = None
+        template_payload = {
+            "version": 1,
+            "last_modified": datetime.now().isoformat(),
+            "hardware": {"sim_mode": True, "robohat_port": "/dev/test"},
+            "network": {
+                "wifi_ssid": "TemplateWiFi",
+                "wifi_password": "pass",
+                "ap_enabled": False,
+                "ap_ssid": None,
+            },
+            "telemetry": {
+                "stream_enabled": True,
+                "persist_enabled": True,
+                "retention_days": 30,
+                "cadence_hz": 4,
+                "latency_targets": {"pi5_ms": 240, "pi4b_ms": 340},
+            },
+            "control": {
+                "lockout_enabled": True,
+                "lockout_timeout": 30,
+                "blade_safety": True,
+            },
+            "maps": {
+                "provider": "leaflet",
+                "api_key": None,
+                "fallback_enabled": True,
+                "cache_tiles": True,
+            },
+            "camera": {
+                "enabled": True,
+                "resolution": "1280x720",
+                "framerate": 30,
+                "quality": 80,
+            },
+            "ai": {
+                "obstacle_detection": True,
+                "path_optimization": True,
+                "learning_enabled": False,
+            },
+            "system": {
+                "log_level": "INFO",
+                "auto_updates": False,
+                "remote_access": False,
+                "branding_checksum": "abc123",
+                "unit_system": "imperial",
+            },
+        }
+        (tmp_path / "default.example.json").write_text(json.dumps(template_payload))
+
+        service = SettingsService(config_dir=tmp_path)
+        profile = service.load_profile()
+
+        assert (tmp_path / "default.json").exists()
+        assert profile.hardware.sim_mode is True
+        assert profile.system.unit_system == "imperial"
+
     def test_save_profile_dual_persistence(self, mock_persistence, sample_profile):
         """Test profile is saved to both DB and JSON."""
         service = SettingsService()

@@ -64,6 +64,14 @@ class SettingsService:
 
         # Fall back to config files
         config_file = self.config_dir / f"{profile_id}.json"
+        if profile_id == "default" and not config_file.exists():
+            template_file = self.config_dir / "default.example.json"
+            if template_file.exists():
+                try:
+                    config_file.write_text(template_file.read_text(encoding="utf-8"), encoding="utf-8")
+                    logger.info("Bootstrapped default settings from %s", template_file)
+                except Exception as exc:
+                    logger.warning("Failed to bootstrap default settings from template: %s", exc)
         if config_file.exists():
             data = json.loads(config_file.read_text())
             profile = SettingsProfile.model_validate(data)
