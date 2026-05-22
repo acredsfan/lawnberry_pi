@@ -230,6 +230,9 @@ class TelemetryService:
                     try:
                         await forwarder.start()
                         self.app_state.ntrip_forwarder = forwarder
+                        gps_iface = getattr(manager, "gps", None)
+                        if gps_iface is not None:
+                            gps_iface._ntrip_forwarder = forwarder
                     except Exception as e:
                         logger.error(f"Failed to start NTRIP: {e}")
 

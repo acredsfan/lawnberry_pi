@@ -116,10 +116,14 @@ class NtripForwarder:
         except ValueError:
             logger.warning("Invalid NTRIP_GGA_* values provided; skipping static GGA")
             return None
+        return NtripForwarder._build_gga(lat, lon, alt)
+
+    @staticmethod
+    def _build_gga(lat: float, lon: float, alt: float) -> str | None:
+        """Build a GPGGA sentence from decimal-degree coordinates."""
         lat_ddmm, lat_hemi = NtripForwarder._decimal_to_ddmm(lat, is_lat=True)
         lon_ddmm, lon_hemi = NtripForwarder._decimal_to_ddmm(lon, is_lat=False)
         alt_field = f"{alt:.1f}"
-        # Timestamp (UTC hhmmss) improves caster acceptance vs. 000000
         try:
             import datetime as _dt
 
@@ -127,7 +131,6 @@ class NtripForwarder:
             time_str = f"{ts.hour:02d}{ts.minute:02d}{ts.second:02d}"
         except Exception:
             time_str = "000000"
-        # Simple fixed GGA payload with quality=1 and 12 satellites
         fields = [
             "$GPGGA",
             time_str,
@@ -151,6 +154,19 @@ class NtripForwarder:
             checksum ^= ord(char)
         return f"{sentence}*{checksum:02X}"
 
+    def update_gga_from_position(self, lat: float, lon: float, alt: float) -> None:
+        """Update the GGA position sent to the NTRIP caster with the rover's current fix.
+
+        Keeps VRS corrections centered on the mower's actual location while moving.
+        Safe to call at GPS rate (1 Hz); GGA is only transmitted at gga_interval cadence.
+        """
+        try:
+            gga_str = NtripForwarder._build_gga(lat, lon, alt)
+            if gga_str:
+                self._settings.gga_sentence = gga_str.encode("ascii") + b"\r\n"
+        except Exception:
+            pass
+
     @staticmethod
     def _decimal_to_ddmm(value: float, *, is_lat: bool) -> tuple[str, str]:
         hemi = "N" if (value >= 0 and is_lat) else "E"
@@ -170,12 +186,6 @@ class NtripForwarder:
             return
         if serial is None:
             raise RuntimeError("pyserial is required for NTRIP forwarding but is not installed")
-        gps_device = os.getenv("GPS_DEVICE")
-        if gps_device and self._settings.serial_device == gps_device:
-            raise ValueError(
-                f"NTRIP forwarder serial device '{self._settings.serial_device}' conflicts with the "
-                "primary GPS_DEVICE. Ensure NTRIP_SERIAL_DEVICE is configured differently."
-            )
         self._stop_event.clear()
         try:
             self._started_monotonic = asyncio.get_running_loop().time()

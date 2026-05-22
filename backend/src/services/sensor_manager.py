@@ -82,6 +82,7 @@ class GPSSensorInterface:
         self.coordinator = coordinator
         self.last_reading: GpsReading | None = None
         self.status = SensorStatus.OFFLINE
+        self._ntrip_forwarder: object | None = None  # NtripForwarder, set after init
         # Concrete driver (lazy, SIM-safe)
         try:
             from ..drivers.sensors.gps_driver import GPSDriver  # type: ignore
@@ -126,6 +127,20 @@ class GPSSensorInterface:
                 reading = self.last_reading
 
             self.last_reading = reading
+            if (
+                reading is not None
+                and reading.latitude is not None
+                and reading.longitude is not None
+                and self._ntrip_forwarder is not None
+            ):
+                try:
+                    self._ntrip_forwarder.update_gga_from_position(  # type: ignore[attr-defined]
+                        reading.latitude,
+                        reading.longitude,
+                        reading.altitude or 0.0,
+                    )
+                except Exception:
+                    pass
             return reading
 
         except Exception as e:
