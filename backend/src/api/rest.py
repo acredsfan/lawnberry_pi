@@ -318,7 +318,29 @@ class MapLocations(BaseModel):
     pm_sun: Optional[Position] = None
 
 
-_locations_store = MapLocations()
+_MAP_LOCATIONS_FILE = os.path.join(os.getcwd(), "data", "map_locations.json")
+
+
+def _load_map_locations() -> MapLocations:
+    try:
+        with open(_MAP_LOCATIONS_FILE) as f:
+            return MapLocations.model_validate(json.load(f))
+    except Exception:
+        return MapLocations()
+
+
+def _save_map_locations(locations: MapLocations) -> None:
+    try:
+        os.makedirs(os.path.dirname(_MAP_LOCATIONS_FILE), exist_ok=True)
+        tmp = _MAP_LOCATIONS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(locations.model_dump(mode="json"), f, indent=2)
+        os.replace(tmp, _MAP_LOCATIONS_FILE)
+    except Exception as exc:
+        logger.warning("Failed to persist map locations: %s", exc)
+
+
+_locations_store = _load_map_locations()
 _locations_last_modified: datetime = datetime.now(timezone.utc)
 
 
@@ -343,7 +365,7 @@ def get_map_locations(request: Request):
     headers = {
         "ETag": etag,
         "Last-Modified": format_datetime(_locations_last_modified),
-        "Cache-Control": "public, max-age=30",
+        "Cache-Control": "no-cache",
     }
     return JSONResponse(content=data, headers=headers)
 
@@ -354,6 +376,7 @@ def put_map_locations(locations: MapLocations):
     _locations_store = locations
     global _locations_last_modified
     _locations_last_modified = datetime.now(timezone.utc)
+    _save_map_locations(locations)
     return _locations_store
 
 
@@ -692,15 +715,15 @@ def _legacy_polygon_zones(entries: Any, *, zone_type: str) -> list[dict[str, Any
     return zones
 
 
-def _persist_map_provider_setting(provider: str) -> None:
+def _persist_map_provider_setting(provider: str, request: Request | None = None) -> None:
     try:
         from .routers.settings import _load_ui_settings, _save_ui_settings
 
-        sections = _load_ui_settings()
+        sections = _load_ui_settings(request)
         maps_settings = dict(sections.get("maps", {}))
         maps_settings["provider"] = "google" if provider == "google-maps" else "osm"
         sections["maps"] = maps_settings
-        _save_ui_settings(sections)
+        _save_ui_settings(sections, request)
     except Exception as exc:
         logger.warning("Failed to persist maps provider setting: %s", exc)
 
@@ -735,6 +758,7 @@ async def get_map_configuration(
 @router.put("/map/configuration")
 async def put_map_configuration(
     envelope: dict[str, Any],
+    request: Request,
     config_id: str = Query("default"),
     runtime: RuntimeContext = Depends(get_runtime),
 ):
@@ -761,7 +785,7 @@ async def put_map_configuration(
         },
         updated_by=str(envelope.get("updated_by") or "api"),
     )
-    _persist_map_provider_setting(saved["provider"])
+    _persist_map_provider_setting(saved["provider"], request)
     return {
         "status": "accepted",
         "config_id": config_id,
@@ -771,11 +795,11 @@ async def put_map_configuration(
 
 
 @router.post("/map/provider-fallback")
-async def trigger_map_provider_fallback(config_id: str = Query("default")):
+async def trigger_map_provider_fallback(request: Request, config_id: str = Query("default")):
     from ..services.maps_service import maps_service
 
     await persistence.update_map_configuration_provider(config_id, "osm")
-    _persist_map_provider_setting("osm")
+    _persist_map_provider_setting("osm", request)
     now = datetime.now(timezone.utc).isoformat()
     try:
         maps_service.configure("osm")
@@ -898,7 +922,12 @@ async def get_robohat_status():
     payload["safety_state"] = safety_state
     telemetry_snapshot: dict[str, Any] | None = None
     try:
-        telemetry_snapshot = await websocket_hub._generate_telemetry()
+        # Use cached telemetry to avoid blocking the event loop with a live sensor read.
+        # _generate_telemetry() reads all sensors synchronously and takes 600-800 ms,
+        # which is long enough to trigger the watchdog when called every 60 s.
+        cached = await websocket_hub.get_cached_telemetry()
+        if cached.get("source") != "unavailable":
+            telemetry_snapshot = cached
     except Exception as exc:
         logger.warning("Failed to gather hardware telemetry snapshot: %s", exc)
 
@@ -1222,10 +1251,13 @@ async def control_preset_turn(
         speed = _PRESET_TURN_SPEED
     speed = max(0.1, min(1.0, speed))
 
-    # CW (positive): left forward, right backward
+    # CW (positive): right forward, left backward.
+    # _mix_arcade_to_pwm uses angular=(right-left)/2 (inverted vs standard) to
+    # compensate for MDDRC10 physical wiring swap, so we swap our signs here so
+    # the net result is the correct physical turn direction.
     turn_sign = 1.0 if target_degrees > 0 else -1.0
-    left_cmd = turn_sign * speed
-    right_cmd = -turn_sign * speed
+    left_cmd = -turn_sign * speed
+    right_cmd = turn_sign * speed
 
     start_time = time.monotonic()
     sim_mode = os.getenv("SIM_MODE", "0") == "1"

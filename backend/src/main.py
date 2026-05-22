@@ -251,9 +251,19 @@ async def lifespan(app: FastAPI):
     _estop_handler = GatewayEstopHandler(_auth, _command_gateway)
     _watchdog_timeout_ms = getattr(safety_limits, "watchdog_timeout_ms", 1000) or 1000
     _watchdog = Watchdog(_estop_handler, timeout_ms=_watchdog_timeout_ms)
-    await _watchdog.start()
+    # watchdog is started after all sync init below — see comment before yield
     app.state.watchdog = _watchdog
     _command_gateway.set_watchdog(_watchdog)
+
+    _hb_interval_s = (_watchdog_timeout_ms / 1000.0) / 4.0
+
+    async def _watchdog_heartbeat_loop() -> None:
+        try:
+            while True:
+                _watchdog.heartbeat()
+                await asyncio.sleep(_hb_interval_s)
+        except asyncio.CancelledError:
+            pass
 
     # Construct LocalizationService when not running in legacy navigation mode.
     # USE_LEGACY_NAVIGATION=1 keeps NavigationService running its original code path.
@@ -378,8 +388,26 @@ async def lifespan(app: FastAPI):
     )
     app.state.startup_config_report = _startup_report
 
+    # Start the watchdog only after all synchronous init is complete.
+    # create_task schedules the heartbeat coroutine; asyncio.sleep(0) yields to the
+    # event loop so the task runs once (calling heartbeat()) before the watchdog thread
+    # starts counting. This eliminates the race where sync startup > 1000 ms caused a
+    # spurious timeout before the first heartbeat could fire.
+    _watchdog_heartbeat_task = asyncio.create_task(
+        _watchdog_heartbeat_loop(), name="watchdog_heartbeat"
+    )
+    app.state.watchdog_heartbeat_task = _watchdog_heartbeat_task
+    await asyncio.sleep(0)  # let heartbeat task run once before watchdog timer starts
+    await _watchdog.start()
+
     yield
     # Shutdown
+    if getattr(app.state, "watchdog_heartbeat_task", None):
+        app.state.watchdog_heartbeat_task.cancel()
+        try:
+            await app.state.watchdog_heartbeat_task
+        except asyncio.CancelledError:
+            pass
     if getattr(app.state, "watchdog", None):
         await app.state.watchdog.stop()
     set_safety_event_handler(None)

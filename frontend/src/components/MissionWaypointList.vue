@@ -7,6 +7,24 @@
         <button class="btn btn-xs btn-danger" @click="clearAll">Clear all</button>
       </div>
     </div>
+    <div class="default-speed-row">
+      <label class="default-speed-label">
+        Default speed:
+        <input
+          v-model.number="missionStore.defaultSpeed"
+          type="range"
+          min="0"
+          max="100"
+          class="speed-slider"
+        />
+        {{ missionStore.defaultSpeed }}%
+      </label>
+      <button
+        v-if="missionStore.waypoints.length"
+        class="btn btn-xs"
+        @click="missionStore.applySpeedToAll(missionStore.defaultSpeed)"
+      >Apply to all</button>
+    </div>
     <Draggable v-model="localWaypoints" item-key="id" @end="onDragEnd">
       <template #item="{ element: waypoint, index }">
         <li class="waypoint-item">
@@ -95,4 +113,7 @@ function undoLast() {
 .btn-xs { font-size: .75rem; }
 .btn-danger { background: #5a1a1a; border-color: #a33; color: #fff; }
 .list-actions { display: flex; gap: .5rem; }
+.default-speed-row { display: flex; align-items: center; gap: 1rem; margin-bottom: .5rem; }
+.default-speed-label { display: flex; align-items: center; gap: .4rem; font-size: .85rem; }
+.speed-slider { width: 90px; }
 </style>

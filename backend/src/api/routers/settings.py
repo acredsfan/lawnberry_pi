@@ -535,7 +535,7 @@ def _response_headers(payload: Any, last_modified: datetime | None = None) -> di
     body = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     headers = {
         "ETag": sha256(body).hexdigest(),
-        "Cache-Control": "public, max-age=30",
+        "Cache-Control": "no-cache",
     }
     if last_modified:
         headers["Last-Modified"] = format_datetime(last_modified)

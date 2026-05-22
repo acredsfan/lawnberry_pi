@@ -57,6 +57,7 @@ const CURRENT_MISSION_ID_KEY = 'lawnberry:currentMissionId';
 
 export const useMissionStore = defineStore('mission', () => {
   const waypoints = ref<Waypoint[]>([]);
+  const defaultSpeed = ref(75);
   const currentMission = ref<Mission | null>(null);
   const missionStatus = ref<MissionLifecycleStatus>('idle');
   const progress = ref(0);
@@ -96,9 +97,13 @@ export const useMissionStore = defineStore('mission', () => {
       lat,
       lon,
       blade_on: false,
-      speed: 50,
+      speed: defaultSpeed.value,
     };
     waypoints.value.push(newWaypoint);
+  };
+
+  const applySpeedToAll = (speed: number) => {
+    waypoints.value = waypoints.value.map(wp => ({ ...wp, speed }));
   };
 
   const removeWaypoint = (id: string) => {
@@ -444,6 +449,7 @@ export const useMissionStore = defineStore('mission', () => {
 
   return {
     waypoints,
+    defaultSpeed,
     currentMission,
     missionStatus,
     progress,
@@ -456,6 +462,7 @@ export const useMissionStore = defineStore('mission', () => {
     missionsLoading,
     missionsError,
     addWaypoint,
+    applySpeedToAll,
     removeWaypoint,
     updateWaypoint,
     reorderWaypoints,

@@ -29,7 +29,7 @@ export function useMissionMapSettings() {
 
   async function loadSettings() {
     try {
-      const response = await api.get('/api/v2/settings/maps')
+      const response = await api.get('/api/v2/settings/maps', { headers: { 'Cache-Control': 'no-cache' } })
       const payload =
         response?.data && typeof response.data === 'object'
           ? (response.data as Record<string, unknown>)
