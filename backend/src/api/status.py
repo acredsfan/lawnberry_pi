@@ -25,8 +25,9 @@ async def get_status_v2():
     """Return current robot state in a simplified schema for contract tests."""
     mgr = get_robot_state_manager()
     try:
-        telemetry: dict[str, Any] = await websocket_hub._generate_telemetry()
-        mgr.update_from_telemetry(telemetry)
+        telemetry: dict[str, Any] = await websocket_hub.get_cached_telemetry()
+        if telemetry.get("source") != "unavailable":
+            mgr.update_from_telemetry(telemetry)
     except Exception:
         pass
     st = mgr.get_state()
@@ -64,9 +65,12 @@ async def ws_status(websocket: WebSocket):
     mgr = get_robot_state_manager()
     try:
         while True:
-            # Update state opportunistically from the same telemetry source used for dashboard
-            telemetry: dict[str, Any] = await websocket_hub._generate_telemetry()
-            mgr.update_from_telemetry(telemetry)
+            # Use cached telemetry to avoid a live sensor read on every tick.
+            # _generate_telemetry() blocks the event loop for 600-800 ms per call
+            # at 5 Hz, which starves the safety watchdog heartbeat.
+            telemetry: dict[str, Any] = await websocket_hub.get_cached_telemetry()
+            if telemetry.get("source") != "unavailable":
+                mgr.update_from_telemetry(telemetry)
             st = mgr.get_state()
             await websocket.send_json(
                 {
