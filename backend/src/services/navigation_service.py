@@ -294,6 +294,16 @@ class NavigationService:
         self._session_heading_alignment: float = 0.0
         self._heading_alignment_sample_count: int = 0
         self._gps_cog_history: list = []  # recent GPS COG values for straight-motion gate
+        # Tolerance for GPS COG consistency during bootstrap straight-line detection.
+        # GPS COG can be noisy; increased from 10° to 15° to tolerate GPS jitter
+        # and minor steering inputs during the ~15s bootstrap drive.
+        # Set via LAWNBERRY_BOOTSTRAP_STRAIGHT_TOLERANCE_DEG environment variable.
+        try:
+            self._bootstrap_straight_tolerance_deg = float(
+                os.getenv("LAWNBERRY_BOOTSTRAP_STRAIGHT_TOLERANCE_DEG", "15.0")
+            )
+        except ValueError:
+            self._bootstrap_straight_tolerance_deg = 15.0
         # Track when bootstrap begins for lenient GPS snap criteria.
         self._bootstrap_start_time: float | None = None
         self._require_gps_heading_alignment: bool = False
@@ -1168,7 +1178,7 @@ class NavigationService:
                                 abs(self._heading_delta(c, cog_mean))
                                 for c in self._gps_cog_history
                             )
-                            going_straight = max_dev < 10.0
+                            going_straight = max_dev < self._bootstrap_straight_tolerance_deg
 
                         if going_straight and self._heading_alignment_sample_count == 0:
                             # First stable bootstrap sample: snap immediately to GPS COG.
