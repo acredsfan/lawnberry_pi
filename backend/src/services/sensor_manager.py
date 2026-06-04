@@ -905,9 +905,14 @@ class SensorManager:
                 )
                 return None
 
-        # Read all sensors concurrently; power gets a longer budget for BLE
+        # Read all sensors concurrently; power and GPS get custom timeouts.
+        # GPS timeout is reduced from 2.5s to 1.5s to prevent watchdog starvation
+        # when consecutive sensor timeouts occur. With 5000ms watchdog and 1250ms
+        # heartbeat interval, a 2.5s GPS timeout leaves no margin for the next
+        # heartbeat. Reduced to 1.5s ensures heartbeat window is maintained.
+        GPS_READ_TIMEOUT_SECONDS = 1.5
         tasks = [
-            _read_with_timeout("gps", self.gps.read_gps()),
+            _read_with_timeout("gps", self.gps.read_gps(), timeout=GPS_READ_TIMEOUT_SECONDS),
             _read_with_timeout("imu", self.imu.read_imu()),
             _read_with_timeout("tof", self.tof.read_tof_sensors()),
             _read_with_timeout("environmental", self.environmental.read_environmental()),
