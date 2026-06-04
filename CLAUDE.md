@@ -14,6 +14,9 @@ Use **semble MCP tools** for all code search before falling back to `grep` or `f
 - `mcp__semble__search` — find where a symbol, function, or pattern is defined/used
 - `mcp__semble__find_related` — discover related code after an initial hit
 
+Prefer `repo=https://github.com/acredsfan/lawnberry_pi` unless local-path indexing has been
+verified healthy in the current runtime.
+
 Use the **Explore subagent** for open-ended multi-file investigations (file patterns, cross-file
 references, architecture surveys). Use `mcp__semble__search` for targeted lookups.
 

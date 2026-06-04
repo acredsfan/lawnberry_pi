@@ -4,7 +4,7 @@ tilt_cutoff_latency_ms: 200
 battery_low_voltage: 12.2
 battery_critical_voltage: 11.8
 motor_current_max_amps: 5.0
-watchdog_timeout_ms: 1000
+watchdog_timeout_ms: 5000
 geofence_buffer_meters: 0.5
 high_temperature_celsius: 80.0
 tof_obstacle_distance_meters: 0.10159994513602963

@@ -102,6 +102,19 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             return header_client
         if os.getenv("SIM_MODE", "0") == "1":
             return f"sim:{uuid.uuid4().hex}"
+        
+        # Check for real IP through proxy headers (Cloudflare tunnel, reverse proxies)
+        # Order: CF-Connecting-IP (Cloudflare) > X-Forwarded-For > direct client IP
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            # X-Forwarded-For can be a comma-separated list; take the first (original client)
+            client_ip = forwarded_for.split(",")[0].strip()
+            return f"ip:{client_ip}"
+        
+        cf_connecting_ip = request.headers.get("CF-Connecting-IP")
+        if cf_connecting_ip:
+            return f"ip:{cf_connecting_ip}"
+        
         client = request.client
         if client:
             return f"ip:{client.host}"

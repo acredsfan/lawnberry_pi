@@ -2,7 +2,7 @@
 
 ## Code Search
 
-Use the semble MCP tools (`mcp__semble__search`, `mcp__semble__find_related`) for file and code searches before falling back to `grep`/`find`. Pass the repo root path or a GitHub URL for external repos. Call `find_related` on a search result to discover similar code elsewhere in the codebase. Prefer semble for any question about how code works, where a symbol is defined, or which files reference a given name.
+Use the semble MCP tools (`mcp__semble__search`, `mcp__semble__find_related`) for file and code searches before falling back to `grep`/`find`. Prefer passing `repo=https://github.com/acredsfan/lawnberry_pi` unless local-path indexing is explicitly verified healthy in the current runtime (some environments mis-handle Linux paths). Call `find_related` on a search result to discover similar code elsewhere in the codebase. Prefer semble for any question about how code works, where a symbol is defined, or which files reference a given name.
 
 ## Project Orientation
 

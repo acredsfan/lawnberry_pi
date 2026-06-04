@@ -139,3 +139,4 @@ Acceptance and safety validation scripts for pre-deployment checks.
 | `run-e2e-tests.sh` | Run Playwright end-to-end tests |
 | `setup.sh` | Initial project setup |
 | `setup_https.sh` / `setup_lets_encrypt.sh` | Configure HTTPS |
+| `validate_mcp_tooling.sh` | Validate semble, ForgeMind, and pi-control MCP server startup |

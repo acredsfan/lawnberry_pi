@@ -216,6 +216,52 @@ async def test_bootstrap_end_clears_active_flag():
 
 
 @pytest.mark.asyncio
+async def test_heading_relock_after_repeated_outlier_rejects_with_gps_corroboration():
+    """When heading is latched, repeated IMU rejects should re-lock if GPS agrees.
+
+    Reproduces field failure mode where current heading stayed stale while both
+    raw IMU and GPS COG moved consistently to a new direction.
+    """
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(
+        imu_yaw_offset=0.0,
+        antenna_forward_m=0.0,
+        antenna_right_m=0.0,
+        max_fix_age_seconds=2.0,
+        max_accuracy_m=5.0,
+        alignment_file=None,
+    )
+
+    # Mission already aligned; heading got latched to a stale value.
+    loc._require_gps_heading_alignment = False
+    loc._heading_alignment_sample_count = 1
+    loc.state.heading = 289.0
+
+    t0 = datetime.now(UTC)
+    # IMU adjusted heading ≈ 80° (yaw=280 with zero offsets/alignment),
+    # GPS COG corroborates ~80° with valid motion speed.
+    for i in range(4):
+        state = await loc.update(
+            SensorData(
+                gps=GpsReading(
+                    latitude=37.0 + i * 0.000003,
+                    longitude=-122.0,
+                    accuracy=0.03,
+                    heading=80.0,
+                    speed=0.6,
+                    timestamp=t0 + timedelta(seconds=i),
+                ),
+                imu=ImuReading(yaw=280.0, calibration_status="fully_calibrated"),
+            )
+        )
+
+    # Should recover from stale 289° latch and move near corroborated 80°.
+    assert state.heading is not None
+    assert state.heading == pytest.approx(80.0, abs=5.0)
+
+
+@pytest.mark.asyncio
 async def test_reset_clears_alignment():
     from backend.src.services.localization_service import LocalizationService
 

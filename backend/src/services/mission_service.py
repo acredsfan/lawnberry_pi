@@ -482,6 +482,10 @@ class MissionService:
                 else MissionWaypoint.model_validate(waypoint)
                 for waypoint in waypoints
             ]
+            # Ensure the latest zone boundaries are loaded before validating so
+            # that waypoints are checked against the current geofence even on the
+            # first call after startup (before any mission has executed).
+            await self._refresh_nav_boundaries()
             self._validate_waypoints_in_geofence(normalized_waypoints)
 
         mission = Mission(
@@ -528,6 +532,11 @@ class MissionService:
         if status.status == MissionLifecycleStatus.PAUSED:
             raise MissionStateError("Mission is paused. Use resume instead of start.")
 
+        # Ensure the latest zone boundaries are loaded before any waypoint
+        # validation below, so the geofence check is always against the current
+        # saved zones — not stale state from a previous mission or cold start.
+        await self._refresh_nav_boundaries()
+
         # Lazy waypoint generation: if mission has a planning intent and no waypoints yet,
         # generate waypoints NOW before changing status or spawning the nav task.
         intent = self._planning_intents.get(mission_id)
@@ -554,6 +563,10 @@ class MissionService:
             self._validate_waypoints_in_geofence(mission.waypoints)
             # Persist updated waypoints immediately.
             self._persist_mission(mission)
+        elif mission.waypoints:
+            # Always re-validate explicit waypoints at start time in case the
+            # boundary changed since the mission was originally created.
+            self._validate_waypoints_in_geofence(mission.waypoints)
 
         self.mission_statuses[mission_id] = self._build_status(
             mission.id,
@@ -975,6 +988,24 @@ class MissionService:
             return 0.0
         bounded_index = max(0, min(current_waypoint_index, len(mission.waypoints)))
         return round((bounded_index / len(mission.waypoints)) * 100, 2)
+
+    async def _refresh_nav_boundaries(self) -> None:
+        """Load the latest zone boundaries into NavigationService before validating.
+
+        ``_validate_waypoints_in_geofence`` reads
+        ``nav_service.navigation_state.safety_boundaries``, which is only
+        populated by ``_load_boundaries_from_zones()`` inside
+        ``execute_mission``.  Calling this helper first ensures validation
+        uses current saved zones, not stale (or empty) state from a previous
+        run or cold start.
+
+        The SQLite read is offloaded to a thread so it does not block the
+        asyncio event loop and trigger the safety watchdog.
+        """
+        try:
+            await asyncio.to_thread(self.nav_service._load_boundaries_from_zones)
+        except Exception as exc:
+            logger.warning("Could not refresh navigation boundaries before validation: %s", exc)
 
     def _validate_waypoints_in_geofence(self, waypoints: list[MissionWaypoint]) -> None:
         boundaries = getattr(self.nav_service.navigation_state, "safety_boundaries", None) or []

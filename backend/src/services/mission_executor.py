@@ -639,19 +639,35 @@ class MissionExecutor:
                         )
                         if _gps_stall_escape_phase is None:
                             if _gps_no_move_s >= _GPS_STALL_ARM_S:
-                                _gps_stall_escape_start = time.monotonic()
-                                _gps_stall_escape_phase = "pivot"
-                                # Pivot opposite to heading error: try to get different wheel
-                                # contact before retrying the original direction.
-                                _gps_stall_pivot_dir = -1.0 if err >= 0 else 1.0
-                                logger.warning(
-                                    "GPS position stall: no movement (%.2f m) in %.1f s — "
-                                    "escape pivot starting (dir=%+.0f, hdg=%.1f°)",
-                                    _gps_moved_m,
-                                    _gps_no_move_s,
-                                    _gps_stall_pivot_dir,
-                                    _imu_heading,
+                                # Suppress escape when GPS is unreliable: dead-reckoning
+                                # active or accuracy too coarse to detect the stall threshold.
+                                _cur_acc = getattr(current_position, "accuracy", None)
+                                _dr_active = getattr(self._loc, "dead_reckoning_active", False)
+                                _acc_too_coarse = (
+                                    _cur_acc is not None and _cur_acc >= _GPS_STALL_MIN_M * 4
                                 )
+                                if _dr_active or _acc_too_coarse:
+                                    _gps_stall_ref_lat = _cur_lat
+                                    _gps_stall_ref_lon = _cur_lon
+                                    _gps_stall_ref_time = time.monotonic()
+                                    logger.debug(
+                                        "GPS stall suppressed: dr_active=%s acc=%.2f m",
+                                        _dr_active, _cur_acc or 0.0,
+                                    )
+                                else:
+                                    _gps_stall_escape_start = time.monotonic()
+                                    _gps_stall_escape_phase = "pivot"
+                                    # Pivot opposite to heading error: try to get different wheel
+                                    # contact before retrying the original direction.
+                                    _gps_stall_pivot_dir = -1.0 if err >= 0 else 1.0
+                                    logger.warning(
+                                        "GPS position stall: no movement (%.2f m) in %.1f s — "
+                                        "escape pivot starting (dir=%+.0f, hdg=%.1f°)",
+                                        _gps_moved_m,
+                                        _gps_no_move_s,
+                                        _gps_stall_pivot_dir,
+                                        _imu_heading,
+                                    )
                         elif _gps_stall_escape_phase == "pivot":
                             _esc_t = time.monotonic() - (
                                 _gps_stall_escape_start or time.monotonic()
@@ -775,9 +791,9 @@ class MissionExecutor:
                                 _stall_elapsed, _max_cmd,
                             )
             else:
-                # Clear only on clear recovery (5× threshold) or zero command,
-                # so transient gear-lash blips don't reset accumulated stall time.
-                if _max_enc_rpm >= _MOTOR_STALL_RPM_THRESHOLD * 5.0 or _max_cmd <= _MOTOR_STALL_CMD_THRESHOLD:
+                # Clear when RPM exceeds 2× stall threshold (4.0 RPM) or command drops to zero.
+                # 5× was too aggressive: slow mowing/turning RPM (3-8) never cleared the timer.
+                if _max_enc_rpm >= _MOTOR_STALL_RPM_THRESHOLD * 2.0 or _max_cmd <= _MOTOR_STALL_CMD_THRESHOLD:
                     _motor_stall_start = None
 
             # Trigger B: wheel spin — turning but not moving
@@ -847,7 +863,7 @@ class MissionExecutor:
             else:
                 _enc_asym_start = None
 
-            if _raw_abs_err > 20 and (not _in_tank_mode or _stall_active):
+            if _raw_abs_err > 20 and (not _in_tank_mode or _stall_active) and not _pre_rotating:
                 if _stall_start is None:
                     _stall_start = time.monotonic()
                     _stall_heading = _imu_heading

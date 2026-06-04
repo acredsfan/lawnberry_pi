@@ -64,3 +64,44 @@ def test_encode_numpy_frame_preserves_expected_rgb(monkeypatch, color_space, pix
     assert len(rgb_pixel) == len(expected)
     for observed, exp in zip(rgb_pixel, expected):
         assert abs(observed - exp) <= 2
+
+
+def test_picamera2_uses_full_sensor_crop_for_full_fov(monkeypatch):
+    """PiCamera2 should be configured to use the full sensor area, not a zoomed crop."""
+
+    class FakeCamera:
+        def __init__(self):
+            self.camera_properties = {"ScalerCropMaximum": (0, 0, 4056, 3040)}
+            self.controls = []
+            self.config = None
+            self.started = False
+
+        def create_video_configuration(self, main):
+            self.config = {"main": main}
+            return {"buffer_count": 3}
+
+        def configure(self, config):
+            self.config = config
+
+        def start(self):
+            self.started = True
+
+        def set_controls(self, controls):
+            self.controls.append(controls)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(camera_module, "PICAMERA_AVAILABLE", True)
+    monkeypatch.setattr(camera_module, "Picamera2", FakeCamera)
+
+    service = CameraStreamService(sim_mode=False)
+    service.stream.configuration.width = 1280
+    service.stream.configuration.height = 720
+    service.stream.configuration.framerate = 15.0
+
+    assert service._initialize_camera_sync() is True
+    assert isinstance(service.camera, FakeCamera)
+    assert service.camera.started is True
+    assert any("ScalerCrop" in call for call in service.camera.controls)
+    assert service.camera.controls[-1]["ScalerCrop"] == (0, 0, 4056, 3040)

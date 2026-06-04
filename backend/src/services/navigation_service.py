@@ -217,6 +217,7 @@ class NavigationService:
         self.obstacle_avoidance_distance = 0.2  # meters
         self.max_waypoint_fix_age_seconds = 2.0
         self.max_waypoint_accuracy_m = 5.0
+        self.geofence_inner_margin_m = 1.0
         self.position_verification_timeout_seconds = 30.0
         # Warn when GPS position diverges from dead-reckoning estimate by more
         # than this distance (metres) on re-acquisition after a GPS outage.
@@ -256,6 +257,13 @@ class NavigationService:
                 "Failed to load navigation config from hardware/safety limits: %s",
                 exc,
             )
+
+        try:
+            self.geofence_inner_margin_m = max(
+                0.0, float(os.getenv("LAWNBERRY_GEOFENCE_INNER_MARGIN_M", "1.0"))
+            )
+        except ValueError:
+            self.geofence_inner_margin_m = 1.0
 
         self.obstacle_detector = ObstacleDetector(self.obstacle_avoidance_distance)
 
@@ -479,7 +487,7 @@ class NavigationService:
         self.navigation_state.current_waypoint_index = max(0, min(requested_index or 0, max_index))
 
         self._mission_execution_active = True
-        self._load_boundaries_from_zones()
+        await asyncio.to_thread(self._load_boundaries_from_zones)
 
         async def _bootstrap():
             await self._run_bootstrap_and_check_geofence()
@@ -494,6 +502,11 @@ class NavigationService:
             never calls update_navigation_state itself. Without this pump the
             heading freezes the moment the bootstrap loop ends, causing any
             tank-turn to steer against a static heading forever.
+
+            Also enforces the geofence on every tick: if the mower's GPS
+            position exits the safety boundary during a mission, the global
+            emergency stop is latched immediately so the waypoint loop halts
+            on its next iteration.
             """
             from ..core.state_manager import get_sensor_manager
             from ..services.telemetry_service import telemetry_service
@@ -512,6 +525,34 @@ class NavigationService:
                     raise
                 except Exception as exc:
                     logger.debug("Mission sensor pump error: %s", exc)
+
+                # Geofence enforcement — check on every tick after sensor update.
+                # This is the only continuous guard against the mower wandering
+                # outside the boundary during normal waypoint navigation.
+                try:
+                    boundaries = self.navigation_state.safety_boundaries
+                    pos = self.navigation_state.current_position
+                    if boundaries and pos is not None and not self._global_emergency_active():
+                        outer = boundaries[0]
+                        if len(outer) >= 3:
+                            poly = [(p.latitude, p.longitude) for p in outer]
+                            if not point_in_polygon(pos.latitude, pos.longitude, poly):
+                                logger.critical(
+                                    "GEOFENCE VIOLATION: mower exited boundary at "
+                                    "(%.6f, %.6f) — emergency stop triggered",
+                                    pos.latitude,
+                                    pos.longitude,
+                                )
+                                self._latch_global_emergency_state(
+                                    reason=(
+                                        f"Geofence violation: position "
+                                        f"({pos.latitude:.6f}, {pos.longitude:.6f}) "
+                                        f"is outside safety boundary"
+                                    )
+                                )
+                except Exception as exc:
+                    logger.warning("Geofence check error in sensor pump: %s", exc)
+
                 await asyncio.sleep(0.1)  # 10 Hz
 
         sensor_pump_task = asyncio.create_task(_sensor_pump())

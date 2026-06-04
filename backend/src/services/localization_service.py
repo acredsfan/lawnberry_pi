@@ -184,6 +184,11 @@ class LocalizationService:
         # IMU diagnostic log throttle
         self._last_imu_log: float = 0.0
 
+        # Heading latch diagnostics/recovery: if IMU updates are repeatedly
+        # rejected as outliers while GPS COG corroborates the IMU direction,
+        # force a one-time re-lock to prevent stale-heading deadlock.
+        self._imu_reject_streak: int = 0
+
         if alignment_file is not None:
             self.load_alignment()
         else:
@@ -253,6 +258,7 @@ class LocalizationService:
         self.state.gps_cog = None
         self._odometry_integrator.reset_ticks()
         self._last_dr_time_s = time.monotonic()
+        self._imu_reject_streak = 0
         if saved_alignment is not None:
             saved_value, saved_samples, _age_s = saved_alignment
             self._session_heading_alignment = saved_value
@@ -473,6 +479,38 @@ class LocalizationService:
                         if self._alignment_file is not None:
                             self.save_alignment(source="gps_cog_snap")
 
+                # Root-cause recovery: heading can become latched if consecutive
+                # IMU jumps exceed outlier threshold while current heading is stale.
+                # When GPS COG consistently agrees with IMU and strongly disagrees
+                # with the latched heading, force a safe re-lock.
+                if (
+                    self.alignment_ready
+                    and self._imu_reject_streak >= 3
+                    and gps_cog_speed is not None
+                    and gps_cog_speed >= 0.3
+                ):
+                    imu_vs_cog = abs(heading_delta(adjusted_yaw, gps_cog))
+                    current_h = self.state.heading
+                    current_vs_cog = (
+                        abs(heading_delta(current_h, gps_cog))
+                        if current_h is not None
+                        else 0.0
+                    )
+                    # Require clear corroboration: IMU and GPS agree (<=25°)
+                    # while the current heading is clearly wrong (>=60°).
+                    if imu_vs_cog <= 25.0 and current_vs_cog >= 60.0:
+                        self._set_heading(adjusted_yaw, allow_large_jump=True)
+                        logger.warning(
+                            "Heading relock: accepted IMU jump after %d rejects "
+                            "(imu=%.1f° gps_cog=%.1f° current=%.1f° speed=%.2f)",
+                            self._imu_reject_streak,
+                            adjusted_yaw,
+                            gps_cog,
+                            current_h if current_h is not None else -1.0,
+                            gps_cog_speed,
+                        )
+                        self._imu_reject_streak = 0
+
         elif gps_cog is not None:
             # IMU unavailable — use GPS COG as heading fallback while in motion
             self.state.heading = gps_cog
@@ -681,6 +719,7 @@ class LocalizationService:
         if previous is not None and not allow_large_jump:
             jump = abs(heading_delta(heading, previous))
             if jump > 60.0:
+                self._imu_reject_streak += 1
                 logger.debug(
                     "IMU heading outlier rejected: prev=%.1f° new=%.1f° (Δ=%.1f°) — "
                     "keeping previous value",
@@ -688,6 +727,7 @@ class LocalizationService:
                 )
                 return
         self.state.heading = heading
+        self._imu_reject_streak = 0
 
     def _update_quality(self) -> None:
         """Classify and update state.quality from current position data."""
