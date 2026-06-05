@@ -41,6 +41,14 @@ journalctl -u lawnberry-backend -f --no-pager
 tail -f /home/pi/lawnberry/backend/backend.log
 ```
 
+## Agent Tooling and Verification Gate (Required)
+
+- Use **Semble** (`semble-search`, `semble-find_related`) as the first choice for code discovery.
+- Use **Pi-control** tools first for runtime/service/hardware state checks.
+- Use **ForgeMind** session/context tools at task start when available.
+- Before final handoff, include direct evidence from tool/command output that proves the reported behavior changed.
+- For changes under `backend/`, `frontend/`, or `systemd/`, complete the PR template **Agent Evidence** checklist; CI rejects PRs missing it.
+
 ⚠️ **Test suite hang warning:** `python -m pytest tests/` without `-m "not hardware"` will hang
 indefinitely because some tests block on hardware I/O (serial ports, I2C). Always filter or
 set a per-test timeout. `pytest-timeout` is NOT installed; add `--timeout=N` only if it is.

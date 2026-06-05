@@ -33,3 +33,40 @@ jobs:
           then
             echo "$CHANGES" | grep -qi '^docs/' || (echo "Missing docs/ update for substantive code change" && exit 2)
           fi
+      - name: Require agent evidence checklist for substantive code changes
+        run: |
+          base=${{ github.event.pull_request.base.sha }}
+          head=${{ github.event.pull_request.head.sha }}
+          CHANGES=$(git diff --name-only "$base" "$head")
+          if ! echo "$CHANGES" | grep -qE '^(backend/|frontend/|systemd/)'; then
+            echo "No substantive backend/frontend/systemd change; skipping agent evidence gate."
+            exit 0
+          fi
+
+          BODY=$(python - <<'PY'
+import json
+import os
+from pathlib import Path
+event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+print(event.get("pull_request", {}).get("body", ""))
+PY
+          )
+
+          fail=0
+          echo "$BODY" | grep -Eiq -- '- \[[xX]\] Used \*\*Semble\*\* for code discovery' || {
+            echo "Missing checked Semble evidence box in PR template."
+            fail=1
+          }
+          echo "$BODY" | grep -Eiq -- '- \[[xX]\] Used \*\*Pi-control\*\* for runtime/service/hardware evidence' || {
+            echo "Missing checked Pi-control evidence box in PR template."
+            fail=1
+          }
+          echo "$BODY" | grep -Eiq -- '- \[[xX]\] Used \*\*ForgeMind\*\* for task context/memory' || {
+            echo "Missing checked ForgeMind evidence box in PR template."
+            fail=1
+          }
+          echo "$BODY" | grep -Eiq -- '- \[[xX]\] Added verification evidence' || {
+            echo "Missing checked verification evidence box in PR template."
+            fail=1
+          }
+          [ "$fail" -eq 0 ] || exit 3

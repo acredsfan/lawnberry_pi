@@ -4,6 +4,14 @@
 
 Use the semble MCP tools (`mcp__semble__search`, `mcp__semble__find_related`) for file and code searches before falling back to `grep`/`find`. Prefer passing `repo=https://github.com/acredsfan/lawnberry_pi` unless local-path indexing is explicitly verified healthy in the current runtime (some environments mis-handle Linux paths). Call `find_related` on a search result to discover similar code elsewhere in the codebase. Prefer semble for any question about how code works, where a symbol is defined, or which files reference a given name.
 
+## Agent Execution Gate (Required)
+
+- For codebase discovery, use **Semble first** (`semble-search` / `semble-find_related`) before fallback tools.
+- For runtime, service, hardware, or on-device diagnostics, use **Pi-control first** (`pi-control` tools) before generic shell probing.
+- At task start, use **ForgeMind session/context tools** (`forgemind-session_start`, then context/memory tools as needed) for cross-turn continuity.
+- Do not claim a fix until evidence is captured from commands/tool calls that directly prove the target behavior changed.
+- For PRs that touch `backend/`, `frontend/`, or `systemd/`, complete the **Agent Evidence** checklist in the PR template; CI enforces this.
+
 ## Project Orientation
 
 - LawnBerry Pi is a Raspberry Pi autonomous mower system with a FastAPI backend, Vue 3 frontend, hardware drivers, systemd deployment units, and operations tooling.

@@ -7,12 +7,11 @@
 
 ## Checklist
 
-- [ ] **Agent Journal Updated**
-  - Updated `memory/AGENT_JOURNAL.md` with:
-    - Current task status
-    - Decisions made
-    - Next debug steps
-    - Handoff notes
+- [ ] **Agent Evidence (Required for backend/frontend/systemd code changes)**
+  - [ ] Used **Semble** for code discovery (`semble-search` / `semble-find_related`)
+  - [ ] Used **Pi-control** for runtime/service/hardware evidence
+  - [ ] Used **ForgeMind** for task context/memory (`forgemind-session_start` and related calls)
+  - [ ] Added verification evidence (commands/tool calls + key output) in PR description
 
 - [ ] **Docs Updated**
   - Updated `/docs` and `/spec` to reflect this change
