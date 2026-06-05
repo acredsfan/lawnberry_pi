@@ -868,13 +868,16 @@ class SensorManager:
         self.initialized = success_count >= 3
         return self.initialized
 
-    async def read_all_sensors(self) -> SensorData:
+    async def read_all_sensors(self, bootstrap_mode: bool = False) -> SensorData:
         """Read data from all sensors.
 
         Only one hardware read is allowed in-flight at a time.  Concurrent
         callers wait on ``_read_lock`` then receive the cached result if it is
         still fresh (< ``_CACHE_TTL_S`` seconds old).  This prevents thread-pool
         exhaustion when the BNO085 or another blocking driver is slow.
+        
+        Args:
+            bootstrap_mode: If True, extend GPS timeout to 2.0s for heading bootstrap.
         """
         if not self.initialized:
             logger.warning("Sensor manager not initialized")
@@ -885,13 +888,19 @@ class SensorManager:
             if self._read_cache is not None and (now - self._read_cache_ts) < self._CACHE_TTL_S:
                 return self._read_cache
 
-            result = await self._do_read_all_sensors()
+            result = await self._do_read_all_sensors(bootstrap_mode=bootstrap_mode)
             self._read_cache = result
             self._read_cache_ts = time.monotonic()
             return result
 
-    async def _do_read_all_sensors(self) -> SensorData:
-        """Perform a real hardware read of all sensors (called under _read_lock)."""
+    async def _do_read_all_sensors(self, bootstrap_mode: bool = False) -> SensorData:
+        """Perform a real hardware read of all sensors (called under _read_lock).
+        
+        Args:
+            bootstrap_mode: If True, use extended GPS timeout (2.0s) for heading bootstrap.
+                           This allows GPS COG snaps to complete reliably during the
+                           ~15s bootstrap drive, where GPS may transition between RTK states.
+        """
 
         async def _read_with_timeout(name: str, coro: Any, timeout: float | None = None) -> Any:
             t = timeout if timeout is not None else self.SENSOR_READ_TIMEOUT_SECONDS
@@ -910,7 +919,10 @@ class SensorManager:
         # when consecutive sensor timeouts occur. With 5000ms watchdog and 1250ms
         # heartbeat interval, a 2.5s GPS timeout leaves no margin for the next
         # heartbeat. Reduced to 1.5s ensures heartbeat window is maintained.
-        GPS_READ_TIMEOUT_SECONDS = 1.5
+        # HOWEVER, during heading bootstrap (bootstrap_mode=True), GPS COG snaps need
+        # more lenient conditions. Use 2.0s during bootstrap to allow RTK transitions
+        # to settle and COG data to flow reliably to the snap logic.
+        GPS_READ_TIMEOUT_SECONDS = 2.0 if bootstrap_mode else 1.5
         tasks = [
             _read_with_timeout("gps", self.gps.read_gps(), timeout=GPS_READ_TIMEOUT_SECONDS),
             _read_with_timeout("imu", self.imu.read_imu()),

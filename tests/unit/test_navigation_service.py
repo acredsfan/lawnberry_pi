@@ -295,7 +295,7 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
     calls = 0
 
     class FakeSensorManager:
-        async def read_all_sensors(self):
+        async def read_all_sensors(self, bootstrap_mode: bool = False):
             nonlocal calls
             calls += 1
             return SensorData()
@@ -315,7 +315,7 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
         nonlocal calls
         nav._heading_alignment_sample_count = 1
         # Simulate ~2 m of forward movement so the min-distance gate passes.
-        nav.navigation_state.current_position = Position(latitude=0.00002, longitude=0.0, accuracy=1.0)
+        nav.navigation_state.current_position = Position(latitude=0.00002, longitude=0.0, accuracy=0.1)
         return nav.navigation_state
 
     original_manager = AppState.get_instance().sensor_manager
@@ -325,7 +325,7 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
     monkeypatch.setattr(nav, "_global_emergency_active", lambda: False)
     monkeypatch.setattr(nav, "update_navigation_state", fake_update_navigation_state)
     # Pre-set a GPS fix so the pre-flight check passes immediately without waiting.
-    nav.navigation_state.current_position = Position(latitude=0.0, longitude=0.0, accuracy=1.0)
+    nav.navigation_state.current_position = Position(latitude=0.0, longitude=0.0, accuracy=0.1)
 
     try:
         await nav._bootstrap_heading_from_gps_cog()
@@ -333,6 +333,15 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
         set_sensor_manager(original_manager)
 
     assert calls == 1
+
+
+def test_bootstrap_position_quality_requires_rtk_grade_accuracy():
+    nav = NavigationService()
+
+    assert nav._position_ready_for_bootstrap(None) is False
+    assert nav._position_ready_for_bootstrap(Position(latitude=0.0, longitude=0.0, accuracy=None)) is False
+    assert nav._position_ready_for_bootstrap(Position(latitude=0.0, longitude=0.0, accuracy=0.6)) is False
+    assert nav._position_ready_for_bootstrap(Position(latitude=0.0, longitude=0.0, accuracy=0.25)) is True
 
 
 @pytest.mark.xfail(reason="pre-existing on main: passes in isolation, fails in full-suite ordering. Earlier test latches emergency stop on shared state. Tracked for CI cleanup.")
@@ -744,6 +753,38 @@ def test_load_saved_alignment_mission_start_reset_source(tmp_path):
     assert result is None
 
 
+def test_load_saved_alignment_rejects_fallback_source(tmp_path):
+    """Fallback-derived alignment should not be reused as mission seed."""
+    nav = NavigationService()
+    nav._ALIGNMENT_FILE = _make_alignment_file(
+        tmp_path,
+        value=11.1,
+        samples=1,
+        source="gps_cog_snap_fallback",
+        age_hours=0.1,
+    )
+    nav._calibration_repo = None
+
+    result = nav._load_saved_alignment_for_mission_start()
+    assert result is None
+
+
+def test_load_saved_alignment_rejects_no_imu_source(tmp_path):
+    """GPS-only snap should not be reused as mission seed for autonomous runs."""
+    nav = NavigationService()
+    nav._ALIGNMENT_FILE = _make_alignment_file(
+        tmp_path,
+        value=11.1,
+        samples=1,
+        source="gps_cog_snap_no_imu",
+        age_hours=0.1,
+    )
+    nav._calibration_repo = None
+
+    result = nav._load_saved_alignment_for_mission_start()
+    assert result is None
+
+
 def test_load_saved_alignment_missing_file(tmp_path):
     """No alignment file returns None gracefully."""
     nav = NavigationService()
@@ -808,7 +849,7 @@ async def test_execute_mission_loads_saved_alignment_when_valid(tmp_path, monkey
         await nav.execute_mission(mission, mission_svc)
 
     assert nav._session_heading_alignment == pytest.approx(15.5, abs=0.01)
-    assert nav._heading_alignment_sample_count >= 1
+    assert nav._heading_alignment_sample_count == 0
     assert nav._require_gps_heading_alignment is True
 
 

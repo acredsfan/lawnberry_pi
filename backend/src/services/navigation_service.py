@@ -217,6 +217,7 @@ class NavigationService:
         self.obstacle_avoidance_distance = 0.2  # meters
         self.max_waypoint_fix_age_seconds = 2.0
         self.max_waypoint_accuracy_m = 5.0
+        self.bootstrap_required_accuracy_m = 0.25
         self.geofence_inner_margin_m = 1.0
         self.position_verification_timeout_seconds = 30.0
         # Warn when GPS position diverges from dead-reckoning estimate by more
@@ -466,13 +467,16 @@ class NavigationService:
         if saved is not None:
             saved_value, saved_samples, saved_age_s = saved
             self._session_heading_alignment = saved_value
-            self._heading_alignment_sample_count = max(1, saved_samples)
-            # Do NOT write "mission_start_reset" — the disk still holds the real snap.
+            # Seed heading from saved value, but always require a fresh bootstrap snap
+            # for the current mission before treating alignment as verified.
+            self._heading_alignment_sample_count = 0
+            # Do NOT write "mission_start_reset" — the disk still holds the prior snap.
             logger.info(
-                "Mission start: loaded saved heading alignment %.1f° (age %.0fs) "
-                "— will validate via GPS COG bootstrap",
+                "Mission start: loaded saved heading alignment %.1f° (age %.0fs, prev_samples=%d) "
+                "— requiring fresh GPS COG bootstrap",
                 saved_value,
                 saved_age_s,
+                saved_samples,
             )
         else:
             self._session_heading_alignment = 0.0
@@ -667,9 +671,11 @@ class NavigationService:
         # Without a position, _resolve_gps_cog returns None immediately on every tick
         # because current_position is None, so the bootstrap drive produces no COG no
         # matter how long the mower moves.
-        if self.navigation_state.current_position is None:
+        if not self._position_ready_for_bootstrap(self.navigation_state.current_position):
             logger.info(
-                "Heading bootstrap: waiting for GPS fix before driving (timeout %.0f s)...",
+                "Heading bootstrap: waiting for RTK-grade GPS fix (<=%.2f m) before driving "
+                "(timeout %.0f s)...",
+                self.bootstrap_required_accuracy_m,
                 _GPS_PREFLIGHT_WAIT_S,
             )
             from ..core.state_manager import get_sensor_manager as _get_sm
@@ -681,15 +687,15 @@ class NavigationService:
                 try:
                     _mgr = _get_sm()
                     if _mgr is not None:
-                        _sd = await _mgr.read_all_sensors()
+                        _sd = await _mgr.read_all_sensors(bootstrap_mode=True)
                         if _sd:
                             await self.update_navigation_state(_sd)
                 except Exception:
                     pass
-                if self.navigation_state.current_position is not None:
+                if self._position_ready_for_bootstrap(self.navigation_state.current_position):
                     _acc = getattr(self.navigation_state.current_position, "accuracy", None)
                     logger.info(
-                        "Heading bootstrap: GPS fix acquired "
+                        "Heading bootstrap: RTK-grade GPS fix acquired "
                         "(accuracy=%.2f m, waited %.0f s) — starting drive.",
                         _acc or 0.0,
                         time.monotonic() - gps_wait_start,
@@ -698,20 +704,22 @@ class NavigationService:
                 _now = time.monotonic()
                 if _now - _last_gps_warn_t >= 10.0:
                     logger.warning(
-                        "Heading bootstrap: still waiting for GPS fix "
-                        "(%.0f s elapsed — check sky view and antenna)",
+                        "Heading bootstrap: still waiting for RTK-grade fix (<=%.2f m) "
+                        "(%.0f s elapsed — check sky view/NTRIP/antenna)",
+                        self.bootstrap_required_accuracy_m,
                         _now - gps_wait_start,
                     )
                     _last_gps_warn_t = _now
             else:
                 raise RuntimeError(
-                    f"Heading bootstrap pre-flight: no GPS fix within {_GPS_PREFLIGHT_WAIT_S:.0f} s. "
-                    "Check sky view, GPS antenna, and satellite signal before retrying."
+                    "Heading bootstrap pre-flight: no RTK-grade fix "
+                    f"(<= {self.bootstrap_required_accuracy_m:.2f} m) within "
+                    f"{_GPS_PREFLIGHT_WAIT_S:.0f} s. Check sky view, NTRIP link, and antenna."
                 )
         else:
             _acc = getattr(self.navigation_state.current_position, "accuracy", None)
             logger.info(
-                "Heading bootstrap: GPS fix already available (accuracy=%.2f m) — starting drive.",
+                "Heading bootstrap: RTK-grade fix already available (accuracy=%.2f m) — starting drive.",
                 _acc or 0.0,
             )
 
@@ -732,6 +740,8 @@ class NavigationService:
 
                 # CRITICAL: Poll telemetry and update navigation state during bootstrap.
                 # The GPS COG snap only fires when valid GPS data reaches navigation state.
+                # Use bootstrap_mode=True to extend GPS timeout to 2.0s, allowing RTK
+                # transitions and COG data to reach the snap logic reliably.
                 try:
                     from ..core.state_manager import get_sensor_manager
 
@@ -743,7 +753,7 @@ class NavigationService:
                         manager = get_sensor_manager()
                     if manager is None:
                         continue
-                    sensor_data = await manager.read_all_sensors()
+                    sensor_data = await manager.read_all_sensors(bootstrap_mode=True)
                     if sensor_data:
                         await self.update_navigation_state(sensor_data)
                 except Exception as e:
@@ -856,6 +866,15 @@ class NavigationService:
         if last_fix is None:
             return False
         return (datetime.now(UTC) - last_fix).total_seconds() <= self.max_waypoint_fix_age_seconds
+
+    def _position_ready_for_bootstrap(self, position: Position | None) -> bool:
+        """Return True when position quality is sufficient for a safe heading bootstrap."""
+        if position is None:
+            return False
+        accuracy = position.accuracy
+        if accuracy is None:
+            return False
+        return float(accuracy) <= float(self.bootstrap_required_accuracy_m)
 
     def _position_is_verified_for_waypoint(self) -> bool:
         """Return True when position data is trustworthy enough to advance a waypoint."""
@@ -1697,7 +1716,8 @@ class NavigationService:
         Returns None when:
         - No saved alignment file / repository data exists.
         - The alignment is older than 24 hours (stale sensor drift risk).
-        - The source is "mission_start_reset" (the record is itself a reset, not a real snap).
+        - The source is a non-authoritative bootstrap record
+          ("mission_start_reset", "gps_cog_snap_fallback", or "gps_cog_snap_no_imu").
 
         When valid, the caller should apply the returned value instead of resetting to 0°,
         while still setting ``_require_gps_heading_alignment = True`` so a fresh GPS COG
@@ -1712,7 +1732,7 @@ class NavigationService:
                 data = json.loads(self._ALIGNMENT_FILE.read_text())
 
             source = data.get("source", "default")
-            if source == "mission_start_reset":
+            if source in {"mission_start_reset", "gps_cog_snap_fallback", "gps_cog_snap_no_imu"}:
                 return None
 
             last_updated_str = data.get("last_updated")
