@@ -55,6 +55,7 @@ try:
 
     PICAMERA_AVAILABLE = True
 except Exception as exc:
+    Picamera2 = None  # Make available for test monkeypatching
     PICAMERA_AVAILABLE = False
     logger.warning(
         "PiCamera2 unavailable; falling back to OpenCV or simulation",
