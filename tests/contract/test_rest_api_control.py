@@ -67,6 +67,47 @@ async def test_post_drive_command_returns_audit_id_and_snapshot():
     assert payload.get("status_reason") in {None, "nominal", "safety_override"}
 
 
+@pytest.mark.asyncio
+async def test_post_drive_rejects_legacy_payload_without_session_contract():
+    """Legacy throttle/turn payloads must be rejected in favor of contract payloads."""
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        response = await client.post(
+            "/api/v2/control/drive",
+            json={"throttle": 0.3, "turn": 0.1},
+        )
+
+    assert response.status_code == 400, response.text
+    payload = response.json()
+    assert "detail" in payload
+    assert "legacy" in payload["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_get_encoder_status_endpoint_returns_robohat_encoder_fields():
+    """Encoder endpoint must expose current encoder feedback fields from RoboHAT status."""
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        response = await client.get("/api/v2/sensors/encoders")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    for field in (
+        "encoder_feedback_ok",
+        "encoder_position",
+        "encoder_1_position",
+        "encoder_2_position",
+        "encoder_rpm",
+        "encoder_1_rpm",
+        "encoder_2_rpm",
+        "serial_connected",
+        "timestamp",
+    ):
+        assert field in payload, f"Missing field {field}"
+
+
 @pytest.mark.xfail(reason="pre-existing on main: asserts 'OBSTACLE_DETECTED' but reads 'TELEMETRY_UNAVAILABLE' — interlock ordering issue; tracked for CI cleanup.")
 @pytest.mark.asyncio
 async def test_post_drive_command_blocks_when_obstacle_detected(monkeypatch):

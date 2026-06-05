@@ -137,6 +137,9 @@ class LocalizationService:
     _DEFAULT_ALIGNMENT_FILE = (
         Path(__file__).resolve().parent.parent.parent.parent / "data" / "imu_alignment.json"
     )
+    _BOOTSTRAP_MAX_AUTO_SNAP_DELTA_DEG = 120.0
+    _BOOTSTRAP_MAX_FALLBACK_SPREAD_DEG = 20.0
+    _BOOTSTRAP_MAX_FALLBACK_DELTA_DEG = 90.0
 
     def __init__(
         self,
@@ -260,10 +263,12 @@ class LocalizationService:
         self._last_dr_time_s = time.monotonic()
         self._imu_reject_streak = 0
         if saved_alignment is not None:
-            saved_value, saved_samples, _age_s = saved_alignment
+            saved_value, _saved_samples, _age_s = saved_alignment
             self._session_heading_alignment = saved_value
-            self._heading_alignment_sample_count = max(1, saved_samples)
-            # Disk already holds the valid snap; do not overwrite with a reset record.
+            # Seed heading from the last known-good value, but force a fresh mission
+            # bootstrap sample before navigation control treats alignment as verified.
+            self._heading_alignment_sample_count = 0
+            # Disk already holds the previous snap; do not overwrite with a reset record.
         else:
             self._session_heading_alignment = 0.0
             self._heading_alignment_sample_count = 0
@@ -294,8 +299,25 @@ class LocalizationService:
                 else 0.0
             )
             current_hdg = self.state.heading
+            low_confidence = spread > self._BOOTSTRAP_MAX_FALLBACK_SPREAD_DEG
+            delta_fb: float | None = None
             if current_hdg is not None:
                 delta_fb = heading_delta(fallback_cog, current_hdg)
+                if abs(delta_fb) > self._BOOTSTRAP_MAX_FALLBACK_DELTA_DEG:
+                    low_confidence = True
+
+            if low_confidence:
+                logger.warning(
+                    "Bootstrap low-confidence fallback rejected "
+                    "(spread=%.1f°, samples=%d, delta=%s) — alignment not committed",
+                    spread,
+                    len(self._gps_cog_history),
+                    f"{delta_fb:.1f}°" if delta_fb is not None else "None",
+                )
+                self._bootstrap_start_time = None
+                return
+
+            if current_hdg is not None and delta_fb is not None:
                 clamped = max(-180.0, min(180.0, delta_fb))
                 self._session_heading_alignment = wrap_heading(
                     self._session_heading_alignment + clamped
@@ -459,25 +481,34 @@ class LocalizationService:
                         # Use buffer mean rather than the current tick's COG to
                         # filter GPS noise spikes that may still be in the window.
                         snap_delta = heading_delta(cog_mean, adjusted_yaw)
-                        clamped_delta = max(-180.0, min(180.0, snap_delta))
-                        self._session_heading_alignment = wrap_heading(
-                            self._session_heading_alignment + clamped_delta
-                        )
-                        self._heading_alignment_sample_count = 1
-                        self._require_gps_heading_alignment = False
-                        adjusted_yaw = wrap_heading(
-                            -raw_yaw + self._imu_yaw_offset + self._session_heading_alignment
-                        )
-                        self._set_heading(adjusted_yaw, allow_large_jump=True)
-                        logger.info(
-                            "HDG snap-calibrated from GPS COG: delta=%.1f° "
-                            "new_align=%.1f° source=%s",
-                            clamped_delta,
-                            self._session_heading_alignment,
-                            gps_cog_source,
-                        )
-                        if self._alignment_file is not None:
-                            self.save_alignment(source="gps_cog_snap")
+                        if abs(snap_delta) > self._BOOTSTRAP_MAX_AUTO_SNAP_DELTA_DEG:
+                            logger.warning(
+                                "Bootstrap low-confidence snap rejected "
+                                "(delta=%.1f°, mean=%.1f°, adjusted=%.1f°)",
+                                snap_delta,
+                                cog_mean,
+                                adjusted_yaw,
+                            )
+                        else:
+                            clamped_delta = max(-180.0, min(180.0, snap_delta))
+                            self._session_heading_alignment = wrap_heading(
+                                self._session_heading_alignment + clamped_delta
+                            )
+                            self._heading_alignment_sample_count = 1
+                            self._require_gps_heading_alignment = False
+                            adjusted_yaw = wrap_heading(
+                                -raw_yaw + self._imu_yaw_offset + self._session_heading_alignment
+                            )
+                            self._set_heading(adjusted_yaw, allow_large_jump=True)
+                            logger.info(
+                                "HDG snap-calibrated from GPS COG: delta=%.1f° "
+                                "new_align=%.1f° source=%s",
+                                clamped_delta,
+                                self._session_heading_alignment,
+                                gps_cog_source,
+                            )
+                            if self._alignment_file is not None:
+                                self.save_alignment(source="gps_cog_snap")
 
                 # Root-cause recovery: heading can become latched if consecutive
                 # IMU jumps exceed outlier threshold while current heading is stale.

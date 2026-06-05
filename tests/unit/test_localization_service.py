@@ -350,14 +350,13 @@ def test_reset_for_mission_applies_saved_alignment():
     loc.reset_for_mission(saved_alignment=(33.3, 2, 1800.0))
 
     assert loc._session_heading_alignment == pytest.approx(33.3, abs=0.01)
-    assert loc._heading_alignment_sample_count == 2
+    assert loc._heading_alignment_sample_count == 0
     assert loc._require_gps_heading_alignment is True
-    # alignment_ready: not require OR samples>0 → True
-    assert loc.alignment_ready is True
+    assert loc.alignment_ready is False
 
 
-def test_reset_for_mission_saved_alignment_enforces_min_one_sample():
-    """reset_for_mission clamps sample_count to at least 1 when saved is 0."""
+def test_reset_for_mission_saved_alignment_forces_fresh_validation():
+    """Saved alignment seeds heading, but bootstrap must still produce a fresh sample."""
     from backend.src.services.localization_service import LocalizationService
 
     loc = LocalizationService(
@@ -370,8 +369,8 @@ def test_reset_for_mission_saved_alignment_enforces_min_one_sample():
     )
     loc.reset_for_mission(saved_alignment=(45.0, 0, 600.0))
 
-    assert loc._heading_alignment_sample_count == 1
-    assert loc.alignment_ready is True
+    assert loc._heading_alignment_sample_count == 0
+    assert loc.alignment_ready is False
 
 
 def test_reset_for_mission_none_still_resets_to_zero():
@@ -529,7 +528,7 @@ async def test_end_bootstrap_fallback_commits_mean_when_no_snap():
 
 @pytest.mark.asyncio
 async def test_end_bootstrap_fallback_logs_warning_when_spread_high(caplog):
-    """end_bootstrap() fallback logs WARNING when buffer spread exceeds 15°."""
+    """end_bootstrap() fails closed when COG spread is too high."""
     import logging
     from backend.src.services.localization_service import LocalizationService
 
@@ -546,10 +545,29 @@ async def test_end_bootstrap_fallback_logs_warning_when_spread_high(caplog):
     with caplog.at_level(logging.WARNING, logger="backend.src.services.localization_service"):
         loc.end_bootstrap()
 
-    assert any("bootstrap" in r.message.lower() for r in caplog.records), (
-        "Expected bootstrap warning when spread > 15°"
+    assert any("low-confidence" in r.message.lower() for r in caplog.records), (
+        "Expected low-confidence bootstrap warning when spread is high"
     )
-    assert loc._heading_alignment_sample_count == 1
+    assert loc._heading_alignment_sample_count == 0
+    assert loc.alignment_ready is False
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_rejects_extreme_snap_delta():
+    """Bootstrap must reject extreme snap deltas instead of silently applying them."""
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(alignment_file=None)
+    loc.reset_for_mission()
+    loc.begin_bootstrap()
+
+    # adjusted_yaw starts at 0° with imu_yaw=0, while COG is consistently ~180°.
+    # This would produce a dangerous 180° snap if not explicitly rejected.
+    for cog in [180.0, 181.0, 179.0, 180.5, 179.5, 180.2]:
+        await loc.update(_make_sensor_fix5(gps_cog=cog, imu_yaw=0.0))
+
+    assert loc._heading_alignment_sample_count == 0
+    assert loc.alignment_ready is False
 
 
 @pytest.mark.asyncio

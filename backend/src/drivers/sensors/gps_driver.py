@@ -373,6 +373,16 @@ class GPSDriver(HardwareDriver):
                             acc_source = "heuristic"
                         elif acc_source != "gst":
                             acc = min(acc, heuristic)
+                    elif rtk_status in {"GPS_FIX", "DGPS"} and acc_source != "gst":
+                        # Non-RTK fixes can report deceptively low HDOP despite metre-scale drift.
+                        # Keep non-RTK accuracy conservative unless GST provides explicit uncertainty.
+                        base = hdop_val if hdop_val is not None else (acc if acc is not None else 1.0)
+                        conservative = max(1.5, min(5.0, base * 2.0))
+                        if acc is None:
+                            acc = conservative
+                            acc_source = "non_rtk_floor"
+                        else:
+                            acc = max(acc, conservative)
                 reading = GpsReading(
                     latitude=lat,
                     longitude=lon,

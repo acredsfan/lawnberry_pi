@@ -1000,55 +1000,14 @@ async def control_drive_v2(cmd: dict, request: Request, runtime: RuntimeContext 
 
     timestamp = datetime.now(timezone.utc)
 
-    is_legacy = "session_id" not in cmd
-    if is_legacy:
-        throttle = float(cmd.get("throttle", 0.0))
-        turn = float(cmd.get("turn", 0.0))
-        max_speed_limit = 1.0
-        left_speed = throttle + turn
-        right_speed = throttle - turn
-        left_speed = max(-max_speed_limit, min(max_speed_limit, left_speed))
-        right_speed = max(-max_speed_limit, min(max_speed_limit, right_speed))
-
-        drive_cmd = DriveCommand(
-            left=left_speed,
-            right=right_speed,
-            source="legacy",
-            duration_ms=0,
-            legacy=True,
-            max_speed_limit=max_speed_limit,
+    if "session_id" not in cmd:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Legacy drive payloads are not supported. "
+                "Use session_id + vector + duration_ms contract payload."
+            ),
         )
-        outcome = await runtime.command_gateway.dispatch_drive(drive_cmd, request=request)
-
-        if outcome.status == CommandStatus.BLOCKED:
-            try:
-                cmd_details = dict(cmd)
-            except Exception:
-                cmd_details = {}
-            persistence.add_audit_log(
-                "control.drive.blocked",
-                details={"reason": "emergency_stop_active", "command": cmd_details},
-            )
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Emergency stop active - drive commands blocked"},
-            )
-
-        if outcome.status in (CommandStatus.FIRMWARE_UNKNOWN, CommandStatus.FIRMWARE_INCOMPATIBLE):
-            return JSONResponse(
-                status_code=503,
-                content={"detail": f"Motor controller not ready: {outcome.status_reason}"},
-            )
-
-        global _legacy_motors_active
-        _legacy_motors_active = True
-        body = {
-            "left_motor_speed": round(left_speed, 3),
-            "right_motor_speed": round(right_speed, 3),
-            "safety_status": "OK",
-        }
-        persistence.add_audit_log("control.drive", details={"command": cmd, "response": body})
-        return JSONResponse(status_code=200, content=body)
 
     # Contract-style payload
     if runtime.command_gateway.is_emergency_active(request):
@@ -1197,6 +1156,40 @@ async def control_drive_v2(cmd: dict, request: Request, runtime: RuntimeContext 
         )
 
     return response
+
+
+@router.get("/sensors/encoders")
+async def get_encoder_status(runtime: RuntimeContext = Depends(get_runtime)):
+    """Return current encoder telemetry from RoboHAT."""
+    from ..services.robohat_service import get_robohat_service
+
+    robohat = runtime.robohat or get_robohat_service()
+    if robohat is None:
+        now = datetime.now(timezone.utc).isoformat()
+        return {
+            "encoder_feedback_ok": False,
+            "encoder_position": 0,
+            "encoder_1_position": 0,
+            "encoder_2_position": 0,
+            "encoder_rpm": 0.0,
+            "encoder_1_rpm": 0.0,
+            "encoder_2_rpm": 0.0,
+            "serial_connected": False,
+            "timestamp": now,
+        }
+
+    status = robohat.get_status().to_dict()
+    return {
+        "encoder_feedback_ok": bool(status.get("encoder_feedback_ok", False)),
+        "encoder_position": int(status.get("encoder_position", 0) or 0),
+        "encoder_1_position": int(status.get("encoder_1_position", 0) or 0),
+        "encoder_2_position": int(status.get("encoder_2_position", 0) or 0),
+        "encoder_rpm": float(status.get("encoder_rpm", 0.0) or 0.0),
+        "encoder_1_rpm": float(status.get("encoder_1_rpm", 0.0) or 0.0),
+        "encoder_2_rpm": float(status.get("encoder_2_rpm", 0.0) or 0.0),
+        "serial_connected": bool(status.get("serial_connected", False)),
+        "timestamp": status.get("timestamp"),
+    }
 
 
 _PRESET_TURN_SPEED = 0.5
