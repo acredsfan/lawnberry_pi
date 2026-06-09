@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -26,10 +27,11 @@ logger = logging.getLogger(__name__)
 class SettingsService:
     """Service for managing settings profiles and configuration persistence"""
 
-    def __init__(self, persistence=None, config_dir: Path = Path("./config")):
+    def __init__(self, persistence=None, config_dir: Path | None = None):
         # Default to module-level persistence if not provided (tests patch this symbol)
         self.persistence = persistence if persistence is not None else globals().get("persistence")
-        self.config_dir = config_dir
+        default_config_dir = Path(os.getenv("LAWN_SETTINGS_DIR", "./config"))
+        self.config_dir = config_dir if config_dir is not None else default_config_dir
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self._current_profile: SettingsProfile | None = None
 

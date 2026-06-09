@@ -7,6 +7,7 @@ persistent data like job schedules, configuration, and telemetry history.
 
 import json
 import logging
+import os
 import sqlite3
 import threading
 from collections.abc import Generator
@@ -681,4 +682,5 @@ class PersistenceLayer:
 
 
 # Global persistence instance
-persistence = PersistenceLayer()
+_db_path = os.getenv("DB_PATH", "data/lawnberry.db")
+persistence = PersistenceLayer(db_path=_db_path)

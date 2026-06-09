@@ -3,6 +3,7 @@ import asyncio
 import importlib
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -65,6 +66,12 @@ os.environ.setdefault("AUTH_RATE_LIMIT_MAX_ATTEMPTS", "3")
 os.environ.setdefault("AUTH_LOCKOUT_FAILURES", "3")
 os.environ.setdefault("AUTH_LOCKOUT_SECONDS", "30")
 
+# Hard-isolate test runtime storage so tests never mutate repository runtime state.
+_TEST_RUNTIME_DIR = Path(tempfile.mkdtemp(prefix="lawnberry-pytest-runtime-"))
+os.environ["LAWN_DATA_DIR"] = str(_TEST_RUNTIME_DIR)
+os.environ["DB_PATH"] = str(_TEST_RUNTIME_DIR / "lawnberry.db")
+os.environ["LAWN_SETTINGS_DIR"] = str(_TEST_RUNTIME_DIR / "config")
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -79,9 +86,10 @@ def setup_test_environment():
     """Set up test environment variables and configurations."""
     # Ensure simulation mode for tests
     os.environ["SIM_MODE"] = "1"
-    # Set test database path if needed
-    # TODO(v2): enforce in-memory DB for integration/contract tests to prevent fixture leakage - Issue #1
-    os.environ.setdefault("DB_PATH", ":memory:")
+    # Keep test runtime storage isolated from the repository data/ directory.
+    os.environ["LAWN_DATA_DIR"] = str(_TEST_RUNTIME_DIR)
+    os.environ["DB_PATH"] = str(_TEST_RUNTIME_DIR / "lawnberry.db")
+    os.environ["LAWN_SETTINGS_DIR"] = str(_TEST_RUNTIME_DIR / "config")
     # Reduce log noise in tests
     os.environ.setdefault("LOG_LEVEL", "WARNING")
 

@@ -21,7 +21,7 @@ from ...services.settings_service import SettingsService
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-DATA_DIR = Path(os.getcwd()) / "data"
+DATA_DIR = Path(os.getenv("LAWN_DATA_DIR", str(Path(os.getcwd()) / "data")))
 SETTINGS_FILE = DATA_DIR / "settings.json"
 UI_SETTINGS_FILE = DATA_DIR / "ui_settings.json"
 

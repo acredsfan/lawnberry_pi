@@ -288,8 +288,18 @@ async def lifespan(app: FastAPI):
     )
     from pathlib import Path as _Path
 
-    _data_dir = _Path(os.getcwd()) / "data"
-    _db_path = _data_dir / "lawnberry.db"
+    _data_dir_env = os.getenv("LAWN_DATA_DIR", "").strip()
+    _db_path_env = os.getenv("DB_PATH", "").strip()
+
+    if _db_path_env:
+        _db_path = _Path(_db_path_env)
+        _data_dir = _db_path.parent
+    elif _data_dir_env:
+        _data_dir = _Path(_data_dir_env)
+        _db_path = _data_dir / "lawnberry.db"
+    else:
+        _data_dir = _Path(os.getcwd()) / "data"
+        _db_path = _data_dir / "lawnberry.db"
 
     _map_repo = MapRepository(db_path=_db_path)
     _mission_repo = MissionRepository(db_path=_db_path)

@@ -18,6 +18,11 @@ Run the full test suite:
 SIM_MODE=1 pytest -q
 ```
 
+Storage isolation note:
+
+- Tests now run with isolated runtime paths (`DB_PATH`, `LAWN_DATA_DIR`, and `LAWN_SETTINGS_DIR`)
+  so they do not mutate live `data/` or `config/` state on the Pi.
+
 - Contract tests validate the FastAPI REST + WebSocket API.
 - Integration tests include backups/migration and more.
 - Placeholder integration tests (future work) are skipped by default.
