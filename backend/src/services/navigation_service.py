@@ -1904,12 +1904,36 @@ class NavigationService:
     def _load_boundaries_from_zones(self) -> None:
         """Load zone polygons from MapRepository into safety_boundaries and no_go_zones.
 
-        Non-exclusion zones are stored as safety_boundaries (the mower must stay inside).
-        Zones with exclusion_zone=True are stored as no_go_zones (the mower avoids these).
+        The generated safe boundary file is preferred for autonomous operation.
+        Confirmed map zones are a compatibility fallback only. Imported parcel
+        helper geometry is intentionally not read here.
 
         Gracefully handles an empty repository (no zones saved) or a missing repository
         by leaving the boundary lists unchanged and logging a warning.
         """
+        try:
+            from .boundary_paths import MOWING_BOUNDARY_SAFE, boundary_file
+
+            safe_path = boundary_file(MOWING_BOUNDARY_SAFE)
+            if safe_path.exists():
+                payload = json.loads(safe_path.read_text(encoding="utf-8"))
+                safe_points = [
+                    Position(latitude=float(p["latitude"]), longitude=float(p["longitude"]))
+                    for p in payload.get("coordinates", [])
+                ]
+                if len(safe_points) >= 3:
+                    self.navigation_state.safety_boundaries = [safe_points]
+                    self.navigation_state.no_go_zones = []
+                    logger.info(
+                        "Loaded generated safe boundary for autonomous geofence "
+                        "(buffer_m=%.2f)",
+                        float(payload.get("buffer_meters", 0.0) or 0.0),
+                    )
+                    return
+                logger.warning("Safe boundary file exists but does not contain a valid polygon")
+        except Exception:
+            logger.warning("Failed to load generated safe boundary; falling back to map zones", exc_info=True)
+
         if self._map_repository is None:
             logger.warning(
                 "MapRepository not attached; geofence enforcement disabled for this mission"
@@ -1922,6 +1946,8 @@ class NavigationService:
             no_go_polygons: list[list[Position]] = []
 
             for zone in zones:
+                if str(zone.get("source", "")).startswith("property_boundary_imported"):
+                    raise RuntimeError("Imported parcel boundary cannot be used for autonomous mowing.")
                 polygon_data = zone.get("polygon", [])
                 pts = [
                     Position(latitude=float(p["latitude"]), longitude=float(p["longitude"]))
@@ -1940,7 +1966,7 @@ class NavigationService:
 
             if boundary_polygons:
                 logger.info(
-                    "Loaded %d boundary polygon(s) and %d no-go zone(s) from MapRepository",
+                    "Loaded %d confirmed boundary polygon(s) and %d no-go zone(s) from MapRepository fallback",
                     len(boundary_polygons),
                     len(no_go_polygons),
                 )

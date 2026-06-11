@@ -213,3 +213,13 @@ async def test_bulk_post_with_bulk_param_returns_200():
         assert resp.status_code == 200, resp.text
         zones = resp.json()
         assert any(z["id"] == zone_id for z in zones)
+
+
+@pytest.mark.asyncio
+async def test_bulk_post_with_empty_list_requires_allow_empty_flag():
+    """POST /api/v2/map/zones?bulk=true with [] should fail closed by default."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        resp = await client.post("/api/v2/map/zones?bulk=true", json=[])
+        assert resp.status_code == 422, resp.text
+        assert "allow_empty=true" in resp.json().get("detail", "").lower()

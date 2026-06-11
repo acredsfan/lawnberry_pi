@@ -8,6 +8,23 @@ import type { components } from '@/types/api'
 
 export type Zone = components['schemas']['Zone']
 export type MapLocations = components['schemas']['MapLocations']
+export interface BoundaryPoint {
+  latitude: number
+  longitude: number
+}
+
+export interface ImportedBoundary {
+  source?: string
+  source_detail?: string
+  confidence?: string
+  helper_only?: boolean
+  coordinates: BoundaryPoint[]
+  warnings?: string[]
+  buffer_meters?: number
+  status?: string
+  points?: Array<BoundaryPoint & { index?: number; status?: string }>
+  target_index?: number | null
+}
 
 // MapConfiguration and PlanningJob types are not defined in generated schemas,
 // so we use unknown and let callers cast or type them at the call site.
@@ -44,6 +61,71 @@ export async function putMapZone(id: string, zone: Zone): Promise<Zone> {
 
 export async function deleteMapZone(id: string): Promise<void> {
   await apiService.delete(`/api/v2/map/zones/${id}`)
+}
+
+export async function importParcelBoundary(payload: unknown): Promise<ImportedBoundary> {
+  const response = await apiService.post<ImportedBoundary>('/api/v2/parcel/import', payload)
+  return response.data
+}
+
+export async function getImportedParcelBoundary(): Promise<ImportedBoundary> {
+  const response = await apiService.get<ImportedBoundary>('/api/v2/parcel/imported')
+  return response.data
+}
+
+export async function clearImportedParcelBoundary(): Promise<void> {
+  await apiService.post('/api/v2/parcel/clear', {})
+}
+
+export async function fetchParcelByPoint(lat: number, lng: number): Promise<ImportedBoundary> {
+  const response = await apiService.post<ImportedBoundary>('/api/v2/parcel/fetch-by-point', { lat, lng })
+  return response.data
+}
+
+export async function fetchParcelByAddress(address: string): Promise<ImportedBoundary> {
+  const response = await apiService.post<ImportedBoundary>('/api/v2/parcel/fetch-by-address', { address })
+  return response.data
+}
+
+export async function generateSafeBoundary(
+  coordinates: BoundaryPoint[],
+  bufferMeters: number
+): Promise<ImportedBoundary> {
+  const response = await apiService.post<ImportedBoundary>('/api/v2/boundary/generate-safe', {
+    coordinates,
+    buffer_meters: bufferMeters,
+  })
+  return response.data
+}
+
+export async function getSafeBoundary(): Promise<ImportedBoundary> {
+  const response = await apiService.get<ImportedBoundary>('/api/v2/boundary/safe')
+  return response.data
+}
+
+export async function startBoundaryVerification(coordinates: BoundaryPoint[]): Promise<ImportedBoundary> {
+  const response = await apiService.post<ImportedBoundary>('/api/v2/boundary-verification/start', { coordinates })
+  return response.data
+}
+
+export async function nextBoundaryVerificationPoint(): Promise<ImportedBoundary> {
+  const response = await apiService.post<ImportedBoundary>('/api/v2/boundary-verification/next', {})
+  return response.data
+}
+
+export async function confirmBoundaryVerificationPoint(): Promise<ImportedBoundary> {
+  const response = await apiService.post<ImportedBoundary>('/api/v2/boundary-verification/confirm-point', {})
+  return response.data
+}
+
+export async function rejectBoundaryVerificationPoint(): Promise<ImportedBoundary> {
+  const response = await apiService.post<ImportedBoundary>('/api/v2/boundary-verification/reject-point', {})
+  return response.data
+}
+
+export async function cancelBoundaryVerification(): Promise<ImportedBoundary> {
+  const response = await apiService.post<ImportedBoundary>('/api/v2/boundary-verification/cancel', {})
+  return response.data
 }
 
 export async function getMapLocations(): Promise<MapLocations> {

@@ -6,12 +6,27 @@ const mockGetMapZones = vi.fn()
 const mockCreateMapZone = vi.fn()
 const mockPutMapZone = vi.fn()
 const mockDeleteMapZone = vi.fn()
+const mockGetImportedParcelBoundary = vi.fn()
+const mockGetSafeBoundary = vi.fn()
+const mockGenerateSafeBoundary = vi.fn()
 
 vi.mock('@/services/mapsClient', () => ({
   getMapZones: mockGetMapZones,
   createMapZone: mockCreateMapZone,
   putMapZone: mockPutMapZone,
   deleteMapZone: mockDeleteMapZone,
+  getImportedParcelBoundary: mockGetImportedParcelBoundary,
+  clearImportedParcelBoundary: vi.fn(),
+  fetchParcelByPoint: vi.fn(),
+  fetchParcelByAddress: vi.fn(),
+  importParcelBoundary: vi.fn(),
+  generateSafeBoundary: mockGenerateSafeBoundary,
+  getSafeBoundary: mockGetSafeBoundary,
+  startBoundaryVerification: vi.fn(),
+  nextBoundaryVerificationPoint: vi.fn(),
+  confirmBoundaryVerificationPoint: vi.fn(),
+  rejectBoundaryVerificationPoint: vi.fn(),
+  cancelBoundaryVerification: vi.fn(),
 }))
 
 const { useMapStore } = await import('@/stores/map')
@@ -84,6 +99,9 @@ describe('Map Store', () => {
     vi.clearAllMocks()
     // Default: getMapZones returns empty list (zones loaded separately in mapStore.test.ts)
     mockGetMapZones.mockResolvedValue([])
+    mockGetImportedParcelBoundary.mockResolvedValue({ coordinates: [], helper_only: true, status: 'empty' })
+    mockGetSafeBoundary.mockResolvedValue({ coordinates: [], buffer_meters: 0.75, status: 'empty' })
+    mockGenerateSafeBoundary.mockResolvedValue({ coordinates: [], buffer_meters: 0.75 })
   })
 
   describe('initialization', () => {
@@ -395,6 +413,25 @@ describe('Map Store', () => {
 
       await expect(store.triggerProviderFallback()).rejects.toThrow('Fallback failed')
       expect(store.error).toBe('Fallback failed')
+    })
+  })
+
+  describe('safe boundary helper', () => {
+    it('sends configured buffer override when generating safe boundary', async () => {
+      const store = useMapStore()
+      store.configuration = createConfig('config1')
+
+      await store.generateSafeBoundaryFromConfirmed(0.45)
+
+      expect(mockGenerateSafeBoundary).toHaveBeenCalledWith(
+        [
+          { latitude: 40.0, longitude: -75.0 },
+          { latitude: 40.0, longitude: -74.9 },
+          { latitude: 39.9, longitude: -74.9 },
+        ],
+        0.45,
+      )
+      expect(store.safeBoundaryBufferMeters).toBe(0.45)
     })
   })
 

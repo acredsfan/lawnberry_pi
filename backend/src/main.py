@@ -7,6 +7,9 @@ from typing import Any
 from fastapi import FastAPI
 
 from .api.ai import router as ai_router
+from .api.boundary import capture_router, parcel_router
+from .api.boundary import router as boundary_router
+from .api.boundary import verification_router as boundary_verification_router
 from .api.dashboard import router as dashboard_router
 from .api.docs import router as docs_router
 from .api.fusion import router as fusion_router
@@ -21,13 +24,13 @@ from .api.rest_v1 import router as rest_v1_router
 from .api.routers import auth as auth_router
 from .api.routers import camera as camera_router
 from .api.routers import maintenance as maintenance_router
+from .api.routers import planning as planning_router
 from .api.routers import sensors as sensors_router
 from .api.routers import settings as settings_router
 from .api.routers import telemetry as telemetry_router
 from .api.routers import weather as weather_router
-from .api.routers import planning as planning_router
-from .api.safety import router as safety_router
 from .api.run_summary import router as run_summary_router
+from .api.safety import router as safety_router
 from .api.status import router as status_router
 from .core.config_loader import get_config_loader
 from .core.env_validation import validate_environment
@@ -214,8 +217,8 @@ async def lifespan(app: FastAPI):
     )
 
     # Set up and start the software watchdog (Blueprint A)
-    from backend.src.safety.motor_authorization import MotorAuthorization
     from backend.src.safety.estop_handler import EstopHandler
+    from backend.src.safety.motor_authorization import MotorAuthorization
     from backend.src.safety.watchdog import Watchdog
 
     class GatewayEstopHandler(EstopHandler):
@@ -279,6 +282,8 @@ async def lifespan(app: FastAPI):
         _log.info("USE_LEGACY_NAVIGATION=1: running legacy NavigationService code path")
 
     # --- Repository construction (§5) ---
+    from pathlib import Path as _Path
+
     from backend.src.repositories import (
         CalibrationRepository,
         MapRepository,
@@ -286,7 +291,6 @@ async def lifespan(app: FastAPI):
         SettingsRepository,
         TelemetryRepository,
     )
-    from pathlib import Path as _Path
 
     _data_dir_env = os.getenv("LAWN_DATA_DIR", "").strip()
     _db_path_env = os.getenv("DB_PATH", "").strip()
@@ -473,6 +477,10 @@ app.include_router(camera_router.router, prefix="/api/v2")
 app.include_router(weather_router.router, prefix="/api/v2")
 app.include_router(planning_router.router, prefix="/api/v2")
 app.include_router(settings_router.router, prefix="/api/v2")
+app.include_router(parcel_router, prefix="/api/v2")
+app.include_router(capture_router, prefix="/api/v2")
+app.include_router(boundary_router, prefix="/api/v2")
+app.include_router(boundary_verification_router, prefix="/api/v2")
 app.include_router(rest_legacy_router)
 app.include_router(metrics_router)
 app.include_router(status_router)

@@ -2,7 +2,26 @@ import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import type { AxiosResponse } from 'axios';
 import apiService from '../services/api';
-import { getMapZones, createMapZone, putMapZone, deleteMapZone, type Zone as ApiZone } from '../services/mapsClient';
+import {
+  getMapZones,
+  createMapZone,
+  putMapZone,
+  deleteMapZone,
+  getImportedParcelBoundary,
+  importParcelBoundary,
+  clearImportedParcelBoundary,
+  fetchParcelByPoint,
+  fetchParcelByAddress,
+  generateSafeBoundary,
+  getSafeBoundary,
+  startBoundaryVerification,
+  nextBoundaryVerificationPoint,
+  confirmBoundaryVerificationPoint,
+  rejectBoundaryVerificationPoint,
+  cancelBoundaryVerification,
+  type Zone as ApiZone,
+  type ImportedBoundary,
+} from '../services/mapsClient';
 
 const MAP_CONFIG_STORAGE_KEY = 'lawnberry_map_configuration_v2';
 
@@ -174,6 +193,10 @@ export const useMapStore = defineStore('map', () => {
   const editMode = ref<'view' | 'boundary' | 'exclusion' | 'mowing' | 'marker'>('view');
   const providerFallbackActive = ref(false);
   const lastError = ref<string | null>(null);
+  const importedBoundary = ref<ImportedBoundary | null>(null);
+  const safeBoundary = ref<ImportedBoundary | null>(null);
+  const verificationStatus = ref<ImportedBoundary | null>(null);
+  const safeBoundaryBufferMeters = ref(0.75);
 
   // Watch for changes and save non-spatial fields to localStorage
   // Zones are loaded from server on demand — do not cache them locally
@@ -266,6 +289,7 @@ export const useMapStore = defineStore('map', () => {
       configuration.value = cfg;
       // Load zones from map_zones table (authoritative source)
       await _reloadZonesFromServer();
+      await loadBoundaryHelperState();
       isDirty.value = false;
       // Update localStorage cache (non-spatial only — no zones)
       try {
@@ -602,6 +626,86 @@ export const useMapStore = defineStore('map', () => {
     }
   }
 
+  async function loadBoundaryHelperState() {
+    try {
+      importedBoundary.value = await getImportedParcelBoundary();
+    } catch {
+      importedBoundary.value = null;
+    }
+    try {
+      safeBoundary.value = await getSafeBoundary();
+      if (typeof safeBoundary.value?.buffer_meters === 'number') {
+        safeBoundaryBufferMeters.value = safeBoundary.value.buffer_meters;
+      }
+    } catch {
+      safeBoundary.value = null;
+    }
+  }
+
+  function setImportedBoundary(boundary: ImportedBoundary | null) {
+    importedBoundary.value = boundary;
+  }
+
+  async function clearImportedBoundary() {
+    await clearImportedParcelBoundary();
+    importedBoundary.value = null;
+  }
+
+  async function fetchImportedBoundaryFromPoint(lat: number, lng: number) {
+    importedBoundary.value = await fetchParcelByPoint(lat, lng);
+    return importedBoundary.value;
+  }
+
+  async function fetchImportedBoundaryFromAddress(address: string) {
+    importedBoundary.value = await fetchParcelByAddress(address);
+    return importedBoundary.value;
+  }
+
+  async function importBoundaryFromText(text: string) {
+    importedBoundary.value = await importParcelBoundary(text);
+    return importedBoundary.value;
+  }
+
+  async function generateSafeBoundaryFromConfirmed(bufferMeters = safeBoundaryBufferMeters.value) {
+    const boundary = configuration.value?.boundary_zone?.polygon || [];
+    if (boundary.length < 3) throw new Error('Confirmed boundary needs at least 3 points');
+    safeBoundaryBufferMeters.value = Number(bufferMeters);
+    safeBoundary.value = await generateSafeBoundary(
+      boundary.map(p => ({ latitude: p.latitude, longitude: p.longitude })),
+      safeBoundaryBufferMeters.value
+    );
+    return safeBoundary.value;
+  }
+
+  async function startVerificationFromConfirmed() {
+    const boundary = configuration.value?.boundary_zone?.polygon || [];
+    if (boundary.length < 3) throw new Error('Confirmed boundary needs at least 3 points');
+    verificationStatus.value = await startBoundaryVerification(
+      boundary.map(p => ({ latitude: p.latitude, longitude: p.longitude }))
+    );
+    return verificationStatus.value;
+  }
+
+  async function goToNextVerificationPoint() {
+    verificationStatus.value = await nextBoundaryVerificationPoint();
+    return verificationStatus.value;
+  }
+
+  async function confirmVerificationPoint() {
+    verificationStatus.value = await confirmBoundaryVerificationPoint();
+    return verificationStatus.value;
+  }
+
+  async function rejectVerificationPoint() {
+    verificationStatus.value = await rejectBoundaryVerificationPoint();
+    return verificationStatus.value;
+  }
+
+  async function cancelVerification() {
+    verificationStatus.value = await cancelBoundaryVerification();
+    return verificationStatus.value;
+  }
+
   function removeExclusionZone(zoneId: string) {
     if (!configuration.value) return;
     configuration.value.exclusion_zones = configuration.value.exclusion_zones.filter(
@@ -915,6 +1019,10 @@ export const useMapStore = defineStore('map', () => {
     editMode,
     providerFallbackActive,
     lastError,
+    importedBoundary,
+    safeBoundary,
+    verificationStatus,
+    safeBoundaryBufferMeters,
 
     // Computed
     hasConfiguration,
@@ -940,6 +1048,18 @@ export const useMapStore = defineStore('map', () => {
     deleteZone,
     updateZoneName,
     updateZonePolygon,
+    loadBoundaryHelperState,
+    setImportedBoundary,
+    clearImportedBoundary,
+    fetchImportedBoundaryFromPoint,
+    fetchImportedBoundaryFromAddress,
+    importBoundaryFromText,
+    generateSafeBoundaryFromConfirmed,
+    startVerificationFromConfirmed,
+    goToNextVerificationPoint,
+    confirmVerificationPoint,
+    rejectVerificationPoint,
+    cancelVerification,
     setEditMode,
     selectZone,
     clearError,

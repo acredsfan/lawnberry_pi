@@ -88,6 +88,60 @@
       </button>
     </div>
 
+    <div class="boundary-helper-toolbar">
+      <button class="btn btn-sm btn-secondary" @click="showImportBox = !showImportBox">
+        Import Property Boundary
+      </button>
+      <button class="btn btn-sm btn-secondary" :disabled="!hasImportedBoundary" @click="clearImportedBoundary">
+        Clear Imported Boundary
+      </button>
+      <button class="btn btn-sm btn-primary" :disabled="!hasImportedBoundary" @click="useImportedAsDraft">
+        Use as Draft Mowing Area
+      </button>
+      <button class="btn btn-sm btn-secondary" :disabled="!mowerLatLng" @click="fetchParcelFromCurrentGps">
+        Fetch Parcel From Current GPS
+      </button>
+      <input v-model="addressInput" class="boundary-address-input" placeholder="Parcel address">
+      <button class="btn btn-sm btn-secondary" :disabled="!addressInput.trim()" @click="fetchParcelFromAddress">
+        Fetch Parcel From Address
+      </button>
+      <label class="buffer-input">
+        Buffer
+        <input v-model.number="safeBufferMeters" type="number" min="0" max="10" step="0.05">
+        m
+      </label>
+      <button class="btn btn-sm btn-success" :disabled="!mapStore.configuration?.boundary_zone" @click="generateSafeBoundary">
+        Generate Safe Boundary
+      </button>
+      <button class="btn btn-sm btn-secondary" :disabled="!mapStore.configuration?.boundary_zone" @click="startVerification">
+        Start Drive-To-Confirm
+      </button>
+      <button class="btn btn-sm btn-secondary" :disabled="!isVerificationActive" @click="goToNextVerificationPoint">
+        Go To Next Point
+      </button>
+      <button class="btn btn-sm btn-success" :disabled="!canConfirmVerificationPoint" @click="confirmVerificationPoint">
+        Confirm Point
+      </button>
+      <button class="btn btn-sm btn-warning" :disabled="!canConfirmVerificationPoint" @click="rejectVerificationPoint">
+        Reject Point
+      </button>
+      <button class="btn btn-sm btn-danger" :disabled="!isVerificationActive" @click="cancelVerification">
+        Cancel Verification
+      </button>
+    </div>
+
+    <div v-if="showImportBox" class="boundary-import-panel">
+      <textarea v-model="importText" placeholder="Paste GeoJSON, KML, or coordinate JSON" />
+      <button class="btn btn-sm btn-primary" :disabled="!importText.trim()" @click="importBoundaryText">
+        Import
+      </button>
+    </div>
+
+    <div class="boundary-helper-warning">
+      Imported property boundaries are approximate. Edit this to the actual mowable area before saving.
+      Drive-to-confirm keeps the blade off and stops at each point until you confirm.
+    </div>
+
     <div ref="canvasContainer" class="editor-canvas" :class="{'cursor-crosshair': mode==='boundary' || mode==='exclusion' || mode==='mowing', 'cursor-pin': mode==='marker', 'google-active': useGoogleMutant}">
       <div v-if="mode === 'boundary'" class="editor-instructions">
         Click on the map to add boundary points. Close the polygon by clicking near the first point.
@@ -210,6 +264,27 @@
           @click="onBoundaryClick"
         />
 
+        <LPolygon
+          v-if="importedBoundaryLatLng.length > 0"
+          :lat-lngs="importedBoundaryLatLng"
+          :color="'#2684ff'"
+          :weight="2"
+          :fill="true"
+          :fill-opacity="0.06"
+          :dash-array="'8 8'"
+          :interactive="false"
+        />
+
+        <LPolygon
+          v-if="safeBoundaryLatLng.length > 0"
+          :lat-lngs="safeBoundaryLatLng"
+          :color="'#ffb703'"
+          :weight="2"
+          :fill="false"
+          :dash-array="'3 6'"
+          :interactive="false"
+        />
+
         <!-- Existing exclusion zones -->
         <LPolygon
           v-for="zone in exclusionPolygons"
@@ -272,6 +347,11 @@
           v-if="mowerDisplayLatLng && mowerIcon"
           :lat-lng="mowerDisplayLatLng"
           :icon="mowerIcon"
+        />
+
+        <LMarker
+          v-if="verificationTargetLatLng"
+          :lat-lng="verificationTargetLatLng"
         />
 
         <!-- GPS accuracy circle (approximate with polygon points) -->
@@ -365,6 +445,10 @@ const error = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
 const currentPolygonClosed = ref(false);
 const editingZoneId = ref<string | null>(null);
+const showImportBox = ref(false);
+const importText = ref('');
+const addressInput = ref('');
+const safeBufferMeters = ref(0.75);
 
 // Tile loading and error state
 const tileLoadingState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle');
@@ -628,6 +712,28 @@ const mowingPolygons = computed(() => {
   }));
 });
 
+const importedBoundaryLatLng = computed(() => {
+  return (mapStore.importedBoundary?.coordinates || [])
+    .map(p => _applyDisplayOffset(p.latitude, p.longitude));
+});
+
+const safeBoundaryLatLng = computed(() => {
+  return (mapStore.safeBoundary?.coordinates || [])
+    .map(p => _applyDisplayOffset(p.latitude, p.longitude));
+});
+
+const hasImportedBoundary = computed(() => importedBoundaryLatLng.value.length >= 3);
+const isVerificationActive = computed(() => mapStore.verificationStatus?.status === 'active');
+const canConfirmVerificationPoint = computed(() => {
+  const target = mapStore.verificationStatus?.target_index;
+  return isVerificationActive.value && target !== null && target !== undefined;
+});
+const verificationTargetLatLng = computed(() => {
+  const status = mapStore.verificationStatus;
+  const target = status?.points?.find((p: any) => p.index === status.target_index);
+  return target ? _applyDisplayOffset(target.latitude, target.longitude) : null;
+});
+
 const currentPolygonLatLng = computed(() => currentPolygon.value.map(p => _applyDisplayOffset(p.latitude, p.longitude)));
 
 const isPolygonMode = computed(() => mode.value === 'boundary' || mode.value === 'exclusion' || mode.value === 'mowing');
@@ -675,6 +781,111 @@ function clearCurrent() {
   hasUnsavedChanges.value = false;
   currentPolygonClosed.value = false;
   editingZoneId.value = null;
+}
+
+async function importBoundaryText() {
+  try {
+    await mapStore.importBoundaryFromText(importText.value);
+    importText.value = '';
+    showImportBox.value = false;
+    toast.show('Imported property boundary loaded', 'success', 2500);
+  } catch (err: any) {
+    toast.show(err?.response?.data?.detail || err?.message || 'Failed to import boundary', 'error', 4000);
+  }
+}
+
+async function clearImportedBoundary() {
+  try {
+    await mapStore.clearImportedBoundary();
+    toast.show('Imported boundary cleared', 'success', 2000);
+  } catch (err: any) {
+    toast.show(err?.message || 'Failed to clear imported boundary', 'error', 3000);
+  }
+}
+
+function useImportedAsDraft() {
+  const coords = mapStore.importedBoundary?.coordinates || [];
+  if (coords.length < 3) return;
+  currentPolygon.value = coords.map(p => ({ latitude: p.latitude, longitude: p.longitude }));
+  currentPolygonClosed.value = true;
+  editingZoneId.value = mapStore.configuration?.boundary_zone?.id || null;
+  hasUnsavedChanges.value = true;
+  mapStore.setEditMode('boundary');
+  toast.show('Imported boundary copied as an unsaved draft', 'warning', 3500);
+}
+
+async function fetchParcelFromCurrentGps() {
+  if (!mowerLatLng.value) return;
+  try {
+    await mapStore.fetchImportedBoundaryFromPoint(mowerLatLng.value[0], mowerLatLng.value[1]);
+    toast.show('Fetched parcel helper boundary', 'success', 2500);
+  } catch (err: any) {
+    toast.show(err?.response?.data?.detail || err?.message || 'Parcel lookup failed', 'error', 4000);
+  }
+}
+
+async function fetchParcelFromAddress() {
+  try {
+    await mapStore.fetchImportedBoundaryFromAddress(addressInput.value.trim());
+    toast.show('Fetched parcel helper boundary', 'success', 2500);
+  } catch (err: any) {
+    toast.show(err?.response?.data?.detail || err?.message || 'Address lookup failed', 'error', 4000);
+  }
+}
+
+async function generateSafeBoundary() {
+  try {
+    const value = Number(safeBufferMeters.value);
+    await mapStore.generateSafeBoundaryFromConfirmed(Number.isFinite(value) ? value : 0.75);
+    toast.show('Safe operating boundary generated', 'success', 2500);
+  } catch (err: any) {
+    toast.show(err?.response?.data?.detail || err?.message || 'Failed to generate safe boundary', 'error', 4000);
+  }
+}
+
+async function startVerification() {
+  try {
+    await mapStore.startVerificationFromConfirmed();
+    toast.show('Drive-to-confirm session started', 'success', 2500);
+  } catch (err: any) {
+    toast.show(err?.response?.data?.detail || err?.message || 'Failed to start verification', 'error', 4000);
+  }
+}
+
+async function goToNextVerificationPoint() {
+  try {
+    await mapStore.goToNextVerificationPoint();
+    toast.show('Mower traveling to boundary point with blade off', 'info', 3500);
+  } catch (err: any) {
+    toast.show(err?.response?.data?.detail || err?.message || 'Failed to start point travel', 'error', 4000);
+  }
+}
+
+async function confirmVerificationPoint() {
+  try {
+    await mapStore.confirmVerificationPoint();
+    toast.show('Boundary point confirmed', 'success', 2200);
+  } catch (err: any) {
+    toast.show(err?.response?.data?.detail || err?.message || 'Point is not ready to confirm', 'error', 3500);
+  }
+}
+
+async function rejectVerificationPoint() {
+  try {
+    await mapStore.rejectVerificationPoint();
+    toast.show('Boundary point rejected', 'warning', 2500);
+  } catch (err: any) {
+    toast.show(err?.response?.data?.detail || err?.message || 'Failed to reject point', 'error', 3500);
+  }
+}
+
+async function cancelVerification() {
+  try {
+    await mapStore.cancelVerification();
+    toast.show('Boundary verification cancelled', 'warning', 2500);
+  } catch (err: any) {
+    toast.show(err?.response?.data?.detail || err?.message || 'Failed to cancel verification', 'error', 3500);
+  }
 }
 
 function undoLastVertex() {
@@ -1170,6 +1381,7 @@ onMounted(async () => {
     if (!mapStore.configuration) {
       await mapStore.loadConfiguration('default');
     }
+    safeBufferMeters.value = mapStore.safeBoundaryBufferMeters || 0.75;
     // Initialize center from configuration if available
     const center = mapStore.configuration?.center_point;
     if (center) {
@@ -1679,6 +1891,71 @@ function retryOriginalTiles() {
   margin-left: .5rem;
 }
 
+.boundary-helper-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem 1rem;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  background: rgba(8, 13, 18, 0.95);
+}
+
+.boundary-address-input {
+  min-width: 180px;
+  max-width: 260px;
+  height: 32px;
+  padding: 0 .5rem;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  color: inherit;
+}
+
+.buffer-input {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .875rem;
+}
+
+.buffer-input input {
+  width: 72px;
+  height: 32px;
+  padding: 0 .35rem;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  color: inherit;
+}
+
+.boundary-import-panel {
+  display: flex;
+  gap: .5rem;
+  align-items: flex-start;
+  padding: .75rem 1rem;
+  background: rgba(8, 13, 18, 0.95);
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.boundary-import-panel textarea {
+  min-height: 80px;
+  flex: 1 1 320px;
+  padding: .5rem;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  color: inherit;
+  resize: vertical;
+}
+
+.boundary-helper-warning {
+  padding: .5rem 1rem;
+  background: rgba(255, 183, 3, 0.12);
+  color: #ffd166;
+  font-size: .875rem;
+}
+
 /* Emoji divIcon styling for map markers */
 :deep(.lb-marker) {
   display: grid;
@@ -1815,5 +2092,22 @@ function retryOriginalTiles() {
 
 @media (prefers-reduced-motion: reduce) {
   .btn { transition: none !important; }
+}
+
+@media (max-width: 760px) {
+  .boundary-helper-toolbar {
+    align-items: stretch;
+  }
+  .boundary-helper-toolbar .btn,
+  .boundary-address-input,
+  .buffer-input {
+    flex: 1 1 160px;
+  }
+  .boundary-import-panel {
+    flex-direction: column;
+  }
+  .boundary-import-panel textarea {
+    width: 100%;
+  }
 }
 </style>

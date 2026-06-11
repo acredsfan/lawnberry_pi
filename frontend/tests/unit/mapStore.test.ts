@@ -13,12 +13,26 @@ const mockGetMapZones = vi.fn()
 const mockCreateMapZone = vi.fn()
 const mockPutMapZone = vi.fn()
 const mockDeleteMapZone = vi.fn()
+const mockGetImportedParcelBoundary = vi.fn()
+const mockGetSafeBoundary = vi.fn()
 
 vi.mock('@/services/mapsClient', () => ({
   getMapZones: mockGetMapZones,
   createMapZone: mockCreateMapZone,
   putMapZone: mockPutMapZone,
   deleteMapZone: mockDeleteMapZone,
+  getImportedParcelBoundary: mockGetImportedParcelBoundary,
+  clearImportedParcelBoundary: vi.fn(),
+  fetchParcelByPoint: vi.fn(),
+  fetchParcelByAddress: vi.fn(),
+  importParcelBoundary: vi.fn(),
+  generateSafeBoundary: vi.fn(),
+  getSafeBoundary: mockGetSafeBoundary,
+  startBoundaryVerification: vi.fn(),
+  nextBoundaryVerificationPoint: vi.fn(),
+  confirmBoundaryVerificationPoint: vi.fn(),
+  rejectBoundaryVerificationPoint: vi.fn(),
+  cancelBoundaryVerification: vi.fn(),
 }))
 
 // Mock the api service too (needed by loadConfiguration etc.)
@@ -95,6 +109,8 @@ describe('mapStore async zone actions', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    mockGetImportedParcelBoundary.mockResolvedValue({ coordinates: [], helper_only: true, status: 'empty' })
+    mockGetSafeBoundary.mockResolvedValue({ coordinates: [], buffer_meters: 0.75, status: 'empty' })
   })
 
   // ------------------------------------------------------------------ setBoundaryZone

@@ -49,6 +49,24 @@ tail -f /home/pi/lawnberry/backend/backend.log
 - Before final handoff, include direct evidence from tool/command output that proves the reported behavior changed.
 - For changes under `backend/`, `frontend/`, or `systemd/`, complete the PR template **Agent Evidence** checklist; CI rejects PRs missing it.
 
+## Session-History Guardrails (Do Not Skip)
+
+- **Test storage isolation is mandatory before any pytest run on the Pi.**
+  Set all three to an isolated temp directory and never point tests at live runtime files:
+  - `LAWN_DATA_DIR=<temp_dir>`
+  - `DB_PATH=<temp_dir>/lawnberry.db`
+  - `LAWN_SETTINGS_DIR=<temp_dir>/config`
+- **For settings-affecting work, always capture pre/post snapshots** and verify critical fields did not drift unless explicitly requested:
+  - `GET /api/v2/settings`
+  - `GET /api/v2/settings/maps`
+  - `GET /api/v2/settings/system`
+- **Do not leak secrets in output.**
+  Never print raw `google_api_key`, tokens, or credentials from config/API responses; report presence/length/redacted values only.
+- **Avoid tool thrash.**
+  After 2 consecutive failures with the same discovery tool, switch strategy immediately (Semble ↔ git grep/view; pi-control ↔ bash) instead of repeating failing probes.
+- **Avoid repeated broad pytest loops.**
+  Run one targeted command per hypothesis, capture output once, and parse that output rather than rerunning to scrape summaries.
+
 ⚠️ **Test suite hang warning:** `python -m pytest tests/` without `-m "not hardware"` will hang
 indefinitely because some tests block on hardware I/O (serial ports, I2C). Always filter or
 set a per-test timeout. `pytest-timeout` is NOT installed; add `--timeout=N` only if it is.

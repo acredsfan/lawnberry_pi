@@ -161,6 +161,7 @@ def get_map_zones(request: Request, runtime: RuntimeContext = Depends(get_runtim
 async def post_map_zones(
     zones: list[Zone],
     bulk: bool = Query(False),
+    allow_empty: bool = Query(False),
     runtime: RuntimeContext = Depends(get_runtime),
 ):
     global _zones_last_modified
@@ -171,6 +172,14 @@ async def post_map_zones(
         )
     repo = getattr(runtime, "map_repository", None)
     zone_dicts = [z.model_dump(mode="json") for z in zones]
+    if not zone_dicts and not allow_empty:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Refusing to clear all zones via empty bulk replace. "
+                "Pass allow_empty=true only for intentional full deletion."
+            ),
+        )
     if repo is not None:
         repo.save_zones(zone_dicts)
     _zones_last_modified = datetime.now(timezone.utc)
@@ -450,6 +459,7 @@ async def _load_map_configuration_envelope(
     map_repository=None,
 ) -> dict[str, Any]:
     default_envelope = _default_map_configuration_envelope(config_id)
+    payload: dict[str, Any] = {}
     raw = await persistence.load_map_configuration(config_id)
     if not raw:
         envelope = default_envelope
@@ -477,6 +487,15 @@ async def _load_map_configuration_envelope(
     if map_repository is not None:
         try:
             zones_from_db = map_repository.list_zones()
+            if not zones_from_db:
+                recovered_zones = _extract_legacy_envelope_zones(payload)
+                if recovered_zones:
+                    map_repository.save_zones(recovered_zones)
+                    zones_from_db = map_repository.list_zones()
+                    logger.warning(
+                        "Recovered %d legacy zone(s) from map configuration envelope into map_zones",
+                        len(zones_from_db),
+                    )
             envelope["zones"] = zones_from_db
             envelope["_zones_source"] = "map_zones"
         except Exception as exc:
@@ -713,6 +732,169 @@ def _legacy_polygon_zones(entries: Any, *, zone_type: str) -> list[dict[str, Any
             }
         )
     return zones
+
+
+def _repo_polygon_from_geojson_zone(entry: dict[str, Any]) -> list[dict[str, float]]:
+    geometry = entry.get("geometry")
+    if not isinstance(geometry, dict):
+        return []
+    if geometry.get("type") != "Polygon":
+        return []
+    coordinates = geometry.get("coordinates")
+    if not isinstance(coordinates, list) or not coordinates:
+        return []
+    ring = coordinates[0]
+    if not isinstance(ring, list):
+        return []
+
+    points: list[dict[str, float]] = []
+    for point in ring:
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            continue
+        try:
+            lng = float(point[0])
+            lat = float(point[1])
+        except (TypeError, ValueError):
+            continue
+        points.append({"latitude": lat, "longitude": lng})
+
+    if len(points) < 3:
+        return []
+    if points[0] == points[-1]:
+        points = points[:-1]
+    return points if len(points) >= 3 else []
+
+
+def _repo_zone_from_modern_zone(
+    entry: dict[str, Any],
+    *,
+    zone_kind: str,
+    fallback_id: str,
+) -> dict[str, Any] | None:
+    polygon = entry.get("polygon")
+    if not isinstance(polygon, list):
+        return None
+
+    points: list[dict[str, float]] = []
+    for point in polygon:
+        if not isinstance(point, dict):
+            continue
+        try:
+            lat = float(point.get("latitude"))
+            lng = float(point.get("longitude"))
+        except (TypeError, ValueError):
+            continue
+        points.append({"latitude": lat, "longitude": lng})
+
+    if len(points) < 3:
+        return None
+
+    zone_id = str(entry.get("id") or entry.get("zone_id") or entry.get("name") or fallback_id)
+    return {
+        "id": zone_id,
+        "name": str(entry.get("name") or zone_id),
+        "polygon": points,
+        "priority": int(entry.get("priority", 0) or 0),
+        "exclusion_zone": zone_kind == "exclusion",
+        "zone_kind": zone_kind,
+    }
+
+
+def _extract_legacy_envelope_zones(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Recover zones from legacy envelope formats used before map_zones became authoritative."""
+
+    recovered: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    def _append(zone: dict[str, Any] | None) -> None:
+        if not zone:
+            return
+        zone_id = str(zone.get("id") or "").strip()
+        if not zone_id:
+            return
+        if zone_id in seen_ids:
+            return
+        seen_ids.add(zone_id)
+        recovered.append(zone)
+
+    # Legacy GeoJSON-style entries under "zones"
+    raw_zones = payload.get("zones")
+    if isinstance(raw_zones, list):
+        for index, entry in enumerate(raw_zones):
+            if not isinstance(entry, dict):
+                continue
+            zone_type = str(entry.get("zone_type") or "boundary").lower()
+            zone_kind = "boundary" if zone_type not in {"boundary", "exclusion", "mow"} else zone_type
+            polygon = _repo_polygon_from_geojson_zone(entry)
+            if not polygon:
+                continue
+            zone_id = str(
+                entry.get("zone_id")
+                or entry.get("id")
+                or entry.get("name")
+                or f"{zone_kind}-{index + 1}"
+            )
+            _append(
+                {
+                    "id": zone_id,
+                    "name": str(entry.get("name") or zone_id),
+                    "polygon": polygon,
+                    "priority": int(entry.get("priority", 0) or 0),
+                    "exclusion_zone": zone_kind == "exclusion",
+                    "zone_kind": zone_kind,
+                }
+            )
+
+    # Legacy list formats with "coordinates" arrays
+    for entry in _legacy_polygon_zones(payload.get("boundaries"), zone_type="boundary"):
+        polygon = _repo_polygon_from_geojson_zone(entry)
+        _append(
+            {
+                "id": str(entry.get("zone_id") or entry.get("name") or "boundary"),
+                "name": str(entry.get("name") or entry.get("zone_id") or "boundary"),
+                "polygon": polygon,
+                "priority": 0,
+                "exclusion_zone": False,
+                "zone_kind": "boundary",
+            }
+        )
+    for entry in _legacy_polygon_zones(payload.get("exclusion_zones"), zone_type="exclusion"):
+        polygon = _repo_polygon_from_geojson_zone(entry)
+        _append(
+            {
+                "id": str(entry.get("zone_id") or entry.get("name") or "exclusion"),
+                "name": str(entry.get("name") or entry.get("zone_id") or "exclusion"),
+                "polygon": polygon,
+                "priority": 0,
+                "exclusion_zone": True,
+                "zone_kind": "exclusion",
+            }
+        )
+
+    # Transitional MapConfiguration-style envelope fields
+    boundary = payload.get("boundary_zone")
+    if isinstance(boundary, dict):
+        _append(_repo_zone_from_modern_zone(boundary, zone_kind="boundary", fallback_id="boundary"))
+    exclusions = payload.get("exclusion_zones")
+    if isinstance(exclusions, list):
+        for index, entry in enumerate(exclusions):
+            if isinstance(entry, dict):
+                _append(
+                    _repo_zone_from_modern_zone(
+                        entry,
+                        zone_kind="exclusion",
+                        fallback_id=f"exclusion-{index + 1}",
+                    )
+                )
+    mows = payload.get("mowing_zones")
+    if isinstance(mows, list):
+        for index, entry in enumerate(mows):
+            if isinstance(entry, dict):
+                _append(
+                    _repo_zone_from_modern_zone(entry, zone_kind="mow", fallback_id=f"mow-{index + 1}")
+                )
+
+    return [z for z in recovered if isinstance(z.get("polygon"), list) and len(z["polygon"]) >= 3]
 
 
 def _persist_map_provider_setting(provider: str, request: Request | None = None) -> None:
