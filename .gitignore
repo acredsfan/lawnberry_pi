@@ -253,3 +253,4 @@ docs/superpowers/plans/
 
 # Auto-added by pre-commit-gitignore-guard: Private key or certificate
 frontend/config/secrets.json
+boundary_plan.md
