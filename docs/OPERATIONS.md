@@ -144,6 +144,9 @@ Manual drive now fails closed for **non-zero** movement commands on live hardwar
 - The backend blocks non-zero drive commands with HTTP `423` if fresh hardware telemetry is unavailable, usable GPS position
   awareness is missing, or a ToF obstacle reading is at/inside the configured clearance threshold.
 - Zero-vector stop commands remain allowed so an operator can still halt motion immediately while the controller is connected.
+- The software watchdog is armed by hazardous actuator sources rather than by backend uptime alone. Idle camera, telemetry, or
+  WebSocket stalls should not latch `watchdog_timeout`; that reason should indicate missed watchdog heartbeats while drive or
+  blade control is armed.
 
 Useful checks:
 

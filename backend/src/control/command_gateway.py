@@ -73,6 +73,24 @@ class MotorCommandGateway:
         """Attach a software safety watchdog."""
         self._watchdog = watchdog
 
+    def _arm_watchdog(self, reason: str) -> None:
+        if self._watchdog is None:
+            return
+        arm = getattr(self._watchdog, "arm", None)
+        if callable(arm):
+            arm(reason)
+            return
+        self._watchdog.heartbeat()
+
+    def _disarm_watchdog(self, reason: str) -> None:
+        if self._watchdog is None:
+            return
+        disarm = getattr(self._watchdog, "disarm", None)
+        if callable(disarm):
+            disarm(reason)
+            return
+        self._watchdog.heartbeat()
+
     def _emit_event(self, event: Any) -> None:
         if self._event_store is not None:
             try:
@@ -268,13 +286,19 @@ class MotorCommandGateway:
                 duration_ms=cmd.duration_ms,
             ))
 
+        motion_active = abs(float(cmd.left)) > 1e-6 or abs(float(cmd.right)) > 1e-6
+
         robohat = self._robohat
         if robohat and getattr(getattr(robohat, "status", None), "serial_connected", False):
+            if motion_active:
+                self._arm_watchdog("drive")
             watchdog_start = datetime.now(UTC)
             success = await robohat.send_motor_command(cmd.left, cmd.right)
             watchdog_latency = (datetime.now(UTC) - watchdog_start).total_seconds() * 1000
 
             if success:
+                if not motion_active:
+                    self._disarm_watchdog("drive")
                 if self._event_store is not None:
                     from ..observability.events import MotionCommandAcked
                     self._emit_event(MotionCommandAcked(
@@ -292,6 +316,7 @@ class MotorCommandGateway:
                     try:
                         await asyncio.sleep(auto_stop_ms / 1000.0)
                         await robohat.send_motor_command(0.0, 0.0)
+                        self._disarm_watchdog("drive")
                         logger.warning(
                             "Manual drive duration expired (%d ms); motors stopped", auto_stop_ms
                         )
@@ -310,6 +335,8 @@ class MotorCommandGateway:
                 watchdog_latency_ms=round(watchdog_latency, 2),
             )
 
+        if not motion_active:
+            self._disarm_watchdog("drive")
         return DriveOutcome(
             status=CommandStatus.QUEUED,
             audit_id=audit_id,
@@ -427,6 +454,11 @@ class MotorCommandGateway:
             bs = get_blade_service()
             await bs.initialize()
             ok = await bs.set_active(cmd.active)
+            if ok:
+                if cmd.active:
+                    self._arm_watchdog("blade")
+                else:
+                    self._disarm_watchdog("blade")
             return BladeOutcome(
                 status=CommandStatus.ACCEPTED if ok else CommandStatus.ACK_FAILED,
                 audit_id=audit_id,

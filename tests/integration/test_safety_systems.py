@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
-from backend.src.safety.motor_authorization import MotorAuthorization
-from backend.src.safety.estop_handler import EstopHandler
-from backend.src.safety.watchdog import Watchdog
-from backend.src.safety.interlock_validator import InterlockValidator, InterlockActiveError
-from backend.src.safety.safety_triggers import SafetyTriggerManager
 from backend.src.core.config_loader import ConfigLoader
+from backend.src.safety.estop_handler import EstopHandler
+from backend.src.safety.interlock_validator import InterlockActiveError, InterlockValidator
+from backend.src.safety.motor_authorization import MotorAuthorization
+from backend.src.safety.safety_triggers import SafetyTriggerManager
+from backend.src.safety.watchdog import Watchdog
 
 
 def test_estop_latency_under_limit():
@@ -43,7 +45,7 @@ def test_interlock_validator_blocks_and_raises():
     assert iv.is_any_active() is True
     try:
         iv.assert_safe_to_move()
-        assert False, "Expected InterlockActiveError"
+        raise AssertionError("Expected InterlockActiveError")
     except InterlockActiveError:
         pass
     iv.set_interlock("blade_guard_open", False)
@@ -59,8 +61,8 @@ def test_watchdog_timeout_triggers_estop():
         await wd.start()
         auth.authorize()
         assert auth.is_enabled()
-        # Heartbeat once then let it timeout
-        wd.heartbeat()
+        # Arm once then let it timeout.
+        wd.arm("drive")
         t0 = time.perf_counter()
         # Wait until auth revoked
         for _ in range(200):
@@ -79,8 +81,6 @@ def test_gateway_watchdog_heartbeat_integration():
     """Verify that MotorCommandGateway and Watchdog integration handles heartbeats and triggers estop on disconnect."""
     from backend.src.control.command_gateway import MotorCommandGateway
     from backend.src.control.commands import DriveCommand
-    from unittest.mock import MagicMock
-    from typing import Any
 
     safety = {"emergency_stop_active": False, "estop_reason": None}
     blade = {"active": False}
@@ -92,7 +92,10 @@ def test_gateway_watchdog_heartbeat_integration():
         safety_state=safety,
         blade_state=blade,
         client_emergency=client_em,
-        robohat=MagicMock(status=MagicMock(serial_connected=False)),
+        robohat=MagicMock(
+            status=MagicMock(serial_connected=True, firmware_version="1.3.0"),
+            send_motor_command=AsyncMock(return_value=True),
+        ),
         persistence=MagicMock(),
         _rest_module=rest_mock,
     )
@@ -155,7 +158,7 @@ def test_gateway_watchdog_heartbeat_integration():
             assert auth.is_enabled()
             assert not gw.is_emergency_active()
 
-            # Now wait >100ms without sending drive commands to let it timeout
+            # Now wait >100ms without sending drive commands to let active motion timeout
             t0 = time.perf_counter()
             for _ in range(100):
                 await asyncio.sleep(0.005)
@@ -172,4 +175,3 @@ def test_gateway_watchdog_heartbeat_integration():
             await wd.stop()
 
     asyncio.run(run_test())
-

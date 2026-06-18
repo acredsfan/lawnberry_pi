@@ -7,9 +7,9 @@ async loop starvation.
 """
 
 import asyncio
+import logging
 import threading
 import time
-import logging
 
 from .estop_handler import EstopHandler
 
@@ -22,6 +22,7 @@ class Watchdog:
         self._timeout_ms = max(1, int(timeout_ms))
         self._timeout_s = self._timeout_ms / 1000.0
         self._last_heartbeat = time.perf_counter()
+        self._armed_reasons: set[str] = set()
         self._thread: threading.Thread | None = None
         self._stop_evt = threading.Event()
         self._lock = threading.Lock()
@@ -29,6 +30,26 @@ class Watchdog:
     def heartbeat(self) -> None:
         with self._lock:
             self._last_heartbeat = time.perf_counter()
+
+    def arm(self, reason: str = "motion") -> None:
+        """Arm timeout enforcement while a hazardous actuator is active."""
+        with self._lock:
+            self._armed_reasons.add(reason)
+            self._last_heartbeat = time.perf_counter()
+
+    def disarm(self, reason: str | None = None) -> None:
+        """Disarm one actuator source, or all sources when reason is omitted."""
+        with self._lock:
+            if reason is None:
+                self._armed_reasons.clear()
+            else:
+                self._armed_reasons.discard(reason)
+            self._last_heartbeat = time.perf_counter()
+
+    @property
+    def armed(self) -> bool:
+        with self._lock:
+            return bool(self._armed_reasons)
 
     async def start(self) -> None:
         if self._thread is None or not self._thread.is_alive():
@@ -56,14 +77,21 @@ class Watchdog:
             while not self._stop_evt.is_set():
                 time.sleep(0.01)
                 with self._lock:
+                    armed = bool(self._armed_reasons)
                     elapsed_s = time.perf_counter() - self._last_heartbeat
-                if elapsed_s > self._timeout_s:
+                    reasons = ",".join(sorted(self._armed_reasons))
+                if armed and elapsed_s > self._timeout_s:
                     logger.error(
-                        f"Watchdog timeout detected (elapsed={elapsed_s * 1000.0:.1f}ms, limit={self._timeout_ms}ms). Triggering E-stop!"
+                        "Watchdog timeout detected (elapsed=%.1fms, limit=%dms, armed=%s). "
+                        "Triggering E-stop!",
+                        elapsed_s * 1000.0,
+                        self._timeout_ms,
+                        reasons or "unknown",
                     )
                     self._estop.trigger_estop("watchdog_timeout")
-                    # After triggering, prevent repeated triggers and exit
-                    break
+                    with self._lock:
+                        self._armed_reasons.clear()
+                        self._last_heartbeat = time.perf_counter()
         except Exception as e:
             logger.exception(f"Exception in watchdog thread: {e}")
         finally:

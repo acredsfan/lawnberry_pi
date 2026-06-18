@@ -402,11 +402,12 @@ async def lifespan(app: FastAPI):
     )
     app.state.startup_config_report = _startup_report
 
-    # Start the watchdog only after all synchronous init is complete.
+    # Start the watchdog monitor only after all synchronous init is complete.
+    # Timeout enforcement stays disarmed until drive/blade control arms it, so
+    # idle startup or telemetry stalls cannot create a spurious watchdog E-stop.
     # create_task schedules the heartbeat coroutine; asyncio.sleep(0) yields to the
     # event loop so the task runs once (calling heartbeat()) before the watchdog thread
-    # starts counting. This eliminates the race where sync startup > 1000 ms caused a
-    # spurious timeout before the first heartbeat could fire.
+    # starts. This keeps the first armed interval from inheriting stale startup time.
     _watchdog_heartbeat_task = asyncio.create_task(
         _watchdog_heartbeat_loop(), name="watchdog_heartbeat"
     )
