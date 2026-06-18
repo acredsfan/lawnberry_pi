@@ -255,3 +255,6 @@ docs/superpowers/plans/
 frontend/config/secrets.json
 boundary_plan.md
 SPEC.md
+
+# Auto-added by pre-commit-gitignore-guard: Environment / secrets file
+.env.example
