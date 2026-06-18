@@ -113,6 +113,13 @@ file_size_kb() {
   fi
 }
 
+is_allowed_env_template() {
+  local file="$1"
+  # Allow committed environment templates, while still blocking real env files.
+  # Examples: .env.example, backend/.env.example
+  [[ "$file" =~ (^|/)\.env\.example$ ]]
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -127,6 +134,10 @@ fi
 VIOLATIONS=0
 
 for file in "${STAGED[@]}"; do
+  if is_allowed_env_template "$file"; then
+    continue
+  fi
+
   violated=0
   violation_label=""
   gitignore_entry=""
