@@ -69,6 +69,12 @@ const router = createRouter({
       name: 'Login',
       component: () => import('@/views/LoginView.vue'),
       meta: { requiresAuth: false }
+    },
+    {
+      path: '/power-history',
+      name: 'PowerHistory',
+      component: () => import('@/views/PowerHistoryView.vue'),
+      meta: { requiresAuth: true }
     }
   ]
 })

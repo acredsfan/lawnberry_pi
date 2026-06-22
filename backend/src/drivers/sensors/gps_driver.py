@@ -61,6 +61,9 @@ class GPSDriver(HardwareDriver):
         # Real hardware handles (lazy)
         self._serial = None
         self._first_read_done = False
+        # Power management: when suspended, read_position() returns None
+        # (last known position is preserved in GPSSensorInterface.last_reading)
+        self._suspended: bool = False
         # Prevent concurrent hardware port scans — a slow cold-start scan can
         # take several seconds and must not run twice in parallel (each consumes
         # a thread pool slot and races on self._serial).
@@ -109,12 +112,36 @@ class GPSDriver(HardwareDriver):
                 pass
             self._serial = None
 
+    # ------------------------------------------------------------------
+    # Power-management suspend / resume
+    # ------------------------------------------------------------------
+
+    def suspend(self) -> None:
+        """Pause GPS reads without closing the serial port.
+
+        While suspended, ``read_position()`` returns ``None`` immediately.
+        The ``GPSSensorInterface`` will serve the last cached position to the
+        rest of the system so the UI still shows the last known location.
+        The serial port is NOT closed — a resume is near-instantaneous with no
+        re-detection delay.
+        """
+        self._suspended = True
+
+    def resume(self) -> None:
+        """Resume live GPS reads after a ``suspend()`` call."""
+        self._suspended = False
+
+    @property
+    def is_suspended(self) -> bool:
+        return self._suspended
+
     async def health_check(self) -> dict[str, Any]:  # noqa: D401
         return {
             "driver": "gps",
             "mode": self.cfg.mode.value,
             "initialized": self.initialized,
             "running": self.running,
+            "suspended": self._suspended,
             "last_read_age_s": (time.time() - self._last_read_ts) if self._last_read_ts else None,
             "simulation": is_simulation_mode(),
         }
@@ -125,8 +152,17 @@ class GPSDriver(HardwareDriver):
         Returns a GpsReading or None if not available. In SIM_MODE this
         generates a deterministic position around a fixed coordinate suitable
         for tests and local development.
+
+        Returns None immediately when the driver is in the suspended state
+        (power management).  The caller (GPSSensorInterface) will serve the
+        last cached reading to keep the rest of the system stable.
         """
         if not self.initialized:
+            return None
+
+        # Power-management suspend: skip hardware read, return None so the
+        # sensor interface falls back to the last cached position.
+        if self._suspended:
             return None
 
         if is_simulation_mode():

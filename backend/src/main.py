@@ -26,6 +26,7 @@ from .api.routers import camera as camera_router
 from .api.routers import maintenance as maintenance_router
 from .api.routers import planning as planning_router
 from .api.routers import sensors as sensors_router
+from .api.routers import power as power_router
 from .api.routers import settings as settings_router
 from .api.routers import telemetry as telemetry_router
 from .api.routers import weather as weather_router
@@ -48,6 +49,8 @@ from .safety.safety_triggers import set_safety_event_handler
 from .safety.safety_validator import validate_on_start
 from .services.ai_service import get_ai_service
 from .services.camera_stream_service import camera_service
+from .services.power_history_service import init_power_history_service
+from .services.power_manager import init_power_manager
 from .services.jobs_service import jobs_service as _jobs_service_singleton
 from .services.mission_service import get_mission_service
 from .services.navigation_service import NavigationService
@@ -194,6 +197,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         _log.exception("AI service initialization failed")
     await websocket_hub.start_telemetry_loop()
+
     # Build the typed RuntimeContext once all services are up. This is
     # consumed by safety-critical routers via Depends(get_runtime).
     # See docs/superpowers/plans/2026-04-26-runtime-context.md.
@@ -415,8 +419,29 @@ async def lifespan(app: FastAPI):
     await asyncio.sleep(0)  # let heartbeat task run once before watchdog timer starts
     await _watchdog.start()
 
+    # Start Power History logging and Power Manager.
+    # These are initialised here (after persistence is ready and _db_path is known)
+    # and stored on app.state so the shutdown block can tear them down cleanly.
+    try:
+        _power_history_svc = init_power_history_service(persistence)
+        await _power_history_svc.start()
+        _power_manager = init_power_manager(_power_history_svc)
+        await _power_manager.start()
+        app.state.power_history_service = _power_history_svc
+        app.state.power_manager = _power_manager
+        _log.info("PowerHistoryService and PowerManager started")
+    except Exception:
+        _log.exception("Power management services failed to start (non-fatal)")
+
     yield
     # Shutdown
+    try:
+        if getattr(app.state, "power_manager", None):
+            await app.state.power_manager.stop()
+        if getattr(app.state, "power_history_service", None):
+            await app.state.power_history_service.stop()
+    except Exception:
+        pass
     if getattr(app.state, "watchdog_heartbeat_task", None):
         app.state.watchdog_heartbeat_task.cancel()
         try:
@@ -478,6 +503,7 @@ app.include_router(camera_router.router, prefix="/api/v2")
 app.include_router(weather_router.router, prefix="/api/v2")
 app.include_router(planning_router.router, prefix="/api/v2")
 app.include_router(settings_router.router, prefix="/api/v2")
+app.include_router(power_router.router)
 app.include_router(parcel_router, prefix="/api/v2")
 app.include_router(capture_router, prefix="/api/v2")
 app.include_router(boundary_router, prefix="/api/v2")

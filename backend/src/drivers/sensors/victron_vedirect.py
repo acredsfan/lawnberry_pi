@@ -66,6 +66,15 @@ class VictronVeDirectDriver(HardwareDriver):
         self._read_lock: asyncio.Lock | None = None
         self._refresh_task: asyncio.Task[None] | None = None
 
+    def set_refresh_interval(self, interval_s: float) -> None:
+        """Dynamically adjust the BLE background-refresh cadence.
+
+        Called by PowerManager to slow polling at night and speed it up during
+        the day.  The new interval takes effect on the *next* cache-staleness
+        check in ``read_power()``.
+        """
+        self._bg_refresh_interval_s = max(5.0, float(interval_s))
+
     async def initialize(self) -> None:
         self._read_lock = asyncio.Lock()
         self._refresh_task = None

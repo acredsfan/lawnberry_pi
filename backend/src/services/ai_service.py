@@ -128,6 +128,18 @@ class AIService:
         self.initialized = True
         return True
 
+    def set_enabled(self, enabled: bool) -> None:
+        """Soft-enable or soft-disable AI inference without restarting the service.
+
+        Called by PowerManager to disable inference when the mower is idle at
+        night and re-enable it when a mission begins.  The model stays loaded
+        in memory so re-enabling is instantaneous.
+        """
+        if self.ai_processing.system_enabled == enabled:
+            return
+        self.ai_processing.system_enabled = enabled
+        logger.info("AIService: system_enabled set to %s by PowerManager", enabled)
+
     async def get_ai_status(self) -> dict[str, Any]:
         """Get current AI processing status"""
         if not self.initialized:

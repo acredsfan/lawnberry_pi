@@ -14,6 +14,17 @@
 
       <!-- Power / Battery -->
       <PowerSystemCard :data="batteryDisplayData" />
+      <!-- Power History shortcut -->
+      <div class="retro-card power-history-link-card" @click="$router.push('/power-history')" style="cursor:pointer;">
+        <div class="card-header">
+          <h4>POWER HISTORY</h4>
+          <span style="font-size:1.2em;">📈</span>
+        </div>
+        <div class="card-content" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 0;">
+          <span style="font-size:0.75rem;color:#94a3b8;text-align:center;">View trends, charging cycles &amp; activity logs</span>
+          <span style="margin-top:8px;font-size:0.7rem;color:#0891b2;letter-spacing:0.08em;">TAP TO OPEN →</span>
+        </div>
+      </div>
 
       <!-- Orientation (speed + heading + tilt) -->
       <OrientationCard :data="orientationDisplayData" />
