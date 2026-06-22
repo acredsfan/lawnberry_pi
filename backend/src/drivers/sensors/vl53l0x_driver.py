@@ -22,6 +22,7 @@ Platform / Constitution Notes:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import random
 import time
@@ -40,6 +41,10 @@ TOF_SENSOR_MAX_VALID_MM: int = 8190
 _adafruit_i2c = None
 _gpio_provider = None  # one of ('lgpio','periphery','rpi_gpio', None)
 _pair_initialized = False
+logger = logging.getLogger(__name__)
+_XSHUT_RESET_DELAY_S = 0.05
+_XSHUT_BOOT_DELAY_S = 0.10
+_XSHUT_PAIR_INIT_ATTEMPTS = 3
 
 
 class VL53L0XDriver(HardwareDriver):
@@ -88,6 +93,7 @@ class VL53L0XDriver(HardwareDriver):
         self._driver_backend: str | None = None  # 'pololu', 'alt', or None
         self._fail_count: int = 0
         self._last_init_attempt: float | None = None
+        self._last_error: str | None = None
         # Optional timing budget (microseconds) for Adafruit backend
         try:
             tb_env = os.environ.get("TOF_TIMING_BUDGET_US")
@@ -106,20 +112,21 @@ class VL53L0XDriver(HardwareDriver):
         If none available and not in SIM_MODE, we still mark initialized so
         higher layers can proceed while we gracefully no-op on reads.
         """
-        self.initialized = True
         if is_simulation_mode():
+            self.initialized = True
             return
 
         # Try Adafruit CircuitPython backend first (most common on Pi via Blinka)
         if await _try_init_adafruit(self):
+            self.initialized = True
             return
 
         # Fallback backends: Pololu-style or alt
-        await _try_init_pololu_like(self)
+        self.initialized = await _try_init_pololu_like(self)
 
     async def start(self) -> None:  # noqa: D401
         # On some modules, ranging already started in initialize; mark running
-        self.running = True
+        self.running = is_simulation_mode() or self._driver is not None
 
     async def stop(self) -> None:  # noqa: D401
         self.running = False
@@ -144,6 +151,7 @@ class VL53L0XDriver(HardwareDriver):
             "backend": self._driver_backend,
             "fail_count": self._fail_count,
             "timing_budget_us": self._timing_budget_us,
+            "last_error": self._last_error,
         }
 
     async def read_distance_mm(self) -> int | None:
@@ -259,17 +267,20 @@ async def _ensure_gpio_provider() -> str | None:
 
 # Module-level GPIO state singletons — safer than function-attribute caching.
 _lgpio_chip: Any = None
+_lgpio_claimed_pins: set[int] = set()
 _periphery_pins: dict[int, Any] = {}
 
 
 def _gpio_set(pin: int, value: int) -> None:
-    global _lgpio_chip, _periphery_pins
+    global _lgpio_chip, _lgpio_claimed_pins, _periphery_pins
     if _gpio_provider == "lgpio":
         import lgpio  # type: ignore
 
         if _lgpio_chip is None:
             _lgpio_chip = lgpio.gpiochip_open(0)
-        lgpio.gpio_claim_output(_lgpio_chip, pin, 0)
+        if pin not in _lgpio_claimed_pins:
+            lgpio.gpio_claim_output(_lgpio_chip, pin, 1 if value else 0)
+            _lgpio_claimed_pins.add(pin)
         lgpio.gpio_write(_lgpio_chip, pin, 1 if value else 0)
     elif _gpio_provider == "periphery":
         from periphery import GPIO  # type: ignore
@@ -304,42 +315,68 @@ async def _try_pair_init_adafruit(
     provider = await _ensure_gpio_provider()
     if provider is None:
         return False
-    # Set both low
-    _gpio_set(left_gpio, 0)
-    _gpio_set(right_gpio, 0)
-    await asyncio.sleep(0.02)
-    # Bring right high and set new address
-    _gpio_set(right_gpio, 1)
-    await asyncio.sleep(0.02)
-    try:
-        import adafruit_vl53l0x  # type: ignore
-        import board  # type: ignore
-        import busio  # type: ignore
+    success = False
+    last_error: Exception | None = None
+    for attempt in range(1, _XSHUT_PAIR_INIT_ATTEMPTS + 1):
+        try:
+            # Set both low, then bring only the right sensor up at the default
+            # address so it can be moved to the configured secondary address.
+            _gpio_set(left_gpio, 0)
+            _gpio_set(right_gpio, 0)
+            await asyncio.sleep(_XSHUT_RESET_DELAY_S)
+            _gpio_set(right_gpio, 1)
+            await asyncio.sleep(_XSHUT_BOOT_DELAY_S)
 
-        if _adafruit_i2c is None:
-            _adafruit_i2c = busio.I2C(board.SCL, board.SDA)
-        _i2c = _adafruit_i2c
-        _raddr = right_addr
+            import adafruit_vl53l0x  # type: ignore
+            import board  # type: ignore
+            import busio  # type: ignore
 
-        def _do_pair_init() -> object:
-            s = adafruit_vl53l0x.VL53L0X(_i2c)
-            s.set_address(_raddr)
-            try:
-                if hasattr(s, "measurement_timing_budget"):
-                    tb = int(os.environ.get("TOF_TIMING_BUDGET_US", "0")) or 66000
-                    s.measurement_timing_budget = tb
-            except Exception:
-                pass
-            return s
+            if _adafruit_i2c is None:
+                _adafruit_i2c = busio.I2C(board.SCL, board.SDA)
+            _i2c = _adafruit_i2c
+            _raddr = right_addr
 
-        await asyncio.to_thread(_do_pair_init)
-    except Exception:
+            def _do_pair_init(i2c: object = _i2c, raddr: int = _raddr) -> object:
+                s = adafruit_vl53l0x.VL53L0X(i2c)
+                s.set_address(raddr)
+                try:
+                    if hasattr(s, "measurement_timing_budget"):
+                        tb = int(os.environ.get("TOF_TIMING_BUDGET_US", "0")) or 66000
+                        s.measurement_timing_budget = tb
+                except Exception as exc:
+                    logger.debug("VL53L0X pair timing budget setup failed: %s", exc)
+                return s
+
+            await asyncio.to_thread(_do_pair_init)
+            _gpio_set(left_gpio, 1)
+            await asyncio.sleep(_XSHUT_BOOT_DELAY_S)
+            success = True
+            break
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "VL53L0X XSHUT pair init attempt %s/%s failed: %s",
+                attempt,
+                _XSHUT_PAIR_INIT_ATTEMPTS,
+                exc,
+            )
+            for pin in (left_gpio, right_gpio):
+                try:
+                    _gpio_set(pin, 1)
+                except Exception as cleanup_exc:
+                    logger.warning(
+                        "Failed to release VL53L0X XSHUT GPIO %s high after init failure: %s",
+                        pin,
+                        cleanup_exc,
+                    )
+            await asyncio.sleep(_XSHUT_BOOT_DELAY_S)
+
+    if not success and last_error is not None:
+        logger.warning("VL53L0X XSHUT pair init failed: %s", last_error)
+    _pair_initialized = success
+
+    if not success:
         return False
-
-    # Bring left high
-    _gpio_set(left_gpio, 1)
-    await asyncio.sleep(0.02)
-    _pair_initialized = True
     return True
 
 
@@ -354,38 +391,42 @@ async def ensure_pair_addressing(
     return await _try_pair_init_adafruit(left_gpio, right_gpio, right_addr)
 
 
-async def _try_prepare_adafruit_instance(address: int) -> tuple[object | None, str | None]:
+async def _try_prepare_adafruit_instance(
+    address: int, timing_budget_us: int | None = None
+) -> tuple[object | None, str | None, str | None]:
     """Create Adafruit VL53L0X instance bound to a specific address."""
     global _adafruit_i2c
     try:
         import adafruit_vl53l0x  # type: ignore
         import board  # type: ignore
         import busio  # type: ignore
-    except Exception:
-        return None, None
+    except Exception as exc:
+        return None, None, str(exc)
     try:
         if _adafruit_i2c is None:
             _adafruit_i2c = busio.I2C(board.SCL, board.SDA)
         _i2c = _adafruit_i2c
         _addr = address
         _tb_env = os.environ.get("TOF_TIMING_BUDGET_US")
+        _tb = timing_budget_us
 
         def _do_init() -> object:
             s = adafruit_vl53l0x.VL53L0X(_i2c, address=_addr)
             try:
-                if _tb_env:
-                    s.measurement_timing_budget = int(_tb_env)
-            except Exception:
-                pass
+                tb = _tb or (int(_tb_env) if _tb_env else None)
+                if tb:
+                    s.measurement_timing_budget = int(tb)
+            except Exception as exc:
+                logger.debug("VL53L0X timing budget setup failed: %s", exc)
             return s
 
         sensor = await asyncio.to_thread(_do_init)
-        return sensor, "adafruit"
-    except Exception:
-        return None, None
+        return sensor, "adafruit", None
+    except Exception as exc:
+        return None, None, str(exc)
 
 
-async def _try_init_pololu_like(self: VL53L0XDriver) -> None:
+async def _try_init_pololu_like(self: VL53L0XDriver) -> bool:
     # Lazy import optional bindings
     module = None
     try:
@@ -405,7 +446,9 @@ async def _try_init_pololu_like(self: VL53L0XDriver) -> None:
 
     if module is None:
         # No Python binding available; we'll gracefully degrade in reads
-        return
+        if not self._last_error:
+            self._last_error = "No VL53L0X Python binding available"
+        return False
 
     # Create driver instance; different modules export class differently
     try:
@@ -419,6 +462,8 @@ async def _try_init_pololu_like(self: VL53L0XDriver) -> None:
         except Exception:
             self._driver = None
             self._driver_backend = None
+            self._last_error = "Failed to create VL53L0X driver instance"
+            return False
 
     # Configure/prepare ranging if driver exists
     if self._driver is not None:
@@ -442,12 +487,20 @@ async def _try_init_pololu_like(self: VL53L0XDriver) -> None:
         except Exception:
             # Keep running with get_distance available; many libs allow reads without explicit start
             pass
+        self._last_error = None
+        return True
+    self._last_error = "VL53L0X driver instance unavailable"
+    return False
 
 
 async def _try_init_adafruit(self: VL53L0XDriver) -> bool:
     # If Adafruit library not available, skip
-    sensor, backend = await _try_prepare_adafruit_instance(self._i2c_address)
+    sensor, backend, error = await _try_prepare_adafruit_instance(
+        self._i2c_address, self._timing_budget_us
+    )
     if sensor is None:
+        if error:
+            self._last_error = error
         # If XSHUT pins exist, attempt pair init then try again
         # Prefer env, fall back to instance-configured shutdown pin for this side
         try:
@@ -469,15 +522,22 @@ async def _try_init_adafruit(self: VL53L0XDriver) -> bool:
         if await _try_pair_init_adafruit(
             lpin, rpin, right_addr=int(os.environ.get("TOF_RIGHT_ADDR", "0x30"), 0)
         ):
-            sensor, backend = await _try_prepare_adafruit_instance(self._i2c_address)
+            sensor, backend, error = await _try_prepare_adafruit_instance(
+                self._i2c_address, self._timing_budget_us
+            )
+            if sensor is None and error:
+                self._last_error = error
         else:
             return False
 
     if sensor is None:
+        if error:
+            self._last_error = error
         return False
 
     self._driver = sensor
     self._driver_backend = backend
+    self._last_error = None
     # Optional: no explicit start required; `.range` triggers reads
     return True
 
@@ -496,10 +556,31 @@ async def _reinit_if_needed(self: VL53L0XDriver) -> None:
     if self._last_init_attempt and (now - self._last_init_attempt) < 2.0:
         return
     self._last_init_attempt = now
+    previous_driver = self._driver
+    previous_backend = self._driver_backend
+    previous_initialized = self.initialized
+    previous_running = self.running
     # Try Adafruit first, then pololu-like
     try:
         if await _try_init_adafruit(self):
+            self.initialized = True
+            self.running = True
             return
-        await _try_init_pololu_like(self)
-    except Exception:
-        pass
+        ok = await _try_init_pololu_like(self)
+        if ok:
+            self.initialized = True
+            self.running = True
+            return
+    except Exception as exc:
+        self._last_error = str(exc)
+
+    if previous_driver is not None:
+        self._driver = previous_driver
+        self._driver_backend = previous_backend
+        self.initialized = previous_initialized
+        self.running = previous_running
+        self._last_error = f"Reinit failed; preserving existing backend {previous_backend}"
+        return
+
+    self.initialized = False
+    self.running = False

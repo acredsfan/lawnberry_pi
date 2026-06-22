@@ -238,12 +238,14 @@ class ToFSensorInterface:
                 "address": cfg.get("left_address"),
                 "shutdown_gpio": cfg.get("left_shutdown_gpio"),
                 "ranging_mode": cfg.get("ranging_mode"),
+                "timing_budget_us": cfg.get("timing_budget_us"),
             }
             right_cfg = {
                 "bus": cfg.get("bus"),
                 "address": cfg.get("right_address"),
                 "shutdown_gpio": cfg.get("right_shutdown_gpio"),
                 "ranging_mode": cfg.get("ranging_mode"),
+                "timing_budget_us": cfg.get("timing_budget_us"),
             }
             self._left = VL53L0XDriver("left", left_cfg)
             self._right = VL53L0XDriver("right", right_cfg)
@@ -277,11 +279,32 @@ class ToFSensorInterface:
                 await self._right.initialize()
                 await self._left.start()
                 await self._right.start()
-                self.status = SensorStatus.ONLINE
-                return True
+                left_ok = bool(
+                    getattr(self._left, "initialized", False)
+                    and getattr(self._left, "running", False)
+                )
+                right_ok = bool(
+                    getattr(self._right, "initialized", False)
+                    and getattr(self._right, "running", False)
+                )
+                if left_ok and right_ok:
+                    self.status = SensorStatus.ONLINE
+                    return True
+                self.status = SensorStatus.ERROR
+                logger.warning(
+                    "VL53L0X initialization incomplete: left=%s right=%s left_backend=%s "
+                    "right_backend=%s left_error=%s right_error=%s",
+                    left_ok,
+                    right_ok,
+                    getattr(self._left, "_driver_backend", None),
+                    getattr(self._right, "_driver_backend", None),
+                    getattr(self._left, "_last_error", None),
+                    getattr(self._right, "_last_error", None),
+                )
+                return False
             else:
-                self.status = SensorStatus.ONLINE
-                return True
+                self.status = SensorStatus.OFFLINE
+                return False
 
         except Exception as e:
             logger.error(f"Failed to initialize ToF sensors: {e}")

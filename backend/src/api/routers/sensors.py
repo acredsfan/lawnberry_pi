@@ -57,6 +57,7 @@ class ToFProbe(BaseModel):
     running: bool | None = None
     last_distance_mm: int | None = None
     last_read_age_s: float | None = None
+    last_error: str | None = None
 
 
 class ToFStatusResponse(BaseModel):
@@ -200,6 +201,7 @@ async def get_tof_status() -> ToFStatusResponse:
                 last_read_age_s=(time.time() - getattr(left, "_last_read_ts", time.time()))
                 if getattr(left, "_last_read_ts", None)
                 else None,
+                last_error=getattr(left, "_last_error", None),
             )
         if right is not None:
             right_probe = ToFProbe(
@@ -215,6 +217,7 @@ async def get_tof_status() -> ToFStatusResponse:
                 last_read_age_s=(time.time() - getattr(right, "_last_read_ts", time.time()))
                 if getattr(right, "_last_read_ts", None)
                 else None,
+                last_error=getattr(right, "_last_error", None),
             )
     except Exception:
         pass

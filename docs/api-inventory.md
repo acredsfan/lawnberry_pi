@@ -120,7 +120,7 @@ All mutations on either surface are immediately visible through the other.
 | Method | Path | Label | Router file | Notes |
 |---|---|---|---|---|
 | GET  | `/api/v2/sensors/health` | `canonical` | `api/routers/sensors.py` | |
-| GET  | `/api/v2/sensors/tof/status` | `canonical` | `api/routers/sensors.py` | |
+| GET  | `/api/v2/sensors/tof/status` | `canonical` | `api/routers/sensors.py` | Includes per-side backend, last distance, read age, and last init/read error. |
 | GET  | `/api/v2/sensors/gps/status` | `canonical` | `api/routers/sensors.py` | |
 | GET  | `/api/v2/sensors/gps/rtk/diagnostics` | `canonical` | `api/routers/sensors.py` | |
 | GET  | `/api/v2/sensors/imu/status` | `canonical` | `api/routers/sensors.py` | |
