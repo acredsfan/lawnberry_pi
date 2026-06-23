@@ -104,6 +104,7 @@ class PowerManager:
         self._history = power_history_service
         self._running = False
         self._task: asyncio.Task | None = None
+        self._sensor_manager = None  # lazily resolved from websocket_hub
 
         # State tracking
         self._gps_suspended = False
@@ -206,11 +207,24 @@ class PowerManager:
     # State helpers
     # ------------------------------------------------------------------
 
+    def _get_sensor_manager(self):
+        """Return the live SensorManager (from websocket hub or cached)."""
+        if self._sensor_manager is not None:
+            return self._sensor_manager
+        try:
+            from .websocket_hub import websocket_hub
+            sm = getattr(websocket_hub, "_sensor_manager", None)
+            if sm is not None:
+                self._sensor_manager = sm
+                return sm
+        except Exception:
+            pass
+        return None
+
     def _get_position(self) -> tuple[float, float]:
         """Return (lat, lon) from last GPS fix, or default (US central)."""
         try:
-            from ..core.state_manager import get_sensor_manager
-            sm = get_sensor_manager()
+            sm = self._get_sensor_manager()
             if sm is not None and sm.gps.last_reading is not None:
                 r = sm.gps.last_reading
                 if r.latitude is not None and r.longitude is not None:
@@ -233,8 +247,7 @@ class PowerManager:
     def _is_moving(self) -> bool:
         """Return True if IMU/GPS indicates the mower is moving."""
         try:
-            from ..core.state_manager import get_sensor_manager
-            sm = get_sensor_manager()
+            sm = self._get_sensor_manager()
             if sm is None:
                 return False
             # Check last GPS reading speed
@@ -259,8 +272,7 @@ class PowerManager:
 
     async def _suspend_gps(self) -> None:
         try:
-            from ..core.state_manager import get_sensor_manager
-            sm = get_sensor_manager()
+            sm = self._get_sensor_manager()
             if sm is None or not hasattr(sm, "gps"):
                 return
             driver = getattr(sm.gps, "_driver", None)
@@ -275,8 +287,7 @@ class PowerManager:
         if not self._gps_suspended:
             return
         try:
-            from ..core.state_manager import get_sensor_manager
-            sm = get_sensor_manager()
+            sm = self._get_sensor_manager()
             if sm is None or not hasattr(sm, "gps"):
                 return
             driver = getattr(sm.gps, "_driver", None)
@@ -293,8 +304,7 @@ class PowerManager:
 
     async def _set_victron_rate(self, dark: bool) -> None:
         try:
-            from ..core.state_manager import get_sensor_manager
-            sm = get_sensor_manager()
+            sm = self._get_sensor_manager()
             if sm is None or not hasattr(sm, "power"):
                 return
             driver = getattr(sm.power, "_victron_driver", None)

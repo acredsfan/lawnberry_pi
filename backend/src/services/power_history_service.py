@@ -93,6 +93,7 @@ class PowerHistoryService:
         self._running = False
         self._task: asyncio.Task | None = None
         self._is_day = True  # set by PowerManager
+        self._sensor_manager = None  # lazily initialised on first _log_sample
         self._ensure_table()
 
     # ------------------------------------------------------------------
@@ -141,17 +142,33 @@ class PowerHistoryService:
     async def _log_sample(self) -> None:
         from .navigation_service import NavigationService
         from ..models.navigation_state import NavigationMode
-        from ..core.state_manager import get_sensor_manager
 
-        sm = get_sensor_manager()
+        # --- Get / lazily initialise the sensor manager ---
+        sm = self._sensor_manager
         if sm is None:
-            return
+            try:
+                # Prefer the already-running instance from the websocket hub
+                from .websocket_hub import websocket_hub
+                sm = getattr(websocket_hub, "_sensor_manager", None)
+            except Exception:
+                pass
+        if sm is None:
+            try:
+                from .sensor_manager import SensorManager
+                sm = SensorManager()
+                await sm.initialize()
+            except Exception:
+                pass
+        self._sensor_manager = sm
 
         power = None
-        try:
-            power = await sm.power.read_power()
-        except Exception:
-            pass
+        if sm is not None:
+            try:
+                power = await sm.power.read_power()
+                if power is None:
+                    power = sm.power.last_reading
+            except Exception:
+                pass
 
         activity = ACTIVITY_IDLE
         try:
@@ -234,6 +251,7 @@ class PowerHistoryService:
                     """,
                     kwargs,
                 )
+                conn.commit()
         except Exception:
             logger.exception("PowerHistoryService: failed to write sample")
 
