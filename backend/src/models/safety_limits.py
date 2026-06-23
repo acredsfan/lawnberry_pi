@@ -31,6 +31,13 @@ class SafetyLimits(BaseModel):
     geofence_buffer_meters: float = Field(default=0.5)
     high_temperature_celsius: float = Field(default=80.0)
     tof_obstacle_distance_meters: float = Field(default=0.2)
+    obstacle_detection_latency_s: float = Field(default=0.35, gt=0)
+    obstacle_conservative_deceleration_mps2: float = Field(default=0.45, gt=0)
+    obstacle_front_offset_m: float = Field(default=0.25, ge=0)
+    obstacle_fixed_margin_m: float = Field(default=0.20, ge=0)
+    obstacle_min_clearance_m: float = Field(default=0.55, gt=0)
+    obstacle_stale_sample_timeout_s: float = Field(default=0.25, gt=0)
+    obstacle_conservative_unknown_speed_mps: float = Field(default=0.4, gt=0)
     autonomous_max_gps_accuracy_m: float = Field(
         default=0.25,
         gt=0,

@@ -124,6 +124,7 @@ If you protect the public hostname with Cloudflare Access, HTTP-01 issuance will
 - POST http://127.0.0.1:8081/api/v2/control/emergency-stop
 - POST http://127.0.0.1:8081/api/v2/control/emergency_clear → clear E-stop with confirmation
 - GET http://127.0.0.1:8081/api/v2/hardware/robohat → RoboHAT status
+- GET http://127.0.0.1:8081/api/v2/autonomy/readiness → blade/platform/pin readiness report
 - GET http://127.0.0.1:8081/api/v2/camera/status → camera activity + FPS snapshot
 - GET http://127.0.0.1:8081/api/v2/camera/frame → latest raw JPEG snapshot
 - GET http://127.0.0.1:8081/api/v2/camera/stream.mjpeg → live MJPEG stream
@@ -147,6 +148,8 @@ Manual drive now fails closed for **non-zero** movement commands on live hardwar
 - The software watchdog is armed by hazardous actuator sources rather than by backend uptime alone. Idle camera, telemetry, or
   WebSocket stalls should not latch `watchdog_timeout`; that reason should indicate missed watchdog heartbeats while drive or
   blade control is armed.
+- Obstacle clearance is calculated from speed, latency, conservative braking, front offset, and margin values in
+  `config/limits.yaml`; `tof_obstacle_distance_meters` is now only a minimum floor.
 
 Useful checks:
 
@@ -179,13 +182,16 @@ watch the mission status contract instead of assuming `running` alone means the 
 - During normal waypoint pursuit, GPS course-over-ground is treated as a movement vector/fallback rather than a continuous
   IMU calibration source. This avoids corrupting chassis heading while the mower is arcing, tank-turning, slipping, or
   maneuvering around obstacles.
-- Autonomous obstacle gating now uses the same configured ToF clearance threshold as manual drive:
-  `config/limits.yaml` → `tof_obstacle_distance_meters` (currently ~0.1 m; see file for exact value).
+- Autonomous obstacle gating now uses the same stopping-distance ToF clearance model as manual drive. Tune
+  `obstacle_detection_latency_s`, `obstacle_conservative_deceleration_mps2`, `obstacle_front_offset_m`,
+  `obstacle_fixed_margin_m`, and `obstacle_min_clearance_m` only after blade-off field calibration on grass.
 - If waypoint traversal cannot begin safely after the bounded verification window, the mission now fails with explicit detail
   instead of remaining indefinitely `running` / `executing` with no progress.
 - RoboHAT drive commands now wait for an explicit firmware PWM acknowledgement before the backend reports them accepted; if
   the RP2040 rejects the command or never acknowledges it, the mission/manual-control path surfaces that as a controller
   failure instead of treating a successful serial write as motion success.
+- Mission-style drive commands carry a short backend lease and the RP2040 firmware independently neutralizes stale serial
+  motion if PWM renewal stops. Firmware also turns blade output off if blade command renewal stops.
 - `GET /api/v2/control/status` reflects the navigation mode/path state, while
   `GET /api/v2/missions/{mission_id}/status` is the authoritative mission lifecycle/detail surface.
 - Legacy `POST /api/v2/control/start` returns `409` with `MISSION_EXECUTOR_REQUIRED`; use
@@ -271,6 +277,9 @@ The system will return status EMERGENCY_CLEARED.
 
 ## Blade Safety Lockout
 By default, blade engagement is locked out until safety preconditions are satisfied (no emergency stop, motors not active, authorization present). If a blade command is rejected, check active interlocks and remediate hazards before retrying.
+Blade-enabled autonomy also requires `GET /api/v2/autonomy/readiness` to report no blocker reason codes, including no
+`HARDWARE_PIN_CONFLICT`, an approved configured blade backend, and an online blade controller. The software does not replace
+the physical E-stop that cuts blade power.
 
 ## IMU Calibration
 For best orientation accuracy, calibrate the IMU after installation:

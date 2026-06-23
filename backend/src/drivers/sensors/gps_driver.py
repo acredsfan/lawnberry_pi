@@ -57,6 +57,7 @@ class GPSDriver(HardwareDriver):
         )
         self._last_read: GpsReading | None = None
         self._last_read_ts: float | None = None
+        self._sample_seq: int = 0
         self._sim_counter: int = 0
         # Real hardware handles (lazy)
         self._serial = None
@@ -188,6 +189,8 @@ class GPSDriver(HardwareDriver):
                 mode=self.cfg.mode,
                 rtk_status=rtk,
                 hdop=hdop,
+                sample_id=self._next_sample_id(),
+                monotonic_received_s=time.monotonic(),
             )
             self._last_read = reading
             self._last_read_ts = time.time()
@@ -197,13 +200,22 @@ class GPSDriver(HardwareDriver):
         try:
             return await asyncio.to_thread(self._read_hardware_blocking)
         except Exception:
-            return self._last_read
+            return self._cached_last_read()
+
+    def _next_sample_id(self) -> int:
+        self._sample_seq += 1
+        return self._sample_seq
+
+    def _cached_last_read(self) -> GpsReading | None:
+        if self._last_read is None:
+            return None
+        return self._last_read.model_copy(update={"cached": True})
 
     def _read_hardware_blocking(self) -> GpsReading | None:
         """Blocking hardware read — must only be called via asyncio.to_thread."""
         if not self._read_thread_lock.acquire(blocking=False):
             # Another thread is already scanning; return last known position.
-            return self._last_read
+            return self._cached_last_read()
         try:
             if self._serial is None:
                 # Lazy open serial port based on mode with simple autodetect
@@ -289,7 +301,7 @@ class GPSDriver(HardwareDriver):
                         break
                 # If not opened, keep last reading
                 if self._serial is None:
-                    return self._last_read
+                    return self._cached_last_read()
 
             # Read NMEA lines for a short window and parse
             # Allow a bit more time on first acquisition
@@ -430,6 +442,8 @@ class GPSDriver(HardwareDriver):
                     mode=self.cfg.mode,
                     rtk_status=rtk_status,
                     hdop=hdop_val,
+                    sample_id=self._next_sample_id(),
+                    monotonic_received_s=time.monotonic(),
                 )
                 self._last_read = reading
                 self._last_read_ts = time.time()
@@ -439,16 +453,23 @@ class GPSDriver(HardwareDriver):
             # Optional gpsd fallback (if service is present on localhost:2947)
             gd = self._read_from_gpsd(timeout_sec=0.5 if self._first_read_done else 1.0)
             if gd is not None:
+                gd = gd.model_copy(
+                    update={
+                        "sample_id": self._next_sample_id(),
+                        "monotonic_received_s": time.monotonic(),
+                        "cached": False,
+                    }
+                )
                 self._last_read = gd
                 self._last_read_ts = time.time()
                 self._first_read_done = True
                 return gd
 
             # If parsing failed, return last known
-            return self._last_read
+            return self._cached_last_read()
         except Exception:
             # On errors, keep last reading and mark running
-            return self._last_read
+            return self._cached_last_read()
         finally:
             self._read_thread_lock.release()
 

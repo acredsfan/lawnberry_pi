@@ -176,6 +176,8 @@ class LocalizationService:
         # GPS track position for deriving COG from position deltas
         self._last_gps_track_position: Position | None = None
         self._last_gps_track_time: datetime | None = None
+        self._last_gps_sample_id: int | None = None
+        self._last_gps_sample_timestamp: datetime | None = None
 
         # PathPlanner used only for haversine distance/bearing calls
         self._path_planner = PathPlanner()
@@ -626,6 +628,17 @@ class LocalizationService:
         """Resolve position from GPS or dead reckoning."""
         gps = sensor_data.gps
         if gps and gps.latitude and gps.longitude:
+            sample_id = getattr(gps, "sample_id", None)
+            sample_timestamp = getattr(gps, "timestamp", None)
+            cached = bool(getattr(gps, "cached", False))
+            sample_is_new = not cached and (
+                (sample_id is not None and sample_id != self._last_gps_sample_id)
+                or (
+                    sample_id is None
+                    and sample_timestamp is not None
+                    and sample_timestamp != self._last_gps_sample_timestamp
+                )
+            )
             gps_position = Position(
                 latitude=gps.latitude,
                 longitude=gps.longitude,
@@ -681,7 +694,10 @@ class LocalizationService:
 
             self._dead_reckoning.update_reference(gps_position)
             self.state.dead_reckoning_active = False
-            self.state.last_gps_fix = datetime.now(UTC)
+            if sample_is_new:
+                self.state.last_gps_fix = datetime.now(UTC)
+                self._last_gps_sample_id = sample_id
+                self._last_gps_sample_timestamp = sample_timestamp
             return gps_position
 
         # Fallback: dead reckoning using velocity integration (never a fixed constant).

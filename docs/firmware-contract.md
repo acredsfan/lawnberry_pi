@@ -17,8 +17,8 @@ serial at 115200 baud.
 | Command | Effect | Firmware ack |
 |---|---|---|
 | `pwm,<steer_us>,<throttle_us>` | Set motor PWM. 1500 µs = stop; range 1000–2000 µs. | `[USB] PWM …` line |
-| `blade=on` | Engage blade motor relay | `[USB] Blade: ON` |
-| `blade=off` | Disengage blade motor relay | `[USB] Blade: OFF` |
+| `blade=on` | Engage blade motor output | `[USB] Blade enabled` |
+| `blade=off` | Disengage blade motor output | `[USB] Blade disabled` |
 | `rc=disable` | Switch to USB control mode; firmware ignores RC receiver | `[USB] RC disabled` or status heartbeat with `rc_enabled: false` |
 | `rc=enable` | Return control authority to RC receiver | `[USB] RC enabled` |
 
@@ -45,6 +45,23 @@ has a dead band; values below ±80 µs from center produce no wheel motion.
 - No retry is the conservative default: unacknowledged motor commands on a mower are
   ambiguous (firmware may have executed but the ack was lost), so stopping is safer than
   re-issuing.
+- Blade commands also require an explicit `Blade enabled` / `Blade disabled` acknowledgement.
+  A serial write alone is not treated as confirmed physical state.
+
+---
+
+## Short Command TTLs
+
+The backend and firmware both enforce short-lived command authorization:
+
+| TTL | Default | Owner | Effect |
+|---|---:|---|---|
+| Mission drive lease | 350 ms | Backend `MotorCommandGateway` | Lease expiry sends `pwm,1500,1500` and refreshes neutral only. |
+| Serial motion command TTL | 500 ms | RP2040 firmware | If non-neutral serial PWM is not renewed, firmware sends neutral and emits `[SERIAL] Motion TTL expired – neutral`. |
+| Serial blade command TTL | 1000 ms | RP2040 firmware | If serial blade-on is not renewed, firmware turns blade off and emits `[SERIAL] Blade TTL expired – off`. |
+
+The longer `SERIAL_TIMEOUT` remains a fallback that returns control to RC mode after about five seconds
+without any serial command, but it is no longer the only stale-motion protection.
 
 ---
 
@@ -92,19 +109,22 @@ healthy. These are **not** the same as the software gateway emergency stop.
 
 ### Firmware-Side Stop Paths
 
-1. **SERIAL_TIMEOUT watchdog (~5 s):** If the Pi stops sending any command within
+1. **Short serial command TTLs (0.5 s motion, 1.0 s blade):** If the Pi stops renewing
+   active serial output, firmware neutralizes motion and turns blade output off before RC fallback.
+
+2. **SERIAL_TIMEOUT watchdog (~5 s):** If the Pi stops sending any command within
    ~5 seconds, the firmware drops back to RC mode and the motor controller de-energizes
    (safe state). The watchdog is fed by the backend's `_maintain_usb_control` loop which
    sends a keepalive PWM refresh every ~0.9 s.
 
-2. **RC failsafe:** If a physical RC receiver is wired and the transmitter signal is lost,
+3. **RC failsafe:** If a physical RC receiver is wired and the transmitter signal is lost,
    the firmware reverts to failsafe (typically stop). The RC failsafe channel is configured
    on the RC transmitter and firmware side — not in the backend.
 
-3. **Physical power cut:** Cutting 12 V to the MDDRC10 motor driver stops motors
+4. **Physical power cut:** Cutting 12 V to the MDDRC10 motor driver stops motors
    immediately regardless of firmware or Pi state.
 
-4. **Hardware estop button (if wired):** If the operator has wired an estop button to
+5. **Hardware estop button (if wired):** If the operator has wired an estop button to
    RC channel 5 or a firmware GPIO, the firmware handles it independently of the backend.
 
 ### Software-Side Estop (Gateway)

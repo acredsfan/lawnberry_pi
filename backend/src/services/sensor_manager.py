@@ -121,10 +121,18 @@ class GPSSensorInterface:
                 reading = await self._driver.read_position()
                 if reading is None:
                     # Keep last_reading if available
-                    reading = self.last_reading
+                    reading = (
+                        self.last_reading.model_copy(update={"cached": True})
+                        if self.last_reading is not None
+                        else None
+                    )
             else:
                 # No driver available — return None so the dashboard shows "—"
-                reading = self.last_reading
+                reading = (
+                    self.last_reading.model_copy(update={"cached": True})
+                    if self.last_reading is not None
+                    else None
+                )
 
             self.last_reading = reading
             if (

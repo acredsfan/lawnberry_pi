@@ -1,7 +1,28 @@
 """Unit tests for MotorCommandGateway — Phase A: emergency lifecycle."""
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+
+class _FakeBladeController:
+    async def initialize(self):
+        return True
+
+    async def set_active(self, active: bool, *, reason: str):
+        from backend.src.services.blade_controller import BladeResult
+
+        return BladeResult(
+            ok=True,
+            commanded_active=bool(active),
+            acknowledged_active=bool(active),
+        )
+
+    async def emergency_stop(self, *, reason: str):
+        from backend.src.services.blade_controller import BladeResult
+
+        return BladeResult(ok=True, commanded_active=False, acknowledged_active=False)
 
 
 def _make_gw():
@@ -24,6 +45,7 @@ def _make_gw():
         _rest_module=rest_mock,
     )
     gw._check_manual_drive_interlocks = AsyncMock(return_value=[])
+    gw.set_blade_controller(_FakeBladeController())
     return gw, safety, blade
 
 
@@ -266,6 +288,37 @@ async def test_dispatch_drive_allowed_with_supported_firmware():
         CommandStatus.FIRMWARE_UNKNOWN,
         CommandStatus.FIRMWARE_INCOMPATIBLE,
     )
+
+
+@pytest.mark.asyncio
+async def test_mission_drive_lease_old_expiry_cannot_stop_newer_command():
+    from backend.src.control.commands import CommandStatus, DriveCommand
+
+    gw, _, _ = _make_gw()
+    mock_robohat = MagicMock()
+    mock_robohat.status.serial_connected = True
+    mock_robohat.status.firmware_version = "10.0.0"
+    mock_robohat.send_motor_command = AsyncMock(return_value=True)
+    gw._robohat = mock_robohat
+    gw._config_loader = MagicMock(
+        get=MagicMock(return_value=(None, SimpleNamespace(autonomous_command_ttl_ms=80)))
+    )
+
+    first = await gw.dispatch_drive(
+        DriveCommand(left=0.4, right=0.4, source="mission", duration_ms=0)
+    )
+    await asyncio.sleep(0.04)
+    second = await gw.dispatch_drive(
+        DriveCommand(left=0.5, right=0.5, source="mission", duration_ms=0)
+    )
+    await asyncio.sleep(0.06)
+
+    assert first.status == CommandStatus.ACCEPTED
+    assert second.status == CommandStatus.ACCEPTED
+    assert mock_robohat.send_motor_command.await_count == 2
+
+    await asyncio.sleep(0.04)
+    assert mock_robohat.send_motor_command.await_args_list[-1].args == (0.0, 0.0)
 
 
 @pytest.mark.asyncio

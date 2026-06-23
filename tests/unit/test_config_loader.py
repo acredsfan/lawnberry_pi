@@ -66,6 +66,44 @@ def test_config_loader_maps_gps_position_offsets(tmp_path: Path):
     assert hardware.gps_antenna_offset_right_m == pytest.approx(0.08)
 
 
+def test_config_loader_maps_typed_blade_block(tmp_path: Path):
+    (tmp_path / "hardware.yaml").write_text(
+        dedent(
+            """\
+            blade:
+              controller: ibt-4
+              allow_autonomous: true
+              spinup_seconds: 2.5
+              shutdown_timeout_seconds: 1.2
+              command_ack_timeout_seconds: 0.6
+              pins:
+                in1: 26
+                in2: 27
+            """
+        )
+    )
+    (tmp_path / "limits.yaml").write_text("")
+
+    loader = ConfigLoader(config_dir=str(tmp_path))
+    hardware, _limits = loader.load()
+
+    assert hardware.blade_controller.value == "ibt-4"
+    assert hardware.blade.allow_autonomous is True
+    assert hardware.blade.pins.in1 == 26
+    assert hardware.blade.pins.in2 == 27
+
+
+def test_config_loader_preserves_legacy_blade_controller_key(tmp_path: Path):
+    (tmp_path / "hardware.yaml").write_text("blade_controller: robohat-rp2040\n")
+    (tmp_path / "limits.yaml").write_text("")
+
+    loader = ConfigLoader(config_dir=str(tmp_path))
+    hardware, _limits = loader.load()
+
+    assert hardware.blade_controller.value == "robohat-rp2040"
+    assert hardware.blade.controller.value == "robohat-rp2040"
+
+
 def test_config_loader_local_override(tmp_path: Path):
     (tmp_path / "hardware.yaml").write_text(
         dedent(

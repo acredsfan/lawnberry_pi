@@ -76,6 +76,30 @@ CI will fail if code changes without corresponding documentation or journal upda
 bash scripts/check_docs_drift.sh
 ```
 
+## 3a) Autonomous readiness regression slice
+
+For platform/pin validation, blade controller safety, GPS freshness, dynamic obstacle clearance,
+command leases, and scheduled mission due detection:
+
+```bash
+tmpdir=$(mktemp -d)
+SIM_MODE=1 \
+LAWN_DATA_DIR="$tmpdir" \
+DB_PATH="$tmpdir/lawnberry.db" \
+LAWN_SETTINGS_DIR="$tmpdir/config" \
+python -m pytest \
+  tests/unit/test_platform_pin_registry.py \
+  tests/unit/test_obstacle_clearance.py \
+  tests/unit/test_gps_sample_freshness.py \
+  tests/unit/test_autonomy_readiness_service.py \
+  tests/unit/test_config_loader.py \
+  tests/unit/test_ibt4_blade_driver.py \
+  tests/unit/test_command_gateway.py \
+  tests/integration/test_scheduled_mission_dispatch.py \
+  -x -q -m "not hardware"
+python -m py_compile robohat-rp2040-code/code.py
+```
+
 Update one of the following to satisfy the guard:
 - `docs/**`
 - `spec/**`

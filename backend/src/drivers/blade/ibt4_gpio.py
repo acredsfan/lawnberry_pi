@@ -23,29 +23,65 @@ logger = logging.getLogger(__name__)
 
 
 class _GPIOAdapter:
-    """Tiny GPIO adapter to allow testing without real hardware.
-
-    In SIM_MODE or when adapter is not available, methods are no-ops.
-    """
+    """Tiny GPIO adapter to allow testing without real hardware."""
 
     def __init__(self, in1: int, in2: int):
         self.in1 = in1
         self.in2 = in2
         self._active = False
         self._initialized = False
+        self._chip = None
+        self._lines: list[Any] = []
 
     def setup(self) -> None:
-        # Defer selecting a library until we run on hardware; tests will skip
+        try:
+            import lgpio  # type: ignore
+        except Exception as exc:
+            raise RuntimeError("lgpio is required for IBT-4 GPIO blade control") from exc
+
+        chip = lgpio.gpiochip_open(0)
+        try:
+            for gpio in (self.in1, self.in2):
+                lgpio.gpio_claim_output(chip, gpio, 0)
+                lgpio.gpio_write(chip, gpio, 0)
+        except Exception:
+            try:
+                lgpio.gpiochip_close(chip)
+            except Exception:
+                pass
+            raise
+        self._chip = chip
+        self._lines = [self.in1, self.in2]
         self._initialized = True
         self._active = False
 
     def set_active(self, active: bool) -> None:
+        if self._chip is not None:
+            import lgpio  # type: ignore
+
+            # Forward-only blade operation: IN1 high, IN2 low. Off is both low.
+            lgpio.gpio_write(self._chip, self.in1, 1 if active else 0)
+            lgpio.gpio_write(self._chip, self.in2, 0)
         self._active = bool(active)
 
     def is_active(self) -> bool:
         return self._active
 
     def cleanup(self) -> None:
+        if self._chip is not None:
+            try:
+                self.set_active(False)
+                import lgpio  # type: ignore
+
+                for gpio in self._lines:
+                    try:
+                        lgpio.gpio_free(self._chip, gpio)
+                    except Exception:
+                        pass
+                lgpio.gpiochip_close(self._chip)
+            finally:
+                self._chip = None
+                self._lines = []
         self._initialized = False
         self._active = False
 
@@ -68,18 +104,26 @@ class IBT4BladeDriver(HardwareDriver):
         self._gpio = gpio_adapter or _GPIOAdapter(self.in1, self.in2)
         self._blade_active = False
         self._estop_latched = False
+        self._offline_reason: str | None = None
 
     async def initialize(self) -> None:
-        if not is_simulation_mode():
+        if is_simulation_mode():
+            logger.info("IBT-4 blade driver in SIM_MODE; GPIO disabled")
+        else:
             try:
                 self._gpio.setup()
             except Exception as e:
-                logger.warning("IBT-4 GPIO setup failed; falling back to simulated mode: %s", e)
-        else:
-            logger.info("IBT-4 blade driver in SIM_MODE; GPIO disabled")
+                self.initialized = False
+                self._offline_reason = str(e)
+                logger.error("IBT-4 GPIO setup failed: %s", e)
+                raise
         self.initialized = True
+        self._offline_reason = None
 
     async def start(self) -> None:
+        if not self.initialized:
+            raise RuntimeError(self._offline_reason or "IBT-4 blade driver is not initialized")
+        await self.set_active(False)
         self.running = True
 
     async def stop(self) -> None:
@@ -89,6 +133,8 @@ class IBT4BladeDriver(HardwareDriver):
             pass
         self._blade_active = False
         self.running = False
+        if not is_simulation_mode():
+            self._gpio.cleanup()
 
     async def health_check(self) -> dict[str, Any]:
         return {
@@ -98,6 +144,7 @@ class IBT4BladeDriver(HardwareDriver):
             "active": self._blade_active,
             "pins": {"in1": self.in1, "in2": self.in2},
             "estop_latched": self._estop_latched,
+            "offline_reason": self._offline_reason,
         }
 
     async def set_estop(self, active: bool) -> None:

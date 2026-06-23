@@ -58,7 +58,7 @@ If this file conflicts with those sources, the spec and integration guide win.
 | **VL53L0X Left** | I2C `0x29` | ✅ Baseline | Left obstacle sensing. |
 | **VL53L0X Right** | I2C `0x30` | ✅ Baseline | Right obstacle sensing. |
 | **ToF shutdown pins (GPIO 22/23)** | GPIO | ✅ Optional within baseline | Supported optional wiring for power/address sequencing. |
-| **ToF interrupt pins (GPIO 6/12)** | GPIO | ✅ Optional within baseline | Supported optional wiring. |
+| **ToF interrupt pins** | GPIO | ✅ Optional within baseline | GPIO 6 is available for left IRQ; GPIO 12 is not available for ToF right IRQ on the Pi 5 UART4 BNO085 profile. |
 | **SSD1306 OLED 128x64** | I2C `0x3C` | ✅ Baseline | On-device status display. |
 | **Ultrasonic sensors** | — | ❌ Not in baseline | Removed; not part of supported hardware. |
 
@@ -100,7 +100,7 @@ If this file conflicts with those sources, the spec and integration guide win.
 | **L298N dual H-bridge** | ✅ Supported fallback | Lower-capability fallback path for drive control. |
 | **Hall effect encoders** | ✅ Baseline | Four magnets per wheel per spec. |
 | **997 DC blade motor** | ✅ Baseline | Current cutting motor. |
-| **IBT-4 blade driver** | ✅ Baseline | GPIO 24 / 25 control path. |
+| **IBT-4 blade driver** | ✅ Baseline | Pi 5 current wiring uses GPIO 24/25; Pi 4B conflict-free profile uses GPIO 26/27. |
 | **BTS7960** | ❌ Not in baseline | Removed from recommendations. |
 
 ## Supported communication and buses
@@ -152,10 +152,12 @@ If this file conflicts with those sources, the spec and integration guide win.
 |---|---|---|
 | 15 | GPIO 22 | ToF left shutdown |
 | 16 | GPIO 23 | ToF right shutdown |
-| 18 | GPIO 24 | Blade IN1 |
-| 22 | GPIO 25 | Blade IN2 |
+| 18 | GPIO 24 | Blade IN1 on Pi 5 profile; conflicts with Pi 4B UART4 |
+| 22 | GPIO 25 | Blade IN2 on Pi 5 profile |
+| 37 | GPIO 26 | Blade IN1 on Pi 4B conflict-free profile |
+| 13 | GPIO 27 | Blade IN2 on Pi 4B conflict-free profile |
 | 31 | GPIO 6 | ToF left interrupt |
-| 32 | GPIO 12 | ToF right interrupt |
+| 32 | GPIO 12 | ToF right interrupt only when not using Pi 5 UART4 BNO085 |
 | 33 | RXD4 / Pi 4B alt GPIO 21 | BNO085 RX |
 | 32 | TXD4 / Pi 4B alt GPIO 24 | BNO085 TX |
 

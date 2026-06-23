@@ -50,6 +50,15 @@ motor_controller: robohat-rp2040
 # Set to /dev/serial0 to prefer the GPIO UART header over USB, or /dev/ttyACM0 for USB only.
 motor_controller_port: /dev/serial0
 blade_controller: ibt-4
+blade:
+  controller: ibt-4
+  allow_autonomous: false
+  spinup_seconds: 2.0
+  shutdown_timeout_seconds: 1.0
+  command_ack_timeout_seconds: 0.5
+  pins:
+    in1: 24
+    in2: 25
 encoders:
   enabled: true
 battery:

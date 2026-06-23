@@ -133,8 +133,13 @@ rc_enabled        = True
 rc_mode          = RCMode.EMERGENCY
 last_serial_time  = time.monotonic()
 SERIAL_TIMEOUT    = 5.0
+MOTION_COMMAND_TIMEOUT = 0.5
+BLADE_COMMAND_TIMEOUT = 1.0
 _prev_led_state   = None
 blade_enabled     = False
+serial_motion_active = False
+last_motion_command_time = 0.0
+last_blade_command_time = 0.0
 rc_signal_lost_time = None
 SIGNAL_LOSS_TIMEOUT = 1.0
 channel_data      = {}
@@ -150,6 +155,11 @@ def set_pwm(steer_us: int, thr_us: int) -> None:
     steer_pwm.duty_cycle = us_to_dc(steer_us)
     thr_pwm.duty_cycle   = us_to_dc(thr_us)
 
+
+def blade_off() -> None:
+    global blade_enabled  # pylint: disable=global-statement
+    blade_pwm.duty_cycle = 0
+    blade_enabled = False
 
 
 def drain_pulsein(pin: PulseIn) -> list[int]:
@@ -328,9 +338,10 @@ def get_circuitpython_version() -> str:
 def main() -> None:
     global rc_enabled, last_serial_time, rc_mode, blade_enabled  # pylint: disable=global-statement
     global _enc1_count, _enc1_prev, _enc2_count, _enc2_prev
+    global serial_motion_active, last_motion_command_time, last_blade_command_time
 
     set_pwm(1500, 1500)
-    blade_pwm.duty_cycle = 0
+    blade_off()
     set_led(True, force=True)
     startup_msg = f"▶ RoboHAT Advanced RC Control ready (CircuitPython {get_circuitpython_version()})"
     try:
@@ -384,6 +395,7 @@ def main() -> None:
                 elif cmd == "blade":
                     blade_enabled = (param1 == "on")
                     blade_pwm.duty_cycle = us_to_dc(2000) if blade_enabled else 0
+                    last_blade_command_time = now if blade_enabled else 0.0
                     respond(f"Blade {'enabled' if blade_enabled else 'disabled'}")
                 elif cmd == "get_rc_status":
                     signal_lost = is_rc_signal_lost()
@@ -404,7 +416,11 @@ def main() -> None:
                     _enc2_prev = _enc2_pin.value
                     respond("Encoder counters reset")
                 elif cmd == "pwm" and not rc_enabled:
-                    set_pwm(int(param1), int(param2))
+                    steer_us = int(param1)
+                    throttle_us = int(param2)
+                    set_pwm(steer_us, throttle_us)
+                    serial_motion_active = steer_us != 1500 or throttle_us != 1500
+                    last_motion_command_time = now if serial_motion_active else 0.0
                     last_serial_time = now
                     respond(f"PWM set → steer={param1} µs throttle={param2} µs")
                 else:
@@ -414,9 +430,32 @@ def main() -> None:
             if not rc_enabled and (now - last_serial_time) > SERIAL_TIMEOUT:
                 rc_enabled = True
                 set_led(rc_enabled)
+                serial_motion_active = False
+                blade_off()
                 timeout_msg = f"[SERIAL] Timeout – back to RC mode: {rc_mode}"
                 print(timeout_msg)
                 uart_write(timeout_msg)
+
+            if (
+                not rc_enabled
+                and serial_motion_active
+                and (now - last_motion_command_time) > MOTION_COMMAND_TIMEOUT
+            ):
+                set_pwm(1500, 1500)
+                serial_motion_active = False
+                fault_msg = "[SERIAL] Motion TTL expired – neutral"
+                print(fault_msg)
+                uart_write(fault_msg)
+
+            if (
+                not rc_enabled
+                and blade_enabled
+                and (now - last_blade_command_time) > BLADE_COMMAND_TIMEOUT
+            ):
+                blade_off()
+                fault_msg = "[SERIAL] Blade TTL expired – off"
+                print(fault_msg)
+                uart_write(fault_msg)
 
             # --- control path --- #
             if rc_enabled:
@@ -426,8 +465,7 @@ def main() -> None:
                 if is_rc_signal_lost():
                     # Emergency failsafe - center all controls
                     set_pwm(1500, 1500)
-                    blade_pwm.duty_cycle = 0
-                    blade_enabled = False
+                    blade_off()
                     pixel[0] = (255, 255, 0)  # Yellow for signal loss
                     pixel.show()
                 else:
@@ -439,8 +477,7 @@ def main() -> None:
                     emergency_val = channel_values.get(5, 1500)
                     if emergency_val < 1200:  # Emergency stop triggered
                         set_pwm(1500, 1500)
-                        blade_pwm.duty_cycle = 0
-                        blade_enabled = False
+                        blade_off()
                         pixel[0] = (255, 0, 0)  # Red for emergency stop
                         pixel.show()
                     else:
@@ -454,7 +491,7 @@ def main() -> None:
                             blade_pwm.duty_cycle = us_to_dc(2000)
                         else:
                             blade_enabled = False
-                            blade_pwm.duty_cycle = 0
+                            blade_off()
                     
                         set_led(rc_enabled)
 
@@ -497,5 +534,6 @@ if __name__ == "__main__":
         print(f"[FATAL] {err!r}")
     finally:
         set_pwm(1500, 1500)
+        blade_off()
         pixel[0] = (255, 0, 0)  # red = halted/error
         pixel.show()

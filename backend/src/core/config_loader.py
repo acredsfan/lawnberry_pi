@@ -177,6 +177,7 @@ class ConfigLoader:
             "power_monitor",
             "motor_controller",
             "blade_controller",
+            "blade",
             "camera_enabled",
         ):
             if key in cfg:
@@ -281,6 +282,14 @@ class ConfigLoader:
                 mapped["motor_controller"] = "l298n"
             else:
                 mapped["motor_controller"] = motor.get("type")
+
+        blade_cfg = cfg.get("blade")
+        if isinstance(blade_cfg, dict):
+            mapped["blade"] = blade_cfg
+            if "controller" in blade_cfg and "blade_controller" not in mapped:
+                mapped["blade_controller"] = blade_cfg["controller"]
+        elif "blade_controller" in mapped:
+            mapped["blade"] = {"controller": mapped["blade_controller"]}
 
         return mapped
 

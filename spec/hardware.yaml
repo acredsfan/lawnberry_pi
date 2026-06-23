@@ -82,8 +82,14 @@ cutting_system:
   blade_motor: { type: "997 DC Motor" }
   blade_driver:
     model: "IBT-4 H-Bridge"
-    gpio_in1: 24
-    gpio_in2: 25
+    controller: "ibt-4"
+    pi5_gpio_in1: 24
+    pi5_gpio_in2: 25
+    pi4b_gpio_in1: 26
+    pi4b_gpio_in2: 27
+    allow_autonomous_default: false
+    spinup_seconds: 2.0
+    shutdown_timeout_seconds: 1.0
   safety: { tilt_cutoff: true, estop: true }
 
 comms:
@@ -95,10 +101,12 @@ pins:
   gpio_used:
     - { pin: 15, gpio: 22, role: "ToF Left Shutdown" }
     - { pin: 16, gpio: 23, role: "ToF Right Shutdown" }
-    - { pin: 18, gpio: 24, role: "Blade IN1" }
-    - { pin: 22, gpio: 25, role: "Blade IN2" }
+    - { pin: 18, gpio: 24, role: "Blade IN1 (Pi 5 profile only; conflicts with Pi 4B UART4)" }
+    - { pin: 22, gpio: 25, role: "Blade IN2 (Pi 5 profile)" }
+    - { pin: 37, gpio: 26, role: "Blade IN1 (Pi 4B conflict-free profile)" }
+    - { pin: 13, gpio: 27, role: "Blade IN2 (Pi 4B conflict-free profile)" }
     - { pin: 31, gpio: 6,  role: "ToF Left Interrupt" }
-    - { pin: 32, gpio: 12, role: "ToF Right Interrupt" }
+    - { pin: 32, gpio: 12, role: "ToF Right Interrupt (not supported when Pi 5 UART4 BNO085 profile is active)" }
     - { pin: 33, rxd: 4,  role: "BNO085 RX", rpi4_alt_pin: 21 }
     - { pin: 32, txd: 4,  role: "BNO085 TX", rpi4_alt_pin: 24 }
 

@@ -66,6 +66,9 @@ class GpsReading(BaseModel):
     mode: GpsMode = GpsMode.NEO8M_UART
     rtk_status: str | None = None  # RTK correction status
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    sample_id: int | None = None
+    monotonic_received_s: float | None = None
+    cached: bool = False
 
 
 class ImuReading(BaseModel):

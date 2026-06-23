@@ -10,15 +10,13 @@ Tests verify:
 """
 from __future__ import annotations
 
-import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.src.services.jobs_service import JobsService
 from backend.src.models.mission import Mission, MissionLifecycleStatus, MissionStatus
-
+from backend.src.services.jobs_service import JobsService
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -123,6 +121,39 @@ async def test_scheduled_job_creates_and_starts_mission():
 
     # last_run updated on the job dict
     assert job["last_run"] is not None
+
+
+@pytest.mark.asyncio
+async def test_check_and_dispatch_planning_jobs_detects_due_job():
+    """Scheduler due detection fires through the polling path."""
+    svc = JobsService()
+
+    created_mission = Mission(
+        id="mission-due-001",
+        name="Scheduled: Test Schedule",
+        waypoints=[],
+        created_at=datetime.now(UTC).isoformat(),
+    )
+    mock_mission_svc = MagicMock()
+    mock_mission_svc.list_missions = AsyncMock(return_value=[])
+    mock_mission_svc.create_mission = AsyncMock(return_value=created_mission)
+    mock_mission_svc.start_mission = AsyncMock(return_value=None)
+    svc.set_mission_service(mock_mission_svc)
+
+    due_time = datetime.now(UTC) - timedelta(minutes=1)
+    job = _make_job(zones=["zone-abc"])
+    job["schedule"] = due_time.strftime("%H:%M")
+
+    with (
+        patch("backend.src.services.jobs_service.get_safety_state", return_value={"emergency_stop_active": False}),
+        patch("backend.src.core.persistence.persistence.load_planning_jobs", return_value=[job]),
+        patch("backend.src.core.persistence.persistence.save_planning_job") as save_job,
+    ):
+        await svc._check_and_dispatch_planning_jobs()
+
+    mock_mission_svc.start_mission.assert_awaited_once_with(created_mission.id)
+    assert job["last_run"] is not None
+    save_job.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -239,7 +270,7 @@ async def test_scheduled_job_ws_broadcast_failure_does_not_crash():
 
 @pytest.mark.asyncio
 async def test_scheduled_job_start_mission_error_logged_not_raised():
-    """If start_mission raises, the error is logged and last_run is still updated."""
+    """If start_mission raises, the error is logged and last_run is not updated."""
     svc = JobsService()
 
     created_mission = Mission(
@@ -266,8 +297,8 @@ async def test_scheduled_job_start_mission_error_logged_not_raised():
         # Must not raise despite start_mission failure
         await svc._dispatch_scheduled_job(job)
 
-    # last_run still updated so we don't re-fire immediately
-    assert job["last_run"] is not None
+    # Failed starts must not suppress the next eligible retry.
+    assert job["last_run"] is None
 
 
 @pytest.mark.asyncio

@@ -23,8 +23,8 @@ class JobsService:
         self.scheduler_running = False
         self._scheduler_task: asyncio.Task | None = None
         self._running_tasks: set[asyncio.Task] = set()
-        self._mission_service: "MissionService | None" = None
-        self._websocket_hub: "WebSocketHub | None" = None
+        self._mission_service: MissionService | None = None
+        self._websocket_hub: WebSocketHub | None = None
 
     # ------------------------------------------------------------------
     # Dependency injection setters
@@ -265,8 +265,10 @@ class JobsService:
 
             # --- Compute next_run dynamically from the schedule field ---
             try:
-                from ..models.job import Job as JobModel, SchedulePattern
                 import json as _json
+
+                from ..models.job import Job as JobModel
+                from ..models.job import SchedulePattern
 
                 # The schedule column may hold a JSON SchedulePattern or a bare "HH:MM" string.
                 if isinstance(schedule_raw, dict):
@@ -279,9 +281,9 @@ class JobsService:
                         schedule_dict = {"start_time": str(schedule_raw).strip()}
 
                 schedule = SchedulePattern.model_validate(schedule_dict)
-                # Build a minimal Job-like object for _calculate_next_run
+                # Build a minimal Job-like object for schedule calculations.
                 job_obj = JobModel(id=job.get("id", "tmp"), name=job.get("name", ""), schedule=schedule)
-                next_run = self._calculate_next_run(job_obj, from_time=now)
+                due_occurrence = self._calculate_due_occurrence(job_obj, from_time=now)
             except Exception as exc:
                 logger.warning(
                     "Planning job %r: failed to compute next_run from schedule %r — skipping. Error: %s",
@@ -291,34 +293,33 @@ class JobsService:
                 )
                 continue
 
-            if next_run is None:
+            if due_occurrence is None:
                 continue
 
-            # Don't re-fire if we already ran this cycle (last_run >= next_run)
+            # Don't re-fire if we already successfully started this occurrence.
             last_run_raw = job.get("last_run")
             if last_run_raw:
                 try:
                     last_run = datetime.fromisoformat(last_run_raw)
                     if last_run.tzinfo is None:
                         last_run = last_run.replace(tzinfo=UTC)
-                    if last_run >= next_run:
+                    if last_run >= due_occurrence:
                         continue
                 except (ValueError, TypeError):
                     pass  # Unparseable last_run — treat as never run
 
-            if next_run <= now:
-                try:
-                    await self._dispatch_scheduled_job(job)
-                except RuntimeError:
-                    # MissionService guard — should not happen since we check above
-                    raise
-                except Exception as exc:
-                    logger.error(
-                        "Unhandled error dispatching planning job %r: %s",
-                        job.get("id"),
-                        exc,
-                        exc_info=True,
-                    )
+            try:
+                await self._dispatch_scheduled_job(job, due_occurrence=due_occurrence)
+            except RuntimeError:
+                # MissionService guard — should not happen since we check above
+                raise
+            except Exception as exc:
+                logger.error(
+                    "Unhandled error dispatching planning job %r: %s",
+                    job.get("id"),
+                    exc,
+                    exc_info=True,
+                )
 
     def _update_recurring_schedules(self):
         """Update next_run times for recurring jobs."""
@@ -403,6 +404,25 @@ class JobsService:
 
         return candidate
 
+    def _calculate_due_occurrence(self, job: Job, from_time: datetime) -> datetime | None:
+        """Return the most recent scheduled occurrence that is due at ``from_time``."""
+        if not job.schedule or not job.schedule.start_time:
+            return None
+
+        tz = zoneinfo.ZoneInfo(job.schedule.timezone)
+        now_local = from_time.astimezone(tz)
+        allowed_days = set(job.schedule.days_of_week or range(7))
+
+        for offset in range(0, 8):
+            candidate_date = now_local.date() - timedelta(days=offset)
+            raw = datetime.combine(candidate_date, job.schedule.start_time, tzinfo=tz)
+            candidate = self._resolve_dst_gap(raw, tz)
+            if candidate.weekday() not in allowed_days:
+                continue
+            if candidate <= now_local:
+                return candidate.astimezone(UTC)
+        return None
+
     def _cleanup_old_jobs(self):
         """Remove old completed jobs."""
         cutoff_date = datetime.now(UTC) - timedelta(days=30)
@@ -418,7 +438,12 @@ class JobsService:
         for job_id in jobs_to_remove:
             del self.jobs[job_id]
 
-    async def _dispatch_scheduled_job(self, job: dict[str, Any]) -> None:
+    async def _dispatch_scheduled_job(
+        self,
+        job: dict[str, Any],
+        *,
+        due_occurrence: datetime | None = None,
+    ) -> None:
         """Create and start a mission when a planning-job fires.
 
         ``job`` is a planning-job dict as returned by
@@ -557,8 +582,18 @@ class JobsService:
                     exc,
                 )
 
+        if not mission_started:
+            logger.warning(
+                "Scheduled job %r (%s) did not start mission %s; last_run not updated.",
+                job_name,
+                job_id,
+                mission.id,
+            )
+            return
+
         # --- Update last_run and persist ---
-        job["last_run"] = datetime.now(UTC).isoformat()
+        job["last_run"] = (due_occurrence or datetime.now(UTC)).isoformat()
+        job["last_successful_run"] = job["last_run"]
         try:
             from ..core.persistence import persistence
             persistence.save_planning_job(job)

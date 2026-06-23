@@ -47,6 +47,8 @@ class RoboHATStatus:
     error_count: int = 0
     last_error: str | None = None
     motor_controller_ok: bool = False
+    blade_commanded_active: bool = False
+    blade_acknowledged_active: bool | None = False
     encoder_feedback_ok: bool = False
     encoder_ever_incremented: bool = False  # True once any encoder tick > 0 seen
     encoder_position: int = 0   # encoder_1 (backward compat alias)
@@ -73,6 +75,8 @@ class RoboHATStatus:
             "error_count": self.error_count,
             "last_error": self.last_error,
             "motor_controller_ok": self.motor_controller_ok,
+            "blade_commanded_active": self.blade_commanded_active,
+            "blade_acknowledged_active": self.blade_acknowledged_active,
             "encoder_feedback_ok": self.encoder_feedback_ok,
             "encoder_position": self.encoder_position,
             "encoder_1_position": self.encoder_1_position,
@@ -147,6 +151,8 @@ class RoboHATService:
         # send_motor_command before each new command so _wait_for_pwm_ack can
         # await notification instead of polling at a fixed 20 ms interval.
         self._pwm_ack_event: asyncio.Event = asyncio.Event()
+        self._blade_ack_count: int = 0
+        self._blade_ack_event: asyncio.Event = asyncio.Event()
         # Reconnect coordination — prevents concurrent reconnect tasks and enables
         # periodic retry after the initial attempt window is exhausted.
         self._reconnecting: bool = False
@@ -1054,6 +1060,22 @@ class RoboHATService:
             self.status.last_error = None
             return
 
+        if (
+            line_lower.startswith("[usb] blade")
+            or line_lower.startswith("[uart] blade")
+            or line_lower.startswith("[serial] blade")
+        ):
+            active = "on" in line_lower or "enabled" in line_lower
+            inactive = "off" in line_lower or "disabled" in line_lower
+            if active or inactive:
+                self.status.blade_acknowledged_active = active and not inactive
+                self._blade_ack_count += 1
+                self._blade_ack_event.set()
+                self._last_status_at = time.monotonic()
+                self.status.last_watchdog_echo = "blade:on" if active else "blade:off"
+                self.status.last_error = None
+                return
+
         if line_lower.startswith("[usb] invalid"):
             # The backend attempted an unsupported command earlier. Count it once.
             if "pwm" in line_lower:
@@ -1186,7 +1208,44 @@ class RoboHATService:
             self.status.last_error = self.status.last_error or "pwm_send_failed"
         return ok
 
-    async def send_blade_command(self, active: bool, speed: float = 1.0) -> bool:
+    async def _wait_for_blade_ack(
+        self,
+        *,
+        expected_active: bool,
+        timeout: float = 0.5,
+        _baseline: int | None = None,
+    ) -> bool:
+        deadline = time.monotonic() + timeout
+        starting_count = self._blade_ack_count if _baseline is None else _baseline
+        while True:
+            if (
+                self._blade_ack_count > starting_count
+                and self.status.blade_acknowledged_active is expected_active
+            ):
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self._blade_ack_event.clear()
+            if (
+                self._blade_ack_count > starting_count
+                and self.status.blade_acknowledged_active is expected_active
+            ):
+                return True
+            try:
+                await asyncio.wait_for(self._blade_ack_event.wait(), timeout=min(remaining, 0.5))
+            except TimeoutError:
+                pass
+        self.status.last_error = self.status.last_error or "blade_ack_timeout"
+        logger.warning("Timed out waiting for RoboHAT blade acknowledgement")
+        return False
+
+    async def send_blade_command(
+        self,
+        active: bool,
+        speed: float = 1.0,
+        ack_timeout: float = 0.5,
+    ) -> bool:
         """Send blade motor command to RoboHAT"""
         if not self.serial_conn or not self.serial_conn.is_open or not self.running:
             return False
@@ -1197,7 +1256,16 @@ class RoboHATService:
         if not await self._ensure_usb_control(timeout=0.9, retries=2):
             return False
         command = "blade=on" if active and speed > 0 else "blade=off"
+        self._blade_ack_event.clear()
+        _ack_baseline = self._blade_ack_count
+        self.status.blade_commanded_active = bool(active and speed > 0)
         ok = await self._send_line(command)
+        if ok:
+            ok = await self._wait_for_blade_ack(
+                expected_active=bool(active and speed > 0),
+                timeout=ack_timeout,
+                _baseline=_ack_baseline,
+            )
         if ok and not active:
             self.status.last_watchdog_echo = "blade:off"
         elif ok:

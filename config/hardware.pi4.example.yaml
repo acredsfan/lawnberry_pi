@@ -1,0 +1,34 @@
+# Raspberry Pi 4B example profile.
+# This profile avoids the UART4/BNO085 conflict with the legacy blade GPIO 24.
+# Rewire the IBT-4 blade inputs before using this profile; runtime does not
+# silently remap pins.
+
+imu:
+  type: BNO085
+  port: /dev/ttyAMA4
+
+sensors:
+  tof:
+    - left
+    - right
+  tof_config:
+    bus: 1
+    left_address: 41
+    right_address: 48
+    left_shutdown_gpio: 22
+    right_shutdown_gpio: 23
+    left_interrupt_gpio: 6
+    right_interrupt_gpio: null
+
+motor_controller: robohat-rp2040
+blade_controller: ibt-4
+blade:
+  controller: ibt-4
+  allow_autonomous: false
+  spinup_seconds: 2.0
+  shutdown_timeout_seconds: 1.0
+  command_ack_timeout_seconds: 0.5
+  pins:
+    in1: 26
+    in2: 27
+

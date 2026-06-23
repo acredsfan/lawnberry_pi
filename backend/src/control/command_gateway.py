@@ -58,6 +58,8 @@ class MotorCommandGateway:
         self._obs_mission_id: str = ""
         self._watchdog: Any = None
         self._autonomy_context_provider: Any = None
+        self._drive_lease_generation: int = 0
+        self._blade_controller: Any | None = None
 
     def _rest(self) -> Any:
         if self.__rest_module is not None:
@@ -78,6 +80,28 @@ class MotorCommandGateway:
     def set_autonomy_context_provider(self, provider: Any) -> None:
         """Attach a callable that supplies mission geofence/localization context."""
         self._autonomy_context_provider = provider
+
+    def set_blade_controller(self, controller: Any) -> None:
+        self._blade_controller = controller
+
+    def _get_blade_controller(self) -> Any:
+        if self._blade_controller is not None:
+            return self._blade_controller
+        from ..services.blade_controller import build_blade_controller
+
+        if self._config_loader is not None:
+            hardware, _ = self._config_loader.get()
+            blade_config = hardware.blade
+            if blade_config.controller is None:
+                blade_config = blade_config.model_copy(
+                    update={"controller": hardware.blade_controller}
+                )
+        else:
+            from ..models.hardware_config import BladeConfig
+
+            blade_config = BladeConfig(controller=None)
+        self._blade_controller = build_blade_controller(blade_config, self._robohat)
+        return self._blade_controller
 
     def _arm_watchdog(self, reason: str) -> None:
         if self._watchdog is None:
@@ -152,6 +176,12 @@ class MotorCommandGateway:
                 hardware_confirmed = await robohat.emergency_stop()
             except Exception:
                 hardware_confirmed = False
+        try:
+            controller = self._get_blade_controller()
+            blade_result = await controller.emergency_stop(reason=cmd.reason)
+            hardware_confirmed = bool(hardware_confirmed and blade_result.ok)
+        except Exception:
+            hardware_confirmed = False
 
         return EmergencyOutcome(
             status=CommandStatus.EMERGENCY_LATCHED,
@@ -340,16 +370,28 @@ class MotorCommandGateway:
                         hardware_confirmed=True,
                     ))
                 auto_stop_ms = cmd.duration_ms if cmd.duration_ms > 0 else 500
+                if cmd.source == "mission":
+                    try:
+                        _, limits = self._config_loader.get() if self._config_loader else (None, None)
+                        auto_stop_ms = int(getattr(limits, "autonomous_command_ttl_ms", 350) or 350)
+                    except Exception:
+                        auto_stop_ms = 350
+                self._drive_lease_generation += 1
+                lease_generation = self._drive_lease_generation
                 if self._drive_timeout_task and not self._drive_timeout_task.done():
                     self._drive_timeout_task.cancel()
 
                 async def _auto_stop() -> None:
                     try:
                         await asyncio.sleep(auto_stop_ms / 1000.0)
+                        if lease_generation != self._drive_lease_generation:
+                            return
                         await robohat.send_motor_command(0.0, 0.0)
                         self._disarm_watchdog("drive")
                         logger.warning(
-                            "Manual drive duration expired (%d ms); motors stopped", auto_stop_ms
+                            "%s drive lease expired (%d ms); motors stopped",
+                            cmd.source,
+                            auto_stop_ms,
                         )
                     except asyncio.CancelledError:
                         pass
@@ -422,7 +464,12 @@ class MotorCommandGateway:
                     loader = ConfigLoader()
                 _, limits = loader.get()
                 tof = telemetry.get("tof") or {}
-                threshold_mm = float(limits.tof_obstacle_distance_meters) * 1000.0
+                from ..nav.obstacle_clearance import required_obstacle_clearance_m
+
+                commanded_speed_mps = max(abs(float(cmd.left)), abs(float(cmd.right))) * float(
+                    getattr(cmd, "max_speed_limit", 0.8) or 0.8
+                )
+                threshold_mm = required_obstacle_clearance_m(commanded_speed_mps, limits) * 1000.0
                 for side in ("left", "right"):
                     side_payload = tof.get(side) or {}
                     distance_mm = side_payload.get("distance_mm")
@@ -545,12 +592,20 @@ class MotorCommandGateway:
                 )
 
         try:
-            from ..services.blade_service import get_blade_service
-
-            bs = get_blade_service()
-            await bs.initialize()
-            ok = await bs.set_active(cmd.active)
+            controller = self._get_blade_controller()
+            if not await controller.initialize():
+                return BladeOutcome(
+                    status=CommandStatus.ACK_FAILED,
+                    audit_id=audit_id,
+                    status_reason="BLADE_CONTROLLER_OFFLINE",
+                )
+            result = await controller.set_active(
+                cmd.active,
+                reason=f"{cmd.source}:dispatch_blade",
+            )
+            ok = result.ok
             if ok:
+                self._blade_state["active"] = bool(cmd.active)
                 if cmd.active:
                     self._arm_watchdog("blade")
                 else:
@@ -558,14 +613,14 @@ class MotorCommandGateway:
             return BladeOutcome(
                 status=CommandStatus.ACCEPTED if ok else CommandStatus.ACK_FAILED,
                 audit_id=audit_id,
-                status_reason=None if ok else "blade_service_rejected",
+                status_reason=None if ok else (result.reason_code or "BLADE_ACK_TIMEOUT"),
             )
         except Exception as exc:
             logger.warning("Blade service dispatch failed: %s", exc)
             return BladeOutcome(
                 status=CommandStatus.ACK_FAILED,
                 audit_id=audit_id,
-                status_reason="blade_service_unavailable",
+                status_reason="BLADE_CONTROLLER_OFFLINE",
             )
 
     def reset_for_testing(self) -> None:

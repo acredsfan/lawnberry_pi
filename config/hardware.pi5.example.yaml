@@ -1,0 +1,34 @@
+# Raspberry Pi 5 example profile for the current LawnBerry mower wiring.
+# Copy values into hardware.local.yaml only after verifying physical wiring.
+
+imu:
+  type: BNO085
+  port: /dev/ttyAMA4
+
+sensors:
+  tof:
+    - left
+    - right
+  tof_config:
+    bus: 1
+    left_address: 41
+    right_address: 48
+    left_shutdown_gpio: 22
+    right_shutdown_gpio: 23
+    # GPIO 12 is used by Pi 5 UART4 for BNO085 TX; do not enable ToF right IRQ
+    # on GPIO 12 while this UART profile is active.
+    left_interrupt_gpio: 6
+    right_interrupt_gpio: null
+
+motor_controller: robohat-rp2040
+blade_controller: ibt-4
+blade:
+  controller: ibt-4
+  allow_autonomous: false
+  spinup_seconds: 2.0
+  shutdown_timeout_seconds: 1.0
+  command_ack_timeout_seconds: 0.5
+  pins:
+    in1: 24
+    in2: 25
+

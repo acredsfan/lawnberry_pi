@@ -7,7 +7,14 @@ motor_current_max_amps: 5.0
 watchdog_timeout_ms: 5000
 geofence_buffer_meters: 0.5
 high_temperature_celsius: 80.0
-tof_obstacle_distance_meters: 0.10159994513602963
+tof_obstacle_distance_meters: 0.55
+obstacle_detection_latency_s: 0.35
+obstacle_conservative_deceleration_mps2: 0.45
+obstacle_front_offset_m: 0.25
+obstacle_fixed_margin_m: 0.20
+obstacle_min_clearance_m: 0.55
+obstacle_stale_sample_timeout_s: 0.25
+obstacle_conservative_unknown_speed_mps: 0.4
 autonomous_max_gps_accuracy_m: 0.25
 autonomous_max_gps_fix_age_s: 2.0
 mower_footprint_radius_m: 0.35

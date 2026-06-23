@@ -513,6 +513,25 @@ class MissionService:
         if _is_emergency_active():
             raise MissionStateError("Cannot start mission while emergency stop is active.")
 
+        try:
+            from ..main import app
+            from .autonomy_readiness_service import (
+                AutonomyReadinessError,
+                AutonomyReadinessService,
+            )
+
+            runtime = getattr(app.state, "runtime", None)
+            if runtime is not None and os.getenv("SIM_MODE", "0") != "1":
+                try:
+                    await AutonomyReadinessService(runtime).assert_ready(require_blade=True)
+                except AutonomyReadinessError as exc:
+                    codes = ", ".join(exc.report.blocking_reason_codes)
+                    raise MissionStateError(f"Autonomy readiness failed: {codes}") from exc
+        except MissionStateError:
+            raise
+        except Exception:
+            logger.debug("Autonomy readiness preflight unavailable", exc_info=True)
+
         # Pre-flight: verify motor controller is available (skip in simulation)
         # Only block when a robohat service IS registered but currently disconnected.
         # None means no service configured (dev / test without hardware) — allow.

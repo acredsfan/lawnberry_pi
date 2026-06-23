@@ -105,6 +105,26 @@ class BladeControllerType(str, Enum):
     IBT_4 = "ibt-4"
 
 
+class BladePinsConfig(BaseModel):
+    in1: int = Field(default=24, ge=0, description="GPIO number wired to IBT-4 IN1")
+    in2: int = Field(default=25, ge=0, description="GPIO number wired to IBT-4 IN2")
+
+
+class BladeConfig(BaseModel):
+    controller: BladeControllerType | None = Field(
+        default=None,
+        description="Configured physical blade controller backend.",
+    )
+    allow_autonomous: bool = Field(
+        default=False,
+        description="Whether this configured backend is approved for autonomous mowing.",
+    )
+    spinup_seconds: float = Field(default=2.0, ge=0.0)
+    shutdown_timeout_seconds: float = Field(default=1.0, gt=0.0)
+    command_ack_timeout_seconds: float = Field(default=0.5, gt=0.0)
+    pins: BladePinsConfig = Field(default_factory=BladePinsConfig)
+
+
 class BatteryConfig(BaseModel):
     """Battery pack specification.
 
@@ -198,6 +218,7 @@ class HardwareConfig(BaseModel):
     power_monitor: bool = Field(default=False, description="INA3221 present")
     motor_controller: MotorControllerType | None = Field(default=None)
     blade_controller: BladeControllerType | None = Field(default=None)
+    blade: BladeConfig = Field(default_factory=BladeConfig)
     camera_enabled: bool = Field(default=False)
     # Optional typed ToF configuration (sensors.tof_config in hardware.yaml)
     tof_config: ToFConfig | None = Field(default=None)
@@ -231,4 +252,6 @@ class ToFConfig(BaseModel):
     ranging_mode: str | None = Field(default="better_accuracy")
     left_shutdown_gpio: int | None = Field(default=None)
     right_shutdown_gpio: int | None = Field(default=None)
+    left_interrupt_gpio: int | None = Field(default=None)
+    right_interrupt_gpio: int | None = Field(default=None)
     timing_budget_us: int | None = Field(default=None)

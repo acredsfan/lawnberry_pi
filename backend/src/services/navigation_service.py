@@ -30,6 +30,7 @@ from ..models import (
     Waypoint,
 )
 from ..nav.geoutils import body_offset_to_north_east, haversine_m, offset_lat_lon, point_in_polygon
+from ..nav.obstacle_clearance import required_obstacle_clearance_m
 from ..nav.odometry import OdometryIntegrator
 from ..nav.path_planner import PathPlanner
 from .operating_area_service import OperatingAreaError, load_operating_area_snapshot
@@ -48,15 +49,21 @@ logger = logging.getLogger(__name__)
 class ObstacleDetector:
     """Obstacle detection and avoidance"""
 
-    def __init__(self, safety_distance: float = 0.2):
+    def __init__(self, safety_distance: float = 0.2, limits: Any | None = None):
         self.safety_distance = safety_distance
+        self.limits = limits
         self.detected_obstacles: list[Obstacle] = []
 
     def update_obstacles_from_sensors(self, sensor_data: SensorData) -> list[Obstacle]:
         """Update obstacle list from sensor data"""
         obstacles = []
         obstacle_id_counter = 0
-        threshold_mm = max(0.0, float(self.safety_distance) * 1000.0)
+        speed = sensor_data.gps.speed if sensor_data.gps is not None else None
+        if self.limits is not None:
+            threshold_m = required_obstacle_clearance_m(speed, self.limits)
+        else:
+            threshold_m = max(0.0, float(self.safety_distance))
+        threshold_mm = threshold_m * 1000.0
 
         # ToF sensor obstacles
         if sensor_data.tof_left and sensor_data.tof_left.distance is not None:
@@ -273,6 +280,7 @@ class NavigationService:
         self.cruise_speed = 0.7  # m/s
         self.waypoint_tolerance = 1.0  # meters — fallback when GPS accuracy unavailable
         self.obstacle_avoidance_distance = 0.2  # meters
+        self._safety_limits = None
         self.max_waypoint_fix_age_seconds = 2.0
         self.max_waypoint_accuracy_m = 5.0
         self.bootstrap_required_accuracy_m = 0.25
@@ -298,6 +306,7 @@ class NavigationService:
 
         try:
             hardware, limits = ConfigLoader().get()
+            self._safety_limits = limits
             self.obstacle_avoidance_distance = float(limits.tof_obstacle_distance_meters)
             self.autonomous_max_gps_accuracy_m = float(limits.autonomous_max_gps_accuracy_m)
             self.autonomous_max_gps_fix_age_s = float(limits.autonomous_max_gps_fix_age_s)
@@ -352,7 +361,10 @@ class NavigationService:
         except ValueError:
             self.geofence_inner_margin_m = 1.0
 
-        self.obstacle_detector = ObstacleDetector(self.obstacle_avoidance_distance)
+        self.obstacle_detector = ObstacleDetector(
+            self.obstacle_avoidance_distance,
+            self._safety_limits,
+        )
 
         # State tracking
         self.total_distance = 0.0

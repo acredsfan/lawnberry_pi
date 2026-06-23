@@ -19,6 +19,11 @@ class DummyGPIO(_GPIOAdapter):
         super().cleanup()
 
 
+class FailingGPIO(_GPIOAdapter):
+    def setup(self) -> None:
+        raise RuntimeError("gpio unavailable")
+
+
 @pytest.mark.asyncio
 async def test_ibt4_initialize_and_toggle_in_sim_mode(monkeypatch):
     # Force SIM_MODE for test safety
@@ -51,3 +56,19 @@ async def test_ibt4_initialize_and_toggle_in_sim_mode(monkeypatch):
     # Stop driver
     await drv.stop()
     assert not (await drv.health_check())["active"]
+
+
+@pytest.mark.asyncio
+async def test_ibt4_hardware_mode_setup_failure_reports_offline(monkeypatch):
+    monkeypatch.setenv("SIM_MODE", "0")
+
+    drv = IBT4BladeDriver(
+        config={"pins": {"in1": 24, "in2": 25}},
+        gpio_adapter=FailingGPIO(24, 25),
+    )
+
+    with pytest.raises(RuntimeError, match="gpio unavailable"):
+        await drv.initialize()
+    health = await drv.health_check()
+    assert health["initialized"] is False
+    assert health["offline_reason"] == "gpio unavailable"

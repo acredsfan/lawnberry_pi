@@ -10,10 +10,14 @@ This guide documents wiring, pin assignments, and integration steps for Raspberr
 ## Pin Assignments (from spec/hardware.yaml)
 
 ### Blade Driver (IBT-4 H-Bridge)
-- GPIO 24 → IN1 (Blade IN1)
-- GPIO 25 → IN2 (Blade IN2)
+- Pi 5 current mower profile: GPIO 24 → IN1, GPIO 25 → IN2.
+- Pi 4B conflict-free profile: GPIO 26 → IN1, GPIO 27 → IN2.
 - Power: 12V from battery through appropriate fuse
 - Ground: Common ground with Raspberry Pi
+- Backend config uses an explicit `blade:` block (`controller`, `allow_autonomous`, `pins`, timeouts).
+  The legacy `blade_controller` key is still accepted, but runtime never silently remaps blade pins.
+  If moving a Pi 5-wired mower to a Pi 4B, physically rewire the IBT-4 inputs and use
+  `config/hardware.pi4.example.yaml` as the template.
 
 Safety:
 - Ensure E-stop physically cuts blade power path.
@@ -28,7 +32,8 @@ Safety:
   - ToF Right Shutdown: GPIO 23
 - Optional interrupts:
   - ToF Left IRQ: GPIO 6
-  - ToF Right IRQ: GPIO 12
+  - ToF Right IRQ: GPIO 12 only when it does not conflict with the active UART profile.
+    On the Pi 5 BNO085 UART4 profile, GPIO 12 is UART4 TX and ToF-right IRQ mode is unsupported.
 
 Driver behavior (backend/src/drivers/sensors/vl53l0x_driver.py):
 - Uses Adafruit CircuitPython backend first (adafruit-circuitpython-vl53l0x), then Pololu-style bindings.
@@ -68,7 +73,9 @@ Verification steps:
 ### IMU (BNO085)
 - Preferred: UART4 at 3,000,000 baud
 - Pi 5: /dev/ttyAMA4 → GPIO 12 (TXD4), GPIO 13 (RXD4)
-- Pi 4B: Alternative pins may be required; map to rpi4_alt_pin as specified (e.g., TXD4 on GPIO 24, RXD4 on GPIO 21). Verify with `dtoverlay=uart4` and `gpioinfo`.
+- Pi 4B: UART4 uses GPIO 24 (TXD4) and GPIO 21 (RXD4). This conflicts with the
+  legacy Pi 5 blade GPIO 24 wiring, so the Pi 4B IBT-4 blade profile uses GPIO 26/27 instead.
+  Verify with `dtoverlay=uart4` and `gpioinfo`.
 
 **IMU heading formula** (from `backend/src/services/navigation_service.py`):
 ```

@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from .api.ai import router as ai_router
+from .api.autonomy import router as autonomy_router
 from .api.boundary import capture_router, parcel_router
 from .api.boundary import router as boundary_router
 from .api.boundary import verification_router as boundary_verification_router
@@ -496,6 +497,7 @@ register_sanitization_middleware(app)
 register_deprecation_middleware(app)
 
 app.include_router(rest_router, prefix="/api/v2")
+app.include_router(autonomy_router)
 app.include_router(auth_router.router, prefix="/api/v2")
 app.include_router(telemetry_router.router, prefix="/api/v2")
 app.include_router(sensors_router.router, prefix="/api/v2")
