@@ -164,6 +164,15 @@ clear nearby obstacles and restore fresh hardware telemetry before retrying.
 Mission creation/start can succeed before the mower has enough verified autonomy feedback to traverse the first waypoint, so
 watch the mission status contract instead of assuming `running` alone means the rover is moving.
 
+- Live mission start and resume fail closed unless a user-confirmed mowing boundary and matching generated safe boundary
+  are available. The generated safe-boundary payload records the confirmed-boundary revision hash; if the confirmed
+  boundary changes, regenerate the safe boundary before autonomous motion.
+- Mission preflight validates complete legs, including the current-position-to-first-waypoint leg, against the safe outer
+  boundary and active exclusions. Endpoints inside the yard are not sufficient if the connecting segment crosses an
+  exclusion or leaves a concave safe area.
+- Nonzero mission drive commands pass through `MotorCommandGateway`, which checks fresh RTK-grade localization, dead
+  reckoning state, current footprint containment, ToF obstacle state, and a short predictive swept-motion envelope before
+  dispatching motor output.
 - Mission-start heading alignment is an explicit bootstrap step: the mower drives straight, polls the shared sensor manager,
   derives GPS course-over-ground from receiver course or actual coordinate deltas, then snaps the relative BNO085 yaw to
   that GPS movement vector before trusting IMU heading for waypoint turns.
@@ -179,6 +188,8 @@ watch the mission status contract instead of assuming `running` alone means the 
   failure instead of treating a successful serial write as motion success.
 - `GET /api/v2/control/status` reflects the navigation mode/path state, while
   `GET /api/v2/missions/{mission_id}/status` is the authoritative mission lifecycle/detail surface.
+- Legacy `POST /api/v2/control/start` returns `409` with `MISSION_EXECUTOR_REQUIRED`; use
+  `POST /api/v2/missions/{mission_id}/start` so a real mission executor is created.
 
 Useful checks:
 

@@ -25,8 +25,8 @@ from .api.routers import auth as auth_router
 from .api.routers import camera as camera_router
 from .api.routers import maintenance as maintenance_router
 from .api.routers import planning as planning_router
-from .api.routers import sensors as sensors_router
 from .api.routers import power as power_router
+from .api.routers import sensors as sensors_router
 from .api.routers import settings as settings_router
 from .api.routers import telemetry as telemetry_router
 from .api.routers import weather as weather_router
@@ -49,11 +49,11 @@ from .safety.safety_triggers import set_safety_event_handler
 from .safety.safety_validator import validate_on_start
 from .services.ai_service import get_ai_service
 from .services.camera_stream_service import camera_service
-from .services.power_history_service import init_power_history_service
-from .services.power_manager import init_power_manager
 from .services.jobs_service import jobs_service as _jobs_service_singleton
 from .services.mission_service import get_mission_service
 from .services.navigation_service import NavigationService
+from .services.power_history_service import init_power_history_service
+from .services.power_manager import init_power_manager
 from .services.robohat_service import initialize_robohat_service, shutdown_robohat_service
 from .services.websocket_hub import websocket_hub
 
@@ -322,6 +322,7 @@ async def lifespan(app: FastAPI):
     # This lets _load_boundaries_from_zones() read persisted zones instead of
     # the deprecated _zones_store global in rest.py.
     nav_service.attach_map_repository(_map_repo)
+    nav_service.attach_command_gateway(_command_gateway)
 
     # Wire MissionRepository into the already-constructed MissionService singleton.
     get_mission_service(nav_service, mission_repository=_mission_repo)

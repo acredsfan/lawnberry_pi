@@ -32,6 +32,7 @@ from ..models import (
 from ..nav.geoutils import body_offset_to_north_east, haversine_m, offset_lat_lon, point_in_polygon
 from ..nav.odometry import OdometryIntegrator
 from ..nav.path_planner import PathPlanner
+from .operating_area_service import OperatingAreaError, load_operating_area_snapshot
 from .robohat_service import get_robohat_service
 
 if TYPE_CHECKING:
@@ -177,6 +178,31 @@ class _NavStateLocalizationAdapter:
     def last_gps_fix(self) -> datetime | None:
         return self._nav.navigation_state.last_gps_fix
 
+    @property
+    def velocity(self) -> float | None:
+        return self._nav.navigation_state.velocity
+
+    @property
+    def quality(self) -> str | None:
+        return self._nav.navigation_state.pose_quality
+
+    @property
+    def imu_valid(self) -> bool:
+        return bool(self._nav.navigation_state.imu_valid)
+
+    @property
+    def heading_source(self) -> str | None:
+        return self._nav.navigation_state.heading_source
+
+    @property
+    def accuracy_m(self) -> float | None:
+        position = self.current_position
+        return float(position.accuracy) if position and position.accuracy is not None else None
+
+    @property
+    def state(self) -> _NavStateLocalizationAdapter:
+        return self
+
 
 class _NavGatewayAdapter:
     """Adapts NavigationService drive/emergency interface to MissionExecutor's gateway protocol."""
@@ -189,10 +215,42 @@ class _NavGatewayAdapter:
 
     async def dispatch_drive_speeds(self, left: float, right: float) -> bool:
         try:
-            await self._nav.set_speed(left, right)
-            return True
+            if self._nav._command_gateway is None:
+                await self._nav.set_speed(left, right)
+                return True
+            from ..control.commands import CommandStatus, DriveCommand
+
+            def _normalize(value: float) -> float:
+                if self._nav.max_speed <= 0:
+                    return 0.0
+                return max(-1.0, min(1.0, float(value) / self._nav.max_speed))
+
+            outcome = await self._nav._command_gateway.dispatch_drive(
+                DriveCommand(
+                    left=_normalize(right),
+                    right=_normalize(left),
+                    source="mission",
+                    duration_ms=self._nav.autonomous_command_ttl_ms,
+                    max_speed_limit=1.0,
+                )
+            )
+            return outcome.status in {CommandStatus.ACCEPTED, CommandStatus.QUEUED}
         except Exception as exc:
             logger.debug("_NavGatewayAdapter.dispatch_drive_speeds failed: %s", exc)
+            return False
+
+    async def dispatch_blade(self, active: bool) -> bool:
+        if self._nav._command_gateway is None:
+            return not active
+        try:
+            from ..control.commands import BladeCommand, CommandStatus
+
+            outcome = await self._nav._command_gateway.dispatch_blade(
+                BladeCommand(active=active, source="mission")
+            )
+            return outcome.status == CommandStatus.ACCEPTED
+        except Exception as exc:
+            logger.debug("_NavGatewayAdapter.dispatch_blade failed: %s", exc)
             return False
 
 
@@ -219,6 +277,18 @@ class NavigationService:
         self.max_waypoint_accuracy_m = 5.0
         self.bootstrap_required_accuracy_m = 0.25
         self.geofence_inner_margin_m = 1.0
+        self.autonomous_max_gps_accuracy_m = 0.25
+        self.autonomous_max_gps_fix_age_s = 2.0
+        self.mower_footprint_radius_m = 0.35
+        self.differential_drive_wheelbase_m = 0.30
+        self.geofence_safety_allowance_m = 0.10
+        self.autonomous_prediction_horizon_s = 1.0
+        self.autonomous_command_ttl_ms = 350
+        self.autonomous_braking_decel_mps2 = 0.5
+        self.bootstrap_speed_mps = 0.20
+        self.bootstrap_max_travel_m = 0.60
+        self.coverage_endpoint_clearance_m = 0.25
+        self.max_operational_cross_track_error_m = 1.5
         self.position_verification_timeout_seconds = 30.0
         # Warn when GPS position diverges from dead-reckoning estimate by more
         # than this distance (metres) on re-acquisition after a GPS outage.
@@ -229,6 +299,22 @@ class NavigationService:
         try:
             hardware, limits = ConfigLoader().get()
             self.obstacle_avoidance_distance = float(limits.tof_obstacle_distance_meters)
+            self.autonomous_max_gps_accuracy_m = float(limits.autonomous_max_gps_accuracy_m)
+            self.autonomous_max_gps_fix_age_s = float(limits.autonomous_max_gps_fix_age_s)
+            self.max_waypoint_accuracy_m = self.autonomous_max_gps_accuracy_m
+            self.bootstrap_required_accuracy_m = self.autonomous_max_gps_accuracy_m
+            self.mower_footprint_radius_m = float(limits.mower_footprint_radius_m)
+            self.differential_drive_wheelbase_m = float(limits.differential_drive_wheelbase_m)
+            self.geofence_safety_allowance_m = float(limits.geofence_safety_allowance_m)
+            self.autonomous_prediction_horizon_s = float(limits.autonomous_prediction_horizon_s)
+            self.autonomous_command_ttl_ms = int(limits.autonomous_command_ttl_ms)
+            self.autonomous_braking_decel_mps2 = float(limits.autonomous_braking_decel_mps2)
+            self.bootstrap_speed_mps = float(limits.bootstrap_speed_mps)
+            self.bootstrap_max_travel_m = float(limits.bootstrap_max_travel_m)
+            self.coverage_endpoint_clearance_m = float(limits.coverage_endpoint_clearance_m)
+            self.max_operational_cross_track_error_m = float(
+                limits.max_operational_cross_track_error_m
+            )
             self._imu_yaw_offset: float = float(getattr(hardware, "imu_yaw_offset_degrees", 0.0))
             self._gps_antenna_offset_forward_m = float(
                 getattr(hardware, "gps_antenna_offset_forward_m", 0.0) or 0.0
@@ -324,6 +410,8 @@ class NavigationService:
         # MapRepository: injected at lifespan startup via attach_map_repository().
         # Used by _load_boundaries_from_zones() to read persisted zone definitions.
         self._map_repository: Any | None = None
+        self._command_gateway: Any | None = None
+        self._operating_area_snapshot: Any | None = None
 
         # Odometry integrator for dead-reckoning distance/heading estimation.
         self._odometry_integrator = OdometryIntegrator()
@@ -350,6 +438,7 @@ class NavigationService:
             max_waypoint_fix_age_seconds=self.max_waypoint_fix_age_seconds,
             max_waypoint_accuracy_m=self.max_waypoint_accuracy_m,
             position_verification_timeout_seconds=self.position_verification_timeout_seconds,
+            max_operational_cross_track_error_m=self.max_operational_cross_track_error_m,
         )
 
     _instance: NavigationService | None = None
@@ -389,6 +478,8 @@ class NavigationService:
 
     def _current_pose_quality(self) -> str:
         """Map current GPS/IMU state to a pose quality string."""
+        if self.navigation_state.pose_quality:
+            return self.navigation_state.pose_quality
         gps_qual = getattr(self.navigation_state, "gps_fix_quality", None)
         if gps_qual in ("rtk_fixed", "rtk_float"):
             return "rtk_fixed"
@@ -425,6 +516,57 @@ class NavigationService:
         """
         self._map_repository = map_repository
         logger.info("MapRepository attached to NavigationService")
+
+    def attach_command_gateway(self, command_gateway: Any) -> None:
+        """Route mission drive commands through MotorCommandGateway."""
+        self._command_gateway = command_gateway
+        if hasattr(command_gateway, "set_autonomy_context_provider"):
+            command_gateway.set_autonomy_context_provider(self._autonomy_context_for_gateway)
+        logger.info("MotorCommandGateway attached to NavigationService")
+
+    def _load_operating_area_snapshot(self) -> Any:
+        snapshot = load_operating_area_snapshot(
+            map_repository=self._map_repository,
+            allow_zone_fallback=os.getenv("SIM_MODE", "0") == "1",
+        )
+        self._operating_area_snapshot = snapshot
+        self.navigation_state.operating_area_source = snapshot.source
+        self.navigation_state.operating_area_revision = snapshot.revision_hash
+        self.navigation_state.operating_area_validity = snapshot.validity_state
+        if snapshot.valid:
+            self.navigation_state.safety_boundaries = [snapshot.safe_boundary]
+            self.navigation_state.no_go_zones = snapshot.exclusions
+            if self.navigation_state.current_position is not None:
+                self.navigation_state.boundary_clearance_m = snapshot.distance_to_boundary(
+                    self.navigation_state.current_position
+                )
+        return snapshot
+
+    def get_operating_area_snapshot(self) -> Any:
+        return getattr(self, "_operating_area_snapshot", None) or self._load_operating_area_snapshot()
+
+    def _autonomy_context_for_gateway(self, cmd: Any) -> dict[str, Any]:
+        snapshot = self.get_operating_area_snapshot()
+        pos = self.navigation_state.current_position
+        if pos is not None and snapshot.valid:
+            self.navigation_state.boundary_clearance_m = snapshot.distance_to_boundary(pos)
+        return {
+            "snapshot": snapshot,
+            "position": pos,
+            "last_gps_fix": self.navigation_state.last_gps_fix,
+            "dead_reckoning_active": self.navigation_state.dead_reckoning_active,
+            "heading": self.navigation_state.heading,
+            "accuracy_m": pos.accuracy if pos is not None else None,
+            "tof_blocked": self.navigation_state.obstacle_avoidance_active,
+            "max_fix_age_s": self.autonomous_max_gps_fix_age_s,
+            "max_accuracy_m": self.autonomous_max_gps_accuracy_m,
+            "footprint_radius_m": self.mower_footprint_radius_m,
+            "fixed_allowance_m": self.geofence_safety_allowance_m,
+            "prediction_horizon_s": self.autonomous_prediction_horizon_s,
+            "command_latency_s": max(0.0, float(getattr(cmd, "duration_ms", 0)) / 1000.0),
+            "wheelbase_m": self.differential_drive_wheelbase_m,
+            "braking_decel_mps2": self.autonomous_braking_decel_mps2,
+        }
 
     def _use_localization(self) -> bool:
         """Return True when delegation to LocalizationService is active."""
@@ -730,7 +872,10 @@ class NavigationService:
             self._localization.begin_bootstrap()
         deadline = time.monotonic() + _BOOTSTRAP_DEADLINE_S
         try:
-            await self.set_speed(0.6, 0.6)
+            await self._gateway_adapter.dispatch_drive_speeds(
+                self.bootstrap_speed_mps,
+                self.bootstrap_speed_mps,
+            )
             _last_drive_t = time.monotonic()
             while time.monotonic() < deadline:
                 await asyncio.sleep(0.2)
@@ -763,7 +908,12 @@ class NavigationService:
                 # from cutting power before the mower covers the required 1 m.
                 if time.monotonic() - _last_drive_t >= 0.5:
                     try:
-                        await self.set_speed(0.6, 0.6)
+                        ok = await self._gateway_adapter.dispatch_drive_speeds(
+                            self.bootstrap_speed_mps,
+                            self.bootstrap_speed_mps,
+                        )
+                        if not ok:
+                            raise RuntimeError("gateway rejected bootstrap drive")
                         _last_drive_t = time.monotonic()
                         logger.info("Bootstrap: drive re-issued at t+%.1f s", time.monotonic() - self._bootstrap_start_time)
                     except Exception as e:
@@ -776,19 +926,32 @@ class NavigationService:
                     done = self._heading_alignment_sample_count >= 1
                     align_val = self._session_heading_alignment
 
-                if done:
-                    current_pos = self.navigation_state.current_position
-                    if start_pos is not None and current_pos is not None:
-                        dist_m = haversine_m(
-                            start_pos.latitude, start_pos.longitude,
-                            current_pos.latitude, current_pos.longitude,
+                current_pos = self.navigation_state.current_position
+                dist_m = 0.0
+                if start_pos is not None and current_pos is not None:
+                    dist_m = haversine_m(
+                        start_pos.latitude, start_pos.longitude,
+                        current_pos.latitude, current_pos.longitude,
+                    )
+                    if dist_m >= self.bootstrap_max_travel_m and not done:
+                        raise RuntimeError(
+                            "Heading bootstrap exceeded maximum configured travel distance"
                         )
-                        if dist_m < 1.0:
+
+                if done:
+                    required_travel_m = min(1.0, self.bootstrap_max_travel_m)
+                    if start_pos is not None and current_pos is not None:
+                        if dist_m < required_travel_m:
                             logger.debug(
-                                "Bootstrap snap at %.1f m — continuing to ≥1.0 m",
+                                "Bootstrap snap at %.1f m — waiting for %.1f m minimum travel",
                                 dist_m,
+                                required_travel_m,
                             )
                             done = False
+                        if dist_m >= self.bootstrap_max_travel_m:
+                            raise RuntimeError(
+                                "Heading bootstrap exceeded maximum configured travel distance"
+                            )
 
                 if done:
                     logger.info(
@@ -815,20 +978,40 @@ class NavigationService:
         Called once at mission start after reset. Raises RuntimeError and latches
         the global emergency state if the position is outside the safety boundary.
         """
+        snapshot = self.get_operating_area_snapshot()
+        footprint_radius_m = float(getattr(self, "mower_footprint_radius_m", 0.35))
+        fixed_allowance_m = float(getattr(self, "geofence_safety_allowance_m", 0.10))
+        bootstrap_max_travel_m = float(getattr(self, "bootstrap_max_travel_m", 0.60))
+        try:
+            snapshot.validate_ready_for_autonomy(
+                position=self.navigation_state.current_position,
+                last_gps_fix=self.navigation_state.last_gps_fix,
+                dead_reckoning_active=self.navigation_state.dead_reckoning_active,
+                max_fix_age_s=float(getattr(self, "autonomous_max_gps_fix_age_s", 2.0)),
+                max_accuracy_m=float(getattr(self, "autonomous_max_gps_accuracy_m", 0.25)),
+                footprint_radius_m=footprint_radius_m,
+                fixed_allowance_m=fixed_allowance_m,
+                bootstrap_clearance_m=(
+                    footprint_radius_m
+                    + fixed_allowance_m
+                    + bootstrap_max_travel_m
+                ),
+            )
+        except OperatingAreaError as exc:
+            raise RuntimeError(f"{exc.reason_code}: {exc.detail}") from exc
+
         await self._bootstrap_heading_from_gps_cog()
 
-        if self.navigation_state.safety_boundaries and self.navigation_state.current_position:
-            outer_boundary = self.navigation_state.safety_boundaries[0]
-            polygon = [(p.latitude, p.longitude) for p in outer_boundary]
-            cur = self.navigation_state.current_position
-            if not point_in_polygon(cur.latitude, cur.longitude, polygon):
-                self._latch_global_emergency_state()
-                logger.error(
-                    "Bootstrap drive exited geofence at (%.6f, %.6f) — mission aborted",
-                    cur.latitude,
-                    cur.longitude,
-                )
-                raise RuntimeError("Bootstrap drive exited geofence — mission aborted")
+        cur = self.navigation_state.current_position
+        if cur is None or not snapshot.contains_footprint(
+            cur,
+            float(cur.accuracy or 0.0)
+            + footprint_radius_m
+            + fixed_allowance_m,
+        ):
+            self._latch_global_emergency_state("Bootstrap drive exited safe operating area")
+            logger.error("Bootstrap drive exited safe operating area — mission aborted")
+            raise RuntimeError("GEOFENCE_PREDICTION_BLOCKED: bootstrap exited safe area")
 
     async def _deliver_stop_command(
         self,
@@ -1079,6 +1262,10 @@ class NavigationService:
             self.navigation_state.current_position = loc_state.current_position
             self.navigation_state.heading = loc_state.heading
             self.navigation_state.gps_cog = loc_state.gps_cog
+            self.navigation_state.velocity = loc_state.velocity
+            self.navigation_state.imu_valid = bool(loc_state.imu_valid)
+            self.navigation_state.heading_source = loc_state.heading_source
+            self.navigation_state.pose_quality = loc_state.quality.value
             self.navigation_state.dead_reckoning_active = loc_state.dead_reckoning_active
             self.navigation_state.dead_reckoning_drift = loc_state.dead_reckoning_drift
             self.navigation_state.last_gps_fix = loc_state.last_gps_fix
@@ -1107,6 +1294,7 @@ class NavigationService:
                 and sensor_data.imu.yaw is not None
                 and sensor_data.imu.calibration_status != "uncalibrated"
             )
+            self.navigation_state.imu_valid = bool(imu_valid)
             imu_alignment_ready = (
                 not self._require_gps_heading_alignment
                 or self._heading_alignment_sample_count > 0
@@ -1140,14 +1328,17 @@ class NavigationService:
 
                 if imu_alignment_ready:
                     self._set_navigation_heading(adjusted_yaw)
+                    self.navigation_state.heading_source = "imu"
                     self._pose_filter.update_imu_heading(
                         adjusted_yaw,
                         quality=getattr(sensor_data.imu, 'calibration_status', None) or "calibrated"
                     )
                 elif gps_cog is not None:
                     self.navigation_state.heading = gps_cog
+                    self.navigation_state.heading_source = "gps_cog"
                 else:
                     self.navigation_state.heading = None
+                    self.navigation_state.heading_source = None
 
                 # GPS COG comparison and session heading alignment update.
                 # Only mutate IMU alignment during the explicit straight bootstrap drive.
@@ -1233,6 +1424,9 @@ class NavigationService:
                 # Use GPS course-over-ground as heading fallback while in motion.
                 # GPS COG is already in world frame; IMU yaw_offset does NOT apply here.
                 self.navigation_state.heading = gps_cog
+                self.navigation_state.heading_source = "gps_cog"
+
+        self.navigation_state.pose_quality = self._current_pose_quality()
 
         # Update obstacles
         obstacles = self.obstacle_detector.update_obstacles_from_sensors(sensor_data)
@@ -1269,6 +1463,13 @@ class NavigationService:
             self.total_distance += distance_increment
 
         self.last_position = current_position
+        if self._operating_area_snapshot is not None and current_position is not None:
+            try:
+                self.navigation_state.boundary_clearance_m = (
+                    self._operating_area_snapshot.distance_to_boundary(current_position)
+                )
+            except Exception:
+                pass
         self.navigation_state.timestamp = datetime.now(UTC)
 
         # Optional capture for replay diagnostics. Failures must never break
@@ -1912,75 +2113,69 @@ class NavigationService:
         by leaving the boundary lists unchanged and logging a warning.
         """
         try:
-            from .boundary_paths import MOWING_BOUNDARY_SAFE, boundary_file
-
-            safe_path = boundary_file(MOWING_BOUNDARY_SAFE)
-            if safe_path.exists():
-                payload = json.loads(safe_path.read_text(encoding="utf-8"))
-                safe_points = [
-                    Position(latitude=float(p["latitude"]), longitude=float(p["longitude"]))
-                    for p in payload.get("coordinates", [])
-                ]
-                if len(safe_points) >= 3:
-                    self.navigation_state.safety_boundaries = [safe_points]
-                    self.navigation_state.no_go_zones = []
-                    logger.info(
-                        "Loaded generated safe boundary for autonomous geofence "
-                        "(buffer_m=%.2f)",
-                        float(payload.get("buffer_meters", 0.0) or 0.0),
-                    )
-                    return
-                logger.warning("Safe boundary file exists but does not contain a valid polygon")
-        except Exception:
-            logger.warning("Failed to load generated safe boundary; falling back to map zones", exc_info=True)
-
-        if self._map_repository is None:
-            logger.warning(
-                "MapRepository not attached; geofence enforcement disabled for this mission"
-            )
-            return
-
-        try:
-            zones = self._map_repository.list_zones()  # list[dict[str, Any]]
-            boundary_polygons: list[list[Position]] = []
-            no_go_polygons: list[list[Position]] = []
-
-            for zone in zones:
-                if str(zone.get("source", "")).startswith("property_boundary_imported"):
-                    raise RuntimeError("Imported parcel boundary cannot be used for autonomous mowing.")
-                polygon_data = zone.get("polygon", [])
-                pts = [
-                    Position(latitude=float(p["latitude"]), longitude=float(p["longitude"]))
-                    for p in polygon_data
-                ]
-                if len(pts) < 3:
-                    continue
-
-                if zone.get("exclusion_zone", False):
-                    no_go_polygons.append(pts)
-                else:
-                    boundary_polygons.append(pts)
-
-            self.navigation_state.safety_boundaries = boundary_polygons
-            self.navigation_state.no_go_zones = no_go_polygons
-
-            if boundary_polygons:
+            snapshot = self._load_operating_area_snapshot()
+            if snapshot.valid:
+                if snapshot.source == "simulation_zone_fallback" and self._map_repository is not None:
+                    try:
+                        zones = self._map_repository.list_zones()
+                        boundaries: list[list[Position]] = []
+                        exclusions: list[list[Position]] = []
+                        for zone in zones:
+                            points = []
+                            for point in zone.get("polygon", []):
+                                if isinstance(point, dict):
+                                    lat = point.get("latitude", point.get("lat"))
+                                    lon = point.get("longitude", point.get("lon", point.get("lng")))
+                                    if lat is not None and lon is not None:
+                                        points.append(Position(latitude=float(lat), longitude=float(lon)))
+                                elif isinstance(point, (list, tuple)) and len(point) >= 2:
+                                    points.append(Position(latitude=float(point[0]), longitude=float(point[1])))
+                            if len(points) < 3:
+                                continue
+                            kind = str(zone.get("zone_kind") or "").lower()
+                            if kind == "exclusion" or bool(zone.get("exclusion_zone", False)):
+                                exclusions.append(points)
+                            else:
+                                boundaries.append(points)
+                        self.navigation_state.safety_boundaries = boundaries
+                        self.navigation_state.no_go_zones = exclusions
+                    except Exception:
+                        logger.debug("Failed to expand simulation zone fallback", exc_info=True)
                 logger.info(
-                    "Loaded %d confirmed boundary polygon(s) and %d no-go zone(s) from MapRepository fallback",
-                    len(boundary_polygons),
-                    len(no_go_polygons),
+                    "Loaded operating area source=%s exclusions=%d buffer_m=%.2f",
+                    snapshot.source,
+                    len(snapshot.exclusions),
+                    snapshot.buffer_meters,
                 )
             else:
-                logger.warning(
-                    "No mowing-area zones defined in MapRepository; "
-                    "geofence enforcement disabled for this mission"
-                )
+                if os.getenv("SIM_MODE", "0") == "1" and self._map_repository is not None:
+                    try:
+                        zones = self._map_repository.list_zones()
+                        exclusions: list[list[Position]] = []
+                        for zone in zones:
+                            kind = str(zone.get("zone_kind") or "").lower()
+                            if kind != "exclusion" and not bool(zone.get("exclusion_zone", False)):
+                                continue
+                            points = []
+                            for point in zone.get("polygon", []):
+                                if isinstance(point, dict):
+                                    lat = point.get("latitude", point.get("lat"))
+                                    lon = point.get("longitude", point.get("lon", point.get("lng")))
+                                    if lat is not None and lon is not None:
+                                        points.append(Position(latitude=float(lat), longitude=float(lon)))
+                                elif isinstance(point, (list, tuple)) and len(point) >= 2:
+                                    points.append(Position(latitude=float(point[0]), longitude=float(point[1])))
+                            if len(points) >= 3:
+                                exclusions.append(points)
+                        self.navigation_state.no_go_zones = exclusions
+                    except Exception:
+                        logger.debug("Failed to load simulation exclusions", exc_info=True)
+                logger.warning("Operating area unavailable: %s", snapshot.validity_state)
         except Exception:
-            logger.warning(
-                "Failed to load map zones from MapRepository for geofence; "
-                "continuing without boundary enforcement",
-                exc_info=True,
-            )
+            self.navigation_state.safety_boundaries = []
+            self.navigation_state.no_go_zones = []
+            self.navigation_state.operating_area_validity = "SAFE_BOUNDARY_REQUIRED"
+            logger.warning("Failed to load operating-area snapshot", exc_info=True)
 
     def add_no_go_zone(self, zone: list[Position]):
         """Add a no-go zone to avoid"""

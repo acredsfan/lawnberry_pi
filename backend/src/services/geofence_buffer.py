@@ -2,19 +2,39 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
 from datetime import UTC, datetime
 from typing import Any
 
-from pyproj import Transformer
 from shapely.geometry import Polygon
 
+from ..nav.geoutils import enu_to_latlon, latlon_to_enu
 from .boundary_paths import MOWING_BOUNDARY_SAFE, boundary_file
 from .parcel_boundary import BoundaryValidationError, normalize_boundary_to_lat_lng
 
+try:
+    from pyproj import Transformer
+except ModuleNotFoundError:  # pragma: no cover - depends on local Pi environment
+    Transformer = None  # type: ignore[assignment]
+
 DEFAULT_SAFE_BOUNDARY_BUFFER_METERS = 0.75
+
+
+def boundary_revision_hash(coordinates: list[dict[str, float]]) -> str:
+    """Return a stable hash for a user-confirmed boundary coordinate sequence."""
+    normalized = normalize_boundary_to_lat_lng(coordinates, order="latlng")
+    canonical = [
+        {
+            "latitude": round(float(point["latitude"]), 8),
+            "longitude": round(float(point["longitude"]), 8),
+        }
+        for point in normalized
+    ]
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def default_buffer_meters() -> float:
@@ -28,9 +48,30 @@ def default_buffer_meters() -> float:
     return value if math.isfinite(value) and value >= 0 else DEFAULT_SAFE_BOUNDARY_BUFFER_METERS
 
 
-def _projection_for(points: list[dict[str, float]]) -> tuple[Transformer, Transformer]:
+class _LocalForward:
+    def __init__(self, origin_lat: float, origin_lon: float) -> None:
+        self.origin_lat = origin_lat
+        self.origin_lon = origin_lon
+
+    def transform(self, lon: float, lat: float) -> tuple[float, float]:
+        return latlon_to_enu(lat, lon, self.origin_lat, self.origin_lon)
+
+
+class _LocalReverse:
+    def __init__(self, origin_lat: float, origin_lon: float) -> None:
+        self.origin_lat = origin_lat
+        self.origin_lon = origin_lon
+
+    def transform(self, x: float, y: float) -> tuple[float, float]:
+        lat, lon = enu_to_latlon(x, y, self.origin_lat, self.origin_lon)
+        return lon, lat
+
+
+def _projection_for(points: list[dict[str, float]]) -> tuple[Any, Any]:
     lat = sum(p["latitude"] for p in points) / len(points)
     lon = sum(p["longitude"] for p in points) / len(points)
+    if Transformer is None:
+        return _LocalForward(lat, lon), _LocalReverse(lat, lon)
     zone = int((lon + 180) // 6) + 1
     epsg = 32600 + zone if lat >= 0 else 32700 + zone
     return (
@@ -79,6 +120,7 @@ def save_safe_boundary(
         "source": source,
         "created_at": datetime.now(UTC).isoformat(),
         "buffer_meters": buffer_value,
+        "confirmed_boundary_hash": boundary_revision_hash(coordinates),
         "coordinates": safe_coordinates,
     }
     path = boundary_file(MOWING_BOUNDARY_SAFE)

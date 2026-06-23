@@ -1,18 +1,18 @@
 """Contract tests for manual control REST endpoints."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
-from backend.src.main import app
-from backend.src.core.globals import _safety_state
-from backend.src.models import NavigationMode, PathStatus
 from backend.src.api import rest as rest_api
-from backend.src.services.navigation_service import NavigationService
+from backend.src.core.globals import _safety_state
+from backend.src.main import app
+from backend.src.models import NavigationMode, PathStatus
 from backend.src.services import robohat_service as robohat_module
+from backend.src.services.navigation_service import NavigationService
 
 BASE_URL = "http://test"
 
@@ -122,7 +122,7 @@ async def test_post_drive_command_blocks_when_obstacle_detected(monkeypatch):
         obstacle_distance_mm = threshold_m * 1000 * 0.5  # half the threshold — definitely blocked
         return {
             "source": "hardware",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "position": {
                 "latitude": 39.0,
                 "longitude": -84.0,
@@ -257,9 +257,9 @@ async def test_control_navigation_endpoints_surface_runtime_state(monkeypatch):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         start = await client.post("/api/v2/control/start", json={})
-        assert start.status_code == 200, start.text
-        assert start.json()["status"] == "running"
-        assert start.json()["mode"] == "auto"
+        assert start.status_code == 409, start.text
+        assert start.json()["status"] == "not_supported"
+        assert start.json()["reason"] == "MISSION_EXECUTOR_REQUIRED"
 
         pause = await client.post("/api/v2/control/pause", json={})
         assert pause.status_code == 200, pause.text
@@ -295,6 +295,7 @@ def test_robohat_status_includes_firmware_version():
 
     os.environ.setdefault("SIM_MODE", "1")
     from fastapi.testclient import TestClient
+
     from backend.src.main import app
 
     with TestClient(app) as client:

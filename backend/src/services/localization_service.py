@@ -46,6 +46,8 @@ class LocalizationState:
         "gps_cog",
         "velocity",
         "quality",
+        "imu_valid",
+        "heading_source",
         "dead_reckoning_active",
         "dead_reckoning_drift",
         "last_gps_fix",
@@ -59,6 +61,8 @@ class LocalizationState:
         self.gps_cog: float | None = None          # GPS course-over-ground degrees
         self.velocity: float | None = None         # m/s
         self.quality: PoseQuality = PoseQuality.STALE
+        self.imu_valid: bool = False
+        self.heading_source: str | None = None
         self.dead_reckoning_active: bool = False
         self.dead_reckoning_drift: float | None = None  # metres estimated drift
         self.last_gps_fix: datetime | None = None
@@ -238,6 +242,22 @@ class LocalizationService:
     def last_gps_fix(self) -> datetime | None:
         return self.state.last_gps_fix
 
+    @property
+    def velocity(self) -> float | None:
+        return self.state.velocity
+
+    @property
+    def quality(self) -> PoseQuality:
+        return self.state.quality
+
+    @property
+    def imu_valid(self) -> bool:
+        return self.state.imu_valid
+
+    @property
+    def heading_source(self) -> str | None:
+        return self.state.heading_source
+
     # ── Mission lifecycle ────────────────────────────────────────────────────
 
     def reset_for_mission(
@@ -379,6 +399,7 @@ class LocalizationService:
             and sensor_data.imu.yaw is not None
             and sensor_data.imu.calibration_status != "uncalibrated"
         )
+        self.state.imu_valid = bool(imu_valid)
         if imu_valid:
             raw_yaw_preview = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
             adjusted_yaw_preview = wrap_heading(
@@ -428,13 +449,16 @@ class LocalizationService:
 
             if self.alignment_ready:
                 self._set_heading(adjusted_yaw)
+                self.state.heading_source = "imu"
             elif gps_cog is not None:
                 self.state.heading = gps_cog
+                self.state.heading_source = "gps_cog"
             else:
                 # No GPS COG and alignment not ready (mission not started yet).
                 # Provide raw adjusted IMU yaw for display — navigation control
                 # layers must still wait for alignment_ready before using heading.
                 self.state.heading = adjusted_yaw
+                self.state.heading_source = "imu_unverified"
 
             # GPS COG comparison and session alignment update during bootstrap
             if gps_cog is not None:
@@ -545,6 +569,7 @@ class LocalizationService:
         elif gps_cog is not None:
             # IMU unavailable — use GPS COG as heading fallback while in motion
             self.state.heading = gps_cog
+            self.state.heading_source = "gps_cog"
             # Bootstrap can still snap heading from GPS COG without IMU
             if self._bootstrap_start_time is not None:
                 self._gps_cog_history.append(gps_cog)
@@ -673,6 +698,7 @@ class LocalizationService:
             if dr_pos is not None:
                 self.state.dead_reckoning_active = True
                 self.state.dead_reckoning_drift = self._dead_reckoning.drift_estimate
+                self.state.velocity = commanded_v
                 return dr_pos
 
         return None

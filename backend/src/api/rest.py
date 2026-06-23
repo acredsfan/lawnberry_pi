@@ -356,7 +356,14 @@ _locations_last_modified: datetime = datetime.now(timezone.utc)
 @router.get("/map/locations", response_model=MapLocations)
 def get_map_locations(request: Request):
     data = _locations_store.model_dump(mode="json")
-    body = json.dumps(data, sort_keys=True).encode()
+    body = json.dumps(
+        {
+            "data": data,
+            "last_modified": _locations_last_modified.isoformat(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
     etag = hashlib.sha256(body).hexdigest()
     inm = request.headers.get("if-none-match")
     ims = request.headers.get("if-modified-since")
@@ -1668,7 +1675,7 @@ async def control_emergency_stop_alias(
 
 @router.post("/control/start")
 async def control_start_navigation(runtime: RuntimeContext = Depends(get_runtime)):
-    """Start autonomous navigation using the active planned path."""
+    """Reject legacy autonomous start; callers must start a real mission."""
     from ..services.navigation_service import NavigationService
 
     nav_service = NavigationService.get_instance()
@@ -1678,19 +1685,19 @@ async def control_start_navigation(runtime: RuntimeContext = Depends(get_runtime
             status_label="emergency_stop_active",
             detail="Navigation start is blocked while emergency stop is active.",
         )
-    started = await nav_service.start_autonomous_navigation()
-    if not started:
-        return _navigation_error_response(
-            nav_service,
-            status_label="not_ready",
-            detail="Navigation could not start with the current path and position state.",
-        )
-
-    return {
-        "ok": True,
-        "status": "running",
-        **_control_navigation_snapshot(nav_service),
-    }
+    return JSONResponse(
+        status_code=409,
+        content={
+            "ok": False,
+            "status": "not_supported",
+            "reason": "MISSION_EXECUTOR_REQUIRED",
+            "detail": (
+                "Legacy /control/start does not start an autonomous executor. "
+                "Create and start a mission with /api/v2/missions/{id}/start."
+            ),
+            **_control_navigation_snapshot(nav_service),
+        },
+    )
 
 
 @router.post("/control/pause")

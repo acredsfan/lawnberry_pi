@@ -7,6 +7,7 @@ import pytest
 def _make_gw():
     """Return (gateway, safety_state, blade_state) using a mocked rest module."""
     from unittest.mock import AsyncMock, MagicMock
+
     from backend.src.control.command_gateway import MotorCommandGateway
 
     safety = {"emergency_stop_active": False, "estop_reason": None}
@@ -222,8 +223,9 @@ async def test_dispatch_drive_blocked_firmware_incompatible():
 async def test_dispatch_blade_allowed_firmware_version_not_yet_received(monkeypatch):
     """firmware_version=None must not block blade commands — version arrives async at startup."""
     from unittest.mock import AsyncMock
-    from backend.src.control.commands import BladeCommand, CommandStatus
+
     import backend.src.services.blade_service as bs_mod
+    from backend.src.control.commands import BladeCommand, CommandStatus
 
     gw, _, _ = _make_gw()
     gw._robohat = MagicMock(
@@ -319,8 +321,9 @@ def _make_gw_with_store(mode: str = "full"):
 
 
 @pytest.mark.asyncio
-async def test_dispatch_drive_emits_motion_command_issued():
+async def test_dispatch_drive_emits_motion_command_issued(monkeypatch):
     from backend.src.control.commands import DriveCommand
+    monkeypatch.setenv("SIM_MODE", "1")
     gw, emitted = _make_gw_with_store()
     cmd = DriveCommand(left=0.5, right=0.5, source="mission", duration_ms=500)
     await gw.dispatch_drive(cmd)
@@ -343,15 +346,31 @@ async def test_dispatch_drive_blocked_emits_safety_gate_blocked():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_drive_in_summary_mode_does_not_persist_issued():
+async def test_mission_drive_blocks_without_operating_area_in_hardware_mode(monkeypatch):
+    from backend.src.control.commands import CommandStatus, DriveCommand
+
+    monkeypatch.setenv("SIM_MODE", "0")
+    gw, _, _ = _make_gw()
+
+    outcome = await gw.dispatch_drive(
+        DriveCommand(left=0.2, right=0.2, source="mission", duration_ms=200)
+    )
+
+    assert outcome.status == CommandStatus.BLOCKED
+    assert outcome.status_reason == "SAFE_BOUNDARY_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_drive_in_summary_mode_does_not_persist_issued(monkeypatch):
     """In summary mode, MotionCommandIssued is not written to DB."""
     import os
     import tempfile
-    from backend.src.observability.events import PersistenceMode
-    from backend.src.observability.event_store import EventStore
-    from backend.src.core.persistence import PersistenceLayer
+
     from backend.src.control.command_gateway import MotorCommandGateway
     from backend.src.control.commands import DriveCommand
+    from backend.src.core.persistence import PersistenceLayer
+    from backend.src.observability.event_store import EventStore
+    from backend.src.observability.events import PersistenceMode
 
     written = []
 
@@ -375,6 +394,7 @@ async def test_dispatch_drive_in_summary_mode_does_not_persist_issued():
             _rest_module=rest_mock,
         )
         gw.set_event_store(store, run_id="r", mission_id="m")
+        monkeypatch.setenv("SIM_MODE", "1")
         cmd = DriveCommand(left=0.1, right=0.1, source="mission", duration_ms=100)
         await gw.dispatch_drive(cmd)
         assert all(e.event_type != "motion_command_issued" for e in written)

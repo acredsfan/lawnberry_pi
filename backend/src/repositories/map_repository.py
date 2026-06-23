@@ -73,7 +73,10 @@ class MapRepository(BaseRepository):
                         json.dumps(zone["polygon"]),
                         zone.get("priority", 0),
                         int(bool(zone.get("exclusion_zone", False))),
-                        zone.get("zone_kind", "boundary"),
+                        zone.get(
+                            "zone_kind",
+                            "exclusion" if bool(zone.get("exclusion_zone", False)) else "boundary",
+                        ),
                     ),
                 )
             conn.commit()
@@ -111,7 +114,10 @@ class MapRepository(BaseRepository):
                     json.dumps(zone["polygon"]),
                     zone.get("priority", 0),
                     int(bool(zone.get("exclusion_zone", False))),
-                    zone.get("zone_kind", "boundary"),
+                    zone.get(
+                        "zone_kind",
+                        "exclusion" if bool(zone.get("exclusion_zone", False)) else "boundary",
+                    ),
                     zone["id"],
                 ),
             )
@@ -130,7 +136,10 @@ class MapRepository(BaseRepository):
                     json.dumps(zone["polygon"]),
                     zone.get("priority", 0),
                     int(bool(zone.get("exclusion_zone", False))),
-                    zone.get("zone_kind", "boundary"),
+                    zone.get(
+                        "zone_kind",
+                        "exclusion" if bool(zone.get("exclusion_zone", False)) else "boundary",
+                    ),
                 ),
             )
             conn.commit()

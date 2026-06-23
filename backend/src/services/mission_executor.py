@@ -20,6 +20,7 @@ from ..nav.waypoint_geometry import (
     HEADING_EMA_ALPHA_IMU,
     HEADING_SLEW_DEG_PER_TICK_GPS,
     HEADING_SLEW_DEG_PER_TICK_IMU,
+    along_track_progress,
     compute_blend_speeds,
     compute_tank_speeds,
     cross_track_error,
@@ -67,6 +68,7 @@ class MissionExecutor:
         max_waypoint_fix_age_seconds: float = 2.0,
         max_waypoint_accuracy_m: float = 5.0,
         position_verification_timeout_seconds: float = 30.0,
+        max_operational_cross_track_error_m: float = 1.5,
     ) -> None:
         self._loc = localization
         self._gw = gateway
@@ -76,6 +78,7 @@ class MissionExecutor:
         self.max_waypoint_fix_age_seconds = max_waypoint_fix_age_seconds
         self.max_waypoint_accuracy_m = max_waypoint_accuracy_m
         self.position_verification_timeout_seconds = position_verification_timeout_seconds
+        self.max_operational_cross_track_error_m = max_operational_cross_track_error_m
         self._encoder_rpm_provider = encoder_rpm_provider
         self._encoder_active_provider = encoder_active_provider
         import os
@@ -253,6 +256,19 @@ class MissionExecutor:
         )
         return False
 
+    async def _set_blade(self, active: bool, *, reason: str) -> bool:
+        dispatch = getattr(self._gw, "dispatch_blade", None)
+        if not callable(dispatch):
+            return not active
+        try:
+            ok = await dispatch(active)
+            if not ok and not active:
+                logger.error("Unable to confirm blade-off command for %s", reason)
+            return bool(ok)
+        except Exception as exc:
+            logger.warning("Blade command failed for %s: %s", reason, exc)
+            return False
+
     # ------------------------------------------------------------------
     # Waypoint pursuit loop (Task 6)
     # ------------------------------------------------------------------
@@ -366,7 +382,9 @@ class MissionExecutor:
         _heading_ema: float | None = None
         # Detect once per leg whether we are GPS-only (no IMU) for EMA tuning
         _loc_state_init = getattr(self._loc, "state", None)
-        _imu_valid_for_leg = bool(getattr(_loc_state_init, "imu_valid", False))
+        _imu_valid_for_leg = bool(
+            getattr(self._loc, "imu_valid", getattr(_loc_state_init, "imu_valid", False))
+        )
         _ema_alpha = HEADING_EMA_ALPHA_IMU if _imu_valid_for_leg else HEADING_EMA_ALPHA_GPS
         _ema_slew = HEADING_SLEW_DEG_PER_TICK_IMU if _imu_valid_for_leg else HEADING_SLEW_DEG_PER_TICK_GPS
 
@@ -390,6 +408,7 @@ class MissionExecutor:
                 hasattr(status.status, "value") and status.status.value == "paused"
             ):
                 await self._deliver_stop_command(reason="mission pause hold")
+                await self._set_blade(False, reason="mission pause hold")
                 await asyncio.sleep(0.1)
                 continue
 
@@ -397,11 +416,13 @@ class MissionExecutor:
             if _status_val != "running":
                 logger.info("Waypoint navigation interrupted: status=%s", _status_val)
                 await self._deliver_stop_command(reason="mission status change")
+                await self._set_blade(False, reason="mission status change")
                 return False
 
             if self._gw.is_emergency_active():
                 logger.critical("Waypoint navigation blocked by active emergency stop latch")
                 await self._deliver_stop_command(reason="global emergency hold")
+                await self._set_blade(False, reason="global emergency hold")
                 return False
 
             current_position = self._loc.current_position
@@ -474,6 +495,30 @@ class MissionExecutor:
                     Position(latitude=_path_a_lat, longitude=_path_a_lon),
                     target_pos,
                 )
+
+            _along_track_m, _segment_len_m, _progress_cte = along_track_progress(
+                (current_position.latitude, current_position.longitude),
+                (_path_a_lat, _path_a_lon),
+                (target_pos.latitude, target_pos.longitude),
+            )
+            if _segment_len_m > 0 and _along_track_m >= _segment_len_m:
+                if abs(_progress_cte) <= max(_effective_tol, 0.25):
+                    logger.info(
+                        "MissionExecutor: waypoint accepted after perpendicular-plane crossing "
+                        "(progress=%.2fm/%.2fm cte=%.2fm)",
+                        _along_track_m,
+                        _segment_len_m,
+                        _progress_cte,
+                    )
+                    stop_confirmed = await self._deliver_stop_command(reason="waypoint overshoot arrival")
+                    if not stop_confirmed:
+                        raise RuntimeError("Failed to stop safely after waypoint overshoot")
+                    return True
+                if _along_track_m > _segment_len_m + _effective_tol:
+                    await self._deliver_stop_command(reason="waypoint overshoot excessive CTE")
+                    raise RuntimeError(
+                        "Waypoint overshoot with excessive cross-track error; revalidation required"
+                    )
 
             # --- Heading and motor calculation ---
             # Use the cached path bearing (A→B constant for this leg) to avoid
@@ -1052,14 +1097,14 @@ class MissionExecutor:
                 _steer = err
                 _loc_state = getattr(self._loc, "state", None)
                 _loc_vel = (
-                    getattr(_loc_state, "velocity", None) if _loc_state is not None else None
+                    getattr(self._loc, "velocity", None)
+                    if getattr(self._loc, "velocity", None) is not None
+                    else (getattr(_loc_state, "velocity", None) if _loc_state is not None else None)
                 ) or 0.0
-                _use_gps_smoothing = not _imu_valid_for_leg
                 if (
                     not _in_heading_bootstrap
                     and _path_a_lat is not None
                     and _heading_ema is not None
-                    and not (_use_gps_smoothing and _loc_vel < 0.3)
                 ):
                     _cte = cross_track_error(
                         (current_position.latitude, current_position.longitude),
@@ -1085,6 +1130,11 @@ class MissionExecutor:
                         _s_k_cte,
                         _s_dead_band,
                     )
+                    if abs(_cte) > self.max_operational_cross_track_error_m:
+                        await self._deliver_stop_command(reason="cross-track error limit")
+                        raise RuntimeError(
+                            "Maximum operational cross-track error exceeded; revalidation required"
+                        )
 
                 left_speed, right_speed = compute_blend_speeds(
                     _steer,
@@ -1196,7 +1246,13 @@ class MissionExecutor:
                 "heading_error_deg": round(err, 1) if err is not None else None,
                 "raw_heading_error_deg": round(_raw_abs_err, 1),
                 "cross_track_error_m": round(_cte, 3) if _cte is not None else None,
+                "along_track_progress_m": round(_along_track_m, 3),
+                "path_segment_length_m": round(_segment_len_m, 3),
                 "steer_deg": round(_steer, 1) if _steer is not None else None,
+                "path_bearing_deg": round(_path_bearing, 1) if _path_bearing is not None else None,
+                "velocity_mps": round(_loc_vel, 3) if _loc_vel is not None else None,
+                "heading_source": getattr(self._loc, "heading_source", None),
+                "pose_quality": getattr(self._loc, "quality", None),
                 "stanley_k_cte": _k_cte_now,
                 "stanley_dead_band_m": _db_now,
                 "distance_to_waypoint_m": round(distance_to_target, 2),
@@ -1249,6 +1305,7 @@ class MissionExecutor:
         self.current_waypoint_index = 0
         self._debug_state = {}
 
+        await self._set_blade(False, reason="mission bootstrap")
         if on_bootstrap is not None:
             await on_bootstrap()
 
@@ -1287,6 +1344,9 @@ class MissionExecutor:
                     return
 
                 current_wp = mission.waypoints[self.current_waypoint_index]
+                if not await self._set_blade(bool(current_wp.blade_on), reason="waypoint blade intent"):
+                    await self._deliver_stop_command(reason="blade command failure")
+                    raise RuntimeError("Failed to deliver mission blade command")
                 waypoint_reached = await self.go_to_waypoint(
                     mission, current_wp, mission_service,
                     previous_position=_prev_wp_pos,
@@ -1315,7 +1375,9 @@ class MissionExecutor:
 
         except Exception as exc:
             self._failure_detail = str(exc)
+            await self._set_blade(False, reason="mission failure")
             await self._deliver_stop_command(reason="mission failure")
             raise
         finally:
+            await self._set_blade(False, reason="mission end")
             self._active = False

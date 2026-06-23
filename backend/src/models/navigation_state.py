@@ -85,6 +85,9 @@ class NavigationState(BaseModel):
     gps_cog: float | None = None  # degrees (0-360), GPS Course-Over-Ground heading
     velocity: float | None = None  # m/s current speed
     target_velocity: float | None = None  # m/s desired speed
+    heading_source: str | None = None  # "imu" | "gps_cog" | "unavailable"
+    imu_valid: bool = False
+    pose_quality: str | None = None
 
     # Path planning
     planned_path: list[Waypoint] = Field(default_factory=list)
@@ -108,6 +111,10 @@ class NavigationState(BaseModel):
     # Safety and constraints
     safety_boundaries: list[list[Position]] = Field(default_factory=list)  # Polygon boundaries
     no_go_zones: list[list[Position]] = Field(default_factory=list)  # Exclusion areas
+    operating_area_source: str | None = None
+    operating_area_revision: str | None = None
+    operating_area_validity: str | None = None
+    boundary_clearance_m: float | None = None
     home_position: Position | None = None
     docking_position: Position | None = None
 

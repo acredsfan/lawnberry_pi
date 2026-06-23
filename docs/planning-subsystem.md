@@ -89,6 +89,13 @@ Internally calls `plan_coverage()` from `backend/src/nav/coverage_planner.py`
 which implements an arbitrary-angle boustrophedon (serpentine) algorithm without
 Shapely.
 
+When an operating-area snapshot is available, generated coverage points are
+validated as connected segments before a mission is accepted. If a direct
+connector would leave free space or cross an exclusion, planning fails instead
+of silently creating an unsafe transit. The waypoint `blade_on` flag remains a
+compatibility field and represents the requested blade state for motion into
+that waypoint until an explicit leg/action model is added.
+
 **Patterns:**
 
 | Pattern | Status | Notes |

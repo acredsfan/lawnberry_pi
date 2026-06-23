@@ -5,6 +5,7 @@ Phase A implements emergency lifecycle. Drive/blade dispatch added in Phase B.
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from datetime import UTC
@@ -56,6 +57,7 @@ class MotorCommandGateway:
         self._obs_run_id: str = ""
         self._obs_mission_id: str = ""
         self._watchdog: Any = None
+        self._autonomy_context_provider: Any = None
 
     def _rest(self) -> Any:
         if self.__rest_module is not None:
@@ -72,6 +74,10 @@ class MotorCommandGateway:
     def set_watchdog(self, watchdog: Any) -> None:
         """Attach a software safety watchdog."""
         self._watchdog = watchdog
+
+    def set_autonomy_context_provider(self, provider: Any) -> None:
+        """Attach a callable that supplies mission geofence/localization context."""
+        self._autonomy_context_provider = provider
 
     def _arm_watchdog(self, reason: str) -> None:
         if self._watchdog is None:
@@ -244,6 +250,31 @@ class MotorCommandGateway:
             )
 
         manual_active_interlocks: list[str] = []
+        mission_active_interlocks: list[str] = []
+        if not cmd.legacy and cmd.source == "mission":
+            mission_active_interlocks = await self._check_mission_drive_interlocks(cmd)
+
+        if mission_active_interlocks:
+            mission_active_interlocks = list(dict.fromkeys(mission_active_interlocks))
+            reason = self._drive_interlock_reason(mission_active_interlocks)
+            if self._event_store is not None:
+                from ..observability.events import SafetyGateBlocked
+                self._emit_event(SafetyGateBlocked(
+                    run_id=self._obs_run_id,
+                    mission_id=self._obs_mission_id,
+                    audit_id=audit_id,
+                    reason=reason,
+                    interlocks=mission_active_interlocks,
+                    source=cmd.source,
+                ))
+            return DriveOutcome(
+                status=CommandStatus.BLOCKED,
+                audit_id=audit_id,
+                status_reason=reason,
+                active_interlocks=mission_active_interlocks,
+                watchdog_latency_ms=None,
+            )
+
         if (
             not cmd.legacy
             and cmd.source == "manual"
@@ -408,8 +439,73 @@ class MotorCommandGateway:
             interlocks.append("telemetry_unavailable")
         return interlocks
 
+    async def _check_mission_drive_interlocks(self, cmd: DriveCommand) -> list[str]:
+        motion_active = abs(float(cmd.left)) > 1e-6 or abs(float(cmd.right)) > 1e-6
+        if not motion_active:
+            return []
+
+        interlocks: list[str] = []
+        if self._autonomy_context_provider is None:
+            return ["operating_area_unavailable"] if os.getenv("SIM_MODE", "0") == "0" else []
+
+        try:
+            ctx = self._autonomy_context_provider(cmd)
+            snapshot = ctx.get("snapshot")
+            if snapshot is None or not getattr(snapshot, "valid", False):
+                interlocks.append("operating_area_unavailable")
+            else:
+                try:
+                    snapshot.validate_ready_for_autonomy(
+                        position=ctx.get("position"),
+                        last_gps_fix=ctx.get("last_gps_fix"),
+                        dead_reckoning_active=bool(ctx.get("dead_reckoning_active", False)),
+                        max_fix_age_s=float(ctx.get("max_fix_age_s", 2.0)),
+                        max_accuracy_m=float(ctx.get("max_accuracy_m", 0.25)),
+                        footprint_radius_m=float(ctx.get("footprint_radius_m", 0.35)),
+                        fixed_allowance_m=float(ctx.get("fixed_allowance_m", 0.10)),
+                    )
+                except Exception as exc:
+                    interlocks.append(getattr(exc, "reason_code", "geofence_not_ready").lower())
+                position = ctx.get("position")
+                if position is not None and not interlocks:
+                    allowed = snapshot.swept_motion_is_safe(
+                        position,
+                        ctx.get("heading"),
+                        float(cmd.left),
+                        float(cmd.right),
+                        footprint_radius_m=float(ctx.get("footprint_radius_m", 0.35)),
+                        uncertainty_m=float(ctx.get("accuracy_m") or 0.0),
+                        fixed_allowance_m=float(ctx.get("fixed_allowance_m", 0.10)),
+                        horizon_s=float(ctx.get("prediction_horizon_s", 1.0)),
+                        command_latency_s=float(ctx.get("command_latency_s", 0.35)),
+                        wheelbase_m=float(ctx.get("wheelbase_m", 0.30)),
+                        braking_decel_mps2=float(ctx.get("braking_decel_mps2", 0.5)),
+                    )
+                    if not allowed:
+                        interlocks.append("geofence_prediction_blocked")
+            if bool(ctx.get("tof_blocked", False)):
+                interlocks.append("obstacle_detected")
+        except Exception as exc:
+            logger.warning("Mission drive safety validation failed: %s", exc)
+            interlocks.append("operating_area_unavailable")
+        return interlocks
+
     @staticmethod
     def _drive_interlock_reason(interlocks: list[str]) -> str:
+        if "geofence_prediction_blocked" in interlocks:
+            return "GEOFENCE_PREDICTION_BLOCKED"
+        if "safe_boundary_required" in interlocks or "operating_area_unavailable" in interlocks:
+            return "SAFE_BOUNDARY_REQUIRED"
+        if "safe_boundary_stale" in interlocks:
+            return "SAFE_BOUNDARY_STALE"
+        if "localization_not_rtk_grade" in interlocks:
+            return "LOCALIZATION_NOT_RTK_GRADE"
+        if "localization_stale" in interlocks or "localization_unavailable" in interlocks:
+            return "LOCALIZATION_STALE"
+        if "localization_dead_reckoning" in interlocks:
+            return "LOCALIZATION_DEAD_RECKONING"
+        if "current_footprint_outside_free_space" in interlocks:
+            return "CURRENT_FOOTPRINT_OUTSIDE_FREE_SPACE"
         if "obstacle_detected" in interlocks:
             return "OBSTACLE_DETECTED"
         if "location_awareness_unavailable" in interlocks:

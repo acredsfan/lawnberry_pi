@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import json
 import logging
+import os
 from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
     from .websocket_hub import WebSocketHub
 
 from ..core.persistence import persistence
-from ..models import NavigationMode, PathStatus
+from ..models import NavigationMode, PathStatus, Position
 from ..models.mission import (
     Mission,
     MissionLifecycleStatus,
@@ -486,7 +487,7 @@ class MissionService:
             # that waypoints are checked against the current geofence even on the
             # first call after startup (before any mission has executed).
             await self._refresh_nav_boundaries()
-            self._validate_waypoints_in_geofence(normalized_waypoints)
+            self._validate_waypoints_in_geofence(normalized_waypoints, require_boundary=False)
 
         mission = Mission(
             name=clean_name,
@@ -560,13 +561,19 @@ class MissionService:
 
             # Populate the in-memory mission and re-validate against geofence.
             mission.waypoints = planned.waypoints
-            self._validate_waypoints_in_geofence(mission.waypoints)
+            self._validate_waypoints_in_geofence(
+                mission.waypoints,
+                require_boundary=self._live_autonomy_requires_boundary(),
+            )
             # Persist updated waypoints immediately.
             self._persist_mission(mission)
         elif mission.waypoints:
             # Always re-validate explicit waypoints at start time in case the
             # boundary changed since the mission was originally created.
-            self._validate_waypoints_in_geofence(mission.waypoints)
+            self._validate_waypoints_in_geofence(
+                mission.waypoints,
+                require_boundary=self._live_autonomy_requires_boundary(),
+            )
 
         self.mission_statuses[mission_id] = self._build_status(
             mission.id,
@@ -719,6 +726,12 @@ class MissionService:
         if status.status != MissionLifecycleStatus.PAUSED:
             raise MissionStateError("Mission is not paused.")
 
+        await self._refresh_nav_boundaries()
+        self._validate_waypoints_in_geofence(
+            mission.waypoints,
+            require_boundary=self._live_autonomy_requires_boundary(),
+        )
+
         active_task = self.mission_tasks.get(mission_id)
         if active_task is None or active_task.done():
             task = asyncio.create_task(self.nav_service.execute_mission(mission, self))
@@ -838,7 +851,7 @@ class MissionService:
         if status.status in (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED):
             raise MissionConflictError("Cannot edit a running or paused mission.")
         if waypoints is not None:
-            self._validate_waypoints_in_geofence(waypoints)
+            self._validate_waypoints_in_geofence(waypoints, require_boundary=False)
         if name is not None:
             mission.name = name
         if waypoints is not None:
@@ -1007,7 +1020,51 @@ class MissionService:
         except Exception as exc:
             logger.warning("Could not refresh navigation boundaries before validation: %s", exc)
 
-    def _validate_waypoints_in_geofence(self, waypoints: list[MissionWaypoint]) -> None:
+    def _live_autonomy_requires_boundary(self) -> bool:
+        return os.getenv("SIM_MODE", "0") != "1"
+
+    def _validate_waypoints_in_geofence(
+        self,
+        waypoints: list[MissionWaypoint],
+        *,
+        require_boundary: bool,
+    ) -> None:
+        if not waypoints:
+            raise MissionValidationError("Mission must contain at least one waypoint.")
+
+        snapshot = None
+        if hasattr(self.nav_service, "get_operating_area_snapshot"):
+            try:
+                snapshot = self.nav_service.get_operating_area_snapshot()
+            except Exception as exc:
+                if require_boundary:
+                    raise MissionValidationError(f"SAFE_BOUNDARY_REQUIRED: {exc}") from exc
+
+        if snapshot is not None and getattr(snapshot, "valid", False):
+            points = [
+                Position(latitude=waypoint.lat, longitude=waypoint.lon)
+                for waypoint in waypoints
+            ]
+            current = getattr(self.nav_service.navigation_state, "current_position", None)
+            path_points = ([current] if current is not None else []) + points
+            margin = float(getattr(self.nav_service, "coverage_endpoint_clearance_m", 0.25))
+            for index, point in enumerate(points, start=1):
+                if not snapshot.contains_footprint(point, margin):
+                    raise MissionValidationError(
+                        f"PATH_EXITS_SAFE_AREA: waypoint {index} is outside free space"
+                    )
+            if len(path_points) >= 2:
+                for index in range(len(path_points) - 1):
+                    if not snapshot.segment_is_safe(path_points[index], path_points[index + 1], margin):
+                        raise MissionValidationError(
+                            f"PATH_EXITS_SAFE_AREA: leg {index + 1} leaves safe free space"
+                        )
+            return
+
+        if require_boundary:
+            reason = getattr(snapshot, "validity_state", "SAFE_BOUNDARY_REQUIRED")
+            raise MissionValidationError(f"{reason}: valid generated safe boundary is required")
+
         boundaries = getattr(self.nav_service.navigation_state, "safety_boundaries", None) or []
         if not boundaries:
             return

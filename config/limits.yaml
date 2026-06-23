@@ -8,3 +8,15 @@ watchdog_timeout_ms: 5000
 geofence_buffer_meters: 0.5
 high_temperature_celsius: 80.0
 tof_obstacle_distance_meters: 0.10159994513602963
+autonomous_max_gps_accuracy_m: 0.25
+autonomous_max_gps_fix_age_s: 2.0
+mower_footprint_radius_m: 0.35
+differential_drive_wheelbase_m: 0.30
+geofence_safety_allowance_m: 0.10
+autonomous_prediction_horizon_s: 1.0
+autonomous_command_ttl_ms: 350
+autonomous_braking_decel_mps2: 0.5
+bootstrap_speed_mps: 0.20
+bootstrap_max_travel_m: 0.60
+coverage_endpoint_clearance_m: 0.25
+max_operational_cross_track_error_m: 1.5

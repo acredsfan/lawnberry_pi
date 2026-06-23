@@ -326,6 +326,7 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
     monkeypatch.setattr(nav, "update_navigation_state", fake_update_navigation_state)
     # Pre-set a GPS fix so the pre-flight check passes immediately without waiting.
     nav.navigation_state.current_position = Position(latitude=0.0, longitude=0.0, accuracy=0.1)
+    nav.bootstrap_max_travel_m = 3.0
 
     try:
         await nav._bootstrap_heading_from_gps_cog()
@@ -333,6 +334,46 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
         set_sensor_manager(original_manager)
 
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_aborts_when_travel_budget_expires(monkeypatch):
+    nav = NavigationService()
+
+    class FakeSensorManager:
+        async def read_all_sensors(self, bootstrap_mode: bool = False):
+            return SensorData()
+
+    async def fake_deliver_stop_command(
+        *,
+        reason: str,
+        retries: int = 3,
+        initial_delay: float = 0.1,
+    ):
+        return True
+
+    async def fake_update_navigation_state(_sensor_data: SensorData):
+        nav._heading_alignment_sample_count = 0
+        nav.navigation_state.current_position = Position(
+            latitude=0.00002,
+            longitude=0.0,
+            accuracy=0.1,
+        )
+        return nav.navigation_state
+
+    original_manager = AppState.get_instance().sensor_manager
+    set_sensor_manager(FakeSensorManager())
+    monkeypatch.setattr(nav, "_deliver_stop_command", fake_deliver_stop_command)
+    monkeypatch.setattr(nav, "_global_emergency_active", lambda: False)
+    monkeypatch.setattr(nav, "update_navigation_state", fake_update_navigation_state)
+    nav.navigation_state.current_position = Position(latitude=0.0, longitude=0.0, accuracy=0.1)
+    nav.bootstrap_max_travel_m = 0.5
+
+    try:
+        with pytest.raises(RuntimeError, match="maximum configured travel distance"):
+            await nav._bootstrap_heading_from_gps_cog()
+    finally:
+        set_sensor_manager(original_manager)
 
 
 def test_bootstrap_position_quality_requires_rtk_grade_accuracy():
@@ -514,8 +555,11 @@ async def test_bootstrap_geofence_violation_aborts_mission():
     nav._latch_global_emergency_state = MagicMock()
     nav._bootstrap_heading_from_gps_cog = AsyncMock()
     nav._load_boundaries_from_zones = MagicMock()
+    nav._operating_area_snapshot = MagicMock()
+    nav._operating_area_snapshot.validate_ready_for_autonomy.return_value = None
+    nav._operating_area_snapshot.contains_footprint.return_value = False
 
-    with pytest.raises(RuntimeError, match="Bootstrap drive exited geofence"):
+    with pytest.raises(RuntimeError, match="bootstrap exited safe area"):
         await nav._run_bootstrap_and_check_geofence()
 
     nav._latch_global_emergency_state.assert_called_once()
@@ -523,8 +567,8 @@ async def test_bootstrap_geofence_violation_aborts_mission():
 
 def test_navigation_service_accepts_mission_status_reader_protocol():
     """NavigationService must accept any object satisfying MissionStatusReader, not MissionService."""
+
     from backend.src.protocols.mission import MissionStatusReader
-    from unittest.mock import AsyncMock
 
     class FakeMissionService:
         async def update_waypoint_progress(self, mission_id: str, waypoint_index: int) -> None:
@@ -538,7 +582,6 @@ def test_navigation_service_accepts_mission_status_reader_protocol():
 
     fake = FakeMissionService()
     # If this import works, the protocol module exists
-    from backend.src.protocols.mission import MissionStatusReader
     # Protocol structural check (runtime)
     assert isinstance(fake, MissionStatusReader)
 
@@ -625,7 +668,11 @@ async def test_tank_turn_cw_calls_set_speed_left_positive_right_negative(monkeyp
     await asyncio.wait_for(task, timeout=1.0)
 
     # Filter out stop commands (0, 0) — only look at motion commands
-    motor_commands = [(l, r) for l, r in set_speed_calls if l != 0.0 or r != 0.0]
+    motor_commands = [
+        (left_speed, right_speed)
+        for left_speed, right_speed in set_speed_calls
+        if left_speed != 0.0 or right_speed != 0.0
+    ]
     assert motor_commands, "set_speed must have been called with non-zero speeds during tank-turn"
     first_left, first_right = motor_commands[0]
     assert first_left > 0, f"CW tank-turn: left_speed must be > 0, got {first_left:.3f}"
@@ -672,7 +719,11 @@ async def test_blended_mode_right_turn_left_speed_greater_than_right(monkeypatch
     mission_service.mission_statuses[mission.id].status = MissionLifecycleStatus.ABORTED
     await asyncio.wait_for(task, timeout=1.0)
 
-    motor_commands = [(l, r) for l, r in set_speed_calls if l != 0.0 or r != 0.0]
+    motor_commands = [
+        (left_speed, right_speed)
+        for left_speed, right_speed in set_speed_calls
+        if left_speed != 0.0 or right_speed != 0.0
+    ]
     assert motor_commands, "set_speed must have been called with non-zero speeds during blended mode"
     first_left, first_right = motor_commands[0]
     assert first_left > first_right, (
@@ -797,8 +848,8 @@ def test_load_saved_alignment_missing_file(tmp_path):
 
 def test_load_saved_alignment_uses_calibration_repo(tmp_path):
     """When calibration_repo is set, it is used instead of _ALIGNMENT_FILE."""
-    from unittest.mock import MagicMock
     from datetime import UTC, datetime, timedelta
+    from unittest.mock import MagicMock
 
     nav = NavigationService()
     nav._calibration_repo = MagicMock()

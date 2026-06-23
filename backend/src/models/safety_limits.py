@@ -31,6 +31,67 @@ class SafetyLimits(BaseModel):
     geofence_buffer_meters: float = Field(default=0.5)
     high_temperature_celsius: float = Field(default=80.0)
     tof_obstacle_distance_meters: float = Field(default=0.2)
+    autonomous_max_gps_accuracy_m: float = Field(
+        default=0.25,
+        gt=0,
+        description="Maximum GPS accuracy allowed for autonomous drive authorization.",
+    )
+    autonomous_max_gps_fix_age_s: float = Field(
+        default=2.0,
+        gt=0,
+        description="Maximum GPS fix age allowed for autonomous drive authorization.",
+    )
+    mower_footprint_radius_m: float = Field(
+        default=0.35,
+        gt=0,
+        description="Conservative mower footprint radius used for geofence authorization.",
+    )
+    differential_drive_wheelbase_m: float = Field(
+        default=0.30,
+        gt=0,
+        description="Canonical differential-drive wheelbase used by prediction guards.",
+    )
+    geofence_safety_allowance_m: float = Field(
+        default=0.10,
+        ge=0,
+        description="Fixed geofence allowance added to footprint and uncertainty buffers.",
+    )
+    autonomous_prediction_horizon_s: float = Field(
+        default=1.0,
+        gt=0,
+        description="Forward horizon for autonomous swept-motion geofence prediction.",
+    )
+    autonomous_command_ttl_ms: int = Field(
+        default=350,
+        ge=50,
+        le=2000,
+        description="TTL for mission drive commands sent through the command gateway.",
+    )
+    autonomous_braking_decel_mps2: float = Field(
+        default=0.5,
+        gt=0,
+        description="Conservative braking capability used to estimate stopping distance.",
+    )
+    bootstrap_speed_mps: float = Field(
+        default=0.20,
+        gt=0,
+        description="Low mission-start heading bootstrap speed.",
+    )
+    bootstrap_max_travel_m: float = Field(
+        default=0.60,
+        gt=0,
+        description="Maximum blade-off heading-bootstrap travel before aborting.",
+    )
+    coverage_endpoint_clearance_m: float = Field(
+        default=0.25,
+        ge=0,
+        description="Minimum clearance for coverage stripe endpoints and turns.",
+    )
+    max_operational_cross_track_error_m: float = Field(
+        default=1.5,
+        gt=0,
+        description="Maximum lateral error before waypoint pursuit stops for recovery.",
+    )
 
     @field_validator("estop_latency_ms")
     @classmethod

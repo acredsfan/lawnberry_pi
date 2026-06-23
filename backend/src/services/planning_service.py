@@ -25,8 +25,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from backend.src.models import Position
 from backend.src.models.mission import MissionWaypoint
 from backend.src.nav.coverage_planner import plan_coverage
+from backend.src.services.operating_area_service import load_operating_area_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +125,7 @@ class PlanningService:
         # Find the requested boundary zone (exclusion_zone must be False / absent)
         boundary_zone: dict | None = None
         for z in all_zones:
-            if z["id"] == zone_id and not z.get("exclusion_zone", False):
+            if z["id"] == zone_id and _zone_kind(z) != "exclusion":
                 boundary_zone = z
                 break
 
@@ -131,7 +133,7 @@ class PlanningService:
             raise KeyError(f"Boundary zone not found: {zone_id!r}")
 
         # Collect exclusion zones
-        exclusion_zones = [z for z in all_zones if z.get("exclusion_zone", False)]
+        exclusion_zones = [z for z in all_zones if _zone_kind(z) == "exclusion"]
 
         # Convert polygon storage format to list[LatLng]
         # MapRepository stores polygons as list of [lat, lon] (JSON arrays)
@@ -157,6 +159,24 @@ class PlanningService:
             )
         else:  # pragma: no cover — guarded by pattern validation above
             raise ValueError(f"unknown pattern: {pattern!r}")
+
+        try:
+            snapshot = load_operating_area_snapshot(
+                map_repository=self._map_repository,
+                selected_mow_zone_id=zone_id,
+                allow_zone_fallback=True,
+            )
+            if snapshot.valid and snapshot.source != "simulation_zone_fallback":
+                margin = float(params.get("endpoint_clearance_m", 0.0) or 0.0)
+                path_positions = [
+                    Position(latitude=lat, longitude=lon) for lat, lon in path_points
+                ]
+                if path_positions and not snapshot.path_is_safe(path_positions, margin):
+                    raise ValueError("Generated coverage path leaves safe free space")
+        except ValueError:
+            raise
+        except Exception:
+            logger.debug("PlanningService: operating-area validation unavailable", exc_info=True)
 
         # Convert path points to MissionWaypoint objects
         waypoints: list[MissionWaypoint] = [
@@ -201,6 +221,13 @@ def _polygon_to_latlng(polygon: list) -> list[LatLng]:
         else:
             raise ValueError(f"Unsupported polygon point format: {point!r}")
     return result
+
+
+def _zone_kind(zone: dict) -> str:
+    kind = str(zone.get("zone_kind") or "").strip().lower()
+    if kind:
+        return "exclusion" if kind == "exclusion_zone" else kind
+    return "exclusion" if bool(zone.get("exclusion_zone", False)) else "boundary"
 
 
 # ---------------------------------------------------------------------------

@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 import pytest
 
@@ -17,10 +19,14 @@ async def test_audit_manual_control_and_settings():
         # Drive command
         resp = await client.post(
             "/api/v2/control/drive",
-            json={"mode": "arcade", "throttle": 0.1, "turn": 0.0},
+            json={
+                "session_id": "audit-session-1",
+                "vector": {"linear": 0.1, "angular": 0.0},
+                "duration_ms": 250,
+            },
             headers=headers,
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 202
 
         # Emergency stop
         resp = await client.post("/api/v2/control/emergency-stop", headers=headers)
@@ -34,11 +40,12 @@ async def test_audit_manual_control_and_settings():
         )
         assert resp.status_code == 200
 
+    await asyncio.sleep(0.05)
     logs = persistence.load_audit_logs(limit=50)
     actions = [log["action"] for log in logs]
     # Ensure our expected actions are present
     assert any(a == "control.blade" for a in actions)
-    assert any(a == "control.drive" for a in actions)
+    assert any(a == "control.drive.v2" for a in actions)
     assert any(a == "control.emergency_stop" for a in actions)
     assert any(a == "settings.update" for a in actions)
 

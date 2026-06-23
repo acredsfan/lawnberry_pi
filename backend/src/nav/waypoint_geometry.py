@@ -179,6 +179,31 @@ def cross_track_error(
     return un * east_p - ue * north_p
 
 
+def along_track_progress(
+    point: tuple[float, float],
+    line_a: tuple[float, float],
+    line_b: tuple[float, float],
+) -> tuple[float, float, float]:
+    """Return progress along A->B, segment length, and signed CTE in metres."""
+    lat_a, lon_a = line_a
+    _MPD_LAT = 111_320.0
+    mpd_lon = _MPD_LAT * math.cos(math.radians(lat_a))
+
+    north_p = (point[0] - lat_a) * _MPD_LAT
+    east_p = (point[1] - lon_a) * mpd_lon
+    north_b = (line_b[0] - lat_a) * _MPD_LAT
+    east_b = (line_b[1] - lon_a) * mpd_lon
+
+    segment_len = math.hypot(east_b, north_b)
+    if segment_len < 1e-9:
+        return 0.0, 0.0, 0.0
+    ue = east_b / segment_len
+    un = north_b / segment_len
+    progress = east_p * ue + north_p * un
+    cte = un * east_p - ue * north_p
+    return progress, segment_len, cte
+
+
 def stanley_steer(
     heading_err_deg: float,
     cte_m: float,

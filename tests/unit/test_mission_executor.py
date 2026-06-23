@@ -79,6 +79,34 @@ def test_mission_executor_constructs():
     assert executor is not None
 
 
+def test_nav_state_localization_adapter_exposes_tracking_contract(monkeypatch):
+    monkeypatch.setenv("SIM_MODE", "1")
+    from backend.src.services.navigation_service import (
+        NavigationService,
+        _NavStateLocalizationAdapter,
+    )
+
+    nav = NavigationService()
+    nav.navigation_state.current_position = Position(latitude=40.0, longitude=-75.0, accuracy=0.03)
+    nav.navigation_state.heading = 12.0
+    nav.navigation_state.velocity = 0.42
+    nav.navigation_state.imu_valid = True
+    nav.navigation_state.heading_source = "imu"
+    nav.navigation_state.pose_quality = "rtk_fixed"
+    nav.navigation_state.dead_reckoning_active = False
+    nav.navigation_state.last_gps_fix = datetime.now(UTC)
+
+    adapter = _NavStateLocalizationAdapter(nav)
+
+    assert adapter.current_position == nav.navigation_state.current_position
+    assert adapter.heading == 12.0
+    assert adapter.velocity == 0.42
+    assert adapter.imu_valid is True
+    assert adapter.heading_source == "imu"
+    assert adapter.quality == "rtk_fixed"
+    assert adapter.accuracy_m == pytest.approx(0.03)
+
+
 # ---------------------------------------------------------------------------
 # Task 4: Position verification helpers
 # ---------------------------------------------------------------------------
@@ -768,9 +796,11 @@ def test_per_waypoint_threshold_bypasses_tier():
 @pytest.mark.asyncio
 async def test_go_to_waypoint_arrives_using_tiered_tolerance():
     """Mower at waypoint with RTK Fixed accuracy triggers arrival at 0.15m tolerance."""
+    import types
+    import uuid
+
+    from backend.src.models.mission import Mission, MissionLifecycleStatus, MissionWaypoint
     from backend.src.services.mission_executor import MissionExecutor
-    from backend.src.models.mission import Mission, MissionWaypoint, MissionLifecycleStatus
-    import uuid, types
 
     WP_LAT, WP_LON = 39.000000, -84.000000
     loc = FakeLocalization(
@@ -795,9 +825,11 @@ async def test_go_to_waypoint_arrives_using_tiered_tolerance():
 @pytest.mark.asyncio
 async def test_go_to_waypoint_uses_per_waypoint_arrival_threshold():
     """arrival_threshold_m set on waypoint bypasses tiered tolerance in go_to_waypoint."""
+    import types
+    import uuid
+
+    from backend.src.models.mission import Mission, MissionLifecycleStatus, MissionWaypoint
     from backend.src.services.mission_executor import MissionExecutor
-    from backend.src.models.mission import Mission, MissionWaypoint, MissionLifecycleStatus
-    import uuid, types
 
     WP_LAT, WP_LON = 39.000000, -84.000000
     # accuracy=0.03 (RTK Fixed) → tiered tolerance would be 0.15m
@@ -825,8 +857,8 @@ async def test_go_to_waypoint_uses_per_waypoint_arrival_threshold():
 
 def test_per_waypoint_threshold_not_doubled_in_degraded_mode():
     """Per-waypoint arrival_threshold_m is not doubled even in degraded GPS mode."""
-    from backend.src.services.mission_executor import MissionExecutor
     from backend.src.models.mission import MissionWaypoint
+    from backend.src.services.mission_executor import MissionExecutor
     # degraded: accuracy=None (no tiered tolerance)
     loc = FakeLocalization(
         position=Position(latitude=1.0, longitude=1.0, accuracy=None),
@@ -894,8 +926,9 @@ def test_position_confidence_degraded_when_accuracy_is_none():
 
 
 def test_position_confidence_degraded_when_fix_marginally_stale():
-    from backend.src.services.mission_executor import MissionExecutor
     from datetime import timedelta
+
+    from backend.src.services.mission_executor import MissionExecutor
     # Fix age = 3.0s — beyond max_waypoint_fix_age_seconds (2.0s) but within 2.5× (5.0s)
     stale_fix = datetime.now(UTC) - timedelta(seconds=3.0)
     loc = FakeLocalization(
@@ -911,8 +944,9 @@ def test_position_confidence_degraded_when_fix_marginally_stale():
 
 
 def test_position_confidence_none_when_fix_very_stale():
-    from backend.src.services.mission_executor import MissionExecutor
     from datetime import timedelta
+
+    from backend.src.services.mission_executor import MissionExecutor
     # Fix age = 6.0s — beyond 2.5× max_waypoint_fix_age_seconds (5.0s) → none
     very_stale = datetime.now(UTC) - timedelta(seconds=6.0)
     loc = FakeLocalization(
@@ -1122,9 +1156,11 @@ async def test_decel_taper_mower_arrives_without_overshoot():
     With standard GPS (accuracy=0.8m → 0.65m tolerance), decel starts at 1.95m.
     At 0.15 m/s, per-tick advance is 0.03m — ample ticks within the arrival zone.
     """
+    import types
+    import uuid
+
+    from backend.src.models.mission import Mission, MissionLifecycleStatus, MissionWaypoint
     from backend.src.services.mission_executor import MissionExecutor
-    from backend.src.models.mission import Mission, MissionWaypoint, MissionLifecycleStatus
-    import uuid, types
 
     # Mower AT the waypoint coordinates (distance = 0m → taper kicks in → arrival fires)
     WP_LAT, WP_LON = 39.000000, -84.000000
@@ -1161,6 +1197,7 @@ async def test_encoder_asymmetry_logs_warning_after_arm_period(caplog):
     """Sustained RPM asymmetry during equal-speed command must produce a WARNING."""
     import logging
     from unittest.mock import patch as _patch
+
     from backend.src.services.mission_executor import MissionExecutor
 
     # Place mower far from target so it never arrives
@@ -1202,7 +1239,7 @@ async def test_encoder_asymmetry_logs_warning_after_arm_period(caplog):
                     executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader),
                     timeout=5.0,
                 )
-            except (TimeoutError, RuntimeError, asyncio.TimeoutError):
+            except (TimeoutError, RuntimeError):
                 pass
 
     asym_warnings = [r for r in caplog.records if "asymmetry" in r.message.lower() or "shaft slip" in r.message.lower()]
@@ -1260,4 +1297,3 @@ async def test_encoder_continuity_watchdog_aborts_mission():
 
     # Stop command should have been dispatched
     assert (0.0, 0.0) in gw.drive_calls
-
