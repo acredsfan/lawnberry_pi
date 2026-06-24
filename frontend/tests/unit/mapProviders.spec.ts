@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { getOsmTileLayer, isSecureMapsContext, shouldUseGoogleProvider } from '@/utils/mapProviders'
+import {
+  findCustomImagerySource,
+  getCustomTileLayer,
+  getOsmTileLayer,
+  isSecureMapsContext,
+  resolveCustomSourceId,
+  shouldUseGoogleProvider,
+} from '@/utils/mapProviders'
 
 describe('map provider helpers', () => {
   describe('isSecureMapsContext', () => {
@@ -74,6 +81,33 @@ describe('map provider helpers', () => {
       const config = getOsmTileLayer('hybrid')
       expect(config.overlay).toBeTruthy()
       expect(config.overlay?.url).toContain('World_Boundaries_and_Places')
+    })
+  })
+
+  describe('custom imagery sources', () => {
+    const source = {
+      id: 'local_orthophoto',
+      name: 'Local Orthophoto',
+      type: 'xyz' as const,
+      url_template: 'https://example.invalid/tiles/{z}/{x}/{y}.png',
+      attribution: 'Example',
+      max_zoom: 22,
+      max_native_zoom: 20,
+      enabled: true,
+    }
+
+    it('resolves custom source ids', () => {
+      expect(resolveCustomSourceId(source)).toBe('custom:local_orthophoto')
+      expect(findCustomImagerySource([source], 'custom:local_orthophoto')).toEqual(source)
+      expect(findCustomImagerySource([source], 'google:satellite')).toBeNull()
+    })
+
+    it('builds a Leaflet tile layer config', () => {
+      const layer = getCustomTileLayer(source)
+      expect(layer.url).toBe(source.url_template)
+      expect(layer.attribution).toBe('Example')
+      expect(layer.maxZoom).toBe(22)
+      expect(layer.maxNativeZoom).toBe(20)
     })
   })
 })

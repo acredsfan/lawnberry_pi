@@ -90,8 +90,22 @@ import googleMutantScriptUrl from 'leaflet.gridlayer.googlemutant/dist/Leaflet.G
 if (typeof window !== 'undefined') (window as any).L = L;
 
 import { useMapStore } from '@/stores/map';
-import { getOsmTileLayer, isSecureMapsContext, shouldUseGoogleProvider } from '@/utils/mapProviders';
-import type { TileLayerConfig } from '@/utils/mapProviders';
+import {
+  findCustomImagerySource,
+  getCustomTileLayer,
+  getOsmTileLayer,
+  isSecureMapsContext,
+  shouldUseGoogleProvider,
+} from '@/utils/mapProviders';
+import type { CustomImagerySource, TileLayerConfig } from '@/utils/mapProviders';
+import {
+  applyDisplayTransform as applyTransform,
+  createMapDisplayTransform,
+  METERS_PER_LAT_DEG,
+  removeDisplayTransform as removeTransform,
+  resolveMapSourceId,
+  type MapAlignmentProfile,
+} from '@/utils/mapDisplayTransform';
 import type { Waypoint } from '@/stores/mission';
 
 // Props
@@ -99,7 +113,21 @@ const props = defineProps<{
   waypoints: Waypoint[];
   mowerPosition: { lat: number; lon: number; accuracy: number; heading?: number | null } | null;
   followMower: boolean;
-  mapSettings?: { provider: 'google' | 'osm' | 'none'; style: 'standard' | 'satellite' | 'hybrid' | 'terrain'; google_api_key: string; satellite_display_north_m?: number; satellite_display_east_m?: number } | null;
+  mapSettings?: {
+    provider: 'google' | 'osm' | 'none';
+    style: 'standard' | 'satellite' | 'hybrid' | 'terrain';
+    google_api_key: string;
+    satellite_display_north_m?: number;
+    satellite_display_east_m?: number;
+    active_source_id?: string | null;
+    alignment_profiles?: Record<string, MapAlignmentProfile>;
+    custom_sources?: CustomImagerySource[];
+    mission_planner?: {
+      provider?: 'google' | 'osm' | 'none';
+      style?: 'standard' | 'satellite' | 'hybrid' | 'terrain';
+      source_id?: string | null;
+    } | null;
+  } | null;
   pathTrace?: [number, number][];
 }>();
 
@@ -108,7 +136,7 @@ const emit = defineEmits<{
   (e: 'add-waypoint', lat: number, lon: number): void;
   (e: 'update-waypoint', waypoint: Waypoint): void;
   (e: 'remove-waypoint', id: string): void;
-  (e: 'calibration-set', northM: number, eastM: number): void;
+  (e: 'calibration-set', northM: number, eastM: number, sourceId?: string): void;
 }>();
 
 // Component State
@@ -123,26 +151,6 @@ const DEFAULT_MAP_MAX_ZOOM = 19;
 const EXTENDED_MAP_MAX_ZOOM = 22;
 const TERRAIN_MAP_MAX_ZOOM = 17;
 
-const METERS_PER_LAT_DEG = 111320.0;
-
-function applyDisplayOffset(lat: number, lon: number): [number, number] {
-  if (props.mapSettings?.style !== 'satellite' && props.mapSettings?.style !== 'hybrid') return [lat, lon];
-  const northM = props.mapSettings?.satellite_display_north_m ?? 0;
-  const eastM = props.mapSettings?.satellite_display_east_m ?? 0;
-  if (northM === 0 && eastM === 0) return [lat, lon];
-  const metersPerLonDeg = METERS_PER_LAT_DEG * Math.cos(lat * Math.PI / 180);
-  return [lat + northM / METERS_PER_LAT_DEG, lon + eastM / metersPerLonDeg];
-}
-
-function removeDisplayOffset(lat: number, lon: number): [number, number] {
-  if (props.mapSettings?.style !== 'satellite' && props.mapSettings?.style !== 'hybrid') return [lat, lon];
-  const northM = props.mapSettings?.satellite_display_north_m ?? 0;
-  const eastM = props.mapSettings?.satellite_display_east_m ?? 0;
-  if (northM === 0 && eastM === 0) return [lat, lon];
-  const metersPerLonDeg = METERS_PER_LAT_DEG * Math.cos(lat * Math.PI / 180);
-  return [lat - northM / METERS_PER_LAT_DEG, lon - eastM / metersPerLonDeg];
-}
-
 const zoom = ref(18);
 const center = ref<[number, number]>([37.7749, -122.4194]);
 const mapMaxZoom = ref(EXTENDED_MAP_MAX_ZOOM);
@@ -153,6 +161,7 @@ const tileLayerConfig = ref<TileLayerConfig | null>(null);
 const tileLayerKey = ref(0);
 const providerBadge = ref('');
 const tileErrorMessage = ref<string | null>(null);
+const activeSourceId = ref<string | null>(null);
 let googleLayer: any = null;
 // useGlobalLeaflet=true ensures vue-leaflet and GoogleMutant share the same window.L instance.
 // With false, vue-leaflet's internal dynamic import can produce a separate Leaflet instance in
@@ -166,6 +175,13 @@ const leafletOptions = {
 let resizeObserver: ResizeObserver | null = null;
 
 // Computed properties for rendering — display offset shifts all visual positions to align with imagery
+const displayTransform = computed(() => createMapDisplayTransform(props.mapSettings, activeSourceId.value));
+function applyDisplayOffset(lat: number, lon: number): [number, number] {
+  return applyTransform(lat, lon, displayTransform.value);
+}
+function removeDisplayOffset(lat: number, lon: number): [number, number] {
+  return removeTransform(lat, lon, displayTransform.value);
+}
 const waypointLatLngs = computed(() => props.waypoints.map(wp => applyDisplayOffset(wp.lat, wp.lon)));
 const mowerLatLng = computed(() => {
   if (!props.mowerPosition) return null;
@@ -261,10 +277,12 @@ async function initializeBaseLayer() {
 
   // Fetch latest map display settings (provider/style/api key)
   const settings = props.mapSettings ?? await loadMapsSettings();
+  const requestedSourceId = settings.active_source_id || settings.mission_planner?.source_id || null;
+  const customSource = findCustomImagerySource(settings.custom_sources, requestedSourceId);
   const apiKey = settings.google_api_key || '';
   const googleRequested = settings.provider === 'google';
   const secureContext = typeof window !== 'undefined' ? isSecureMapsContext(window.location) : false;
-  const usingGoogle = shouldUseGoogleProvider(settings.provider, apiKey, window.location);
+  const usingGoogle = !customSource && shouldUseGoogleProvider(settings.provider, apiKey, window.location);
 
   // Cleanup previous Google layer if it exists
   if (googleLayer) {
@@ -275,7 +293,13 @@ async function initializeBaseLayer() {
   tileErrorMessage.value = null;
   mapMaxZoom.value = resolveMapMaxZoom(settings.style, usingGoogle, null);
 
-  if (usingGoogle) {
+  if (customSource) {
+    activeSourceId.value = `custom:${customSource.id}`;
+    providerBadge.value = customSource.name || 'Custom imagery';
+    tileLayerConfig.value = getCustomTileLayer(customSource);
+    mapMaxZoom.value = resolveMapMaxZoom(settings.style, false, tileLayerConfig.value);
+  } else if (usingGoogle) {
+    activeSourceId.value = resolveMapSourceId('google', settings.style || 'standard');
     providerBadge.value = 'Google Maps';
     try {
       await loadGoogleMapsApi(apiKey);
@@ -299,6 +323,7 @@ async function initializeBaseLayer() {
       googleLayer.addTo(map);
     } catch (error) {
       console.warn('Failed to load Google Maps, falling back to OSM.', error);
+      activeSourceId.value = resolveMapSourceId('osm', settings.style || 'standard');
       providerBadge.value = 'OSM (fallback)';
       tileErrorMessage.value = 'Google Maps failed to load for Mission Planner. Check the API key, allowed referrers, and internet connection.';
       const style = settings.style || 'standard';
@@ -306,31 +331,39 @@ async function initializeBaseLayer() {
       mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
     }
   } else if (googleRequested && looksLikeGoogleOAuthClientId(apiKey)) {
+    activeSourceId.value = resolveMapSourceId('osm', settings.style || 'standard');
     providerBadge.value = 'OSM (invalid Google key)';
     tileErrorMessage.value = 'Mission Planner has a Google OAuth client ID saved, not a Google Maps API key. Update Settings with a Maps JavaScript API key.';
     const style = settings.style || 'standard';
     tileLayerConfig.value = getOsmTileLayer(style);
     mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
   } else if (googleRequested && !apiKey.trim()) {
+    activeSourceId.value = resolveMapSourceId('osm', settings.style || 'standard');
     providerBadge.value = 'OSM (Google key required)';
     tileErrorMessage.value = 'Mission Planner is set to Google Maps, but no Google Maps API key is saved in Settings.';
     const style = settings.style || 'standard';
     tileLayerConfig.value = getOsmTileLayer(style);
     mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
   } else if (googleRequested && !secureContext) {
+    activeSourceId.value = resolveMapSourceId('osm', settings.style || 'standard');
     providerBadge.value = 'OSM (secure context required)';
     tileErrorMessage.value = 'Google Maps needs HTTPS, localhost, or a local-network hostname to render in Mission Planner.';
     const style = settings.style || 'standard';
     tileLayerConfig.value = getOsmTileLayer(style);
     mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
   } else if (settings.provider === 'none') {
+    activeSourceId.value = 'none';
     providerBadge.value = 'Maps disabled';
     tileLayerConfig.value = null;
   } else {
+    activeSourceId.value = resolveMapSourceId('osm', settings.style || 'standard');
     providerBadge.value = 'OpenStreetMap';
     const style = settings.style || 'standard';
     tileLayerConfig.value = getOsmTileLayer(style);
     mapMaxZoom.value = resolveMapMaxZoom(style, false, tileLayerConfig.value);
+  }
+  if (displayTransform.value.unaligned && (settings.style === 'satellite' || settings.style === 'hybrid')) {
+    tileErrorMessage.value = tileErrorMessage.value || 'This imagery source has no saved alignment profile; display transform is zero.';
   }
   map.setMaxZoom(mapMaxZoom.value);
   tileLayerKey.value++;
@@ -407,7 +440,19 @@ function invalidateMapSize() {
 // Load map provider/style settings from backend (same contract as MapsView).
 // Bracket notation for the key field avoids the secret-scanner literal-key heuristic.
 const GMAP_KEY = ['google', 'api', 'key'].join('_') as 'google_api_key';
-async function loadMapsSettings(): Promise<{ provider: 'google'|'osm'|'none'; style: 'standard'|'satellite'|'hybrid'|'terrain'; google_api_key: string }> {
+async function loadMapsSettings(): Promise<{
+  provider: 'google'|'osm'|'none';
+  style: 'standard'|'satellite'|'hybrid'|'terrain';
+  google_api_key: string;
+  active_source_id?: string | null;
+  alignment_profiles?: Record<string, MapAlignmentProfile>;
+  custom_sources?: CustomImagerySource[];
+  mission_planner?: {
+    provider?: 'google'|'osm'|'none';
+    style?: 'standard'|'satellite'|'hybrid'|'terrain';
+    source_id?: string | null;
+  } | null;
+}> {
   try {
     const res = await fetch('/api/v2/settings/maps', { headers: { 'Cache-Control': 'no-cache' } });
     if (res && res.ok) {
@@ -418,7 +463,24 @@ async function loadMapsSettings(): Promise<{ provider: 'google'|'osm'|'none'; st
       const provider = (missionPlanner?.provider === 'google' || missionPlanner?.provider === 'osm' || missionPlanner?.provider === 'none') ? missionPlanner.provider : 'osm';
       const style = (['standard','satellite','hybrid','terrain'].includes(String(missionPlanner?.style))) ? missionPlanner.style : 'standard';
       const key = typeof data?.[GMAP_KEY] === 'string' ? data[GMAP_KEY] : '';
-      return { provider, style, [GMAP_KEY]: key } as any;
+      const activeSourceId = typeof data?.active_source_id === 'string' ? data.active_source_id : null;
+      const customSources = Array.isArray(data?.custom_sources) ? data.custom_sources : [];
+      const alignmentProfiles = data?.alignment_profiles && typeof data.alignment_profiles === 'object'
+        ? data.alignment_profiles as Record<string, MapAlignmentProfile>
+        : {};
+      return {
+        provider,
+        style,
+        [GMAP_KEY]: key,
+        active_source_id: activeSourceId,
+        alignment_profiles: alignmentProfiles,
+        custom_sources: customSources,
+        mission_planner: {
+          provider,
+          style,
+          source_id: typeof missionPlanner?.source_id === 'string' ? missionPlanner.source_id : activeSourceId,
+        },
+      } as any;
     }
   } catch (e) {
     console.warn('Failed to load /api/v2/settings/maps; defaulting to OSM standard', e);
@@ -432,10 +494,10 @@ function onMapClick(e: L.LeafletMouseEvent) {
     const gpsLat = props.mowerPosition?.lat;
     const gpsLon = props.mowerPosition?.lon;
     if (gpsLat != null && gpsLon != null) {
-      const metersPerLonDeg = METERS_PER_LAT_DEG * Math.cos(gpsLat * Math.PI / 180);
       const northM = (e.latlng.lat - gpsLat) * METERS_PER_LAT_DEG;
+      const metersPerLonDeg = METERS_PER_LAT_DEG * Math.cos(gpsLat * Math.PI / 180);
       const eastM = (e.latlng.lng - gpsLon) * metersPerLonDeg;
-      emit('calibration-set', northM, eastM);
+      emit('calibration-set', northM, eastM, displayTransform.value.sourceId);
     }
     calibratingMode.value = false;
     return;
@@ -482,13 +544,14 @@ watch(
 
 // --- Public API ---
 function recenter(lat: number, lon: number, z?: number) {
-  center.value = [lat, lon];
+  const displayLatLng = applyDisplayOffset(lat, lon);
+  center.value = displayLatLng;
   if (z) {
     zoom.value = z;
   }
   nextTick(() => {
     invalidateMapSize();
-    map?.setView([lat, lon], z ?? zoom.value, { animate: false });
+    map?.setView(displayLatLng, z ?? zoom.value, { animate: false });
   });
 }
 

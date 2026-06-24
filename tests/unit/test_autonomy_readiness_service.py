@@ -28,12 +28,29 @@ class FakeGateway:
         return FakeBladeController()
 
 
+class FakeLiveSafety:
+    def __init__(self, *, running: bool = True, sample_age_s: float = 0.1):
+        self.running = running
+        self.sample_age_s = sample_age_s
+
+    def status_dict(self) -> dict:
+        return {
+            "running": self.running,
+            "fast_loop_age_s": self.sample_age_s,
+            "imu_sample_age_s": self.sample_age_s,
+            "tof_left_sample_age_s": self.sample_age_s,
+            "tof_right_sample_age_s": self.sample_age_s,
+            "faults": [],
+        }
+
+
 @dataclass
 class Runtime:
     hardware_config: HardwareConfig
     command_gateway: object | None = FakeGateway()
     robohat: object | None = None
     safety_state: dict | None = None
+    live_safety: object | None = FakeLiveSafety()
 
 
 @pytest.mark.asyncio
@@ -76,3 +93,48 @@ async def test_readiness_accepts_pi5_explicit_profile(monkeypatch):
 
     assert report.ready
 
+
+@pytest.mark.asyncio
+async def test_readiness_blocks_missing_live_safety_loop(monkeypatch):
+    monkeypatch.setenv("LAWNBERRY_PLATFORM_MODEL", "Raspberry Pi 5 Model B Rev 1.0")
+    hardware = HardwareConfig.model_validate(
+        {
+            "imu_type": "bno085-uart",
+            "blade_controller": "ibt-4",
+            "blade": {
+                "controller": "ibt-4",
+                "allow_autonomous": True,
+                "pins": {"in1": 24, "in2": 25},
+            },
+        }
+    )
+
+    report = await AutonomyReadinessService(
+        Runtime(hardware, safety_state={}, live_safety=None)
+    ).evaluate()
+
+    assert not report.ready
+    assert "LIVE_SAFETY_LOOP_HEALTHY" in report.blocking_reason_codes
+
+
+@pytest.mark.asyncio
+async def test_readiness_blocks_stale_live_safety_sample(monkeypatch):
+    monkeypatch.setenv("LAWNBERRY_PLATFORM_MODEL", "Raspberry Pi 5 Model B Rev 1.0")
+    hardware = HardwareConfig.model_validate(
+        {
+            "imu_type": "bno085-uart",
+            "blade_controller": "ibt-4",
+            "blade": {
+                "controller": "ibt-4",
+                "allow_autonomous": True,
+                "pins": {"in1": 24, "in2": 25},
+            },
+        }
+    )
+
+    report = await AutonomyReadinessService(
+        Runtime(hardware, safety_state={}, live_safety=FakeLiveSafety(sample_age_s=2.0))
+    ).evaluate()
+
+    assert not report.ready
+    assert "LIVE_SAFETY_LOOP_HEALTHY" in report.blocking_reason_codes

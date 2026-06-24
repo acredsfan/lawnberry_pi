@@ -76,10 +76,44 @@ class RemoteAccessSectionResponse(BaseModel):
     custom: dict[str, Any] = Field(default_factory=dict)
 
 
+class MapAlignmentData(BaseModel):
+    north_m: float = 0.0
+    east_m: float = 0.0
+    method: str = "none"
+    control_point_count: int = 0
+    rmse_m: float | None = None
+    created_at: str | None = None
+
+
+class MapAlignmentProfile(BaseModel):
+    source_id: str
+    provider: str
+    layer: str
+    dataset_revision: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    alignment: MapAlignmentData = Field(default_factory=MapAlignmentData)
+
+
+class CustomImagerySource(BaseModel):
+    id: str
+    name: str
+    type: str = "xyz"
+    url_template: str
+    attribution: str = ""
+    min_zoom: int = 0
+    max_zoom: int = 22
+    max_native_zoom: int | None = None
+    bounds: Any | None = None
+    crs: str = "EPSG:3857"
+    dataset_revision: str | None = None
+    enabled: bool = False
+
+
 class MapsSectionResponse(BaseModel):
     class MissionPlannerMapSectionResponse(BaseModel):
         provider: str = "osm"
         style: str = "standard"
+        source_id: str | None = None
 
     provider: str = "osm"
     style: str = "standard"
@@ -92,6 +126,10 @@ class MapsSectionResponse(BaseModel):
     )
     satellite_display_north_m: float = 0.0
     satellite_display_east_m: float = 0.0
+    active_source_id: str | None = None
+    alignment_profiles: dict[str, MapAlignmentProfile] = Field(default_factory=dict)
+    custom_sources: list[CustomImagerySource] = Field(default_factory=list)
+    alignment_migration: dict[str, Any] = Field(default_factory=dict)
 
 
 class GpsPolicySectionResponse(BaseModel):
@@ -666,6 +704,96 @@ def _normalize_remote_section(payload: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _source_id_for(provider: str, style: str, source_id: str | None = None) -> str:
+    if source_id:
+        return str(source_id).strip()
+    provider = str(provider or "osm").strip().lower()
+    style = str(style or "standard").strip().lower()
+    if provider == "google" and style in {"satellite", "hybrid"}:
+        return f"google:{style}"
+    if provider == "osm" and style in {"satellite", "hybrid"}:
+        return "esri:world-imagery" if style == "satellite" else "esri:world-imagery-hybrid"
+    if provider == "none":
+        return "none"
+    return f"{provider}:{style}"
+
+
+def _is_imagery_source(source_id: str) -> bool:
+    return any(
+        marker in source_id
+        for marker in ("google:satellite", "google:hybrid", "esri:world-imagery", "custom:")
+    )
+
+
+def _normalize_alignment_profiles(
+    raw_profiles: Any,
+    *,
+    active_source_id: str,
+    legacy_north_m: float,
+    legacy_east_m: float,
+) -> dict[str, MapAlignmentProfile]:
+    profiles: dict[str, MapAlignmentProfile] = {}
+    if isinstance(raw_profiles, dict):
+        for key, raw in raw_profiles.items():
+            if not isinstance(raw, dict):
+                continue
+            profile_payload = {**raw, "source_id": raw.get("source_id") or str(key)}
+            profile = MapAlignmentProfile.model_validate(profile_payload)
+            profiles[profile.source_id] = profile
+
+    has_legacy_offset = abs(legacy_north_m) > 1e-9 or abs(legacy_east_m) > 1e-9
+    if has_legacy_offset and "legacy_satellite" not in profiles:
+        profiles["legacy_satellite"] = MapAlignmentProfile(
+            source_id="legacy_satellite",
+            provider="legacy",
+            layer="satellite",
+            alignment=MapAlignmentData(
+                north_m=legacy_north_m,
+                east_m=legacy_east_m,
+                method="legacy_global_offset",
+                control_point_count=1,
+                created_at=datetime.now(UTC).isoformat(),
+            ),
+        )
+    if has_legacy_offset and active_source_id not in profiles and _is_imagery_source(active_source_id):
+        provider, _, layer = active_source_id.partition(":")
+        profiles[active_source_id] = MapAlignmentProfile(
+            source_id=active_source_id,
+            provider=provider or "unknown",
+            layer=layer or "satellite",
+            alignment=MapAlignmentData(
+                north_m=legacy_north_m,
+                east_m=legacy_east_m,
+                method="legacy_migrated_current_source",
+                control_point_count=1,
+                created_at=datetime.now(UTC).isoformat(),
+            ),
+        )
+    return profiles
+
+
+def _normalize_custom_sources(raw_sources: Any) -> list[CustomImagerySource]:
+    if not isinstance(raw_sources, list):
+        return []
+    sources: list[CustomImagerySource] = []
+    for raw in raw_sources:
+        if not isinstance(raw, dict):
+            continue
+        source = CustomImagerySource.model_validate(raw)
+        if source.type not in {"xyz", "arcgis"}:
+            raise HTTPException(status_code=422, detail="custom source type must be xyz or arcgis")
+        url = source.url_template.strip()
+        if not (url.startswith("https://") or url.startswith("http://")):
+            raise HTTPException(status_code=422, detail="custom imagery URL must use http or https")
+        if source.type == "xyz" and not all(token in url for token in ("{z}", "{x}", "{y}")):
+            raise HTTPException(
+                status_code=422,
+                detail="xyz custom imagery url_template must include {z}, {x}, and {y}",
+            )
+        sources.append(source)
+    return sources
+
+
 def _normalize_maps_section(payload: dict[str, Any]) -> dict[str, Any]:
     data = dict(payload)
     if "api_key" in data and not data.get("google_api_key"):
@@ -714,19 +842,45 @@ def _normalize_maps_section(payload: dict[str, Any]) -> dict[str, Any]:
             detail="google_api_key must be a Google Maps API key, not a Google OAuth client ID",
         )
 
+    mission_planner_source_id = _source_id_for(
+        mission_planner_provider,
+        mission_planner_style,
+        mission_planner_raw.get("source_id"),
+    )
+    active_source_id = _source_id_for(provider, style, data.get("active_source_id"))
+    legacy_north_m = float(data.get("satellite_display_north_m") or 0.0)
+    legacy_east_m = float(data.get("satellite_display_east_m") or 0.0)
+    custom_sources = _normalize_custom_sources(data.get("custom_sources"))
+    alignment_profiles = _normalize_alignment_profiles(
+        data.get("alignment_profiles"),
+        active_source_id=mission_planner_source_id or active_source_id,
+        legacy_north_m=legacy_north_m,
+        legacy_east_m=legacy_east_m,
+    )
+
     normalized = MapsSectionResponse.model_validate(
         {
             **data,
             "google_api_key": google_api_key,
             "provider": provider,
             "style": style,
+            "active_source_id": active_source_id,
+            "alignment_profiles": alignment_profiles,
+            "custom_sources": custom_sources,
             "mission_planner": {
                 **mission_planner_raw,
                 "provider": mission_planner_provider,
                 "style": mission_planner_style,
+                "source_id": mission_planner_source_id,
             },
         }
     ).model_dump()
+    if legacy_north_m != 0.0 or legacy_east_m != 0.0:
+        normalized["alignment_migration"] = {
+            **(normalized.get("alignment_migration") or {}),
+            "legacy_satellite_preserved": True,
+            "legacy_current_source": mission_planner_source_id or active_source_id,
+        }
     return normalized
 
 
@@ -755,21 +909,45 @@ def _maps_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
         mission_planner_style = style
 
     google_api_key = str(data.get("google_api_key") or "").strip()
+    mission_planner_source_id = _source_id_for(
+        mission_planner_provider,
+        mission_planner_style,
+        mission_planner_raw.get("source_id"),
+    )
+    active_source_id = _source_id_for(provider, style, data.get("active_source_id"))
     normalized = MapsSectionResponse.model_validate(
         {
             **data,
             "provider": provider,
             "style": style,
             "google_api_key": google_api_key,
+            "active_source_id": active_source_id,
             "mission_planner": {
                 **mission_planner_raw,
                 "provider": mission_planner_provider,
                 "style": mission_planner_style,
+                "source_id": mission_planner_source_id,
             },
         }
     ).model_dump()
     normalized["google_api_key_invalid"] = _looks_like_google_oauth_client_id(google_api_key)
     normalized["api_key"] = normalized.get("google_api_key", "")
+    profiles = normalized.get("alignment_profiles") or {}
+    active_profile = profiles.get(mission_planner_source_id) or profiles.get(active_source_id)
+    if active_profile:
+        normalized["active_alignment_profile"] = active_profile
+    else:
+        normalized["active_alignment_profile"] = {
+            "source_id": mission_planner_source_id,
+            "provider": mission_planner_provider,
+            "layer": mission_planner_style,
+            "alignment": MapAlignmentData().model_dump(),
+        }
+    normalized["alignment_diagnostics"] = {
+        "active_source_id": mission_planner_source_id,
+        "profile_found": bool(active_profile),
+        "unaligned": not bool(active_profile) and _is_imagery_source(mission_planner_source_id),
+    }
     return normalized
 
 
@@ -919,7 +1097,15 @@ async def update_remote_access_settings(settings: dict[str, Any], request: Reque
 @router.get("/settings/maps")
 async def get_maps_settings(request: Request):
     sections = _load_ui_settings(request)
-    payload = _maps_response_payload(sections.get("maps", {}))
+    current_maps = sections.get("maps", {})
+    try:
+        normalized_maps = _normalize_maps_section(current_maps)
+        if normalized_maps != current_maps:
+            sections["maps"] = normalized_maps
+            _save_ui_settings(sections, request)
+    except HTTPException:
+        normalized_maps = current_maps
+    payload = _maps_response_payload(normalized_maps)
     last_modified = datetime.fromisoformat(
         sections.get("updated_at", datetime.now(UTC).isoformat())
     )

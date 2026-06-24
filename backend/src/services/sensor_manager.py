@@ -924,6 +924,65 @@ class SensorManager:
             self._read_cache_ts = time.monotonic()
             return result
 
+    async def read_fast_safety_sensors(self) -> SensorData:
+        """Read only fast safety-critical sensors without waiting on slow telemetry.
+
+        This path intentionally excludes GPS, environmental, power/Victron,
+        camera, history, and WebSocket work. It is used by the live safety loop
+        so tilt and near-field obstacle decisions are not delayed by aggregate
+        telemetry reads.
+        """
+
+        async def _read_with_timeout(name: str, coro: Any, timeout: float) -> Any:
+            try:
+                return await asyncio.wait_for(coro, timeout=timeout)
+            except TimeoutError:
+                logger.warning("Timed out reading fast safety %s after %.2fs", name, timeout)
+                return None
+
+        imu_timeout_s = 0.08
+        tof_timeout_s = min(0.20, max(0.05, float(self._CACHE_TTL_S)))
+        imu_data, tof_data = await asyncio.gather(
+            _read_with_timeout("imu", self.imu.read_imu(), imu_timeout_s),
+            _read_with_timeout("tof", self.tof.read_tof_sensors(), tof_timeout_s),
+        )
+        tof_left, tof_right = (None, None)
+        if isinstance(tof_data, tuple):
+            tof_left, tof_right = tof_data
+        return SensorData(
+            imu=imu_data,
+            tof_left=tof_left,
+            tof_right=tof_right,
+            sensor_health={
+                SensorType.IMU: self.imu.status,
+                SensorType.TOF_LEFT: self.tof.status,
+                SensorType.TOF_RIGHT: self.tof.status,
+            },
+        )
+
+    async def read_slow_safety_sensors(self) -> SensorData:
+        """Read slower safety-relevant samples without blocking the fast loop."""
+
+        async def _read_with_timeout(name: str, coro: Any, timeout: float) -> Any:
+            try:
+                return await asyncio.wait_for(coro, timeout=timeout)
+            except TimeoutError:
+                logger.warning("Timed out reading slow safety %s after %.1fs", name, timeout)
+                return None
+
+        env_data, power_data = await asyncio.gather(
+            _read_with_timeout("environmental", self.environmental.read_environmental(), 1.0),
+            _read_with_timeout("power", self.power.read_power(), self.POWER_READ_TIMEOUT_SECONDS),
+        )
+        return SensorData(
+            environmental=env_data,
+            power=power_data,
+            sensor_health={
+                SensorType.ENVIRONMENTAL: self.environmental.status,
+                SensorType.POWER: self.power.status,
+            },
+        )
+
     async def _do_read_all_sensors(self, bootstrap_mode: bool = False) -> SensorData:
         """Perform a real hardware read of all sensors (called under _read_lock).
         

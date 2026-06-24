@@ -129,6 +129,18 @@ async def test_dispatch_drive_blocked_when_emergency_active():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_zero_drive_allowed_when_emergency_active():
+    from backend.src.control.commands import CommandStatus, DriveCommand, EmergencyTrigger
+
+    gw, _, _ = _make_gw()
+    await gw.trigger_emergency(EmergencyTrigger(reason="x", source="operator"))
+    outcome = await gw.dispatch_drive(
+        DriveCommand(left=0.0, right=0.0, source="manual", duration_ms=200)
+    )
+    assert outcome.status in (CommandStatus.ACCEPTED, CommandStatus.QUEUED)
+
+
+@pytest.mark.asyncio
 async def test_dispatch_drive_queued_when_no_hardware():
     from backend.src.control.commands import CommandStatus, DriveCommand
 

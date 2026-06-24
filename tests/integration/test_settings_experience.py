@@ -232,6 +232,7 @@ async def test_settings_maps_supports_mission_planner_overrides():
         assert data["mission_planner"] == {
             "provider": "google",
             "style": "hybrid",
+            "source_id": "google:hybrid",
         }
 
         response_get = await client.get("/api/v2/settings/maps", headers=headers)
@@ -243,6 +244,7 @@ async def test_settings_maps_supports_mission_planner_overrides():
         assert response_get.json()["mission_planner"] == {
             "provider": "google",
             "style": "hybrid",
+            "source_id": "google:hybrid",
         }
 
 

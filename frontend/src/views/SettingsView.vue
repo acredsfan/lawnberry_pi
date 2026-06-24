@@ -359,6 +359,23 @@
                 Use this to keep everyday maps on OSM while reserving higher-cost Google imagery for close waypoint placement in mission planning.
               </small>
             </div>
+
+            <div v-if="enabledCustomSources.length > 0" class="form-group">
+              <label for="mission-planner-source">Mission Planner Imagery Source</label>
+              <select id="mission-planner-source" v-model="mapsSettings.active_source_id" class="form-control">
+                <option :value="null">Automatic from provider/style</option>
+                <option
+                  v-for="source in enabledCustomSources"
+                  :key="source.id"
+                  :value="`custom:${source.id}`"
+                >
+                  {{ source.name }}{{ source.dataset_revision ? ` (${source.dataset_revision})` : '' }}
+                </option>
+              </select>
+              <small class="form-text text-muted">
+                Custom imagery sources are configured in local settings/API and keep their own alignment profile.
+              </small>
+            </div>
           </div>
           
           <button
@@ -727,15 +744,26 @@ const mapsSettings = ref({
   google_api_key: '',
   google_billing_warnings: true,
   style: 'standard',
+  active_source_id: null as string | null,
+  custom_sources: [] as Array<{
+    id: string
+    name: string
+    dataset_revision?: string | null
+    enabled?: boolean
+  }>,
   mission_planner: {
     provider: 'osm',
     style: 'standard',
+    source_id: null as string | null,
   },
 })
 
 const mapsRequireGoogleApiKey = computed(() => {
   return mapsSettings.value.provider === 'google' || mapsSettings.value.mission_planner.provider === 'google'
 })
+const enabledCustomSources = computed(() =>
+  (mapsSettings.value.custom_sources || []).filter(source => source.enabled !== false)
+)
 
 function looksLikeGoogleOAuthClientId(value: string): boolean {
   return String(value || '').trim().toLowerCase().endsWith('.apps.googleusercontent.com')
@@ -907,7 +935,14 @@ async function saveMapsSettings() {
     toast.show('Google Maps API key is invalid', 'error', 4500)
     return
   }
-  await saveSettings('/api/v2/settings/maps', mapsSettings.value)
+  const payload = {
+    ...mapsSettings.value,
+    mission_planner: {
+      ...mapsSettings.value.mission_planner,
+      source_id: mapsSettings.value.active_source_id,
+    },
+  }
+  await saveSettings('/api/v2/settings/maps', payload)
 }
 
 async function saveGpsSettings() {

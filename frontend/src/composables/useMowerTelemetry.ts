@@ -7,6 +7,13 @@ export interface MowerPosition {
   lon: number
   accuracy: number
   heading: number | null
+  positionRole: 'body_center' | 'antenna' | 'unknown'
+  antenna?: {
+    lat: number
+    lon: number
+    accuracy: number | null
+  } | null
+  antennaCorrectionState?: string | null
 }
 
 export function useMowerTelemetry() {
@@ -14,6 +21,9 @@ export function useMowerTelemetry() {
   const mowerLatLng = ref<[number, number] | null>(null)
   const gpsAccuracyMeters = ref<number | null>(null)
   const mowerHeading = ref<number | null>(null)
+  const mowerPositionRole = ref<'body_center' | 'antenna' | 'unknown'>('unknown')
+  const antennaPosition = ref<{ lat: number; lon: number; accuracy: number | null } | null>(null)
+  const antennaCorrectionState = ref<string | null>(null)
   const lastWsUpdateAt = ref<number>(0)
 
   const mowerPosition = computed<MowerPosition | null>(() => {
@@ -23,25 +33,65 @@ export function useMowerTelemetry() {
       lon: mowerLatLng.value[1],
       accuracy: gpsAccuracyMeters.value ?? 0,
       heading: mowerHeading.value,
+      positionRole: mowerPositionRole.value,
+      antenna: antennaPosition.value,
+      antennaCorrectionState: antennaCorrectionState.value,
     }
   })
 
   const telemetrySocket = useWebSocket('telemetry')
   let restPollTimer: number | null = null
 
-  function handleNavigation(payload: unknown) {
-    const p = payload as Record<string, unknown>
-    const pos = p?.position as Record<string, unknown> | undefined
-    const lat = Number(pos?.latitude)
-    const lon = Number(pos?.longitude)
+  function numeric(value: unknown): number | null {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : null
+  }
+
+  function readPoint(point: unknown): { lat: number; lon: number; accuracy: number | null } | null {
+    const p = point as Record<string, unknown> | undefined
+    const lat = numeric(p?.latitude)
+    const lon = numeric(p?.longitude)
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      mowerLatLng.value = [lat, lon]
-      const accuracy = Number(pos?.accuracy)
-      gpsAccuracyMeters.value = Number.isFinite(accuracy) ? accuracy : null
+      return { lat: lat as number, lon: lon as number, accuracy: numeric(p?.accuracy) }
+    }
+    return null
+  }
+
+  function applyTelemetryPayload(payload: Record<string, unknown> | undefined) {
+    if (!payload) return
+
+    const canonicalPose = payload.canonical_pose as Record<string, unknown> | undefined
+    const bodyCenter = readPoint(canonicalPose?.body_center)
+    const antenna = readPoint(canonicalPose?.antenna_position)
+
+    antennaPosition.value = antenna
+    antennaCorrectionState.value =
+      typeof canonicalPose?.antenna_correction_state === 'string'
+        ? canonicalPose.antenna_correction_state
+        : null
+
+    const selected = bodyCenter ?? antenna ?? readPoint(payload.position)
+    if (selected) {
+      mowerLatLng.value = [selected.lat, selected.lon]
+      gpsAccuracyMeters.value = selected.accuracy
+      if (bodyCenter) {
+        mowerPositionRole.value = 'body_center'
+      } else if (antenna) {
+        mowerPositionRole.value = 'antenna'
+      } else if (payload.position_role === 'body_center' || payload.position_role === 'antenna') {
+        mowerPositionRole.value = payload.position_role
+      } else {
+        mowerPositionRole.value = 'unknown'
+      }
       lastWsUpdateAt.value = Date.now()
     }
-    const hdg = p?.nav_heading
-    mowerHeading.value = hdg != null && Number.isFinite(Number(hdg)) ? Number(hdg) : null
+
+    const heading = numeric(canonicalPose?.heading_deg ?? payload.nav_heading)
+    mowerHeading.value = heading
+  }
+
+  function handleNavigation(payload: unknown) {
+    applyTelemetryPayload(payload as Record<string, unknown> | undefined)
   }
 
   async function pollRestFallback() {
@@ -49,17 +99,7 @@ export function useMowerTelemetry() {
     try {
       const res = await api.get('/api/v2/dashboard/telemetry')
       const data = res?.data as Record<string, unknown> | undefined
-      const pos = data?.position as Record<string, unknown> | undefined
-      const lat = Number(pos?.latitude)
-      const lon = Number(pos?.longitude)
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        mowerLatLng.value = [lat, lon]
-        const acc = Number(pos?.accuracy)
-        gpsAccuracyMeters.value = Number.isFinite(acc) ? acc : null
-        const hdg = data?.nav_heading
-        mowerHeading.value = hdg != null && Number.isFinite(Number(hdg)) ? Number(hdg) : null
-        lastWsUpdateAt.value = Date.now()
-      }
+      applyTelemetryPayload(data)
     } catch {
       // REST fallback is best-effort
     }

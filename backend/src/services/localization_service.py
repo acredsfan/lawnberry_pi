@@ -15,8 +15,10 @@ import json
 import logging
 import math
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from ..fusion.pose2d import PoseQuality
 from ..models import Position, SensorData
@@ -31,6 +33,52 @@ from ..nav.odometry import OdometryIntegrator
 from ..nav.path_planner import PathPlanner
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CanonicalPose:
+    """Single localization-owned pose contract for navigation, telemetry, and maps."""
+
+    body_center: Position | None
+    antenna_position: Position | None
+    heading_deg: float | None
+    heading_source: str | None
+    position_source: str
+    accuracy_m: float | None
+    gps_sample_id: int | None
+    sample_monotonic_s: float | None
+    gps_fix_age_s: float | None
+    rtk_status: str | None
+    antenna_correction_state: str
+    dead_reckoning_active: bool
+    cached: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        def _pos_payload(position: Position | None) -> dict[str, Any] | None:
+            if position is None:
+                return None
+            return {
+                "latitude": position.latitude,
+                "longitude": position.longitude,
+                "altitude": position.altitude,
+                "accuracy": position.accuracy,
+            }
+
+        return {
+            "body_center": _pos_payload(self.body_center),
+            "antenna_position": _pos_payload(self.antenna_position),
+            "heading_deg": self.heading_deg,
+            "heading_source": self.heading_source,
+            "position_source": self.position_source,
+            "accuracy_m": self.accuracy_m,
+            "gps_sample_id": self.gps_sample_id,
+            "sample_monotonic_s": self.sample_monotonic_s,
+            "gps_fix_age_s": self.gps_fix_age_s,
+            "rtk_status": self.rtk_status,
+            "antenna_correction_state": self.antenna_correction_state,
+            "dead_reckoning_active": self.dead_reckoning_active,
+            "cached": self.cached,
+        }
 
 
 class LocalizationState:
@@ -178,6 +226,15 @@ class LocalizationService:
         self._last_gps_track_time: datetime | None = None
         self._last_gps_sample_id: int | None = None
         self._last_gps_sample_timestamp: datetime | None = None
+        self._last_gps_monotonic_received_s: float | None = None
+        self._last_gps_cached: bool = False
+        self._last_gps_rtk_status: str | None = None
+        self._last_antenna_position: Position | None = None
+        self._antenna_correction_state: str = (
+            "not_configured"
+            if antenna_forward_m == 0.0 and antenna_right_m == 0.0
+            else "pending_heading"
+        )
 
         # PathPlanner used only for haversine distance/bearing calls
         self._path_planner = PathPlanner()
@@ -259,6 +316,53 @@ class LocalizationService:
     @property
     def heading_source(self) -> str | None:
         return self.state.heading_source
+
+    def canonical_pose(self) -> CanonicalPose:
+        """Return the single localization-owned pose contract.
+
+        ``body_center`` is populated only when the antenna-to-body correction is
+        either unnecessary or has been applied with a world-frame heading. When a
+        nonzero antenna offset is configured but the world heading is unavailable,
+        callers get ``antenna_position`` plus ``pending_heading`` instead of a
+        fabricated mower-center coordinate.
+        """
+        gps_fix_age_s: float | None = None
+        if self.state.last_gps_fix is not None:
+            gps_fix_age_s = (datetime.now(UTC) - self.state.last_gps_fix).total_seconds()
+
+        body_center: Position | None
+        if self._antenna_correction_state == "pending_heading":
+            body_center = None
+        else:
+            body_center = self.state.current_position
+
+        position_source = "gps"
+        if self.state.dead_reckoning_active:
+            position_source = "dead_reckoning"
+        elif self._last_antenna_position is None and self.state.current_position is None:
+            position_source = "unavailable"
+
+        accuracy = None
+        if body_center is not None:
+            accuracy = body_center.accuracy
+        elif self._last_antenna_position is not None:
+            accuracy = self._last_antenna_position.accuracy
+
+        return CanonicalPose(
+            body_center=body_center,
+            antenna_position=self._last_antenna_position,
+            heading_deg=self.state.heading,
+            heading_source=self.state.heading_source,
+            position_source=position_source,
+            accuracy_m=accuracy,
+            gps_sample_id=self._last_gps_sample_id,
+            sample_monotonic_s=self._last_gps_monotonic_received_s,
+            gps_fix_age_s=gps_fix_age_s,
+            rtk_status=self._last_gps_rtk_status,
+            antenna_correction_state=self._antenna_correction_state,
+            dead_reckoning_active=self.state.dead_reckoning_active,
+            cached=self._last_gps_cached,
+        )
 
     # ── Mission lifecycle ────────────────────────────────────────────────────
 
@@ -645,9 +749,16 @@ class LocalizationService:
                 altitude=gps.altitude,
                 accuracy=gps.accuracy,
             )
+            antenna_position = gps_position
+            self._last_antenna_position = antenna_position
+            self._last_gps_cached = cached
+            self._last_gps_rtk_status = getattr(gps, "rtk_status", None)
+            monotonic_received_s = getattr(gps, "monotonic_received_s", None)
+            if isinstance(monotonic_received_s, (int, float)):
+                self._last_gps_monotonic_received_s = float(monotonic_received_s)
 
             # Apply antenna offset when heading is available
-            heading = self.state.heading
+            heading = self._world_heading_for_antenna_correction()
             if (
                 (self._antenna_forward_m != 0.0 or self._antenna_right_m != 0.0)
                 and isinstance(heading, (int, float))
@@ -662,10 +773,14 @@ class LocalizationService:
                 gps_position = gps_position.model_copy(
                     update={"latitude": new_lat, "longitude": new_lon}
                 )
+                self._antenna_correction_state = "applied"
             elif self._antenna_forward_m != 0.0 or self._antenna_right_m != 0.0:
+                self._antenna_correction_state = "pending_heading"
                 logger.debug(
                     "GPS antenna offset configured but heading unavailable; using antenna position"
                 )
+            else:
+                self._antenna_correction_state = "not_configured"
 
             # Log divergence when recovering from dead reckoning
             if self.state.dead_reckoning_active:
@@ -717,6 +832,20 @@ class LocalizationService:
                 self.state.velocity = commanded_v
                 return dr_pos
 
+        return None
+
+    def _world_heading_for_antenna_correction(self) -> float | None:
+        """Return heading only when it is safe to use as a world-frame bearing."""
+        heading = self.state.heading
+        if not isinstance(heading, (int, float)):
+            return None
+        source = self.state.heading_source
+        if source == "gps_cog":
+            return float(heading)
+        if source == "dock_configured":
+            return float(heading)
+        if source == "imu" and self.alignment_ready:
+            return float(heading)
         return None
 
     def _resolve_gps_cog(
@@ -907,6 +1036,7 @@ def build_localization_service_from_config() -> LocalizationService:
 
 
 __all__ = [
+    "CanonicalPose",
     "LocalizationService",
     "LocalizationState",
     "PoseQuality",

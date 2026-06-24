@@ -154,6 +154,7 @@ class MotorCommandGateway:
         audit_id = str(uuid.uuid4())
         from backend.src.core.robot_state_manager import get_robot_state_manager
         get_robot_state_manager().set_emergency_stop(True, cmd.reason)
+        blade_was_active = bool(self._blade_state.get("active", False))
         self._safety_state["emergency_stop_active"] = True
         self._safety_state["estop_reason"] = cmd.reason
         self._blade_state["active"] = False
@@ -179,9 +180,11 @@ class MotorCommandGateway:
         try:
             controller = self._get_blade_controller()
             blade_result = await controller.emergency_stop(reason=cmd.reason)
-            hardware_confirmed = bool(hardware_confirmed and blade_result.ok)
+            if blade_was_active or blade_result.ok:
+                hardware_confirmed = bool(hardware_confirmed and blade_result.ok)
         except Exception:
-            hardware_confirmed = False
+            if blade_was_active:
+                hardware_confirmed = False
 
         return EmergencyOutcome(
             status=CommandStatus.EMERGENCY_LATCHED,
@@ -260,7 +263,9 @@ class MotorCommandGateway:
                     watchdog_latency_ms=None,
                 )
 
-        if self.is_emergency_active(request):
+        motion_active = abs(float(cmd.left)) > 1e-6 or abs(float(cmd.right)) > 1e-6
+
+        if self.is_emergency_active(request) and motion_active:
             if self._event_store is not None:
                 from ..observability.events import SafetyGateBlocked
                 self._emit_event(SafetyGateBlocked(
@@ -346,8 +351,6 @@ class MotorCommandGateway:
                 source=cmd.source,
                 duration_ms=cmd.duration_ms,
             ))
-
-        motion_active = abs(float(cmd.left)) > 1e-6 or abs(float(cmd.right)) > 1e-6
 
         robohat = self._robohat
         if robohat and getattr(getattr(robohat, "status", None), "serial_connected", False):

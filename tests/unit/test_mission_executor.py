@@ -56,6 +56,8 @@ class FakeGateway:
 
     def __init__(self):
         self.drive_calls: list[tuple[float, float]] = []
+        self.blade_calls: list[bool] = []
+        self.emergency_reasons: list[str] = []
         self._emergency = False
 
     def is_emergency_active(self) -> bool:
@@ -64,6 +66,15 @@ class FakeGateway:
     async def dispatch_drive_speeds(self, left: float, right: float) -> bool:
         self.drive_calls.append((left, right))
         return True
+
+    async def dispatch_blade(self, active: bool) -> bool:
+        self.blade_calls.append(bool(active))
+        return True
+
+    async def trigger_emergency(self, trigger) -> object:
+        self._emergency = True
+        self.emergency_reasons.append(str(getattr(trigger, "reason", "")))
+        return types.SimpleNamespace(ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +197,41 @@ async def test_deliver_stop_returns_false_when_all_retries_fail():
     assert result is False
 
 
+@pytest.mark.asyncio
+async def test_safety_hold_stops_drive_and_blade():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    gw = FakeGateway()
+    executor = MissionExecutor(localization=FakeLocalization(), gateway=gw)
+
+    result = await executor._enter_safety_hold(reason="unit test hold")
+
+    assert result is True
+    assert (0.0, 0.0) in gw.drive_calls
+    assert gw.blade_calls == [False]
+    assert gw.emergency_reasons == []
+
+
+@pytest.mark.asyncio
+async def test_safety_hold_escalates_if_blade_off_unconfirmed():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    class FailingBladeGateway(FakeGateway):
+        async def dispatch_blade(self, active: bool) -> bool:
+            self.blade_calls.append(bool(active))
+            return False
+
+    gw = FailingBladeGateway()
+    executor = MissionExecutor(localization=FakeLocalization(), gateway=gw)
+
+    with pytest.raises(RuntimeError):
+        await executor._enter_safety_hold(reason="blade fault")
+
+    assert (0.0, 0.0) in gw.drive_calls
+    assert gw.blade_calls == [False]
+    assert gw.emergency_reasons == ["blade_off_unconfirmed:blade fault"]
+
+
 # ---------------------------------------------------------------------------
 # Task 6: go_to_waypoint
 # ---------------------------------------------------------------------------
@@ -306,6 +352,57 @@ async def test_go_to_waypoint_holds_when_paused():
     assert not task.done()
 
     # Resume it by switching to aborted and letting task finish
+    status.status = MissionLifecycleStatus.ABORTED
+    result = await asyncio.wait_for(task, timeout=1.0)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_go_to_waypoint_missing_position_holds_blade_off():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    loc = FakeLocalization(position=None)
+    gw = FakeGateway()
+    executor = MissionExecutor(localization=loc, gateway=gw)
+
+    mission = _make_mission([{"lat": 1.0, "lon": 1.0, "blade_on": True, "speed": 50}])
+    status = _make_status(mission)
+    ms_reader = FakeMissionStatusReader(mission, status)
+
+    task = asyncio.create_task(executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader))
+    await asyncio.sleep(0.05)
+
+    assert (0.0, 0.0) in gw.drive_calls
+    assert False in gw.blade_calls
+
+    status.status = MissionLifecycleStatus.ABORTED
+    result = await asyncio.wait_for(task, timeout=1.0)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_go_to_waypoint_dead_reckoning_holds_blade_off():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    loc = FakeLocalization(
+        position=Position(latitude=0.0, longitude=0.0, accuracy=0.5),
+        heading=0.0,
+        dead_reckoning_active=True,
+        last_gps_fix=datetime.now(UTC),
+    )
+    gw = FakeGateway()
+    executor = MissionExecutor(localization=loc, gateway=gw)
+
+    mission = _make_mission([{"lat": 1.0, "lon": 1.0, "blade_on": True, "speed": 50}])
+    status = _make_status(mission)
+    ms_reader = FakeMissionStatusReader(mission, status)
+
+    task = asyncio.create_task(executor.go_to_waypoint(mission, mission.waypoints[0], ms_reader))
+    await asyncio.sleep(0.05)
+
+    assert (0.0, 0.0) in gw.drive_calls
+    assert False in gw.blade_calls
+
     status.status = MissionLifecycleStatus.ABORTED
     result = await asyncio.wait_for(task, timeout=1.0)
     assert result is False

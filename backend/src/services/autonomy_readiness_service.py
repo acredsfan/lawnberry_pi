@@ -193,6 +193,68 @@ class AutonomyReadinessService:
                 )
             )
 
+        live_safety = getattr(self._runtime, "live_safety", None)
+        if require_blade:
+            if live_safety is None:
+                checks.append(
+                    ReadinessCheck(
+                        code="LIVE_SAFETY_LOOP_HEALTHY",
+                        ok=False,
+                        severity="blocker",
+                        message="Live safety coordinator is not available.",
+                    )
+                )
+            else:
+                status = (
+                    live_safety.status_dict()
+                    if callable(getattr(live_safety, "status_dict", None))
+                    else {}
+                )
+                if not bool(status.get("running")):
+                    checks.append(
+                        ReadinessCheck(
+                            code="LIVE_SAFETY_LOOP_HEALTHY",
+                            ok=False,
+                            severity="blocker",
+                            message="Live safety coordinator is not running.",
+                        )
+                    )
+                else:
+                    checks.append(
+                        ReadinessCheck(
+                            code="LIVE_SAFETY_LOOP_HEALTHY",
+                            ok=True,
+                            severity="info",
+                            message="Live safety coordinator is running.",
+                        )
+                    )
+
+                fast_age = status.get("fast_loop_age_s")
+                if fast_age is None or float(fast_age) > 1.0:
+                    checks.append(
+                        ReadinessCheck(
+                            code="LIVE_SAFETY_LOOP_HEALTHY",
+                            ok=False,
+                            severity="blocker",
+                            message="Live safety fast loop has not produced a recent tick.",
+                        )
+                    )
+                for code, key in (
+                    ("IMU_SAFETY_SAMPLE_FRESH", "imu_sample_age_s"),
+                    ("TOF_LEFT_SAFETY_SAMPLE_FRESH", "tof_left_sample_age_s"),
+                    ("TOF_RIGHT_SAFETY_SAMPLE_FRESH", "tof_right_sample_age_s"),
+                ):
+                    age = status.get(key)
+                    if age is None or float(age) > 1.0:
+                        checks.append(
+                            ReadinessCheck(
+                                code=code,
+                                ok=False,
+                                severity="blocker",
+                                message=f"{code} is stale or unavailable.",
+                            )
+                        )
+
         ready = not any(not check.ok and check.severity == "blocker" for check in checks)
         return AutonomyReadinessReport(
             ready=ready,
@@ -207,4 +269,3 @@ class AutonomyReadinessService:
         if not report.ready:
             raise AutonomyReadinessError(report)
         return report
-

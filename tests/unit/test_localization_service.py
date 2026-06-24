@@ -124,12 +124,47 @@ async def test_antenna_offset_applied_when_configured():
     )
     # heading north, antenna 0.46m behind center → center is north of antenna
     loc.state.heading = 0.0
+    loc.state.heading_source = "imu"
+    loc._heading_alignment_sample_count = 1
+    loc._require_gps_heading_alignment = False
     state = await loc.update(
         SensorData(gps=GpsReading(latitude=40.0, longitude=-75.0, accuracy=0.03))
     )
     assert state.current_position is not None
     expected_lat = 40.0 + 0.46 / 111_320.0
     assert state.current_position.latitude == pytest.approx(expected_lat)
+    pose = loc.canonical_pose()
+    assert pose.body_center is not None
+    assert pose.antenna_position is not None
+    assert pose.antenna_position.latitude == pytest.approx(40.0)
+    assert pose.antenna_correction_state == "applied"
+
+
+@pytest.mark.asyncio
+async def test_antenna_offset_pending_without_world_heading():
+    from backend.src.services.localization_service import LocalizationService
+    loc = LocalizationService(
+        imu_yaw_offset=0.0,
+        antenna_forward_m=-0.46,
+        antenna_right_m=0.0,
+        max_fix_age_seconds=2.0,
+        max_accuracy_m=5.0,
+        alignment_file=None,
+    )
+    loc.state.heading = 0.0
+    loc.state.heading_source = "imu_unverified"
+
+    state = await loc.update(
+        SensorData(gps=GpsReading(latitude=40.0, longitude=-75.0, accuracy=0.03))
+    )
+
+    assert state.current_position is not None
+    assert state.current_position.latitude == pytest.approx(40.0)
+    pose = loc.canonical_pose()
+    assert pose.body_center is None
+    assert pose.antenna_position is not None
+    assert pose.antenna_position.latitude == pytest.approx(40.0)
+    assert pose.antenna_correction_state == "pending_heading"
 
 
 @pytest.mark.asyncio
@@ -398,6 +433,7 @@ def test_reset_for_mission_none_still_resets_to_zero():
 def test_reset_for_mission_saved_alignment_does_not_overwrite_disk(tmp_path):
     """When saved_alignment is applied, the disk file is NOT overwritten with a reset record."""
     import json
+
     from backend.src.services.localization_service import LocalizationService
 
     align_file = tmp_path / "imu_alignment.json"
@@ -530,6 +566,7 @@ async def test_end_bootstrap_fallback_commits_mean_when_no_snap():
 async def test_end_bootstrap_fallback_logs_warning_when_spread_high(caplog):
     """end_bootstrap() fails closed when COG spread is too high."""
     import logging
+
     from backend.src.services.localization_service import LocalizationService
 
     loc = LocalizationService(alignment_file=None)

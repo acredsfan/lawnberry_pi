@@ -155,6 +155,77 @@ def test_ready_for_autonomy_requires_rtk_fresh_position(tmp_path, monkeypatch):
     assert exc.value.reason_code == "LOCALIZATION_NOT_RTK_GRADE"
 
 
+def test_ready_for_autonomy_rejects_center_inside_but_footprint_outside(tmp_path, monkeypatch):
+    monkeypatch.setenv("LAWN_DATA_DIR", str(tmp_path))
+    coords = _square()
+    _write_json(
+        MOWING_BOUNDARY_SAFE,
+        {
+            "source": "test",
+            "created_at": datetime.now(UTC).isoformat(),
+            "buffer_meters": 0.0,
+            "coordinates": coords,
+        },
+    )
+    snapshot = load_operating_area_snapshot()
+    pose = Position(latitude=40.0001, longitude=-74.999999, accuracy=0.02)
+
+    assert snapshot.contains_center(pose)
+    with pytest.raises(OperatingAreaError) as exc:
+        snapshot.validate_ready_for_autonomy(
+            position=pose,
+            last_gps_fix=datetime.now(UTC),
+            dead_reckoning_active=False,
+            max_fix_age_s=2.0,
+            max_accuracy_m=0.25,
+            footprint_radius_m=0.35,
+            fixed_allowance_m=0.10,
+        )
+
+    assert exc.value.reason_code == "CURRENT_FOOTPRINT_OUTSIDE_FREE_SPACE"
+
+
+def test_ready_for_autonomy_rejects_exclusion_penetration(tmp_path, monkeypatch):
+    monkeypatch.setenv("LAWN_DATA_DIR", str(tmp_path))
+    coords = _square()
+    _write_json(
+        MOWING_BOUNDARY_SAFE,
+        {
+            "source": "test",
+            "created_at": datetime.now(UTC).isoformat(),
+            "buffer_meters": 0.0,
+            "coordinates": coords,
+        },
+    )
+    repo = MagicMock()
+    repo.list_zones.return_value = [
+        {
+            "id": "bed",
+            "zone_kind": "exclusion",
+            "polygon": [
+                {"latitude": 40.00008, "longitude": -74.99992},
+                {"latitude": 40.00008, "longitude": -74.99988},
+                {"latitude": 40.00012, "longitude": -74.99988},
+                {"latitude": 40.00012, "longitude": -74.99992},
+            ],
+        }
+    ]
+    snapshot = load_operating_area_snapshot(map_repository=repo)
+
+    with pytest.raises(OperatingAreaError) as exc:
+        snapshot.validate_ready_for_autonomy(
+            position=Position(latitude=40.00010, longitude=-74.99990, accuracy=0.02),
+            last_gps_fix=datetime.now(UTC),
+            dead_reckoning_active=False,
+            max_fix_age_s=2.0,
+            max_accuracy_m=0.25,
+            footprint_radius_m=0.05,
+            fixed_allowance_m=0.02,
+        )
+
+    assert exc.value.reason_code == "CURRENT_FOOTPRINT_OUTSIDE_FREE_SPACE"
+
+
 def test_predictive_guard_blocks_outward_near_edge(tmp_path, monkeypatch):
     monkeypatch.setenv("LAWN_DATA_DIR", str(tmp_path))
     coords = _square()

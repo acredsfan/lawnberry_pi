@@ -20,6 +20,19 @@ export type TileLayerConfig = {
   overlay?: TileLayerOverlay
 }
 
+export type CustomImagerySource = {
+  id: string
+  name: string
+  type: 'xyz' | 'arcgis'
+  url_template: string
+  attribution?: string | null
+  min_zoom?: number | null
+  max_zoom?: number | null
+  max_native_zoom?: number | null
+  dataset_revision?: string | null
+  enabled?: boolean
+}
+
 const PRIVATE_IPV4_REGEX = /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/
 const LOCAL_SUFFIXES = ['.local', '.lan', '.home', '.internal']
 
@@ -83,4 +96,26 @@ export function shouldUseGoogleProvider(
 export function getOsmTileLayer(style: string | null | undefined): TileLayerConfig {
   const key = (style || 'standard').toLowerCase().trim()
   return OSM_TILE_LAYERS[key] || OSM_TILE_LAYERS.standard
+}
+
+export function resolveCustomSourceId(source: CustomImagerySource): string {
+  return `custom:${source.id}`
+}
+
+export function findCustomImagerySource(
+  sources: CustomImagerySource[] | null | undefined,
+  sourceId: string | null | undefined,
+): CustomImagerySource | null {
+  if (!sourceId || !sourceId.startsWith('custom:')) return null
+  const id = sourceId.slice('custom:'.length)
+  return (sources ?? []).find(source => source.enabled !== false && source.id === id) ?? null
+}
+
+export function getCustomTileLayer(source: CustomImagerySource): TileLayerConfig {
+  return {
+    url: source.url_template,
+    attribution: source.attribution || source.name,
+    maxZoom: source.max_zoom ?? 22,
+    maxNativeZoom: source.max_native_zoom ?? source.max_zoom ?? undefined,
+  }
 }

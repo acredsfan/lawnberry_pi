@@ -7,7 +7,7 @@ from typing import Any
 from ..core.state_manager import AppState
 from ..models.sensor_data import SensorData
 from ..nav.geoutils import body_offset_to_north_east, offset_lat_lon
-from ..utils.battery import voltage_current_to_soc, voltage_to_soc
+from ..utils.battery import voltage_current_to_soc
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,19 @@ class TelemetryService:
             return float(heading) if isinstance(heading, (int, float)) else None
         except Exception:
             return None
+
+    def _get_canonical_pose(self) -> Any | None:
+        try:
+            from .navigation_service import NavigationService
+
+            nav_svc = NavigationService.get_instance()
+            localization = getattr(nav_svc, "_localization", None)
+            canonical_pose = getattr(localization, "canonical_pose", None)
+            if callable(canonical_pose):
+                return canonical_pose()
+        except Exception:
+            return None
+        return None
 
     def _get_motor_status(self) -> str:
         try:
@@ -344,10 +357,45 @@ class TelemetryService:
                 nav_heading = getattr(imu, "yaw", None)
                 if nav_heading is not None:
                     nav_heading_source = "imu_raw"
-        current_pos, raw_position, position_correction = self._apply_position_offsets(
-            current_pos,
-            nav_heading=nav_heading,
-        )
+        canonical_pose = self._get_canonical_pose()
+        if canonical_pose is not None:
+            pose_payload = canonical_pose.to_dict()
+            body = pose_payload.get("body_center")
+            antenna = pose_payload.get("antenna_position")
+            if body is not None:
+                current_pos.update(body)
+                current_pos["position_role"] = "body_center"
+            elif antenna is not None:
+                current_pos.update(antenna)
+                current_pos["position_role"] = "antenna"
+            raw_position = antenna
+            position_correction = {
+                "applied": ["gps_antenna_offset"]
+                if pose_payload.get("antenna_correction_state") == "applied"
+                else [],
+                "pending": ["gps_antenna_offset_heading_unavailable"]
+                if pose_payload.get("antenna_correction_state") == "pending_heading"
+                else [],
+                "antenna_offset_forward_m": getattr(
+                    getattr(self.app_state, "hardware_config", None),
+                    "gps_antenna_offset_forward_m",
+                    0.0,
+                ),
+                "antenna_offset_right_m": getattr(
+                    getattr(self.app_state, "hardware_config", None),
+                    "gps_antenna_offset_right_m",
+                    0.0,
+                ),
+                "antenna_correction_state": pose_payload.get("antenna_correction_state"),
+                "position_source": pose_payload.get("position_source"),
+            }
+            nav_heading = pose_payload.get("heading_deg")
+            nav_heading_source = pose_payload.get("heading_source") or "localization"
+        else:
+            current_pos, raw_position, position_correction = self._apply_position_offsets(
+                current_pos,
+                nav_heading=nav_heading,
+            )
 
         # IMU Calibration
         cal_status = getattr(imu, "calibration_status", None)
@@ -398,6 +446,8 @@ class TelemetryService:
         # Add fused navigation heading from NavigationService (IMU yaw preferred, GPS COG fallback)
         telemetry["nav_heading"] = nav_heading
         telemetry["nav_heading_source"] = nav_heading_source
+        if canonical_pose is not None:
+            telemetry["canonical_pose"] = canonical_pose.to_dict()
         if raw_position is not None:
             telemetry["raw_position"] = raw_position
         if position_correction is not None:

@@ -3,8 +3,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from backend.src.models import Position
 from backend.src.models.hardware_config import HardwareConfig
 from backend.src.models.sensor_data import GpsMode, GpsReading, SensorData
+from backend.src.services.localization_service import CanonicalPose
 from backend.src.services.telemetry_service import TelemetryService
 
 
@@ -81,7 +83,9 @@ def test_format_telemetry_applies_gps_antenna_offset_to_displayed_position():
         gps_antenna_offset_forward_m=-0.46,
         gps_antenna_offset_right_m=0.0,
     )
+    mock_app_state.safety_state = {}
     service.app_state = mock_app_state
+    service._get_canonical_pose = lambda: None
     service._get_navigation_heading = lambda: 0.0
 
     telemetry = service._format_telemetry(
@@ -93,6 +97,80 @@ def test_format_telemetry_applies_gps_antenna_offset_to_displayed_position():
     assert telemetry["position"]["latitude"] == pytest.approx(40.0 + 0.46 / 111_320.0)
     assert telemetry["position"]["longitude"] == pytest.approx(-75.0)
     assert telemetry["position_correction"]["applied"] == ["gps_antenna_offset"]
+
+
+def test_format_telemetry_uses_canonical_pose_body_center():
+    service = TelemetryService()
+    mock_app_state = MagicMock()
+    mock_app_state.hardware_config = HardwareConfig(
+        gps_antenna_offset_forward_m=-0.46,
+        gps_antenna_offset_right_m=0.0,
+    )
+    mock_app_state.safety_state = {}
+    service.app_state = mock_app_state
+    pose = CanonicalPose(
+        body_center=Position(latitude=40.000004, longitude=-75.0, accuracy=0.03),
+        antenna_position=Position(latitude=40.0, longitude=-75.0, accuracy=0.03),
+        heading_deg=0.0,
+        heading_source="imu",
+        position_source="gps",
+        accuracy_m=0.03,
+        gps_sample_id=7,
+        sample_monotonic_s=123.0,
+        gps_fix_age_s=0.2,
+        rtk_status="rtk_fixed",
+        antenna_correction_state="applied",
+        dead_reckoning_active=False,
+        cached=False,
+    )
+    service._get_canonical_pose = lambda: pose
+
+    telemetry = service._format_telemetry(
+        SensorData(gps=GpsReading(latitude=40.0, longitude=-75.0, accuracy=0.03)),
+        sim_mode=False,
+    )
+
+    assert telemetry["position"]["latitude"] == pytest.approx(40.000004)
+    assert telemetry["position"]["position_role"] == "body_center"
+    assert telemetry["raw_position"]["latitude"] == pytest.approx(40.0)
+    assert telemetry["position_correction"]["applied"] == ["gps_antenna_offset"]
+    assert telemetry["canonical_pose"]["gps_sample_id"] == 7
+
+
+def test_format_telemetry_uses_antenna_when_canonical_body_pending():
+    service = TelemetryService()
+    mock_app_state = MagicMock()
+    mock_app_state.hardware_config = None
+    mock_app_state.safety_state = {}
+    service.app_state = mock_app_state
+    pose = CanonicalPose(
+        body_center=None,
+        antenna_position=Position(latitude=40.0, longitude=-75.0, accuracy=0.03),
+        heading_deg=None,
+        heading_source=None,
+        position_source="gps",
+        accuracy_m=0.03,
+        gps_sample_id=8,
+        sample_monotonic_s=124.0,
+        gps_fix_age_s=0.1,
+        rtk_status="rtk_fixed",
+        antenna_correction_state="pending_heading",
+        dead_reckoning_active=False,
+        cached=False,
+    )
+    service._get_canonical_pose = lambda: pose
+
+    telemetry = service._format_telemetry(
+        SensorData(gps=GpsReading(latitude=40.0, longitude=-75.0, accuracy=0.03)),
+        sim_mode=False,
+    )
+
+    assert telemetry["position"]["latitude"] == pytest.approx(40.0)
+    assert telemetry["position"]["position_role"] == "antenna"
+    assert telemetry["position_correction"]["pending"] == [
+        "gps_antenna_offset_heading_unavailable"
+    ]
+    assert telemetry["canonical_pose"]["antenna_correction_state"] == "pending_heading"
 
 
 

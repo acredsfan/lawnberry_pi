@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -8,6 +9,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ...core.globals import _debug_overrides
+from ...models.sensor_data import GpsReading
+from ...services.stationary_rtk_averaging import compute_stationary_rtk_average
 from ...services.websocket_hub import websocket_hub
 
 logger = logging.getLogger(__name__)
@@ -79,6 +82,33 @@ class RtkDiagnosticsResponse(BaseModel):
     ntrip: dict[str, Any]
     gps: dict[str, Any]
     hardware: dict[str, Any]
+
+
+class StationaryRtkAverageRequest(BaseModel):
+    duration_s: float = Field(default=5.0, ge=0.2, le=30.0)
+    interval_s: float = Field(default=0.2, ge=0.05, le=2.0)
+    min_samples: int = Field(default=20, ge=1, le=500)
+    max_accuracy_m: float = Field(default=0.05, gt=0.0, le=1.0)
+    max_speed_mps: float = Field(default=0.03, ge=0.0, le=1.0)
+    samples: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Optional explicit samples for validation/replay; omitted requests read live GPS.",
+    )
+
+
+class StationaryRtkAverageResponse(BaseModel):
+    accepted: bool
+    averaged_antenna_coordinate: dict[str, float | None] | None
+    rmse_m: float | None
+    stddev_east_m: float | None
+    stddev_north_m: float | None
+    sample_count: int
+    accepted_count: int
+    rejected_count: int
+    rejected_reasons: dict[str, int]
+    rtk_status_distribution: dict[str, int]
+    elapsed_s: float | None
+    creates_global_offset: bool
 
 
 class IMUSummary(BaseModel):
@@ -254,6 +284,39 @@ async def get_gps_status() -> GPSSummary:
         )
     except Exception:
         return GPSSummary()
+
+
+@router.post("/sensors/gps/stationary-average", response_model=StationaryRtkAverageResponse)
+async def collect_stationary_rtk_average(
+    request: StationaryRtkAverageRequest,
+) -> StationaryRtkAverageResponse:
+    """Average fresh stationary RTK-fixed antenna samples without writing offsets."""
+    readings: list[GpsReading] = []
+    if request.samples is not None:
+        readings = [GpsReading.model_validate(sample) for sample in request.samples]
+    else:
+        try:
+            sm = await websocket_hub._ensure_sensor_manager()
+            gps = getattr(sm, "gps", None)
+            if gps is None:
+                raise RuntimeError("GPS is not available")
+            deadline = time.monotonic() + request.duration_s
+            while len(readings) < request.min_samples and time.monotonic() < deadline:
+                reading = await gps.read_gps()
+                if reading is not None:
+                    readings.append(reading)
+                await asyncio.sleep(request.interval_s)
+        except Exception as exc:
+            logger.exception("Stationary RTK averaging failed to collect GPS samples: %s", exc)
+            raise HTTPException(status_code=503, detail="GPS samples unavailable") from exc
+
+    result = compute_stationary_rtk_average(
+        readings,
+        min_samples=request.min_samples,
+        max_accuracy_m=request.max_accuracy_m,
+        max_speed_mps=request.max_speed_mps,
+    )
+    return StationaryRtkAverageResponse.model_validate(result.to_dict())
 
 
 @router.get("/sensors/gps/rtk/diagnostics", response_model=RtkDiagnosticsResponse)

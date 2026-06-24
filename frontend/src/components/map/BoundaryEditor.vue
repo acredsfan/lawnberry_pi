@@ -405,7 +405,20 @@ import { useWebSocket } from '@/services/websocket';
 import { useMapStore } from '../../stores/map';
 import type { Point } from '../../stores/map';
 import { useToastStore } from '@/stores/toast';
-import { shouldUseGoogleProvider, getOsmTileLayer, type TileLayerConfig } from '@/utils/mapProviders';
+import {
+  findCustomImagerySource,
+  getCustomTileLayer,
+  shouldUseGoogleProvider,
+  getOsmTileLayer,
+  type CustomImagerySource,
+  type TileLayerConfig,
+} from '@/utils/mapProviders';
+import {
+  applyDisplayTransform,
+  createMapDisplayTransform,
+  removeDisplayTransform,
+  type MapAlignmentProfile,
+} from '@/utils/mapDisplayTransform';
 
 const mapStore = useMapStore();
 const toast = useToastStore();
@@ -424,6 +437,9 @@ interface Props {
   pickForPin?: boolean;
   satelliteDisplayNorthM?: number;
   satelliteDisplayEastM?: number;
+  activeSourceId?: string | null;
+  alignmentProfiles?: Record<string, MapAlignmentProfile>;
+  customSources?: CustomImagerySource[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -434,6 +450,9 @@ const props = withDefaults(defineProps<Props>(), {
   pickForPin: false,
   satelliteDisplayNorthM: 0,
   satelliteDisplayEastM: 0,
+  activeSourceId: null,
+  alignmentProfiles: () => ({}),
+  customSources: () => [],
 });
 
 // State
@@ -456,23 +475,20 @@ const tileErrorMessage = ref<string | null>(null);
 const fallbackToStandard = ref(false);
 const loadingTimeout = ref<number | null>(null);
 
-// Satellite imagery display offset helpers
-const _METERS_PER_LAT_DEG = 111320.0;
+// Imagery display transform helpers. Geometry stays in true WGS84; only rendering/clicks are shifted.
+const _displayTransform = computed(() => createMapDisplayTransform({
+  provider: props.mapProvider,
+  style: props.mapStyle,
+  active_source_id: props.activeSourceId,
+  alignment_profiles: props.alignmentProfiles,
+  satellite_display_north_m: props.satelliteDisplayNorthM,
+  satellite_display_east_m: props.satelliteDisplayEastM,
+}));
 function _applyDisplayOffset(lat: number, lon: number): [number, number] {
-  if (props.mapStyle !== 'satellite' && props.mapStyle !== 'hybrid') return [lat, lon];
-  const northM = props.satelliteDisplayNorthM;
-  const eastM = props.satelliteDisplayEastM;
-  if (northM === 0 && eastM === 0) return [lat, lon];
-  const mpLon = _METERS_PER_LAT_DEG * Math.cos(lat * Math.PI / 180);
-  return [lat + northM / _METERS_PER_LAT_DEG, lon + eastM / mpLon];
+  return applyDisplayTransform(lat, lon, _displayTransform.value);
 }
 function _removeDisplayOffset(lat: number, lon: number): [number, number] {
-  if (props.mapStyle !== 'satellite' && props.mapStyle !== 'hybrid') return [lat, lon];
-  const northM = props.satelliteDisplayNorthM;
-  const eastM = props.satelliteDisplayEastM;
-  if (northM === 0 && eastM === 0) return [lat, lon];
-  const mpLon = _METERS_PER_LAT_DEG * Math.cos(lat * Math.PI / 180);
-  return [lat - northM / _METERS_PER_LAT_DEG, lon - eastM / mpLon];
+  return removeDisplayTransform(lat, lon, _displayTransform.value);
 }
 
 // Map view state
@@ -480,10 +496,12 @@ const mapRef = ref<any>(null);
 const zoom = ref(18);
 const centerLatLng = ref<[number, number]>([37.7749, -122.4194]);
 const showTiles = computed(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+const customSource = computed(() => findCustomImagerySource(props.customSources, props.activeSourceId));
 
 // Dynamic Leaflet tile layer when NOT using Google Mutant
 const tileLayerConfig = computed<TileLayerConfig | null>(() => {
   if (props.mapProvider === 'none') return null;
+  if (customSource.value) return getCustomTileLayer(customSource.value);
   if (useGoogleMutant.value) return null;
   if (props.mapProvider === 'osm') {
     // If satellite tiles failed and we're in satellite mode, fallback to standard
@@ -498,7 +516,7 @@ const useGoogleMutant = computed(() => shouldUseGoogleProvider(
   props.mapProvider,
   props.googleApiKey,
   typeof window !== 'undefined' ? window.location : null
-));
+) && !customSource.value);
 let googleBaseLayer: any = null;
 let googleLayerHandlers: {
   tileerror?: (e: any) => void;

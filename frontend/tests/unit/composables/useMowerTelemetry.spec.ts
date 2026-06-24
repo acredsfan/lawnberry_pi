@@ -85,6 +85,31 @@ describe('useMowerTelemetry', () => {
     expect(pos?.heading).toBe(180)
   })
 
+  it('prefers canonical body-center pose and preserves antenna diagnostics', async () => {
+    const { getResult } = mountWithComposable()
+    const { _mockService } = await import('@/services/websocket') as any
+    await nextTick()
+
+    _mockService.emit('telemetry.navigation', {
+      position: { latitude: 40.0, longitude: -75.0, accuracy: 0.03, position_role: 'antenna' },
+      nav_heading: 90,
+      canonical_pose: {
+        body_center: { latitude: 40.000004, longitude: -75.0, accuracy: 0.03 },
+        antenna_position: { latitude: 40.0, longitude: -75.0, accuracy: 0.03 },
+        heading_deg: 0,
+        antenna_correction_state: 'applied',
+      },
+    })
+    await nextTick()
+
+    const pos = getResult().mowerPosition.value
+    expect(pos?.lat).toBeCloseTo(40.000004)
+    expect(pos?.positionRole).toBe('body_center')
+    expect(pos?.antenna?.lat).toBe(40)
+    expect(pos?.antennaCorrectionState).toBe('applied')
+    expect(pos?.heading).toBe(0)
+  })
+
   it('falls back to REST poll when WS is stale', async () => {
     const { getResult } = mountWithComposable()
     await nextTick()

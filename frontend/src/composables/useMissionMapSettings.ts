@@ -1,5 +1,7 @@
 import { ref } from 'vue'
 import { useApiService } from '@/services/api'
+import type { MapAlignmentProfile } from '@/utils/mapDisplayTransform'
+import type { CustomImagerySource } from '@/utils/mapProviders'
 
 export type MapProvider = 'google' | 'osm' | 'none'
 export type MapStyle = 'standard' | 'satellite' | 'hybrid' | 'terrain'
@@ -13,6 +15,14 @@ export interface MapDisplaySettings {
   googleMapsKey: string
   satelliteDisplayNorthM: number
   satelliteDisplayEastM: number
+  activeSourceId: string | null
+  alignmentProfiles: Record<string, MapAlignmentProfile>
+  customSources: CustomImagerySource[]
+  mission_planner?: {
+    provider: MapProvider
+    style: MapStyle
+    source_id?: string | null
+  }
 }
 
 export function useMissionMapSettings() {
@@ -24,6 +34,9 @@ export function useMissionMapSettings() {
     googleMapsKey: '',
     satelliteDisplayNorthM: 0,
     satelliteDisplayEastM: 0,
+    activeSourceId: null,
+    alignmentProfiles: {},
+    customSources: [],
   })
   const mapStyle = ref<MapStyle>('standard')
 
@@ -52,7 +65,26 @@ export function useMissionMapSettings() {
         typeof payload.satellite_display_north_m === 'number' ? payload.satellite_display_north_m : 0
       const satelliteDisplayEastM =
         typeof payload.satellite_display_east_m === 'number' ? payload.satellite_display_east_m : 0
-      mapDisplaySettings.value = { provider, style, googleMapsKey, satelliteDisplayNorthM, satelliteDisplayEastM }
+      const activeSourceId = typeof payload.active_source_id === 'string' ? payload.active_source_id : null
+      const alignmentProfiles =
+        payload.alignment_profiles && typeof payload.alignment_profiles === 'object'
+          ? (payload.alignment_profiles as Record<string, MapAlignmentProfile>)
+          : {}
+      const customSources = Array.isArray(payload.custom_sources)
+        ? (payload.custom_sources as CustomImagerySource[])
+        : []
+      const sourceId = typeof mp.source_id === 'string' ? mp.source_id : activeSourceId
+      mapDisplaySettings.value = {
+        provider,
+        style,
+        googleMapsKey,
+        satelliteDisplayNorthM,
+        satelliteDisplayEastM,
+        activeSourceId,
+        alignmentProfiles,
+        customSources,
+        mission_planner: { provider, style, source_id: sourceId },
+      }
       mapStyle.value = style
     } catch (error) {
       console.warn('useMissionMapSettings: failed to load settings', error)

@@ -1,8 +1,10 @@
-import pytest
-import os
 import json
+import os
 from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
+
 from backend.src.api.routers import settings as settings_router
 from backend.src.main import app
 
@@ -72,7 +74,7 @@ def test_update_and_persist_settings(clean_settings_file):
     # Verify file persistence
     settings_file = settings_router.SETTINGS_FILE
     assert os.path.exists(settings_file)
-    with open(settings_file, "r") as f:
+    with open(settings_file) as f:
         saved_data = json.load(f)
         assert saved_data["profile_version"] == "1.0.1"
         assert saved_data["theme"] == "light"
@@ -148,12 +150,14 @@ def test_settings_maps_section_persists_mission_planner_overrides(clean_settings
     assert payload["mission_planner"] == {
         "provider": "google",
         "style": "hybrid",
+        "source_id": "google:hybrid",
     }
 
     stored_sections = json.loads(settings_router.UI_SETTINGS_FILE.read_text())
     assert stored_sections["maps"]["mission_planner"] == {
         "provider": "google",
         "style": "hybrid",
+        "source_id": "google:hybrid",
     }
 
     response_get = client.get("/api/v2/settings/maps")
@@ -161,6 +165,7 @@ def test_settings_maps_section_persists_mission_planner_overrides(clean_settings
     assert response_get.json()["mission_planner"] == {
         "provider": "google",
         "style": "hybrid",
+        "source_id": "google:hybrid",
     }
 
 
@@ -221,4 +226,5 @@ def test_settings_maps_get_tolerates_saved_invalid_google_key(clean_settings_fil
     assert payload["mission_planner"] == {
         "provider": "google",
         "style": "hybrid",
+        "source_id": "google:hybrid",
     }

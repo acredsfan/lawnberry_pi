@@ -92,14 +92,21 @@ adjusted_yaw = (-raw_yaw + imu_yaw_offset_degrees + session_heading_alignment) %
 ### GPS
 - Preferred: USB (ZED-F9P RTK) → `/dev/lawnberry-gps` (udev symlink; configured via `gps.usb_device` in `config/hardware.yaml`)
 - Alternative: UART0 for NEO-8M → /dev/serial0 at 115200 baud
-- GPS coordinates are corrected for antenna placement when `gps.antenna_offset_forward_m` or
+- Localization owns the antenna-to-body-center correction when `gps.antenna_offset_forward_m` or
   `gps.antenna_offset_right_m` is set. These values describe the antenna location relative to the
   mower navigation point/body center: positive is forward/right, negative is behind/left. Example:
   if the antenna is 1.5 ft behind the point the mower should navigate from, set
   `gps.antenna_offset_forward_m: -0.46`.
-- `gps.map_display_offset_north_m` and `gps.map_display_offset_east_m` are fixed display-only
-  nudges for local satellite imagery alignment. Use them only when the map imagery is offset in a
-  consistent world direction; they do not affect navigation.
+- The corrected body-center coordinate is published only after a verified world-frame heading is
+  available, such as GPS COG bootstrap alignment. Before that, telemetry reports the raw antenna
+  position with `antenna_correction_state="pending_heading"` rather than inventing a body-center
+  coordinate from boot-relative IMU yaw.
+- Satellite/orthophoto imagery alignment is display-only and source-specific. Legacy
+  `satellite_display_north_m/east_m` settings migrate to alignment profiles; Google, Esri, and
+  custom orthophoto sources do not share offsets unless a profile explicitly aliases them.
+- Use `POST /api/v2/sensors/gps/stationary-average` for stationary RTK reference averaging. It
+  returns an averaged antenna coordinate for setup/reference workflows and never writes a hidden GPS
+  offset.
 
 #### RTK Positioning with NTRIP Corrections
 

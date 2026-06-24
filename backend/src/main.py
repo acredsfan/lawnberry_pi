@@ -373,6 +373,16 @@ async def lifespan(app: FastAPI):
         jobs_service=_jobs_service_singleton,
         planning_service=_planning_svc,
     )
+    try:
+        from backend.src.safety.live_safety_coordinator import LiveSafetyCoordinator
+
+        _live_safety = LiveSafetyCoordinator(app.state.runtime)
+        app.state.runtime.live_safety = _live_safety
+        app.state.live_safety = _live_safety
+        await _live_safety.start()
+        _log.info("LiveSafetyCoordinator started")
+    except Exception:
+        _log.exception("LiveSafetyCoordinator startup failed")
     # Wire MissionService and WebSocketHub into JobsService for scheduled dispatch.
     _jobs_service_singleton.set_mission_service(mission_service)
     _jobs_service_singleton.set_websocket_hub(websocket_hub)
@@ -437,6 +447,11 @@ async def lifespan(app: FastAPI):
 
     yield
     # Shutdown
+    try:
+        if getattr(app.state, "live_safety", None):
+            await app.state.live_safety.stop()
+    except Exception:
+        _log.exception("LiveSafetyCoordinator shutdown failed")
     try:
         if getattr(app.state, "power_manager", None):
             await app.state.power_manager.stop()

@@ -10,6 +10,7 @@ def test_tilt_and_obstacle_interlocks_activate_and_reflect_in_state():
     os.environ["SIM_MODE"] = "1"
     mgr = get_safety_trigger_manager()
     # Clear any previous state by creating fresh manager reference
+    mgr._active.clear()
     st = get_robot_state_manager().get_state()
     st.active_interlocks = []
 

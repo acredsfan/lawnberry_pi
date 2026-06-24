@@ -21,6 +21,9 @@
           :pick-for-pin="pickForPin"
           :satellite-display-north-m="settings.satellite_display_north_m ?? 0"
           :satellite-display-east-m="settings.satellite_display_east_m ?? 0"
+          :active-source-id="settings.active_source_id ?? settings.mission_planner?.source_id ?? null"
+          :alignment-profiles="settings.alignment_profiles ?? {}"
+          :custom-sources="settings.custom_sources ?? []"
           @pinPicked="onPinPicked"
         />
       </div>
@@ -321,6 +324,8 @@ import BoundaryEditor from '@/components/map/BoundaryEditor.vue'
 import { useMapStore } from '@/stores/map'
 import { useToastStore } from '@/stores/toast'
 import type { MarkerSchedule } from '@/stores/map'
+import type { MapAlignmentProfile, MapProvider, MapStyle } from '@/utils/mapDisplayTransform'
+import type { CustomImagerySource } from '@/utils/mapProviders'
 
 const api = useApiService()
 const mapStore = useMapStore()
@@ -330,7 +335,24 @@ const isE2ETestMode = computed(() => typeof window !== 'undefined' && (window.lo
 
 // State
 const settingsLoaded = ref(false)
-const settings = ref({
+type MapSettings = {
+  provider: MapProvider
+  google_api_key: string
+  google_billing_warnings: boolean
+  style: MapStyle
+  satellite_display_north_m?: number
+  satellite_display_east_m?: number
+  active_source_id?: string | null
+  alignment_profiles?: Record<string, MapAlignmentProfile>
+  custom_sources?: CustomImagerySource[]
+  mission_planner?: {
+    provider?: MapProvider
+    style?: MapStyle
+    source_id?: string | null
+  } | null
+}
+
+const settings = ref<MapSettings>({
   provider: 'osm',
   google_api_key: '',
   google_billing_warnings: true,

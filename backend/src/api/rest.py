@@ -1569,7 +1569,8 @@ async def control_blade_v2(cmd: dict, request: Request, runtime: RuntimeContext 
         "audit_id": audit_id,
         "result": "accepted" if ok else "rejected",
         "blade_active": desired if ok else _blade_state.get("active", False),
-        "blade_status": "ENABLED" if (ok and desired) else "DISABLED",
+        "blade_status": "ENABLED" if (ok and desired) else ("LOCKED_OUT" if desired else "DISABLED"),
+        "status_reason": outcome.status_reason,
         "timestamp": timestamp.isoformat(),
     }
     persistence.add_audit_log("control.blade", details={"command": cmd, "response": body})

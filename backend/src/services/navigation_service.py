@@ -694,30 +694,43 @@ class NavigationService:
                 except Exception as exc:
                     logger.debug("Mission sensor pump error: %s", exc)
 
-                # Geofence enforcement — check on every tick after sensor update.
-                # This is the only continuous guard against the mower wandering
-                # outside the boundary during normal waypoint navigation.
+                # Continuous geofence enforcement — use the authoritative
+                # operating-area snapshot and the same footprint/uncertainty
+                # semantics as gateway authorization. Center-point containment
+                # alone is insufficient near edges and exclusions.
                 try:
-                    boundaries = self.navigation_state.safety_boundaries
                     pos = self.navigation_state.current_position
-                    if boundaries and pos is not None and not self._global_emergency_active():
-                        outer = boundaries[0]
-                        if len(outer) >= 3:
-                            poly = [(p.latitude, p.longitude) for p in outer]
-                            if not point_in_polygon(pos.latitude, pos.longitude, poly):
-                                logger.critical(
-                                    "GEOFENCE VIOLATION: mower exited boundary at "
-                                    "(%.6f, %.6f) — emergency stop triggered",
-                                    pos.latitude,
-                                    pos.longitude,
-                                )
-                                self._latch_global_emergency_state(
-                                    reason=(
-                                        f"Geofence violation: position "
-                                        f"({pos.latitude:.6f}, {pos.longitude:.6f}) "
-                                        f"is outside safety boundary"
-                                    )
-                                )
+                    if pos is not None and not self._global_emergency_active():
+                        snapshot = self.get_operating_area_snapshot()
+                        snapshot.validate_ready_for_autonomy(
+                            position=pos,
+                            last_gps_fix=self.navigation_state.last_gps_fix,
+                            dead_reckoning_active=self.navigation_state.dead_reckoning_active,
+                            max_fix_age_s=float(
+                                getattr(self, "autonomous_max_gps_fix_age_s", 2.0)
+                            ),
+                            max_accuracy_m=float(
+                                getattr(self, "autonomous_max_gps_accuracy_m", 0.25)
+                            ),
+                            footprint_radius_m=float(
+                                getattr(self, "mower_footprint_radius_m", 0.35)
+                            ),
+                            fixed_allowance_m=float(
+                                getattr(self, "geofence_safety_allowance_m", 0.10)
+                            ),
+                        )
+                        self.navigation_state.boundary_clearance_m = (
+                            snapshot.distance_to_boundary(pos) if snapshot.valid else None
+                        )
+                except OperatingAreaError as exc:
+                    logger.critical(
+                        "GEOFENCE VIOLATION: %s (%s) — emergency stop triggered",
+                        exc.reason_code,
+                        exc.detail,
+                    )
+                    self._latch_global_emergency_state(
+                        reason=f"{exc.reason_code}: {exc.detail}"
+                    )
                 except Exception as exc:
                     logger.warning("Geofence check error in sensor pump: %s", exc)
 

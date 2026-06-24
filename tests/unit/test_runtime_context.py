@@ -55,6 +55,7 @@ def test_runtime_context_holds_all_required_fields():
         "persistence_mode",
         "jobs_service",
         "planning_service",
+        "live_safety",
     }
     actual = {f.name for f in fields(RuntimeContext)}
     assert actual == expected, f"field set drift: extra={actual-expected}, missing={expected-actual}"

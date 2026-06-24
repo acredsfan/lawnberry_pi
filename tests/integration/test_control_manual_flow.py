@@ -27,7 +27,6 @@ def _drive_payload(linear: float, angular: float, duration_ms: int = 500) -> dic
 @pytest.fixture(autouse=True)
 def _override_runtime_for_control_routes():
     from backend.src.control.command_gateway import MotorCommandGateway
-    from backend.src.core import globals as core_globals_inner
 
     _gw = MotorCommandGateway(
         safety_state=core_globals._safety_state,

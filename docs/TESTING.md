@@ -100,6 +100,37 @@ python -m pytest \
 python -m py_compile robohat-rp2040-code/code.py
 ```
 
+## 3b) Live safety, canonical pose, and map alignment slice
+
+For changes that touch blade-off holds, live sensor safety, canonical GPS antenna/body-center pose,
+operating-area authorization, stationary RTK averaging, or source-specific map alignment:
+
+```bash
+tmpdir=$(mktemp -d)
+SIM_MODE=1 \
+LAWN_DATA_DIR="$tmpdir" \
+DB_PATH="$tmpdir/lawnberry.db" \
+LAWN_SETTINGS_DIR="$tmpdir/config" \
+python -m pytest \
+  tests/unit/test_mission_executor.py \
+  tests/unit/test_live_safety_coordinator.py \
+  tests/unit/test_localization_service.py \
+  tests/unit/test_telemetry_service.py \
+  tests/unit/test_operating_area_service.py \
+  tests/unit/test_stationary_rtk_averaging.py \
+  tests/unit/test_autonomy_readiness_service.py \
+  tests/unit/test_command_gateway.py \
+  tests/integration/test_satellite_settings_api.py \
+  -x -q -m "not hardware"
+
+cd frontend
+npm run type-check
+npm test -- --run frontend/tests/unit/mapDisplayTransform.spec.ts frontend/tests/unit/mapProviders.spec.ts frontend/tests/unit/composables/useMowerTelemetry.spec.ts
+```
+
+This slice proves software behavior only. Hardware validation still needs the staged blade-disabled,
+wheels-raised, outdoor blade-off, then limited blade-on sequence before any field-readiness claim.
+
 Update one of the following to satisfy the guard:
 - `docs/**`
 - `spec/**`

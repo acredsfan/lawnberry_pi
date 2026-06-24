@@ -269,6 +269,32 @@ class MissionExecutor:
             logger.warning("Blade command failed for %s: %s", reason, exc)
             return False
 
+    async def _trigger_emergency(self, *, reason: str) -> None:
+        trigger = getattr(self._gw, "trigger_emergency", None)
+        if not callable(trigger):
+            return
+        try:
+            from ..control.commands import EmergencyTrigger
+
+            await trigger(EmergencyTrigger(reason=reason, source="mission"))
+        except Exception as exc:
+            logger.warning("Emergency trigger failed for %s: %s", reason, exc)
+
+    async def _enter_safety_hold(
+        self,
+        *,
+        reason: str,
+        raise_on_unconfirmed_blade_off: bool = True,
+    ) -> bool:
+        """Stop drive and command blade off for any non-running safety hold."""
+        stop_confirmed = await self._deliver_stop_command(reason=reason)
+        blade_off_confirmed = await self._set_blade(False, reason=reason)
+        if not blade_off_confirmed:
+            await self._trigger_emergency(reason=f"blade_off_unconfirmed:{reason}")
+            if raise_on_unconfirmed_blade_off:
+                raise RuntimeError(f"Blade-off command unconfirmed during {reason}")
+        return bool(stop_confirmed and blade_off_confirmed)
+
     # ------------------------------------------------------------------
     # Waypoint pursuit loop (Task 6)
     # ------------------------------------------------------------------
@@ -401,45 +427,45 @@ class MissionExecutor:
             status = mission_service.mission_statuses.get(mission.id)
             if not status:
                 logger.info("Waypoint navigation interrupted: mission status missing.")
-                await self._deliver_stop_command(reason="missing mission status")
+                await self._enter_safety_hold(reason="missing mission status")
                 return False
 
             if status.status == "paused" or (
                 hasattr(status.status, "value") and status.status.value == "paused"
             ):
-                await self._deliver_stop_command(reason="mission pause hold")
-                await self._set_blade(False, reason="mission pause hold")
+                await self._enter_safety_hold(reason="mission pause hold")
                 await asyncio.sleep(0.1)
                 continue
 
             _status_val = status.status.value if hasattr(status.status, "value") else status.status
             if _status_val != "running":
                 logger.info("Waypoint navigation interrupted: status=%s", _status_val)
-                await self._deliver_stop_command(reason="mission status change")
-                await self._set_blade(False, reason="mission status change")
+                await self._enter_safety_hold(reason="mission status change")
                 return False
 
             if self._gw.is_emergency_active():
                 logger.critical("Waypoint navigation blocked by active emergency stop latch")
-                await self._deliver_stop_command(reason="global emergency hold")
-                await self._set_blade(False, reason="global emergency hold")
+                await self._enter_safety_hold(reason="global emergency hold")
                 return False
 
             current_position = self._loc.current_position
             if current_position is None:
                 heading_wait_start = None
+                await self._enter_safety_hold(reason="missing position hold")
                 if (
                     time.monotonic() - verification_wait_start
                 ) >= self.position_verification_timeout_seconds:
-                    await self._deliver_stop_command(reason="position acquisition timeout")
+                    await self._enter_safety_hold(reason="position acquisition timeout")
                     raise RuntimeError("Position acquisition timeout while navigating waypoint")
                 await asyncio.sleep(0.5)
                 continue
 
             _confidence = self._position_confidence()
-            if _confidence == "none":
+            if _confidence != "full":
                 heading_wait_start = None
-                await self._deliver_stop_command(reason="position verification hold")
+                await self._enter_safety_hold(
+                    reason=f"position verification hold:{_confidence}"
+                )
                 _now_mono = time.monotonic()
                 if _pos_hold_start is None:
                     _pos_hold_start = _now_mono
@@ -453,6 +479,7 @@ class MissionExecutor:
                 if (
                     time.monotonic() - verification_wait_start
                 ) >= self.position_verification_timeout_seconds:
+                    await self._enter_safety_hold(reason="position verification timeout")
                     raise RuntimeError("Position verification timeout while navigating waypoint")
                 await asyncio.sleep(0.2)
                 continue
@@ -484,6 +511,9 @@ class MissionExecutor:
                 stop_confirmed = await self._deliver_stop_command(reason="waypoint arrival")
                 if not stop_confirmed:
                     raise RuntimeError("Failed to stop safely at waypoint")
+                if not await self._set_blade(False, reason="waypoint arrival"):
+                    await self._trigger_emergency(reason="blade_off_unconfirmed:waypoint arrival")
+                    raise RuntimeError("Failed to confirm blade off at waypoint")
                 return True
 
             # --- Stanley path anchor: capture leg-start on first valid GPS tick ---
@@ -513,9 +543,14 @@ class MissionExecutor:
                     stop_confirmed = await self._deliver_stop_command(reason="waypoint overshoot arrival")
                     if not stop_confirmed:
                         raise RuntimeError("Failed to stop safely after waypoint overshoot")
+                    if not await self._set_blade(False, reason="waypoint overshoot arrival"):
+                        await self._trigger_emergency(
+                            reason="blade_off_unconfirmed:waypoint overshoot arrival"
+                        )
+                        raise RuntimeError("Failed to confirm blade off after waypoint overshoot")
                     return True
                 if _along_track_m > _segment_len_m + _effective_tol:
-                    await self._deliver_stop_command(reason="waypoint overshoot excessive CTE")
+                    await self._enter_safety_hold(reason="waypoint overshoot excessive CTE")
                     raise RuntimeError(
                         "Waypoint overshoot with excessive cross-track error; revalidation required"
                     )
@@ -545,7 +580,7 @@ class MissionExecutor:
                 if (
                     time.monotonic() - heading_wait_start
                 ) >= self.position_verification_timeout_seconds:
-                    await self._deliver_stop_command(reason="heading unavailable — mission aborted")
+                    await self._enter_safety_hold(reason="heading unavailable — mission aborted")
                     raise RuntimeError(
                         "Heading unavailable while navigating waypoint; mission aborted"
                     )
@@ -754,7 +789,7 @@ class MissionExecutor:
                                     _gps_moved_m,
                                     _recheck_s,
                                 )
-                                await self._deliver_stop_command(
+                                await self._enter_safety_hold(
                                     reason="GPS position stall after escape"
                                 )
                                 raise RuntimeError(
@@ -794,7 +829,9 @@ class MissionExecutor:
                             "for %d consecutive ticks - possible wire snap/cable disconnect!",
                             _max_cmd, _encoder_drop_ticks
                         )
-                        await self._deliver_stop_command(reason="encoder continuity fault / wire snap")
+                        await self._enter_safety_hold(
+                            reason="encoder continuity fault / wire snap"
+                        )
                         raise RuntimeError("encoder continuity fault / wire snap")
                 else:
                     _encoder_drop_ticks = 0
@@ -823,7 +860,7 @@ class MissionExecutor:
                             "Motor stall: RPM≈0 for %.1f s with cmd=%.2f — aborting",
                             _stall_elapsed, _max_cmd,
                         )
-                        await self._deliver_stop_command(reason="motor stall abort")
+                        await self._enter_safety_hold(reason="motor stall abort")
                         raise RuntimeError(
                             "Motor stall: encoder RPM ~0 with active command"
                         )
@@ -1004,7 +1041,7 @@ class MissionExecutor:
                                 "%.1f s (err=%.1f°, hdg=%.1f°) — stopping mission",
                                 _elapsed, err, current_heading,
                             )
-                            await self._deliver_stop_command(reason="physically stuck")
+                            await self._enter_safety_hold(reason="physically stuck")
                             raise RuntimeError(
                                 "Mower appears physically stuck: heading did not change "
                                 "after staged escape attempts (A→B→C→D)"
@@ -1080,7 +1117,7 @@ class MissionExecutor:
                             err,
                             current_heading,
                         )
-                        await self._deliver_stop_command(reason="tank-turn timeout")
+                        await self._enter_safety_hold(reason="tank-turn timeout")
                         raise RuntimeError(
                             f"Tank-turn timed out after {_TANK_TURN_TIMEOUT_S:.0f} s "
                             "without heading convergence"
@@ -1131,7 +1168,7 @@ class MissionExecutor:
                         _s_dead_band,
                     )
                     if abs(_cte) > self.max_operational_cross_track_error_m:
-                        await self._deliver_stop_command(reason="cross-track error limit")
+                        await self._enter_safety_hold(reason="cross-track error limit")
                         raise RuntimeError(
                             "Maximum operational cross-track error exceeded; revalidation required"
                         )
@@ -1229,7 +1266,7 @@ class MissionExecutor:
                     pass  # recovery-wait is best-effort; original failure path applies
 
                 if _motor_last_exc is not None:
-                    await self._deliver_stop_command(reason="navigation command failure")
+                    await self._enter_safety_hold(reason="navigation command failure")
                     raise RuntimeError(
                         "Failed to deliver navigation motor command"
                     ) from _motor_last_exc
@@ -1333,7 +1370,7 @@ class MissionExecutor:
                 )
 
                 if _status_val == "paused":
-                    await self._deliver_stop_command(reason="mission pause hold")
+                    await self._enter_safety_hold(reason="mission pause hold")
                     await asyncio.sleep(0.1)
                     continue
 
@@ -1341,11 +1378,12 @@ class MissionExecutor:
                     logger.warning(
                         "Mission %s interrupted: status=%s", mission.id, _status_val
                     )
+                    await self._enter_safety_hold(reason="mission status change")
                     return
 
                 current_wp = mission.waypoints[self.current_waypoint_index]
                 if not await self._set_blade(bool(current_wp.blade_on), reason="waypoint blade intent"):
-                    await self._deliver_stop_command(reason="blade command failure")
+                    await self._enter_safety_hold(reason="blade command failure")
                     raise RuntimeError("Failed to deliver mission blade command")
                 waypoint_reached = await self.go_to_waypoint(
                     mission, current_wp, mission_service,
@@ -1376,7 +1414,10 @@ class MissionExecutor:
         except Exception as exc:
             self._failure_detail = str(exc)
             await self._set_blade(False, reason="mission failure")
-            await self._deliver_stop_command(reason="mission failure")
+            await self._enter_safety_hold(
+                reason="mission failure",
+                raise_on_unconfirmed_blade_off=False,
+            )
             raise
         finally:
             await self._set_blade(False, reason="mission end")

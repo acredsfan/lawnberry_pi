@@ -176,6 +176,13 @@ watch the mission status contract instead of assuming `running` alone means the 
 - Nonzero mission drive commands pass through `MotorCommandGateway`, which checks fresh RTK-grade localization, dead
   reckoning state, current footprint containment, ToF obstacle state, and a short predictive swept-motion envelope before
   dispatching motor output.
+- A dedicated live safety coordinator runs alongside mission execution. Its fast loop reads only IMU and ToF safety
+  samples so tilt and near-field obstacle stops do not wait for GPS, Victron/power, environmental, camera, persistence,
+  HTTP, or WebSocket work. Slow battery/temperature samples are evaluated separately and still fail closed on critical
+  thresholds.
+- Any localization, GPS freshness, pause, abort, geofence, obstacle, tilt, critical battery, thermal, or mission exception
+  hold commands zero drive and blade-off through the command gateway. If blade-off acknowledgement is not confirmed, the
+  mission path escalates through the emergency latch.
 - Mission-start heading alignment is an explicit bootstrap step: the mower drives straight, polls the shared sensor manager,
   derives GPS course-over-ground from receiver course or actual coordinate deltas, then snaps the relative BNO085 yaw to
   that GPS movement vector before trusting IMU heading for waypoint turns.
@@ -194,6 +201,8 @@ watch the mission status contract instead of assuming `running` alone means the 
   motion if PWM renewal stops. Firmware also turns blade output off if blade command renewal stops.
 - `GET /api/v2/control/status` reflects the navigation mode/path state, while
   `GET /api/v2/missions/{mission_id}/status` is the authoritative mission lifecycle/detail surface.
+- `GET /api/v2/autonomy/readiness` also checks that the live safety loop is running and has fresh fast IMU/ToF samples
+  before reporting blade-enabled autonomy ready.
 - Legacy `POST /api/v2/control/start` returns `409` with `MISSION_EXECUTOR_REQUIRED`; use
   `POST /api/v2/missions/{mission_id}/start` so a real mission executor is created.
 
@@ -293,9 +302,18 @@ For best orientation accuracy, calibrate the IMU after installation:
   center, set `gps.antenna_offset_forward_m` and `gps.antenna_offset_right_m` in
   `config/hardware.yaml`. Use meters; positive is forward/right from the mower point to the antenna.
   For an antenna 1.5 ft behind the desired mower point, use `gps.antenna_offset_forward_m: -0.46`.
-- If only the satellite imagery is shifted, use the display-only
-  `gps.map_display_offset_north_m` / `gps.map_display_offset_east_m` values instead; those do not
-  change navigation.
+- Localization owns the canonical pose: `body_center` is published only when the antenna-to-body correction is either not
+  configured or can be applied with a verified world-frame heading. When heading is unavailable, telemetry exposes
+  `antenna_position` with `antenna_correction_state="pending_heading"` instead of fabricating a mower-center coordinate.
+- If only satellite imagery is shifted, use the display-only map alignment profile for the active source. Legacy
+  `satellite_display_north_m` / `satellite_display_east_m` values are migrated into `legacy_satellite` and, when
+  unambiguous, the current imagery source; they do not change navigation coordinates.
+- Custom orthophoto/orthomosaic sources can be configured under `/api/v2/settings/maps` as `custom_sources` with an
+  `xyz` or ArcGIS tile URL. Select them via `active_source_id` / `mission_planner.source_id` such as
+  `custom:local_orthophoto`; each source keeps its own alignment profile.
+- Stationary RTK reference averaging is available at `POST /api/v2/sensors/gps/stationary-average`. It accepts only fresh,
+  uncached, stationary RTK-fixed antenna samples, rejects spatial outliers, and returns an averaged reference measurement
+  without writing any hidden GPS offset.
 - NTRIP corrections:
   - If the rover already receives corrections directly (configured in u-center), no further changes are needed on the Pi.
   - When letting the Pi forward RTCM data, ensure `gps_ntrip_enabled: true` in `config/hardware.yaml` and update the `.env` file with the required `NTRIP_*` caster settings (host, mountpoint, credentials, serial device).

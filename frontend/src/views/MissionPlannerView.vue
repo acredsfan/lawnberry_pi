@@ -95,6 +95,10 @@ const adaptedMapSettings = computed(() => {
     [GMAP_FIELD]: s.googleMapsKey,
     satellite_display_north_m: s.satelliteDisplayNorthM,
     satellite_display_east_m: s.satelliteDisplayEastM,
+    active_source_id: s.activeSourceId,
+    alignment_profiles: s.alignmentProfiles,
+    custom_sources: s.customSources,
+    mission_planner: s.mission_planner,
   }
 })
 
@@ -200,16 +204,38 @@ function clearAllWaypoints() {
 
 function undoLastWaypoint() { missionStore.removeLastWaypoint() }
 
-async function handleCalibrationSet(northM: number, eastM: number) {
+async function handleCalibrationSet(northM: number, eastM: number, sourceId?: string) {
   const prev = mapDisplaySettings.value
-  mapDisplaySettings.value = { ...prev, satelliteDisplayNorthM: northM, satelliteDisplayEastM: eastM }
+  const profileSourceId = sourceId || prev.mission_planner?.source_id || prev.activeSourceId || 'legacy_satellite'
+  const nextProfiles = {
+    ...prev.alignmentProfiles,
+    [profileSourceId]: {
+      source_id: profileSourceId,
+      provider: profileSourceId.split(':')[0] || prev.provider,
+      layer: profileSourceId.split(':').slice(1).join(':') || prev.style,
+      alignment: {
+        north_m: northM,
+        east_m: eastM,
+        method: 'manual',
+        control_point_count: 1,
+        created_at: new Date().toISOString(),
+      },
+    },
+  }
+  mapDisplaySettings.value = {
+    ...prev,
+    satelliteDisplayNorthM: northM,
+    satelliteDisplayEastM: eastM,
+    alignmentProfiles: nextProfiles,
+  }
   try {
     const api = useApiService()
     await api.put('/api/v2/settings/maps', {
       satellite_display_north_m: northM,
       satellite_display_east_m: eastM,
+      alignment_profiles: nextProfiles,
     })
-    toast.show('Satellite imagery aligned', 'success', 3000)
+    toast.show('Imagery alignment saved for this source', 'success', 3000)
   } catch {
     mapDisplaySettings.value = prev
     toast.show('Failed to save imagery alignment', 'error', 4000)

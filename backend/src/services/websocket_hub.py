@@ -245,8 +245,13 @@ class WebSocketHub:
                 "telemetry.navigation",
                 {
                     "position": telemetry_data["position"],
+                    "position_role": telemetry_data.get("position_role"),
+                    "raw_position": telemetry_data.get("raw_position"),
+                    "position_correction": telemetry_data.get("position_correction"),
+                    "canonical_pose": telemetry_data.get("canonical_pose"),
                     "velocity": telemetry_data.get("velocity"),
                     "nav_heading": telemetry_data.get("nav_heading"),
+                    "nav_heading_source": telemetry_data.get("nav_heading_source"),
                     "source": telemetry_data.get("source"),
                 },
             )
