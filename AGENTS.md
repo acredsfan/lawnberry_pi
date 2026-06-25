@@ -9,6 +9,8 @@ Use the semble MCP tools (`mcp__semble__search`, `mcp__semble__find_related`) fo
 - For codebase discovery, use **Semble first** (`semble-search` / `semble-find_related`) before fallback tools.
 - For runtime, service, hardware, or on-device diagnostics, use **Pi-control first** (`pi-control` tools) before generic shell probing.
 - At task start, use **ForgeMind session/context tools** (`forgemind-session_start`, then context/memory tools as needed) for cross-turn continuity.
+- Treat **ForgeMind as the shared project memory and history source of truth** for agent work. Before changing code or runtime state, query ForgeMind for relevant prior work, known failures, discoveries, corrected errors, and open follow-ups. After meaningful progress, fixes, root-cause findings, failed approaches, config changes, or validation results, write a concise ForgeMind memory/session update so later agents do not repeat mistakes, undo previous work, or lose operational context.
+- If ForgeMind is unavailable, record that as a tooling blocker in the task notes/final handoff, use the best local fallback, and do not present the fallback memory as complete project history.
 - Do not claim a fix until evidence is captured from commands/tool calls that directly prove the target behavior changed.
 - For PRs that touch `backend/`, `frontend/`, or `systemd/`, complete the **Agent Evidence** checklist in the PR template; CI enforces this.
 

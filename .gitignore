@@ -256,3 +256,4 @@ frontend/config/secrets.json
 boundary_plan.md
 SPEC.md
 
+docs/AGENT_TASK_REMAINING_AUTONOMY_SAFETY_AND_MAP_ALIGNMENT.md

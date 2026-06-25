@@ -46,6 +46,7 @@ tail -f /home/pi/lawnberry/backend/backend.log
 - Use **Semble** (`semble-search`, `semble-find_related`) as the first choice for code discovery.
 - Use **Pi-control** tools first for runtime/service/hardware state checks.
 - Use **ForgeMind** session/context tools at task start when available.
+- Treat **ForgeMind as the shared source of truth for project memory/history**: query it before changing code or runtime state, and write back concise updates for meaningful fixes, discoveries, failed approaches, corrected errors, config changes, and validation results. If ForgeMind is unavailable, state that explicitly and avoid treating local fallback notes as complete history.
 - Before final handoff, include direct evidence from tool/command output that proves the reported behavior changed.
 - For changes under `backend/`, `frontend/`, or `systemd/`, complete the PR template **Agent Evidence** checklist; CI rejects PRs missing it.
 
