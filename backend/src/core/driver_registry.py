@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import os
 
-import yaml
-
 from backend.src.core.simulation import is_simulation_mode
+from backend.src.models.hardware_config import HardwareConfig
 
 
 def _make_mock(name: str) -> object:
@@ -26,37 +25,47 @@ class DriverRegistry:
     - Maintains internal mapping to allow mark_failed() and restart().
     """
 
-    def __init__(self, config_path: str | None = None):
+    def __init__(
+        self,
+        config_path: str | None = None,
+        *,
+        hardware_config: HardwareConfig | None = None,
+        config_loader: object | None = None,
+    ):
         self.config_path = config_path or os.path.join(os.getcwd(), "config", "hardware.yaml")
         self._drivers: dict[str, object] = {}
-        self._config_cache: dict[str, object] = {}
+        self._config_cache: HardwareConfig | None = hardware_config
+        self._config_loader = config_loader
 
-    def _load_config(self) -> dict[str, object]:
-        try:
-            with open(self.config_path, encoding="utf-8") as f:
-                cfg = yaml.safe_load(f) or {}
-        except FileNotFoundError:
-            cfg = {}
+    def _load_config(self) -> HardwareConfig:
+        if self._config_cache is not None:
+            return self._config_cache
+        if self._config_loader is not None:
+            cfg, _limits = self._config_loader.get()
+        else:
+            from backend.src.core.config_loader import ConfigLoader
+
+            cfg, _limits = ConfigLoader(hardware_path=self.config_path).get()
         self._config_cache = cfg
         return cfg
 
-    def _instantiate(self, name: str, cfg: dict[str, object] | None = None) -> object | None:
+    def _instantiate(self, name: str, cfg: HardwareConfig | None = None) -> object | None:
         if is_simulation_mode():
             return _make_mock(name)
 
         # Minimal instantiation logic from config presence
         cfg = cfg or (self._config_cache or self._load_config())
-        if name == "gps" and (cfg.get("gps", {}) or {}).get("type"):
+        if name == "gps" and cfg.gps_type is not None:
             return object()
-        if name == "imu" and (cfg.get("imu", {}) or {}).get("type"):
+        if name == "imu" and cfg.imu_type is not None:
             return object()
         if name in ("tof_left", "tof_right"):
-            tof = (cfg.get("sensors", {}) or {}).get("tof", [])
+            tof = cfg.tof_sensors
             if (name == "tof_left" and "left" in tof) or (name == "tof_right" and "right" in tof):
                 return object()
-        if name == "power" and (cfg.get("power_monitor", {}) or {}).get("type"):
+        if name == "power" and (cfg.power_monitor or cfg.victron_config is not None):
             return object()
-        if name == "motor" and (cfg.get("motor_controller", {}) or {}).get("type"):
+        if name == "motor" and cfg.motor_controller is not None:
             return object()
         return None
 

@@ -22,6 +22,7 @@ Storage isolation note:
 
 - Tests now run with isolated runtime paths (`DB_PATH`, `LAWN_DATA_DIR`, and `LAWN_SETTINGS_DIR`)
   so they do not mutate live `data/` or `config/` state on the Pi.
+- `SIM_MODE=1` tests do not require `config/hardware.yaml`; hardware-mode startup does.
 
 - Contract tests validate the FastAPI REST + WebSocket API.
 - Integration tests include backups/migration and more.
@@ -76,7 +77,33 @@ CI will fail if code changes without corresponding documentation or journal upda
 bash scripts/check_docs_drift.sh
 ```
 
-## 3a) Autonomous readiness regression slice
+## 3a) Hardware configuration contract slice
+
+For changes that touch `ConfigLoader`, hardware templates, setup, startup reporting, health, RoboHAT config consumption,
+or runtime redaction:
+
+```bash
+tmpdir=$(mktemp -d)
+SIM_MODE=1 \
+LAWN_DATA_DIR="$tmpdir/data" \
+DB_PATH="$tmpdir/data/lawnberry.db" \
+LAWN_SETTINGS_DIR="$tmpdir/config" \
+python -m pytest \
+  tests/unit/test_config_loader.py \
+  tests/unit/test_startup_config_report.py \
+  tests/unit/test_hardware_config_manager.py \
+  tests/unit/test_platform_pin_registry.py \
+  tests/contract/test_driver_registry.py \
+  -q -m "not hardware"
+
+bash -n scripts/setup.sh
+uv run python scripts/manage_hardware_config.py validate
+```
+
+Use temporary roots in tests for migration and ensure commands. Do not touch the real node `config/hardware.yaml` from
+automated tests.
+
+## 3b) Autonomous readiness regression slice
 
 For platform/pin validation, blade controller safety, GPS freshness, dynamic obstacle clearance,
 command leases, and scheduled mission due detection:
@@ -100,7 +127,7 @@ python -m pytest \
 python -m py_compile robohat-rp2040-code/code.py
 ```
 
-## 3b) Live safety, canonical pose, and map alignment slice
+## 3c) Live safety, canonical pose, and map alignment slice
 
 For changes that touch blade-off holds, live sensor safety, canonical GPS antenna/body-center pose,
 operating-area authorization, stationary RTK averaging, or source-specific map alignment:

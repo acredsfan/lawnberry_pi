@@ -19,6 +19,17 @@ def _robohat_health_provider() -> dict | None:
 health_service = HealthService(robohat_provider=_robohat_health_provider)
 
 
+def _service_for_request(request: Request = None) -> HealthService:
+    runtime = getattr(request.app.state, "runtime", None) if request is not None else None
+    if runtime is None:
+        return health_service
+    return HealthService(
+        robohat_provider=_robohat_health_provider,
+        hardware_config=getattr(runtime, "hardware_config", None),
+        config_loader=getattr(runtime, "config_loader", None),
+    )
+
+
 def _with_compatibility_aliases(report: dict) -> dict:
     subsystems = report.get("subsystems") if isinstance(report.get("subsystems"), dict) else {}
     compatibility_status = report.get("overall_status") or "healthy"
@@ -51,20 +62,22 @@ def health_root() -> dict:
 
 
 @router.get("/health")
-def health_root_route(request: Request) -> dict:
+def health_root_route(request: Request = None) -> dict:
     """Return aggregated health status for platform monitoring."""
 
-    report = _with_compatibility_aliases(health_root())
-    startup_report = getattr(request.app.state, "startup_config_report", None)
+    report = _with_compatibility_aliases(_service_for_request(request).evaluate())
+    startup_report = (
+        getattr(request.app.state, "startup_config_report", None) if request is not None else None
+    )
     report["startup_config_report"] = startup_report
     return report
 
 
 @router.get("/api/v2/health")
-def health_api_v2() -> dict:
+def health_api_v2(request: Request = None) -> dict:
     """Expose health report under the versioned API namespace."""
 
-    return health_service.evaluate()
+    return _service_for_request(request).evaluate()
 
 
 @router.get("/api/v2/health/liveness")
@@ -75,10 +88,10 @@ def health_liveness() -> dict:
 
 
 @router.get("/api/v2/health/readiness")
-def health_readiness() -> dict:
+def health_readiness(request: Request = None) -> dict:
     """Readiness probe including subsystem rollup."""
 
-    report = health_service.evaluate()
+    report = _service_for_request(request).evaluate()
     return {
         "status": report.get("overall_status"),
         "timestamp": report.get("timestamp"),

@@ -63,6 +63,8 @@ tail -f /home/pi/lawnberry/backend/backend.log
   - `GET /api/v2/settings/system`
 - **Do not leak secrets in output.**
   Never print raw `google_api_key`, tokens, or credentials from config/API responses; report presence/length/redacted values only.
+- **Hardware config has one runtime source.**
+  `spec/hardware.yaml` is the tracked supported-hardware specification. `config/hardware.pi5.example.yaml` and `config/hardware.pi4.example.yaml` are tracked complete templates. `config/hardware.yaml` is the only ignored runtime hardware config; never stage it, never load `hardware.local.yaml`, and never use `LAWN_HARDWARE_LOCAL_PATH`. Use `scripts/manage_hardware_config.py ensure|validate|migrate-legacy` for setup and migration.
 - **Avoid tool thrash.**
   After 2 consecutive failures with the same discovery tool, switch strategy immediately (Semble ↔ git grep/view; pi-control ↔ bash) instead of repeating failing probes.
 - **Avoid repeated broad pytest loops.**
@@ -291,7 +293,7 @@ corrupts the BNO085 sensor state and requires a power cycle.
   This is **opposite** to compass convention (CW = increasing bearing).
 - The correct heading formula is: `adjusted_yaw = (-raw_yaw + imu_yaw_offset_degrees) % 360.0`
   (note the **negation** of raw_yaw — without it, CW turns decrease heading and navigation diverges)
-- `imu_yaw_offset_degrees: 0.0` in `config/hardware.yaml` — the IMU is forward-facing and does
+- `imu_yaw_offset_degrees: 0.0` in the ignored runtime `config/hardware.yaml` — the IMU is forward-facing and does
   not require mounting offset. The formula `(-raw_yaw + offset) % 360` alone handles the ZYX→compass
   convention conversion. **Do not change this value without understanding the heading oscillation root
   cause.**

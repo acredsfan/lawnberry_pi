@@ -192,6 +192,7 @@ class TelemetryService:
             power_cfg = None
             battery_cfg = None
             imu_cfg = None
+            environmental_cfg = None
             if hw_cfg:
                 try:
                     tc = getattr(hw_cfg, "tof_config", None)
@@ -209,6 +210,10 @@ class TelemetryService:
 
                     battery_cfg = getattr(hw_cfg, "battery_config", None)
 
+                    bme280 = getattr(hw_cfg, "bme280_config", None)
+                    if bme280:
+                        environmental_cfg = bme280.model_dump(exclude_none=True)
+
                     # IMU port from hardware config (overrides env var BNO085_PORT if set)
                     imu_port = getattr(hw_cfg, "imu_port", None)
                     if imu_port:
@@ -222,6 +227,7 @@ class TelemetryService:
                 power_config=power_cfg,
                 battery_config=battery_cfg,
                 imu_config=imu_cfg,
+                environmental_config=environmental_cfg,
                 gps_usb_device=gps_usb_device,
             )
             await manager.initialize()

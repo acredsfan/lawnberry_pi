@@ -260,7 +260,7 @@ Recommended examples:
 
 - `config/hardware.pi5.example.yaml`
 - `config/hardware.pi4.example.yaml`
-- or equivalent documented `hardware.local.yaml` overrides.
+- historical note: `hardware.local.yaml` overrides were supported when this plan was written; current runtime uses only ignored `config/hardware.yaml`.
 
 ### Pin registry and validation
 

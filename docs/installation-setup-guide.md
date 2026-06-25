@@ -191,13 +191,23 @@ Validate HTTPS/ACME locally (no real cert required):
 
 ### 1. Initial System Config
 ```bash
-# Review tracked configuration first
-sed -n '1,220p' config/hardware.yaml
-sed -n '1,220p' config/default.example.json
+# Create the ignored runtime hardware config from the detected Pi profile.
+# Use --profile pi5 or --profile pi4 if auto-detection is unavailable.
+uv run python scripts/manage_hardware_config.py ensure --profile auto
+uv run python scripts/manage_hardware_config.py validate
 
 # Create local runtime settings file (gitignored)
 cp -n config/default.example.json config/default.json
 ```
+
+`config/hardware.yaml` is the single user-owned runtime hardware file. It may contain node-specific values and secrets,
+so do not print it in logs or commit it. If an older install has `config/hardware.local.yaml`, migrate it once:
+
+```bash
+uv run python scripts/manage_hardware_config.py migrate-legacy --profile auto
+```
+
+Normal setup and update operations preserve an existing `config/hardware.yaml` byte-for-byte.
 
 ### 2. Test Installation
 ```bash

@@ -26,6 +26,9 @@ SENSITIVE_KEYS: set[str] = {
     "refresh_token",
     "api_key",
     "apikey",
+    "encryption_key",
+    "device_key",
+    "credentials",
     "auth",
     "authorization",
 }

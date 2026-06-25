@@ -70,6 +70,8 @@ BLOCKED_EXACT=(
   "test_error_handling.html"
   "config/secrets.json"
   "config/maps_settings.json"
+  "config/hardware.yaml"
+  "config/hardware.local.yaml"
 )
 
 # ---------------------------------------------------------------------------
@@ -79,7 +81,7 @@ BLOCKED_EXACT=(
 is_already_ignored() {
   local file="$1"
   # Use git check-ignore to see if a rule already covers this path.
-  git check-ignore -q "$file" 2>/dev/null
+  git check-ignore --no-index -q "$file" 2>/dev/null
 }
 
 add_to_gitignore() {
@@ -179,7 +181,9 @@ for file in "${STAGED[@]}"; do
 
   if [[ $violated -eq 1 ]]; then
     echo -e "${RED}✗ ${violation_label}:${NC} ${file}"
-    add_to_gitignore "$gitignore_entry" "$violation_label"
+    if ! is_already_ignored "$gitignore_entry"; then
+      add_to_gitignore "$gitignore_entry" "$violation_label"
+    fi
     unstage_file "$file"
     VIOLATIONS=$((VIOLATIONS + 1))
   fi

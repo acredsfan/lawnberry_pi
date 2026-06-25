@@ -66,7 +66,7 @@ def test_merge_prefers_victron_load_when_enabled():
 def test_convert_frame_handles_ble_payload():
     frame = {
         "name": "SmartSolar",
-        "address": "EC:1A:A8:DD:99:C2",
+        "address": "placeholder-controller",
         "payload": {
             "battery_voltage": 13.5,
             "battery_charging_current": 0.7,

@@ -47,6 +47,8 @@ DEFAULT_SENSITIVE_KEYS: tuple[str, ...] = (
     "secret",
     "api_key",
     "apikey",
+    "encryption_key",
+    "device_key",
     "access_key",
     "refresh_token",
 )
@@ -58,9 +60,11 @@ DEFAULT_REDACTION_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(Authorization:\s*Bearer)\s+[^\s]+", re.IGNORECASE),
     re.compile(r"(token[:=]\s*)[^\s,;]+", re.IGNORECASE),
     re.compile(r"(api[_-]?key[:=]\s*)[^\s,;]+", re.IGNORECASE),
+    re.compile(r"(encryption[_-]?key[:=]\s*)[^\s,;]+", re.IGNORECASE),
+    re.compile(r"(device[_-]?key[:=]\s*)[^\s,;]+", re.IGNORECASE),
+    re.compile(r"(credential[s]?[:=]\s*)[^\s,;]+", re.IGNORECASE),
     re.compile(r"(password[:=]\s*)[^\s,;]+", re.IGNORECASE),
 )
-
 
 def _as_pattern(pattern: str | re.Pattern[str]) -> re.Pattern[str]:
     if isinstance(pattern, re.Pattern):
@@ -92,6 +96,8 @@ class PrivacyFilter(logging.Filter):
         for key in list(record.__dict__.keys()):
             if key.lower() in self._sensitive_keys:
                 setattr(record, key, REDACTED)
+            elif key not in _STD_KEYS:
+                setattr(record, key, self._redact_extra_value(record.__dict__[key]))
 
         # Redact message content
         if isinstance(record.msg, str):
@@ -101,6 +107,22 @@ class PrivacyFilter(logging.Filter):
             record.msg = msg
 
         return True
+
+    def _redact_extra_value(self, value):
+        if isinstance(value, dict):
+            return {
+                key: (
+                    REDACTED
+                    if key.lower() in self._sensitive_keys
+                    else self._redact_extra_value(item)
+                )
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._redact_extra_value(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._redact_extra_value(item) for item in value)
+        return value
 
 
 def _normalise_logger_input(

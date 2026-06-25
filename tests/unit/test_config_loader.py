@@ -104,7 +104,11 @@ def test_config_loader_preserves_legacy_blade_controller_key(tmp_path: Path):
     assert hardware.blade.controller.value == "robohat-rp2040"
 
 
-def test_config_loader_local_override(tmp_path: Path):
+def test_config_loader_rejects_legacy_hardware_local_in_hardware_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("SIM_MODE", "0")
     (tmp_path / "hardware.yaml").write_text(
         dedent(
             """\
@@ -122,7 +126,57 @@ def test_config_loader_local_override(tmp_path: Path):
             """
         )
     )
+    (tmp_path / "limits.yaml").write_text("")
+
+    loader = ConfigLoader(config_dir=str(tmp_path))
+
+    with pytest.raises(RuntimeError, match="migrate-legacy"):
+        loader.load()
+
+
+def test_config_loader_ignores_legacy_hardware_local_in_simulation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("SIM_MODE", "1")
+    (tmp_path / "hardware.yaml").write_text(
+        dedent(
+            """\
+            victron:
+              enabled: true
+              encryption_key: "placeholder"
+            """
+        )
+    )
+    (tmp_path / "hardware.local.yaml").write_text(
+        dedent(
+            """\
+            victron:
+              encryption_key: "super-secret"
+            """
+        )
+    )
+    (tmp_path / "limits.yaml").write_text("")
+
+    loader = ConfigLoader(config_dir=str(tmp_path))
+    hardware, _limits = loader.load()
+
+    assert hardware.victron_config is not None
+    assert hardware.victron_config.encryption_key == "placeholder"
+    assert loader.source_metadata()["hardware_legacy_present"] is True
+
+
+def test_config_loader_preserves_limits_local_override(tmp_path: Path):
+    (tmp_path / "hardware.yaml").write_text("gps:\n  type: ZED-F9P\n")
     (tmp_path / "limits.yaml").write_text(
+        dedent(
+            """\
+            estop_latency_ms: 100
+            tilt_cutoff_latency_ms: 200
+            """
+        )
+    )
+    (tmp_path / "limits.local.yaml").write_text(
         dedent(
             """\
             estop_latency_ms: 90
@@ -132,12 +186,80 @@ def test_config_loader_local_override(tmp_path: Path):
     )
 
     loader = ConfigLoader(config_dir=str(tmp_path))
-    hardware, limits = loader.load()
+    _hardware, limits = loader.load()
 
-    assert hardware.victron_config is not None
-    assert hardware.victron_config.encryption_key == "super-secret"
     assert limits.estop_latency_ms == 90
     assert limits.tilt_cutoff_latency_ms == 180
+
+
+def test_config_loader_missing_hardware_allowed_only_in_simulation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    (tmp_path / "limits.yaml").write_text("")
+    monkeypatch.setenv("SIM_MODE", "1")
+
+    loader = ConfigLoader(config_dir=str(tmp_path))
+    hardware, _limits = loader.load()
+
+    assert hardware.gps_type is None
+    assert loader.source_metadata()["hardware_loaded"] is False
+    assert loader.source_metadata()["hardware_missing_allowed"] is True
+
+    monkeypatch.setenv("SIM_MODE", "0")
+    loader = ConfigLoader(config_dir=str(tmp_path))
+    with pytest.raises(FileNotFoundError, match="manage_hardware_config.py ensure"):
+        loader.load()
+
+
+def test_config_loader_unknown_top_level_key_fails(tmp_path: Path):
+    (tmp_path / "hardware.yaml").write_text("motor_controler_port: /dev/ttyACM0\n")
+    (tmp_path / "limits.yaml").write_text("")
+
+    loader = ConfigLoader(config_dir=str(tmp_path))
+
+    with pytest.raises(ValueError, match="unsupported top-level setting 'motor_controler_port'"):
+        loader.load()
+
+
+def test_config_loader_unknown_nested_key_fails(tmp_path: Path):
+    (tmp_path / "hardware.yaml").write_text("victron:\n  foo_bar: true\n")
+    (tmp_path / "limits.yaml").write_text("")
+
+    loader = ConfigLoader(config_dir=str(tmp_path))
+
+    with pytest.raises(ValueError, match="unknown setting 'victron.foo_bar'"):
+        loader.load()
+
+
+def test_config_loader_maps_robohat_and_bme280_runtime_fields(tmp_path: Path):
+    (tmp_path / "hardware.yaml").write_text(
+        dedent(
+            """\
+            motor_controller_port: /dev/robohat
+            bme280:
+              enabled: true
+              bus: 1
+              address: 118
+              sea_level_hpa: 1010.0
+            victron:
+              enabled: false
+              yield_today_unit: kwh
+              solar_panel_max_wh: 1200.0
+            """
+        )
+    )
+    (tmp_path / "limits.yaml").write_text("")
+
+    loader = ConfigLoader(config_dir=str(tmp_path))
+    hardware, _limits = loader.load()
+
+    assert hardware.motor_controller_port == "/dev/robohat"
+    assert hardware.env_sensor is True
+    assert hardware.bme280_config is not None
+    assert hardware.bme280_config.sea_level_hpa == pytest.approx(1010.0)
+    assert hardware.victron_config is not None
+    assert hardware.victron_config.yield_today_unit == "kwh"
 
 
 def test_get_config_loader_returns_same_instance():

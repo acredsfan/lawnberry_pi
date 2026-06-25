@@ -67,7 +67,7 @@ Verification steps:
 ### Victron SmartSolar BLE telemetry
 - Optional replacement or supplement for INA3221 readings.
 - Follow `docs/victron-ble-integration.md` to install the `victron-ble` CLI, patch the upstream scanner guard, and register the Instant Readout key.
-- Configure the `victron` block in `config/hardware.yaml`; set `prefer_battery`, `prefer_solar`, and `prefer_load` to prioritize SmartSolar data when both sources are available. Keep secrets in the untracked `config/hardware.local.yaml` override so the repository never stores live keys.
+- Configure the `victron` block in the ignored runtime `config/hardware.yaml`; set `prefer_battery`, `prefer_solar`, and `prefer_load` to prioritize SmartSolar data when both sources are available. Never put a live Instant Readout key in tracked examples or docs.
 - Backend automatically falls back to INA3221 values if Victron telemetry is temporarily unavailable.
 
 ### IMU (BNO085)
@@ -140,7 +140,7 @@ curl http://localhost:8081/api/v2/sensors/health | jq '.gps'
 
 ### Drive Controller: RoboHAT RP2040 → Cytron MDDRC10 (preferred)
 - Serial link (auto-discovery order when `motor_controller_port` is blank): `/dev/robohat` (udev symlink → `/dev/ttyACM0`), `/dev/serial0`, then `ttyAMA*` / `ttyACM*`; `/dev/ttyAMA4` (IMU) is always excluded
-- Explicit port override: set `motor_controller_port` in `config/hardware.yaml` (current default: `/dev/serial0`)
+- Explicit port override: set `motor_controller_port` in ignored `config/hardware.yaml`; leave it `null` to use safe discovery.
 - PWM and direction handled on RoboHAT; Pi communicates via serial API
 - Encoders wired to RoboHAT for real-time counting
 

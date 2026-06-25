@@ -56,7 +56,7 @@ The shortest useful mental model is:
 
 - **backend** owns hardware, safety, state, APIs, and telemetry
 - **frontend** owns operator workflows, control surfaces, maps, diagnostics, and auth-aware UX
-- **config/** and `.env` shape runtime behavior
+- **config/** and `.env` shape runtime behavior; `config/hardware.yaml` is the ignored single runtime hardware file, created from the Pi 5/Pi 4 template, while `spec/hardware.yaml` remains the tracked supported-hardware specification
 - **scripts/** and `systemd/` are how the appliance is validated and operated on-device
 - **docs/** contains both strong source-of-truth material and some drift that still needs cleanup
 
@@ -283,7 +283,9 @@ Practical rule of thumb:
 
 - `backend/src/main.py`
 - `backend/src/core/config_loader.py`
-- `config/hardware.yaml`
+- `spec/hardware.yaml`
+- `config/hardware.pi5.example.yaml` / `config/hardware.pi4.example.yaml`
+- ignored runtime `config/hardware.yaml`
 - `config/limits.yaml`
 - `.env`
 - `docs/OPERATIONS.md`

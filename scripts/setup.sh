@@ -17,57 +17,44 @@ echo "[setup] Root: $ROOT_DIR"
 
 # Flags
 UPDATE=0
-for arg in "$@"; do
-  case "$arg" in
+HARDWARE_PROFILE="auto"
+HARDWARE_PROFILE_EXPLICIT=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --update)
       UPDATE=1
+      shift
+      ;;
+    --hardware-profile)
+      HARDWARE_PROFILE="${2:-}"
+      HARDWARE_PROFILE_EXPLICIT=1
+      shift 2
+      ;;
+    --hardware-profile=*)
+      HARDWARE_PROFILE="${1#*=}"
+      HARDWARE_PROFILE_EXPLICIT=1
+      shift
+      ;;
+    *)
+      echo "[setup] WARNING: unknown argument ignored: $1" >&2
+      shift
       ;;
   esac
 done
+
+case "$HARDWARE_PROFILE" in
+  auto|pi5|pi4) ;;
+  *)
+    echo "[setup] ERROR: --hardware-profile must be auto, pi5, or pi4" >&2
+    exit 2
+    ;;
+esac
 
 # Create directories (idempotent)
 mkdir -p "$LOG_DIR" "$DATA_DIR" "$CFG_DIR"
 
 # Preserve data note (no deletion)
 echo "[setup] Ensured directories exist: logs/, data/, config/ (preserved)"
-
-# Copy example configs if not present
-if [[ ! -f "$CFG_DIR/hardware.yaml" ]]; then
-  echo "[setup] Installing example config: config/hardware.yaml"
-  cat > "$CFG_DIR/hardware.yaml" <<'YAML'
-# Example hardware configuration for LawnBerry Pi v2
-# Documented options:
-# - gps.type: ZED-F9P | Neo-8M
-# - imu.type: BNO085
-# - sensors.tof: [left, right] using VL53L0X
-# - env_sensor: BME280
-# - power_monitor: INA3221 (ch1=battery, ch3=solar)
-gps:
-  type: ZED-F9P
-  # NTRIP corrections are typically enabled on the ZED-F9P via u-center (on-device)
-# This flag reflects that RTK corrections are in use, even if not managed by the Pi.
-gps_ntrip_enabled: true
-imu:
-  type: BNO085
-sensors:
-  tof:
-    - left
-    - right
-  env_sensor: BME280
-power_monitor:
-  type: INA3221
-  channels:
-    battery: 1
-    solar: 3
-motor_controller:
-  type: RoboHAT_RP2040
-blade_controller:
-  # Blade uses IBT-4 H-Bridge (GPIO 24 -> IN1, GPIO 25 -> IN2)
-  type: IBT_4
-camera:
-  enabled: false
-YAML
-fi
 
 if [[ ! -f "$CFG_DIR/limits.yaml" ]]; then
   echo "[setup] Installing example config: config/limits.yaml"
@@ -135,6 +122,20 @@ fi
 if [[ $UPDATE -eq 1 ]]; then
   echo "[setup] --update specified: attempting to update dependencies and refresh lockfile."
   (cd "$ROOT_DIR" && uv lock && uv sync --extra hardware)
+fi
+
+# Create or validate the single user-owned hardware runtime file only after
+# Python dependencies are available. SIM_MODE=1 development remains usable
+# without a hardware config unless the operator explicitly selects a profile.
+if [[ "${SIM_MODE:-0}" == "1" && "$HARDWARE_PROFILE_EXPLICIT" -eq 0 ]]; then
+  echo "[setup] SIM_MODE=1: skipping hardware config creation; run manage_hardware_config.py when needed"
+else
+  echo "[setup] Ensuring hardware config with profile: $HARDWARE_PROFILE"
+  if [[ $UPDATE -eq 1 ]]; then
+    (cd "$ROOT_DIR" && uv run python scripts/manage_hardware_config.py ensure --profile "$HARDWARE_PROFILE" --update)
+  else
+    (cd "$ROOT_DIR" && uv run python scripts/manage_hardware_config.py ensure --profile "$HARDWARE_PROFILE")
+  fi
 fi
 
 # Ensure cloudflared tunnel binary is installed

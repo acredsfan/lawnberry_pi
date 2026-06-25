@@ -22,6 +22,35 @@ def test_privacy_filter_redacts_extra_fields():
     assert "pw" not in out
 
 
+def test_privacy_filter_redacts_nested_victron_secret_fields():
+    stream = io.StringIO()
+    logger = create_test_logger(stream)
+    logger.info(
+        "config loaded",
+        extra={
+            "hardware": {
+                "victron": {
+                    "encryption_key": "unit-test-secret",
+                    "device_key": "device-secret",
+                }
+            }
+        },
+    )
+    out = stream.getvalue()
+    assert "[REDACTED]" in out
+    assert "unit-test-secret" not in out
+    assert "device-secret" not in out
+
+
+def test_privacy_filter_redacts_victron_secret_fields_in_message():
+    stream = io.StringIO()
+    logger = create_test_logger(stream)
+    logger.info("encryption_key=unit-test-secret device_key=device-secret")
+    out = stream.getvalue()
+    assert "unit-test-secret" not in out
+    assert "device-secret" not in out
+
+
 def test_privacy_filter_supports_custom_sensitive_keys():
     stream = io.StringIO()
     logger = create_test_logger(

@@ -219,10 +219,8 @@ If quick recalibration doesn't fix the 180° issue, it may be in the firmware's 
 # In backend/src/services/navigation_service.py, line ~162:
 self._imu_yaw_offset = float(getattr(hardware, "imu_yaw_offset_degrees", 0.0))
 
-# If reading -180° when should be +180°, add 180° to offset:
-# config/hardware.yaml:
-#   imu:
-#     yaw_offset_degrees: 180.0
+# If heading appears inverted, inspect GPS COG bootstrap and alignment state first.
+# Do not use imu.yaw_offset_degrees as a shortcut for navigation heading errors.
 ```
 
 ## 4. Common Issues and Fixes
@@ -242,9 +240,10 @@ self._imu_yaw_offset = float(getattr(hardware, "imu_yaw_offset_degrees", 0.0))
 - Yaw calibration procedure was done backward (rotated opposite direction)
 
 **Fixes:**
-1. Physically rotate IMU mount 180° in enclosure, OR
-2. Add `imu_yaw_offset_degrees: 180` to `config/hardware.yaml`
-3. Rerun heading validation to confirm
+1. Verify the GPS COG bootstrap completed and `data/imu_alignment.json` is fresh
+2. Confirm the IMU is physically mounted in the documented orientation
+3. Change `imu.yaw_offset_degrees` in ignored `config/hardware.yaml` only if the IMU is physically rotated in its enclosure
+4. Rerun heading validation to confirm
 
 ### Issue: Heading validation shows 30-90° conflict
 **Likely causes:**

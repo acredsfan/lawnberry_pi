@@ -34,28 +34,33 @@ This guide describes how to source battery, solar, and load telemetry from a Vic
 
    Future victron-ble releases may include this guard; remove the snippet once upstream fixes the issue.
 
-## 2. Collect the encryption key
+## 2. Collect or rotate the encryption key
 
 The Instant Readout key is displayed in VictronConnect once you enable BLE for the controller. Record the 32-character hex key and the controller MAC address (format `EC:1A:…`).
+
+Security note: a previous tracked hardware configuration contained a node-specific Victron Instant Readout credential. Treat
+that old key as compromised. Regenerate or change the Instant Readout key in VictronConnect, then store the replacement only
+in ignored `config/hardware.yaml` on the mower. Removing the file from the current repository tip does not remove the old
+value from Git history.
 
 You can validate the key from the CLI:
 
 ```bash
-victron-ble read EC:1A:A8:DD:99:C2@<replace-with-instant-readout-key> | head -n 1
+victron-ble read <controller-mac>@<instant-readout-key> | head -n 1
 ```
 
 A successful read prints JSON containing `battery_voltage`, `battery_charging_current`, `solar_power`, and `external_device_load`.
 
 ## 3. Configure LawnBerry
 
-Update `config/hardware.yaml` with the Victron block (values shown below are placeholders). Keep the placeholder for `encryption_key` in the tracked file so secrets never end up in Git history:
+Update ignored `config/hardware.yaml` with the Victron block. Values shown below are placeholders; do not commit real identifiers or keys:
 
 ```yaml
 victron:
   enabled: true
-  device_id: "EC:1A:A8:DD:99:C2"          # controller MAC address
+  device_id: "<controller-mac>"
   encryption_key: "<replace-with-instant-readout-key>"
-  # device_key: "EC:1A:A8:DD:99:C2@<replace-with-instant-readout-key>"
+  # device_key: "<controller-mac>@<replace-with-instant-readout-key>"
   cli_path: victron-ble
   adapter: null                            # optional, e.g. "hci1"
   prefer_battery: true                     # take battery V/I/P from Victron when available
@@ -63,15 +68,13 @@ victron:
   prefer_load: true                        # take load current from Victron when available
 ```
 
-Store the real key in the untracked override file `config/hardware.local.yaml` (created automatically by the repo tooling). Only values present in this file override the base configuration:
+Ensure the runtime file is owner-only and validates before restarting:
 
-```yaml
-victron:
-    encryption_key: "<your-instant-readout-key>"
-    # device_key: "EC:1A:A8:DD:99:C2@<your-instant-readout-key>"
+```bash
+chmod 600 config/hardware.yaml
+uv run python scripts/manage_hardware_config.py validate
+sudo systemctl restart lawnberry-backend.service
 ```
-
-Because `config/.gitignore` excludes `hardware.local.yaml`, the secret stays on the node while the placeholder remains safe to commit. If you prefer environment variables, set `LAWN_HARDWARE_LOCAL_PATH` to another YAML file path before starting the backend.
 
 If you are phasing out the INA3221, you may also set `power_monitor: false` (or remove the `ina3221` block). The backend gracefully operates with Victron telemetry alone.
 
@@ -104,6 +107,6 @@ If both Victron and INA3221 are enabled, the preference flags control which sour
 
 - **`victron-ble` hangs**: ensure the Instant Readout key is correct and that only one reader is active at a time. The backend captures a single JSON frame and terminates the CLI, so it should not leave lingering processes.
 - **`victron-ble` crashes with `AttributeError: 'BLEDevice' object has no attribute 'rssi'`**: rerun the patch snippet in step 1 to guard the missing attribute.
-- **No data after restart**: confirm the backend service user (`pi`) can access Bluetooth and that the key is readable from the active configuration (either the placeholder plus `config/hardware.local.yaml` or the file pointed to by `LAWN_HARDWARE_LOCAL_PATH`).
+- **No data after restart**: confirm the backend service user (`pi`) can access Bluetooth and that the key is present only in ignored `config/hardware.yaml`.
 
-With this configuration, other developers only need the key and MAC address to replicate the SmartSolar integration.
+Do not share live keys or MAC identifiers in repository files, logs, screenshots, issues, or pull requests.

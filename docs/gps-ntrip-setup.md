@@ -336,7 +336,7 @@ Enable all satellite constellations for best performance:
 2. **Connect to Raspberry Pi** via USB
 3. **Configure LawnBerry Pi**:
 
-Edit `./config/hardware.yaml`:
+Edit ignored `./config/hardware.yaml`:
 ```yaml
 gps:
   type: ZED-F9P
@@ -388,7 +388,7 @@ NTRIP_GGA_INTERVAL=10
 
 ### Step 2: Enable NTRIP in Hardware Configuration
 
-Edit `./config/hardware.yaml`:
+Edit ignored `./config/hardware.yaml`:
 
 ```yaml
 gps:

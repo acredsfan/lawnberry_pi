@@ -28,7 +28,7 @@ This skill keeps validation honest by separating simulation-safe checks from tru
    - use `SIM_MODE=0` only when real hardware access is intended and prepared
 3. Check runtime prerequisites.
    - confirm whether a project-root `.env` is required
-   - read `config/hardware.yaml`, `config/limits.yaml`, and relevant secrets/example files
+   - validate ignored `config/hardware.yaml` without printing it; read `config/limits.yaml` and tracked examples as needed
    - verify hardware expectations in `docs/hardware-integration.md` and `spec/hardware.yaml`
 4. Validate in the safest order.
    - run focused simulation-safe tests first

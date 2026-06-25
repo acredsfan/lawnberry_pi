@@ -123,7 +123,7 @@ The RoboHAT provides a serial API specifically for drive motor control. The back
 - u-blox ZED-F9P GNSS receiver
 - Multi-constellation support (GPS, GLONASS, Galileo, BeiDou)
 - RTK corrections for centimeter-level accuracy
-- USB interface to Raspberry Pi via `/dev/lawnberry-gps` (udev symlink; configured in `config/hardware.yaml`)
+- USB interface to Raspberry Pi via `/dev/lawnberry-gps` (udev symlink; configured in ignored `config/hardware.yaml`)
 - External antenna for optimal satellite reception
 
 **Accuracy Levels**:

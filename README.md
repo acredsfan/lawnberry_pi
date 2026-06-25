@@ -36,6 +36,22 @@ These are the local development defaults. On-device/systemd deployments use the 
 Important: if you do **not** set `SIM_MODE`, the backend currently behaves like hardware mode and will attempt device
 initialization. On a non-Pi machine this usually degrades gracefully, but it is noisier than running pure simulation.
 
+### Hardware Configuration
+
+- `spec/hardware.yaml` is the tracked supported-hardware specification.
+- `config/hardware.pi5.example.yaml` and `config/hardware.pi4.example.yaml` are complete tracked templates.
+- `config/hardware.yaml` is the single ignored runtime hardware file and may contain node-specific secrets.
+- Fresh clones can run in `SIM_MODE=1` without creating `config/hardware.yaml`.
+
+Create or validate the runtime file on a Pi:
+
+```bash
+uv run python scripts/manage_hardware_config.py ensure --profile auto
+uv run python scripts/manage_hardware_config.py ensure --profile pi5
+uv run python scripts/manage_hardware_config.py validate
+uv run python scripts/manage_hardware_config.py migrate-legacy --profile auto
+```
+
 ### System Status
 - ✅ **Hardware Integration**: Real sensor data streaming from Pi hardware
 - ✅ **Professional UI**: 1980s cyberpunk design with Orbitron fonts and neon effects

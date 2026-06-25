@@ -363,14 +363,15 @@ class ToFSensorInterface:
 class EnvironmentalSensorInterface:
     """BME280 environmental sensor interface"""
 
-    def __init__(self, coordinator: SensorCoordinator):
+    def __init__(self, coordinator: SensorCoordinator, config: dict | None = None):
         self.coordinator = coordinator
         self.last_reading: EnvironmentalReading | None = None
         self.status = SensorStatus.OFFLINE
+        self._config = config or {}
         try:
             from ..drivers.sensors.bme280_driver import BME280Driver  # type: ignore
 
-            self._driver = BME280Driver({})
+            self._driver = BME280Driver(self._config)
         except Exception:  # pragma: no cover
             self._driver = None
 
@@ -849,6 +850,7 @@ class SensorManager:
         power_config: dict | None = None,
         battery_config=None,  # Optional[BatteryConfig]
         imu_config: dict | None = None,
+        environmental_config: dict | None = None,
         gps_usb_device: str | None = None,
     ):
         self.coordinator = SensorCoordinator()
@@ -860,7 +862,10 @@ class SensorManager:
         self.gps = GPSSensorInterface(gps_mode, self.coordinator, usb_device=gps_usb_device)
         self.imu = IMUSensorInterface(self.coordinator, imu_config=imu_config)
         self.tof = ToFSensorInterface(self.coordinator, tof_config=tof_config)
-        self.environmental = EnvironmentalSensorInterface(self.coordinator)
+        self.environmental = EnvironmentalSensorInterface(
+            self.coordinator,
+            config=environmental_config,
+        )
         self.power = PowerSensorInterface(self.coordinator, driver_config=power_config)
 
         self.initialized = False

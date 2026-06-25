@@ -602,7 +602,11 @@ async def test_initialize_robohat_service_attempts_candidates(monkeypatch):
             return True
         return False
 
-    monkeypatch.setattr(robohat_module, "_candidate_serial_ports", lambda explicit=None: ["/dev/ttyACM0", "/dev/ttyACM1"])
+    monkeypatch.setattr(
+        robohat_module,
+        "_candidate_serial_ports",
+        lambda explicit=None, hardware_config=None: ["/dev/ttyACM0", "/dev/ttyACM1"],
+    )
     monkeypatch.setattr(robohat_module.RoboHATService, "initialize", fake_initialize)
     monkeypatch.setattr(robohat_module, "robohat_service", None)
 
@@ -612,6 +616,25 @@ async def test_initialize_robohat_service_attempts_candidates(monkeypatch):
     assert attempts == ["/dev/ttyACM0", "/dev/ttyACM1"]
     assert robohat_module.robohat_service is not None
     assert robohat_module.robohat_service.serial_port == "/dev/ttyACM1"
+
+
+def test_candidate_serial_ports_uses_typed_motor_port(monkeypatch):
+    from backend.src.models.hardware_config import HardwareConfig
+
+    monkeypatch.setattr(robohat_module.os.path, "exists", lambda path: True)
+    monkeypatch.setattr(robohat_module.glob, "glob", lambda pattern: [])
+    monkeypatch.setattr(robohat_module, "_list_ports_candidates", lambda: [])
+    monkeypatch.setattr(robohat_module, "_serial_by_id_candidates", lambda: [])
+    hardware = HardwareConfig(
+        motor_controller_port="/dev/robohat",
+        imu_type="bno085-uart",
+        imu_port="/dev/ttyAMA4",
+    )
+
+    ports = robohat_module._candidate_serial_ports(hardware_config=hardware)
+
+    assert ports[0] == "/dev/robohat"
+    assert "/dev/ttyAMA4" not in ports
 
 
 @pytest.mark.asyncio

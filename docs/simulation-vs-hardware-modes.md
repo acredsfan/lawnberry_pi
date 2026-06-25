@@ -11,6 +11,14 @@ not set `SIM_MODE` explicitly.
 | **Hardware mode** | `SIM_MODE=0 ...` | Attempts real hardware initialization and falls back gracefully when individual devices are missing. |
 | **Unset `SIM_MODE`** | no env var | Behaves like hardware mode today because startup checks `os.getenv("SIM_MODE", "0")`. |
 
+Hardware configuration follows the same split:
+
+- `SIM_MODE=1` can run from a fresh clone without `config/hardware.yaml`.
+- hardware mode requires ignored `config/hardware.yaml`, created from `config/hardware.pi5.example.yaml` or
+  `config/hardware.pi4.example.yaml`.
+- `hardware.local.yaml` is not a runtime overlay. If it exists, run
+  `uv run python scripts/manage_hardware_config.py migrate-legacy --profile auto`.
+
 ## What the backend actually does
 
 `backend/src/main.py` uses `os.getenv("SIM_MODE", "0") == "0"` to decide whether to attempt hardware-only startup work such
@@ -125,6 +133,7 @@ curl http://localhost:8081/api/v2/system/selftest | jq
 ### Hardware mode checks
 
 - confirm you launched with `SIM_MODE=0`
+- confirm `uv run python scripts/manage_hardware_config.py validate` succeeds
 - inspect `journalctl` or backend logs for device initialization messages
 - verify self-test, RoboHAT status, and sensor health endpoints
 

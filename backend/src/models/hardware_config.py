@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class Ina3221Config(BaseModel):
+class StrictHardwareModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class Ina3221Config(StrictHardwareModel):
     address: int | None = Field(default=None, description="I2C address override for INA3221")
     bus: int | None = Field(default=None, description="I2C bus override for INA3221")
     shunt_ohms_ch1: float | None = Field(
@@ -46,7 +50,7 @@ class Ina3221Config(BaseModel):
     )
 
 
-class VictronBleConfig(BaseModel):
+class VictronBleConfig(StrictHardwareModel):
     enabled: bool = Field(default=True, description="Enable Victron SmartSolar BLE reader")
     device_id: str | None = Field(
         default=None, description="Victron identifier or MAC address for BLE connection"
@@ -83,6 +87,34 @@ class VictronBleConfig(BaseModel):
         ge=1,
         description="Number of victron-ble frames to collect per poll before returning the most recent",
     )
+    yield_today_unit: str = Field(
+        default="wh",
+        description="Unit reported by victron-ble for yield_today; expected 'wh' or 'kwh'.",
+    )
+    solar_panel_max_wh: float = Field(
+        default=1000.0,
+        gt=0.0,
+        description="Physical daily-yield sanity limit used when interpreting Victron telemetry.",
+    )
+
+    @field_validator("yield_today_unit")
+    @classmethod
+    def validate_yield_today_unit(cls, value: str) -> str:
+        normalized = str(value).strip().lower()
+        if normalized not in {"wh", "kwh"}:
+            raise ValueError("yield_today_unit must be 'wh' or 'kwh'")
+        return normalized
+
+
+class Bme280Config(StrictHardwareModel):
+    enabled: bool = Field(default=True, description="Whether BME280 environmental sensing is enabled")
+    address: int | None = Field(default=0x76, description="I2C address for BME280")
+    bus: int | None = Field(default=1, description="I2C bus for BME280")
+    sea_level_hpa: float = Field(
+        default=1013.25,
+        gt=0.0,
+        description="Sea-level pressure reference used for altitude estimation.",
+    )
 
 
 class GPSType(str, Enum):
@@ -105,12 +137,12 @@ class BladeControllerType(str, Enum):
     IBT_4 = "ibt-4"
 
 
-class BladePinsConfig(BaseModel):
+class BladePinsConfig(StrictHardwareModel):
     in1: int = Field(default=24, ge=0, description="GPIO number wired to IBT-4 IN1")
     in2: int = Field(default=25, ge=0, description="GPIO number wired to IBT-4 IN2")
 
 
-class BladeConfig(BaseModel):
+class BladeConfig(StrictHardwareModel):
     controller: BladeControllerType | None = Field(
         default=None,
         description="Configured physical blade controller backend.",
@@ -125,7 +157,7 @@ class BladeConfig(BaseModel):
     pins: BladePinsConfig = Field(default_factory=BladePinsConfig)
 
 
-class BatteryConfig(BaseModel):
+class BatteryConfig(StrictHardwareModel):
     """Battery pack specification.
 
     Used for voltage-to-SOC estimation and runtime calculations.
@@ -167,7 +199,19 @@ class BatteryConfig(BaseModel):
     )
 
 
-class HardwareConfig(BaseModel):
+class ToFConfig(StrictHardwareModel):
+    bus: int | None = Field(default=1)
+    left_address: int | None = Field(default=0x29)
+    right_address: int | None = Field(default=0x30)
+    ranging_mode: str | None = Field(default="better_accuracy")
+    left_shutdown_gpio: int | None = Field(default=None)
+    right_shutdown_gpio: int | None = Field(default=None)
+    left_interrupt_gpio: int | None = Field(default=None)
+    right_interrupt_gpio: int | None = Field(default=None)
+    timing_budget_us: int | None = Field(default=None)
+
+
+class HardwareConfig(StrictHardwareModel):
     """Declares physical hardware modules present in the system.
 
     Loaded from config/hardware.yaml at startup (FR-003).
@@ -217,6 +261,10 @@ class HardwareConfig(BaseModel):
     env_sensor: bool = Field(default=False, description="BME280 present")
     power_monitor: bool = Field(default=False, description="INA3221 present")
     motor_controller: MotorControllerType | None = Field(default=None)
+    motor_controller_port: str | None = Field(
+        default=None,
+        description="Optional explicit RoboHAT serial path; null keeps safe discovery enabled.",
+    )
     blade_controller: BladeControllerType | None = Field(default=None)
     blade: BladeConfig = Field(default_factory=BladeConfig)
     camera_enabled: bool = Field(default=False)
@@ -224,6 +272,7 @@ class HardwareConfig(BaseModel):
     tof_config: ToFConfig | None = Field(default=None)
     # Optional INA3221 configuration overrides (ina3221 block in hardware.yaml)
     ina3221_config: Ina3221Config | None = Field(default=None)
+    bme280_config: Bme280Config | None = Field(default=None)
     # Optional Victron SmartSolar BLE configuration
     victron_config: VictronBleConfig | None = Field(default=None)
     # Battery pack specification — used for SOC estimation and runtime calcs
@@ -243,15 +292,3 @@ class HardwareConfig(BaseModel):
     def motor_controller_required(cls, v: MotorControllerType | None):
         # System requires a motor controller for motion; allow None for SIM_MODE setups.
         return v
-
-
-class ToFConfig(BaseModel):
-    bus: int | None = Field(default=1)
-    left_address: int | None = Field(default=0x29)
-    right_address: int | None = Field(default=0x30)
-    ranging_mode: str | None = Field(default="better_accuracy")
-    left_shutdown_gpio: int | None = Field(default=None)
-    right_shutdown_gpio: int | None = Field(default=None)
-    left_interrupt_gpio: int | None = Field(default=None)
-    right_interrupt_gpio: int | None = Field(default=None)
-    timing_budget_us: int | None = Field(default=None)

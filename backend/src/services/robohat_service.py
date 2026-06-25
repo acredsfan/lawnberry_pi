@@ -26,6 +26,8 @@ from typing import Any
 
 import serial
 
+from ..models.hardware_config import HardwareConfig
+
 try:  # Best-effort optional import for USB device enumeration.
     from serial.tools import list_ports  # type: ignore
 except Exception:  # pragma: no cover - serial.tools may be unavailable in CI
@@ -113,7 +115,12 @@ class RoboHATService:
     # so the long USB CDC settle delay is not needed.
     _UART_PORT_PATTERNS = ("ttyAMA", "ttyS", "serial0", "ttyMFD", "ttySC", "ttyO")
 
-    def __init__(self, serial_port: str = "/dev/ttyACM0", baud_rate: int = 115200):
+    def __init__(
+        self,
+        serial_port: str = "/dev/ttyACM0",
+        baud_rate: int = 115200,
+        hardware_config: HardwareConfig | None = None,
+    ):
         self.serial_port = serial_port
         self.baud_rate = baud_rate
         self.serial_conn: serial.Serial | None = None
@@ -179,7 +186,7 @@ class RoboHATService:
         # ─────────────────────────────────────────────────────────────────────────
 
         # Encoder enabled flag — False when hall sensors are missing/unreliable.
-        # Loaded from config/hardware.yaml encoders.enabled (default True).
+        # Loaded from the already-validated HardwareConfig (default True).
         self._encoder_enabled: bool = True
         # Delta-based velocity tracking: cumulative tick counter → RPM.
         # With 4 magnets/wheel: RPM = (delta_ticks / elapsed_s) * (60 / 4)
@@ -188,10 +195,8 @@ class RoboHATService:
         self._enc2_prev_pos: int | None = None
         self._enc2_prev_time: float | None = None
         self._ENCODER_MAGNETS_PER_WHEEL: int = 4
+        hw = hardware_config or _current_hardware_config()
         try:
-            from backend.src.core.config_loader import get_config_loader
-
-            hw, _ = get_config_loader().get()
             self._encoder_enabled = bool(getattr(hw, "encoder_enabled", True))
             if not self._encoder_enabled:
                 logger.info(
@@ -1538,7 +1543,25 @@ def _list_ports_candidates() -> list[str]:
     return matches
 
 
-def _known_excluded_devices() -> set[str]:
+def _current_hardware_config() -> HardwareConfig | None:
+    try:
+        from backend.src.core.state_manager import get_hardware_config
+
+        hw = get_hardware_config()
+        if isinstance(hw, HardwareConfig):
+            return hw
+    except Exception:
+        pass
+    try:
+        from backend.src.core.config_loader import get_config_loader
+
+        hw, _ = get_config_loader().get()
+        return hw
+    except Exception:
+        return None
+
+
+def _known_excluded_devices(hardware_config: HardwareConfig | None = None) -> set[str]:
     """Return device paths that must never be probed as a RoboHAT port.
 
     Includes GPS receivers and the IMU UART (BNO085 on ttyAMA4 by default)
@@ -1562,40 +1585,21 @@ def _known_excluded_devices() -> set[str]:
     for path in ["/dev/lawnberry-gps", "/dev/gps_rtk"]:
         _resolve_and_add(path)
 
-    # IMU UART — resolve from env, hardware.yaml, then hardcoded default
+    # IMU UART — resolve from env, validated config, then hardcoded default.
     imu_port = os.getenv("BNO085_PORT", "")
     if not imu_port:
-        try:
-            import yaml
-
-            hw_cfg_path = os.path.join(os.path.dirname(__file__), "../../../config/hardware.yaml")
-            with open(os.path.realpath(hw_cfg_path)) as f:
-                hw = yaml.safe_load(f) or {}
-            imu_port = (hw.get("imu") or {}).get("port", "")
-        except Exception:
-            pass
+        hw = hardware_config or _current_hardware_config()
+        imu_port = str(getattr(hw, "imu_port", "") or "")
     _resolve_and_add(imu_port or "/dev/ttyAMA4")
 
     return excluded
 
 
-def _read_hardware_yaml_robohat_port() -> str | None:
-    """Read the optional motor_controller_port field from hardware.yaml.
-
-    Returns None when the field is absent so auto-discovery proceeds normally.
-    Allows operators to pin the RoboHAT to a specific UART or USB path without
-    needing environment variables.
-    """
-    try:
-        import yaml
-
-        hw_cfg_path = os.path.join(os.path.dirname(__file__), "../../../config/hardware.yaml")
-        with open(os.path.realpath(hw_cfg_path)) as f:
-            hw = yaml.safe_load(f) or {}
-        port = hw.get("motor_controller_port", "") or ""
-        return port.strip() or None
-    except Exception:
-        return None
+def _configured_robohat_port(hardware_config: HardwareConfig | None = None) -> str | None:
+    """Return the typed optional motor_controller_port override."""
+    hw = hardware_config or _current_hardware_config()
+    port = str(getattr(hw, "motor_controller_port", "") or "").strip()
+    return port or None
 
 
 def _known_gps_devices() -> set[str]:
@@ -1603,12 +1607,15 @@ def _known_gps_devices() -> set[str]:
     return _known_excluded_devices()
 
 
-def _candidate_serial_ports(explicit: str | None = None) -> list[str]:
+def _candidate_serial_ports(
+    explicit: str | None = None,
+    hardware_config: HardwareConfig | None = None,
+) -> list[str]:
     """Build an ordered list of serial ports to try for RoboHAT.
 
     Priority order — UART always before USB:
       1. Explicit argument or ROBOHAT_PORT / LAWN_ROBOHAT_PORT env vars
-      2. motor_controller_port from hardware.yaml
+      2. motor_controller_port from validated HardwareConfig
       3. /dev/serial0 → ttyAMA0 (GPIO UART header — primary hardware UART)
       4. Additional ttyAMA* UART ports (excluding the IMU on ttyAMA4)
       5. list_ports descriptors matching RoboHAT/RP2040 UART keywords
@@ -1627,7 +1634,7 @@ def _candidate_serial_ports(explicit: str | None = None) -> list[str]:
 
     seen: set[str] = set()
     ordered: list[str] = []
-    excluded_devices = _known_excluded_devices()
+    excluded_devices = _known_excluded_devices(hardware_config)
 
     def add(port: str | None, *, require_exists: bool = False) -> None:
         if port is None:
@@ -1658,8 +1665,8 @@ def _candidate_serial_ports(explicit: str | None = None) -> list[str]:
 
     add(_read_profile_robohat_port())
 
-    # Explicit hardware.yaml config beats all autodiscovery
-    add(_read_hardware_yaml_robohat_port())
+    # Explicit typed hardware config beats all autodiscovery
+    add(_configured_robohat_port(hardware_config))
 
     # ── UART candidates first ────────────────────────────────────────────────
     # UART open does NOT assert DTR so the firmware never resets on probe.
@@ -1692,7 +1699,9 @@ def _candidate_serial_ports(explicit: str | None = None) -> list[str]:
 
 
 async def initialize_robohat_service(
-    serial_port: str | None = None, baud_rate: int = 115200
+    serial_port: str | None = None,
+    baud_rate: int = 115200,
+    hardware_config: HardwareConfig | None = None,
 ) -> bool:
     """Initialize global RoboHAT service, probing common serial ports when needed."""
     global robohat_service
@@ -1712,13 +1721,13 @@ async def initialize_robohat_service(
             pass
         robohat_service = None
 
-    candidates = _candidate_serial_ports(serial_port)
+    candidates = _candidate_serial_ports(serial_port, hardware_config)
     if not candidates:
         candidates = [serial_port or "/dev/ttyACM0"]
 
     last_attempt: RoboHATService | None = None
     for candidate in candidates:
-        svc = RoboHATService(candidate, baud_rate)
+        svc = RoboHATService(candidate, baud_rate, hardware_config=hardware_config)
         ok = await svc.initialize()
         last_attempt = svc
         if ok:

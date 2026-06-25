@@ -168,7 +168,7 @@ async def lifespan(app: FastAPI):
     set_safety_event_handler(_handler)
     # Initialize hardware services (best-effort; keep SIM-safe)
     try:
-        await initialize_robohat_service()
+        await initialize_robohat_service(hardware_config=hardware_cfg)
     except Exception:
         pass
     try:
@@ -412,9 +412,11 @@ async def lifespan(app: FastAPI):
     _startup_report = _build_report(
         hardware_path=loader.hardware_path,
         limits_path=loader.limits_path,
-        hardware_local_path=loader.hardware_local_path or "",
         calibration_path=_data_dir / "calibration.json",
-        secrets_keys=["ntrip_password", "google_api_key", "api_key"],
+        secrets_keys=["ntrip_password", "google_api_key", "api_key", "device_key"],
+        hardware_config=hardware_cfg,
+        safety_limits=safety_limits,
+        source_metadata=loader.source_metadata(),
     )
     app.state.startup_config_report = _startup_report
 

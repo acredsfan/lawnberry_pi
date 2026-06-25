@@ -66,6 +66,29 @@ SIM_MODE=0 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
 
 If you want a clean local-development experience without serial/GPIO warnings, always set `SIM_MODE=1` explicitly.
 
+## Hardware configuration
+
+Hardware configuration has one runtime source:
+
+- `spec/hardware.yaml` is the tracked supported-hardware specification.
+- `config/hardware.pi5.example.yaml` and `config/hardware.pi4.example.yaml` are tracked complete templates.
+- `config/hardware.yaml` is the ignored, owner-only runtime file and may contain node-specific secrets.
+- `config/hardware.local.yaml` is no longer loaded; use the migration command below once if it exists.
+- `config/limits.local.yaml` remains the separate ignored safety-limit override.
+
+Commands:
+
+```bash
+uv run python scripts/manage_hardware_config.py ensure --profile auto
+uv run python scripts/manage_hardware_config.py ensure --profile pi5
+uv run python scripts/manage_hardware_config.py ensure --profile pi4
+uv run python scripts/manage_hardware_config.py validate
+uv run python scripts/manage_hardware_config.py migrate-legacy --profile auto
+```
+
+Normal setup and update flows never overwrite an existing `config/hardware.yaml`. After changing hardware configuration,
+restart the backend so the validated typed config is reloaded.
+
 ## TLS/HTTPS Operations
 
 TLS is managed automatically:

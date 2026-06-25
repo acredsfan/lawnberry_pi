@@ -12,6 +12,7 @@ Acceptance (FR-003, FR-004):
 - Validates against HardwareConfig and SafetyLimits schemas
 """
 
+import logging
 import os
 from copy import deepcopy
 from typing import Any
@@ -19,8 +20,26 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from backend.src.models.hardware_config import HardwareConfig
+from backend.src.core.simulation import is_simulation_mode
+from backend.src.models.hardware_config import (
+    BatteryConfig,
+    HardwareConfig,
+    Ina3221Config,
+    VictronBleConfig,
+)
 from backend.src.models.safety_limits import SafetyLimits
+
+logger = logging.getLogger(__name__)
+
+_HARDWARE_SETUP_HINT = (
+    "Run `uv run python scripts/manage_hardware_config.py ensure --profile auto` "
+    "or pass `--profile pi5` / `--profile pi4` on non-detectable hosts."
+)
+
+_HARDWARE_MIGRATION_HINT = (
+    "Run `uv run python scripts/manage_hardware_config.py migrate-legacy --profile auto` "
+    "after backing up local configuration."
+)
 
 
 def _default_config_dir() -> str:
@@ -50,11 +69,8 @@ class ConfigLoader:
         self.config_dir = config_dir or _default_config_dir()
         self.hardware_path = hardware_path or os.path.join(self.config_dir, "hardware.yaml")
         self.limits_path = limits_path or os.path.join(self.config_dir, "limits.yaml")
-        env_local_path = os.environ.get("LAWN_HARDWARE_LOCAL_PATH")
-        self.hardware_local_path = (
-            hardware_local_path
-            or env_local_path
-            or os.path.join(self.config_dir, "hardware.local.yaml")
+        self.hardware_local_path = hardware_local_path or os.path.join(
+            self.config_dir, "hardware.local.yaml"
         )
         env_limits_local = os.environ.get("LAWN_LIMITS_LOCAL_PATH")
         self.limits_local_path = (
@@ -63,6 +79,10 @@ class ConfigLoader:
             or os.path.join(self.config_dir, "limits.local.yaml")
         )
         self._cache: tuple[HardwareConfig, SafetyLimits] | None = None
+        self.hardware_loaded: bool = False
+        self.hardware_missing_allowed: bool = False
+        self.hardware_overlay: str | None = None
+        self.hardware_legacy_present: bool = False
 
     def _read_yaml(self, path: str) -> dict[str, Any]:
         try:
@@ -74,22 +94,53 @@ class ConfigLoader:
         except FileNotFoundError:
             return {}
 
+    def _load_hardware_raw(self) -> dict[str, Any]:
+        self.hardware_loaded = False
+        self.hardware_missing_allowed = False
+        self.hardware_overlay = None
+        self.hardware_legacy_present = bool(
+            self.hardware_local_path and os.path.exists(self.hardware_local_path)
+        )
+
+        if self.hardware_legacy_present:
+            message = (
+                f"Legacy hardware overlay found at {self.hardware_local_path}. "
+                f"Runtime no longer loads hardware.local.yaml. {_HARDWARE_MIGRATION_HINT}"
+            )
+            if is_simulation_mode():
+                logger.warning(message)
+            else:
+                raise RuntimeError(message)
+
+        if not os.path.exists(self.hardware_path):
+            if is_simulation_mode():
+                self.hardware_missing_allowed = True
+                logger.warning(
+                    "Hardware configuration %s is missing; using simulation-safe defaults",
+                    self.hardware_path,
+                )
+                return {}
+            raise FileNotFoundError(
+                f"Hardware configuration not found at {self.hardware_path}. {_HARDWARE_SETUP_HINT}"
+            )
+
+        self.hardware_loaded = True
+        return self._read_yaml(self.hardware_path)
+
     def load(self) -> tuple[HardwareConfig, SafetyLimits]:
         """Load and validate configuration; caches the result.
 
         Raises:
             ValidationError/ValueError on invalid configuration.
         """
-        hw_raw = self._read_yaml(self.hardware_path)
-        local_raw = self._read_yaml(self.hardware_local_path) if self.hardware_local_path else {}
-        if local_raw:
-            hw_raw = self._deep_merge(hw_raw, local_raw)
+        hw_raw = self._load_hardware_raw()
         limits_raw = self._read_yaml(self.limits_path)
         limits_local_raw = self._read_yaml(self.limits_local_path) if self.limits_local_path else {}
         if limits_local_raw:
             limits_raw = self._deep_merge(limits_raw, limits_local_raw)
 
         try:
+            self._validate_hardware_yaml_keys(hw_raw)
             hardware = HardwareConfig(**self._normalize_hardware_yaml(hw_raw))
         except ValidationError as e:
             # Re-raise with file context
@@ -112,6 +163,21 @@ class ConfigLoader:
 
         self._cache = (hardware, limits)
         return self._cache
+
+    def source_metadata(self) -> dict[str, Any]:
+        """Return non-secret source metadata for startup/health diagnostics."""
+
+        return {
+            "hardware_source": self.hardware_path,
+            "hardware_loaded": self.hardware_loaded,
+            "hardware_missing_allowed": self.hardware_missing_allowed,
+            "hardware_overlay": self.hardware_overlay,
+            "hardware_legacy_path": self.hardware_local_path,
+            "hardware_legacy_present": self.hardware_legacy_present,
+            "limits_source": self.limits_path,
+            "limits_local_source": self.limits_local_path,
+            "limits_local_loaded": bool(self.limits_local_path and os.path.exists(self.limits_local_path)),
+        }
 
     def get(self) -> tuple[HardwareConfig, SafetyLimits]:
         """Return cached configs, loading if necessary."""
@@ -171,14 +237,25 @@ class ConfigLoader:
             "gps_ntrip_enabled",
             "gps_antenna_offset_forward_m",
             "gps_antenna_offset_right_m",
+            "gps_usb_device",
             "imu_type",
+            "imu_port",
+            "imu_yaw_offset_degrees",
+            "encoder_enabled",
             "tof_sensors",
             "env_sensor",
             "power_monitor",
             "motor_controller",
+            "motor_controller_port",
             "blade_controller",
             "blade",
+            "camera",
             "camera_enabled",
+            "tof_config",
+            "ina3221_config",
+            "bme280_config",
+            "victron_config",
+            "battery_config",
         ):
             if key in cfg:
                 if key == "power_monitor" and isinstance(cfg[key], dict):
@@ -247,6 +324,15 @@ class ConfigLoader:
             # Preserve as-is; Pydantic model on HardwareConfig will validate
             mapped["tof_config"] = tof_cfg
 
+        if isinstance(sensors, dict) and "env_sensor" in sensors and "env_sensor" not in mapped:
+            mapped["env_sensor"] = bool(sensors["env_sensor"])
+
+        bme280_cfg = cfg.get("bme280")
+        if isinstance(bme280_cfg, dict):
+            mapped["bme280_config"] = bme280_cfg
+            if "env_sensor" not in mapped:
+                mapped["env_sensor"] = bool(bme280_cfg.get("enabled", True))
+
         power_entry = cfg.get("power_monitor")
         if isinstance(power_entry, dict):
             if "power_monitor" not in mapped:
@@ -283,6 +369,20 @@ class ConfigLoader:
             else:
                 mapped["motor_controller"] = motor.get("type")
 
+        if "motor_controller_port" in cfg and "motor_controller_port" not in mapped:
+            port = cfg.get("motor_controller_port")
+            mapped["motor_controller_port"] = str(port).strip() if port is not None else None
+
+        blade_controller_entry = cfg.get("blade_controller")
+        if isinstance(blade_controller_entry, dict) and "type" in blade_controller_entry:
+            blade_type = str(blade_controller_entry.get("type")).strip().lower()
+            if blade_type in {"ibt_4", "ibt-4", "ibt4"}:
+                mapped["blade_controller"] = "ibt-4"
+            elif "robohat" in blade_type:
+                mapped["blade_controller"] = "robohat-rp2040"
+            else:
+                mapped["blade_controller"] = blade_controller_entry.get("type")
+
         blade_cfg = cfg.get("blade")
         if isinstance(blade_cfg, dict):
             mapped["blade"] = blade_cfg
@@ -291,7 +391,138 @@ class ConfigLoader:
         elif "blade_controller" in mapped:
             mapped["blade"] = {"controller": mapped["blade_controller"]}
 
+        camera = cfg.get("camera") or {}
+        if isinstance(camera, dict) and "enabled" in camera and "camera_enabled" not in mapped:
+            mapped["camera_enabled"] = bool(camera["enabled"])
+
         return mapped
+
+    def _validate_hardware_yaml_keys(self, cfg: dict[str, Any]) -> None:
+        """Reject unknown runtime hardware settings before normalization drops them."""
+
+        if not cfg:
+            return
+
+        allowed_top = {
+            "gps",
+            "gps_type",
+            "gps_ntrip_enabled",
+            "gps_usb_device",
+            "gps_antenna_offset_forward_m",
+            "gps_antenna_offset_right_m",
+            "imu",
+            "imu_type",
+            "imu_port",
+            "imu_yaw_offset_degrees",
+            "encoders",
+            "encoder_enabled",
+            "sensors",
+            "tof_config",
+            "tof_sensors",
+            "env_sensor",
+            "bme280",
+            "bme280_config",
+            "power_monitor",
+            "ina3221",
+            "ina3221_config",
+            "victron",
+            "victron_config",
+            "battery_config",
+            "motor_controller",
+            "motor_controller_port",
+            "blade_controller",
+            "blade",
+            "camera_enabled",
+            "battery",
+        }
+        nested_allowed = {
+            "gps": {
+                "type",
+                "connection",
+                "ntrip_enabled",
+                "usb_device",
+                "antenna_offset_forward_m",
+                "antenna_offset_right_m",
+            },
+            "imu": {"type", "port", "yaw_offset_degrees"},
+            "encoders": {"enabled"},
+            "sensors": {"tof", "tof_config", "env_sensor", "power_monitor"},
+            "sensors.tof_config": {
+                "bus",
+                "left_address",
+                "right_address",
+                "ranging_mode",
+                "left_shutdown_gpio",
+                "right_shutdown_gpio",
+                "left_interrupt_gpio",
+                "right_interrupt_gpio",
+                "timing_budget_us",
+            },
+            "tof_config": {
+                "bus",
+                "left_address",
+                "right_address",
+                "ranging_mode",
+                "left_shutdown_gpio",
+                "right_shutdown_gpio",
+                "left_interrupt_gpio",
+                "right_interrupt_gpio",
+                "timing_budget_us",
+            },
+            "bme280": {"enabled", "bus", "address", "sea_level_hpa"},
+            "bme280_config": {"enabled", "bus", "address", "sea_level_hpa"},
+            "power_monitor": {
+                "enabled",
+                "type",
+                "channels",
+                "ina3221",
+                "victron",
+                "victron_vedirect",
+            },
+            "power_monitor.ina3221": set(Ina3221Config.model_fields),
+            "power_monitor.victron": set(VictronBleConfig.model_fields),
+            "power_monitor.victron_vedirect": set(VictronBleConfig.model_fields),
+            "ina3221": set(Ina3221Config.model_fields),
+            "ina3221_config": set(Ina3221Config.model_fields),
+            "victron": set(VictronBleConfig.model_fields),
+            "victron_config": set(VictronBleConfig.model_fields),
+            "battery": set(BatteryConfig.model_fields),
+            "battery_config": set(BatteryConfig.model_fields),
+            "blade": {
+                "controller",
+                "allow_autonomous",
+                "spinup_seconds",
+                "shutdown_timeout_seconds",
+                "command_ack_timeout_seconds",
+                "pins",
+            },
+            "blade.pins": {"in1", "in2"},
+            "blade_controller": {"type"},
+            "camera": {"enabled"},
+            "motor_controller": {"type"},
+        }
+
+        for key, value in cfg.items():
+            if key not in allowed_top:
+                raise ValueError(f"unsupported top-level setting '{key}'")
+            self._validate_nested_hardware_keys(value, key, nested_allowed)
+
+    def _validate_nested_hardware_keys(
+        self,
+        value: Any,
+        path: str,
+        nested_allowed: dict[str, set[str]],
+    ) -> None:
+        if not isinstance(value, dict):
+            return
+        allowed = nested_allowed.get(path)
+        if allowed is None:
+            return
+        for key, child in value.items():
+            child_path = f"{path}.{key}"
+            if key not in allowed:
+                raise ValueError(f"unknown setting '{child_path}'")
+            self._validate_nested_hardware_keys(child, child_path, nested_allowed)
 
     @staticmethod
     def _normalize_limits_yaml(cfg: dict[str, Any]) -> dict[str, Any]:

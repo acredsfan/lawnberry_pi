@@ -1,13 +1,10 @@
-import json
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 
-from backend.src.middleware.sanitization import register_sanitization_middleware, _redact
-
+from backend.src.middleware.sanitization import _redact, register_sanitization_middleware
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -103,6 +100,7 @@ def test_content_length_correct_for_invalid_json_passthrough():
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
     from starlette.routing import Route
+
     from backend.src.middleware.sanitization import SanitizationMiddleware
 
     raw_body = b"not valid json at all"
@@ -127,6 +125,7 @@ def test_content_length_correct_for_non_json_passthrough():
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
     from starlette.routing import Route
+
     from backend.src.middleware.sanitization import SanitizationMiddleware
 
     async def plain(request: Request):
@@ -160,6 +159,21 @@ def test_security_headers_always_present():
 def test_redact_dict_sensitive_keys():
     result = _redact({"token": "abc", "ok": 1})
     assert result == {"token": "***REDACTED***", "ok": 1}
+
+
+def test_redact_victron_secret_keys():
+    result = _redact(
+        {
+            "victron": {
+                "encryption_key": "unit-test-secret",
+                "device_key": "device-secret",
+                "enabled": True,
+            }
+        }
+    )
+    assert result["victron"]["encryption_key"] == "***REDACTED***"
+    assert result["victron"]["device_key"] == "***REDACTED***"
+    assert result["victron"]["enabled"] is True
 
 
 def test_redact_nested():

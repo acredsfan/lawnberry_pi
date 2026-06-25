@@ -12,7 +12,7 @@ from backend.src.api.health import (
 )
 
 
-def test_health_endpoints_surface_service_evaluation(monkeypatch):
+def test_v15_health_endpoints_surface_service_evaluation_without_request(monkeypatch):
     sample_report: dict[str, Any] = {
         "timestamp": datetime.now(UTC).isoformat(),
         "overall_status": "healthy",

@@ -1,3 +1,9 @@
-# Sensitive configuration overrides (not committed)
+# User-owned runtime hardware configuration
+hardware.yaml
+
+# Legacy input retained only so old secret-bearing files never appear in git status.
+# Runtime must not load this file.
 hardware.local.yaml
+
+# Existing safety-limit override mechanism
 limits.local.yaml

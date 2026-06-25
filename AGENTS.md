@@ -52,6 +52,11 @@ Use the semble MCP tools (`mcp__semble__search`, `mcp__semble__find_related`) fo
 - Use `SIM_MODE=1` for local development, CI, and tests unless explicitly validating hardware.
 - Use `SIM_MODE=0` only for on-device or bench hardware validation.
 - Leaving `SIM_MODE` unset currently behaves like hardware mode because startup defaults to `os.getenv("SIM_MODE", "0")`.
+- `spec/hardware.yaml` is the tracked supported-hardware specification, not runtime config.
+- `config/hardware.pi5.example.yaml` and `config/hardware.pi4.example.yaml` are tracked complete templates.
+- `config/hardware.yaml` is the single user-owned runtime hardware config; it is ignored and must not be staged.
+- `config/hardware.local.yaml` is legacy migration input only. Runtime must not load it or `LAWN_HARDWARE_LOCAL_PATH`.
+- Use `uv run python scripts/manage_hardware_config.py ensure --profile auto|pi5|pi4` to create or validate hardware config without overwriting an existing file, and `migrate-legacy` to fold an old overlay into `config/hardware.yaml`.
 - Runtime services may keep stale Python bytecode; after changing systemd-served Python code, clear `*.pyc`/`__pycache__` before restart if validating on-device.
 
 ## Development Commands
@@ -110,6 +115,7 @@ Use the semble MCP tools (`mcp__semble__search`, `mcp__semble__find_related`) fo
 - Update docs in the same pass when changing runtime behavior, ports, safety behavior, hardware scope, public APIs, setup, operations, or testing workflows.
 - If callable interfaces change under `backend/src/**`, `frontend/src/**`, `scripts/**`, or `.specify/scripts/**`, update `docs/code_structure_overview.md`.
 - The canonical hardware baseline is `spec/hardware.yaml`.
+- Runtime hardware settings belong only in ignored `config/hardware.yaml`; update the Pi 5/Pi 4 example templates and docs when schema or platform wiring changes.
 - `docs/OPERATIONS.md` is the runtime operations reference.
 - `docs/TESTING.md` is the test workflow reference.
 - `docs/simulation-vs-hardware-modes.md` explains SIM vs hardware behavior.

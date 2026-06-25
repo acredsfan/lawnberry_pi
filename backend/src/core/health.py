@@ -13,8 +13,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from ..models.hardware_config import HardwareConfig
+from .config_loader import ConfigLoader
 from .observability import observability
 from .tls_status import get_tls_status
 
@@ -67,6 +67,8 @@ class HealthService:
         sensor_health_provider: Callable[[], dict[str, Any]] | None = None,
         dependency_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         robohat_provider: Callable[[], dict[str, Any] | None] | None = None,
+        hardware_config: HardwareConfig | None = None,
+        config_loader: ConfigLoader | None = None,
     ) -> None:
         self.hardware_config_path = hardware_config_path
         self.system_config_path = system_config_path
@@ -81,6 +83,8 @@ class HealthService:
         self._sensor_health_provider = sensor_health_provider
         self._dependency_provider = dependency_provider
         self._robohat_provider = robohat_provider
+        self._hardware_config = hardware_config
+        self._config_loader = config_loader
 
     def evaluate(self) -> dict[str, Any]:
         now = datetime.now(UTC)
@@ -449,17 +453,27 @@ class HealthService:
             logger.debug("Failed to read system config: %s", exc)
             return {}
 
-    def _load_hardware_config(self) -> tuple[dict[str, Any] | None, str | None]:
+    def _load_hardware_config(self) -> tuple[HardwareConfig | None, str | None]:
+        if self._hardware_config is not None:
+            return self._hardware_config, None
+        if self._config_loader is not None:
+            try:
+                hardware, _limits = self._config_loader.get()
+                return hardware, None
+            except Exception as exc:
+                return None, f"Unable to load hardware configuration: {exc}"
+
         path = self.hardware_config_path
         if not path.exists():
             return None, f"Hardware configuration not found at {path}"
         try:
-            data = yaml.safe_load(path.read_text()) or {}
-            if not isinstance(data, dict):
-                return None, "Hardware configuration must be a mapping"
-            return data, None
+            hardware, _limits = ConfigLoader(
+                config_dir=str(path.parent),
+                hardware_path=str(path),
+            ).get()
+            return hardware, None
         except Exception as exc:  # pragma: no cover - defensive
-            return None, f"Unable to parse hardware configuration: {exc}"
+            return None, f"Unable to load hardware configuration: {exc}"
 
     def _evaluate_firmware(self) -> dict[str, Any]:
         """Return firmware health info from robohat provider, or a stub if unavailable."""
@@ -518,7 +532,7 @@ class HealthService:
 
         assert config is not None
 
-        gps_config = config.get("gps") or config.get("gps_type")
+        gps_config = config.gps_type.value if config.gps_type is not None else None
         if gps_config:
             checks.append(
                 {
@@ -533,7 +547,7 @@ class HealthService:
             )
             status = _merge_status(status, HealthLevel.CRITICAL)
 
-        imu_config = config.get("imu") or config.get("imu_type")
+        imu_config = config.imu_type.value if config.imu_type is not None else None
         if imu_config:
             checks.append(
                 {
@@ -548,10 +562,7 @@ class HealthService:
             )
             status = _merge_status(status, HealthLevel.CRITICAL)
 
-        sensors_config = config.get("sensors") or {}
-        if not isinstance(sensors_config, dict):
-            sensors_config = {}
-        tof_config = sensors_config.get("tof") or config.get("tof_sensors")
+        tof_config = config.tof_sensors
         if tof_config:
             checks.append(
                 {
@@ -570,9 +581,7 @@ class HealthService:
             )
             status = _merge_status(status, HealthLevel.DEGRADED)
 
-        power_monitor_enabled = bool(
-            config.get("power_monitor", sensors_config.get("power_monitor", False))
-        )
+        power_monitor_enabled = bool(config.power_monitor or config.victron_config is not None)
         if power_monitor_enabled:
             checks.append(
                 {
@@ -591,7 +600,7 @@ class HealthService:
             )
             status = _merge_status(status, HealthLevel.DEGRADED)
 
-        motor_controller = config.get("motor_controller")
+        motor_controller = config.motor_controller.value if config.motor_controller else None
         if motor_controller:
             checks.append(
                 {
