@@ -1,5 +1,6 @@
-import math
 import asyncio
+import math
+
 import pytest
 
 from backend.src.drivers.sensors.victron_vedirect import VictronVeDirectDriver
@@ -19,6 +20,20 @@ def test_merge_prefers_victron_battery_current_when_requested():
     assert reading is not None
     assert math.isclose(reading.battery_current, 1.2, rel_tol=1e-6)
     assert math.isclose(reading.battery_voltage, 12.6, rel_tol=1e-6)
+
+
+def test_v14_preferred_victron_battery_voltage_does_not_fallback_to_ina():
+    ina_payload = {"battery_current": -0.5, "battery_voltage": 0.17}
+
+    reading = PowerSensorInterface._merge_power_payload(
+        ina_payload,
+        None,
+        prefer_battery=True,
+    )
+
+    assert reading is not None
+    assert reading.battery_voltage is None
+    assert math.isclose(reading.battery_current, -0.5, rel_tol=1e-6)
 
 
 def test_merge_prefers_ina_battery_current_by_default():

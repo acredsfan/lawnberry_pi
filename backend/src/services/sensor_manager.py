@@ -651,11 +651,10 @@ class PowerSensorInterface:
         if not ina and not victron:
             return None
 
-        battery_voltage = cls._pick(
-            victron.get("battery_voltage") if victron else None,
-            ina.get("battery_voltage") if ina else None,
-            min_abs=0.05,
-        )
+        battery_voltage_sources: list[Any] = [victron.get("battery_voltage") if victron else None]
+        if not prefer_battery:
+            battery_voltage_sources.append(ina.get("battery_voltage") if ina else None)
+        battery_voltage = cls._pick(*battery_voltage_sources, min_abs=0.05)
         battery_current_sources: list[Any] = []
         if prefer_battery:
             battery_current_sources.extend(

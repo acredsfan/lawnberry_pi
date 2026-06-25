@@ -1,12 +1,14 @@
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.src.api.routers import settings as settings_router
 from backend.src.main import app
+from backend.src.models.safety_limits import SafetyLimits
 
 client = TestClient(app)
 
@@ -228,3 +230,41 @@ def test_settings_maps_get_tolerates_saved_invalid_google_key(clean_settings_fil
         "style": "hybrid",
         "source_id": "google:hybrid",
     }
+
+
+def test_v14_settings_safety_hot_reloads_runtime_limits(monkeypatch):
+    updated_limits = SafetyLimits(
+        battery_low_voltage=12.2,
+        battery_critical_voltage=10.7,
+        tof_obstacle_distance_meters=0.33,
+    )
+
+    class FakeLoader:
+        def update_limits(self, patch):
+            assert patch["battery_critical_voltage"] == 10.7
+            return updated_limits
+
+    fake_nav = SimpleNamespace(obstacle_detector=SimpleNamespace())
+    runtime = SimpleNamespace(safety_limits=SafetyLimits())
+
+    import backend.src.core.config_loader as config_loader
+    import backend.src.services.navigation_service as navigation_service
+
+    monkeypatch.setattr(config_loader, "get_config_loader", lambda: FakeLoader())
+    monkeypatch.setattr(
+        navigation_service.NavigationService,
+        "get_instance",
+        staticmethod(lambda: fake_nav),
+    )
+    monkeypatch.setattr(app.state, "runtime", runtime, raising=False)
+
+    response = client.put(
+        "/api/v2/settings/safety",
+        json={"battery_critical_voltage": 10.7},
+    )
+
+    assert response.status_code == 200
+    assert runtime.safety_limits is updated_limits
+    assert fake_nav._safety_limits is updated_limits
+    assert fake_nav.obstacle_detector.limits is updated_limits
+    assert fake_nav.obstacle_detector.safety_distance == 0.33

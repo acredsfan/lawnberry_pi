@@ -1217,16 +1217,23 @@ async def put_safety_settings(request: Request):
         logger.error("Failed to update safety limits: %s", exc)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    # Hot-reload the live NavigationService obstacle threshold
+    runtime = getattr(request.app.state, "runtime", None)
+    if runtime is not None:
+        runtime.safety_limits = updated
+
+    # Hot-reload live services that hold direct references to safety limits.
     try:
         nav = NavigationService.get_instance()
+        nav._safety_limits = updated
         nav.obstacle_avoidance_distance = float(updated.tof_obstacle_distance_meters)
         nav.obstacle_detector.safety_distance = float(updated.tof_obstacle_distance_meters)
+        nav.obstacle_detector.limits = updated
         logger.info(
-            "Live-reloaded obstacle threshold to %.3f m",
+            "Live-reloaded safety limits; obstacle threshold %.3f m, critical battery %.2f V",
             updated.tof_obstacle_distance_meters,
+            updated.battery_critical_voltage,
         )
     except Exception as exc:
-        logger.warning("NavigationService live-reload skipped: %s", exc)
+        logger.warning("NavigationService safety-limit live-reload skipped: %s", exc)
 
     return updated.model_dump()
