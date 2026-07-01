@@ -102,6 +102,8 @@ uv run python scripts/manage_hardware_config.py validate
 
 Use temporary roots in tests for migration and ensure commands. Do not touch the real node `config/hardware.yaml` from
 automated tests.
+The manager tests must cover the fail-closed legacy path: `ensure` and `validate` return non-zero when
+`config/hardware.local.yaml` exists, and `migrate-legacy` restores original files if any post-backup step fails.
 
 ## 3b) Autonomous readiness regression slice
 

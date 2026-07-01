@@ -73,7 +73,8 @@ Hardware configuration has one runtime source:
 - `spec/hardware.yaml` is the tracked supported-hardware specification.
 - `config/hardware.pi5.example.yaml` and `config/hardware.pi4.example.yaml` are tracked complete templates.
 - `config/hardware.yaml` is the ignored, owner-only runtime file and may contain node-specific secrets.
-- `config/hardware.local.yaml` is no longer loaded; use the migration command below once if it exists.
+- `config/hardware.local.yaml` is no longer loaded; `ensure` and `validate` fail if it exists so the
+  legacy values cannot be silently ignored. Use the migration command below once if it exists.
 - `config/limits.local.yaml` remains the separate ignored safety-limit override.
 
 Commands:

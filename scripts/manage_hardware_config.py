@@ -41,6 +41,7 @@ PROFILE_TEMPLATES = {
     "pi5": "hardware.pi5.example.yaml",
     "pi4": "hardware.pi4.example.yaml",
 }
+LEGACY_CONFIG_RELATIVE = Path("config") / "hardware.local.yaml"
 
 
 def _redact_text(value: str) -> str:
@@ -138,6 +139,24 @@ def _backup_path(backup_dir: Path, source: Path, stamp: str) -> Path:
     return candidate
 
 
+def _legacy_path(root: Path) -> Path:
+    return root / LEGACY_CONFIG_RELATIVE
+
+
+def _fail_if_legacy_exists(root: Path, command: str) -> bool:
+    legacy = _legacy_path(root)
+    if not legacy.exists():
+        return False
+    print(
+        "[hardware-config] Legacy config/hardware.local.yaml exists; "
+        f"`{command}` refuses to ignore it. Run "
+        "`uv run python scripts/manage_hardware_config.py migrate-legacy --profile auto` "
+        "or remove the legacy file after verifying it is obsolete.",
+        file=sys.stderr,
+    )
+    return True
+
+
 def _copy_backup(source: Path, backup_dir: Path, stamp: str) -> Path:
     _secure_dir(backup_dir)
     dest = _backup_path(backup_dir, source, stamp)
@@ -152,6 +171,37 @@ def _move_to_backup(source: Path, backup_dir: Path, stamp: str) -> Path:
     os.replace(source, dest)
     _chmod_owner_only(dest)
     return dest
+
+
+def _restore_after_migration_failure(
+    *,
+    hardware: Path,
+    legacy: Path,
+    hardware_existed: bool,
+    hardware_backup: Path | None,
+    legacy_backup: Path | None,
+) -> list[str]:
+    errors: list[str] = []
+    try:
+        if hardware_existed:
+            if hardware_backup and hardware_backup.exists():
+                _atomic_copy_bytes(hardware_backup, hardware)
+            elif not hardware.exists():
+                errors.append("missing hardware backup")
+        elif hardware.exists():
+            hardware.unlink()
+    except Exception as exc:
+        errors.append(f"hardware restore failed: {_validation_error_summary(exc)}")
+
+    try:
+        if legacy_backup and legacy_backup.exists():
+            _atomic_copy_bytes(legacy_backup, legacy)
+        elif not legacy.exists():
+            errors.append("missing legacy backup")
+    except Exception as exc:
+        errors.append(f"legacy restore failed: {_validation_error_summary(exc)}")
+
+    return errors
 
 
 def _profile_template(root: Path, profile: str, model_path: Path | None) -> tuple[str, Path]:
@@ -197,6 +247,8 @@ def _validate_data(root: Path, data: dict[str, Any]) -> None:
 
 def cmd_ensure(args: argparse.Namespace) -> int:
     root = args.root.resolve()
+    if _fail_if_legacy_exists(root, "ensure"):
+        return 1
     config_dir = root / "config"
     hardware = config_dir / "hardware.yaml"
     profile, template = _profile_template(root, args.profile, args.model_path)
@@ -235,6 +287,8 @@ def cmd_ensure(args: argparse.Namespace) -> int:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     root = args.root.resolve()
+    if _fail_if_legacy_exists(root, "validate"):
+        return 1
     hardware = root / "config" / "hardware.yaml"
     try:
         _validate_file(root, hardware)
@@ -249,7 +303,7 @@ def cmd_migrate_legacy(args: argparse.Namespace) -> int:
     root = args.root.resolve()
     config_dir = root / "config"
     hardware = config_dir / "hardware.yaml"
-    legacy = config_dir / "hardware.local.yaml"
+    legacy = _legacy_path(root)
     backup_dir = args.backup_dir.resolve() if args.backup_dir else root / "backups" / "hardware-config"
 
     if not legacy.exists():
@@ -270,14 +324,36 @@ def cmd_migrate_legacy(args: argparse.Namespace) -> int:
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backups: list[Path] = []
+    hardware_existed = hardware.exists()
+    hardware_backup: Path | None = None
+    legacy_backup: Path | None = None
     try:
-        if hardware.exists():
-            backups.append(_copy_backup(hardware, backup_dir, stamp))
-        backups.append(_move_to_backup(legacy, backup_dir, stamp))
+        if hardware_existed:
+            hardware_backup = _copy_backup(hardware, backup_dir, stamp)
+            backups.append(hardware_backup)
+        legacy_backup = _move_to_backup(legacy, backup_dir, stamp)
+        backups.append(legacy_backup)
         _atomic_write_yaml(hardware, merged)
         _validate_file(root, hardware)
     except Exception as exc:
-        print(f"[hardware-config] migration failed after validation: {_validation_error_summary(exc)}", file=sys.stderr)
+        print(
+            f"[hardware-config] migration failed after backups began: {_validation_error_summary(exc)}",
+            file=sys.stderr,
+        )
+        restore_errors = _restore_after_migration_failure(
+            hardware=hardware,
+            legacy=legacy,
+            hardware_existed=hardware_existed,
+            hardware_backup=hardware_backup,
+            legacy_backup=legacy_backup,
+        )
+        if restore_errors:
+            print(
+                "[hardware-config] rollback failed: " + "; ".join(restore_errors),
+                file=sys.stderr,
+            )
+        else:
+            print("[hardware-config] restored original files after failed migration", file=sys.stderr)
         return 1
 
     print(
