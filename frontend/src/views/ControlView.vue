@@ -701,7 +701,9 @@ watch(motorControllerState, (state) => {
 
 watch(lockout, (value) => {
   if (value) {
-    lockControl()
+    void stopMovement(true)
+    joystickRef.value?.reset()
+    currentSpeed.value = 0
     const reason = lockoutReason.value || 'Safety lockout active'
     showStatus(reason, false, 6000)
   }

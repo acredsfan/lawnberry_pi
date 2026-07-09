@@ -167,13 +167,15 @@ Manual drive now fails closed for **non-zero** movement commands on live hardwar
 
 - The RoboHAT controller must be connected and controller-ready before the joystick is enabled in the WebUI.
 - The backend blocks non-zero drive commands with HTTP `423` if fresh hardware telemetry is unavailable, usable GPS position
-  awareness is missing, or a ToF obstacle reading is at/inside the configured clearance threshold.
+  awareness is missing, or a ToF obstacle reading is at/inside the operator-configured `tof_obstacle_distance_meters`
+  cutoff.
 - Zero-vector stop commands remain allowed so an operator can still halt motion immediately while the controller is connected.
 - The software watchdog is armed by hazardous actuator sources rather than by backend uptime alone. Idle camera, telemetry, or
   WebSocket stalls should not latch `watchdog_timeout`; that reason should indicate missed watchdog heartbeats while drive or
   blade control is armed.
-- Obstacle clearance is calculated from speed, latency, conservative braking, front offset, and margin values in
-  `config/limits.yaml`; `tof_obstacle_distance_meters` is now only a minimum floor.
+- Autonomous obstacle clearance is calculated from speed, latency, conservative braking, front offset, and margin values in
+  `config/limits.yaml`; `tof_obstacle_distance_meters` remains the manual near-field cutoff and is only a minimum floor
+  for the autonomous stopping-distance model.
 
 Useful checks:
 

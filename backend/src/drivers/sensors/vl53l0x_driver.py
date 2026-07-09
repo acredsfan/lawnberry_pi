@@ -31,10 +31,11 @@ from typing import Any
 from ...core.simulation import is_simulation_mode
 from ..base import HardwareDriver
 
-# VL53L0X out-of-range sentinel: the sensor returns exactly 8190 mm when a
-# measurement is invalid or the target is beyond measurement range (VCSEL period
-# pre-range limit exceeded).  This value must never be treated as a real distance
-# — it must be filtered to None before reaching obstacle-detection logic.
+# VL53L0X invalid-range sentinels:
+# - 0 mm is emitted by some backends during invalid/no-target samples.
+# - 8190 mm is emitted when the target is beyond measurement range.
+# Neither value must reach obstacle-detection logic as a real distance.
+TOF_SENSOR_MIN_VALID_MM: int = 1
 TOF_SENSOR_MAX_VALID_MM: int = 8190
 
 # Shared singletons for Adafruit backend and GPIO control
@@ -205,17 +206,18 @@ class VL53L0XDriver(HardwareDriver):
             # Ignore errors and keep last good reading
             distance = None
 
-        # VL53L0X emits TOF_SENSOR_MAX_VALID_MM (8190 mm) as a sentinel for
-        # "out of range / measurement invalid".  Discard it — do NOT cache it
-        # as a valid distance and do NOT treat it as a clear-path indicator.
-        # Increment fail_count so repeated sentinels can trigger re-init.
-        if isinstance(distance, int) and distance >= TOF_SENSOR_MAX_VALID_MM:
+        # Discard invalid/no-target sentinels — do NOT cache them as valid
+        # distances and do NOT let zero glitches become obstacle detections.
+        if (
+            isinstance(distance, int)
+            and (distance < TOF_SENSOR_MIN_VALID_MM or distance >= TOF_SENSOR_MAX_VALID_MM)
+        ):
             self._last_read_ts = time.time()
             self._fail_count += 1
             return None
 
         # Update state if we obtained a valid in-range measurement
-        if isinstance(distance, int) and distance >= 0:
+        if isinstance(distance, int) and distance >= TOF_SENSOR_MIN_VALID_MM:
             self._last_distance_mm = distance
             self._last_read_ts = time.time()
             self._fail_count = 0
@@ -229,7 +231,12 @@ class VL53L0XDriver(HardwareDriver):
         return self._last_distance_mm
 
 
-__all__ = ["VL53L0XDriver", "ensure_pair_addressing", "TOF_SENSOR_MAX_VALID_MM"]
+__all__ = [
+    "VL53L0XDriver",
+    "ensure_pair_addressing",
+    "TOF_SENSOR_MIN_VALID_MM",
+    "TOF_SENSOR_MAX_VALID_MM",
+]
 
 # -------------------------- Private helpers ---------------------------
 

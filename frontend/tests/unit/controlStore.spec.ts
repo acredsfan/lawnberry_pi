@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useControlStore } from '@/stores/control'
-import * as api from '@/services/api'
+import * as controlClient from '@/services/controlClient'
+
+vi.mock('@/services/controlClient', () => ({
+  sendControlCommand: vi.fn(),
+  getRoboHATStatus: vi.fn(),
+  getControlStatus: vi.fn(),
+  clearEmergencyStop: vi.fn(),
+}))
 
 function getControlWsEntry() {
   const instances = (globalThis as any).__wsMockInstances as Array<{
@@ -66,13 +73,13 @@ describe('Control Store', () => {
         timestamp: new Date().toISOString(),
       }
 
-      vi.mocked(api.sendControlCommand).mockResolvedValue(mockResponse)
+      vi.mocked(controlClient.sendControlCommand).mockResolvedValue(mockResponse)
 
       await store.submitCommand('FORWARD', { speed: 50 })
 
       expect(store.commandInProgress).toBe(false)
       expect(store.lastCommandEcho).toEqual(mockResponse)
-      expect(api.sendControlCommand).toHaveBeenCalledWith('FORWARD', { speed: 50 })
+      expect(controlClient.sendControlCommand).toHaveBeenCalledWith('FORWARD', { speed: 50 })
     })
 
     it('prevents command submission during lockout', async () => {
@@ -84,7 +91,28 @@ describe('Control Store', () => {
         'Control locked out: Emergency stop activated'
       )
 
-      expect(api.sendControlCommand).not.toHaveBeenCalled()
+      expect(controlClient.sendControlCommand).not.toHaveBeenCalled()
+    })
+
+    it('allows a zero-vector drive stop during lockout', async () => {
+      const { store } = createStoreWithWs()
+      const mockResponse = { result: 'accepted', status: 'accepted' }
+      store.lockoutActive = true
+      store.lockoutReason = 'OBSTACLE_DETECTED'
+      vi.mocked(controlClient.sendControlCommand).mockResolvedValue(mockResponse)
+
+      await store.submitCommand('drive', {
+        session_id: 'sid-1',
+        vector: { linear: 0, angular: 0 },
+        duration_ms: 0,
+        reason: 'manual-stop',
+      })
+
+      expect(controlClient.sendControlCommand).toHaveBeenCalledWith('drive', expect.objectContaining({
+        vector: { linear: 0, angular: 0 },
+        reason: 'manual-stop',
+      }))
+      expect(store.lastCommandEcho).toEqual(mockResponse)
     })
 
     it('preserves remediation links from blocked responses', async () => {
@@ -95,7 +123,7 @@ describe('Control Store', () => {
         remediation_url: '/docs/OPERATIONS.md#blade-safety-lockout',
       }
 
-      vi.mocked(api.sendControlCommand).mockResolvedValue(blockedResponse as any)
+      vi.mocked(controlClient.sendControlCommand).mockResolvedValue(blockedResponse as any)
 
       await store.submitCommand('blade', { action: 'enable' })
 
@@ -108,7 +136,7 @@ describe('Control Store', () => {
       const { store } = createStoreWithWs()
       const error = new Error('Communication failure')
 
-      vi.mocked(api.sendControlCommand).mockRejectedValue(error)
+      vi.mocked(controlClient.sendControlCommand).mockRejectedValue(error)
 
       await expect(store.submitCommand('FORWARD', {})).rejects.toThrow('Communication failure')
       expect(store.commandInProgress).toBe(false)
@@ -118,7 +146,7 @@ describe('Control Store', () => {
       const { store } = createStoreWithWs()
       const error = new Error('Network timeout')
 
-      vi.mocked(api.sendControlCommand).mockRejectedValue(error)
+      vi.mocked(controlClient.sendControlCommand).mockRejectedValue(error)
 
       await expect(store.submitCommand('drive', {})).rejects.toThrow('Network timeout')
 
@@ -144,7 +172,7 @@ describe('Control Store', () => {
         },
       }
 
-      vi.mocked(api.sendControlCommand).mockRejectedValue(error)
+      vi.mocked(controlClient.sendControlCommand).mockRejectedValue(error)
 
       await expect(store.submitCommand('blade', {})).rejects.toMatchObject(error)
 
@@ -158,7 +186,7 @@ describe('Control Store', () => {
       const { store } = createStoreWithWs()
       let progressDuringCall = false
 
-      vi.mocked(api.sendControlCommand).mockImplementation(async () => {
+      vi.mocked(controlClient.sendControlCommand).mockImplementation(async () => {
         progressDuringCall = store.commandInProgress
         return {
           command_id: 'cmd123',
@@ -187,19 +215,44 @@ describe('Control Store', () => {
         },
       }
 
-      vi.mocked(api.getRoboHATStatus).mockResolvedValue(mockStatus)
+      vi.mocked(controlClient.getRoboHATStatus).mockResolvedValue(mockStatus)
 
       await store.fetchRoboHATStatus()
 
       expect(store.robohatStatus).toEqual(mockStatus)
-      expect(api.getRoboHATStatus).toHaveBeenCalled()
+      expect(controlClient.getRoboHATStatus).toHaveBeenCalled()
+    })
+
+    it('refreshes queued motor banner from RoboHAT serial status', async () => {
+      const { store } = createStoreWithWs()
+      vi.mocked(controlClient.sendControlCommand).mockResolvedValue({
+        result: 'queued',
+        motor_connected: false,
+      } as any)
+
+      await store.submitCommand('drive', {
+        session_id: 'sid-1',
+        vector: { linear: 0, angular: 0 },
+        duration_ms: 0,
+      })
+
+      expect(store.motorConnected).toBe(false)
+
+      vi.mocked(controlClient.getRoboHATStatus).mockResolvedValue({
+        serial_connected: true,
+        motor_controller_ok: true,
+      } as any)
+
+      await store.fetchRoboHATStatus()
+
+      expect(store.motorConnected).toBe(true)
     })
 
     it('handles status fetch errors gracefully', async () => {
       const { store } = createStoreWithWs()
       const error = new Error('Connection timeout')
 
-      vi.mocked(api.getRoboHATStatus).mockRejectedValue(error)
+      vi.mocked(controlClient.getRoboHATStatus).mockRejectedValue(error)
 
       await expect(store.fetchRoboHATStatus()).rejects.toThrow('Connection timeout')
       expect(store.robohatStatus).toBeNull()

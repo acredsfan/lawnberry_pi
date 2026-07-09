@@ -52,6 +52,20 @@ describe('useJoystickDrive', () => {
     expect(getResult().activeDriveVector.value).toEqual({ linear: 0, angular: 0 })
   })
 
+  it('allows a zero-vector stop while a safety lockout blocks motion', async () => {
+    const { getResult, hasLockout } = mountWithComposable()
+    hasLockout.value = true
+
+    await getResult().stopMovement(true)
+
+    expect(mockSubmitCommand).toHaveBeenCalledWith('drive', expect.objectContaining({
+      session_id: 'sid-1',
+      vector: { linear: 0, angular: 0 },
+      reason: 'manual-stop',
+      duration_ms: 0,
+    }))
+  })
+
   it('clears timers on unmount', () => {
     const { wrapper } = mountWithComposable()
     expect(() => wrapper.unmount()).not.toThrow()

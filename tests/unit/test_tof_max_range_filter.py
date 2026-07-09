@@ -1,9 +1,10 @@
-"""Unit tests for VL53L0X ToF 8190 mm out-of-range sentinel filtering.
+"""Unit tests for VL53L0X ToF invalid sentinel filtering.
 
 Covers:
 - TOF_SENSOR_MAX_VALID_MM constant equals 8190
 - Driver returns None (not 8190) for exact sentinel readings
 - Driver returns None for any value >= 8190
+- Driver returns None for raw 0 mm invalid samples
 - Driver does NOT cache the sentinel as _last_distance_mm
 - Driver increments fail_count on sentinel readings (not resets it)
 - ObstacleDetector treats None distance as "unknown" (no false positive)
@@ -15,10 +16,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backend.src.drivers.sensors.vl53l0x_driver import TOF_SENSOR_MAX_VALID_MM, VL53L0XDriver
+from backend.src.drivers.sensors.vl53l0x_driver import (
+    TOF_SENSOR_MAX_VALID_MM,
+    TOF_SENSOR_MIN_VALID_MM,
+    VL53L0XDriver,
+)
 from backend.src.models.sensor_data import SensorData, TofReading
 from backend.src.services.navigation_service import ObstacleDetector
-
 
 # ---------------------------------------------------------------------------
 # Constant
@@ -27,10 +31,12 @@ from backend.src.services.navigation_service import ObstacleDetector
 class TestTofSentinelConstant:
     def test_sentinel_value_is_8190(self):
         assert TOF_SENSOR_MAX_VALID_MM == 8190
+        assert TOF_SENSOR_MIN_VALID_MM == 1
 
     def test_sentinel_exported_in_all(self):
         from backend.src.drivers.sensors import vl53l0x_driver
         assert "TOF_SENSOR_MAX_VALID_MM" in vl53l0x_driver.__all__
+        assert "TOF_SENSOR_MIN_VALID_MM" in vl53l0x_driver.__all__
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +73,15 @@ async def test_value_above_sentinel_returns_none():
 
 
 @pytest.mark.asyncio
+async def test_raw_zero_returns_none():
+    """Raw 0 mm is an invalid/no-target sample, not a zero-distance obstacle."""
+    drv = _make_pololu_driver(0)
+    with patch.dict("os.environ", {"SIM_MODE": "0"}):
+        result = await drv.read_distance_mm()
+    assert result is None
+
+
+@pytest.mark.asyncio
 async def test_valid_distance_below_sentinel_returned():
     """Normal in-range distance (< 8190) is returned as-is."""
     drv = _make_pololu_driver(450)
@@ -86,9 +101,27 @@ async def test_sentinel_does_not_overwrite_last_cached_distance():
 
 
 @pytest.mark.asyncio
+async def test_raw_zero_does_not_overwrite_last_cached_distance():
+    drv = _make_pololu_driver(0)
+    drv._last_distance_mm = 500
+    with patch.dict("os.environ", {"SIM_MODE": "0"}):
+        await drv.read_distance_mm()
+    assert drv._last_distance_mm == 500
+
+
+@pytest.mark.asyncio
 async def test_sentinel_increments_fail_count():
     """8190 is a measurement failure — fail_count must increase, not reset."""
     drv = _make_pololu_driver(8190)
+    drv._fail_count = 0
+    with patch.dict("os.environ", {"SIM_MODE": "0"}):
+        await drv.read_distance_mm()
+    assert drv._fail_count == 1
+
+
+@pytest.mark.asyncio
+async def test_raw_zero_increments_fail_count():
+    drv = _make_pololu_driver(0)
     drv._fail_count = 0
     with patch.dict("os.environ", {"SIM_MODE": "0"}):
         await drv.read_distance_mm()
@@ -152,6 +185,13 @@ def test_both_none_tof_no_obstacle():
     """Both ToF readings unavailable (None) → no obstacle (unknown, not blocked)."""
     detector = ObstacleDetector(safety_distance=0.2)
     obstacles = detector.update_obstacles_from_sensors(_sensor_data(None, None))
+    assert obstacles == []
+
+
+def test_raw_zero_tof_no_obstacle():
+    """A zero-distance ToF glitch is invalid and must not create a false obstacle."""
+    detector = ObstacleDetector(safety_distance=0.2)
+    obstacles = detector.update_obstacles_from_sensors(_sensor_data(0.0, 1500.0))
     assert obstacles == []
 
 

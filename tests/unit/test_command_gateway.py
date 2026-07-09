@@ -334,6 +334,171 @@ async def test_mission_drive_lease_old_expiry_cannot_stop_newer_command():
 
 
 @pytest.mark.asyncio
+async def test_v18_zero_drive_cancels_existing_lease_without_new_delayed_stop():
+    from backend.src.control.commands import CommandStatus, DriveCommand
+
+    gw, _, _ = _make_gw()
+    mock_robohat = MagicMock()
+    mock_robohat.status.serial_connected = True
+    mock_robohat.status.firmware_version = "10.0.0"
+    mock_robohat.send_motor_command = AsyncMock(return_value=True)
+    gw._robohat = mock_robohat
+
+    moving = await gw.dispatch_drive(
+        DriveCommand(left=0.4, right=0.4, source="manual", duration_ms=100)
+    )
+    stopped = await gw.dispatch_drive(
+        DriveCommand(left=0.0, right=0.0, source="manual", duration_ms=0)
+    )
+    await asyncio.sleep(0.6)
+
+    assert moving.status == CommandStatus.ACCEPTED
+    assert stopped.status == CommandStatus.ACCEPTED
+    assert mock_robohat.send_motor_command.await_count == 2
+    assert mock_robohat.send_motor_command.await_args_list[-1].args == (0.0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_v18_manual_drive_ignores_zero_tof_glitch(monkeypatch):
+    from datetime import UTC, datetime
+
+    from backend.src.control.command_gateway import MotorCommandGateway
+    from backend.src.control.commands import DriveCommand
+    from backend.src.core.state_manager import AppState
+    from backend.src.models.safety_limits import SafetyLimits
+    from backend.src.services.navigation_service import NavigationService
+
+    gw, _, _ = _make_gw()
+    gw._check_manual_drive_interlocks = MotorCommandGateway._check_manual_drive_interlocks.__get__(
+        gw, MotorCommandGateway
+    )
+    gw._config_loader = MagicMock(get=MagicMock(return_value=(None, SafetyLimits())))
+    monkeypatch.setattr(
+        NavigationService,
+        "get_instance",
+        lambda: SimpleNamespace(max_waypoint_accuracy_m=0.25),
+    )
+    AppState.get_instance().last_telemetry = {
+        "source": "hardware",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "position": {"latitude": 39.0, "longitude": -84.0, "accuracy": 0.03},
+        "tof": {
+            "left": {"distance_mm": 0},
+            "right": {"distance_mm": 1200},
+        },
+    }
+
+    interlocks = await gw._check_manual_drive_interlocks(
+        DriveCommand(left=0.4, right=0.4, source="manual", duration_ms=200)
+    )
+
+    assert "obstacle_detected" not in interlocks
+
+
+@pytest.mark.asyncio
+async def test_v20_manual_drive_uses_operator_tof_cutoff_not_dynamic_floor(monkeypatch):
+    from datetime import UTC, datetime
+
+    from backend.src.control.command_gateway import MotorCommandGateway
+    from backend.src.control.commands import DriveCommand
+    from backend.src.core.state_manager import AppState
+    from backend.src.models.safety_limits import SafetyLimits
+    from backend.src.services.navigation_service import NavigationService
+
+    gw, _, _ = _make_gw()
+    gw._check_manual_drive_interlocks = MotorCommandGateway._check_manual_drive_interlocks.__get__(
+        gw, MotorCommandGateway
+    )
+    limits = SafetyLimits(
+        tof_obstacle_distance_meters=0.0254,
+        obstacle_min_clearance_m=0.55,
+        obstacle_front_offset_m=0.25,
+        obstacle_fixed_margin_m=0.2,
+    )
+    gw._config_loader = MagicMock(get=MagicMock(return_value=(None, limits)))
+    monkeypatch.setattr(
+        NavigationService,
+        "get_instance",
+        lambda: SimpleNamespace(max_waypoint_accuracy_m=0.25),
+    )
+    AppState.get_instance().last_telemetry = {
+        "source": "hardware",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "position": {"latitude": 39.0, "longitude": -84.0, "accuracy": 0.03},
+        "tof": {
+            "left": {"distance_mm": 500},
+            "right": {"distance_mm": 600},
+        },
+    }
+
+    interlocks = await gw._check_manual_drive_interlocks(
+        DriveCommand(left=0.4, right=0.4, source="manual", duration_ms=200)
+    )
+
+    assert "obstacle_detected" not in interlocks
+
+
+@pytest.mark.asyncio
+async def test_v20_manual_drive_blocks_inside_operator_tof_cutoff(monkeypatch):
+    from datetime import UTC, datetime
+
+    from backend.src.control.command_gateway import MotorCommandGateway
+    from backend.src.control.commands import DriveCommand
+    from backend.src.core.state_manager import AppState
+    from backend.src.models.safety_limits import SafetyLimits
+    from backend.src.services.navigation_service import NavigationService
+
+    gw, _, _ = _make_gw()
+    gw._check_manual_drive_interlocks = MotorCommandGateway._check_manual_drive_interlocks.__get__(
+        gw, MotorCommandGateway
+    )
+    gw._config_loader = MagicMock(
+        get=MagicMock(
+            return_value=(None, SafetyLimits(tof_obstacle_distance_meters=0.0254))
+        )
+    )
+    monkeypatch.setattr(
+        NavigationService,
+        "get_instance",
+        lambda: SimpleNamespace(max_waypoint_accuracy_m=0.25),
+    )
+    AppState.get_instance().last_telemetry = {
+        "source": "hardware",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "position": {"latitude": 39.0, "longitude": -84.0, "accuracy": 0.03},
+        "tof": {
+            "left": {"distance_mm": 10},
+            "right": {"distance_mm": 600},
+        },
+    }
+
+    interlocks = await gw._check_manual_drive_interlocks(
+        DriveCommand(left=0.4, right=0.4, source="manual", duration_ms=200)
+    )
+
+    assert "obstacle_detected" in interlocks
+
+
+@pytest.mark.asyncio
+async def test_v21_zero_drive_skips_manual_interlocks_with_stale_telemetry():
+    from backend.src.control.command_gateway import MotorCommandGateway
+    from backend.src.control.commands import DriveCommand
+    from backend.src.core.state_manager import AppState
+
+    gw, _, _ = _make_gw()
+    gw._check_manual_drive_interlocks = MotorCommandGateway._check_manual_drive_interlocks.__get__(
+        gw, MotorCommandGateway
+    )
+    AppState.get_instance().last_telemetry = {"source": "unavailable"}
+
+    interlocks = await gw._check_manual_drive_interlocks(
+        DriveCommand(left=0.0, right=0.0, source="manual", duration_ms=0)
+    )
+
+    assert interlocks == []
+
+
+@pytest.mark.asyncio
 async def test_dispatch_drive_ack_timeout_returns_ack_failed():
     """Simulated ack timeout: send_motor_command returns False -> ACK_FAILED outcome."""
     from unittest.mock import AsyncMock, MagicMock

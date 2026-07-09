@@ -361,6 +361,9 @@ class MotorCommandGateway:
             watchdog_latency = (datetime.now(UTC) - watchdog_start).total_seconds() * 1000
 
             if success:
+                self._drive_lease_generation += 1
+                if self._drive_timeout_task and not self._drive_timeout_task.done():
+                    self._drive_timeout_task.cancel()
                 if not motion_active:
                     self._disarm_watchdog("drive")
                 if self._event_store is not None:
@@ -372,6 +375,14 @@ class MotorCommandGateway:
                         watchdog_latency_ms=round(watchdog_latency, 2),
                         hardware_confirmed=True,
                     ))
+                if not motion_active:
+                    return DriveOutcome(
+                        status=CommandStatus.ACCEPTED,
+                        audit_id=audit_id,
+                        status_reason=None,
+                        active_interlocks=[],
+                        watchdog_latency_ms=round(watchdog_latency, 2),
+                    )
                 auto_stop_ms = cmd.duration_ms if cmd.duration_ms > 0 else 500
                 if cmd.source == "mission":
                     try:
@@ -379,10 +390,7 @@ class MotorCommandGateway:
                         auto_stop_ms = int(getattr(limits, "autonomous_command_ttl_ms", 350) or 350)
                     except Exception:
                         auto_stop_ms = 350
-                self._drive_lease_generation += 1
                 lease_generation = self._drive_lease_generation
-                if self._drive_timeout_task and not self._drive_timeout_task.done():
-                    self._drive_timeout_task.cancel()
 
                 async def _auto_stop() -> None:
                     try:
@@ -423,6 +431,10 @@ class MotorCommandGateway:
 
     async def _check_manual_drive_interlocks(self, cmd: DriveCommand) -> list[str]:
         from datetime import datetime
+
+        motion_active = abs(float(cmd.left)) > 1e-6 or abs(float(cmd.right)) > 1e-6
+        if not motion_active:
+            return []
 
         interlocks: list[str] = []
         try:
@@ -467,19 +479,19 @@ class MotorCommandGateway:
                     loader = ConfigLoader()
                 _, limits = loader.get()
                 tof = telemetry.get("tof") or {}
-                from ..nav.obstacle_clearance import required_obstacle_clearance_m
+                from ..nav.obstacle_clearance import configured_tof_obstacle_threshold_m
 
-                commanded_speed_mps = max(abs(float(cmd.left)), abs(float(cmd.right))) * float(
-                    getattr(cmd, "max_speed_limit", 0.8) or 0.8
-                )
-                threshold_mm = required_obstacle_clearance_m(commanded_speed_mps, limits) * 1000.0
+                threshold_mm = configured_tof_obstacle_threshold_m(limits) * 1000.0
                 for side in ("left", "right"):
                     side_payload = tof.get(side) or {}
                     distance_mm = side_payload.get("distance_mm")
                     if distance_mm is None:
                         continue
                     try:
-                        if float(distance_mm) <= threshold_mm:
+                        distance_mm_f = float(distance_mm)
+                        if distance_mm_f <= 0.0:
+                            continue
+                        if distance_mm_f <= threshold_mm:
                             interlocks.append("obstacle_detected")
                             break
                     except (TypeError, ValueError):

@@ -102,6 +102,15 @@ function describeLockoutReason(reason: unknown): LockoutDisplay {
   }
 }
 
+function isZeroDriveCommand(command: string, payload: ControlPayload = {}): boolean {
+  if (command !== 'drive') return false;
+  const vector = payload.vector as { linear?: unknown; angular?: unknown } | undefined;
+  if (!vector || typeof vector !== 'object') return false;
+  const linear = Number(vector.linear ?? 0);
+  const angular = Number(vector.angular ?? 0);
+  return Number.isFinite(linear) && Number.isFinite(angular) && Math.abs(linear) <= 0.01 && Math.abs(angular) <= 0.01;
+}
+
 export const useControlStore = defineStore('control', () => {
   function extractRemediationLink(source: ControlPayload | null | undefined): string {
     if (!source) return '';
@@ -227,7 +236,7 @@ export const useControlStore = defineStore('control', () => {
   });
 
   async function submitCommand(command: string, payload: ControlPayload = {}) {
-    if (lockoutActive.value) {
+    if (lockoutActive.value && !isZeroDriveCommand(command, payload)) {
       throw new Error(`Control locked out: ${lockoutReason.value}`);
     }
 
@@ -275,6 +284,9 @@ export const useControlStore = defineStore('control', () => {
     try {
       const result = await getRoboHATStatus() as RoboHATStatus;
       robohatStatus.value = result;
+      if (typeof result.serial_connected === 'boolean') {
+        _updateMotorConnected(result.serial_connected);
+      }
       return result;
     } catch (e) {
       robohatStatus.value = null;

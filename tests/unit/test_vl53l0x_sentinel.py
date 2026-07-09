@@ -9,19 +9,19 @@ Tests cover:
 - Driver-level sentinel filtering in ``read_distance_mm()``
 - ``_last_distance_mm`` is NOT poisoned by sentinel reads
 - Normal valid distances pass through unchanged
-- 0 mm (sensor contact) is treated as a valid distance
+- 0 mm invalid/no-target samples are filtered before safety logic
 - Boundary values: anything >= 8190 is filtered, < 8190 is passed through
 """
 from __future__ import annotations
 
 import os
+
 import pytest
 
 # Force simulation-safe environment — no real hardware assumed
 os.environ["SIM_MODE"] = "1"
 
-from backend.src.drivers.sensors.vl53l0x_driver import VL53L0XDriver, TOF_SENSOR_MAX_VALID_MM
-
+from backend.src.drivers.sensors.vl53l0x_driver import TOF_SENSOR_MAX_VALID_MM, VL53L0XDriver
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -156,8 +156,8 @@ async def test_last_distance_not_poisoned_by_sentinel():
 
 @pytest.mark.asyncio
 async def test_valid_distance_passes_through():
-    """Valid distances (< 8190 mm) must reach the caller unchanged."""
-    for valid_mm in [0, 50, 200, 1500, 8189]:
+    """Valid positive distances (< 8190 mm) must reach the caller unchanged."""
+    for valid_mm in [1, 50, 200, 1500, 8189]:
         assert not (isinstance(valid_mm, int) and valid_mm >= TOF_SENSOR_MAX_VALID_MM), \
             f"{valid_mm} mm must NOT be caught by the sentinel filter"
 
@@ -173,9 +173,9 @@ def test_sentinel_boundary_values_are_caught(sentinel_mm: int):
         f"{sentinel_mm} mm must be caught as an out-of-range sentinel"
 
 
-@pytest.mark.parametrize("valid_mm", [0, 1, 100, 500, 1500, 8188, 8189])
+@pytest.mark.parametrize("valid_mm", [1, 100, 500, 1500, 8188, 8189])
 def test_valid_distances_are_not_caught(valid_mm: int):
-    """Values < 8190 mm must NOT be treated as sentinel."""
+    """Positive values < 8190 mm must NOT be treated as sentinel."""
     assert not (isinstance(valid_mm, int) and valid_mm >= TOF_SENSOR_MAX_VALID_MM), \
         f"{valid_mm} mm must NOT be treated as an out-of-range sentinel"
 

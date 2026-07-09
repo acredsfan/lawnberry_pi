@@ -89,6 +89,30 @@ async def test_obstacle_reaches_stop_and_blade_off():
 
 
 @pytest.mark.asyncio
+async def test_v20_idle_clear_path_above_operator_cutoff_does_not_latch_obstacle():
+    runtime = _runtime(target_velocity=0.0)
+    runtime.safety_limits = SafetyLimits(
+        tof_obstacle_distance_meters=0.0254,
+        obstacle_min_clearance_m=0.55,
+        obstacle_front_offset_m=0.25,
+        obstacle_fixed_margin_m=0.2,
+    )
+    coordinator = LiveSafetyCoordinator(runtime)
+
+    faults = await coordinator.evaluate_fast_sample(
+        SensorData(
+            imu=ImuReading(roll=0.0, pitch=0.0),
+            tof_left=_tof("left", distance=500.0),
+            tof_right=_tof("right", distance=600.0),
+        )
+    )
+
+    assert "OBSTACLE_STOP" not in faults
+    assert runtime.command_gateway.drive_commands == []
+    assert runtime.command_gateway.blade_commands == []
+
+
+@pytest.mark.asyncio
 async def test_critical_battery_reaches_stop_blade_off_and_emergency():
     runtime = _runtime(blade_active=True)
     coordinator = LiveSafetyCoordinator(runtime)

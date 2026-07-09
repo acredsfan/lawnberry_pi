@@ -330,11 +330,11 @@ class ToFSensorInterface:
                 async with self.coordinator.acquire_i2c("vl53l0x_pair"):
                     dl = await self._left.read_distance_mm()
                     dr = await self._right.read_distance_mm()
-                # Defense-in-depth: filter VL53L0X out-of-range sentinel (≥ 8000 mm)
-                # in case the driver layer didn't catch it (e.g. a library wrapping the raw value).
-                if isinstance(dl, int) and dl >= 8000:
+                # Defense-in-depth: filter VL53L0X invalid/no-target sentinels
+                # in case the driver layer didn't catch a wrapped raw value.
+                if isinstance(dl, int) and (dl <= 0 or dl >= 8000):
                     dl = None
-                if isinstance(dr, int) and dr >= 8000:
+                if isinstance(dr, int) and (dr <= 0 or dr >= 8000):
                     dr = None
                 left_reading = TofReading(
                     distance=float(dl) if dl is not None else None,

@@ -171,8 +171,9 @@ class LiveSafetyCoordinator:
         if tof_right is not None:
             self._status.last_tof_right_sample_monotonic_s = now_mono
 
+        actuator_active = self._actuator_active()
         stale_timeout_s = float(getattr(limits, "obstacle_stale_sample_timeout_s", 0.25))
-        if self._actuator_active():
+        if actuator_active:
             for code, sample_time in (
                 ("TOF_LEFT_STALE", self._status.last_tof_left_sample_monotonic_s),
                 ("TOF_RIGHT_STALE", self._status.last_tof_right_sample_monotonic_s),
@@ -180,17 +181,20 @@ class LiveSafetyCoordinator:
                 if sample_time is None or now_mono - sample_time > stale_timeout_s:
                     faults.add(code)
 
-        commanded_speed = self._current_commanded_speed_mps()
-        obstacle_threshold_m = required_obstacle_clearance_m(commanded_speed, limits)
-        for tof in (tof_left, tof_right):
-            if tof is None or tof.distance is None:
-                continue
-            try:
-                distance_m = float(tof.distance) / 1000.0
-            except (TypeError, ValueError):
-                continue
-            if self._trigger_manager.trigger_obstacle(distance_m, obstacle_threshold_m):
-                faults.add("OBSTACLE_STOP")
+        if actuator_active:
+            commanded_speed = self._current_commanded_speed_mps()
+            obstacle_threshold_m = required_obstacle_clearance_m(commanded_speed, limits)
+            for tof in (tof_left, tof_right):
+                if tof is None or tof.distance is None:
+                    continue
+                try:
+                    distance_m = float(tof.distance) / 1000.0
+                except (TypeError, ValueError):
+                    continue
+                if distance_m <= 0.0:
+                    continue
+                if self._trigger_manager.trigger_obstacle(distance_m, obstacle_threshold_m):
+                    faults.add("OBSTACLE_STOP")
 
         if faults:
             await self._fail_closed(faults)

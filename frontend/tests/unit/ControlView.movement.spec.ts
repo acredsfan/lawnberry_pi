@@ -71,6 +71,12 @@ function createMockControlStore() {
     lockout: false,
     lockoutReason: '',
     lockoutUntil: null,
+    lockoutDisplay: {
+      code: 'OBSTACLE_DETECTED',
+      label: 'Obstacle detected',
+      message: 'Clear nearby obstacles before retrying manual movement.',
+      severity: 'warning',
+    },
     lastEcho: null,
     lastCommandEcho: null,
     lastCommandResult: null,
@@ -80,6 +86,7 @@ function createMockControlStore() {
     robohatStatus: { telemetry_source: 'simulated' },
     submitCommand: vi.fn().mockResolvedValue({ result: 'accepted' }),
     fetchRoboHATStatus: vi.fn().mockImplementation(async () => store.robohatStatus),
+    fetchControlStatus: vi.fn().mockResolvedValue({ emergency_stop_active: false, estop_reason: null }),
     initWebSocket: vi.fn(),
     cleanup: vi.fn(),
   })
@@ -292,6 +299,34 @@ describe('ControlView manual movement loop', () => {
 
     joystick.vm.triggerEnd()
     await flushPromises()
+    wrapper.unmount()
+  })
+
+  it('keeps the manual session unlocked when V17 transient obstacle lockout stops movement', async () => {
+    const store = controlStoreContainer.current
+    store.robohatStatus = {
+      telemetry_source: 'hardware',
+      serial_connected: true,
+      motor_controller_ok: true,
+      last_watchdog_echo: 'rc=disable',
+    }
+    const wrapper = await mountControlView()
+    store.submitCommand.mockClear()
+
+    store.lockoutReason = 'OBSTACLE_DETECTED'
+    store.lockoutUntil = new Date(Date.now() + 3000).toISOString()
+    store.lockout = true
+    await nextTick()
+    await flushPromises()
+
+    expect(wrapper.vm.isControlUnlocked).toBe(true)
+    expect(wrapper.find('.control-interface').exists()).toBe(true)
+    expect(wrapper.text()).toContain('OBSTACLE_DETECTED')
+    expect(store.submitCommand).toHaveBeenCalledWith('drive', expect.objectContaining({
+      vector: { linear: 0, angular: 0 },
+      reason: 'manual-stop',
+    }))
+
     wrapper.unmount()
   })
 })

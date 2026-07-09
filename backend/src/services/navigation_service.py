@@ -67,7 +67,8 @@ class ObstacleDetector:
 
         # ToF sensor obstacles
         if sensor_data.tof_left and sensor_data.tof_left.distance is not None:
-            if float(sensor_data.tof_left.distance) <= threshold_mm:
+            left_distance = float(sensor_data.tof_left.distance)
+            if 0.0 < left_distance <= threshold_mm:
                 obstacles.append(
                     Obstacle(
                         id=f"tof_left_{obstacle_id_counter}",
@@ -80,7 +81,8 @@ class ObstacleDetector:
                 obstacle_id_counter += 1
 
         if sensor_data.tof_right and sensor_data.tof_right.distance is not None:
-            if float(sensor_data.tof_right.distance) <= threshold_mm:
+            right_distance = float(sensor_data.tof_right.distance)
+            if 0.0 < right_distance <= threshold_mm:
                 obstacles.append(
                     Obstacle(
                         id=f"tof_right_{obstacle_id_counter}",

@@ -31,6 +31,15 @@ export function useJoystickDrive(opts: {
     return Math.min(max, Math.max(min, value))
   }
 
+  function isStopVector(vector: DriveVector) {
+    return Math.abs(vector.linear) <= 0.01 && Math.abs(vector.angular) <= 0.01
+  }
+
+  function isStopPayload(payload: Record<string, unknown>) {
+    const vector = payload.vector as DriveVector | undefined
+    return !!vector && isStopVector(vector)
+  }
+
   function buildDrivePayload(vector: DriveVector, reason = JOYSTICK_REASON, durationMs = MOVEMENT_DURATION_MS) {
     const speedLimit = clamp(speedLevel.value / 100, 0, 1)
     return { session_id: getSessionId(), vector: { ...vector }, duration_ms: durationMs, reason, max_speed_limit: speedLimit }
@@ -41,9 +50,9 @@ export function useJoystickDrive(opts: {
     driveCommandActive = true
     try {
       while (pendingDrivePayload) {
-        if (destroyed || !isControlUnlocked.value || lockout.value) { pendingDrivePayload = null; break }
         const payload = pendingDrivePayload
         pendingDrivePayload = null
+        if (destroyed || !isControlUnlocked.value || (lockout.value && !isStopPayload(payload))) break
         try {
           await control.submitCommand('drive', payload)
         } catch { /* non-fatal */ }
@@ -55,7 +64,7 @@ export function useJoystickDrive(opts: {
   }
 
   function queueDriveCommand(vector: DriveVector, reason = JOYSTICK_REASON, durationMs = MOVEMENT_DURATION_MS, cmdOpts: { immediate?: boolean } = {}) {
-    if (!isControlUnlocked.value || lockout.value) return driveDispatchPromise ?? Promise.resolve()
+    if (!isControlUnlocked.value || (lockout.value && !isStopVector(vector))) return driveDispatchPromise ?? Promise.resolve()
     pendingDrivePayload = buildDrivePayload(vector, reason, durationMs)
     if (!driveCommandActive || cmdOpts.immediate) driveDispatchPromise = dispatchDriveCommands()
     return driveDispatchPromise ?? Promise.resolve()
