@@ -190,7 +190,7 @@ clear nearby obstacles and restore fresh hardware telemetry before retrying.
 
 ## Reference Mower Bench Validation
 
-Aaron physically verified the following on the reference mower against `main@a1d01df` on 2026-07-10, with the blade disabled/disconnected for the movement checks:
+Aaron physically verified the following on the reference mower against `main@a1d01df` on 2026-07-10. The exact blade-power state and remaining bench conditions were not recorded, so this evidence must not be expanded beyond the listed behaviors:
 
 - Forward/reverse drive polarity is correct.
 - Left/right steering polarity is correct.
