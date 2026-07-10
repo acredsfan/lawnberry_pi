@@ -25,7 +25,13 @@ jobs:
           fi
           changed=$(git diff --name-only "$base" "$head")
           echo "$changed"
-          python_files=$(printf '%s\n' "$changed" | grep -E '^backend/src/.*\.py          if echo "$changed" | grep -qE '^(backend/|tests/|scripts/|config/|spec/|robohat-rp2040-code/|pyproject\.toml$|uv\.lock$|openapi\.json$)'; then
+          python_files=$(printf '%s\n' "$changed" | grep -E '^backend/src/.*\.py$' || true)
+          {
+            echo 'python_files<<EOF'
+            echo "$python_files"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          if echo "$changed" | grep -qE '^(backend/|tests/|scripts/|config/|spec/|robohat-rp2040-code/|pyproject\.toml$|uv\.lock$|openapi\.json$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -67,118 +73,6 @@ jobs:
           fi
           mapfile -t python_files <<< "$CHANGED_PYTHON_FILES"
           ruff check -- "${python_files[@]}"
-
-      - name: Run pytest (SIM_MODE=1)
-        if: steps.changes.outputs.relevant == 'true'
-        env:
-          SIM_MODE: '1'
-        run: uv run pytest -q
-
-  openapi-schema:
-    runs-on: ubuntu-latest
-    needs: backend-ci
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect OpenAPI-relevant changes
-        id: changes
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
-            head="${{ github.event.pull_request.head.sha }}"
-          else
-            base="${{ github.event.before }}"
-            head="${{ github.sha }}"
-            if echo "$base" | grep -qE '^0+$'; then
-              base=$(git rev-list --max-parents=0 "$head")
-            fi
-          fi
-          changed=$(git diff --name-only "$base" "$head")
-          echo "$changed"
-          if echo "$changed" | grep -qE '^(backend/|scripts/generate_openapi\.py$|pyproject\.toml$|uv\.lock$|openapi\.json$)'; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Explain documentation-only skip
-        if: steps.changes.outputs.relevant != 'true'
-        run: echo "No API implementation, schema generator, dependency, or snapshot changes; OpenAPI comparison is not applicable."
-
-      - name: Set up Python 3.11
-        if: steps.changes.outputs.relevant == 'true'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Set up uv
-        if: steps.changes.outputs.relevant == 'true'
-        uses: astral-sh/setup-uv@v3
-
-      - name: Install project dependencies (locked)
-        if: steps.changes.outputs.relevant == 'true'
-        run: uv sync --frozen
-
-      - name: Generate OpenAPI schema
-        if: steps.changes.outputs.relevant == 'true'
-        env:
-          SIM_MODE: '1'
-          LAWNBERRY_SKIP_HW_INIT: '1'
-        run: uv run python scripts/generate_openapi.py openapi.generated.json
-
-      - name: Diff against committed snapshot
-        if: steps.changes.outputs.relevant == 'true'
-        run: |
-          if ! diff -u openapi.json openapi.generated.json; then
-            echo ""
-            echo "ERROR: OpenAPI schema has changed but openapi.json was not updated."
-            echo "Run: uv run python scripts/generate_openapi.py openapi.json"
-            echo "Then commit the updated openapi.json alongside your backend changes."
-            exit 1
-          fi
-          echo "OpenAPI schema matches committed snapshot."
- || true)
-          {
-            echo 'python_files<<EOF'
-            echo "$python_files"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-          if echo "$changed" | grep -qE '^(backend/|tests/|scripts/|config/|spec/|robohat-rp2040-code/|pyproject\.toml$|uv\.lock$|openapi\.json$)'; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Explain documentation-only skip
-        if: steps.changes.outputs.relevant != 'true'
-        run: echo "No backend, test, runtime-config, specification, firmware, or dependency changes; backend CI is not applicable."
-
-      - name: Set up Python 3.11
-        if: steps.changes.outputs.relevant == 'true'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Set up uv
-        if: steps.changes.outputs.relevant == 'true'
-        uses: astral-sh/setup-uv@v3
-
-      - name: Install project dependencies (locked)
-        if: steps.changes.outputs.relevant == 'true'
-        run: uv sync --frozen
-
-      - name: Install dev tools
-        if: steps.changes.outputs.relevant == 'true'
-        # Pin ruff version so CI and local devs share rule set; bumping ruff
-        # introduces new rule families that need a deliberate cleanup pass.
-        run: pip install 'ruff==0.13.3'
-
-      - name: Lint (ruff)
-        if: steps.changes.outputs.relevant == 'true'
-        run: ruff check backend/src
 
       - name: Run pytest (SIM_MODE=1)
         if: steps.changes.outputs.relevant == 'true'
