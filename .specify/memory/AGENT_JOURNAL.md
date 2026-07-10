@@ -1,3 +1,13 @@
+## 2026-07-10 — PyJWT 2.13.0 Security Update (PR #64)
+
+- Raised the direct production dependency from PyJWT 2.12.x to 2.13.x and refreshed `uv.lock`.
+- PyJWT 2.13.0 closes five published security issues involving HMAC/JWK algorithm confusion, JWK algorithm binding, non-HTTP(S) JWKS URIs, detached-payload resource exhaustion, and cache loss on JWKS fetch errors.
+- Configuration compatibility note: empty HMAC secrets now fail closed with `InvalidKeyError`; deployments must provide a non-empty JWT signing secret. JWK-backed tokens must use an algorithm matching the JWK, and `PyJWKClient` URLs must use HTTP(S).
+- No mower hardware, GPIO, serial/I2C/UART, motor, blade, navigation, or autonomy behavior changed.
+- Verification gates: locked dependency installation, dependency audit, CodeQL, backend simulation tests, and token/authentication behavior. Physical mower testing is not required for this dependency-only change.
+
+---
+
 ## 2026-04-13 — Bug Fix: TLS Probe Failure in /api/v2/health (fix-tls-probe)
 
 **Symptom:** `GET /api/v2/health` returned `tls: {status: "unknown", detail: "TLS probe failed"}`.
