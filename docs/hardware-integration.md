@@ -20,7 +20,9 @@ This guide documents wiring, pin assignments, and integration steps for Raspberr
   `config/hardware.pi4.example.yaml` as the template.
 
 Safety:
-- Ensure E-stop physically cuts blade power path.
+- Aaron's reference mower has no dedicated E-stop. Its accessible physical power button is a verified master cutoff for every component downstream of the solar charge controller, including the Raspberry Pi and all mower hardware/motors.
+- A dedicated hardwired E-stop is optional, but strongly recommended when a build has no other quick, accessible physical control that removes hazardous actuator power.
+- Builders must document and bench-test their chosen physical intervention method. A software/API stop complements but does not replace a physical way to intervene.
 - Software interlocks: tilt, obstacle, watchdog enforced.
 
 ### Time-of-Flight Sensors (VL53L0X x2)
@@ -165,9 +167,12 @@ sudo i2cdetect -y 1
 # Expect addresses: 0x29 (VL53L0X Left), 0x30 (VL53L0X Right), 0x76 (BME280), 0x40 (INA3221)
 ```
 
-## Emergency Stop Wiring
-- Hardware E-stop must cut power to blade driver and optionally signal RoboHAT input.
-- Software API complements hardware E-stop for remote control.
+## Physical Intervention and Optional E-stop
+- Aaron's reference mower does **not** have a dedicated physical E-stop. Its accessible main power button is the verified physical intervention method: it removes power from every component downstream of the solar charge controller, including the Raspberry Pi and all mower hardware/motors.
+- A dedicated hardwired E-stop is an optional build feature. It is strongly recommended when the mower otherwise lacks a quick, accessible physical control that removes hazardous drive and blade power.
+- When fitted, the E-stop should interrupt the actuator-energy path without relying on the Raspberry Pi, backend, network, or Web UI. An optional RoboHAT input may report its state, but software signaling must not be the only stopping mechanism.
+- When relying on a power button or other cutoff instead, document exactly what it de-energizes and bench-test stopping behavior before ground or blade-enabled operation.
+- The software emergency-stop API is a complementary remote latch, not a substitute for physical intervention.
 
 ## Testing Checklist
 - Sensors health: GET /api/v2/sensors/health
@@ -179,7 +184,7 @@ sudo i2cdetect -y 1
 - No I2C devices: Check 3.3V and pull-ups; confirm I2C enabled
 - UART not present: Ensure dtoverlay is set; verify no console on serial
 - GPS not detected: Try different USB cable/port; check `dmesg`
-- Blade doesn’t stop: Verify E-stop wiring and IBT-4 enable path; check software interlocks
+- Blade doesn’t stop: Verify the selected physical cutoff or optional E-stop wiring, the IBT-4 enable path, and software interlocks
 
 ## References
 - spec/hardware.yaml (pin map and device list)

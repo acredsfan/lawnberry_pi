@@ -42,7 +42,10 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 - **Camera Cable**: 15-pin to 22-pin adapter if needed
 
 #### Proximity & Safety
-- **Safety Switch**: Emergency stop button
+- **Physical intervention control**:
+  - Aaron's reference mower does not have a dedicated E-stop. Its accessible main power button has been physically verified to remove power from every component downstream of the solar charge controller, including the Raspberry Pi and all mower hardware/motors.
+  - A dedicated hardwired E-stop is optional, but strongly recommended when a build has no other quick, accessible physical control that removes hazardous drive and blade power.
+  - Whatever method is selected must be documented and physically bench-tested; software or Web UI controls are not a substitute for local physical intervention.
 
 #### Motor & Power
 - **Drive Controller**
@@ -110,6 +113,7 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
    - Connect battery to power management board
    - Wire 5V output to Pi power input
    - Connect motor controllers to battery and GPIO
+   - Install the selected physical intervention control where it is immediately accessible. The reference build uses its main power button; builders without an equally rapid cutoff should add a dedicated hardwired E-stop.
 
 3. **Motor & Drive System**
    - Mount motors to chassis

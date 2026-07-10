@@ -1,18 +1,60 @@
 name: sim-tests
 on: [push, pull_request]
+
 jobs:
   sim:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect simulation-relevant changes
+        id: changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            if echo "$base" | grep -qE '^0+$'; then
+              base=$(git rev-list --max-parents=0 "$head")
+            fi
+          fi
+          changed=$(git diff --name-only "$base" "$head")
+          echo "$changed"
+          if echo "$changed" | grep -qE '^(backend/|tests/|scripts/|config/|spec/|robohat-rp2040-code/|pyproject\.toml$|uv\.lock$|openapi\.json$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Explain documentation-only skip
+        if: steps.changes.outputs.relevant != 'true'
+        run: echo "No simulation-relevant implementation, test, runtime-config, specification, firmware, or dependency changes."
+
       - name: Set up Python 3.11
+        if: steps.changes.outputs.relevant == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - uses: astral-sh/setup-uv@v3
-      - run: uv sync --frozen --all-extras --dev
-      - run: SIM_MODE=1 LBY_ACCEL=cpu uv run pytest -q
+
+      - name: Set up uv
+        if: steps.changes.outputs.relevant == 'true'
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install simulation dependencies
+        if: steps.changes.outputs.relevant == 'true'
+        run: uv sync --frozen --all-extras --dev
+
+      - name: Run simulation test suite
+        if: steps.changes.outputs.relevant == 'true'
+        run: SIM_MODE=1 LBY_ACCEL=cpu uv run pytest -q
+
       - name: API smoke (FastAPI)
+        if: steps.changes.outputs.relevant == 'true'
         run: |
           set -e
           (SIM_MODE=1 LBY_ACCEL=cpu uv run uvicorn backend.src.main:app \

@@ -188,6 +188,20 @@ Notes:
 - The self-test is safe on systems without hardware: it catches missing devices and returns a report.
 - For I2C/serial access, ensure the user is in groups `i2c` and `dialout`.
 
+### Reference mower physical validation record
+
+Aaron physically verified the following against `main@a1d01df` on 2026-07-10. The exact blade-power state and remaining bench conditions were not recorded:
+
+- forward/reverse polarity;
+- left/right polarity;
+- **Stop Motors** immediate neutral command;
+- 45° and 90° preset turns;
+- obstacle lockout behavior.
+
+These results close only those bench checks. They do not substitute for wheels-on-ground control tuning, outdoor RTK/geofence validation, loss-of-fix tests, scheduled mission execution, blade shutdown tests, or controlled autonomous mowing.
+
+The reference mower has no dedicated physical E-stop. Aaron has repeatedly verified that its accessible power button removes power from every component downstream of the solar charge controller, shutting down the Raspberry Pi and all mower hardware/motors. A dedicated hardwired E-stop remains optional, but is strongly recommended for builds without another quick, accessible physical control that removes hazardous actuator power. Test the actual intervention control installed on each build; do not record an E-stop test for hardware that is not present.
+
 ## 5) Troubleshooting
 
 - Ensure you’re on Raspberry Pi OS (64-bit) Bookworm.
