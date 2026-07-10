@@ -198,7 +198,7 @@ Aaron physically verified the following on the reference mower against `main@a1d
 - The 45° and 90° preset turns complete without the prior delayed-stop interruption.
 - Obstacle lockouts stop motion and preserve the unlocked manual-control session as intended.
 
-This is real bench evidence for those specific behaviors, not proof of ground, blade-enabled, geofence, RTK-loss, scheduled-mission, or autonomous mowing readiness. The reference mower has no dedicated physical E-stop, so no physical E-stop test was performed. Its accessible power button remains the physical intervention method.
+This is real bench evidence for those specific behaviors, not proof of ground, blade-enabled, geofence, RTK-loss, scheduled-mission, or autonomous mowing readiness. The reference mower has no dedicated physical E-stop, so no physical E-stop test was performed. Aaron has repeatedly verified that its accessible power button removes power from every component downstream of the solar charge controller, shutting down the Raspberry Pi and all mower hardware/motors.
 
 ## Mission execution safety feedback
 
@@ -312,7 +312,7 @@ python scripts/generate_docs_bundle.py
 When the software emergency-stop latch is active, all motion is locked out. To clear it:
 
 1) Confirm the mower is stationary, the blade is stopped, and the area is safe.
-2) If the build includes the optional physical E-stop, release/reset it. Aaron's reference mower has no dedicated E-stop; its accessible power button is the local physical intervention method.
+2) If the build includes the optional physical E-stop, release/reset it. Aaron's reference mower has no dedicated E-stop; its accessible power button is the verified local physical intervention method and removes power from every component downstream of the solar charge controller, including the Raspberry Pi and all mower hardware/motors.
 3) If power was removed, restart the mower and re-run hardware health and autonomy-readiness checks before enabling motion.
 4) Clear the software latch via API with the explicit confirmation flag:
 
@@ -328,8 +328,9 @@ The system will return status EMERGENCY_CLEARED.
 By default, blade engagement is locked out until safety preconditions are satisfied (no emergency stop, motors not active, authorization present). If a blade command is rejected, check active interlocks and remediate hazards before retrying.
 Blade-enabled autonomy also requires `GET /api/v2/autonomy/readiness` to report no blocker reason codes, including no
 `HARDWARE_PIN_CONFLICT`, an approved configured blade backend, and an online blade controller. Software controls do not replace
-a quick, accessible physical intervention method. Aaron's reference mower uses its main power button; a dedicated hardwired
-E-stop is optional but strongly recommended when a build has no equally rapid way to remove hazardous actuator power.
+a quick, accessible physical intervention method. Aaron's reference mower uses a verified main power cutoff downstream of
+its solar charge controller; a dedicated hardwired E-stop is optional but strongly recommended when a build has no equally
+rapid way to remove hazardous actuator power.
 
 ## IMU Calibration
 For best orientation accuracy, calibrate the IMU after installation:
