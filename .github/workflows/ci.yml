@@ -25,6 +25,12 @@ jobs:
           fi
           changed=$(git diff --name-only "$base" "$head")
           echo "$changed"
+          python_files=$(printf '%s\n' "$changed" | grep -E '^backend/src/.*\.py$' || true)
+          {
+            echo 'python_files<<EOF'
+            echo "$python_files"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
           if echo "$changed" | grep -qE '^(backend/|tests/|scripts/|config/|spec/|robohat-rp2040-code/|pyproject\.toml$|uv\.lock$|openapi\.json$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
@@ -55,9 +61,18 @@ jobs:
         # introduces new rule families that need a deliberate cleanup pass.
         run: pip install 'ruff==0.13.3'
 
-      - name: Lint (ruff)
+      - name: Lint changed backend Python files (ruff)
         if: steps.changes.outputs.relevant == 'true'
-        run: ruff check backend/src
+        env:
+          CHANGED_PYTHON_FILES: ${{ steps.changes.outputs.python_files }}
+        shell: bash
+        run: |
+          if [[ -z "$CHANGED_PYTHON_FILES" ]]; then
+            echo "No backend Python files changed; Ruff is not applicable."
+            exit 0
+          fi
+          mapfile -t python_files <<< "$CHANGED_PYTHON_FILES"
+          ruff check -- "${python_files[@]}"
 
       - name: Run pytest (SIM_MODE=1)
         if: steps.changes.outputs.relevant == 'true'

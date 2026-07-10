@@ -15,7 +15,7 @@ BASE_REF=${BASE_REF:-"origin/${GITHUB_BASE_REF:-main}"}
 HEAD_REF=${HEAD_REF:-"HEAD"}
 
 # Ensure git history depth is sufficient
-git fetch --no-tags --depth=0 origin || true
+git fetch --no-tags origin "${GITHUB_BASE_REF:-main}" || true
 
 # Compute range; fallback to BASE_REF..HEAD_REF
 MERGE_BASE=$(git merge-base "$BASE_REF" "$HEAD_REF" 2>/dev/null || true)
