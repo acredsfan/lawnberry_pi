@@ -34,7 +34,6 @@ from backend.src.models.diagnostics_capture import CaptureRecord
 from backend.src.models.sensor_data import GpsReading, ImuReading, SensorData
 from backend.src.services.navigation_service import NavigationService
 
-
 FIXTURE_PATH = Path(__file__).parent / "synthetic_straight_drive.jsonl"
 NUM_STEPS = 5
 LAT_START = 42.0
@@ -77,8 +76,13 @@ async def _build() -> None:
     # capture.
     os.environ["SIM_MODE"] = "1"
 
-    # Fresh service — do not pollute the singleton.
-    nav = NavigationService()
+    # Fresh service with neutral offsets. A committed synthetic fixture must
+    # never inherit ignored, host-owned config/hardware.yaml values.
+    nav = NavigationService(
+        load_runtime_config=False,
+        load_persisted_alignment=False,
+    )
+    FIXTURE_PATH.unlink(missing_ok=True)
     capture = TelemetryCapture(FIXTURE_PATH)
     deterministic = _DeterministicCapture(capture)
     nav.attach_capture(deterministic)

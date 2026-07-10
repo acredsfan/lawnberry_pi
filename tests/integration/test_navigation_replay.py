@@ -46,7 +46,10 @@ async def test_synthetic_straight_drive_replays_with_parity(monkeypatch, tmp_pat
     # generation path. Session state (GPS COG history, dead reckoning,
     # waypoint index) accumulates across update_navigation_state calls; a
     # fresh-per-record approach would diverge from the fixture.
-    nav = NavigationService()
+    nav = NavigationService(
+        load_runtime_config=False,
+        load_persisted_alignment=False,
+    )
 
     deltas: list[str] = []
     step = 0

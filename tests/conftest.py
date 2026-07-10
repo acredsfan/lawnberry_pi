@@ -45,7 +45,10 @@ def _ensure_optional_dependency(module_name: str) -> None:
         if compat_stubs.exists():
             stub_path = str(compat_stubs)
             if stub_path not in sys.path:
-                sys.path.insert(0, stub_path)
+                # Stubs are fallback-only. Keep installed production packages
+                # ahead of this directory even after an earlier optional import
+                # (for example ``google``) needs a compatibility module.
+                sys.path.append(stub_path)
             importlib.import_module(module_name)
 
 

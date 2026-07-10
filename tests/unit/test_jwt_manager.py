@@ -13,6 +13,8 @@ SECRET = "test-only-jwt-secret-" + ("x" * 64)
 
 
 def test_v25_pyjwt_213_round_trip_uses_required_claims_and_hs256():
+    assert "compat_stubs" not in str(jwt.__file__)
+    assert jwt.__version__ == "2.13.0"
     manager = JWTManager(SECRET)
 
     token, expires_at = manager.create_token(

@@ -67,3 +67,57 @@ def test_replay_script_exits_nonzero_on_missing_fixture(tmp_path: Path):
     assert result.returncode != 0
 
 
+@pytest.mark.parametrize(
+    ("flag", "filename", "expected_error"),
+    [
+        ("--hardware-config", "missing-hardware.yaml", "hardware config not found"),
+        ("--limits-config", "missing-limits.yaml", "limits config not found"),
+        ("--imu-alignment", "missing-alignment.json", "IMU alignment not found"),
+    ],
+)
+def test_replay_script_rejects_missing_explicit_context_file(
+    tmp_path: Path,
+    flag: str,
+    filename: str,
+    expected_error: str,
+):
+    env = os.environ.copy()
+    env["SIM_MODE"] = "1"
+    missing_path = tmp_path / filename
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(FIXTURE),
+            flag,
+            str(missing_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=10,
+    )
+    assert result.returncode == 2
+    assert expected_error in result.stderr
+
+
+def test_replay_script_requires_hardware_and_limits_context_together():
+    env = os.environ.copy()
+    env["SIM_MODE"] = "1"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(FIXTURE),
+            "--hardware-config",
+            str(REPO_ROOT / "config" / "hardware.pi5.example.yaml"),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=10,
+    )
+    assert result.returncode == 2
+    assert "must be supplied together" in result.stderr

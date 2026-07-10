@@ -52,6 +52,7 @@ if str(ROOT) not in sys.path:
 # Default to SIM_MODE so the script never touches hardware.
 os.environ.setdefault("SIM_MODE", "1")
 
+from backend.src.core.config_loader import ConfigLoader  # noqa: E402
 from backend.src.diagnostics.replay import ReplayLoader  # noqa: E402
 from backend.src.services.navigation_service import NavigationService  # noqa: E402
 
@@ -127,7 +128,64 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="write machine-readable divergence report as JSON to PATH (compare mode only)",
     )
+    p.add_argument(
+        "--hardware-config",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "explicit captured hardware.yaml to apply; when omitted, replay uses "
+            "neutral hardware offsets and never reads the host runtime config"
+        ),
+    )
+    p.add_argument(
+        "--imu-alignment",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "explicit captured imu_alignment.json to apply; when omitted, replay "
+            "does not read the host's persisted alignment"
+        ),
+    )
+    p.add_argument(
+        "--limits-config",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "explicit captured limits.yaml to apply; must be supplied together "
+            "with --hardware-config"
+        ),
+    )
     return p
+
+
+def _new_navigation_service(args: argparse.Namespace) -> NavigationService:
+    """Construct a replay service without implicit host-runtime coupling."""
+    if args.imu_alignment is not None and not args.imu_alignment.is_file():
+        raise FileNotFoundError(f"IMU alignment not found: {args.imu_alignment}")
+    if args.hardware_config is not None and not args.hardware_config.is_file():
+        raise FileNotFoundError(f"hardware config not found: {args.hardware_config}")
+    if args.limits_config is not None and not args.limits_config.is_file():
+        raise FileNotFoundError(f"limits config not found: {args.limits_config}")
+    if (args.hardware_config is None) != (args.limits_config is None):
+        raise ValueError("--hardware-config and --limits-config must be supplied together")
+    common = {
+        "alignment_file": args.imu_alignment,
+        "load_persisted_alignment": args.imu_alignment is not None,
+    }
+    if args.hardware_config is None:
+        return NavigationService(load_runtime_config=False, **common)
+    config_loader = ConfigLoader(
+        hardware_path=str(args.hardware_config),
+        limits_path=str(args.limits_config),
+    )
+    config_loader.get()
+    return NavigationService(
+        config_loader=config_loader,
+        **common,
+    )
 
 
 async def _run_compare(args: argparse.Namespace) -> int:
@@ -148,12 +206,17 @@ async def _run_compare(args: argparse.Namespace) -> int:
 
     # Build two independent NavigationService instances.
     # Force the env var before construction so any __init__-time reads see it.
-    os.environ["LAWN_LEGACY_NAV"] = "1"
-    nav_legacy = NavigationService()
-    os.environ["LAWN_LEGACY_NAV"] = "0"
-    nav_refactored = NavigationService()
-    # Restore to unset so the flag is read dynamically per-call.
-    del os.environ["LAWN_LEGACY_NAV"]
+    try:
+        os.environ["LAWN_LEGACY_NAV"] = "1"
+        nav_legacy = _new_navigation_service(args)
+        os.environ["LAWN_LEGACY_NAV"] = "0"
+        nav_refactored = _new_navigation_service(args)
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        # Restore to unset so the flag is read dynamically per-call.
+        os.environ.pop("LAWN_LEGACY_NAV", None)
 
     divergences: list[StepDivergence] = []
     step = 0
@@ -183,7 +246,7 @@ async def _run_compare(args: argparse.Namespace) -> int:
         )
         return 2
 
-    for step, (leg, ref) in enumerate(zip(legacy_states, refactored_states)):
+    for step, (leg, ref) in enumerate(zip(legacy_states, refactored_states, strict=False)):
         # Heading
         if leg.heading is not None and ref.heading is not None:
             d = abs(leg.heading - ref.heading)
@@ -335,7 +398,11 @@ async def _run(args: argparse.Namespace) -> int:
         f"replay tolerances: heading={args.heading_tol}° "
         f"latlon={args.latlon_tol:g} velocity={args.velocity_tol} m/s"
     )
-    nav = NavigationService()
+    try:
+        nav = _new_navigation_service(args)
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     deltas: list[str] = []
     step = 0
     for record in ReplayLoader(args.capture):

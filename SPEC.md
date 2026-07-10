@@ -141,3 +141,6 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | B30 | 2026-07-10 | Health contract patched only the config path, so prior tests could leave cached hardware/config-loader objects that bypassed the intended missing-config branch | V27, T24 |
 | B31 | 2026-07-10 | WebSocket scalability benchmark started timing before `AsyncMock` creation and used async mock headers unlike Starlette's synchronous mapping, making Pi load appear as connection latency | V31, T28 |
 | B32 | 2026-07-10 | Pre-commit scanner treated local `configured_secret` variable assignments as credential literals and blocked the verified commit | V25, T22 |
+| B33 | 2026-07-10 | Synthetic navigation fixture generation and replay implicitly loaded ignored host `config/hardware.yaml`, baking the Pi's antenna offset into the golden output while clean CI used neutral defaults | V28, T25 |
+| B34 | 2026-07-10 | Optional-dependency fallback prepended the entire compatibility-stub directory after an earlier missing import, allowing the JWT stub to shadow installed PyJWT 2.13 in clean CI | V25, T22 |
+| B35 | 2026-07-10 | Synthetic fixture generation loaded the host's persisted IMU alignment and appended to an existing golden JSONL, so regeneration was neither host-independent nor idempotent | V28, T25 |

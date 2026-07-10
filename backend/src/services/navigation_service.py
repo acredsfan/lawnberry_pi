@@ -266,7 +266,16 @@ class _NavGatewayAdapter:
 class NavigationService:
     """Main navigation service with sensor fusion and path planning"""
 
-    def __init__(self, weather=None, calibration_repository=None):
+    def __init__(
+        self,
+        weather=None,
+        calibration_repository=None,
+        *,
+        config_loader: ConfigLoader | None = None,
+        load_runtime_config: bool = True,
+        alignment_file: str | Path | None = None,
+        load_persisted_alignment: bool = True,
+    ):
         self.navigation_state = NavigationState()
         self.path_planner = PathPlanner()
         self.dead_reckoning = DeadReckoningSystem()
@@ -303,58 +312,69 @@ class NavigationService:
         # Warn when GPS position diverges from dead-reckoning estimate by more
         # than this distance (metres) on re-acquisition after a GPS outage.
         self.position_mismatch_warn_threshold_m = 5.0
+        self._imu_yaw_offset = 0.0
         self._gps_antenna_offset_forward_m = 0.0
         self._gps_antenna_offset_right_m = 0.0
 
-        try:
-            hardware, limits = ConfigLoader().get()
-            self._safety_limits = limits
-            self.obstacle_avoidance_distance = float(limits.tof_obstacle_distance_meters)
-            self.autonomous_max_gps_accuracy_m = float(limits.autonomous_max_gps_accuracy_m)
-            self.autonomous_max_gps_fix_age_s = float(limits.autonomous_max_gps_fix_age_s)
-            self.max_waypoint_accuracy_m = self.autonomous_max_gps_accuracy_m
-            self.bootstrap_required_accuracy_m = self.autonomous_max_gps_accuracy_m
-            self.mower_footprint_radius_m = float(limits.mower_footprint_radius_m)
-            self.differential_drive_wheelbase_m = float(limits.differential_drive_wheelbase_m)
-            self.geofence_safety_allowance_m = float(limits.geofence_safety_allowance_m)
-            self.autonomous_prediction_horizon_s = float(limits.autonomous_prediction_horizon_s)
-            self.autonomous_command_ttl_ms = int(limits.autonomous_command_ttl_ms)
-            self.autonomous_braking_decel_mps2 = float(limits.autonomous_braking_decel_mps2)
-            self.bootstrap_speed_mps = float(limits.bootstrap_speed_mps)
-            self.bootstrap_max_travel_m = float(limits.bootstrap_max_travel_m)
-            self.coverage_endpoint_clearance_m = float(limits.coverage_endpoint_clearance_m)
-            self.max_operational_cross_track_error_m = float(
-                limits.max_operational_cross_track_error_m
-            )
-            self._imu_yaw_offset: float = float(getattr(hardware, "imu_yaw_offset_degrees", 0.0))
-            self._gps_antenna_offset_forward_m = float(
-                getattr(hardware, "gps_antenna_offset_forward_m", 0.0) or 0.0
-            )
-            self._gps_antenna_offset_right_m = float(
-                getattr(hardware, "gps_antenna_offset_right_m", 0.0) or 0.0
-            )
-            if self._imu_yaw_offset != 0.0:
-                logger.info(
-                    "IMU yaw offset loaded: %.1f° (applied as: adjusted = (-raw + offset) %% 360)",
-                    self._imu_yaw_offset,
+        if load_runtime_config:
+            try:
+                hardware, limits = (config_loader or ConfigLoader()).get()
+                self._safety_limits = limits
+                self.obstacle_avoidance_distance = float(limits.tof_obstacle_distance_meters)
+                self.autonomous_max_gps_accuracy_m = float(limits.autonomous_max_gps_accuracy_m)
+                self.autonomous_max_gps_fix_age_s = float(limits.autonomous_max_gps_fix_age_s)
+                self.max_waypoint_accuracy_m = self.autonomous_max_gps_accuracy_m
+                self.bootstrap_required_accuracy_m = self.autonomous_max_gps_accuracy_m
+                self.mower_footprint_radius_m = float(limits.mower_footprint_radius_m)
+                self.differential_drive_wheelbase_m = float(
+                    limits.differential_drive_wheelbase_m
                 )
-            if (
-                self._gps_antenna_offset_forward_m != 0.0
-                or self._gps_antenna_offset_right_m != 0.0
-            ):
-                logger.info(
-                    "GPS antenna offset loaded: forward=%.2fm right=%.2fm",
-                    self._gps_antenna_offset_forward_m,
-                    self._gps_antenna_offset_right_m,
+                self.geofence_safety_allowance_m = float(limits.geofence_safety_allowance_m)
+                self.autonomous_prediction_horizon_s = float(
+                    limits.autonomous_prediction_horizon_s
                 )
-        except Exception as exc:
-            self._imu_yaw_offset = 0.0
-            self._gps_antenna_offset_forward_m = 0.0
-            self._gps_antenna_offset_right_m = 0.0
-            logger.warning(
-                "Failed to load navigation config from hardware/safety limits: %s",
-                exc,
-            )
+                self.autonomous_command_ttl_ms = int(limits.autonomous_command_ttl_ms)
+                self.autonomous_braking_decel_mps2 = float(
+                    limits.autonomous_braking_decel_mps2
+                )
+                self.bootstrap_speed_mps = float(limits.bootstrap_speed_mps)
+                self.bootstrap_max_travel_m = float(limits.bootstrap_max_travel_m)
+                self.coverage_endpoint_clearance_m = float(limits.coverage_endpoint_clearance_m)
+                self.max_operational_cross_track_error_m = float(
+                    limits.max_operational_cross_track_error_m
+                )
+                self._imu_yaw_offset = float(
+                    getattr(hardware, "imu_yaw_offset_degrees", 0.0)
+                )
+                self._gps_antenna_offset_forward_m = float(
+                    getattr(hardware, "gps_antenna_offset_forward_m", 0.0) or 0.0
+                )
+                self._gps_antenna_offset_right_m = float(
+                    getattr(hardware, "gps_antenna_offset_right_m", 0.0) or 0.0
+                )
+                if self._imu_yaw_offset != 0.0:
+                    logger.info(
+                        "IMU yaw offset loaded: %.1f° "
+                        "(applied as: adjusted = (-raw + offset) %% 360)",
+                        self._imu_yaw_offset,
+                    )
+                if (
+                    self._gps_antenna_offset_forward_m != 0.0
+                    or self._gps_antenna_offset_right_m != 0.0
+                ):
+                    logger.info(
+                        "GPS antenna offset loaded: forward=%.2fm right=%.2fm",
+                        self._gps_antenna_offset_forward_m,
+                        self._gps_antenna_offset_right_m,
+                    )
+            except Exception as exc:
+                self._imu_yaw_offset = 0.0
+                self._gps_antenna_offset_forward_m = 0.0
+                self._gps_antenna_offset_right_m = 0.0
+                logger.warning(
+                    "Failed to load navigation config from hardware/safety limits: %s",
+                    exc,
+                )
 
         try:
             self.geofence_inner_margin_m = max(
@@ -410,7 +430,10 @@ class NavigationService:
         self._require_gps_heading_alignment: bool = False
         self._last_gps_track_position: Position | None = None
         self._last_gps_track_time: datetime | None = None
-        self._load_alignment_from_disk()
+        if alignment_file is not None:
+            self._ALIGNMENT_FILE = Path(alignment_file)
+        if load_persisted_alignment:
+            self._load_alignment_from_disk()
         # Optional telemetry capture. Set via attach_capture(); default is no-op.
         self._capture = None
         # Observability: event store injected per-run by set_event_store().
