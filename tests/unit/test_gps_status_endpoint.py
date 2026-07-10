@@ -16,10 +16,16 @@ async def test_gps_status_is_read_only_and_reports_real_sample_age(monkeypatch):
             return {
                 "initialized": True,
                 "running": True,
+                "suspended": False,
                 "last_read_age_s": 42.0,
                 "live": False,
                 "stale": True,
                 "serial_reopen_count": 3,
+                "serial_open": False,
+                "read_in_progress": True,
+                "read_lock_contention_count": 8,
+                "open_attempt_count": 4,
+                "last_read_error": "waiting_for_nmea",
             }
 
     class FakeGps:
@@ -57,3 +63,9 @@ async def test_gps_status_is_read_only_and_reports_real_sample_age(monkeypatch):
     assert status.sample_id == 91
     assert status.stale_reason == "cached_sample"
     assert status.serial_reopen_count == 3
+    assert status.suspended is False
+    assert status.serial_open is False
+    assert status.read_in_progress is True
+    assert status.read_lock_contention_count == 8
+    assert status.open_attempt_count == 4
+    assert status.last_read_error == "waiting_for_nmea"

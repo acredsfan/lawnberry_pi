@@ -67,6 +67,9 @@ class GPSDriver(HardwareDriver):
         # Real hardware handles (lazy)
         self._serial = None
         self._serial_reopen_count = 0
+        self._open_attempt_count = 0
+        self._read_lock_contention_count = 0
+        self._last_read_error: str | None = None
         self._first_read_done = False
         # Power management: when suspended, read_position() returns None
         # (last known position is preserved in GPSSensorInterface.last_reading)
@@ -163,7 +166,11 @@ class GPSDriver(HardwareDriver):
             "stale": stale,
             "sample_id": self._last_read.sample_id if self._last_read is not None else None,
             "serial_open": self._serial is not None,
+            "read_in_progress": self._read_thread_lock.locked(),
             "serial_reopen_count": self._serial_reopen_count,
+            "read_lock_contention_count": self._read_lock_contention_count,
+            "open_attempt_count": self._open_attempt_count,
+            "last_read_error": self._last_read_error,
             "simulation": is_simulation_mode(),
         }
 
@@ -239,16 +246,24 @@ class GPSDriver(HardwareDriver):
         if age_s < self.cfg.stale_reopen_s:
             return False
 
+        return self._close_serial_for_recovery(f"sample stale for {age_s:.1f}s")
+
+    def _close_serial_for_recovery(self, reason: str) -> bool:
+        """Close only this driver's reader handle and record bounded recovery state."""
         serial_handle = self._serial
+        if serial_handle is None:
+            self._last_read_error = reason
+            return False
         self._serial = None
         try:
             serial_handle.close()
         except Exception:
             pass
         self._serial_reopen_count += 1
+        self._last_read_error = reason
         logger.warning(
-            "GPS sample stale for %.1fs; recycling serial reader (attempt %d)",
-            age_s,
+            "GPS reader recovery requested: %s (attempt %d)",
+            reason,
             self._serial_reopen_count,
         )
         return True
@@ -256,7 +271,15 @@ class GPSDriver(HardwareDriver):
     def _read_hardware_blocking(self) -> GpsReading | None:
         """Blocking hardware read — must only be called via asyncio.to_thread."""
         if not self._read_thread_lock.acquire(blocking=False):
-            # Another thread is already scanning; return last known position.
+            # A timed-out asyncio caller cannot cancel its worker thread. If that
+            # worker still owns a stale serial read, close the reader to unblock it;
+            # otherwise lock contention could preserve one cached sample forever.
+            self._read_lock_contention_count += 1
+            if (
+                self._last_read_ts is not None
+                and time.time() - self._last_read_ts >= self.cfg.stale_reopen_s
+            ):
+                self._close_serial_for_recovery("stale read lock contention")
             return self._cached_last_read()
         try:
             if self._recycle_stale_serial():
@@ -267,44 +290,61 @@ class GPSDriver(HardwareDriver):
                 # Lazy open serial port based on mode with simple autodetect
                 import serial  # type: ignore
 
-                candidates: list[str] = []
+                configured_candidates: list[str] = []
                 # Env overrides
                 env_dev = os.environ.get("GPS_DEVICE")
                 if env_dev:
-                    candidates.append(env_dev)
+                    configured_candidates.append(env_dev)
                 # Configured default
                 default_dev = (
                     self.cfg.usb_device
                     if self.cfg.mode == GpsMode.F9P_USB
                     else self.cfg.uart_device
                 )
-                candidates.append(default_dev)
-                # Common fallbacks on Raspberry Pi
-                candidates.extend(
-                    [
-                        "/dev/ttyACM0",
-                        "/dev/ttyACM1",
-                        "/dev/ttyUSB0",
-                        "/dev/ttyUSB1",
-                        "/dev/ttyAMA0",
-                        "/dev/ttyS0",
-                        "/dev/serial0",
-                    ]
-                )
-                # Add ACM/USB globbed devices if present
-                for pat in ("/dev/ttyACM*", "/dev/ttyUSB*"):
-                    for p in glob.glob(pat):
-                        if p not in candidates:
-                            candidates.append(p)
+                if default_dev not in configured_candidates:
+                    configured_candidates.append(default_dev)
 
-                # Exclude RoboHAT and other system ports to prevent DTR-reset mid-mission.
-                # The RoboHAT RP2040 resets when DTR is asserted on its USB CDC port.
+                # Exclude RoboHAT and other system ports before deciding whether
+                # a configured path is authoritative. The historical F9P default
+                # (/dev/ttyACM0) may be the excluded RoboHAT on this mower.
                 excluded = {"/dev/robohat", "/dev/ttyACM0"}  # hardcoded fallback
                 try:
                     from ..services.robohat_service import _known_excluded_devices
                     excluded |= _known_excluded_devices()
                 except (ImportError, ModuleNotFoundError, RuntimeError):
-                    pass  # Fallback if circular import or service unavailable
+                    pass
+
+                eligible_configured = [
+                    dev
+                    for dev in configured_candidates
+                    if dev not in excluded and os.path.realpath(dev) not in excluded
+                ]
+                explicit_candidates = [
+                    dev for dev in eligible_configured if os.path.exists(dev)
+                ]
+                if explicit_candidates:
+                    # A configured device is authoritative. Do not hold the owner
+                    # lock while probing unrelated UART/USB devices after a brief
+                    # NMEA gap.
+                    candidates = explicit_candidates
+                else:
+                    candidates = list(eligible_configured)
+                    # Common fallbacks on Raspberry Pi when no configured path exists.
+                    candidates.extend(
+                        [
+                            "/dev/ttyACM0",
+                            "/dev/ttyACM1",
+                            "/dev/ttyUSB0",
+                            "/dev/ttyUSB1",
+                            "/dev/ttyAMA0",
+                            "/dev/ttyS0",
+                            "/dev/serial0",
+                        ]
+                    )
+                    for pat in ("/dev/ttyACM*", "/dev/ttyUSB*"):
+                        for p in glob.glob(pat):
+                            if p not in candidates:
+                                candidates.append(p)
 
                 candidates = [
                     c for c in candidates
@@ -314,6 +354,7 @@ class GPSDriver(HardwareDriver):
                 for dev in candidates:
                     for baud in self._baud_candidates:
                         try:
+                            self._open_attempt_count += 1
                             ser = serial.Serial(dev, baud, timeout=0.25)  # type: ignore
                             # Try a few reads to confirm NMEA stream presence
                             has_nmea = False
@@ -328,9 +369,16 @@ class GPSDriver(HardwareDriver):
                                 if s.startswith("$"):
                                     has_nmea = True
                                     break
-                            if has_nmea:
+                            retain_configured_usb = (
+                                self.cfg.mode == GpsMode.F9P_USB
+                                and dev in explicit_candidates
+                            )
+                            if has_nmea or retain_configured_usb:
                                 self._serial = ser
                                 self.cfg.baudrate = baud
+                                self._last_read_error = (
+                                    None if has_nmea else "waiting_for_nmea"
+                                )
                                 break
                             else:
                                 try:
@@ -493,6 +541,7 @@ class GPSDriver(HardwareDriver):
                 )
                 self._last_read = reading
                 self._last_read_ts = time.time()
+                self._last_read_error = None
                 self._first_read_done = True
                 return reading
 
@@ -508,13 +557,16 @@ class GPSDriver(HardwareDriver):
                 )
                 self._last_read = gd
                 self._last_read_ts = time.time()
+                self._last_read_error = None
                 self._first_read_done = True
                 return gd
 
             # If parsing failed, return last known
             return self._cached_last_read()
-        except Exception:
-            # On errors, keep last reading and mark running
+        except Exception as exc:
+            # Preserve the last sample for display, but never preserve a broken
+            # reader handle. The next canonical owner poll will reopen it.
+            self._close_serial_for_recovery(str(exc))
             return self._cached_last_read()
         finally:
             self._read_thread_lock.release()

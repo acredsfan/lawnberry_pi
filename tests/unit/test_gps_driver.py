@@ -257,3 +257,106 @@ async def test_gps_driver_does_not_label_three_second_sample_live_before_reopen(
 
     assert health["live"] is False
     assert health["stale"] is False
+
+
+def test_stale_lock_contention_forces_serial_recovery():
+    class SilentSerial:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    drv = GPSDriver({"mode": GpsMode.F9P_USB.value, "stale_reopen_s": 5.0})
+    serial = SilentSerial()
+    drv._serial = serial
+    drv._last_read = GpsReading(sample_id=21)
+    drv._last_read_ts = time.time() - 10.0
+    drv._read_thread_lock.acquire()
+    try:
+        reading = drv._read_hardware_blocking()
+    finally:
+        drv._read_thread_lock.release()
+
+    assert reading is not None and reading.cached is True
+    assert serial.closed is True
+    assert drv._serial is None
+    assert drv._serial_reopen_count == 1
+    assert drv._read_lock_contention_count == 1
+
+
+def test_serial_read_exception_closes_handle_for_next_owner_poll():
+    class BrokenSerial:
+        def __init__(self):
+            self.closed = False
+
+        def readline(self):
+            raise OSError("USB reader failed")
+
+        def close(self):
+            self.closed = True
+
+    drv = GPSDriver({"mode": GpsMode.F9P_USB.value})
+    serial = BrokenSerial()
+    drv._serial = serial
+    drv._last_read = GpsReading(sample_id=22)
+    drv._last_read_ts = time.time()
+
+    reading = drv._read_hardware_blocking()
+
+    assert reading is not None and reading.cached is True
+    assert serial.closed is True
+    assert drv._serial is None
+    assert drv._serial_reopen_count == 1
+    assert "USB reader failed" in (drv._last_read_error or "")
+
+
+def test_configured_usb_reader_is_retained_through_initial_nmea_gap():
+    from unittest.mock import patch
+
+    class DelayedNmeaSerial:
+        def __init__(self):
+            self.read_count = 0
+            self.closed = False
+
+        def readline(self):
+            self.read_count += 1
+            if self.read_count <= 3:
+                return b""
+            if self.read_count == 4:
+                return b"$GNGGA,123519,4807.038,N,01131.000,E,4,12,0.7,545.4,M,46.9,M,,*5B\r\n"
+            if self.read_count == 5:
+                return b"$GNRMC,123520,A,4807.039,N,01131.001,E,0.00,45.0,230394,003.1,W*6A\r\n"
+            return b""
+
+        def close(self):
+            self.closed = True
+
+    opened: list[tuple[str, int, DelayedNmeaSerial]] = []
+
+    def open_serial(port, baud, timeout):
+        assert timeout == 0.25
+        serial = DelayedNmeaSerial()
+        opened.append((port, baud, serial))
+        return serial
+
+    drv = GPSDriver(
+        {
+            "mode": GpsMode.F9P_USB.value,
+            "usb_device": "/dev/lawnberry-gps",
+            "baudrate": 115200,
+        }
+    )
+    with (
+        patch("serial.Serial", side_effect=open_serial),
+        patch("glob.glob", return_value=[]),
+        patch("os.path.exists", side_effect=lambda path: path == "/dev/lawnberry-gps"),
+        patch("os.path.realpath", side_effect=lambda path: path),
+    ):
+        reading = drv._read_hardware_blocking()
+
+    assert reading is not None and reading.cached is False
+    assert reading.rtk_status == "RTK_FIXED"
+    assert len(opened) == 1
+    assert opened[0][0] == "/dev/lawnberry-gps"
+    assert drv._serial is opened[0][2]

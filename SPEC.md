@@ -72,6 +72,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | V34 | GPS freshness must be derived from immutable sample identity and acquisition time: cached fallback readings must preserve the prior sample ID and timestamp, must never report zero age or refresh the canonical last-fix time, and a stale serial owner must close and reopen the device to recover live acquisition |
 | V35 | Manual ToF cutoff, autonomous front-sensor stopping clearance, safe-boundary additional inset, mower footprint, and localization accuracy are distinct safety quantities; front-sensor range must not add the center-to-sensor offset again, autonomous clearance must remain speed-dependent, and the safe-boundary inset must not duplicate footprint containment |
 | V36 | Safe-boundary generation without client-supplied coordinates must resolve the same authoritative persisted boundary zone shown by the Maps UI; it must not depend on one historical hardcoded zone ID |
+| V37 | The backend's single GPS owner must continue acquiring samples without status/UI demand; an explicitly configured USB GPS must retain or promptly reacquire its reader through NMEA gaps, stale lock contention or read exceptions must force bounded recovery, and status must expose acquisition/recovery state without taking a read |
 
 ---
 
@@ -111,6 +112,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T30 | x | Recalibrate autonomous front-sensor clearance and safe-boundary inset semantics without weakening footprint containment | V35 |
 | T31 | x | Replace direct boundary waypoint motion with a restart-safe blade-off diagnostic workflow, stationary RTK evidence, and status-driven UI | V32, V33, I.api |
 | T32 | x | Resolve coordinate-free safe-boundary generation from the current persisted boundary zone | V36, I.api |
+| T33 | x | Keep GPS acquisition continuously active, bound configured-USB reacquisition, and expose owner suspend/lock/open recovery diagnostics | V34, V37, I.api |
 
 ---
 
@@ -158,3 +160,4 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | B38 | 2026-07-10 | Safe-boundary generation defaulted to a 0.75 m inset and operating-area validation then applied the mower footprint and accuracy allowances again, duplicating containment clearance | V35, T30 |
 | B39 | 2026-07-10 | Boundary verification sent direct navigation waypoints at the recorded boundary, bypassing diagnostic mission preflight and cleanup while targeting a location the mower center cannot safely occupy | V32, V33, T31 |
 | B40 | 2026-07-10 | Coordinate-free safe-boundary generation looked up only the legacy ID `confirmed_mowing_boundary`, while the current Maps UI persisted a valid boundary under a generated ID and the API returned 422 | V36, T32 |
+| B41 | 2026-07-10 | PowerManager intentionally suspended GPS after its dark-and-idle check while its mission wake hook was unused and motion detection read obsolete GPS/IMU fields, creating a stale-fix preflight deadlock; driver probe/lock recovery and status also lacked enough evidence to distinguish suspension from serial failure | V34, V37, T33 |

@@ -434,8 +434,10 @@ For best orientation accuracy, calibrate the IMU after installation:
   unique, uncached, stationary RTK-fixed antenna samples observed from the canonical GPS owner's cache, rejects duplicate
   identities and spatial outliers, and returns an averaged reference measurement without writing any hidden GPS offset.
 - `GET /api/v2/sensors/gps/status` is read-only: it reports the real sample age, cache/live state, sample ID, and serial
-  reopen count without taking another serial read. A silent reader is recycled after five seconds so the next owner poll
-  can reacquire the configured GPS device instead of presenting one cached fix forever.
+  open/read-in-progress state, lock contention, open/reopen counts, and last recovery reason without taking another serial
+  read. A configured USB GPS remains authoritative across brief NMEA gaps; read exceptions or stale lock contention close
+  only the GPS reader handle so the continuously running telemetry owner can promptly reacquire it instead of presenting
+  one cached fix forever.
 - NTRIP corrections:
   - If the rover already receives corrections directly (configured in u-center), no further changes are needed on the Pi.
   - When letting the Pi forward RTCM data, ensure `gps_ntrip_enabled: true` in `config/hardware.yaml` and update the `.env` file with the required `NTRIP_*` caster settings (host, mountpoint, credentials, serial device).

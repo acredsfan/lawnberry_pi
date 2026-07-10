@@ -759,6 +759,17 @@
             ],
             "title": "Last Read Age S"
           },
+          "last_read_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Read Error"
+          },
           "last_reading": {
             "anyOf": [
               {
@@ -787,6 +798,21 @@
             ],
             "title": "Mode"
           },
+          "open_attempt_count": {
+            "default": 0,
+            "title": "Open Attempt Count",
+            "type": "integer"
+          },
+          "read_in_progress": {
+            "default": false,
+            "title": "Read In Progress",
+            "type": "boolean"
+          },
+          "read_lock_contention_count": {
+            "default": 0,
+            "title": "Read Lock Contention Count",
+            "type": "integer"
+          },
           "running": {
             "anyOf": [
               {
@@ -809,6 +835,11 @@
             ],
             "title": "Sample Id"
           },
+          "serial_open": {
+            "default": false,
+            "title": "Serial Open",
+            "type": "boolean"
+          },
           "serial_reopen_count": {
             "default": 0,
             "title": "Serial Reopen Count",
@@ -824,6 +855,11 @@
               }
             ],
             "title": "Stale Reason"
+          },
+          "suspended": {
+            "default": false,
+            "title": "Suspended",
+            "type": "boolean"
           }
         },
         "title": "GPSSummary",

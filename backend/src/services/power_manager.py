@@ -1,19 +1,16 @@
 """Intelligent Power Manager for LawnBerry Pi.
 
-Manages four subsystems to reduce idle power consumption:
+Manages three non-positioning subsystems to reduce idle power consumption while
+keeping GPS continuously available for safety and operator readiness:
 
-1. GPS suspension — suspends the GPS driver when dark + not moving + no active
-   mission.  Resumes automatically when any condition flips (motion detected by
-   IMU, mission starts, or daylight returns).
-
-2. Camera idle pause — stops the camera capture loop when no mission is active
+1. Camera idle pause — stops the camera capture loop when no mission is active
    and no AI inference has been requested recently.  Restarts automatically when
    a mission begins or inference is requested.
 
-3. Victron BLE poll rate — slows the Victron BLE background refresh from 10 s
+2. Victron BLE poll rate — slows the Victron BLE background refresh from 10 s
    (day) to 60 s (night) so BLE doesn't stay active overnight.
 
-4. AI inference — soft-disables inference when the mower is fully idle; re-
+3. AI inference — soft-disables inference when the mower is fully idle; re-
    enables when a mission starts.
 
 Solar "dark" detection uses a simple solar-elevation formula (no external API).
@@ -29,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -43,8 +40,6 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_S: float = 10.0           # main loop period
 SOLAR_ELEVATION_THRESHOLD = -6.0        # civil twilight (degrees)
 MOTION_SPEED_THRESHOLD_MS = 0.05        # m/s below which we consider "stopped"
-GPS_RESUME_SETTLE_S: float = 30.0       # wait after resume before re-checking suspend
-GPS_MIN_SUSPEND_S: float = 120.0        # minimum seconds between suspend/resume cycles
 CAMERA_IDLE_TIMEOUT_S: float = 30.0     # camera off delay after going idle
 VICTRON_RATE_DAY_S: float = 10.0        # BLE refresh interval during day
 VICTRON_RATE_NIGHT_S: float = 60.0      # BLE refresh interval at night
@@ -145,7 +140,6 @@ class PowerManager:
     # ------------------------------------------------------------------
 
     async def _run_loop(self) -> None:
-        import time as _time
         while self._running:
             try:
                 await self._tick()
@@ -161,7 +155,6 @@ class PowerManager:
         dark = _is_dark(lat, lon)
         mission_active = self._is_mission_active()
         moving = self._is_moving()
-        import time as _time
         now = _time.monotonic()
 
         # Update power history cadence
@@ -169,17 +162,10 @@ class PowerManager:
         if self._history is not None:
             self._history.set_is_day(self._is_day)
 
-        # -- GPS management --
-        should_suspend = dark and not moving and not mission_active
-        if should_suspend and not self._gps_suspended:
-            # Enforce minimum cycle time
-            if now - self._last_gps_resume_ts >= GPS_RESUME_SETTLE_S and \
-               now - self._last_gps_suspend_ts >= GPS_MIN_SUSPEND_S:
-                await self._suspend_gps()
-                self._last_gps_suspend_ts = now
-        elif not should_suspend and self._gps_suspended:
-            await self._resume_gps_if_suspended()
-            self._last_gps_resume_ts = now
+        # GPS is a safety/readiness input, not an idle power-saving target.
+        # Keeping it live avoids a deadlock where mission preflight requires a
+        # fresh fix but the old power policy waited for a mission to resume GPS.
+        await self._resume_gps_if_suspended()
 
         # -- Victron BLE rate --
         await self._set_victron_rate(dark)
@@ -236,8 +222,8 @@ class PowerManager:
 
     def _is_mission_active(self) -> bool:
         try:
-            from .navigation_service import NavigationService
             from ..models.navigation_state import NavigationMode
+            from .navigation_service import NavigationService
             nav = NavigationService.get_instance()
             mode = nav.navigation_state.navigation_mode
             return mode in (NavigationMode.AUTO, NavigationMode.RETURN_HOME, NavigationMode.PAUSED)
@@ -252,13 +238,21 @@ class PowerManager:
                 return False
             # Check last GPS reading speed
             gps = sm.gps.last_reading
-            if gps is not None and gps.speed_ms is not None:
-                if float(gps.speed_ms) > MOTION_SPEED_THRESHOLD_MS:
+            gps_speed = getattr(gps, "speed", getattr(gps, "speed_ms", None))
+            if gps is not None and gps_speed is not None:
+                if abs(float(gps_speed)) > MOTION_SPEED_THRESHOLD_MS:
                     return True
             # Check IMU angular velocity (any axis > threshold → rotating = moving)
             imu = sm.imu.last_reading if hasattr(sm, "imu") else None
             if imu is not None:
-                for attr in ("angular_velocity_x", "angular_velocity_y", "angular_velocity_z"):
+                for attr in (
+                    "gyro_x",
+                    "gyro_y",
+                    "gyro_z",
+                    "angular_velocity_x",
+                    "angular_velocity_y",
+                    "angular_velocity_z",
+                ):
                     val = getattr(imu, attr, None)
                     if val is not None and abs(float(val)) > 0.05:  # rad/s threshold
                         return True
@@ -271,27 +265,22 @@ class PowerManager:
     # ------------------------------------------------------------------
 
     async def _suspend_gps(self) -> None:
-        try:
-            sm = self._get_sensor_manager()
-            if sm is None or not hasattr(sm, "gps"):
-                return
-            driver = getattr(sm.gps, "_driver", None)
-            if driver is not None and hasattr(driver, "suspend"):
-                driver.suspend()
-                self._gps_suspended = True
-                logger.info("PowerManager: GPS suspended (dark + idle)")
-        except Exception:
-            logger.exception("PowerManager: failed to suspend GPS")
+        """Compatibility no-op: GPS must remain continuously available."""
+        await self._resume_gps_if_suspended()
+        logger.warning("PowerManager: GPS suspend request ignored; continuous fix required")
 
     async def _resume_gps_if_suspended(self) -> None:
-        if not self._gps_suspended:
-            return
         try:
             sm = self._get_sensor_manager()
             if sm is None or not hasattr(sm, "gps"):
                 return
             driver = getattr(sm.gps, "_driver", None)
-            if driver is not None and hasattr(driver, "resume"):
+            driver_suspended = bool(getattr(driver, "is_suspended", False))
+            if (
+                driver is not None
+                and hasattr(driver, "resume")
+                and (self._gps_suspended or driver_suspended)
+            ):
                 driver.resume()
                 self._gps_suspended = False
                 logger.info("PowerManager: GPS resumed")

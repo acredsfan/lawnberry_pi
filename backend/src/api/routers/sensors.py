@@ -76,12 +76,18 @@ class GPSSummary(BaseModel):
     mode: str | None = None
     initialized: bool | None = None
     running: bool | None = None
+    suspended: bool = False
     last_read_age_s: float | None = None
     live: bool = False
     cached: bool | None = None
     sample_id: int | None = None
     stale_reason: str | None = None
     serial_reopen_count: int = 0
+    serial_open: bool = False
+    read_in_progress: bool = False
+    read_lock_contention_count: int = 0
+    open_attempt_count: int = 0
+    last_read_error: str | None = None
     last_reading: dict[str, Any] | None = None
 
 
@@ -289,11 +295,14 @@ async def get_gps_status() -> GPSSummary:
             age = max(0.0, (datetime.now(UTC) - reading.timestamp).total_seconds())
         cached = bool(reading.cached) if reading is not None else None
         running = bool(health.get("running", getattr(gps, "status", None) is not None))
+        suspended = bool(health.get("suspended", False))
         live = bool(health.get("live", False) and reading is not None and not cached)
         if reading is None:
             stale_reason = "no_sample"
         elif not running:
             stale_reason = "driver_not_running"
+        elif suspended:
+            stale_reason = "driver_suspended"
         elif cached:
             stale_reason = "cached_sample"
         elif not live:
@@ -307,12 +316,20 @@ async def get_gps_status() -> GPSSummary:
                 health.get("initialized", getattr(gps, "status", None) is not None)
             ),
             running=running,
+            suspended=suspended,
             last_read_age_s=age,
             live=live,
             cached=cached,
             sample_id=getattr(reading, "sample_id", None),
             stale_reason=stale_reason,
             serial_reopen_count=int(health.get("serial_reopen_count", 0)),
+            serial_open=bool(health.get("serial_open", False)),
+            read_in_progress=bool(health.get("read_in_progress", False)),
+            read_lock_contention_count=int(
+                health.get("read_lock_contention_count", 0)
+            ),
+            open_attempt_count=int(health.get("open_attempt_count", 0)),
+            last_read_error=health.get("last_read_error"),
             last_reading=reading.model_dump() if reading else None,
         )
     except Exception:
