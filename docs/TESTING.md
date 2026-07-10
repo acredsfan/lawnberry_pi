@@ -190,7 +190,7 @@ Notes:
 
 ### Reference mower physical validation record
 
-Aaron physically verified the following against `main@a1d01df` on 2026-07-10, with blade power disabled/disconnected for movement checks:
+Aaron physically verified the following against `main@a1d01df` on 2026-07-10. The exact blade-power state and remaining bench conditions were not recorded:
 
 - forward/reverse polarity;
 - left/right polarity;
