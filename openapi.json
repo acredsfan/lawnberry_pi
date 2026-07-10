@@ -726,6 +726,17 @@
       },
       "GPSSummary": {
         "properties": {
+          "cached": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached"
+          },
           "initialized": {
             "anyOf": [
               {
@@ -760,6 +771,11 @@
             ],
             "title": "Last Reading"
           },
+          "live": {
+            "default": false,
+            "title": "Live",
+            "type": "boolean"
+          },
           "mode": {
             "anyOf": [
               {
@@ -781,6 +797,33 @@
               }
             ],
             "title": "Running"
+          },
+          "sample_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Id"
+          },
+          "serial_reopen_count": {
+            "default": 0,
+            "title": "Serial Reopen Count",
+            "type": "integer"
+          },
+          "stale_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Reason"
           }
         },
         "title": "GPSSummary",
@@ -2199,14 +2242,14 @@
       "StationaryRtkAverageRequest": {
         "properties": {
           "duration_s": {
-            "default": 5.0,
+            "default": 8.0,
             "maximum": 30.0,
             "minimum": 0.2,
             "title": "Duration S",
             "type": "number"
           },
           "interval_s": {
-            "default": 0.2,
+            "default": 0.1,
             "maximum": 2.0,
             "minimum": 0.05,
             "title": "Interval S",
@@ -2227,7 +2270,7 @@
             "type": "number"
           },
           "min_samples": {
-            "default": 20,
+            "default": 5,
             "maximum": 500.0,
             "minimum": 1.0,
             "title": "Min Samples",
@@ -2724,6 +2767,11 @@
       },
       "VerificationStartRequest": {
         "properties": {
+          "blade_physically_disabled": {
+            "default": false,
+            "title": "Blade Physically Disabled",
+            "type": "boolean"
+          },
           "coordinates": {
             "items": {
               "additionalProperties": {
@@ -2733,6 +2781,22 @@
             },
             "title": "Coordinates",
             "type": "array"
+          },
+          "operator_confirmed": {
+            "default": false,
+            "title": "Operator Confirmed",
+            "type": "boolean"
+          },
+          "physical_intervention": {
+            "default": "",
+            "maxLength": 240,
+            "title": "Physical Intervention",
+            "type": "string"
+          },
+          "route_clear_confirmed": {
+            "default": false,
+            "title": "Route Clear Confirmed",
+            "type": "boolean"
           }
         },
         "required": [

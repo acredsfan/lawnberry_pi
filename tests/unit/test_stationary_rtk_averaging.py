@@ -3,7 +3,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from backend.src.models.sensor_data import GpsReading
-from backend.src.services.stationary_rtk_averaging import compute_stationary_rtk_average
+from backend.src.services.stationary_rtk_averaging import (
+    collect_live_stationary_rtk_average,
+    compute_stationary_rtk_average,
+)
 
 
 def _sample(
@@ -61,6 +64,22 @@ def test_stationary_rtk_average_rejects_cached_moving_and_non_rtk_samples():
     assert result.rejected_reasons["accuracy"] == 1
 
 
+def test_stationary_rtk_average_rejects_duplicate_sample_identity():
+    samples = [_sample(index) for index in range(5)]
+    duplicate = samples[-1].model_copy(
+        update={"latitude": samples[-1].latitude + 0.000001}
+    )
+
+    result = compute_stationary_rtk_average(
+        [*samples, duplicate],
+        min_samples=6,
+    )
+
+    assert result.accepted is False
+    assert result.accepted_count == 5
+    assert result.rejected_reasons["duplicate_sample"] == 1
+
+
 def test_stationary_rtk_average_rejects_spatial_outlier():
     samples = [_sample(i, lat_offset=i * 1e-9) for i in range(20)]
     samples.append(_sample(20, lat_offset=0.0001, lon_offset=0.0001))
@@ -71,3 +90,31 @@ def test_stationary_rtk_average_rejects_spatial_outlier():
     assert result.accepted_count == 20
     assert result.rejected_reasons["outlier"] == 1
     assert result.rmse_m is not None and result.rmse_m < 0.01
+
+
+@pytest.mark.asyncio
+async def test_live_collector_observes_owner_cache_and_counts_unique_samples_only():
+    samples = [_sample(index, lat_offset=index * 1e-9) for index in range(3)]
+
+    class OwnerCache:
+        def __init__(self):
+            self.index = 0
+
+        @property
+        def last_reading(self):
+            sample = samples[min(self.index, len(samples) - 1)]
+            self.index += 1
+            return sample
+
+        async def read_gps(self):
+            raise AssertionError("collector must not read the GPS serial owner")
+
+    result = await collect_live_stationary_rtk_average(
+        OwnerCache(),
+        duration_s=0.2,
+        interval_s=0.01,
+        min_samples=3,
+    )
+
+    assert result.accepted is True
+    assert result.accepted_count == 3

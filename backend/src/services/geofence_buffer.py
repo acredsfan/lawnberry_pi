@@ -20,7 +20,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - depends on local Pi environment
     Transformer = None  # type: ignore[assignment]
 
-DEFAULT_SAFE_BOUNDARY_BUFFER_METERS = 0.75
+# This is an *additional* operational inset. Runtime containment separately
+# accounts for mower footprint, localization uncertainty, and the fixed
+# geofence allowance; duplicating those here leaves an unnecessarily wide
+# uncut strip around every edge.
+DEFAULT_SAFE_BOUNDARY_BUFFER_METERS = 0.05
 
 
 def boundary_revision_hash(coordinates: list[dict[str, float]]) -> str:

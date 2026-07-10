@@ -7,11 +7,14 @@ global GPS offset or mutates navigation coordinates.
 
 from __future__ import annotations
 
+import asyncio
 import math
+import time
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from statistics import median
+from typing import Any
 
 from ..fusion.enu_frame import ENUFrame
 from ..models.sensor_data import GpsReading
@@ -71,8 +74,19 @@ def compute_stationary_rtk_average(
     rtk_distribution = Counter(str(getattr(sample, "rtk_status", None) or "unknown") for sample in samples)
     rejected = Counter()
     valid: list[GpsReading] = []
+    seen_sample_identities: set[tuple[str, object]] = set()
 
     for sample in samples:
+        sample_id = getattr(sample, "sample_id", None)
+        identity: tuple[str, object] = (
+            ("sample_id", int(sample_id))
+            if isinstance(sample_id, int)
+            else ("timestamp", sample.timestamp.isoformat())
+        )
+        if identity in seen_sample_identities:
+            rejected["duplicate_sample"] += 1
+            continue
+        seen_sample_identities.add(identity)
         if not _finite(sample.latitude) or not _finite(sample.longitude):
             rejected["missing_coordinate"] += 1
             continue
@@ -181,4 +195,57 @@ def compute_stationary_rtk_average(
     )
 
 
-__all__ = ["StationaryRtkAverageResult", "compute_stationary_rtk_average"]
+async def collect_live_stationary_rtk_average(
+    gps: Any,
+    *,
+    duration_s: float = 8.0,
+    interval_s: float = 0.1,
+    min_samples: int = 5,
+    max_accuracy_m: float = 0.05,
+    max_speed_mps: float = 0.03,
+) -> StationaryRtkAverageResult:
+    """Observe the canonical GPS owner's cache until enough unique fixes arrive.
+
+    This deliberately does not call ``read_gps``. The sensor manager remains
+    the sole serial reader, while this observer keys samples by immutable
+    identity so a cached fix cannot be counted repeatedly.
+    """
+
+    readings: list[GpsReading] = []
+    seen: set[tuple[str, object]] = set()
+    deadline = time.monotonic() + max(0.0, float(duration_s))
+    while time.monotonic() < deadline:
+        reading = getattr(gps, "last_reading", None)
+        if isinstance(reading, GpsReading):
+            sample_id = getattr(reading, "sample_id", None)
+            identity: tuple[str, object] = (
+                ("sample_id", int(sample_id))
+                if isinstance(sample_id, int)
+                else ("timestamp", reading.timestamp.isoformat())
+            )
+            if identity not in seen:
+                seen.add(identity)
+                readings.append(reading)
+                provisional = compute_stationary_rtk_average(
+                    readings,
+                    min_samples=min_samples,
+                    max_accuracy_m=max_accuracy_m,
+                    max_speed_mps=max_speed_mps,
+                )
+                if provisional.accepted:
+                    return provisional
+        await asyncio.sleep(max(0.01, float(interval_s)))
+
+    return compute_stationary_rtk_average(
+        readings,
+        min_samples=min_samples,
+        max_accuracy_m=max_accuracy_m,
+        max_speed_mps=max_speed_mps,
+    )
+
+
+__all__ = [
+    "StationaryRtkAverageResult",
+    "collect_live_stationary_rtk_average",
+    "compute_stationary_rtk_average",
+]

@@ -551,14 +551,14 @@
             >
           </div>
           <div class="form-group">
-            <label for="geofence-buffer">Geofence Buffer (meters)</label>
-            <p class="form-text">Extra margin around yard boundary before geofence violation triggers.</p>
+            <label for="geofence-buffer">Additional Safe-Boundary Inset (meters)</label>
+            <p class="form-text">Extra inset only; mower footprint, RTK accuracy, and motion prediction are enforced separately.</p>
             <input
               id="geofence-buffer"
               v-model.number="safetySettings.geofence_buffer_meters"
               type="number"
               class="form-control"
-              step="0.1"
+              step="0.05"
               min="0"
               max="5"
             >
@@ -779,7 +779,7 @@ const gpsSettings = ref({
 const safetySettings = ref({
   tof_obstacle_distance_meters: 0.2,
   tilt_threshold_degrees: 30.0,
-  geofence_buffer_meters: 0.5,
+  geofence_buffer_meters: 0.05,
   battery_low_voltage: 12.2,
   battery_critical_voltage: 11.8,
   motor_current_max_amps: 5.0,

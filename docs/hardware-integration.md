@@ -107,8 +107,10 @@ adjusted_yaw = (-raw_yaw + imu_yaw_offset_degrees + session_heading_alignment) %
   `satellite_display_north_m/east_m` settings migrate to alignment profiles; Google, Esri, and
   custom orthophoto sources do not share offsets unless a profile explicitly aliases them.
 - Use `POST /api/v2/sensors/gps/stationary-average` for stationary RTK reference averaging. It
-  returns an averaged antenna coordinate for setup/reference workflows and never writes a hidden GPS
-  offset.
+  observes unique samples already acquired by the canonical sensor-manager owner, returns an averaged
+  antenna coordinate for setup/reference workflows, and never writes a hidden GPS offset. Use
+  `GET /api/v2/sensors/gps/status` to distinguish `live` from `cached` and inspect the real sample age;
+  the status request itself never reads or competes for the serial device.
 
 #### RTK Positioning with NTRIP Corrections
 

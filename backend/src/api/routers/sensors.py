@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import time
@@ -10,7 +9,10 @@ from pydantic import BaseModel, Field
 
 from ...core.globals import _debug_overrides
 from ...models.sensor_data import GpsReading
-from ...services.stationary_rtk_averaging import compute_stationary_rtk_average
+from ...services.stationary_rtk_averaging import (
+    collect_live_stationary_rtk_average,
+    compute_stationary_rtk_average,
+)
 from ...services.websocket_hub import websocket_hub
 
 logger = logging.getLogger(__name__)
@@ -75,6 +77,11 @@ class GPSSummary(BaseModel):
     initialized: bool | None = None
     running: bool | None = None
     last_read_age_s: float | None = None
+    live: bool = False
+    cached: bool | None = None
+    sample_id: int | None = None
+    stale_reason: str | None = None
+    serial_reopen_count: int = 0
     last_reading: dict[str, Any] | None = None
 
 
@@ -85,9 +92,9 @@ class RtkDiagnosticsResponse(BaseModel):
 
 
 class StationaryRtkAverageRequest(BaseModel):
-    duration_s: float = Field(default=5.0, ge=0.2, le=30.0)
-    interval_s: float = Field(default=0.2, ge=0.05, le=2.0)
-    min_samples: int = Field(default=20, ge=1, le=500)
+    duration_s: float = Field(default=8.0, ge=0.2, le=30.0)
+    interval_s: float = Field(default=0.1, ge=0.05, le=2.0)
+    min_samples: int = Field(default=5, ge=1, le=500)
     max_accuracy_m: float = Field(default=0.05, gt=0.0, le=1.0)
     max_speed_mps: float = Field(default=0.03, ge=0.0, le=1.0)
     samples: list[dict[str, Any]] | None = Field(
@@ -266,24 +273,51 @@ async def get_gps_status() -> GPSSummary:
         sm = await websocket_hub._ensure_sensor_manager()
         gps = getattr(sm, "gps", None)
         if gps is None:
-            return GPSSummary()
-        # Attempt a non-blocking read
-        reading = await gps.read_gps()
-        age = None
-        try:
-            # health_check not exposed; compute age from manager read cadence indirectly
-            age = 0.0
-        except Exception:
-            age = None
+            return GPSSummary(stale_reason="gps_unavailable")
+
+        # This endpoint is intentionally read-only. The sensor manager's polling
+        # loop is the sole GPS reader; an operator status refresh must not compete
+        # for or reset the serial stream.
+        reading = getattr(gps, "last_reading", None)
+        driver = getattr(gps, "_driver", None)
+        health: dict[str, Any] = {}
+        if driver is not None and hasattr(driver, "health_check"):
+            health = await driver.health_check()
+
+        age = health.get("last_read_age_s")
+        if age is None and reading is not None and reading.timestamp is not None:
+            age = max(0.0, (datetime.now(UTC) - reading.timestamp).total_seconds())
+        cached = bool(reading.cached) if reading is not None else None
+        running = bool(health.get("running", getattr(gps, "status", None) is not None))
+        live = bool(health.get("live", False) and reading is not None and not cached)
+        if reading is None:
+            stale_reason = "no_sample"
+        elif not running:
+            stale_reason = "driver_not_running"
+        elif cached:
+            stale_reason = "cached_sample"
+        elif not live:
+            stale_reason = "stale_sample"
+        else:
+            stale_reason = None
+        gps_mode = getattr(gps, "gps_mode", None)
         return GPSSummary(
-            mode=str(getattr(gps, "gps_mode", None)) if gps else None,
-            initialized=getattr(gps, "status", None) is not None,
-            running=True,
+            mode=getattr(gps_mode, "value", str(gps_mode) if gps_mode is not None else None),
+            initialized=bool(
+                health.get("initialized", getattr(gps, "status", None) is not None)
+            ),
+            running=running,
             last_read_age_s=age,
+            live=live,
+            cached=cached,
+            sample_id=getattr(reading, "sample_id", None),
+            stale_reason=stale_reason,
+            serial_reopen_count=int(health.get("serial_reopen_count", 0)),
             last_reading=reading.model_dump() if reading else None,
         )
     except Exception:
-        return GPSSummary()
+        logger.exception("GPS status collection failed")
+        return GPSSummary(stale_reason="status_error")
 
 
 @router.post("/sensors/gps/stationary-average", response_model=StationaryRtkAverageResponse)
@@ -300,12 +334,15 @@ async def collect_stationary_rtk_average(
             gps = getattr(sm, "gps", None)
             if gps is None:
                 raise RuntimeError("GPS is not available")
-            deadline = time.monotonic() + request.duration_s
-            while len(readings) < request.min_samples and time.monotonic() < deadline:
-                reading = await gps.read_gps()
-                if reading is not None:
-                    readings.append(reading)
-                await asyncio.sleep(request.interval_s)
+            result = await collect_live_stationary_rtk_average(
+                gps,
+                duration_s=request.duration_s,
+                interval_s=request.interval_s,
+                min_samples=request.min_samples,
+                max_accuracy_m=request.max_accuracy_m,
+                max_speed_mps=request.max_speed_mps,
+            )
+            return StationaryRtkAverageResponse.model_validate(result.to_dict())
         except Exception as exc:
             logger.exception("Stationary RTK averaging failed to collect GPS samples: %s", exc)
             raise HTTPException(status_code=503, detail="GPS samples unavailable") from exc

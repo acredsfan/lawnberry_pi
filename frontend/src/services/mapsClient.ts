@@ -22,8 +22,35 @@ export interface ImportedBoundary {
   warnings?: string[]
   buffer_meters?: number
   status?: string
-  points?: Array<BoundaryPoint & { index?: number; status?: string }>
-  target_index?: number | null
+}
+
+export interface BoundaryVerificationPoint {
+  index: number
+  reference: BoundaryPoint
+  approach: BoundaryPoint
+  status: 'pending' | 'starting' | 'traveling' | 'arrived' | 'confirmed' | 'rejected' | 'failed' | 'interrupted'
+  mission_id?: string | null
+  mission_lifecycle?: string | null
+  error?: string | null
+  evidence?: Record<string, unknown> | null
+}
+
+export interface BoundaryVerificationSession {
+  session_id?: string
+  status: 'idle' | 'active' | 'complete' | 'cancelled'
+  points: BoundaryVerificationPoint[]
+  target_index: number | null
+  active_mission_id?: string | null
+  verification_standoff_m?: number
+  safe_boundary_buffer_m?: number
+  updated_at?: string
+}
+
+export interface BoundaryVerificationAcknowledgement {
+  operator_confirmed: boolean
+  blade_physically_disabled: boolean
+  route_clear_confirmed: boolean
+  physical_intervention: string
 }
 
 // MapConfiguration and PlanningJob types are not defined in generated schemas,
@@ -103,28 +130,39 @@ export async function getSafeBoundary(): Promise<ImportedBoundary> {
   return response.data
 }
 
-export async function startBoundaryVerification(coordinates: BoundaryPoint[]): Promise<ImportedBoundary> {
-  const response = await apiService.post<ImportedBoundary>('/api/v2/boundary-verification/start', { coordinates })
+export async function startBoundaryVerification(
+  coordinates: BoundaryPoint[],
+  acknowledgement: BoundaryVerificationAcknowledgement
+): Promise<BoundaryVerificationSession> {
+  const response = await apiService.post<BoundaryVerificationSession>('/api/v2/boundary-verification/start', {
+    coordinates,
+    ...acknowledgement,
+  })
   return response.data
 }
 
-export async function nextBoundaryVerificationPoint(): Promise<ImportedBoundary> {
-  const response = await apiService.post<ImportedBoundary>('/api/v2/boundary-verification/next', {})
+export async function getBoundaryVerificationStatus(): Promise<BoundaryVerificationSession> {
+  const response = await apiService.get<BoundaryVerificationSession>('/api/v2/boundary-verification/status')
   return response.data
 }
 
-export async function confirmBoundaryVerificationPoint(): Promise<ImportedBoundary> {
-  const response = await apiService.post<ImportedBoundary>('/api/v2/boundary-verification/confirm-point', {})
+export async function nextBoundaryVerificationPoint(): Promise<BoundaryVerificationSession> {
+  const response = await apiService.post<BoundaryVerificationSession>('/api/v2/boundary-verification/next', {})
   return response.data
 }
 
-export async function rejectBoundaryVerificationPoint(): Promise<ImportedBoundary> {
-  const response = await apiService.post<ImportedBoundary>('/api/v2/boundary-verification/reject-point', {})
+export async function confirmBoundaryVerificationPoint(): Promise<BoundaryVerificationSession> {
+  const response = await apiService.post<BoundaryVerificationSession>('/api/v2/boundary-verification/confirm-point', {})
   return response.data
 }
 
-export async function cancelBoundaryVerification(): Promise<ImportedBoundary> {
-  const response = await apiService.post<ImportedBoundary>('/api/v2/boundary-verification/cancel', {})
+export async function rejectBoundaryVerificationPoint(): Promise<BoundaryVerificationSession> {
+  const response = await apiService.post<BoundaryVerificationSession>('/api/v2/boundary-verification/reject-point', {})
+  return response.data
+}
+
+export async function cancelBoundaryVerification(): Promise<BoundaryVerificationSession> {
+  const response = await apiService.post<BoundaryVerificationSession>('/api/v2/boundary-verification/cancel', {})
   return response.data
 }
 

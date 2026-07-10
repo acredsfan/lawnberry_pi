@@ -29,9 +29,17 @@ class DummyNavigationService:
         self.stop_navigation_results: list[bool] = []
         self.set_speed_failures_remaining = 0
         self.execute_exception: Exception | None = None
+        self.reuse_heading_alignment_calls: list[bool] = []
 
-    async def execute_mission(self, mission, mission_service=None):
+    async def execute_mission(
+        self,
+        mission,
+        mission_service=None,
+        *,
+        reuse_heading_alignment=False,
+    ):
         # mission_service intentionally unused in this test stub
+        self.reuse_heading_alignment_calls.append(reuse_heading_alignment)
         if self._mission_gate is not None:
             await self._mission_gate.wait()
         if self.execute_exception is not None:
@@ -219,6 +227,38 @@ async def test_blade_off_diagnostic_rejects_blade_on_waypoints():
 
     with pytest.raises(MissionStateError, match="Blade-off diagnostic mode"):
         await service.start_mission(mission.id, blade_off_diagnostic=True)
+
+
+@pytest.mark.asyncio
+async def test_heading_reuse_is_restricted_to_blade_off_diagnostic():
+    nav = DummyNavigationService()
+    service = MissionService(nav)
+    mission = await service.create_mission(
+        "Diagnostic route",
+        [MissionWaypoint(lat=0.1, lon=0.1, blade_on=False, speed=20)],
+    )
+
+    with pytest.raises(MissionStateError, match="restricted to blade-off diagnostics"):
+        await service.start_mission(mission.id, reuse_heading_alignment=True)
+
+
+@pytest.mark.asyncio
+async def test_blade_off_diagnostic_can_reuse_saved_heading_without_repeat_bootstrap():
+    nav = DummyNavigationService()
+    service = MissionService(nav)
+    mission = await service.create_mission(
+        "Boundary verification leg",
+        [MissionWaypoint(lat=0.1, lon=0.1, blade_on=False, speed=20)],
+    )
+
+    await service.start_mission(
+        mission.id,
+        blade_off_diagnostic=True,
+        reuse_heading_alignment=True,
+    )
+    await asyncio.sleep(0)
+
+    assert nav.reuse_heading_alignment_calls == [True]
 
 
 @pytest.mark.asyncio

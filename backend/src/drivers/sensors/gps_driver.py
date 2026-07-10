@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import glob
 import json
+import logging
 import math
 import os
 import socket
@@ -29,6 +30,8 @@ from ...core.simulation import is_simulation_mode
 from ...models.sensor_data import GpsMode, GpsReading
 from ..base import HardwareDriver
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class GPSDriverConfig:
@@ -37,6 +40,7 @@ class GPSDriverConfig:
     usb_device: str = "/dev/ttyACM0"  # ZED-F9P default device on Pi
     uart_device: str = "/dev/ttyAMA0"  # common UART on Pi
     baudrate: int = 9600
+    stale_reopen_s: float = 5.0
 
 
 class GPSDriver(HardwareDriver):
@@ -54,6 +58,7 @@ class GPSDriver(HardwareDriver):
             usb_device=cfg.get("usb_device", "/dev/ttyACM0"),
             uart_device=cfg.get("uart_device", "/dev/ttyAMA0"),
             baudrate=int(cfg.get("baudrate", 9600)),
+            stale_reopen_s=max(1.0, float(cfg.get("stale_reopen_s", 5.0))),
         )
         self._last_read: GpsReading | None = None
         self._last_read_ts: float | None = None
@@ -61,6 +66,7 @@ class GPSDriver(HardwareDriver):
         self._sim_counter: int = 0
         # Real hardware handles (lazy)
         self._serial = None
+        self._serial_reopen_count = 0
         self._first_read_done = False
         # Power management: when suspended, read_position() returns None
         # (last known position is preserved in GPSSensorInterface.last_reading)
@@ -137,13 +143,27 @@ class GPSDriver(HardwareDriver):
         return self._suspended
 
     async def health_check(self) -> dict[str, Any]:  # noqa: D401
+        age_s = (time.time() - self._last_read_ts) if self._last_read_ts else None
+        stale = age_s is None or age_s >= self.cfg.stale_reopen_s
+        live_max_age_s = min(2.0, self.cfg.stale_reopen_s)
         return {
             "driver": "gps",
             "mode": self.cfg.mode.value,
             "initialized": self.initialized,
             "running": self.running,
             "suspended": self._suspended,
-            "last_read_age_s": (time.time() - self._last_read_ts) if self._last_read_ts else None,
+            "last_read_age_s": age_s,
+            "live": bool(
+                self.running
+                and not self._suspended
+                and age_s is not None
+                and age_s < live_max_age_s
+            ),
+            "live_max_age_s": live_max_age_s,
+            "stale": stale,
+            "sample_id": self._last_read.sample_id if self._last_read is not None else None,
+            "serial_open": self._serial is not None,
+            "serial_reopen_count": self._serial_reopen_count,
             "simulation": is_simulation_mode(),
         }
 
@@ -211,12 +231,38 @@ class GPSDriver(HardwareDriver):
             return None
         return self._last_read.model_copy(update={"cached": True})
 
+    def _recycle_stale_serial(self) -> bool:
+        """Close a silent reader so the next owner poll can reacquire the GPS stream."""
+        if self._serial is None or self._last_read_ts is None:
+            return False
+        age_s = time.time() - self._last_read_ts
+        if age_s < self.cfg.stale_reopen_s:
+            return False
+
+        serial_handle = self._serial
+        self._serial = None
+        try:
+            serial_handle.close()
+        except Exception:
+            pass
+        self._serial_reopen_count += 1
+        logger.warning(
+            "GPS sample stale for %.1fs; recycling serial reader (attempt %d)",
+            age_s,
+            self._serial_reopen_count,
+        )
+        return True
+
     def _read_hardware_blocking(self) -> GpsReading | None:
         """Blocking hardware read — must only be called via asyncio.to_thread."""
         if not self._read_thread_lock.acquire(blocking=False):
             # Another thread is already scanning; return last known position.
             return self._cached_last_read()
         try:
+            if self._recycle_stale_serial():
+                # Preserve the old sample identity and timestamp. The next poll by
+                # this same owner will reopen the configured device.
+                return self._cached_last_read()
             if self._serial is None:
                 # Lazy open serial port based on mode with simple autodetect
                 import serial  # type: ignore

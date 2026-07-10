@@ -408,6 +408,33 @@ def test_reset_for_mission_saved_alignment_forces_fresh_validation():
     assert loc.alignment_ready is False
 
 
+def test_diagnostic_alignment_reuse_still_requires_a_new_live_imu_tick():
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(
+        imu_yaw_offset=0.0,
+        antenna_forward_m=0.0,
+        antenna_right_m=0.0,
+        max_fix_age_seconds=2.0,
+        max_accuracy_m=5.0,
+        alignment_file=None,
+    )
+    loc.state.heading = 123.0
+    loc.state.heading_source = "imu"
+    loc.state.imu_valid = True
+
+    loc.reset_for_mission(
+        saved_alignment=(45.0, 2, 600.0),
+        require_fresh_bootstrap=False,
+    )
+
+    assert loc._heading_alignment_sample_count == 2
+    assert loc._require_gps_heading_alignment is False
+    assert loc.state.heading is None
+    assert loc.state.heading_source is None
+    assert loc.state.imu_valid is False
+
+
 def test_reset_for_mission_none_still_resets_to_zero():
     """reset_for_mission(saved_alignment=None) behaves like the original reset."""
     from backend.src.services.localization_service import LocalizationService

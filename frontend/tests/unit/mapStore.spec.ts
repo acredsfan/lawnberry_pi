@@ -9,6 +9,8 @@ const mockDeleteMapZone = vi.fn()
 const mockGetImportedParcelBoundary = vi.fn()
 const mockGetSafeBoundary = vi.fn()
 const mockGenerateSafeBoundary = vi.fn()
+const mockGetBoundaryVerificationStatus = vi.fn()
+const mockStartBoundaryVerification = vi.fn()
 
 vi.mock('@/services/mapsClient', () => ({
   getMapZones: mockGetMapZones,
@@ -22,7 +24,8 @@ vi.mock('@/services/mapsClient', () => ({
   importParcelBoundary: vi.fn(),
   generateSafeBoundary: mockGenerateSafeBoundary,
   getSafeBoundary: mockGetSafeBoundary,
-  startBoundaryVerification: vi.fn(),
+  startBoundaryVerification: mockStartBoundaryVerification,
+  getBoundaryVerificationStatus: mockGetBoundaryVerificationStatus,
   nextBoundaryVerificationPoint: vi.fn(),
   confirmBoundaryVerificationPoint: vi.fn(),
   rejectBoundaryVerificationPoint: vi.fn(),
@@ -100,8 +103,10 @@ describe('Map Store', () => {
     // Default: getMapZones returns empty list (zones loaded separately in mapStore.test.ts)
     mockGetMapZones.mockResolvedValue([])
     mockGetImportedParcelBoundary.mockResolvedValue({ coordinates: [], helper_only: true, status: 'empty' })
-    mockGetSafeBoundary.mockResolvedValue({ coordinates: [], buffer_meters: 0.75, status: 'empty' })
-    mockGenerateSafeBoundary.mockResolvedValue({ coordinates: [], buffer_meters: 0.75 })
+    mockGetSafeBoundary.mockResolvedValue({ coordinates: [], buffer_meters: 0.05, status: 'empty' })
+    mockGenerateSafeBoundary.mockResolvedValue({ coordinates: [], buffer_meters: 0.05 })
+    mockGetBoundaryVerificationStatus.mockResolvedValue({ status: 'idle', points: [], target_index: null })
+    mockStartBoundaryVerification.mockResolvedValue({ status: 'active', points: [], target_index: null })
   })
 
   describe('initialization', () => {
@@ -432,6 +437,30 @@ describe('Map Store', () => {
         0.45,
       )
       expect(store.safeBoundaryBufferMeters).toBe(0.45)
+    })
+  })
+
+  describe('boundary verification helper', () => {
+    it('passes explicit physical acknowledgements when creating a session', async () => {
+      const store = useMapStore()
+      store.configuration = createConfig('config1')
+      const acknowledgement = {
+        operator_confirmed: true,
+        blade_physically_disabled: true,
+        route_clear_confirmed: true,
+        physical_intervention: 'master cutoff within reach',
+      }
+
+      await store.startVerificationFromConfirmed(acknowledgement)
+
+      expect(mockStartBoundaryVerification).toHaveBeenCalledWith(
+        [
+          { latitude: 40.0, longitude: -75.0 },
+          { latitude: 40.0, longitude: -74.9 },
+          { latitude: 39.9, longitude: -74.9 },
+        ],
+        acknowledgement,
+      )
     })
   })
 

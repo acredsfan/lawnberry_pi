@@ -202,7 +202,11 @@ python -m pytest \
   tests/unit/test_localization_service.py \
   tests/unit/test_telemetry_service.py \
   tests/unit/test_operating_area_service.py \
+  tests/unit/test_boundary_verification.py \
   tests/unit/test_stationary_rtk_averaging.py \
+  tests/unit/test_gps_driver.py \
+  tests/unit/test_gps_status_endpoint.py \
+  tests/unit/test_obstacle_clearance.py \
   tests/unit/test_autonomy_readiness_service.py \
   tests/unit/test_command_gateway.py \
   tests/integration/test_satellite_settings_api.py \

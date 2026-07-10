@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from shapely.geometry import LineString, Point, Polygon
-from shapely.ops import unary_union
+from shapely.ops import nearest_points, unary_union
 
 from ..models import Position
 from ..nav.geoutils import latlon_to_enu
@@ -71,6 +71,29 @@ class OperatingAreaSnapshot:
         point = self._point_xy(position)
         distance = float(point.distance(self._free_space_xy.boundary))
         return distance if self._free_space_xy.covers(point) else -distance
+
+    def safe_approach_position(
+        self,
+        reference: Position,
+        clearance_m: float,
+    ) -> Position:
+        """Project a reference point to the nearest center-safe stand-off target."""
+        if not self.valid:
+            raise OperatingAreaError("SAFE_BOUNDARY_REQUIRED", self.validity_state)
+        clearance = max(0.0, float(clearance_m))
+        center_space = self._free_space_xy.buffer(-clearance)
+        if center_space.is_empty:
+            raise OperatingAreaError(
+                "SAFE_BOUNDARY_COLLAPSED",
+                "Operating area is too narrow for the requested verification stand-off",
+            )
+        target_xy, _ = nearest_points(center_space, self._point_xy(reference))
+        lon, lat = self._reverse.transform(float(target_xy.x), float(target_xy.y))
+        return Position(
+            latitude=float(lat),
+            longitude=float(lon),
+            altitude=reference.altitude,
+        )
 
     def segment_is_safe(
         self,

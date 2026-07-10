@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import time
+from datetime import UTC, datetime
 
 import pytest
 
 from backend.src.drivers.sensors.gps_driver import GPSDriver
-from backend.src.models.sensor_data import GpsMode
+from backend.src.models.sensor_data import GpsMode, GpsReading
 
 
 @pytest.mark.asyncio
@@ -136,8 +138,7 @@ def test_gps_autoprobe_excludes_robohat():
     This test verifies that the exclusion logic prevents opening any device that
     resolves to the RoboHAT serial path.
     """
-    from unittest.mock import patch, MagicMock
-    import sys
+    from unittest.mock import MagicMock, patch
     
     # Arrange
     gps = GPSDriver({"mode": GpsMode.F9P_USB.value})
@@ -193,3 +194,66 @@ def test_gps_autoprobe_skips_dev_robohat_symlink():
     assert "/dev/robohat" not in filtered, "/dev/robohat should be excluded"
     assert "/dev/ttyACM0" not in filtered, "/dev/ttyACM0 should be excluded"
     assert "/dev/ttyACM1" in filtered, "/dev/ttyACM1 should NOT be excluded"
+
+
+def test_gps_driver_recycles_stale_serial_without_fabricating_freshness():
+    class SilentSerial:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    drv = GPSDriver({"mode": GpsMode.F9P_USB.value, "stale_reopen_s": 5.0})
+    stale = GpsReading(
+        latitude=42.0,
+        longitude=-83.0,
+        accuracy=0.03,
+        rtk_status="RTK_FIXED",
+        timestamp=datetime.now(UTC),
+        sample_id=77,
+        monotonic_received_s=time.monotonic() - 10.0,
+    )
+    serial = SilentSerial()
+    drv._last_read = stale
+    drv._last_read_ts = time.time() - 10.0
+    drv._serial = serial
+
+    reading = drv._read_hardware_blocking()
+
+    assert serial.closed is True
+    assert drv._serial is None
+    assert drv._serial_reopen_count == 1
+    assert reading is not None and reading.cached is True
+    assert reading.sample_id == stale.sample_id
+    assert reading.timestamp == stale.timestamp
+
+
+@pytest.mark.asyncio
+async def test_gps_driver_health_reports_stale_cached_sample_truthfully():
+    drv = GPSDriver({"mode": GpsMode.F9P_USB.value, "stale_reopen_s": 5.0})
+    drv.initialized = True
+    drv.running = True
+    drv._last_read = GpsReading(sample_id=12)
+    drv._last_read_ts = time.time() - 8.0
+
+    health = await drv.health_check()
+
+    assert health["last_read_age_s"] == pytest.approx(8.0, abs=0.2)
+    assert health["live"] is False
+    assert health["stale"] is True
+    assert health["sample_id"] == 12
+
+
+@pytest.mark.asyncio
+async def test_gps_driver_does_not_label_three_second_sample_live_before_reopen():
+    drv = GPSDriver({"mode": GpsMode.F9P_USB.value, "stale_reopen_s": 5.0})
+    drv.initialized = True
+    drv.running = True
+    drv._last_read = GpsReading(sample_id=13)
+    drv._last_read_ts = time.time() - 3.0
+
+    health = await drv.health_check()
+
+    assert health["live"] is False
+    assert health["stale"] is False

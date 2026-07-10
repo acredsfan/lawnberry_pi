@@ -75,10 +75,10 @@ def test_imported_property_boundary_is_helper_only(tmp_path, monkeypatch):
     assert get_imported_property_boundary() is None
 
 
-def test_safe_boundary_default_is_075_meters(monkeypatch):
+def test_safe_boundary_default_is_five_centimeter_additional_inset(monkeypatch):
     monkeypatch.delenv("SAFE_BOUNDARY_BUFFER_METERS", raising=False)
 
-    assert default_buffer_meters() == DEFAULT_SAFE_BOUNDARY_BUFFER_METERS == 0.75
+    assert default_buffer_meters() == DEFAULT_SAFE_BOUNDARY_BUFFER_METERS == 0.05
 
 
 def test_safe_boundary_uses_override_and_shrinks_polygon(tmp_path, monkeypatch):

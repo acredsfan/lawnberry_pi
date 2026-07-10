@@ -505,7 +505,13 @@ class MissionService:
         self._persist_mission_status(mission.id)
         return mission
 
-    async def start_mission(self, mission_id: str, *, blade_off_diagnostic: bool = False):
+    async def start_mission(
+        self,
+        mission_id: str,
+        *,
+        blade_off_diagnostic: bool = False,
+        reuse_heading_alignment: bool = False,
+    ):
         import os
 
         from .robohat_service import get_robohat_service
@@ -518,6 +524,10 @@ class MissionService:
         if blade_off_diagnostic and any(bool(wp.blade_on) for wp in mission.waypoints):
             raise MissionStateError(
                 "Blade-off diagnostic mode requires every waypoint to have blade_on=false."
+            )
+        if reuse_heading_alignment and not blade_off_diagnostic:
+            raise MissionStateError(
+                "Saved heading alignment reuse is restricted to blade-off diagnostics."
             )
 
         try:
@@ -608,7 +618,16 @@ class MissionService:
         )
 
         self._obs_run_id = self._new_run_id()
-        task = asyncio.create_task(self.nav_service.execute_mission(mission, self))
+        if reuse_heading_alignment:
+            task = asyncio.create_task(
+                self.nav_service.execute_mission(
+                    mission,
+                    self,
+                    reuse_heading_alignment=True,
+                )
+            )
+        else:
+            task = asyncio.create_task(self.nav_service.execute_mission(mission, self))
         self.mission_tasks[mission_id] = task
         self._persist_mission_status(mission_id)
 

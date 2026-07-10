@@ -106,28 +106,60 @@
         Fetch Parcel From Address
       </button>
       <label class="buffer-input">
-        Buffer
+        Additional safe inset
         <input v-model.number="safeBufferMeters" type="number" min="0" max="10" step="0.05">
         m
       </label>
       <button class="btn btn-sm btn-success" :disabled="!mapStore.configuration?.boundary_zone" @click="generateSafeBoundary">
         Generate Safe Boundary
       </button>
-      <button class="btn btn-sm btn-secondary" :disabled="!mapStore.configuration?.boundary_zone" @click="startVerification">
-        Start Drive-To-Confirm
+      <button
+        class="btn btn-sm btn-secondary"
+        :disabled="!mapStore.configuration?.boundary_zone || isVerificationActive"
+        @click="showVerificationChecklist = true"
+      >
+        Prepare Drive-To-Confirm
       </button>
-      <button class="btn btn-sm btn-secondary" :disabled="!isVerificationActive" @click="goToNextVerificationPoint">
+      <button class="btn btn-sm btn-secondary" :disabled="!canRequestNextVerificationPoint" @click="goToNextVerificationPoint">
         Go To Next Point
       </button>
       <button class="btn btn-sm btn-success" :disabled="!canConfirmVerificationPoint" @click="confirmVerificationPoint">
         Confirm Point
       </button>
-      <button class="btn btn-sm btn-warning" :disabled="!canConfirmVerificationPoint" @click="rejectVerificationPoint">
+      <button class="btn btn-sm btn-warning" :disabled="!canRejectVerificationPoint" @click="rejectVerificationPoint">
         Reject Point
       </button>
       <button class="btn btn-sm btn-danger" :disabled="!isVerificationActive" @click="cancelVerification">
         Cancel Verification
       </button>
+      <span v-if="mapStore.verificationStatus" class="verification-status-chip">
+        Verification: {{ mapStore.verificationStatus.status }}{{ activeVerificationPoint ? ` · point ${activeVerificationPoint.index + 1} ${activeVerificationPoint.status}` : '' }}
+      </span>
+    </div>
+
+    <div v-if="showVerificationChecklist" class="verification-checklist">
+      <strong>Blade-off verification safety check</strong>
+      <p>
+        Creating the session does not move the mower. Each “Go To Next Point” click starts one
+        low-speed blade-off leg to a center-safe stand-off target.
+      </p>
+      <label><input v-model="verificationOperatorConfirmed" type="checkbox"> I am at the mower and will supervise every leg.</label>
+      <label><input v-model="verificationBladeDisabled" type="checkbox"> The cutting blade is physically disabled.</label>
+      <label><input v-model="verificationRouteClear" type="checkbox"> The route is clear and the master cutoff is reachable.</label>
+      <label>
+        Physical intervention available
+        <input
+          v-model="verificationPhysicalIntervention"
+          class="boundary-address-input"
+          placeholder="Example: master cutoff within reach"
+        >
+      </label>
+      <div class="verification-checklist-actions">
+        <button class="btn btn-sm btn-success" :disabled="!canStartVerification" @click="startVerification">
+          Create Blade-Off Session
+        </button>
+        <button class="btn btn-sm btn-secondary" @click="showVerificationChecklist = false">Close</button>
+      </div>
     </div>
 
     <div v-if="showImportBox" class="boundary-import-panel">
@@ -467,7 +499,13 @@ const editingZoneId = ref<string | null>(null);
 const showImportBox = ref(false);
 const importText = ref('');
 const addressInput = ref('');
-const safeBufferMeters = ref(0.75);
+const safeBufferMeters = ref(0.05);
+const showVerificationChecklist = ref(false);
+const verificationOperatorConfirmed = ref(false);
+const verificationBladeDisabled = ref(false);
+const verificationRouteClear = ref(false);
+const verificationPhysicalIntervention = ref('');
+const verificationPollTimer = ref<number | null>(null);
 
 // Tile loading and error state
 const tileLoadingState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle');
@@ -742,13 +780,28 @@ const safeBoundaryLatLng = computed(() => {
 
 const hasImportedBoundary = computed(() => importedBoundaryLatLng.value.length >= 3);
 const isVerificationActive = computed(() => mapStore.verificationStatus?.status === 'active');
-const canConfirmVerificationPoint = computed(() => {
-  const target = mapStore.verificationStatus?.target_index;
-  return isVerificationActive.value && target !== null && target !== undefined;
-});
-const verificationTargetLatLng = computed(() => {
+const activeVerificationPoint = computed(() => {
   const status = mapStore.verificationStatus;
-  const target = status?.points?.find((p: any) => p.index === status.target_index);
+  return status?.points?.find(point => point.index === status.target_index) || null;
+});
+const canRequestNextVerificationPoint = computed(() => (
+  isVerificationActive.value && mapStore.verificationStatus?.target_index == null
+));
+const canConfirmVerificationPoint = computed(() => {
+  return isVerificationActive.value && activeVerificationPoint.value?.status === 'arrived';
+});
+const canRejectVerificationPoint = computed(() => (
+  isVerificationActive.value
+  && ['starting', 'traveling', 'arrived'].includes(activeVerificationPoint.value?.status || '')
+));
+const canStartVerification = computed(() => (
+  verificationOperatorConfirmed.value
+  && verificationBladeDisabled.value
+  && verificationRouteClear.value
+  && verificationPhysicalIntervention.value.trim().length > 0
+));
+const verificationTargetLatLng = computed(() => {
+  const target = activeVerificationPoint.value?.approach;
   return target ? _applyDisplayOffset(target.latitude, target.longitude) : null;
 });
 
@@ -854,7 +907,7 @@ async function fetchParcelFromAddress() {
 async function generateSafeBoundary() {
   try {
     const value = Number(safeBufferMeters.value);
-    await mapStore.generateSafeBoundaryFromConfirmed(Number.isFinite(value) ? value : 0.75);
+    await mapStore.generateSafeBoundaryFromConfirmed(Number.isFinite(value) ? value : 0.05);
     toast.show('Safe operating boundary generated', 'success', 2500);
   } catch (err: any) {
     toast.show(err?.response?.data?.detail || err?.message || 'Failed to generate safe boundary', 'error', 4000);
@@ -863,8 +916,14 @@ async function generateSafeBoundary() {
 
 async function startVerification() {
   try {
-    await mapStore.startVerificationFromConfirmed();
-    toast.show('Drive-to-confirm session started', 'success', 2500);
+    await mapStore.startVerificationFromConfirmed({
+      operator_confirmed: verificationOperatorConfirmed.value,
+      blade_physically_disabled: verificationBladeDisabled.value,
+      route_clear_confirmed: verificationRouteClear.value,
+      physical_intervention: verificationPhysicalIntervention.value.trim(),
+    });
+    showVerificationChecklist.value = false;
+    toast.show('Blade-off session created; no motion has started', 'success', 3000);
   } catch (err: any) {
     toast.show(err?.response?.data?.detail || err?.message || 'Failed to start verification', 'error', 4000);
   }
@@ -1399,7 +1458,11 @@ onMounted(async () => {
     if (!mapStore.configuration) {
       await mapStore.loadConfiguration('default');
     }
-    safeBufferMeters.value = mapStore.safeBoundaryBufferMeters || 0.75;
+    await mapStore.refreshVerificationStatus().catch(() => null);
+    verificationPollTimer.value = window.setInterval(() => {
+      void mapStore.refreshVerificationStatus().catch(() => null);
+    }, 1500);
+    safeBufferMeters.value = mapStore.safeBoundaryBufferMeters ?? 0.05;
     // Initialize center from configuration if available
     const center = mapStore.configuration?.center_point;
     if (center) {
@@ -1469,6 +1532,11 @@ onUnmounted(() => {
   if (restPollTimer.value) {
     clearInterval(restPollTimer.value)
     restPollTimer.value = null
+  }
+
+  if (verificationPollTimer.value) {
+    clearInterval(verificationPollTimer.value)
+    verificationPollTimer.value = null
   }
   
   // Clear loading timeout
@@ -1945,6 +2013,40 @@ function retryOriginalTiles() {
   border-radius: 4px;
   background: rgba(255,255,255,0.08);
   color: inherit;
+}
+
+.verification-status-chip {
+  padding: .25rem .55rem;
+  border-radius: 999px;
+  background: rgba(38, 132, 255, 0.18);
+  color: #9fc7ff;
+  font-size: .8rem;
+}
+
+.verification-checklist {
+  display: grid;
+  gap: .5rem;
+  padding: .75rem 1rem;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  background: rgba(8, 13, 18, 0.98);
+}
+
+.verification-checklist p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: .875rem;
+}
+
+.verification-checklist label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .875rem;
+}
+
+.verification-checklist-actions {
+  display: flex;
+  gap: .5rem;
 }
 
 .boundary-import-panel {

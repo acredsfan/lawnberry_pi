@@ -10,7 +10,13 @@ def configured_tof_obstacle_threshold_m(limits: Any) -> float:
 
 
 def required_obstacle_clearance_m(speed_mps: float | None, limits: Any) -> float:
-    """Return fail-closed stopping clearance for forward ToF obstacle gating."""
+    """Return stopping clearance measured forward from the ToF sensor face.
+
+    ``obstacle_front_offset_m`` describes where the sensor is mounted relative
+    to the mower center. It is useful for body geometry, but adding it here
+    would double-count distance because the ToF measurement already starts at
+    the front sensor.
+    """
 
     if not hasattr(limits, "obstacle_min_clearance_m"):
         return configured_tof_obstacle_threshold_m(limits)
@@ -21,11 +27,7 @@ def required_obstacle_clearance_m(speed_mps: float | None, limits: Any) -> float
         speed = max(0.0, abs(float(speed_mps)))
     latency = float(getattr(limits, "obstacle_detection_latency_s", 0.35))
     decel = float(getattr(limits, "obstacle_conservative_deceleration_mps2", 0.45))
-    front_offset = float(getattr(limits, "obstacle_front_offset_m", 0.25))
-    margin = float(getattr(limits, "obstacle_fixed_margin_m", 0.20))
-    floor = max(
-        configured_tof_obstacle_threshold_m(limits),
-        float(getattr(limits, "obstacle_min_clearance_m", 0.55)),
-    )
+    margin = float(getattr(limits, "obstacle_fixed_margin_m", 0.10))
+    floor = float(getattr(limits, "obstacle_min_clearance_m", 0.15))
     stopping = speed * latency + (speed * speed) / (2.0 * decel)
-    return max(floor, stopping + front_offset + margin)
+    return max(floor, stopping + margin)

@@ -15,12 +15,15 @@ import {
   generateSafeBoundary,
   getSafeBoundary,
   startBoundaryVerification,
+  getBoundaryVerificationStatus,
   nextBoundaryVerificationPoint,
   confirmBoundaryVerificationPoint,
   rejectBoundaryVerificationPoint,
   cancelBoundaryVerification,
   type Zone as ApiZone,
   type ImportedBoundary,
+  type BoundaryVerificationAcknowledgement,
+  type BoundaryVerificationSession,
 } from '../services/mapsClient';
 
 const MAP_CONFIG_STORAGE_KEY = 'lawnberry_map_configuration_v2';
@@ -195,8 +198,8 @@ export const useMapStore = defineStore('map', () => {
   const lastError = ref<string | null>(null);
   const importedBoundary = ref<ImportedBoundary | null>(null);
   const safeBoundary = ref<ImportedBoundary | null>(null);
-  const verificationStatus = ref<ImportedBoundary | null>(null);
-  const safeBoundaryBufferMeters = ref(0.75);
+  const verificationStatus = ref<BoundaryVerificationSession | null>(null);
+  const safeBoundaryBufferMeters = ref(0.05);
 
   // Watch for changes and save non-spatial fields to localStorage
   // Zones are loaded from server on demand — do not cache them locally
@@ -640,6 +643,11 @@ export const useMapStore = defineStore('map', () => {
     } catch {
       safeBoundary.value = null;
     }
+    try {
+      verificationStatus.value = await getBoundaryVerificationStatus();
+    } catch {
+      verificationStatus.value = null;
+    }
   }
 
   function setImportedBoundary(boundary: ImportedBoundary | null) {
@@ -677,12 +685,20 @@ export const useMapStore = defineStore('map', () => {
     return safeBoundary.value;
   }
 
-  async function startVerificationFromConfirmed() {
+  async function startVerificationFromConfirmed(
+    acknowledgement: BoundaryVerificationAcknowledgement
+  ) {
     const boundary = configuration.value?.boundary_zone?.polygon || [];
     if (boundary.length < 3) throw new Error('Confirmed boundary needs at least 3 points');
     verificationStatus.value = await startBoundaryVerification(
-      boundary.map(p => ({ latitude: p.latitude, longitude: p.longitude }))
+      boundary.map(p => ({ latitude: p.latitude, longitude: p.longitude })),
+      acknowledgement
     );
+    return verificationStatus.value;
+  }
+
+  async function refreshVerificationStatus() {
+    verificationStatus.value = await getBoundaryVerificationStatus();
     return verificationStatus.value;
   }
 
@@ -1056,6 +1072,7 @@ export const useMapStore = defineStore('map', () => {
     importBoundaryFromText,
     generateSafeBoundaryFromConfirmed,
     startVerificationFromConfirmed,
+    refreshVerificationStatus,
     goToNextVerificationPoint,
     confirmVerificationPoint,
     rejectVerificationPoint,

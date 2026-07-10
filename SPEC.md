@@ -67,6 +67,11 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | V29 | Qualification evidence ingestion must validate server-observed clean hardware context, exact bindings, unique required passed stages, and cleanup evidence; client-supplied flags alone must never authorize hazardous operation |
 | V30 | Qualification record and artifact identifiers used as filenames must be schema-constrained to path-safe values; client input must not escape evidence storage directories |
 | V31 | Performance tests must time the system operation under test and exclude mock/test-fixture construction from the measured budget |
+| V32 | Boundary-point verification motion must use the canonical blade-off diagnostic mission and motor-authorization path, target only a validated stand-off point inside the authoritative operating area, require explicit physical blade-disable acknowledgement before motion, and command zero drive plus blade off on every terminal path |
+| V33 | A boundary point may be confirmed only after the verification mission reaches its stand-off target, motion is stopped, and a fresh unique-sample stationary RTK average records antenna and body-center coordinates plus target residual; persisted session and mission state must reconcile safely after process restart and drive the UI state |
+| V34 | GPS freshness must be derived from immutable sample identity and acquisition time: cached fallback readings must preserve the prior sample ID and timestamp, must never report zero age or refresh the canonical last-fix time, and a stale serial owner must close and reopen the device to recover live acquisition |
+| V35 | Manual ToF cutoff, autonomous front-sensor stopping clearance, safe-boundary additional inset, mower footprint, and localization accuracy are distinct safety quantities; front-sensor range must not add the center-to-sensor offset again, autonomous clearance must remain speed-dependent, and the safe-boundary inset must not duplicate footprint containment |
+| V36 | Safe-boundary generation without client-supplied coordinates must resolve the same authoritative persisted boundary zone shown by the Maps UI; it must not depend on one historical hardcoded zone ID |
 
 ---
 
@@ -102,6 +107,10 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T26 | x | Reject fabricated or context-mismatched passing qualification evidence and require valid cleanup/stage structure | V23, V29, I.api |
 | T27 | x | Constrain qualification record/artifact identifiers and test traversal rejection | V30, I.api |
 | T28 | x | Remove `AsyncMock` construction and synthetic header behavior from the WebSocket connection benchmark window | V31, I.ws |
+| T29 | x | Make GPS status freshness truthful and recover live acquisition by reopening a stale owner handle | V34, I.api |
+| T30 | x | Recalibrate autonomous front-sensor clearance and safe-boundary inset semantics without weakening footprint containment | V35 |
+| T31 | x | Replace direct boundary waypoint motion with a restart-safe blade-off diagnostic workflow, stationary RTK evidence, and status-driven UI | V32, V33, I.api |
+| T32 | x | Resolve coordinate-free safe-boundary generation from the current persisted boundary zone | V36, I.api |
 
 ---
 
@@ -144,3 +153,8 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | B33 | 2026-07-10 | Synthetic navigation fixture generation and replay implicitly loaded ignored host `config/hardware.yaml`, baking the Pi's antenna offset into the golden output while clean CI used neutral defaults | V28, T25 |
 | B34 | 2026-07-10 | Optional-dependency fallback prepended the entire compatibility-stub directory after an earlier missing import, allowing the JWT stub to shadow installed PyJWT 2.13 in clean CI | V25, T22 |
 | B35 | 2026-07-10 | Synthetic fixture generation loaded the host's persisted IMU alignment and appended to an existing golden JSONL, so regeneration was neither host-independent nor idempotent | V28, T25 |
+| B36 | 2026-07-10 | The GPS driver could return one cached fix forever without recycling a silent serial handle, while the status endpoint hardcoded `last_read_age_s=0.0` and made an old sample look live | V34, T29 |
+| B37 | 2026-07-10 | Autonomous obstacle clearance added the mower-center-to-front-sensor offset to a distance already measured from that front sensor and imposed a 0.55 m floor at every speed | V35, T30 |
+| B38 | 2026-07-10 | Safe-boundary generation defaulted to a 0.75 m inset and operating-area validation then applied the mower footprint and accuracy allowances again, duplicating containment clearance | V35, T30 |
+| B39 | 2026-07-10 | Boundary verification sent direct navigation waypoints at the recorded boundary, bypassing diagnostic mission preflight and cleanup while targeting a location the mower center cannot safely occupy | V32, V33, T31 |
+| B40 | 2026-07-10 | Coordinate-free safe-boundary generation looked up only the legacy ID `confirmed_mowing_boundary`, while the current Maps UI persisted a valid boundary under a generated ID and the API returned 422 | V36, T32 |

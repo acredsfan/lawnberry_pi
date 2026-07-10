@@ -369,6 +369,8 @@ class LocalizationService:
     def reset_for_mission(
         self,
         saved_alignment: tuple[float, int, float] | None = None,
+        *,
+        require_fresh_bootstrap: bool = True,
     ) -> None:
         """Reset heading alignment for a new mission.
 
@@ -380,20 +382,24 @@ class LocalizationService:
                 When None, falls back to the original 0° reset behaviour.
         """
         self._gps_cog_history.clear()
-        self._require_gps_heading_alignment = True
+        self._require_gps_heading_alignment = require_fresh_bootstrap
         self._last_gps_track_position = None
         self._last_gps_track_time = None
+        # Always require a new IMU sensor tick before control uses a heading.
+        # Reuse skips straight-line COG motion, not live sensor validation.
         self.state.heading = None
+        self.state.heading_source = None
+        self.state.imu_valid = False
         self.state.gps_cog = None
         self._odometry_integrator.reset_ticks()
         self._last_dr_time_s = time.monotonic()
         self._imu_reject_streak = 0
         if saved_alignment is not None:
-            saved_value, _saved_samples, _age_s = saved_alignment
+            saved_value, saved_samples, _age_s = saved_alignment
             self._session_heading_alignment = saved_value
-            # Seed heading from the last known-good value, but force a fresh mission
-            # bootstrap sample before navigation control treats alignment as verified.
-            self._heading_alignment_sample_count = 0
+            self._heading_alignment_sample_count = (
+                0 if require_fresh_bootstrap else max(1, int(saved_samples))
+            )
             # Disk already holds the previous snap; do not overwrite with a reset record.
         else:
             self._session_heading_alignment = 0.0

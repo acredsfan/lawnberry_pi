@@ -99,6 +99,31 @@ def test_stale_safe_boundary_is_not_valid(tmp_path, monkeypatch):
     assert snapshot.validity_state == "SAFE_BOUNDARY_STALE"
 
 
+def test_boundary_reference_projects_to_center_safe_verification_standoff(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("LAWN_DATA_DIR", str(tmp_path))
+    coords = _square(size_deg=0.0004)
+    _write_json(
+        MOWING_BOUNDARY_SAFE,
+        {
+            "source": "test",
+            "created_at": datetime.now(UTC).isoformat(),
+            "buffer_meters": 0.05,
+            "coordinates": coords,
+        },
+    )
+    snapshot = load_operating_area_snapshot()
+    reference = Position(**coords[0])
+
+    target = snapshot.safe_approach_position(reference, clearance_m=0.55)
+
+    assert snapshot.contains_center(target)
+    assert snapshot.distance_to_boundary(target) == pytest.approx(0.55, abs=0.02)
+    assert snapshot.contains_footprint(target, 0.54)
+
+
 def test_concave_segment_with_inside_endpoints_can_be_unsafe(tmp_path, monkeypatch):
     monkeypatch.setenv("LAWN_DATA_DIR", str(tmp_path))
     concave = [

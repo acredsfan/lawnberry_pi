@@ -229,9 +229,11 @@ watch the mission status contract instead of assuming `running` alone means the 
 - During normal waypoint pursuit, GPS course-over-ground is treated as a movement vector/fallback rather than a continuous
   IMU calibration source. This avoids corrupting chassis heading while the mower is arcing, tank-turning, slipping, or
   maneuvering around obstacles.
-- Autonomous obstacle gating now uses the same stopping-distance ToF clearance model as manual drive. Tune
-  `obstacle_detection_latency_s`, `obstacle_conservative_deceleration_mps2`, `obstacle_front_offset_m`,
-  `obstacle_fixed_margin_m`, and `obstacle_min_clearance_m` only after blade-off field calibration on grass.
+- Manual ToF uses only the operator-set `tof_obstacle_distance_meters` near-field cutoff. Autonomous ToF uses
+  `max(obstacle_min_clearance_m, speed × detection_latency + braking_distance + obstacle_fixed_margin_m)` measured
+  from the front sensor face. `obstacle_front_offset_m` records body geometry and is not added to that measured range.
+  Defaults are a 0.15 m floor and 0.10 m guard margin; the threshold still expands with speed and uses the configured
+  conservative unknown-speed value when command speed is unavailable.
 - If waypoint traversal cannot begin safely after the bounded verification window, the mission now fails with explicit detail
   instead of remaining indefinitely `running` / `executing` with no progress.
 - RoboHAT drive commands now wait for an explicit firmware PWM acknowledgement before the backend reports them accepted; if
@@ -429,13 +431,35 @@ For best orientation accuracy, calibrate the IMU after installation:
   `xyz` or ArcGIS tile URL. Select them via `active_source_id` / `mission_planner.source_id` such as
   `custom:local_orthophoto`; each source keeps its own alignment profile.
 - Stationary RTK reference averaging is available at `POST /api/v2/sensors/gps/stationary-average`. It accepts only fresh,
-  uncached, stationary RTK-fixed antenna samples, rejects spatial outliers, and returns an averaged reference measurement
-  without writing any hidden GPS offset.
+  unique, uncached, stationary RTK-fixed antenna samples observed from the canonical GPS owner's cache, rejects duplicate
+  identities and spatial outliers, and returns an averaged reference measurement without writing any hidden GPS offset.
+- `GET /api/v2/sensors/gps/status` is read-only: it reports the real sample age, cache/live state, sample ID, and serial
+  reopen count without taking another serial read. A silent reader is recycled after five seconds so the next owner poll
+  can reacquire the configured GPS device instead of presenting one cached fix forever.
 - NTRIP corrections:
   - If the rover already receives corrections directly (configured in u-center), no further changes are needed on the Pi.
   - When letting the Pi forward RTCM data, ensure `gps_ntrip_enabled: true` in `config/hardware.yaml` and update the `.env` file with the required `NTRIP_*` caster settings (host, mountpoint, credentials, serial device).
   - Restart the backend service after modifying `.env` so the connection is re-established.
 - Validate GPS health via GET /api/v2/sensors/health and /api/v2/fusion/state
+
+## Boundary point verification
+
+The Maps UI generates a safe boundary with a default **0.05 m additional inset**. This value is not the mower radius:
+runtime authorization separately includes the configured mower footprint, RTK uncertainty, fixed geofence allowance,
+and swept-motion prediction.
+
+1. Save the confirmed mowing boundary, then click **Generate Safe Boundary**.
+2. Click **Prepare Drive-To-Confirm**, acknowledge on-site supervision, physical blade disablement, a clear route, and the
+   available master cutoff. Creating the session causes no motion.
+3. Click **Go To Next Point** for one low-speed leg. The target is a computed center-safe stand-off inside the authoritative
+   safe polygon; the mower never drives its center to the recorded physical edge.
+4. Wait for the UI point state to change from `traveling` to `arrived`. `Confirm Point` stays disabled until then.
+5. Confirming first reasserts zero drive and blade off, then requires at least five unique live stationary RTK-fixed samples
+   at 0.05 m accuracy or better. Evidence records antenna and body-center coordinates plus residuals.
+6. After a backend restart, a previously running leg becomes `interrupted` and must be explicitly retried. It is never
+   silently treated as arrived or confirmable.
+
+Keep the mower raised or wheels clear for the first blade-off leg, remain at the cutoff, and test one point at a time.
 
 ## Geofence Definition
 Use the map configuration API to define boundaries and exclusion zones:

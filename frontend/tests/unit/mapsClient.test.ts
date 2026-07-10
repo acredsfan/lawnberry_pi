@@ -21,6 +21,8 @@ const {
   deleteMapZone,
   bulkReplaceMapZones,
   postMapZones,
+  startBoundaryVerification,
+  getBoundaryVerificationStatus,
 } = await import('@/services/mapsClient')
 
 function makeZone(id = 'z1'): Zone {
@@ -172,6 +174,38 @@ describe('mapsClient', () => {
       await postMapZones(zones)
 
       expect(mockApiService.post).toHaveBeenCalledWith('/api/v2/map/zones?bulk=true', zones)
+    })
+  })
+
+  describe('boundary verification', () => {
+    it('posts coordinates with explicit physical acknowledgements', async () => {
+      const session = { status: 'active', points: [], target_index: null }
+      mockApiService.post.mockResolvedValue({ data: session })
+      const coordinates = [{ latitude: 40.0, longitude: -75.0 }]
+      const acknowledgement = {
+        operator_confirmed: true,
+        blade_physically_disabled: true,
+        route_clear_confirmed: true,
+        physical_intervention: 'master cutoff within reach',
+      }
+
+      const result = await startBoundaryVerification(coordinates, acknowledgement)
+
+      expect(mockApiService.post).toHaveBeenCalledWith(
+        '/api/v2/boundary-verification/start',
+        { coordinates, ...acknowledgement },
+      )
+      expect(result).toEqual(session)
+    })
+
+    it('reads persisted verification status for UI reconciliation', async () => {
+      const session = { status: 'active', points: [], target_index: null }
+      mockApiService.get.mockResolvedValue({ data: session })
+
+      const result = await getBoundaryVerificationStatus()
+
+      expect(mockApiService.get).toHaveBeenCalledWith('/api/v2/boundary-verification/status')
+      expect(result).toEqual(session)
     })
   })
 })
