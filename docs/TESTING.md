@@ -200,7 +200,7 @@ Aaron physically verified the following against `main@a1d01df` on 2026-07-10. Th
 
 These results close only those bench checks. They do not substitute for wheels-on-ground control tuning, outdoor RTK/geofence validation, loss-of-fix tests, scheduled mission execution, blade shutdown tests, or controlled autonomous mowing.
 
-The reference mower has an accessible power button and no dedicated physical E-stop. A dedicated hardwired E-stop remains optional, but is strongly recommended for builds without another quick, accessible physical control that removes hazardous actuator power. Test the actual intervention control installed on each build; do not record an E-stop test for hardware that is not present.
+The reference mower has no dedicated physical E-stop. Aaron has repeatedly verified that its accessible power button removes power from every component downstream of the solar charge controller, shutting down the Raspberry Pi and all mower hardware/motors. A dedicated hardwired E-stop remains optional, but is strongly recommended for builds without another quick, accessible physical control that removes hazardous actuator power. Test the actual intervention control installed on each build; do not record an E-stop test for hardware that is not present.
 
 ## 5) Troubleshooting
 
