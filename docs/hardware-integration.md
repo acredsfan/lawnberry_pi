@@ -20,7 +20,7 @@ This guide documents wiring, pin assignments, and integration steps for Raspberr
   `config/hardware.pi4.example.yaml` as the template.
 
 Safety:
-- Aaron's reference mower has an accessible physical power button and no dedicated E-stop.
+- Aaron's reference mower has no dedicated E-stop. Its accessible physical power button is a verified master cutoff for every component downstream of the solar charge controller, including the Raspberry Pi and all mower hardware/motors.
 - A dedicated hardwired E-stop is optional, but strongly recommended when a build has no other quick, accessible physical control that removes hazardous actuator power.
 - Builders must document and bench-test their chosen physical intervention method. A software/API stop complements but does not replace a physical way to intervene.
 - Software interlocks: tilt, obstacle, watchdog enforced.
@@ -168,7 +168,7 @@ sudo i2cdetect -y 1
 ```
 
 ## Physical Intervention and Optional E-stop
-- Aaron's reference mower does **not** have a dedicated physical E-stop. Its accessible main power button is the physical intervention method.
+- Aaron's reference mower does **not** have a dedicated physical E-stop. Its accessible main power button is the verified physical intervention method: it removes power from every component downstream of the solar charge controller, including the Raspberry Pi and all mower hardware/motors.
 - A dedicated hardwired E-stop is an optional build feature. It is strongly recommended when the mower otherwise lacks a quick, accessible physical control that removes hazardous drive and blade power.
 - When fitted, the E-stop should interrupt the actuator-energy path without relying on the Raspberry Pi, backend, network, or Web UI. An optional RoboHAT input may report its state, but software signaling must not be the only stopping mechanism.
 - When relying on a power button or other cutoff instead, document exactly what it de-energizes and bench-test stopping behavior before ground or blade-enabled operation.
