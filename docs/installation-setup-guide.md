@@ -43,7 +43,7 @@ This comprehensive guide covers the complete setup process for LawnBerry Pi v2, 
 
 #### Proximity & Safety
 - **Physical intervention control**:
-  - Aaron's reference mower uses an accessible main power button and does not have a dedicated E-stop.
+  - Aaron's reference mower does not have a dedicated E-stop. Its accessible main power button has been physically verified to remove power from every component downstream of the solar charge controller, including the Raspberry Pi and all mower hardware/motors.
   - A dedicated hardwired E-stop is optional, but strongly recommended when a build has no other quick, accessible physical control that removes hazardous drive and blade power.
   - Whatever method is selected must be documented and physically bench-tested; software or Web UI controls are not a substitute for local physical intervention.
 
