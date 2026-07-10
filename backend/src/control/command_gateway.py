@@ -60,6 +60,7 @@ class MotorCommandGateway:
         self._autonomy_context_provider: Any = None
         self._drive_lease_generation: int = 0
         self._blade_controller: Any | None = None
+        self._qualification_service: Any | None = None
 
     def _rest(self) -> Any:
         if self.__rest_module is not None:
@@ -83,6 +84,9 @@ class MotorCommandGateway:
 
     def set_blade_controller(self, controller: Any) -> None:
         self._blade_controller = controller
+
+    def set_qualification_service(self, service: Any) -> None:
+        self._qualification_service = service
 
     def _get_blade_controller(self) -> Any:
         if self._blade_controller is not None:
@@ -604,6 +608,24 @@ class MotorCommandGateway:
                     status=CommandStatus.BLOCKED,
                     audit_id=audit_id,
                     status_reason="emergency_stop_active",
+                )
+            if self._qualification_service is None:
+                return BladeOutcome(
+                    status=CommandStatus.BLOCKED,
+                    audit_id=audit_id,
+                    status_reason="QUALIFICATION_SERVICE_UNAVAILABLE",
+                )
+            try:
+                self._qualification_service.assert_current()
+            except Exception as exc:
+                evaluation = getattr(exc, "evaluation", None)
+                reason_codes = getattr(evaluation, "reason_codes", None) or [
+                    "QUALIFICATION_EVIDENCE_MISSING"
+                ]
+                return BladeOutcome(
+                    status=CommandStatus.BLOCKED,
+                    audit_id=audit_id,
+                    status_reason=";".join(str(code) for code in reason_codes),
                 )
 
         try:

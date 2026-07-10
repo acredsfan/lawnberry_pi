@@ -188,6 +188,19 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
 
       expect(store.missionStatus).toBe('running')
     })
+
+    it('passes blade-off diagnostic mode through the mission start query', async () => {
+      const store = useMissionStore()
+      setActiveMission(store, 'idle')
+      mockedApi.post.mockResolvedValueOnce({ data: {} })
+
+      await store.startCurrentMission({ bladeOffDiagnostic: true })
+
+      expect(mockedApi.post).toHaveBeenCalledWith(
+        '/api/v2/missions/mission-123/start?blade_off_diagnostic=true',
+        {},
+      )
+    })
   })
 })
 

@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import secrets
 import stat
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -77,14 +76,6 @@ class SecretsManager:
         if rec is not None:
             self._audit("get", key, source="file", purpose=purpose)
             return rec.value
-
-        # If a JWT secret is missing, generate and save one.
-        if key == "JWT_SECRET":
-            _log.warning("JWT_SECRET not found. Generating a new one.")
-            new_secret = secrets.token_hex(32)
-            self.set(key, new_secret)
-            self._audit("generate", key, source="internal", purpose=purpose)
-            return new_secret
 
         self._audit("miss", key, source="none", purpose=purpose)
         return default

@@ -8,7 +8,7 @@ Returning to the project after time away? Start with `docs/developer-toolkit.md`
 
 ## 🚀 Quick Start
 
-The LawnBerry Pi v2 system is now fully operational with hardware integration and real-time telemetry streaming.
+The LawnBerry Pi v2 system is operational for development, simulation, and supervised on-device validation with hardware integration and real-time telemetry streaming. It is not considered unattended-autonomous or production-ready until current physical qualification evidence passes for the deployed commit, hardware configuration, safety limits, runtime identity, and RoboHAT firmware.
 
 ### System Architecture
 - **Backend**: FastAPI with hardware sensor integration (`backend/`)
@@ -56,7 +56,7 @@ uv run python scripts/manage_hardware_config.py migrate-legacy --profile auto
 - ✅ **Hardware Integration**: Real sensor data streaming from Pi hardware
 - ✅ **Professional UI**: 1980s cyberpunk design with Orbitron fonts and neon effects
 - ✅ **Real-time Telemetry**: Live GPS, battery, IMU data at 5Hz via WebSocket
-- ✅ **Production Ready**: Complete system validated on Raspberry Pi hardware
+- ⚠️ **Autonomy Qualification Required**: Blade-enabled manual/autonomous mission starts require current on-device qualification evidence; simulation does not count as physical qualification.
 
 ### Mission Planner
 - ✅ Interactive Mission Planner UI is available under the "Mission Planner" navigation item.
@@ -82,4 +82,4 @@ uv run python scripts/manage_hardware_config.py migrate-legacy --profile auto
 - **API Docs**: http://localhost:8081/docs (Swagger UI)
 - **WebSocket**: ws://localhost:8081/api/v2/ws/telemetry
 
-The system provides a complete real-time dashboard for autonomous lawn mowing operations with professional-grade user experience and full hardware integration.
+The system provides a complete real-time dashboard for mower operations with professional-grade user experience and hardware integration. Autonomous mowing claims require retained, current qualification evidence and Aaron's approval for each hazardous test stage.

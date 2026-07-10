@@ -29,6 +29,10 @@ export interface MissionStatusResponse {
   detail?: string | null;
 }
 
+export interface StartMissionOptions {
+  bladeOffDiagnostic?: boolean;
+}
+
 function extractMissionErrorMessage(error: unknown, fallback: string): string {
   const message = (error as {
     response?: {
@@ -311,10 +315,11 @@ export const useMissionStore = defineStore('mission', () => {
     }
   };
 
-  const startCurrentMission = async () => {
+  const startCurrentMission = async (options: StartMissionOptions = {}) => {
     if (!currentMission.value) return;
     try {
-      await apiService.post(`/api/v2/missions/${currentMission.value.id}/start`, {});
+      const query = options.bladeOffDiagnostic ? '?blade_off_diagnostic=true' : '';
+      await apiService.post(`/api/v2/missions/${currentMission.value.id}/start${query}`, {});
       clearTrace();
       missionStatus.value = 'running';
       statusDetail.value = null;

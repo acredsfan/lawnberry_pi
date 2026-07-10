@@ -63,6 +63,26 @@ def _mission_status_running(mission_id: str) -> MissionStatus:
     )
 
 
+class _AllowQualification:
+    def assert_current(self):
+        return None
+
+
+class _BlockQualification:
+    def assert_current(self):
+        exc = RuntimeError("qualification blocked")
+        exc.evaluation = type(
+            "Evaluation",
+            (),
+            {"reason_codes": ["QUALIFICATION_EVIDENCE_MISSING"]},
+        )()
+        raise exc
+
+
+def _allow_qualification(service: JobsService) -> None:
+    service.set_qualification_service(_AllowQualification())
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -91,6 +111,7 @@ async def test_scheduled_job_creates_and_starts_mission():
 
     svc.set_mission_service(mock_mission_svc)
     svc.set_websocket_hub(mock_ws_hub)
+    _allow_qualification(svc)
 
     job = _make_job(zones=["zone-abc"], pattern="parallel", pattern_params={"angle": 45})
 
@@ -139,6 +160,7 @@ async def test_check_and_dispatch_planning_jobs_detects_due_job():
     mock_mission_svc.create_mission = AsyncMock(return_value=created_mission)
     mock_mission_svc.start_mission = AsyncMock(return_value=None)
     svc.set_mission_service(mock_mission_svc)
+    _allow_qualification(svc)
 
     due_time = datetime.now(UTC) - timedelta(minutes=1)
     job = _make_job(zones=["zone-abc"])
@@ -167,6 +189,7 @@ async def test_scheduled_job_skipped_if_emergency_active():
     mock_mission_svc.start_mission = AsyncMock()
 
     svc.set_mission_service(mock_mission_svc)
+    _allow_qualification(svc)
 
     job = _make_job(zones=["zone-abc"])
 
@@ -198,6 +221,7 @@ async def test_scheduled_job_skipped_if_mission_already_running():
     mock_mission_svc.start_mission = AsyncMock()
 
     svc.set_mission_service(mock_mission_svc)
+    _allow_qualification(svc)
 
     job = _make_job(zones=["zone-abc"])
 
@@ -222,6 +246,7 @@ async def test_scheduled_job_skipped_if_no_zones():
     mock_mission_svc.start_mission = AsyncMock()
 
     svc.set_mission_service(mock_mission_svc)
+    _allow_qualification(svc)
 
     job = _make_job(zones=[])
 
@@ -255,6 +280,7 @@ async def test_scheduled_job_ws_broadcast_failure_does_not_crash():
 
     svc.set_mission_service(mock_mission_svc)
     svc.set_websocket_hub(mock_ws_hub)
+    _allow_qualification(svc)
 
     job = _make_job(zones=["zone-abc"])
 
@@ -287,6 +313,7 @@ async def test_scheduled_job_start_mission_error_logged_not_raised():
     )
 
     svc.set_mission_service(mock_mission_svc)
+    _allow_qualification(svc)
 
     job = _make_job(zones=["zone-abc"])
 
@@ -299,6 +326,30 @@ async def test_scheduled_job_start_mission_error_logged_not_raised():
 
     # Failed starts must not suppress the next eligible retry.
     assert job["last_run"] is None
+
+
+@pytest.mark.asyncio
+async def test_scheduled_job_skipped_if_qualification_blocks():
+    """Dispatch skips mission creation when qualification evidence is not current."""
+    svc = JobsService()
+    svc.set_qualification_service(_BlockQualification())
+
+    mock_mission_svc = MagicMock()
+    mock_mission_svc.list_missions = AsyncMock(return_value=[])
+    mock_mission_svc.create_mission = AsyncMock()
+    mock_mission_svc.start_mission = AsyncMock()
+    svc.set_mission_service(mock_mission_svc)
+
+    job = _make_job(zones=["zone-abc"])
+
+    with patch(
+        "backend.src.services.jobs_service.get_safety_state",
+        return_value={"emergency_stop_active": False},
+    ):
+        await svc._dispatch_scheduled_job(job)
+
+    mock_mission_svc.create_mission.assert_not_awaited()
+    mock_mission_svc.start_mission.assert_not_awaited()
 
 
 @pytest.mark.asyncio

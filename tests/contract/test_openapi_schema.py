@@ -22,7 +22,7 @@ from backend.src.main import app
 def committed_schema():
     """Load the committed OpenAPI schema from disk."""
     schema_path = Path(__file__).parent.parent.parent / "openapi.json"
-    with open(schema_path, "r", encoding="utf-8") as f:
+    with open(schema_path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -78,6 +78,10 @@ def test_schema_has_canonical_paths(generated_schema):
         # Missions
         "/api/v2/missions/create",
         "/api/v2/missions/list",
+        # Autonomy qualification/readiness
+        "/api/v2/autonomy/readiness",
+        "/api/v2/autonomy/qualification",
+        "/api/v2/autonomy/qualification/evidence",
         "/api/v2/missions/{mission_id}/status",
         "/api/v2/missions/{mission_id}/pause",
         "/api/v2/missions/{mission_id}/resume",

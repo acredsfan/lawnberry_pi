@@ -73,7 +73,7 @@ describe('MissionListPanel', () => {
     mockedApi.get.mockResolvedValueOnce({ data: [sampleMission] })
 
     const wrapper = mount(MissionListPanel)
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
     const rowButtons = wrapper.findAll('.mission-row-actions button')
     // rowButtons[0] = Select, rowButtons[1] = Edit, rowButtons[2] = Delete
@@ -89,7 +89,7 @@ describe('MissionListPanel', () => {
     mockedApi.get.mockResolvedValueOnce({ data: [sampleMission] })
 
     const wrapper = mount(MissionListPanel)
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
     const rowButtons = wrapper.findAll('.mission-row-actions button')
     expect(rowButtons[1].attributes('disabled')).toBeDefined()
@@ -104,7 +104,7 @@ describe('MissionListPanel', () => {
     mockedApi.get.mockResolvedValueOnce({ data: [sampleMission] })
 
     const wrapper = mount(MissionListPanel)
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
     const rowButtons = wrapper.findAll('.mission-row-actions button')
     expect(rowButtons[1].attributes('disabled')).toBeUndefined()
@@ -119,7 +119,7 @@ describe('MissionListPanel', () => {
     mockedApi.get.mockResolvedValueOnce({ data: [sampleMission] })
 
     const wrapper = mount(MissionListPanel)
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
     const deleteAllBtn = wrapper.find('.btn-delete-all')
     expect(deleteAllBtn.exists()).toBe(true)
@@ -136,7 +136,7 @@ describe('MissionListPanel', () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
 
     const wrapper = mount(MissionListPanel)
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
     await wrapper.find('.btn-delete-all').trigger('click')
     await flushPromises()
@@ -154,7 +154,7 @@ describe('MissionListPanel', () => {
     mockedApi.get.mockResolvedValueOnce({ data: [sampleMission] })
 
     const wrapper = mount(MissionListPanel)
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
     const row = wrapper.find('li')
     expect(row.classes()).toContain('mission-row--active')

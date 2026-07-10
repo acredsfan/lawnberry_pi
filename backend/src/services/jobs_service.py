@@ -25,6 +25,7 @@ class JobsService:
         self._running_tasks: set[asyncio.Task] = set()
         self._mission_service: MissionService | None = None
         self._websocket_hub: WebSocketHub | None = None
+        self._qualification_service: Any | None = None
 
     # ------------------------------------------------------------------
     # Dependency injection setters
@@ -37,6 +38,10 @@ class JobsService:
     def set_websocket_hub(self, websocket_hub: "WebSocketHub") -> None:
         """Wire in WebSocketHub for best-effort event broadcasting."""
         self._websocket_hub = websocket_hub
+
+    def set_qualification_service(self, qualification_service: Any) -> None:
+        """Wire in qualification evidence gate for scheduled blade-capable starts."""
+        self._qualification_service = qualification_service
 
     def create_job(
         self,
@@ -476,6 +481,28 @@ class JobsService:
                 "Scheduled job %r (%s) skipped: emergency stop is active.",
                 job_name,
                 job_id,
+            )
+            return
+
+        if self._qualification_service is None:
+            logger.warning(
+                "Scheduled job %r (%s) skipped: qualification service is unavailable.",
+                job_name,
+                job_id,
+            )
+            return
+        try:
+            self._qualification_service.assert_current()
+        except Exception as exc:
+            evaluation = getattr(exc, "evaluation", None)
+            reason_codes = getattr(evaluation, "reason_codes", None) or [
+                "QUALIFICATION_EVIDENCE_MISSING"
+            ]
+            logger.warning(
+                "Scheduled job %r (%s) skipped: qualification evidence blocked start (%s).",
+                job_name,
+                job_id,
+                ", ".join(str(code) for code in reason_codes),
             )
             return
 

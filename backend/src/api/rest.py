@@ -1559,6 +1559,17 @@ async def control_blade_v2(cmd: dict, request: Request, runtime: RuntimeContext 
             body = {"detail": "safety_interlock: motors_active — blade enable blocked while motors running"}
             persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
             return JSONResponse(status_code=403, content=body)
+        if "QUALIFICATION_" in (outcome.status_reason or ""):
+            reason_codes = [
+                code for code in str(outcome.status_reason).split(";") if code
+            ]
+            body = {
+                "detail": "qualification_required: blade enable blocked until current qualification evidence passes",
+                "status_reason": outcome.status_reason,
+                "reason_codes": reason_codes,
+            }
+            persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
+            return JSONResponse(status_code=409, content=body)
         body = {"detail": "safety_interlock: emergency_stop_active — blade commands blocked"}
         persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
         return JSONResponse(status_code=409, content=body)

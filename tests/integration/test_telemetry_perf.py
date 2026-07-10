@@ -307,10 +307,13 @@ class TestTelemetryPerformance:
         
         # Connect many clients and measure time
         for i in range(client_count):
+            # Test-double construction is not part of the WebSocketHub connection path.
+            # Use the synchronous mapping shape provided by Starlette WebSocket.headers.
+            mock_ws = AsyncMock()
+            mock_ws.headers = {}
             start_time = time.perf_counter()
             
             client_id = f"scale_client_{i}"
-            mock_ws = AsyncMock()
             await mock_websocket_hub.connect(mock_ws, client_id)
             await mock_websocket_hub.subscribe(client_id, "telemetry")
             
@@ -593,9 +596,10 @@ async def test_pi4_memory_constraint_compliance(monkeypatch):
     try:
         import resource
     except ImportError:
-        import sys
-        import psutil
         import os
+
+        import psutil
+
         process = psutil.Process(os.getpid())
         
         class MockResource:

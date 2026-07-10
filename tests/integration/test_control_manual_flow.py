@@ -108,11 +108,13 @@ async def test_blade_control_enable_disable_with_safety_interlock():
         if response_enable.status_code in (404, 501, 422):
             return
         
-        # When implemented: blade enable should succeed if motors stopped
-        assert response_enable.status_code in (200, 403)  # 403 if safety interlock active
+        # Blade enable may succeed only when safety and qualification gates allow it.
+        assert response_enable.status_code in (200, 403, 409)
         if response_enable.status_code == 200:
             data_enable = response_enable.json()
             assert data_enable["blade_status"] in ["ENABLED", "LOCKED_OUT"]
+        elif response_enable.status_code == 409:
+            assert "qualification_required" in response_enable.json()["detail"]
         
         # Attempt to disable blade
         payload_disable = {
@@ -293,8 +295,9 @@ async def test_control_safety_interlock_blade_requires_stopped_motors():
         if response_blade.status_code in (404, 501, 422):
             return
         
-        # When implemented: expect 403 with safety interlock reason
-        assert response_blade.status_code in (200, 403)
+        assert response_blade.status_code in (200, 403, 409)
+        if response_blade.status_code == 409:
+            assert "qualification_required" in response_blade.json()["detail"]
 
 
 @pytest.mark.asyncio

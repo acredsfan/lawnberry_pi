@@ -1,8 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import pytest
 
 from backend.src.models.hardware_config import HardwareConfig
+from backend.src.services.autonomy_qualification_service import AutonomyQualificationError
 from backend.src.services.autonomy_readiness_service import AutonomyReadinessService
 from backend.src.services.blade_controller import BladeHealth
 
@@ -44,6 +46,22 @@ class FakeLiveSafety:
         }
 
 
+class FakeQualification:
+    def assert_current(self):
+        return SimpleNamespace(record=SimpleNamespace(record_id="qualification-ok"))
+
+
+class BlockingQualification:
+    def assert_current(self):
+        evaluation = SimpleNamespace(
+            reason_codes=["QUALIFICATION_EVIDENCE_MISSING"],
+            remediation={
+                "QUALIFICATION_EVIDENCE_MISSING": "Run qualification.",
+            },
+        )
+        raise AutonomyQualificationError(evaluation)
+
+
 @dataclass
 class Runtime:
     hardware_config: HardwareConfig
@@ -51,6 +69,7 @@ class Runtime:
     robohat: object | None = None
     safety_state: dict | None = None
     live_safety: object | None = FakeLiveSafety()
+    qualification_service: object | None = field(default_factory=FakeQualification)
 
 
 @pytest.mark.asyncio
@@ -92,6 +111,8 @@ async def test_readiness_accepts_pi5_explicit_profile(monkeypatch):
     report = await AutonomyReadinessService(Runtime(hardware, safety_state={})).evaluate()
 
     assert report.ready
+    assert report.blade is not None
+    assert report.blade["qualification_record_id"] == "qualification-ok"
 
 
 @pytest.mark.asyncio
@@ -115,6 +136,33 @@ async def test_readiness_blocks_missing_live_safety_loop(monkeypatch):
 
     assert not report.ready
     assert "LIVE_SAFETY_LOOP_HEALTHY" in report.blocking_reason_codes
+
+
+@pytest.mark.asyncio
+async def test_readiness_blocks_missing_qualification_evidence(monkeypatch):
+    monkeypatch.setenv("LAWNBERRY_PLATFORM_MODEL", "Raspberry Pi 5 Model B Rev 1.0")
+    hardware = HardwareConfig.model_validate(
+        {
+            "imu_type": "bno085-uart",
+            "blade_controller": "ibt-4",
+            "blade": {
+                "controller": "ibt-4",
+                "allow_autonomous": True,
+                "pins": {"in1": 24, "in2": 25},
+            },
+        }
+    )
+
+    report = await AutonomyReadinessService(
+        Runtime(
+            hardware,
+            safety_state={},
+            qualification_service=BlockingQualification(),
+        )
+    ).evaluate()
+
+    assert not report.ready
+    assert "QUALIFICATION_EVIDENCE_MISSING" in report.blocking_reason_codes
 
 
 @pytest.mark.asyncio

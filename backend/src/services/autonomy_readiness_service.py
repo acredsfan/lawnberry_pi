@@ -7,6 +7,7 @@ from typing import Any
 from ..hardware.pin_registry import build_pin_allocation_report
 from ..hardware.platform_profile import PlatformKind, detect_platform_profile
 from ..models.hardware_config import BladeControllerType, HardwareConfig
+from .autonomy_qualification_service import AutonomyQualificationError
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,49 @@ class AutonomyReadinessService:
             )
 
         controller = hardware.blade.controller or hardware.blade_controller
+        blade_health: dict[str, Any] | None = None
         if require_blade:
+            qualification = getattr(self._runtime, "qualification_service", None)
+            if qualification is None:
+                checks.append(
+                    ReadinessCheck(
+                        code="QUALIFICATION_SERVICE_UNAVAILABLE",
+                        ok=False,
+                        severity="blocker",
+                        message="Autonomy qualification service is not available.",
+                        remediation="Restart backend and verify RuntimeContext wiring.",
+                    )
+                )
+            else:
+                try:
+                    evaluation = qualification.assert_current()
+                    checks.append(
+                        ReadinessCheck(
+                            code="QUALIFICATION_EVIDENCE_CURRENT",
+                            ok=True,
+                            severity="info",
+                            message=(
+                                "Current commit, hardware configuration, limits, runtime, "
+                                "and firmware have passing qualification evidence."
+                            ),
+                        )
+                    )
+                    blade_health = blade_health or {}
+                    blade_health["qualification_record_id"] = (
+                        evaluation.record.record_id if evaluation.record else None
+                    )
+                except AutonomyQualificationError as exc:
+                    for code in exc.evaluation.reason_codes:
+                        checks.append(
+                            ReadinessCheck(
+                                code=code,
+                                ok=False,
+                                severity="blocker",
+                                message=f"Qualification evidence blocker: {code}",
+                                remediation=exc.evaluation.remediation.get(code),
+                            )
+                        )
+
             if controller is None:
                 checks.append(
                     ReadinessCheck(
@@ -133,14 +176,20 @@ class AutonomyReadinessService:
                 )
             )
 
-        blade_health: dict[str, Any] | None = None
         gateway = getattr(self._runtime, "command_gateway", None)
         if require_blade and gateway is not None:
             try:
                 blade_controller = gateway._get_blade_controller()
                 if await blade_controller.initialize():
                     health = await blade_controller.health()
+                    qualification_record_id = (
+                        blade_health.get("qualification_record_id")
+                        if blade_health is not None
+                        else None
+                    )
                     blade_health = health.to_dict()
+                    if qualification_record_id is not None:
+                        blade_health["qualification_record_id"] = qualification_record_id
                     if not health.online:
                         checks.append(
                             ReadinessCheck(

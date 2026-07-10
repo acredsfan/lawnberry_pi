@@ -140,6 +140,17 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+Provision the persistent JWT signing secret before token use. The command stores it in ignored
+`config/secrets.json` with owner-only permissions and does not print the generated value:
+
+```bash
+uv run python -m backend.src.cli.secrets_cli set JWT_SECRET \
+  "$(python -c 'import secrets; print(secrets.token_hex(32))')"
+uv run python -m backend.src.cli.secrets_cli validate
+```
+
+Missing or blank `JWT_SECRET` fails closed. Do not paste the value into logs, documentation, or commits.
+
 ### 3. Frontend Setup (optional on headless Pi)
 ```bash
 cd ../frontend
@@ -228,7 +239,31 @@ curl http://localhost:8081/health
 # Open browser to http://<pi-ip>:3000
 ```
 
-3. **Hardware Verification**
+### 3. Autonomy qualification gate
+
+Starting services and passing health checks does not qualify the mower for blade-enabled autonomous operation. The backend
+requires current physical qualification evidence before blade-capable mission or scheduler starts.
+
+```bash
+# Inspect the current gate state and blocker reasons.
+curl http://localhost:8081/api/v2/autonomy/readiness | jq
+curl http://localhost:8081/api/v2/autonomy/qualification | jq
+
+# Run only non-destructive evidence collection until hazardous stages are approved.
+python scripts/run_autonomy_qualification.py --base-url http://127.0.0.1:8081 --output -
+```
+
+Do not use `--store` until you have confirmed the backend is running `SIM_MODE=0` on the mower, the deployed Git tree is
+clean, RoboHAT firmware is visible, and the generated record matches the intended hardware setup. Any code rollback,
+hardware config edit, safety limit edit, runtime identity change, or RoboHAT firmware change invalidates prior evidence and
+requires requalification.
+
+Aaron's current mower uses its verified master power cutoff as the independent intervention mechanism and does not have a
+dedicated E-stop. Other builds must identify and test their configured cutoff; test a dedicated E-stop only when installed.
+Physical stage passes are recorded one at a time with `--operator-confirmed`, `--stage-result`, an artifact registry ID, and
+`--physical-intervention`. The runner does not energize a physical stage automatically.
+
+### 4. Hardware Verification
 
 1. **GPS Calibration & RTK Configuration**
    

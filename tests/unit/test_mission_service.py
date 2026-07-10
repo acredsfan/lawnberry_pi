@@ -3,16 +3,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.src.api.rest import _safety_state
 from backend.src.models import NavigationMode, Position
 from backend.src.models.mission import MissionLifecycleStatus, MissionWaypoint
 from backend.src.services.mission_service import (
     MissionConflictError,
-    MissionNotFoundError,
     MissionService,
     MissionStateError,
     MissionValidationError,
 )
-from backend.src.api.rest import _safety_state
 
 
 class DummyNavigationService:
@@ -207,6 +206,19 @@ async def test_start_mission_rejected_when_emergency_stop_active():
             await service.start_mission(mission.id)
     finally:
         _safety_state["emergency_stop_active"] = False
+
+
+@pytest.mark.asyncio
+async def test_blade_off_diagnostic_rejects_blade_on_waypoints():
+    nav = DummyNavigationService()
+    service = MissionService(nav)
+    mission = await service.create_mission(
+        "Blade-on mission",
+        [MissionWaypoint(lat=0.1, lon=0.1, blade_on=True, speed=50)],
+    )
+
+    with pytest.raises(MissionStateError, match="Blade-off diagnostic mode"):
+        await service.start_mission(mission.id, blade_off_diagnostic=True)
 
 
 @pytest.mark.asyncio

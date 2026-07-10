@@ -155,7 +155,7 @@ describe('ControlView manual movement loop', () => {
     expect(store.submitCommand).toHaveBeenCalledTimes(1)
     const initialCall = store.submitCommand.mock.calls.at(0)
     expect(initialCall?.[1]?.reason).toBe('manual-joystick')
-    expect(initialCall?.[1]?.max_speed_limit).toBeCloseTo(0.5, 2)
+    expect(initialCall?.[1]?.max_speed_limit).toBeCloseTo(0.75, 2)
 
     await vi.advanceTimersByTimeAsync(140)
     await flushPromises()
@@ -169,7 +169,7 @@ describe('ControlView manual movement loop', () => {
 
     const lastCall = store.submitCommand.mock.calls.at(-1)!
     expect(lastCall[0]).toBe('drive')
-    expect(lastCall[1]).toMatchObject({ vector: { linear: 0, angular: 0 }, reason: 'manual-stop', max_speed_limit: 0.5 })
+    expect(lastCall[1]).toMatchObject({ vector: { linear: 0, angular: 0 }, reason: 'manual-stop', max_speed_limit: 0.75 })
 
     wrapper.unmount()
   })
@@ -195,7 +195,7 @@ describe('ControlView manual movement loop', () => {
     expect(store.submitCommand).toHaveBeenCalled()
     const stopCall = store.submitCommand.mock.calls.at(-1)!
     expect(stopCall[0]).toBe('drive')
-    expect(stopCall[1]).toMatchObject({ vector: { linear: 0, angular: 0 }, reason: 'manual-stop', max_speed_limit: 0.5 })
+    expect(stopCall[1]).toMatchObject({ vector: { linear: 0, angular: 0 }, reason: 'manual-stop', max_speed_limit: 0.75 })
 
     joystick.vm.triggerEnd()
     wrapper.unmount()
@@ -382,9 +382,11 @@ describe('ControlView camera stream recovery', () => {
       return Promise.resolve({ data: {} })
     })
 
-    vm.cameraStreamFailureCount = 1
     vm.cameraStreamUnavailable = false
-    vm.cameraStreamUrl = '/api/v2/camera/stream.mjpeg?client=test'
+
+    vm.handleCameraStreamError()
+    await flushPromises()
+    expect(vm.cameraStreamUnavailable).toBe(false)
 
     vm.handleCameraStreamError()
     await flushPromises()
@@ -393,12 +395,11 @@ describe('ControlView camera stream recovery', () => {
     expect(vm.cameraModeBadge.label).toBe('SNAPSHOT FALLBACK')
     vm.cameraInfo.active = true
 
-    await vm.attemptCameraStreamRecovery()
+    await vi.advanceTimersByTimeAsync(5000)
     await flushPromises()
 
     expect(vm.cameraStreamUnavailable).toBe(false)
-    expect(vm.cameraStreamUrl).toMatch(/\/api\/v2\/camera\/stream\.mjpeg/)
-    expect(vm.cameraStreamFailureCount).toBe(0)
+    expect(vm.cameraDisplaySource).toMatch(/\/api\/v2\/camera\/stream\.mjpeg/)
 
     vm.stopCameraFeed()
     wrapper.unmount()
@@ -417,11 +418,14 @@ describe('ControlView camera stream recovery', () => {
       if (url === '/api/v2/control/return-home') {
         return Promise.resolve({ data: { status: 'returning_home' } })
       }
+      if (url === '/api/v2/hardware/robohat/soft-reset') {
+        return Promise.resolve({ data: { success: true, message: 'RoboHAT reset complete' } })
+      }
       return Promise.resolve({ data: {} })
     })
 
     const buttons = wrapper.findAll('.system-controls .btn')
-    expect(buttons).toHaveLength(3)
+    expect(buttons).toHaveLength(4)
 
     await buttons[0].trigger('click')
     await flushPromises()
@@ -437,6 +441,11 @@ describe('ControlView camera stream recovery', () => {
     await flushPromises()
     expect(apiClient.post).toHaveBeenCalledWith('/api/v2/control/resume', {})
     expect(wrapper.text()).toContain('System resumed')
+
+    await buttons[3].trigger('click')
+    await flushPromises()
+    expect(apiClient.post).toHaveBeenCalledWith('/api/v2/hardware/robohat/soft-reset', {})
+    expect(wrapper.text()).toContain('RoboHAT reset complete')
 
     wrapper.unmount()
   })

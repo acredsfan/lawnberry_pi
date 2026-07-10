@@ -120,16 +120,72 @@ python -m pytest \
   tests/unit/test_platform_pin_registry.py \
   tests/unit/test_obstacle_clearance.py \
   tests/unit/test_gps_sample_freshness.py \
+  tests/unit/test_autonomy_qualification_service.py \
+  tests/unit/test_autonomy_qualification_runner.py \
   tests/unit/test_autonomy_readiness_service.py \
   tests/unit/test_config_loader.py \
   tests/unit/test_ibt4_blade_driver.py \
   tests/unit/test_command_gateway.py \
   tests/integration/test_scheduled_mission_dispatch.py \
+  tests/integration/test_wifi_watchdog_disabled_tiers.py \
   -x -q -m "not hardware"
 python -m py_compile robohat-rp2040-code/code.py
 ```
 
-## 3c) Live safety, canonical pose, and map alignment slice
+## 3c) Autonomy qualification gate regression slice
+
+For changes to qualification evidence, blade authorization, mission start, scheduler dispatch, WebSocket recovery, or the
+Wi-Fi watchdog regression tasks:
+
+```bash
+tmpdir=$(mktemp -d)
+SIM_MODE=1 \
+LAWN_DATA_DIR="$tmpdir" \
+DB_PATH="$tmpdir/lawnberry.db" \
+LAWN_SETTINGS_DIR="$tmpdir/config" \
+python -m pytest \
+  tests/unit/test_autonomy_qualification_service.py \
+  tests/unit/test_autonomy_qualification_runner.py \
+  tests/unit/test_autonomy_readiness_service.py \
+  tests/unit/test_command_gateway.py \
+  tests/unit/test_mission_service.py \
+  tests/integration/test_scheduled_mission_dispatch.py \
+  tests/integration/test_wifi_watchdog_disabled_tiers.py \
+  tests/test_mission_api.py \
+  -o addopts='' -q -m "not hardware"
+
+SIM_MODE=1 LAWNBERRY_SKIP_HW_INIT=1 \
+  python -m pytest \
+  tests/unit/test_jwt_manager.py \
+  tests/contract/test_health_endpoints.py \
+  tests/contract/test_openapi_schema.py \
+  tests/integration/test_navigation_replay.py \
+  -o addopts='' -q -m "not hardware"
+
+SIM_MODE=1 LAWNBERRY_SKIP_HW_INIT=1 \
+  uv run python scripts/generate_openapi.py openapi.generated.json
+diff -u openapi.json openapi.generated.json
+
+cd frontend
+npm test -- \
+  tests/unit/MissionPlannerView.spec.ts \
+  tests/unit/missionStore.spec.ts \
+  tests/unit/viteWebSocketProxy.spec.ts \
+  tests/integration/test_ws_resilience.spec.ts
+npm run type-check
+npm run build
+```
+
+`tests/integration/test_wifi_watchdog_disabled_tiers.py` imports the installed `/opt/wifi-watchdog` package on the Pi and
+skips only when that runtime package is absent. It monkeypatches recovery commands, so it must not reboot, cycle interfaces,
+or reset USB devices during automated tests.
+
+`tests/unit/test_jwt_manager.py` is the PyJWT 2.13 compatibility contract: HS256 round-trip, expiration, invalid signature,
+algorithm allow-list, and fail-closed missing/blank signing secret. `tests/contract/test_health_endpoints.py` intentionally
+points at a missing hardware config and requires `critical`; healthy sensor mocks must not hide that blocker. The navigation
+replay contract keeps its exact synthetic parity threshold and must not be loosened to make CI pass.
+
+## 3d) Live safety, canonical pose, and map alignment slice
 
 For changes that touch blade-off holds, live sensor safety, canonical GPS antenna/body-center pose,
 operating-area authorization, stationary RTK averaging, or source-specific map alignment:
@@ -157,8 +213,9 @@ npm run type-check
 npm test -- --run frontend/tests/unit/mapDisplayTransform.spec.ts frontend/tests/unit/mapProviders.spec.ts frontend/tests/unit/composables/useMowerTelemetry.spec.ts
 ```
 
-This slice proves software behavior only. Hardware validation still needs the staged blade-disabled,
-wheels-raised, outdoor blade-off, then limited blade-on sequence before any field-readiness claim.
+These slices prove software behavior only. Physical qualification still needs the staged blade-disabled,
+wheels-raised, outdoor blade-off, then limited blade-on sequence before any field-readiness claim. Simulation evidence is
+never accepted as physical qualification evidence by the backend gate.
 
 Update one of the following to satisfy the guard:
 - `docs/**`

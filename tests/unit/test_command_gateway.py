@@ -25,6 +25,18 @@ class _FakeBladeController:
         return BladeResult(ok=True, commanded_active=False, acknowledged_active=False)
 
 
+class _FakeQualificationService:
+    def __init__(self, reason_codes: list[str] | None = None):
+        self.reason_codes = reason_codes or []
+
+    def assert_current(self):
+        if not self.reason_codes:
+            return SimpleNamespace(record=SimpleNamespace(record_id="qualification-ok"))
+        exc = RuntimeError("qualification blocked")
+        exc.evaluation = SimpleNamespace(reason_codes=self.reason_codes)
+        raise exc
+
+
 def _make_gw():
     """Return (gateway, safety_state, blade_state) using a mocked rest module."""
     from unittest.mock import AsyncMock, MagicMock
@@ -46,6 +58,7 @@ def _make_gw():
     )
     gw._check_manual_drive_interlocks = AsyncMock(return_value=[])
     gw.set_blade_controller(_FakeBladeController())
+    gw.set_qualification_service(_FakeQualificationService())
     return gw, safety, blade
 
 
@@ -201,6 +214,34 @@ async def test_dispatch_blade_disable_always_accepted():
         BladeCommand(active=False, source="manual", motors_active=True)
     )
     assert outcome.status in (CommandStatus.ACCEPTED, CommandStatus.QUEUED)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_blade_active_requires_qualification_service():
+    from backend.src.control.commands import BladeCommand, CommandStatus
+
+    gw, _, _ = _make_gw()
+    gw.set_qualification_service(None)
+
+    outcome = await gw.dispatch_blade(BladeCommand(active=True, source="manual"))
+
+    assert outcome.status == CommandStatus.BLOCKED
+    assert outcome.status_reason == "QUALIFICATION_SERVICE_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_blade_active_blocks_failed_qualification():
+    from backend.src.control.commands import BladeCommand, CommandStatus
+
+    gw, _, _ = _make_gw()
+    gw.set_qualification_service(
+        _FakeQualificationService(["QUALIFICATION_EVIDENCE_MISSING"])
+    )
+
+    outcome = await gw.dispatch_blade(BladeCommand(active=True, source="manual"))
+
+    assert outcome.status == CommandStatus.BLOCKED
+    assert "QUALIFICATION_EVIDENCE_MISSING" in (outcome.status_reason or "")
 
 
 # ---- Phase D: reset_for_testing ----

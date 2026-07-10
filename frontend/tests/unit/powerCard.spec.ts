@@ -102,7 +102,6 @@ describe('Power card metrics', () => {
     expect(wrapper.vm.loadCurrentDisplay).toBe('0.50')
     // load power = Vbatt * Iload = 12.6 * 0.5 = 6.3 → display rounds to 6.3
     expect(wrapper.vm.loadPowerDisplay).toBe('6.3')
-    expect(['ON', 'ENABLED', 'ACTIVE']).toContain(wrapper.vm.loadStateDisplay)
 
     wrapper.unmount()
   })

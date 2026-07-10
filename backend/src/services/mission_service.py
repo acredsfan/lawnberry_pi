@@ -505,13 +505,20 @@ class MissionService:
         self._persist_mission_status(mission.id)
         return mission
 
-    async def start_mission(self, mission_id: str):
+    async def start_mission(self, mission_id: str, *, blade_off_diagnostic: bool = False):
         import os
 
         from .robohat_service import get_robohat_service
 
         if _is_emergency_active():
             raise MissionStateError("Cannot start mission while emergency stop is active.")
+
+        mission = self._require_mission(mission_id)
+        status = self._require_status(mission_id)
+        if blade_off_diagnostic and any(bool(wp.blade_on) for wp in mission.waypoints):
+            raise MissionStateError(
+                "Blade-off diagnostic mode requires every waypoint to have blade_on=false."
+            )
 
         try:
             from ..main import app
@@ -523,7 +530,9 @@ class MissionService:
             runtime = getattr(app.state, "runtime", None)
             if runtime is not None and os.getenv("SIM_MODE", "0") != "1":
                 try:
-                    await AutonomyReadinessService(runtime).assert_ready(require_blade=True)
+                    await AutonomyReadinessService(runtime).assert_ready(
+                        require_blade=not blade_off_diagnostic
+                    )
                 except AutonomyReadinessError as exc:
                     codes = ", ".join(exc.report.blocking_reason_codes)
                     raise MissionStateError(f"Autonomy readiness failed: {codes}") from exc
@@ -544,8 +553,6 @@ class MissionService:
                     "Check USB cable and RoboHAT firmware."
                 )
 
-        mission = self._require_mission(mission_id)
-        status = self._require_status(mission_id)
         existing_task = self.mission_tasks.get(mission_id)
         if existing_task and not existing_task.done():
             raise MissionConflictError("Mission is already active.")

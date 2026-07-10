@@ -149,6 +149,8 @@ If you protect the public hostname with Cloudflare Access, HTTP-01 issuance will
 - POST http://127.0.0.1:8081/api/v2/control/emergency_clear → clear E-stop with confirmation
 - GET http://127.0.0.1:8081/api/v2/hardware/robohat → RoboHAT status
 - GET http://127.0.0.1:8081/api/v2/autonomy/readiness → blade/platform/pin readiness report
+- GET http://127.0.0.1:8081/api/v2/autonomy/qualification → current qualification-evidence evaluation
+- POST http://127.0.0.1:8081/api/v2/autonomy/qualification/evidence → store a qualification record
 - GET http://127.0.0.1:8081/api/v2/camera/status → camera activity + FPS snapshot
 - GET http://127.0.0.1:8081/api/v2/camera/frame → latest raw JPEG snapshot
 - GET http://127.0.0.1:8081/api/v2/camera/stream.mjpeg → live MJPEG stream
@@ -240,9 +242,15 @@ watch the mission status contract instead of assuming `running` alone means the 
 - `GET /api/v2/control/status` reflects the navigation mode/path state, while
   `GET /api/v2/missions/{mission_id}/status` is the authoritative mission lifecycle/detail surface.
 - `GET /api/v2/autonomy/readiness` also checks that the live safety loop is running and has fresh fast IMU/ToF samples
-  before reporting blade-enabled autonomy ready.
+  before reporting blade-enabled autonomy ready. It also requires current qualification evidence for blade-capable starts.
+- `GET /api/v2/autonomy/qualification` evaluates the latest retained evidence against the current commit SHA, sanitized
+  hardware-config hash, safety-limits hash, runtime identity hash, and RoboHAT firmware version. Missing, stale, mismatched,
+  interrupted, failed, simulation, dirty-tree, or incomplete evidence returns explicit `QUALIFICATION_*` blocker codes.
 - Legacy `POST /api/v2/control/start` returns `409` with `MISSION_EXECUTOR_REQUIRED`; use
   `POST /api/v2/missions/{mission_id}/start` so a real mission executor is created.
+- Blade-off diagnostics use the same mission start endpoint with
+  `POST /api/v2/missions/{mission_id}/start?blade_off_diagnostic=true`. This mode is rejected if any waypoint has
+  `blade_on=true`; it is a diagnostic path, not a safety bypass.
 
 Useful checks:
 
@@ -251,7 +259,74 @@ curl -s http://127.0.0.1:8081/api/v2/control/status | python -m json.tool
 curl -s http://127.0.0.1:8081/api/v2/missions/<mission-id>/status | python -m json.tool
 curl -s http://127.0.0.1:8081/api/v2/hardware/robohat | python -m json.tool
 curl -s http://127.0.0.1:8081/api/v2/dashboard/telemetry | python -m json.tool
+curl -s http://127.0.0.1:8081/api/v2/autonomy/qualification | python -m json.tool
 ```
+
+## Autonomy qualification evidence
+
+Blade-enabled manual blade commands, blade-enabled mission starts, and scheduled mission dispatch now fail closed unless the
+backend has current passing physical qualification evidence. The retained evidence lives under
+`verification_artifacts/autonomy-qualification/` and is safe to review: user-owned hardware config is hashed after secret
+key redaction, not logged or copied into the record.
+
+Run only the non-destructive stages until Aaron is ready for a supervised physical stage:
+
+```bash
+SIM_MODE=0 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+python scripts/run_autonomy_qualification.py --base-url http://127.0.0.1:8081 --output -
+```
+
+Store evidence only after reviewing the output and confirming the backend is a clean deployed commit on the mower:
+
+```bash
+python scripts/run_autonomy_qualification.py \
+  --base-url http://127.0.0.1:8081 \
+  --store \
+  --operator aaron \
+  --notes "non-destructive qualification"
+```
+
+Hazardous stages are intentionally staged. The runner never energizes them automatically. After a supervised checklist stage,
+register its retained artifact with metadata bound to the context returned by `GET /api/v2/autonomy/qualification`: exact
+`qualification_stage_id`, `commit_sha`, `hardware_config_hash`, `limits_hash`, `runtime_identity_hash`,
+`robohat_firmware_version`, `result: "passed"`, and `operator_confirmed: true`. Then record that one result:
+
+```bash
+python scripts/run_autonomy_qualification.py \
+  --stage wheels_raised_drive \
+  --operator-confirmed \
+  --stage-result wheels_raised_drive=passed \
+  --artifact-id wheels_raised_drive=<verification-artifact-id> \
+  --physical-intervention "verified master power cutoff" \
+  --operator aaron \
+  --store
+```
+
+By default the runner carries forward same-context stages from the latest immutable record; use `--fresh` to start a new
+sequence. A physical pass without prerequisite stages, an artifact ID, or the configured intervention mechanism is recorded
+as failed. The backend independently checks artifact metadata and current clean hardware context before accepting a fully
+passing record. Every run attempts cleanup in `finally` by posting neutral drive and blade-off commands through the backend
+owner APIs. If cleanup fails, treat the record as invalid and physically verify drive neutral plus blade off before further
+work.
+
+Preflight and emergency procedure:
+
+1. Confirm `git rev-parse HEAD` matches the intended deployed commit and `git status --short` is clean.
+2. Confirm `SIM_MODE=0`, `config/hardware.yaml`, `config/limits.yaml`, and RoboHAT firmware are the intended physical setup.
+3. Confirm the configured independent intervention mechanism is reachable and removes hazardous power. Aaron's current mower
+   uses its repeatedly verified master power cutoff; test a dedicated E-stop only on builds where one is installed.
+4. Keep the mower wheels raised for drive-polarity and timeout stages; keep the blade physically disabled until the blade
+   circuit test stage is explicitly approved.
+5. After any exception, cancellation, service restart, rollback, config edit, firmware change, or failed stage, rerun
+   qualification before enabling blade-capable operation.
+
+Rollback:
+
+1. Command neutral drive and blade off, then use the configured master cutoff or installed dedicated E-stop before changing
+   code.
+2. Roll back to the selected commit and restart backend/frontend services.
+3. Treat all newer qualification evidence as invalid; commit changes intentionally invalidate the evidence hash.
+4. Re-run the non-destructive qualification stages before any blade-off motion, then repeat the staged physical checklist.
 
 ## AI
 - GET http://127.0.0.1:8081/api/v2/ai/datasets

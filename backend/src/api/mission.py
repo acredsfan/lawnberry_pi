@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from ..core.runtime import RuntimeContext, get_runtime
 from ..models.mission import Mission, MissionCreationRequest, MissionStatus, MissionUpdateRequest
@@ -45,13 +45,23 @@ async def create_mission(
 @router.post("/api/v2/missions/{mission_id}/start")
 async def start_mission(
     mission_id: str,
+    blade_off_diagnostic: bool = Query(
+        default=False,
+        description="Start only as a blade-off diagnostic mission; all waypoints must have blade_on=false.",
+    ),
     runtime: RuntimeContext = Depends(get_runtime),
 ):
     """Start a mission."""
     mission_service = runtime.mission_service
     try:
-        await mission_service.start_mission(mission_id)
-        return {"status": "Mission started"}
+        await mission_service.start_mission(
+            mission_id,
+            blade_off_diagnostic=blade_off_diagnostic,
+        )
+        return {
+            "status": "Mission started",
+            "blade_off_diagnostic": blade_off_diagnostic,
+        }
     except Exception as e:
         _raise_mission_http_error(e)
 

@@ -56,6 +56,30 @@
           @save="saveMissionChanges"
         />
         <p v-if="missionActionHint" class="mission-action-hint">{{ missionActionHint }}</p>
+        <section class="readiness-panel" aria-label="Autonomy readiness">
+          <div class="readiness-header">
+            <strong>Autonomy readiness</strong>
+            <span :class="['readiness-state', readinessStateClass]">{{ readinessStateLabel }}</span>
+          </div>
+          <ul v-if="readinessRows.length" class="readiness-list">
+            <li v-for="row in readinessRows" :key="row.code">
+              <span class="readiness-code">{{ row.code }}</span>
+              <span v-if="row.remediation" class="readiness-remediation">{{ row.remediation }}</span>
+            </li>
+          </ul>
+          <p v-else-if="autonomyReadiness?.ready && qualificationEvidence?.ok" class="readiness-copy">
+            Current qualification evidence is accepted for blade-capable starts.
+          </p>
+          <p v-else-if="readinessError" class="readiness-copy readiness-error">{{ readinessError }}</p>
+          <label class="diagnostic-toggle">
+            <input
+              v-model="bladeOffDiagnostic"
+              data-testid="blade-off-diagnostic"
+              type="checkbox"
+            >
+            Blade-off diagnostic mode
+          </label>
+        </section>
         <MissionStatusPanel />
         <MissionDebugPanel class="diagnostics-panel" />
       </div>
@@ -78,9 +102,27 @@ import { useMowerTelemetry } from '@/composables/useMowerTelemetry'
 import { useMissionMapSettings } from '@/composables/useMissionMapSettings'
 import { useApiService } from '@/services/api'
 
+interface ReadinessCheck {
+  code: string
+  remediation?: string
+}
+
+interface AutonomyReadinessReport {
+  ready?: boolean
+  blocking_reason_codes?: string[]
+  checks?: ReadinessCheck[]
+}
+
+interface QualificationEvidence {
+  ok?: boolean
+  reason_codes?: string[]
+  remediation?: Record<string, string>
+}
+
 const missionStore = useMissionStore()
 const mapStore = useMapStore()
 const toast = useToastStore()
+const api = useApiService()
 
 const { mowerPosition, mowerLatLng } = useMowerTelemetry()
 const { mapDisplaySettings, mapStyle, loadSettings, persistStyleChange } = useMissionMapSettings()
@@ -110,9 +152,38 @@ const creatingMission = ref(false)
 const startingMission = ref(false)
 const savingMissionChanges = ref(false)
 const missionActionHint = ref('')
+const bladeOffDiagnostic = ref(false)
+const autonomyReadiness = ref<AutonomyReadinessReport | null>(null)
+const qualificationEvidence = ref<QualificationEvidence | null>(null)
+const readinessLoading = ref(false)
+const readinessError = ref('')
+
+const readinessRows = computed(() => {
+  const rows = new Map<string, { code: string; remediation: string }>()
+  const readiness = autonomyReadiness.value
+  const qualification = qualificationEvidence.value
+  for (const code of readiness?.blocking_reason_codes ?? []) {
+    const remediation = readiness?.checks?.find(check => check.code === code)?.remediation ?? ''
+    rows.set(code, { code, remediation })
+  }
+  for (const code of qualification?.reason_codes ?? []) {
+    rows.set(code, {
+      code,
+      remediation: qualification?.remediation?.[code] ?? rows.get(code)?.remediation ?? '',
+    })
+  }
+  return [...rows.values()]
+})
+const readinessStateLabel = computed(() => {
+  if (readinessLoading.value) return 'Checking'
+  if (readinessError.value) return 'Unavailable'
+  if (autonomyReadiness.value?.ready && qualificationEvidence.value?.ok) return 'Ready'
+  return 'Blocked'
+})
+const readinessStateClass = computed(() => readinessStateLabel.value.toLowerCase())
 
 onMounted(async () => {
-  await loadSettings()
+  await Promise.all([loadSettings(), loadAutonomyGateStatus()])
   settingsLoaded.value = true
   if (!mapStore.configuration) {
     try { await mapStore.loadConfiguration('default') } catch { /* non-fatal */ }
@@ -137,6 +208,23 @@ async function handleMapStyleChange() {
   }
 }
 
+async function loadAutonomyGateStatus() {
+  readinessLoading.value = true
+  readinessError.value = ''
+  try {
+    const [readiness, qualification] = await Promise.all([
+      api.get('/api/v2/autonomy/readiness'),
+      api.get('/api/v2/autonomy/qualification'),
+    ])
+    autonomyReadiness.value = readiness.data
+    qualificationEvidence.value = qualification.data
+  } catch {
+    readinessError.value = 'Autonomy gate status unavailable.'
+  } finally {
+    readinessLoading.value = false
+  }
+}
+
 async function createMission() {
   if (!missionName.value) return
   creatingMission.value = true
@@ -155,12 +243,15 @@ async function createMission() {
 async function startMission() {
   startingMission.value = true
   try {
-    await missionStore.startCurrentMission()
-    missionActionHint.value = 'Mission start accepted.'
-    toast.show('Mission start accepted', 'success', 3000)
+    await missionStore.startCurrentMission({ bladeOffDiagnostic: bladeOffDiagnostic.value })
+    missionActionHint.value = bladeOffDiagnostic.value
+      ? 'Blade-off diagnostic mission start accepted.'
+      : 'Mission start accepted.'
+    toast.show(missionActionHint.value, 'success', 3000)
   } catch {
     missionActionHint.value = missionStore.statusDetail || 'Mission start failed.'
     toast.show(missionActionHint.value, 'error', 5000)
+    await loadAutonomyGateStatus()
   } finally {
     startingMission.value = false
   }
@@ -289,6 +380,60 @@ async function saveMissionChanges() {
 .mission-action-hint {
   margin: 0;
   color: rgba(255, 255, 255, 0.78);
+}
+.readiness-panel {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  padding: 0.85rem;
+  background: rgba(10, 16, 22, 0.72);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.readiness-header,
+.diagnostic-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.readiness-state {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+}
+.readiness-state.ready { color: #86efac; border-color: rgba(134, 239, 172, 0.45); }
+.readiness-state.blocked,
+.readiness-state.unavailable { color: #fca5a5; border-color: rgba(252, 165, 165, 0.45); }
+.readiness-state.checking { color: #fde68a; border-color: rgba(253, 230, 138, 0.45); }
+.readiness-list {
+  margin: 0;
+  padding-left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.readiness-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+}
+.readiness-remediation,
+.readiness-copy {
+  color: rgba(255, 255, 255, 0.72);
+}
+.readiness-remediation {
+  display: block;
+  margin-top: 0.15rem;
+}
+.readiness-copy {
+  margin: 0;
+}
+.readiness-error {
+  color: #fca5a5;
+}
+.diagnostic-toggle {
+  justify-content: flex-start;
 }
 .map-toolbar { display:flex; gap:1rem; align-items:center; }
 .map-style-toggle { display:flex; align-items:center; gap:.5rem; }

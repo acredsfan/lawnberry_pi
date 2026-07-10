@@ -1,70 +1,79 @@
-import { describe, it, expect, vi } from 'vitest'
-import { useWebSocket } from '../../src/composables/useWebSocket'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 
-// Mock socket.io-client (define inside factory to avoid hoisting issues)
-vi.mock('socket.io-client', () => {
-  type Handler = (...args: unknown[]) => void
-  class MockSocket {
-    private handlers: Record<string, Handler[]> = {}
-    connected = false
-    // capture emitted events for assertions
-    public emitted: Array<{ event: string; data: unknown }> = []
-    on(event: string, handler: Handler) {
-      this.handlers[event] = this.handlers[event] || []
-      this.handlers[event].push(handler)
-    }
-    emit(event: string, data: unknown) {
-      this.emitted.push({ event, data })
-    }
-    connect() {
-      this.connected = true
-      this.trigger('connect')
-    }
-    disconnect() {
-      this.connected = false
-      this.trigger('disconnect', 'test-disconnect')
-    }
-    trigger(event: string, ...args: unknown[]) {
-      (this.handlers[event] || []).forEach((h) => h(...args))
-    }
+class MockWebSocket {
+  static CONNECTING = 0
+  static OPEN = 1
+  static CLOSED = 3
+  static instances: MockWebSocket[] = []
+
+  readyState = MockWebSocket.CONNECTING
+  sent: string[] = []
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onclose: (() => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+
+  constructor(public url: string) {
+    MockWebSocket.instances.push(this)
   }
-  const io = () => new MockSocket() as unknown as MockSocket
-  return { io, Socket: MockSocket as any }
-})
 
-describe('useWebSocket resilience', () => {
-  it('reconnects with backoff and resubscribes', async () => {
-    vi.useFakeTimers()
-    const ws = useWebSocket('/ws')
+  send(data: string) {
+    this.sent.push(data)
+  }
 
-    // Subscribe and set cadence before connect
-    ws.subscribeTopic('telemetry/updates')
-    ws.setCadence(7)
+  close() {
+    this.readyState = MockWebSocket.CLOSED
+    this.onclose?.()
+  }
 
-    await ws.connect()
-    ;(ws.socket.value as any).connect()
-    expect(ws.isConnected.value).toBe(true)
+  open() {
+    this.readyState = MockWebSocket.OPEN
+    this.onopen?.()
+  }
+}
 
-    // Simulate disconnect
-    ;(ws.socket.value as any).disconnect()
-    expect(ws.isConnected.value).toBe(false)
-
-    // Advance timers to trigger reconnect attempt
-    vi.advanceTimersByTime(500)
-
-    // Simulate new connection established after backoff
-    const mock = ws.socket.value as any
-    mock.connect()
-    expect(ws.isConnected.value).toBe(true)
-
-    // Assert resubscribe and cadence re-applied
-    const emitted = (ws.socket.value as any).emitted as Array<{ event: string; data: any }>
-    const subscribeEvents = emitted.filter((e) => e.event === 'subscribe')
-    const cadenceEvents = emitted.filter((e) => e.event === 'set_cadence')
-    expect(subscribeEvents.length).toBeGreaterThan(0)
-    expect(cadenceEvents.length).toBeGreaterThan(0)
-    expect(cadenceEvents.at(-1)?.data).toEqual({ cadence_hz: 7 })
-
+describe('WebSocketService resilience', () => {
+  afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+    MockWebSocket.instances = []
+  })
+
+  it('reconnects with capped backoff and resubscribes through the native WebSocket path', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.stubGlobal('WebSocket', MockWebSocket)
+
+    const { WebSocketService } = await vi.importActual<typeof import('../../src/services/websocket')>(
+      '../../src/services/websocket'
+    )
+    const service = new WebSocketService('ws://localhost/api/v2/ws/telemetry')
+    service.onTopic('telemetry/updates', vi.fn())
+
+    const firstConnect = service.connect()
+    const firstSocket = MockWebSocket.instances[0]
+    firstSocket.open()
+    await firstConnect
+
+    expect(service.isConnected).toBe(true)
+    expect(firstSocket.sent.map(JSON.parse)).toEqual([
+      { type: 'subscribe', topic: 'telemetry/updates' },
+      { type: 'set_cadence', cadence_hz: 5 },
+    ])
+
+    firstSocket.close()
+    expect(service.isConnected).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    const secondSocket = MockWebSocket.instances[1]
+    secondSocket.open()
+    await Promise.resolve()
+
+    expect(service.isConnected).toBe(true)
+    expect(secondSocket.sent.map(JSON.parse)).toEqual([
+      { type: 'subscribe', topic: 'telemetry/updates' },
+      { type: 'set_cadence', cadence_hz: 5 },
+    ])
   })
 })

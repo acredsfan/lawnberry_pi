@@ -58,6 +58,15 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | V20 | Manual-drive near-field obstacle gating must use the operator-configured `tof_obstacle_distance_meters` cutoff; autonomous stopping-distance clearance fields must not silently override the manual UI cutoff |
 | V21 | Zero-vector manual stop commands must bypass telemetry and obstacle interlocks, and idle live safety must not latch `obstacle_detected` from the autonomous clearance model when no hazardous actuator is active |
 | V22 | The WebUI motor-connected/queued banner must reconcile from the authoritative RoboHAT status poll, not only from drive command responses |
+| V23 | Blade-capable manual/autonomous mission and scheduler entry must require current physical qualification evidence bound to commit SHA, sanitized hardware config hash, limits hash, runtime identity, and RoboHAT firmware; missing, stale, mismatched, failed, interrupted, simulation, or dirty-tree evidence fails closed with explicit reason codes |
+| V24 | Blade-off diagnostic missions must be explicit, must reject any `blade_on=true` waypoint, and must not bypass zero-stop or emergency-stop access; active blade commands remain blocked unless qualification evidence is current |
+| V25 | JWT signing must use PyJWT 2.13-compatible HS256 encode/decode with an explicit algorithm allow-list and the persistent secrets-manager `JWT_SECRET`; missing or empty canonical secrets must fail closed instead of generating a process-local secret |
+| V26 | Repository-root `openapi.json` is the canonical API snapshot and must match deterministic `SIM_MODE=1 LAWNBERRY_SKIP_HW_INIT=1` generation on every reviewed revision |
+| V27 | Missing user-owned `config/hardware.yaml` must remain a `critical` health blocker unless a test installs an explicit deterministic simulation fixture; tests must not make missing production hardware config appear healthy |
+| V28 | The synthetic straight-drive fixture, replay library, and replay CLI must use one canonical heading/coordinate convention and reproduce exact navigation state without relaxing the `1e-07` parity contract |
+| V29 | Qualification evidence ingestion must validate server-observed clean hardware context, exact bindings, unique required passed stages, and cleanup evidence; client-supplied flags alone must never authorize hazardous operation |
+| V30 | Qualification record and artifact identifiers used as filenames must be schema-constrained to path-safe values; client input must not escape evidence storage directories |
+| V31 | Performance tests must time the system operation under test and exclude mock/test-fixture construction from the measured budget |
 
 ---
 
@@ -72,8 +81,8 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T5 | ✓ done | Add `Restart=always` to cloudflared.service | V1 |
 | T6 | ✓ done | Remove `WatchdogSec=120s` from cloudflared.service | V1 |
 | T7 | ✓ done | Set `maxReconnectAttempts = -1` and cap backoff at 30 s in websocket.ts | V5, V6 |
-| T8 | . | Verify Vite `ws:true` proxy survives Cloudflare's HTTP upgrade path; add integration smoke-test | V8, I.cf |
-| T9 | . | Add wifi-watchdog unit test: assert disabled tier is skipped, not stalling | V4 |
+| T8 | ✓ done | Verify Vite `ws:true` proxy survives Cloudflare's HTTP upgrade path; add integration smoke-test | V8, I.cf |
+| T9 | ✓ done | Add wifi-watchdog unit test: assert disabled tier is skipped, not stalling | V4 |
 | T10 | ✓ done | Commit and push all service-file + watchdog source changes made today | V1–V4, V7 |
 | T11 | ✓ done | Make safety watchdog motion-armed and add regression tests for idle vs armed timeout behavior | V9 |
 | T12 | ✓ done | Fix VL53L0X XSHUT cleanup, propagate ToF timing config, and fail ToF health closed when no backend attaches | V10 |
@@ -85,6 +94,14 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T18 | ✓ done | Split operator ToF cutoff from autonomous obstacle clearance and use the operator cutoff for manual-drive gating | V20 |
 | T19 | ✓ done | Let zero manual stops skip backend interlocks and stop idle live safety from latching autonomous obstacle clearance | V21 |
 | T20 | ✓ done | Clear stale queued/disconnected UI state from `/api/v2/hardware/robohat` serial status refreshes | V22 |
+| T21 | ✓ done | Add fail-closed autonomy qualification evidence model, API, runner, mission/scheduler/blade gates, blade-off diagnostic path, and readiness UI remediation | V23, V24 |
+| T22 | x | Merge PyJWT 2.13 dependency/CI changes and add focused round-trip, expiration, signature, algorithm, and missing-secret tests | V25 |
+| T23 | x | Generate and commit canonical `openapi.json`; verify deterministic snapshot parity | V26, I.api |
+| T24 | x | Align health endpoint tests with the fail-closed missing-hardware-config contract | V27, I.api |
+| T25 | x | Fix synthetic navigation replay parity at the canonical heading/coordinate source | V28 |
+| T26 | x | Reject fabricated or context-mismatched passing qualification evidence and require valid cleanup/stage structure | V23, V29, I.api |
+| T27 | x | Constrain qualification record/artifact identifiers and test traversal rejection | V30, I.api |
+| T28 | x | Remove `AsyncMock` construction and synthetic header behavior from the WebSocket connection benchmark window | V31, I.ws |
 
 ---
 
@@ -113,3 +130,14 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | B19 | 2026-07-09 | Manual-drive gating reused the autonomous stopping-distance clearance floor, so an operator-set 1 inch ToF cutoff still blocked clear-path readings around 0.5 m | V20, T18 |
 | B20 | 2026-07-09 | Backend zero stops still ran manual safety interlocks, and idle live safety could latch `obstacle_detected` from the autonomous clearance model before any hazardous actuator was active | V21, T19 |
 | B21 | 2026-07-09 | The WebUI queued/disconnected banner could remain stale because `motorConnected` was updated from drive command responses but not from the RoboHAT status poll | V22, T20 |
+| B22 | 2026-07-10 | Qualification evidence POST trusted client-supplied `sim_mode`, dirty-tree, binding, and stage status fields, so a fabricated passing record could authorize hazardous operation | V29, T26 |
+| B23 | 2026-07-10 | Qualification API routes changed the generated schema without regenerating repository-root `openapi.json`, so the committed API contract drifted | V26, T23 |
+| B24 | 2026-07-10 | Health contract regression test asserted a nonexistent top-level hardware `detail` instead of the stable configuration entry in `drivers.checks` | V27, T24 |
+| B25 | 2026-07-10 | Startup validated persistent `JWT_SECRET`, but `JWTManager` ignored it and generated a process-local signing key, causing restart drift and bypassing missing-secret validation | V25, T22 |
+| B26 | 2026-07-10 | Missing-secret regression test inherited the session fixture's `JWT_SECRET`, so it tested the configured path instead of the absent-secret path | V25, T22 |
+| B27 | 2026-07-10 | Removing secrets-manager auto-generation also removed the module import still used by API-key generation, which changed-file Ruff caught as an undefined name | V25, T22 |
+| B28 | 2026-07-10 | Editing shared test fixtures brought stale unused and unsorted imports into incremental Ruff scope | V25, V27, T22, T24 |
+| B29 | 2026-07-10 | Qualification record and artifact IDs were interpolated into filesystem paths without schema constraints, allowing path separators in client input | V30, T27 |
+| B30 | 2026-07-10 | Health contract patched only the config path, so prior tests could leave cached hardware/config-loader objects that bypassed the intended missing-config branch | V27, T24 |
+| B31 | 2026-07-10 | WebSocket scalability benchmark started timing before `AsyncMock` creation and used async mock headers unlike Starlette's synchronous mapping, making Pi load appear as connection latency | V31, T28 |
+| B32 | 2026-07-10 | Pre-commit scanner treated local `configured_secret` variable assignments as credential literals and blocked the verified commit | V25, T22 |

@@ -62,7 +62,24 @@ def test_create_mission(client, mock_mission_service):
 def test_start_mission(client, mock_mission_service):
     response = client.post("/api/v2/missions/test_mission/start", json={})
     assert response.status_code == 200
-    mock_mission_service.start_mission.assert_called_once_with("test_mission")
+    mock_mission_service.start_mission.assert_called_once_with(
+        "test_mission",
+        blade_off_diagnostic=False,
+    )
+
+
+def test_start_mission_blade_off_diagnostic(client, mock_mission_service):
+    response = client.post(
+        "/api/v2/missions/test_mission/start?blade_off_diagnostic=true",
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["blade_off_diagnostic"] is True
+    mock_mission_service.start_mission.assert_called_once_with(
+        "test_mission",
+        blade_off_diagnostic=True,
+    )
 
 def test_pause_mission(client, mock_mission_service):
     response = client.post("/api/v2/missions/test_mission/pause", json={})

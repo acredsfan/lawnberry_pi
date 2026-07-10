@@ -373,6 +373,16 @@ async def lifespan(app: FastAPI):
         jobs_service=_jobs_service_singleton,
         planning_service=_planning_svc,
     )
+    from backend.src.services.autonomy_qualification_service import (
+        AutonomyQualificationService,
+    )
+
+    _qualification_service = AutonomyQualificationService(app.state.runtime)
+    app.state.runtime.qualification_service = _qualification_service
+    if hasattr(app.state.runtime.command_gateway, "set_qualification_service"):
+        app.state.runtime.command_gateway.set_qualification_service(_qualification_service)
+    if hasattr(_jobs_service_singleton, "set_qualification_service"):
+        _jobs_service_singleton.set_qualification_service(_qualification_service)
     try:
         from backend.src.safety.live_safety_coordinator import LiveSafetyCoordinator
 

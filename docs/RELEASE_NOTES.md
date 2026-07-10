@@ -5,7 +5,7 @@ This release replaces version 1 with a unified v2 backend and frontend, contract
 ## Maintenance (2025-10-22)
 
 - Hardened backend authentication by switching to a direct bcrypt-based password manager that safely handles operator credentials longer than 72 bytes.
-- Secrets manager now self-generates a persistent `JWT_SECRET` when missing, avoiding startup failures on fresh installs.
+- JWT authentication uses the persistent `JWT_SECRET` from the secrets manager and fails closed when it is missing or blank; setup must provision it before token use.
 
 ## Enhancements (2025-10-25)
 

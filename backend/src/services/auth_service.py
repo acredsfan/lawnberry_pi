@@ -22,6 +22,7 @@ import jwt
 import pyotp
 
 from ..core.context import get_correlation_id
+from ..core.secrets_manager import SecretsManager
 from ..models import (
     AuthenticationMethod,
     Permission,
@@ -76,15 +77,46 @@ class PasswordManager:
             return False
 
 
+class JWTConfigurationError(RuntimeError):
+    """Raised when JWT signing cannot operate with a safe configured secret."""
+
+
 class JWTManager:
     """JWT token management"""
 
-    def __init__(self, secret_key: str | None = None, *, expiry_hours: int = 8) -> None:
-        self.secret_key = (
-            secret_key or os.getenv("LAWN_BERRY_AUTH_SECRET") or secrets.token_urlsafe(32)
-        )
+    ALLOWED_ALGORITHMS: tuple[str, ...] = ("HS256",)
+
+    def __init__(
+        self,
+        secret_key: str | None = None,
+        *,
+        expiry_hours: int = 8,
+        secret_provider: Any | None = None,
+    ) -> None:
+        signing_key = secret_key
+        if signing_key is None:
+            legacy_override = os.getenv("LAWN_BERRY_AUTH_SECRET", "").strip()
+            if legacy_override:
+                signing_key = legacy_override
+            else:
+                provider = secret_provider or (
+                    lambda: SecretsManager().get(
+                        "JWT_SECRET",
+                        default=None,
+                        purpose="jwt_signing",
+                    )
+                )
+                signing_key = provider()
+        self.secret_key = signing_key.strip() if signing_key is not None else ""
         self.algorithm = "HS256"
         self.token_expiry_hours = expiry_hours
+
+    def _require_secret(self) -> str:
+        if not self.secret_key:
+            raise JWTConfigurationError(
+                "JWT_SECRET is required for JWT signing and verification"
+            )
+        return self.secret_key
 
     def create_token(
         self, *, session_id: str, user_id: str, role: UserRole
@@ -100,16 +132,17 @@ class JWTManager:
             "exp": int(expires_at.timestamp()),
             "iss": "lawnberry-pi-v2",
         }
-        token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+        token = jwt.encode(payload, self._require_secret(), algorithm=self.algorithm)
         return token, expires_at
 
     def verify_token(self, token: str) -> dict[str, Any] | None:
         """Verify and decode a token."""
+        secret_key = self._require_secret()
         try:
             return jwt.decode(
                 token,
-                self.secret_key,
-                algorithms=[self.algorithm],
+                secret_key,
+                algorithms=list(self.ALLOWED_ALGORITHMS),
                 options={"require": ["exp", "sid", "sub"]},
             )
         except jwt.ExpiredSignatureError:

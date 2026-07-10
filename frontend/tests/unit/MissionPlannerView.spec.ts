@@ -127,6 +127,34 @@ describe('MissionPlannerView.vue', () => {
     primeMapStore()
 
     mockedApi.get.mockImplementation((url: string) => {
+      if (url === '/api/v2/missions/list') {
+        return Promise.resolve({ data: [] })
+      }
+      if (url === '/api/v2/autonomy/readiness') {
+        return Promise.resolve({
+          data: {
+            ready: false,
+            blocking_reason_codes: ['QUALIFICATION_EVIDENCE_MISSING'],
+            checks: [
+              {
+                code: 'QUALIFICATION_EVIDENCE_MISSING',
+                remediation: 'Run the on-device autonomy qualification workflow.',
+              },
+            ],
+          },
+        })
+      }
+      if (url === '/api/v2/autonomy/qualification') {
+        return Promise.resolve({
+          data: {
+            ok: false,
+            reason_codes: ['QUALIFICATION_EVIDENCE_MISSING'],
+            remediation: {
+              QUALIFICATION_EVIDENCE_MISSING: 'Store passing qualification evidence.',
+            },
+          },
+        })
+      }
       if (url.startsWith('/api/v2/settings/maps')) {
         return Promise.resolve({
           data: {
@@ -183,6 +211,7 @@ describe('MissionPlannerView.vue', () => {
       created_at: '2026-03-16T00:00:00Z',
     } as any
     missionStore.missionStatus = 'paused'
+    missionStore.missions = [missionStore.currentMission as any]
     missionStore.progress = 50
     missionStore.currentWaypointIndex = 1
     missionStore.totalWaypoints = 2
@@ -235,5 +264,36 @@ describe('MissionPlannerView.vue', () => {
       'success',
       3500,
     )
+  })
+
+  it('shows autonomy qualification blockers', async () => {
+    const wrapper = mount(MissionPlannerView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Autonomy readiness')
+    expect(wrapper.text()).toContain('Blocked')
+    expect(wrapper.text()).toContain('QUALIFICATION_EVIDENCE_MISSING')
+    expect(wrapper.text()).toContain('Store passing qualification evidence.')
+  })
+
+  it('starts the selected mission in blade-off diagnostic mode when checked', async () => {
+    const wrapper = mount(MissionPlannerView)
+    const missionStore = useMissionStore()
+    missionStore.currentMission = {
+      id: 'mission-1',
+      name: 'Diagnostic',
+      waypoints: [{ id: 'wp-1', lat: 51.5, lon: -0.09, blade_on: false, speed: 50 }],
+      created_at: '2026-07-09T00:00:00Z',
+    } as any
+    const startSpy = vi.spyOn(missionStore, 'startCurrentMission').mockResolvedValue(undefined as any)
+
+    await flushPromises()
+    await wrapper.find('[data-testid="blade-off-diagnostic"]').setValue(true)
+    const startButton = wrapper.findAll('button').find(btn => btn.text().includes('Start Mission'))!
+    await startButton.trigger('click')
+    await flushPromises()
+
+    expect(startSpy).toHaveBeenCalledWith({ bladeOffDiagnostic: true })
+    expect(wrapper.text()).toContain('Blade-off diagnostic mission start accepted.')
   })
 })
