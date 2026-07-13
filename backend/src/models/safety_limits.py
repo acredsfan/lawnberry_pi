@@ -1,6 +1,24 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+BOOTSTRAP_SENSOR_POLL_INTERVAL_S = 0.20
+
+
+def heading_bootstrap_stop_reserve_m(
+    *,
+    speed_mps: float,
+    command_ttl_ms: int,
+    braking_decel_mps2: float,
+    poll_interval_s: float = BOOTSTRAP_SENSOR_POLL_INTERVAL_S,
+) -> float:
+    """Worst-case distance after the latest GPS sample before a lease can stop."""
+    speed = max(0.0, float(speed_mps))
+    latency_s = max(0.0, float(command_ttl_ms) / 1000.0) + max(
+        0.0, float(poll_interval_s)
+    )
+    braking_m = (speed * speed) / (2.0 * max(float(braking_decel_mps2), 1e-6))
+    return speed * latency_s + braking_m
 
 
 class SafetyLimits(BaseModel):
@@ -94,6 +112,11 @@ class SafetyLimits(BaseModel):
         gt=0,
         description="Low mission-start heading bootstrap speed.",
     )
+    bootstrap_min_travel_m: float = Field(
+        default=0.25,
+        gt=0,
+        description="Minimum measured antenna travel required to accept heading bootstrap.",
+    )
     bootstrap_max_travel_m: float = Field(
         default=0.60,
         gt=0,
@@ -131,3 +154,17 @@ class SafetyLimits(BaseModel):
         if v >= low:
             raise ValueError("battery_critical_voltage must be < battery_low_voltage")
         return v
+
+    @model_validator(mode="after")
+    def validate_heading_bootstrap_budget(self):
+        reserve_m = heading_bootstrap_stop_reserve_m(
+            speed_mps=self.bootstrap_speed_mps,
+            command_ttl_ms=self.autonomous_command_ttl_ms,
+            braking_decel_mps2=self.autonomous_braking_decel_mps2,
+        )
+        if self.bootstrap_min_travel_m + reserve_m >= self.bootstrap_max_travel_m:
+            raise ValueError(
+                "bootstrap_min_travel_m plus lease/braking reserve must be less than "
+                "bootstrap_max_travel_m"
+            )
+        return self

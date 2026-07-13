@@ -30,21 +30,45 @@ from types import SimpleNamespace
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers: build a mock BNO08X_UART object for _read_shtp_sync
 # ---------------------------------------------------------------------------
+
+class _MockBNO:
+    def __init__(
+        self,
+        quat=(0.0, 0.0, 0.0, 1.0),
+        accel=(0.0, 0.0, 9.81),
+        gyro=(0.0, 0.0, 0.0),
+        *,
+        process_game_report: bool = True,
+    ):
+        self.quat = quat
+        self.acceleration = accel
+        self.gyro = gyro
+        self.process_game_report = process_game_report
+        self.game_report_sequence = 0
+
+    @property
+    def game_quaternion(self):
+        if self.process_game_report:
+            self.game_report_sequence += 1
+        return self.quat
+
 
 def _make_mock_bno(
     quat=(0.0, 0.0, 0.0, 1.0),
     accel=(0.0, 0.0, 9.81),
     gyro=(0.0, 0.0, 0.0),
+    *,
+    process_game_report: bool = True,
 ):
-    """Return a SimpleNamespace that mimics the Adafruit BNO08X_UART interface."""
-    return SimpleNamespace(
-        game_quaternion=quat,
-        acceleration=accel,
+    """Return a mock with the report-freshness contract used by the UART wrapper."""
+    return _MockBNO(
+        quat=quat,
+        accel=accel,
         gyro=gyro,
+        process_game_report=process_game_report,
     )
 
 
@@ -67,6 +91,36 @@ def test_read_shtp_sync_returns_none_when_quaternion_element_is_none():
     bno = _make_mock_bno(quat=(None, 0.0, 0.0, 1.0))
     result = _read_shtp_sync(bno, valid_frames=50)
     assert result is None
+
+
+def test_read_shtp_sync_rejects_library_cached_quaternion_without_new_report():
+    """A still-readable Adafruit quaternion is stale until a game report is processed."""
+    from backend.src.drivers.sensors.bno085_driver import _read_shtp_sync
+
+    bno = _make_mock_bno()
+    assert _read_shtp_sync(bno, valid_frames=0) is not None
+
+    bno.process_game_report = False
+    assert _read_shtp_sync(bno, valid_frames=1) is None
+
+
+def test_uart_wrapper_counts_only_processed_game_reports():
+    from backend.src.drivers.sensors.bno085_driver import _tracked_bno08x_uart_class
+
+    class FakeBNO08XUART:
+        def __init__(self):
+            self.processed = []
+
+        def _process_report(self, report_id, report_bytes):
+            self.processed.append((report_id, report_bytes))
+
+    tracked_cls = _tracked_bno08x_uart_class(FakeBNO08XUART, game_report_id=8)
+    bno = tracked_cls()
+
+    bno._process_report(1, bytearray())
+    assert bno.game_report_sequence == 0
+    bno._process_report(8, bytearray())
+    assert bno.game_report_sequence == 1
 
 
 def test_read_shtp_sync_calibrating_before_warmup():
@@ -146,6 +200,9 @@ async def test_bno085_driver_hw_path_returns_uncalibrated_when_no_port(monkeypat
     assert result is not None
     cal = result.get("calibration_status")
     assert cal == "uncalibrated", f"Expected 'uncalibrated', got {cal!r}"
+    assert result["cached"] is True
+    assert result["monotonic_received_s"] is None
+    assert result["imu_epoch_id"] is None
 
     await drv.stop()
 
@@ -177,6 +234,7 @@ async def test_bno085_driver_hw_path_never_returns_unknown(monkeypatch):
 async def test_bno085_driver_hw_path_fully_calibrated_after_warmup(monkeypatch):
     """After valid_frames >= 30, read_orientation must carry 'fully_calibrated'."""
     import time
+
     import backend.src.core.simulation as sim_mod
     monkeypatch.setattr(sim_mod, "is_simulation_mode", lambda: False)
     monkeypatch.delenv("SIM_MODE", raising=False)
@@ -228,11 +286,23 @@ async def test_bno085_driver_not_initialized_returns_none(monkeypatch):
 async def test_bno085_driver_sim_calibrating_then_fully_calibrated(monkeypatch):
     """SIM path: first 80 reads -> 'calibrating'; cycle 80+ -> 'fully_calibrated'."""
     monkeypatch.setenv("SIM_MODE", "1")
-    
+
     from backend.src.drivers.sensors.bno085_driver import BNO085Driver
     drv = BNO085Driver({})
     await drv.initialize()
     await drv.start()
+
+    first = await drv.read_orientation()
+    assert first is not None
+    assert first["cached"] is False
+    assert isinstance(first["monotonic_received_s"], float)
+    assert isinstance(first["imu_epoch_id"], str)
+    sim_epoch = first["imu_epoch_id"]
+
+    cached = drv._stale_or_placeholder()
+    assert cached["cached"] is True
+    assert cached["monotonic_received_s"] == first["monotonic_received_s"]
+    assert cached["imu_epoch_id"] == sim_epoch
 
     r1 = await drv.read_orientation()
     assert r1 is not None
@@ -244,8 +314,60 @@ async def test_bno085_driver_sim_calibrating_then_fully_calibrated(monkeypatch):
     r2 = await drv.read_orientation()
     assert r2 is not None
     assert r2["calibration_status"] == "fully_calibrated"
+    assert r2["imu_epoch_id"] == sim_epoch
+
+    await drv.initialize()
+    after_reinitialize = await drv.read_orientation()
+    assert after_reinitialize is not None
+    assert after_reinitialize["imu_epoch_id"] == sim_epoch
 
     await drv.stop()
+
+
+@pytest.mark.asyncio
+async def test_bno085_driver_hardware_epoch_changes_and_clears_cache_on_reinit(monkeypatch):
+    """A successful physical re-open starts a clean, distinct IMU epoch."""
+    import backend.src.drivers.sensors.bno085_driver as driver_module
+
+    monkeypatch.setattr(driver_module, "is_simulation_mode", lambda: False)
+    drv = driver_module.BNO085Driver({})
+    states_at_open = []
+
+    def fake_open_shtp():
+        states_at_open.append(
+            (drv._last_orientation, drv._last_read_ts, drv._valid_frames, drv._imu_epoch_id)
+        )
+        return SimpleNamespace()
+
+    monkeypatch.setattr(drv, "_open_shtp", fake_open_shtp)
+    await drv.initialize()
+    first_epoch = drv._imu_epoch_id
+    assert isinstance(first_epoch, str)
+
+    drv._last_orientation = {
+        "yaw": 45.0,
+        "monotonic_received_s": 123.0,
+        "cached": False,
+        "imu_epoch_id": first_epoch,
+    }
+    drv._last_read_ts = 456.0
+    drv._valid_frames = 42
+
+    await drv._attempt_reinit()
+
+    assert isinstance(drv._imu_epoch_id, str)
+    assert drv._imu_epoch_id != first_epoch
+    assert drv._last_orientation is None
+    assert drv._last_read_ts is None
+    assert drv._valid_frames == 0
+    placeholder = drv._stale_or_placeholder()
+    assert placeholder["cached"] is True
+    assert placeholder["monotonic_received_s"] is None
+    assert placeholder["imu_epoch_id"] == drv._imu_epoch_id
+    assert states_at_open == [
+        (None, None, 0, None),
+        (None, None, 0, None),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -255,8 +377,8 @@ async def test_bno085_driver_sim_calibrating_then_fully_calibrated(monkeypatch):
 @pytest.mark.asyncio
 async def test_imu_interface_no_driver_online_not_unknown():
     """When _driver is None but status is ONLINE, calibration_status != 'unknown'."""
-    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
     from backend.src.models.sensor_data import SensorStatus
+    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
 
     coordinator = SensorCoordinator.__new__(SensorCoordinator)
     iface = IMUSensorInterface.__new__(IMUSensorInterface)
@@ -276,8 +398,8 @@ async def test_imu_interface_no_driver_online_not_unknown():
 @pytest.mark.asyncio
 async def test_imu_interface_no_driver_returns_uncalibrated():
     """When _driver is None, calibration_status must be 'uncalibrated'."""
-    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
     from backend.src.models.sensor_data import SensorStatus
+    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
 
     coordinator = SensorCoordinator.__new__(SensorCoordinator)
     iface = IMUSensorInterface.__new__(IMUSensorInterface)
@@ -301,8 +423,8 @@ async def test_imu_interface_no_driver_returns_uncalibrated():
 @pytest.mark.asyncio
 async def test_imu_interface_propagates_fully_calibrated():
     """read_imu must propagate 'fully_calibrated' from driver (warmed-up SHTP)."""
-    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
     from backend.src.models.sensor_data import SensorStatus
+    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
 
     async def fake_read_orientation():
         return {
@@ -313,6 +435,9 @@ async def test_imu_interface_propagates_fully_calibrated():
             "accel_y": 0.0,
             "accel_z": 9.81,
             "calibration_status": "fully_calibrated",
+            "monotonic_received_s": 123.5,
+            "cached": True,
+            "imu_epoch_id": "imu-session-1",
         }
 
     fake_driver = SimpleNamespace(read_orientation=fake_read_orientation)
@@ -329,13 +454,16 @@ async def test_imu_interface_propagates_fully_calibrated():
     assert reading.calibration_status == "fully_calibrated"
     assert reading.roll == pytest.approx(1.0)
     assert reading.yaw == pytest.approx(90.0)
+    assert reading.monotonic_received_s == pytest.approx(123.5)
+    assert reading.cached is True
+    assert reading.imu_epoch_id == "imu-session-1"
 
 
 @pytest.mark.asyncio
 async def test_imu_interface_propagates_calibrating():
     """read_imu must propagate 'calibrating' from driver (warmup phase)."""
-    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
     from backend.src.models.sensor_data import SensorStatus
+    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
 
     async def fake_read_orientation():
         return {
@@ -360,8 +488,8 @@ async def test_imu_interface_propagates_calibrating():
 @pytest.mark.asyncio
 async def test_imu_interface_none_calibration_falls_back_to_uncalibrated():
     """When driver returns None for calibration_status, fall back to 'uncalibrated'."""
-    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
     from backend.src.models.sensor_data import SensorStatus
+    from backend.src.services.sensor_manager import IMUSensorInterface, SensorCoordinator
 
     async def fake_read_orientation():
         return {

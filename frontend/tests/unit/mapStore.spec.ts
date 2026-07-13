@@ -11,6 +11,7 @@ const mockGetSafeBoundary = vi.fn()
 const mockGenerateSafeBoundary = vi.fn()
 const mockGetBoundaryVerificationStatus = vi.fn()
 const mockStartBoundaryVerification = vi.fn()
+const mockNextBoundaryVerificationPoint = vi.fn()
 
 vi.mock('@/services/mapsClient', () => ({
   getMapZones: mockGetMapZones,
@@ -26,7 +27,7 @@ vi.mock('@/services/mapsClient', () => ({
   getSafeBoundary: mockGetSafeBoundary,
   startBoundaryVerification: mockStartBoundaryVerification,
   getBoundaryVerificationStatus: mockGetBoundaryVerificationStatus,
-  nextBoundaryVerificationPoint: vi.fn(),
+  nextBoundaryVerificationPoint: mockNextBoundaryVerificationPoint,
   confirmBoundaryVerificationPoint: vi.fn(),
   rejectBoundaryVerificationPoint: vi.fn(),
   cancelBoundaryVerification: vi.fn(),
@@ -107,6 +108,7 @@ describe('Map Store', () => {
     mockGenerateSafeBoundary.mockResolvedValue({ coordinates: [], buffer_meters: 0.05 })
     mockGetBoundaryVerificationStatus.mockResolvedValue({ status: 'idle', points: [], target_index: null })
     mockStartBoundaryVerification.mockResolvedValue({ status: 'active', points: [], target_index: null })
+    mockNextBoundaryVerificationPoint.mockResolvedValue({ status: 'active', points: [], target_index: null })
   })
 
   describe('initialization', () => {
@@ -448,6 +450,7 @@ describe('Map Store', () => {
         operator_confirmed: true,
         blade_physically_disabled: true,
         route_clear_confirmed: true,
+        heading_bootstrap_confirmed: true,
         physical_intervention: 'master cutoff within reach',
       }
 
@@ -461,6 +464,35 @@ describe('Map Store', () => {
         ],
         acknowledgement,
       )
+    })
+
+    it('preserves the lifecycle observed by the next-point response', async () => {
+      const store = useMapStore()
+      const point = {
+        index: 0,
+        reference: { latitude: 40.0, longitude: -75.0 },
+        approach: { latitude: 40.0001, longitude: -75.0 },
+        status: 'traveling' as const,
+        mission_id: 'mission-1',
+      }
+      mockNextBoundaryVerificationPoint.mockResolvedValue({
+        status: 'active',
+        points: [point],
+        target_index: 0,
+      })
+
+      const accepted = await store.goToNextVerificationPoint()
+
+      expect(accepted.points[0].status).toBe('traveling')
+
+      mockGetBoundaryVerificationStatus.mockResolvedValue({
+        status: 'active',
+        points: [point],
+        target_index: 0,
+      })
+      const polled = await store.refreshVerificationStatus()
+
+      expect(polled.points[0].status).toBe('traveling')
     })
   })
 

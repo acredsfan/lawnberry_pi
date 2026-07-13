@@ -95,6 +95,9 @@ class LocalizationState:
         "velocity",
         "quality",
         "imu_valid",
+        "imu_received_monotonic_s",
+        "imu_raw_yaw_deg",
+        "imu_epoch_id",
         "heading_source",
         "dead_reckoning_active",
         "dead_reckoning_drift",
@@ -110,6 +113,9 @@ class LocalizationState:
         self.velocity: float | None = None         # m/s
         self.quality: PoseQuality = PoseQuality.STALE
         self.imu_valid: bool = False
+        self.imu_received_monotonic_s: float | None = None
+        self.imu_raw_yaw_deg: float | None = None
+        self.imu_epoch_id: str | None = None
         self.heading_source: str | None = None
         self.dead_reckoning_active: bool = False
         self.dead_reckoning_drift: float | None = None  # metres estimated drift
@@ -210,16 +216,21 @@ class LocalizationService:
         self._max_fix_age_seconds = max_fix_age_seconds
         self._max_accuracy_m = max_accuracy_m
         self._alignment_file: Path | None = alignment_file
+        self._calibration_repo: Any | None = None
         self._mismatch_warn_threshold_m = position_mismatch_warn_threshold_m
 
         # Session heading alignment (reset each mission, persisted between runs)
         self._session_heading_alignment: float = 0.0
         self._heading_alignment_sample_count: int = 0
+        self._alignment_imu_epoch_id: str | None = None
+        self._active_imu_epoch_id: str | None = None
         self._require_gps_heading_alignment: bool = False
         self._gps_cog_history: list[float] = []
 
         # Bootstrap drive state
         self._bootstrap_start_time: float | None = None
+        self._bootstrap_last_gps_sample_key: tuple[str, Any] | None = None
+        self._bootstrap_alignment_staged: bool = False
 
         # GPS track position for deriving COG from position deltas
         self._last_gps_track_position: Position | None = None
@@ -280,6 +291,40 @@ class LocalizationService:
     @property
     def session_heading_alignment(self) -> float:
         return self._session_heading_alignment
+
+    def attach_calibration_repository(self, calibration_repository: Any) -> None:
+        """Make the canonical repository the sole active alignment owner."""
+        self._calibration_repo = calibration_repository
+        self.load_alignment()
+        logger.info("CalibrationRepository attached to LocalizationService")
+
+    def bind_imu_epoch(self, imu_epoch_id: str) -> bool:
+        """Bind heading state to one genuine BNO085 reset generation.
+
+        Stored evidence is never relabeled. A mismatched reset generation
+        invalidates the in-memory alignment and requires a fresh GPS COG snap.
+        The return value is true only for an in-process generation change.
+        """
+        normalized = imu_epoch_id.strip() if isinstance(imu_epoch_id, str) else ""
+        if not normalized:
+            return False
+        previous = self._active_imu_epoch_id
+        self._active_imu_epoch_id = normalized
+        self.state.imu_epoch_id = normalized
+        if self._calibration_repo is not None:
+            self._calibration_repo.bind_imu_epoch(normalized)
+        if self._alignment_imu_epoch_id != normalized:
+            self._invalidate_heading_alignment()
+        return previous is not None and previous != normalized
+
+    def _invalidate_heading_alignment(self) -> None:
+        self._session_heading_alignment = 0.0
+        self._heading_alignment_sample_count = 0
+        self._alignment_imu_epoch_id = None
+        self._require_gps_heading_alignment = True
+        self._bootstrap_alignment_staged = False
+        self.state.heading = None
+        self.state.heading_source = None
 
     # ── LocalizationProvider proxy properties ────────────────────────────────
     # These delegate to self.state so callers can read pose without accessing
@@ -390,6 +435,8 @@ class LocalizationService:
         self.state.heading = None
         self.state.heading_source = None
         self.state.imu_valid = False
+        self.state.imu_received_monotonic_s = None
+        self.state.imu_raw_yaw_deg = None
         self.state.gps_cog = None
         self._odometry_integrator.reset_ticks()
         self._last_dr_time_s = time.monotonic()
@@ -400,72 +447,35 @@ class LocalizationService:
             self._heading_alignment_sample_count = (
                 0 if require_fresh_bootstrap else max(1, int(saved_samples))
             )
+            self._alignment_imu_epoch_id = (
+                None if require_fresh_bootstrap else self._active_imu_epoch_id
+            )
             # Disk already holds the previous snap; do not overwrite with a reset record.
         else:
             self._session_heading_alignment = 0.0
             self._heading_alignment_sample_count = 0
-            if self._alignment_file is not None:
-                self.save_alignment(source="mission_start_reset")
+            self._alignment_imu_epoch_id = None
+            self.save_alignment(source="mission_start_reset")
+        self._bootstrap_alignment_staged = False
 
     def begin_bootstrap(self) -> None:
         """Mark that the heading bootstrap drive has started."""
         self._bootstrap_start_time = time.monotonic()
+        self._bootstrap_last_gps_sample_key = None
+        self._bootstrap_alignment_staged = False
+        self._gps_cog_history.clear()
 
-    def end_bootstrap(self) -> None:
-        """Mark that the bootstrap drive has ended.
-
-        If no consistent snap occurred during the drive, commit the mean of whatever
-        COG readings are buffered as a fallback. Bootstrap always completes.
-        """
-        if (
-            self._bootstrap_start_time is not None
-            and self._heading_alignment_sample_count == 0
-            and self._gps_cog_history
-        ):
-            sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
-            cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
-            fallback_cog = math.degrees(math.atan2(sin_c, cos_c)) % 360.0
-            spread = (
-                max(abs(heading_delta(c, fallback_cog)) for c in self._gps_cog_history)
-                if len(self._gps_cog_history) > 1
-                else 0.0
-            )
-            current_hdg = self.state.heading
-            low_confidence = spread > self._BOOTSTRAP_MAX_FALLBACK_SPREAD_DEG
-            delta_fb: float | None = None
-            if current_hdg is not None:
-                delta_fb = heading_delta(fallback_cog, current_hdg)
-                if abs(delta_fb) > self._BOOTSTRAP_MAX_FALLBACK_DELTA_DEG:
-                    low_confidence = True
-
-            if low_confidence:
-                logger.warning(
-                    "Bootstrap low-confidence fallback rejected "
-                    "(spread=%.1f°, samples=%d, delta=%s) — alignment not committed",
-                    spread,
-                    len(self._gps_cog_history),
-                    f"{delta_fb:.1f}°" if delta_fb is not None else "None",
-                )
-                self._bootstrap_start_time = None
-                return
-
-            if current_hdg is not None and delta_fb is not None:
-                clamped = max(-180.0, min(180.0, delta_fb))
-                self._session_heading_alignment = wrap_heading(
-                    self._session_heading_alignment + clamped
-                )
-            self._heading_alignment_sample_count = 1
-            self._require_gps_heading_alignment = False
-            logger.warning(
-                "Bootstrap ending without consistent snap "
-                "(spread=%.1f°, samples=%d); falling back to mean=%.1f°",
-                spread,
-                len(self._gps_cog_history),
-                fallback_cog,
-            )
-            if self._alignment_file is not None:
-                self.save_alignment(source="gps_cog_snap_fallback")
+    def end_bootstrap(self, *, commit_alignment: bool = False) -> bool:
+        """Finish bootstrap and commit only fully-qualified staged evidence."""
+        committed = False
+        if commit_alignment and self._bootstrap_alignment_staged:
+            committed = self.save_alignment(source="gps_cog_snap")
+        if self._bootstrap_alignment_staged and not committed:
+            self._invalidate_heading_alignment()
         self._bootstrap_start_time = None
+        self._bootstrap_last_gps_sample_key = None
+        self._bootstrap_alignment_staged = False
+        return committed
 
     # ── GPS age/accuracy policy ──────────────────────────────────────────────
 
@@ -506,14 +516,26 @@ class LocalizationService:
             self.state.target_velocity = target_velocity
         # 1. Pre-resolve heading from IMU so dead reckoning in step 2 can use it.
         #    Full heading reconciliation with GPS COG happens in step 3.
+        imu = sensor_data.imu
+        imu_epoch_id = getattr(imu, "imu_epoch_id", None)
+        if isinstance(imu_epoch_id, str) and imu_epoch_id.strip():
+            self.bind_imu_epoch(imu_epoch_id)
+        imu_yaw = getattr(imu, "yaw", None)
         imu_valid = (
-            sensor_data.imu is not None
-            and sensor_data.imu.yaw is not None
-            and sensor_data.imu.calibration_status != "uncalibrated"
+            imu is not None
+            and isinstance(imu_yaw, (int, float))
+            and math.isfinite(float(imu_yaw))
+            and imu.calibration_status != "uncalibrated"
+            and not bool(getattr(imu, "cached", False))
+            and isinstance(getattr(imu, "monotonic_received_s", None), (int, float))
+            and math.isfinite(float(imu.monotonic_received_s))
         )
         self.state.imu_valid = bool(imu_valid)
         if imu_valid:
-            raw_yaw_preview = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
+            raw_yaw_preview = float(imu_yaw)
+            received_mono = getattr(imu, "monotonic_received_s", None)
+            self.state.imu_received_monotonic_s = float(received_mono)
+            self.state.imu_raw_yaw_deg = raw_yaw_preview
             adjusted_yaw_preview = wrap_heading(
                 -raw_yaw_preview + self._imu_yaw_offset + self._session_heading_alignment
             )
@@ -529,7 +551,9 @@ class LocalizationService:
         # 3. Resolve GPS COG from this tick
         speed_threshold = 0.1 if self._bootstrap_start_time is not None else 0.3
         gps_cog, gps_cog_speed, gps_cog_source = self._resolve_gps_cog(
-            sensor_data, new_position, speed_threshold=speed_threshold
+            sensor_data,
+            self._last_antenna_position or new_position,
+            speed_threshold=speed_threshold,
         )
         if gps_cog is not None:
             self.state.gps_cog = gps_cog
@@ -539,7 +563,7 @@ class LocalizationService:
 
         # 4. Resolve heading from IMU + alignment (full reconciliation with GPS COG)
         if imu_valid:
-            raw_yaw = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
+            raw_yaw = float(imu_yaw)
             # BNO085 Game Rotation Vector: positive yaw = CCW (aerospace ZYX).
             # Compass convention: CW-positive. Negate then apply offsets.
             adjusted_yaw = wrap_heading(
@@ -598,7 +622,10 @@ class LocalizationService:
                         adjusted_yaw, cog, delta, self._heading_alignment_sample_count,
                     )
 
-                if self._bootstrap_start_time is not None:
+                if (
+                    self._bootstrap_start_time is not None
+                    and self._accept_bootstrap_gps_sample(sensor_data.gps)
+                ):
                     self._gps_cog_history.append(cog)
                     if len(self._gps_cog_history) > 5:
                         self._gps_cog_history.pop(0)
@@ -632,6 +659,8 @@ class LocalizationService:
                             )
                             self._heading_alignment_sample_count = 1
                             self._require_gps_heading_alignment = False
+                            self._alignment_imu_epoch_id = self._active_imu_epoch_id
+                            self._bootstrap_alignment_staged = True
                             adjusted_yaw = wrap_heading(
                                 -raw_yaw + self._imu_yaw_offset + self._session_heading_alignment
                             )
@@ -643,8 +672,10 @@ class LocalizationService:
                                 self._session_heading_alignment,
                                 gps_cog_source,
                             )
-                            if self._alignment_file is not None:
-                                self.save_alignment(source="gps_cog_snap")
+                            logger.info(
+                                "Heading alignment staged pending minimum travel and "
+                                "confirmed motor stop"
+                            )
 
                 # Root-cause recovery: heading can become latched if consecutive
                 # IMU jumps exceed outlier threshold while current heading is stale.
@@ -682,30 +713,11 @@ class LocalizationService:
             # IMU unavailable — use GPS COG as heading fallback while in motion
             self.state.heading = gps_cog
             self.state.heading_source = "gps_cog"
-            # Bootstrap can still snap heading from GPS COG without IMU
             if self._bootstrap_start_time is not None:
-                self._gps_cog_history.append(gps_cog)
-                if len(self._gps_cog_history) > 5:
-                    self._gps_cog_history.pop(0)
-                going_straight = False
-                if len(self._gps_cog_history) >= 3:
-                    sin_c = sum(math.sin(math.radians(c)) for c in self._gps_cog_history)
-                    cos_c = sum(math.cos(math.radians(c)) for c in self._gps_cog_history)
-                    cog_mean = math.degrees(math.atan2(sin_c, cos_c)) % 360.0
-                    max_dev = max(
-                        abs(heading_delta(c, cog_mean)) for c in self._gps_cog_history
-                    )
-                    going_straight = max_dev < 15.0
-                if going_straight and self._heading_alignment_sample_count == 0:
-                    self._heading_alignment_sample_count = 1
-                    self._require_gps_heading_alignment = False
-                    logger.info(
-                        "HDG snap from GPS COG (IMU unavailable): heading=%.1f° source=%s",
-                        gps_cog,
-                        gps_cog_source,
-                    )
-                    if self._alignment_file is not None:
-                        self.save_alignment(source="gps_cog_snap_no_imu")
+                logger.warning(
+                    "Heading bootstrap received GPS COG without a valid IMU; "
+                    "alignment remains incomplete"
+                )
 
         # 5. Update pose quality
         self._update_quality()
@@ -733,6 +745,32 @@ class LocalizationService:
         return self.state
 
     # ── Internal helpers ─────────────────────────────────────────────────────
+
+    def _accept_bootstrap_gps_sample(self, gps: Any | None) -> bool:
+        """Accept one unique, live GPS frame acquired after bootstrap began."""
+        if gps is None or self._bootstrap_start_time is None:
+            return False
+        if bool(getattr(gps, "cached", False)):
+            return False
+        received_mono = getattr(gps, "monotonic_received_s", None)
+        if (
+            not isinstance(received_mono, (int, float))
+            or not math.isfinite(float(received_mono))
+            or float(received_mono) <= self._bootstrap_start_time
+        ):
+            return False
+        sample_id = getattr(gps, "sample_id", None)
+        timestamp = getattr(gps, "timestamp", None)
+        if sample_id is not None:
+            key: tuple[str, Any] = ("id", sample_id)
+        elif isinstance(timestamp, datetime):
+            key = ("timestamp", timestamp.isoformat())
+        else:
+            key = ("monotonic", float(received_mono))
+        if key == self._bootstrap_last_gps_sample_key:
+            return False
+        self._bootstrap_last_gps_sample_key = key
+        return True
 
     async def _update_position(self, sensor_data: SensorData) -> Position | None:
         """Resolve position from GPS or dead reckoning."""
@@ -964,17 +1002,29 @@ class LocalizationService:
 
     def load_alignment(self) -> None:
         """Load persisted IMU alignment from disk."""
-        if self._alignment_file is None:
+        if self._calibration_repo is not None:
+            data = self._calibration_repo.load_imu_alignment()
+        elif self._alignment_file is not None:
+            try:
+                if not self._alignment_file.exists():
+                    return
+                data = json.loads(self._alignment_file.read_text())
+            except Exception as exc:
+                logger.warning("Could not load IMU alignment file: %s", exc)
+                self._session_heading_alignment = 0.0
+                return
+        else:
             return
         try:
-            if not self._alignment_file.exists():
-                return
-            data = json.loads(self._alignment_file.read_text())
             saved = float(data.get("session_heading_alignment", 0.0))
             samples = int(data.get("sample_count", 0))
             source = data.get("source", "unknown")
             self._session_heading_alignment = saved % 360.0
             self._heading_alignment_sample_count = samples
+            epoch = data.get("imu_epoch_id")
+            self._alignment_imu_epoch_id = (
+                epoch.strip() if isinstance(epoch, str) and epoch.strip() else None
+            )
             logger.info(
                 "IMU alignment loaded: %.1f° (source=%s, samples=%d)",
                 self._session_heading_alignment,
@@ -984,11 +1034,20 @@ class LocalizationService:
         except Exception as exc:
             logger.warning("Could not load IMU alignment file: %s", exc)
             self._session_heading_alignment = 0.0
+            self._heading_alignment_sample_count = 0
+            self._alignment_imu_epoch_id = None
 
-    def save_alignment(self, source: str) -> None:
+    def save_alignment(self, source: str) -> bool:
         """Persist current session heading alignment atomically."""
+        if self._calibration_repo is not None:
+            return bool(self._calibration_repo.save_imu_alignment(
+                heading_deg=self._session_heading_alignment,
+                sample_count=self._heading_alignment_sample_count,
+                source=source,
+                imu_epoch_id=self._alignment_imu_epoch_id,
+            ))
         if self._alignment_file is None:
-            return
+            return True
         try:
             payload = {
                 "session_heading_alignment": round(self._session_heading_alignment, 3),
@@ -996,6 +1055,8 @@ class LocalizationService:
                 "source": source,
                 "last_updated": datetime.now(UTC).isoformat(),
             }
+            if self._alignment_imu_epoch_id is not None:
+                payload["imu_epoch_id"] = self._alignment_imu_epoch_id
             tmp = self._alignment_file.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(payload, indent=2))
             tmp.replace(self._alignment_file)
@@ -1005,8 +1066,10 @@ class LocalizationService:
                 source,
                 self._heading_alignment_sample_count,
             )
+            return True
         except Exception as exc:
             logger.warning("Could not save IMU alignment: %s", exc)
+            return False
 
 
 def build_localization_service_from_config() -> LocalizationService:

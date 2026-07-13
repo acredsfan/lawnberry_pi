@@ -5,6 +5,7 @@ Phase A implements emergency lifecycle. Drive/blade dispatch added in Phase B.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 import uuid
@@ -534,20 +535,85 @@ class MotorCommandGateway:
                     interlocks.append(getattr(exc, "reason_code", "geofence_not_ready").lower())
                 position = ctx.get("position")
                 if position is not None and not interlocks:
-                    allowed = snapshot.swept_motion_is_safe(
-                        position,
-                        ctx.get("heading"),
-                        float(cmd.left),
-                        float(cmd.right),
-                        footprint_radius_m=float(ctx.get("footprint_radius_m", 0.35)),
-                        uncertainty_m=float(ctx.get("accuracy_m") or 0.0),
-                        fixed_allowance_m=float(ctx.get("fixed_allowance_m", 0.10)),
-                        horizon_s=float(ctx.get("prediction_horizon_s", 1.0)),
-                        command_latency_s=float(ctx.get("command_latency_s", 0.35)),
-                        wheelbase_m=float(ctx.get("wheelbase_m", 0.30)),
-                        braking_decel_mps2=float(ctx.get("braking_decel_mps2", 0.5)),
+                    bootstrap_tagged = bool(getattr(cmd, "heading_bootstrap", False))
+                    bootstrap_active = bool(ctx.get("heading_bootstrap_active", False)) and (
+                        ctx.get("mission_phase") == "heading_bootstrap"
                     )
-                    if not allowed:
+                    if bootstrap_tagged:
+                        remaining_m = float(ctx.get("bootstrap_remaining_m") or 0.0)
+                        travel_m = float(ctx.get("bootstrap_travel_m") or 0.0)
+                        reserve_m = float(ctx.get("bootstrap_stop_reserve_m") or 0.0)
+                        max_travel_m = float(ctx.get("bootstrap_max_travel_m") or 0.0)
+                        imu_age_value = ctx.get("imu_age_s")
+                        imu_age_s = float(
+                            imu_age_value if imu_age_value is not None else math.inf
+                        )
+                        imu_lease_s = max(0.05, float(cmd.duration_ms) / 1000.0)
+                        yaw_delta_deg = float(
+                            ctx.get("bootstrap_imu_yaw_delta_deg")
+                            if ctx.get("bootstrap_imu_yaw_delta_deg") is not None
+                            else math.inf
+                        )
+                        max_yaw_delta_deg = float(
+                            ctx.get("bootstrap_max_yaw_delta_deg") or 0.0
+                        )
+                        straight_forward = (
+                            float(cmd.left) > 0.0
+                            and float(cmd.right) > 0.0
+                            and abs(float(cmd.left) - float(cmd.right)) <= 1e-3
+                        )
+                        if not bootstrap_active or not straight_forward:
+                            interlocks.append("heading_bootstrap_invalid")
+                        if (
+                            not bool(ctx.get("imu_valid", False))
+                            or not bool(ctx.get("imu_epoch_valid", False))
+                            or not math.isfinite(imu_age_s)
+                            or imu_age_s > imu_lease_s
+                        ):
+                            interlocks.append("imu_not_ready")
+                        if (
+                            not math.isfinite(yaw_delta_deg)
+                            or yaw_delta_deg > max_yaw_delta_deg
+                        ):
+                            interlocks.append("heading_bootstrap_invalid")
+                        budget_values = (
+                            remaining_m,
+                            travel_m,
+                            reserve_m,
+                            max_travel_m,
+                        )
+                        if (
+                            not all(math.isfinite(value) for value in budget_values)
+                            or remaining_m <= reserve_m
+                            or reserve_m <= 0.0
+                            or travel_m < 0.0
+                            or max_travel_m <= 0.0
+                            or travel_m + reserve_m >= max_travel_m
+                        ):
+                            interlocks.append("heading_bootstrap_budget_exhausted")
+                        allowed = not interlocks and snapshot.contains_footprint(
+                            position,
+                            float(ctx.get("footprint_radius_m", 0.35))
+                            + float(ctx.get("accuracy_m") or 0.0)
+                            + float(ctx.get("fixed_allowance_m", 0.10))
+                            + float(ctx.get("antenna_offset_m") or 0.0)
+                            + remaining_m,
+                        )
+                    else:
+                        allowed = snapshot.swept_motion_is_safe(
+                            position,
+                            ctx.get("heading"),
+                            float(cmd.left),
+                            float(cmd.right),
+                            footprint_radius_m=float(ctx.get("footprint_radius_m", 0.35)),
+                            uncertainty_m=float(ctx.get("accuracy_m") or 0.0),
+                            fixed_allowance_m=float(ctx.get("fixed_allowance_m", 0.10)),
+                            horizon_s=float(ctx.get("prediction_horizon_s", 1.0)),
+                            command_latency_s=float(ctx.get("command_latency_s", 0.35)),
+                            wheelbase_m=float(ctx.get("wheelbase_m", 0.30)),
+                            braking_decel_mps2=float(ctx.get("braking_decel_mps2", 0.5)),
+                        )
+                    if not allowed and not interlocks:
                         interlocks.append("geofence_prediction_blocked")
             if bool(ctx.get("tof_blocked", False)):
                 interlocks.append("obstacle_detected")
@@ -558,6 +624,12 @@ class MotorCommandGateway:
 
     @staticmethod
     def _drive_interlock_reason(interlocks: list[str]) -> str:
+        if "imu_not_ready" in interlocks:
+            return "IMU_NOT_READY"
+        if "heading_bootstrap_invalid" in interlocks:
+            return "HEADING_BOOTSTRAP_INVALID"
+        if "heading_bootstrap_budget_exhausted" in interlocks:
+            return "HEADING_BOOTSTRAP_BUDGET_EXHAUSTED"
         if "geofence_prediction_blocked" in interlocks:
             return "GEOFENCE_PREDICTION_BLOCKED"
         if "safe_boundary_required" in interlocks or "operating_area_unavailable" in interlocks:

@@ -37,6 +37,7 @@ import math
 import os
 import random
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
@@ -71,6 +72,28 @@ class BNO085DriverConfig:
     # At 3 Mbaud, a full SHTP packet (≤256 B) arrives in <1 ms; 200 ms is
     # conservative but avoids the 1-second blocking seen with the old default.
     read_timeout: float = 0.2
+
+
+def _tracked_bno08x_uart_class(base_cls: type, game_report_id: int) -> type:
+    """Wrap ``BNO08X_UART`` with a counter for genuinely processed game reports."""
+
+    class ReportTrackingBNO08XUART(base_cls):
+        def __init__(self, *args, **kwargs):
+            # The Adafruit constructor can process packets, so initialize this
+            # before delegating to it.
+            self._game_report_sequence = 0
+            super().__init__(*args, **kwargs)
+
+        @property
+        def game_report_sequence(self) -> int:
+            return self._game_report_sequence
+
+        def _process_report(self, report_id: int, report_bytes: bytearray) -> None:
+            super()._process_report(report_id, report_bytes)
+            if report_id == game_report_id:
+                self._game_report_sequence += 1
+
+    return ReportTrackingBNO08XUART
 
 
 def _quaternion_to_euler(i: float, j: float, k: float, real: float) -> tuple[float, float, float]:
@@ -114,7 +137,18 @@ def _read_shtp_sync(bno, valid_frames: int = 0) -> dict[str, Any] | None:
       - "calibrating":     fewer than 30 valid frames (gyro still integrating, ~6 s)
       - "fully_calibrated": 30 or more valid frames (gyro settled, heading reliable)
     """
+    # ``game_quaternion`` remains populated with the last library-cached value
+    # after the UART stream stops.  Only a counter advanced by _process_report
+    # proves that this property access consumed a new physical sensor report.
+    report_sequence_before = getattr(bno, "game_report_sequence", None)
     quat = bno.game_quaternion  # Game Rotation Vector — no magnetometer dependency
+    report_sequence_after = getattr(bno, "game_report_sequence", None)
+    if (
+        not isinstance(report_sequence_before, int)
+        or not isinstance(report_sequence_after, int)
+        or report_sequence_after <= report_sequence_before
+    ):
+        return None
     if quat is None or quat[0] is None:
         return None
 
@@ -170,6 +204,11 @@ class BNO085Driver(HardwareDriver):
         self._cycle: int = 0
         self._valid_frames: int = 0
         self._consecutive_errors: int = 0
+        # Simulation has one stable epoch for the lifetime of this driver.
+        # Hardware epochs are assigned only after a successful open/re-open.
+        self._imu_epoch_id: str | None = (
+            uuid.uuid4().hex if is_simulation_mode() else None
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -180,9 +219,11 @@ class BNO085Driver(HardwareDriver):
             self.initialized = True
             return
 
+        self._reset_imu_session()
         try:
             loop = asyncio.get_running_loop()
             self._bno = await loop.run_in_executor(_BNO085_EXECUTOR, self._open_shtp)
+            self._imu_epoch_id = uuid.uuid4().hex
             logger.info(
                 "BNO085 SHTP initialized on %s @ %d baud",
                 self._cfg.port,
@@ -205,7 +246,7 @@ class BNO085Driver(HardwareDriver):
             BNO_REPORT_GAME_ROTATION_VECTOR,
             BNO_REPORT_GYROSCOPE,
         )
-        from adafruit_bno08x.uart import BNO08X_UART  # noqa: PLC0415
+        from adafruit_bno08x.uart import BNO08X_UART as AdafruitBNO08XUART  # noqa: PLC0415
 
         uart = serial.Serial(
             self._cfg.port,
@@ -215,7 +256,11 @@ class BNO085Driver(HardwareDriver):
         self._serial = uart
 
         # Constructor performs soft reset (~1-2 s)
-        bno = BNO08X_UART(uart)
+        tracked_uart_cls = _tracked_bno08x_uart_class(
+            AdafruitBNO08XUART,
+            BNO_REPORT_GAME_ROTATION_VECTOR,
+        )
+        bno = tracked_uart_cls(uart)
 
         # Game Rotation Vector: gyro + accelerometer fusion only.
         # Deliberately avoids the magnetometer so motor-current magnetic
@@ -251,6 +296,7 @@ class BNO085Driver(HardwareDriver):
             "shtp_connected": self._bno is not None,
             "valid_frames": self._valid_frames,
             "consecutive_errors": self._consecutive_errors,
+            "imu_epoch_id": self._imu_epoch_id,
             "last_orientation": self._last_orientation,
             "last_read_age_s": (time.time() - self._last_read_ts) if self._last_read_ts else None,
             "simulation": is_simulation_mode(),
@@ -293,6 +339,9 @@ class BNO085Driver(HardwareDriver):
             "gyro_y": 0.0,
             "gyro_z": 0.0,
             "calibration_status": calibration_state,
+            "monotonic_received_s": time.monotonic(),
+            "cached": False,
+            "imu_epoch_id": self._imu_epoch_id,
         }
         self._last_read_ts = time.time()
         return self._last_orientation
@@ -341,8 +390,15 @@ class BNO085Driver(HardwareDriver):
                 )
             self._consecutive_errors = 0
             self._valid_frames += 1
+            result = {
+                **result,
+                "monotonic_received_s": time.monotonic(),
+                "cached": False,
+                "imu_epoch_id": self._imu_epoch_id,
+            }
             self._last_orientation = result
             self._last_read_ts = time.time()
+            return result
         else:
             self._consecutive_errors += 1
             if self._consecutive_errors == 30:
@@ -352,7 +408,6 @@ class BNO085Driver(HardwareDriver):
                     self._cfg.port,
                     self._consecutive_errors,
                 )
-
         return self._stale_or_placeholder()
 
     def _stale_or_placeholder(self) -> dict[str, Any]:
@@ -362,7 +417,7 @@ class BNO085Driver(HardwareDriver):
             and self._last_read_ts is not None
             and (time.time() - self._last_read_ts) < _MAX_STALE_AGE_S
         ):
-            return self._last_orientation
+            return {**self._last_orientation, "cached": True}
 
         # Data too old or never received — report uncalibrated so navigation
         # does not trust stale heading
@@ -377,7 +432,18 @@ class BNO085Driver(HardwareDriver):
             "gyro_y": 0.0,
             "gyro_z": 0.0,
             "calibration_status": "uncalibrated",
+            "monotonic_received_s": None,
+            "cached": True,
+            "imu_epoch_id": self._imu_epoch_id,
         }
+
+    def _reset_imu_session(self) -> None:
+        """Discard readings and identity from the previous physical IMU session."""
+        self._last_orientation = None
+        self._last_read_ts = None
+        self._valid_frames = 0
+        self._consecutive_errors = 0
+        self._imu_epoch_id = None
 
     async def _attempt_reinit(self) -> None:
         """Try to re-initialize the SHTP connection after repeated failures."""
@@ -389,8 +455,10 @@ class BNO085Driver(HardwareDriver):
                     pass
             self._serial = None
             self._bno = None
+            self._reset_imu_session()
             loop = asyncio.get_running_loop()
             self._bno = await loop.run_in_executor(_BNO085_EXECUTOR, self._open_shtp)
+            self._imu_epoch_id = uuid.uuid4().hex
             self._consecutive_errors = 0
             logger.info("BNO085 SHTP re-initialized successfully on %s", self._cfg.port)
         except Exception as exc:

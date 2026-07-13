@@ -29,6 +29,10 @@ from ..models import (
     SensorData,
     Waypoint,
 )
+from ..models.safety_limits import (
+    BOOTSTRAP_SENSOR_POLL_INTERVAL_S,
+    heading_bootstrap_stop_reserve_m,
+)
 from ..nav.geoutils import body_offset_to_north_east, haversine_m, offset_lat_lon, point_in_polygon
 from ..nav.obstacle_clearance import required_obstacle_clearance_m
 from ..nav.odometry import OdometryIntegrator
@@ -230,10 +234,21 @@ class _NavGatewayAdapter:
     def is_emergency_active(self) -> bool:
         return self._nav._global_emergency_active()
 
-    async def dispatch_drive_speeds(self, left: float, right: float) -> bool:
+    async def dispatch_drive_speeds(
+        self,
+        left: float,
+        right: float,
+        *,
+        heading_bootstrap: bool = False,
+        require_hardware_ack: bool = False,
+    ) -> bool:
         try:
             self._nav.navigation_state.target_velocity = float(max(abs(left), abs(right)))
             if self._nav._command_gateway is None:
+                if heading_bootstrap:
+                    logger.error("Heading bootstrap requires MotorCommandGateway")
+                    self._nav.navigation_state.target_velocity = 0.0
+                    return False
                 await self._nav.set_speed(left, right)
                 return True
             from ..control.commands import CommandStatus, DriveCommand
@@ -250,9 +265,13 @@ class _NavGatewayAdapter:
                     source="mission",
                     duration_ms=self._nav.autonomous_command_ttl_ms,
                     max_speed_limit=1.0,
+                    heading_bootstrap=heading_bootstrap,
                 )
             )
-            accepted = outcome.status in {CommandStatus.ACCEPTED, CommandStatus.QUEUED}
+            accepted = outcome.status == CommandStatus.ACCEPTED or (
+                outcome.status == CommandStatus.QUEUED
+                and (not require_hardware_ack or os.getenv("SIM_MODE", "0") == "1")
+            )
             if not accepted:
                 self._nav.navigation_state.target_velocity = 0.0
             return accepted
@@ -318,6 +337,7 @@ class NavigationService:
         self.autonomous_command_ttl_ms = 350
         self.autonomous_braking_decel_mps2 = 0.5
         self.bootstrap_speed_mps = 0.20
+        self.bootstrap_min_travel_m = 0.25
         self.bootstrap_max_travel_m = 0.60
         self.coverage_endpoint_clearance_m = 0.25
         self.max_operational_cross_track_error_m = 1.5
@@ -351,6 +371,7 @@ class NavigationService:
                     limits.autonomous_braking_decel_mps2
                 )
                 self.bootstrap_speed_mps = float(limits.bootstrap_speed_mps)
+                self.bootstrap_min_travel_m = float(limits.bootstrap_min_travel_m)
                 self.bootstrap_max_travel_m = float(limits.bootstrap_max_travel_m)
                 self.coverage_endpoint_clearance_m = float(limits.coverage_endpoint_clearance_m)
                 self.max_operational_cross_track_error_m = float(
@@ -405,6 +426,8 @@ class NavigationService:
         self.total_distance = 0.0
         self.last_position: Position | None = None
         self._mission_execution_active = False
+        self._active_mission_id: str | None = None
+        self._mission_execution_phase: str = "idle"
 
         # Progressive stiffness detection for stuck motor diagnosis
         self._stiffness_test_active = False
@@ -427,6 +450,8 @@ class NavigationService:
         # and re-derived from GPS COG via the bootstrap drive.
         self._session_heading_alignment: float = 0.0
         self._heading_alignment_sample_count: int = 0
+        self._alignment_imu_epoch_id: str | None = None
+        self._active_imu_epoch_id: str | None = None
         self._gps_cog_history: list = []  # recent GPS COG values for straight-motion gate
         # Tolerance for GPS COG consistency during bootstrap straight-line detection.
         # GPS COG can be noisy; increased from 10° to 15° to tolerate GPS jitter
@@ -440,6 +465,11 @@ class NavigationService:
             self._bootstrap_straight_tolerance_deg = 15.0
         # Track when bootstrap begins for lenient GPS snap criteria.
         self._bootstrap_start_time: float | None = None
+        self._bootstrap_start_antenna_position: Position | None = None
+        self._bootstrap_initial_imu_yaw_deg: float | None = None
+        self._bootstrap_alignment_staged: bool = False
+        self._last_imu_monotonic_s: float | None = None
+        self._last_imu_raw_yaw_deg: float | None = None
         self._require_gps_heading_alignment: bool = False
         self._last_gps_track_position: Position | None = None
         self._last_gps_track_time: datetime | None = None
@@ -548,6 +578,34 @@ class NavigationService:
         self._load_alignment_from_disk()
         logger.info("CalibrationRepository attached; IMU alignment reloaded via repository")
 
+    def _bind_live_imu_epoch(self, imu_epoch_id: str) -> bool:
+        """Bind navigation alignment to the actual BNO085 reset generation."""
+        normalized = imu_epoch_id.strip() if isinstance(imu_epoch_id, str) else ""
+        if not normalized:
+            return False
+        previous = self._active_imu_epoch_id
+        self._active_imu_epoch_id = normalized
+        if self._calibration_repo is not None:
+            self._calibration_repo.bind_imu_epoch(normalized)
+        if self._use_localization():
+            self._localization.bind_imu_epoch(normalized)
+        if self._alignment_imu_epoch_id != normalized:
+            self._session_heading_alignment = 0.0
+            self._heading_alignment_sample_count = 0
+            self._alignment_imu_epoch_id = None
+            self._require_gps_heading_alignment = True
+            self._bootstrap_alignment_staged = False
+            self.navigation_state.heading = None
+            self.navigation_state.heading_source = None
+        return previous is not None and previous != normalized
+
+    def _imu_epoch_is_current(self) -> bool:
+        if self._active_imu_epoch_id is None:
+            return False
+        if self._calibration_repo is None:
+            return True
+        return self._calibration_repo.imu_epoch_id == self._active_imu_epoch_id
+
     def attach_localization(self, localization_service: Any) -> None:
         """Attach a LocalizationService for facade delegation.
 
@@ -574,6 +632,29 @@ class NavigationService:
             command_gateway.set_autonomy_context_provider(self._autonomy_context_for_gateway)
         logger.info("MotorCommandGateway attached to NavigationService")
 
+    def apply_safety_limits(self, limits: Any) -> None:
+        """Hot-reload navigation-owned safety thresholds from the canonical model."""
+        self._safety_limits = limits
+        self.obstacle_avoidance_distance = float(limits.tof_obstacle_distance_meters)
+        self.obstacle_detector.safety_distance = self.obstacle_avoidance_distance
+        self.obstacle_detector.limits = limits
+        self.autonomous_max_gps_accuracy_m = float(limits.autonomous_max_gps_accuracy_m)
+        self.autonomous_max_gps_fix_age_s = float(limits.autonomous_max_gps_fix_age_s)
+        self.bootstrap_required_accuracy_m = self.autonomous_max_gps_accuracy_m
+        self.mower_footprint_radius_m = float(limits.mower_footprint_radius_m)
+        self.differential_drive_wheelbase_m = float(limits.differential_drive_wheelbase_m)
+        self.geofence_safety_allowance_m = float(limits.geofence_safety_allowance_m)
+        self.autonomous_prediction_horizon_s = float(limits.autonomous_prediction_horizon_s)
+        self.autonomous_command_ttl_ms = int(limits.autonomous_command_ttl_ms)
+        self.autonomous_braking_decel_mps2 = float(limits.autonomous_braking_decel_mps2)
+        self.bootstrap_speed_mps = float(limits.bootstrap_speed_mps)
+        self.bootstrap_min_travel_m = float(limits.bootstrap_min_travel_m)
+        self.bootstrap_max_travel_m = float(limits.bootstrap_max_travel_m)
+        self.coverage_endpoint_clearance_m = float(limits.coverage_endpoint_clearance_m)
+        self.max_operational_cross_track_error_m = float(
+            limits.max_operational_cross_track_error_m
+        )
+
     def _load_operating_area_snapshot(self) -> Any:
         snapshot = load_operating_area_snapshot(
             map_repository=self._map_repository,
@@ -597,7 +678,37 @@ class NavigationService:
 
     def _autonomy_context_for_gateway(self, cmd: Any) -> dict[str, Any]:
         snapshot = self.get_operating_area_snapshot()
-        pos = self.navigation_state.current_position
+        bootstrap_requested = bool(getattr(cmd, "heading_bootstrap", False))
+        bootstrap_active = (
+            self._bootstrap_start_time is not None
+            and self._mission_execution_phase == "heading_bootstrap"
+        )
+        pos = (
+            self._raw_antenna_position_for_bootstrap()
+            if bootstrap_requested
+            else self.navigation_state.current_position
+        )
+        traveled_m = self._bootstrap_travel_m(pos) if bootstrap_active else None
+        bootstrap_remaining_m = (
+            max(0.0, float(self.bootstrap_max_travel_m) - traveled_m)
+            if traveled_m is not None
+            else None
+        )
+        bootstrap_stop_reserve_m = (
+            self._heading_bootstrap_stop_reserve_m() if bootstrap_requested else None
+        )
+        imu_age_s = self._live_imu_age_s()
+        yaw_delta_deg: float | None = None
+        if (
+            self._bootstrap_initial_imu_yaw_deg is not None
+            and self._last_imu_raw_yaw_deg is not None
+        ):
+            yaw_delta_deg = abs(
+                self._heading_delta(
+                    self._last_imu_raw_yaw_deg,
+                    self._bootstrap_initial_imu_yaw_deg,
+                )
+            )
         if pos is not None and snapshot.valid:
             self.navigation_state.boundary_clearance_m = snapshot.distance_to_boundary(pos)
         return {
@@ -606,7 +717,23 @@ class NavigationService:
             "last_gps_fix": self.navigation_state.last_gps_fix,
             "dead_reckoning_active": self.navigation_state.dead_reckoning_active,
             "heading": self.navigation_state.heading,
+            "imu_valid": self.navigation_state.imu_valid,
+            "imu_age_s": imu_age_s,
+            "imu_epoch_valid": self._imu_epoch_is_current(),
             "accuracy_m": pos.accuracy if pos is not None else None,
+            "heading_bootstrap_active": bootstrap_active,
+            "mission_phase": self._mission_execution_phase,
+            "bootstrap_travel_m": traveled_m,
+            "bootstrap_remaining_m": bootstrap_remaining_m,
+            "bootstrap_stop_reserve_m": bootstrap_stop_reserve_m,
+            "bootstrap_max_travel_m": self.bootstrap_max_travel_m,
+            "bootstrap_speed_mps": self.bootstrap_speed_mps,
+            "bootstrap_imu_yaw_delta_deg": yaw_delta_deg,
+            "bootstrap_max_yaw_delta_deg": self._bootstrap_straight_tolerance_deg,
+            "antenna_offset_m": math.hypot(
+                self._gps_antenna_offset_forward_m,
+                self._gps_antenna_offset_right_m,
+            ),
             "tof_blocked": self.navigation_state.obstacle_avoidance_active,
             "max_fix_age_s": self.autonomous_max_gps_fix_age_s,
             "max_accuracy_m": self.autonomous_max_gps_accuracy_m,
@@ -617,6 +744,57 @@ class NavigationService:
             "wheelbase_m": self.differential_drive_wheelbase_m,
             "braking_decel_mps2": self.autonomous_braking_decel_mps2,
         }
+
+    def _raw_antenna_position_for_bootstrap(self) -> Position | None:
+        """Return one stable raw-GPS frame for bootstrap geometry and travel."""
+        if self._use_localization():
+            pose = self._localization.canonical_pose()
+            return pose.antenna_position
+        if math.hypot(
+            self._gps_antenna_offset_forward_m,
+            self._gps_antenna_offset_right_m,
+        ) > 1e-6:
+            return None
+        return self.navigation_state.current_position
+
+    def _bootstrap_travel_m(self, current_antenna: Position | None = None) -> float | None:
+        start = self._bootstrap_start_antenna_position
+        current = current_antenna or self._raw_antenna_position_for_bootstrap()
+        if start is None or current is None:
+            return None
+        return haversine_m(
+            start.latitude,
+            start.longitude,
+            current.latitude,
+            current.longitude,
+        )
+
+    def _heading_bootstrap_stop_reserve_m(self) -> float:
+        gps_age_s = self._bootstrap_gps_age_s()
+        return heading_bootstrap_stop_reserve_m(
+            speed_mps=self.bootstrap_speed_mps,
+            command_ttl_ms=self.autonomous_command_ttl_ms,
+            braking_decel_mps2=self.autonomous_braking_decel_mps2,
+            poll_interval_s=max(
+                BOOTSTRAP_SENSOR_POLL_INTERVAL_S,
+                gps_age_s if gps_age_s is not None else BOOTSTRAP_SENSOR_POLL_INTERVAL_S,
+            ),
+        )
+
+    def _bootstrap_gps_age_s(self) -> float | None:
+        if self._use_localization():
+            received = self._localization.canonical_pose().sample_monotonic_s
+            if isinstance(received, (int, float)) and math.isfinite(float(received)):
+                return max(0.0, time.monotonic() - float(received))
+        last_fix = self.navigation_state.last_gps_fix
+        if isinstance(last_fix, datetime) and last_fix.tzinfo is not None:
+            return max(0.0, (datetime.now(UTC) - last_fix).total_seconds())
+        return None
+
+    def _live_imu_age_s(self) -> float | None:
+        if self._last_imu_monotonic_s is None:
+            return None
+        return max(0.0, time.monotonic() - self._last_imu_monotonic_s)
 
     def _use_localization(self) -> bool:
         """Return True when delegation to LocalizationService is active."""
@@ -645,6 +823,8 @@ class NavigationService:
             raise RuntimeError(
                 "HEADING_ALIGNMENT_REQUIRED: run one fresh center-yard heading bootstrap first"
             )
+        self._active_mission_id = mission.id
+        self._mission_execution_phase = "admitting"
         self.navigation_state.navigation_mode = NavigationMode.AUTO
         self.navigation_state.path_status = PathStatus.EXECUTING
         self.navigation_state.planned_path = [
@@ -669,12 +849,17 @@ class NavigationService:
         self.navigation_state.heading = None
         self.navigation_state.heading_source = None
         self.navigation_state.imu_valid = False
+        self._last_imu_monotonic_s = None
+        self._last_imu_raw_yaw_deg = None
         self.navigation_state.gps_cog = None
         if saved is not None:
             saved_value, saved_samples, saved_age_s = saved
             self._session_heading_alignment = saved_value
             self._heading_alignment_sample_count = (
                 max(1, int(saved_samples)) if reuse_heading_alignment else 0
+            )
+            self._alignment_imu_epoch_id = (
+                self._active_imu_epoch_id if reuse_heading_alignment else None
             )
             # Do NOT write "mission_start_reset" — the disk still holds the prior snap.
             logger.info(
@@ -692,6 +877,7 @@ class NavigationService:
         else:
             self._session_heading_alignment = 0.0
             self._heading_alignment_sample_count = 0
+            self._alignment_imu_epoch_id = None
             self._save_alignment_to_disk("mission_start_reset")
             logger.info("Mission start: no valid saved alignment — GPS COG bootstrap required")
         # Mirror state into LocalizationService when it owns pose state.
@@ -700,6 +886,7 @@ class NavigationService:
                 saved_alignment=saved,
                 require_fresh_bootstrap=not reuse_heading_alignment,
             )
+        self._bootstrap_alignment_staged = False
 
         # Reset ENU frame and pose filter for this mission
         self._enu_frame = ENUFrame()  # will anchor on first GPS fix
@@ -719,9 +906,12 @@ class NavigationService:
 
         async def _bootstrap():
             if reuse_heading_alignment:
+                self._mission_execution_phase = "heading_validation"
                 await self._validate_reused_heading_and_geofence()
             else:
+                self._mission_execution_phase = "heading_bootstrap"
                 await self._run_bootstrap_and_check_geofence()
+            self._mission_execution_phase = "waypoint"
 
         def _on_waypoint_advance(completed_index: int) -> None:
             self.navigation_state.current_waypoint_index = completed_index + 1
@@ -824,6 +1014,14 @@ class NavigationService:
             except asyncio.CancelledError:
                 pass
             self._mission_execution_active = False
+            self._active_mission_id = None
+            self._mission_execution_phase = "idle"
+
+    def get_mission_execution_phase(self, mission_id: str) -> str | None:
+        """Return the live async phase only for the active navigation mission."""
+        if self._active_mission_id != mission_id:
+            return None
+        return self._mission_execution_phase
 
     async def go_to_waypoint(
         self,
@@ -883,13 +1081,9 @@ class NavigationService:
         """Drive forward so GPS COG snaps the heading alignment.
 
         IMU Game Rotation Vector yaw is relative to boot orientation (arbitrary zero).
-        This method drives at ~75% throttle for up to 15 seconds and requires the
-        mower to travel at least 1 m before accepting the GPS COG snap, ensuring the
-        alignment comes from real forward motion, not GPS jitter.
-
-        CRITICAL: During the bootstrap drive, we must actively poll sensor data and
-        call update_navigation_state() to process GPS COG snaps. The snap cannot fire
-        unless telemetry data reaches update_navigation_state().
+        The blade-off command is explicitly tagged, renews only after fresh sensor
+        and travel-budget checks, and remains inside a direction-independent radial
+        envelope while world heading is unknown.
 
         Raises RuntimeError if GPS COG cannot snap within the deadline — callers
         must treat this as a mission abort, not a recoverable condition.
@@ -897,13 +1091,16 @@ class NavigationService:
         _BOOTSTRAP_DEADLINE_S: float = 15.0
         _GPS_PREFLIGHT_WAIT_S: float = 60.0
 
-        # Pre-flight: ensure GPS has provided at least one valid position before driving.
-        # Without a position, _resolve_gps_cog returns None immediately on every tick
-        # because current_position is None, so the bootstrap drive produces no COG no
-        # matter how long the mower moves.
-        if not self._position_ready_for_bootstrap(self.navigation_state.current_position):
+        # Require a raw antenna position so the coordinate frame cannot jump when
+        # the heading snap makes the body-center correction available.
+        antenna_position = self._raw_antenna_position_for_bootstrap()
+        if not (
+            self._position_ready_for_bootstrap(antenna_position)
+            and self._imu_ready_for_bootstrap()
+        ):
             logger.info(
-                "Heading bootstrap: waiting for RTK-grade GPS fix (<=%.2f m) before driving "
+                "Heading bootstrap: waiting for RTK-grade GPS (<=%.2f m) and live IMU "
+                "before driving "
                 "(timeout %.0f s)...",
                 self.bootstrap_required_accuracy_m,
                 _GPS_PREFLIGHT_WAIT_S,
@@ -913,19 +1110,19 @@ class NavigationService:
             gps_fix_deadline = gps_wait_start + _GPS_PREFLIGHT_WAIT_S
             _last_gps_warn_t = gps_wait_start
             while time.monotonic() < gps_fix_deadline:
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(BOOTSTRAP_SENSOR_POLL_INTERVAL_S)
                 try:
-                    _mgr = _get_sm()
-                    if _mgr is not None:
-                        _sd = await _mgr.read_all_sensors(bootstrap_mode=True)
-                        if _sd:
-                            await self.update_navigation_state(_sd)
-                except Exception:
-                    pass
-                if self._position_ready_for_bootstrap(self.navigation_state.current_position):
-                    _acc = getattr(self.navigation_state.current_position, "accuracy", None)
+                    await self._refresh_bootstrap_sensor_state(_get_sm())
+                except Exception as exc:
+                    logger.debug("Heading bootstrap preflight sensor refresh failed: %s", exc)
+                antenna_position = self._raw_antenna_position_for_bootstrap()
+                if (
+                    self._position_ready_for_bootstrap(antenna_position)
+                    and self._imu_ready_for_bootstrap()
+                ):
+                    _acc = getattr(antenna_position, "accuracy", None)
                     logger.info(
-                        "Heading bootstrap: RTK-grade GPS fix acquired "
+                        "Heading bootstrap: RTK-grade GPS and live IMU acquired "
                         "(accuracy=%.2f m, waited %.0f s) — starting drive.",
                         _acc or 0.0,
                         time.monotonic() - gps_wait_start,
@@ -934,78 +1131,81 @@ class NavigationService:
                 _now = time.monotonic()
                 if _now - _last_gps_warn_t >= 10.0:
                     logger.warning(
-                        "Heading bootstrap: still waiting for RTK-grade fix (<=%.2f m) "
-                        "(%.0f s elapsed — check sky view/NTRIP/antenna)",
+                        "Heading bootstrap: still waiting for RTK-grade GPS (<=%.2f m) "
+                        "and live IMU (%.0f s elapsed — check GPS and IMU status)",
                         self.bootstrap_required_accuracy_m,
                         _now - gps_wait_start,
                     )
                     _last_gps_warn_t = _now
             else:
                 raise RuntimeError(
-                    "Heading bootstrap pre-flight: no RTK-grade fix "
+                    "Heading bootstrap pre-flight: no RTK-grade GPS plus live IMU "
                     f"(<= {self.bootstrap_required_accuracy_m:.2f} m) within "
-                    f"{_GPS_PREFLIGHT_WAIT_S:.0f} s. Check sky view, NTRIP link, and antenna."
+                    f"{_GPS_PREFLIGHT_WAIT_S:.0f} s. Check GPS and IMU status."
                 )
         else:
-            _acc = getattr(self.navigation_state.current_position, "accuracy", None)
+            _acc = getattr(antenna_position, "accuracy", None)
             logger.info(
-                "Heading bootstrap: RTK-grade fix already available (accuracy=%.2f m) — starting drive.",
+                "Heading bootstrap: RTK-grade GPS and live IMU already available "
+                "(accuracy=%.2f m) — starting drive.",
                 _acc or 0.0,
             )
 
+        stop_reserve_m = self._heading_bootstrap_stop_reserve_m()
+        if self.bootstrap_min_travel_m + stop_reserve_m >= self.bootstrap_max_travel_m:
+            raise RuntimeError(
+                "HEADING_BOOTSTRAP_BUDGET_INVALID: minimum travel plus live GPS/lease/"
+                "braking reserve does not fit inside maximum travel"
+            )
+        if antenna_position is None or self._last_imu_raw_yaw_deg is None:
+            raise RuntimeError("IMU_NOT_READY: live bootstrap pose was lost before dispatch")
+
         logger.info("Heading bootstrap: driving forward to acquire GPS COG snap...")
+        self._bootstrap_start_antenna_position = antenna_position
+        self._bootstrap_initial_imu_yaw_deg = self._last_imu_raw_yaw_deg
         self._bootstrap_start_time = time.monotonic()
-        start_pos = self.navigation_state.current_position
         if self._use_localization():
             self._localization.begin_bootstrap()
         deadline = time.monotonic() + _BOOTSTRAP_DEADLINE_S
+        completed = False
         try:
-            await self._gateway_adapter.dispatch_drive_speeds(
+            accepted = await self._gateway_adapter.dispatch_drive_speeds(
                 self.bootstrap_speed_mps,
                 self.bootstrap_speed_mps,
+                heading_bootstrap=True,
             )
+            if not accepted:
+                raise RuntimeError("Heading bootstrap drive rejected by safety gateway")
             _last_drive_t = time.monotonic()
+            refresh_interval_s = min(
+                0.2,
+                max(0.05, float(self.autonomous_command_ttl_ms) / 2000.0),
+            )
             while time.monotonic() < deadline:
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(BOOTSTRAP_SENSOR_POLL_INTERVAL_S)
                 if self._global_emergency_active():
-                    logger.warning("Heading bootstrap aborted: emergency stop active")
-                    return
+                    raise RuntimeError("EMERGENCY_STOP_ACTIVE: heading bootstrap aborted")
 
-                # CRITICAL: Poll telemetry and update navigation state during bootstrap.
-                # The GPS COG snap only fires when valid GPS data reaches navigation state.
-                # Use bootstrap_mode=True to extend GPS timeout to 2.0s, allowing RTK
-                # transitions and COG data to reach the snap logic reliably.
                 try:
                     from ..core.state_manager import get_sensor_manager
+                    await self._refresh_bootstrap_sensor_state(get_sensor_manager())
+                except Exception as exc:
+                    logger.debug("Bootstrap sensor refresh failed: %s", exc)
 
-                    manager = get_sensor_manager()
-                    if manager is None:
-                        from ..services.telemetry_service import telemetry_service
+                if not self._imu_ready_for_bootstrap():
+                    raise RuntimeError("IMU_NOT_READY: live IMU was lost during bootstrap")
 
-                        await telemetry_service.initialize_sensors()
-                        manager = get_sensor_manager()
-                    if manager is None:
-                        continue
-                    sensor_data = await manager.read_all_sensors(bootstrap_mode=True)
-                    if sensor_data:
-                        await self.update_navigation_state(sensor_data)
-                except Exception as e:
-                    logger.debug(f"Bootstrap telemetry update failed: {e}")
-
-                # Re-issue drive command every 0.5 s to prevent RoboHAT motor watchdog
-                # from cutting power before the mower covers the required 1 m.
-                if time.monotonic() - _last_drive_t >= 0.5:
-                    try:
-                        ok = await self._gateway_adapter.dispatch_drive_speeds(
-                            self.bootstrap_speed_mps,
-                            self.bootstrap_speed_mps,
-                        )
-                        if not ok:
-                            raise RuntimeError("gateway rejected bootstrap drive")
-                        _last_drive_t = time.monotonic()
-                        logger.info("Bootstrap: drive re-issued at t+%.1f s", time.monotonic() - self._bootstrap_start_time)
-                    except Exception as e:
-                        logger.warning("Bootstrap drive refresh failed: %s", e)
+                yaw_delta_deg = abs(
+                    self._heading_delta(
+                        self._last_imu_raw_yaw_deg or 0.0,
+                        self._bootstrap_initial_imu_yaw_deg or 0.0,
+                    )
+                )
+                if yaw_delta_deg > self._bootstrap_straight_tolerance_deg:
+                    raise RuntimeError(
+                        "HEADING_BOOTSTRAP_TURN_DETECTED: relative IMU yaw changed "
+                        f"{yaw_delta_deg:.1f} degrees"
+                    )
 
                 if self._use_localization():
                     done = self._localization.alignment_sample_count >= 1
@@ -1014,39 +1214,49 @@ class NavigationService:
                     done = self._heading_alignment_sample_count >= 1
                     align_val = self._session_heading_alignment
 
-                current_pos = self.navigation_state.current_position
-                dist_m = 0.0
-                if start_pos is not None and current_pos is not None:
-                    dist_m = haversine_m(
-                        start_pos.latitude, start_pos.longitude,
-                        current_pos.latitude, current_pos.longitude,
+                current_antenna = self._raw_antenna_position_for_bootstrap()
+                dist_m = self._bootstrap_travel_m(current_antenna)
+                if dist_m is None:
+                    raise RuntimeError("LOCALIZATION_STALE: raw GPS antenna position unavailable")
+                if dist_m > self.bootstrap_max_travel_m:
+                    raise RuntimeError(
+                        "Heading bootstrap exceeded maximum configured travel distance"
                     )
-                    if dist_m >= self.bootstrap_max_travel_m and not done:
-                        raise RuntimeError(
-                            "Heading bootstrap exceeded maximum configured travel distance"
-                        )
 
-                if done:
-                    required_travel_m = min(1.0, self.bootstrap_max_travel_m)
-                    if start_pos is not None and current_pos is not None:
-                        if dist_m < required_travel_m:
-                            logger.debug(
-                                "Bootstrap snap at %.1f m — waiting for %.1f m minimum travel",
-                                dist_m,
-                                required_travel_m,
-                            )
-                            done = False
-                        if dist_m >= self.bootstrap_max_travel_m:
-                            raise RuntimeError(
-                                "Heading bootstrap exceeded maximum configured travel distance"
-                            )
-
-                if done:
+                if done and dist_m >= self.bootstrap_min_travel_m:
                     logger.info(
-                        "Heading bootstrap complete: session_align=%.1f°",
+                        "Heading bootstrap complete: session_align=%.1f° travel=%.2fm",
                         align_val,
+                        dist_m,
                     )
+                    completed = True
                     break
+                if done:
+                    logger.debug(
+                        "Bootstrap snap at %.2fm — waiting for %.2fm minimum travel",
+                        dist_m,
+                        self.bootstrap_min_travel_m,
+                    )
+
+                # The estimate is based on the latest raw antenna fix. Reserve all
+                # movement possible during GPS age, the next lease, polling, and braking
+                # before authorizing another nonzero command.
+                stop_reserve_m = self._heading_bootstrap_stop_reserve_m()
+                if dist_m + stop_reserve_m >= self.bootstrap_max_travel_m:
+                    raise RuntimeError(
+                        "HEADING_BOOTSTRAP_BUDGET_EXHAUSTED: stopping before configured "
+                        "maximum travel"
+                    )
+
+                if time.monotonic() - _last_drive_t >= refresh_interval_s:
+                    ok = await self._gateway_adapter.dispatch_drive_speeds(
+                        self.bootstrap_speed_mps,
+                        self.bootstrap_speed_mps,
+                        heading_bootstrap=True,
+                    )
+                    if not ok:
+                        raise RuntimeError("Heading bootstrap drive refresh rejected by gateway")
+                    _last_drive_t = time.monotonic()
             else:
                 raise RuntimeError(
                     f"Heading bootstrap failed: GPS COG not acquired within "
@@ -1054,25 +1264,96 @@ class NavigationService:
                     "Check sky view and GPS lock before retrying."
                 )
         finally:
-            self._bootstrap_start_time = None
+            stop_confirmed = await self._deliver_stop_command(reason="heading bootstrap")
+            alignment_committed = False
             if self._use_localization():
-                self._localization.end_bootstrap()
-            await self._deliver_stop_command(reason="heading bootstrap")
+                alignment_committed = self._localization.end_bootstrap(
+                    commit_alignment=completed and stop_confirmed
+                )
+            elif completed and stop_confirmed and self._bootstrap_alignment_staged:
+                alignment_committed = self._save_alignment_to_disk("gps_cog_snap")
+            if self._bootstrap_alignment_staged and not alignment_committed:
+                self._session_heading_alignment = 0.0
+                self._heading_alignment_sample_count = 0
+                self._alignment_imu_epoch_id = None
+                self._require_gps_heading_alignment = True
+                self.navigation_state.heading = None
+                self.navigation_state.heading_source = None
+            self._bootstrap_start_time = None
+            self._bootstrap_start_antenna_position = None
+            self._bootstrap_initial_imu_yaw_deg = None
+            self._bootstrap_alignment_staged = False
             await asyncio.sleep(0.3)
+            if not stop_confirmed:
+                reason = "STOP_CONFIRMATION_FAILED: heading bootstrap motor stop not acknowledged"
+                self._latch_global_emergency_state(reason)
+                try:
+                    await self.emergency_stop(reason)
+                except Exception:
+                    logger.exception("Emergency stop escalation failed after bootstrap stop failure")
+                raise RuntimeError(reason)
+            if completed and not alignment_committed:
+                raise RuntimeError(
+                    "HEADING_ALIGNMENT_PERSISTENCE_FAILED: bootstrap evidence was not committed"
+                )
 
-    async def _run_bootstrap_and_check_geofence(self) -> None:
-        """Run heading bootstrap then abort if mower is outside geofence boundary.
+    async def _refresh_bootstrap_sensor_state(self, manager: Any | None) -> None:
+        """Refresh bootstrap inputs without allowing a slow GPS read to outlive a lease."""
+        if manager is None:
+            raise RuntimeError("sensor manager unavailable")
+        if self._mission_execution_active:
+            imu_interface = getattr(manager, "imu", None)
+            self._record_live_imu_sample(getattr(imu_interface, "last_reading", None))
+            return
+        sensor_data = await manager.read_all_sensors(bootstrap_mode=True)
+        if sensor_data is None:
+            raise RuntimeError("sensor manager returned no bootstrap data")
+        await self.update_navigation_state(sensor_data)
 
-        Called once at mission start after reset. Raises RuntimeError and latches
-        the global emergency state if the position is outside the safety boundary.
-        """
+    def _record_live_imu_sample(self, imu: Any | None) -> None:
+        yaw = getattr(imu, "yaw", None)
+        received_mono = getattr(imu, "monotonic_received_s", None)
+        imu_epoch_id = getattr(imu, "imu_epoch_id", None)
+        epoch_changed = False
+        if isinstance(imu_epoch_id, str) and imu_epoch_id.strip():
+            epoch_changed = self._bind_live_imu_epoch(imu_epoch_id)
+            if epoch_changed:
+                self._latch_global_emergency_state(
+                    "IMU_EPOCH_CHANGED: BNO085 reset invalidated heading alignment"
+                )
+        valid = (
+            imu is not None
+            and not epoch_changed
+            and self._imu_epoch_is_current()
+            and isinstance(yaw, (int, float))
+            and math.isfinite(float(yaw))
+            and getattr(imu, "calibration_status", None) != "uncalibrated"
+            and not bool(getattr(imu, "cached", False))
+            and isinstance(received_mono, (int, float))
+            and math.isfinite(float(received_mono))
+        )
+        self.navigation_state.imu_valid = bool(valid)
+        if valid:
+            self._last_imu_monotonic_s = float(received_mono)
+            self._last_imu_raw_yaw_deg = float(yaw)
+
+    def assert_heading_bootstrap_ready(self) -> None:
+        """Fail closed unless a bounded heading bootstrap fits inside the safe area."""
         snapshot = self.get_operating_area_snapshot()
         footprint_radius_m = float(getattr(self, "mower_footprint_radius_m", 0.35))
         fixed_allowance_m = float(getattr(self, "geofence_safety_allowance_m", 0.10))
         bootstrap_max_travel_m = float(getattr(self, "bootstrap_max_travel_m", 0.60))
+        antenna_offset_m = math.hypot(
+            self._gps_antenna_offset_forward_m,
+            self._gps_antenna_offset_right_m,
+        )
+        position = self._raw_antenna_position_for_bootstrap()
+        if position is None:
+            raise RuntimeError("LOCALIZATION_STALE: raw GPS antenna position unavailable")
+        accuracy_m = float(getattr(position, "accuracy", 0.0) or 0.0)
         try:
             snapshot.validate_ready_for_autonomy(
-                position=self.navigation_state.current_position,
+                position=position,
                 last_gps_fix=self.navigation_state.last_gps_fix,
                 dead_reckoning_active=self.navigation_state.dead_reckoning_active,
                 max_fix_age_s=float(getattr(self, "autonomous_max_gps_fix_age_s", 2.0)),
@@ -1082,14 +1363,27 @@ class NavigationService:
                 bootstrap_clearance_m=(
                     footprint_radius_m
                     + fixed_allowance_m
+                    + accuracy_m
+                    + antenna_offset_m
                     + bootstrap_max_travel_m
                 ),
             )
         except OperatingAreaError as exc:
             raise RuntimeError(f"{exc.reason_code}: {exc.detail}") from exc
 
+    async def _run_bootstrap_and_check_geofence(self) -> None:
+        """Run heading bootstrap then abort if mower is outside geofence boundary.
+
+        Called once at mission start after reset. Raises RuntimeError and latches
+        the global emergency state if the position is outside the safety boundary.
+        """
+        self.assert_heading_bootstrap_ready()
+
         await self._bootstrap_heading_from_gps_cog()
 
+        snapshot = self.get_operating_area_snapshot()
+        footprint_radius_m = float(getattr(self, "mower_footprint_radius_m", 0.35))
+        fixed_allowance_m = float(getattr(self, "geofence_safety_allowance_m", 0.10))
         cur = self.navigation_state.current_position
         if cur is None or not snapshot.contains_footprint(
             cur,
@@ -1149,8 +1443,14 @@ class NavigationService:
         total_attempts = max(1, retries)
         for attempt in range(1, total_attempts + 1):
             try:
-                await self.set_speed(0.0, 0.0)
-                return True
+                confirmed = await self._gateway_adapter.dispatch_drive_speeds(
+                    0.0,
+                    0.0,
+                    require_hardware_ack=True,
+                )
+                if confirmed:
+                    return True
+                raise RuntimeError("safety gateway did not confirm controller stop")
             except Exception as exc:
                 logger.warning(
                     "Failed to deliver %s stop command (attempt %d/%d): %s",
@@ -1182,6 +1482,19 @@ class NavigationService:
         if accuracy is None:
             return False
         return float(accuracy) <= float(self.bootstrap_required_accuracy_m)
+
+    def _imu_ready_for_bootstrap(self) -> bool:
+        """Return True only after the live localization owner accepted an IMU sample."""
+        age_s = self._live_imu_age_s()
+        max_age_s = max(0.05, float(self.autonomous_command_ttl_ms) / 1000.0)
+        return bool(
+            self.navigation_state.imu_valid
+            and self._imu_epoch_is_current()
+            and age_s is not None
+            and age_s <= max_age_s
+            and self._last_imu_raw_yaw_deg is not None
+            and math.isfinite(self._last_imu_raw_yaw_deg)
+        )
 
     def _position_is_verified_for_waypoint(self) -> bool:
         """Return True when position data is trustworthy enough to advance a waypoint."""
@@ -1375,6 +1688,17 @@ class NavigationService:
     async def _update_navigation_state_impl(self, sensor_data: SensorData) -> NavigationState:
         """Original update_navigation_state body — measured by the public wrapper."""
 
+        imu_epoch_id = getattr(sensor_data.imu, "imu_epoch_id", None)
+        if isinstance(imu_epoch_id, str) and imu_epoch_id.strip():
+            epoch_changed = self._bind_live_imu_epoch(imu_epoch_id)
+            if epoch_changed and self._mission_execution_active:
+                reason = "IMU_EPOCH_CHANGED: BNO085 reset invalidated heading alignment"
+                self._latch_global_emergency_state(reason)
+                stop_confirmed = await self._deliver_stop_command(reason="IMU epoch change")
+                if not stop_confirmed:
+                    await self.emergency_stop(reason)
+                raise RuntimeError(reason)
+
         if self._use_localization():
             # Delegate position, heading, GPS COG, dead reckoning, and quality to
             # LocalizationService. Mirror the results into NavigationState so all
@@ -1388,6 +1712,8 @@ class NavigationService:
             self.navigation_state.gps_cog = loc_state.gps_cog
             self.navigation_state.velocity = loc_state.velocity
             self.navigation_state.imu_valid = bool(loc_state.imu_valid)
+            self._last_imu_monotonic_s = loc_state.imu_received_monotonic_s
+            self._last_imu_raw_yaw_deg = loc_state.imu_raw_yaw_deg
             self.navigation_state.heading_source = loc_state.heading_source
             self.navigation_state.pose_quality = loc_state.quality.value
             self.navigation_state.dead_reckoning_active = loc_state.dead_reckoning_active
@@ -1413,10 +1739,16 @@ class NavigationService:
             if gps_cog is not None:
                 self.navigation_state.gps_cog = gps_cog
 
+            imu = sensor_data.imu
+            imu_yaw = getattr(imu, "yaw", None)
             imu_valid = (
-                sensor_data.imu is not None
-                and sensor_data.imu.yaw is not None
-                and sensor_data.imu.calibration_status != "uncalibrated"
+                imu is not None
+                and isinstance(imu_yaw, (int, float))
+                and math.isfinite(float(imu_yaw))
+                and imu.calibration_status != "uncalibrated"
+                and not bool(getattr(imu, "cached", False))
+                and isinstance(getattr(imu, "monotonic_received_s", None), (int, float))
+                and math.isfinite(float(imu.monotonic_received_s))
             )
             self.navigation_state.imu_valid = bool(imu_valid)
             imu_alignment_ready = (
@@ -1425,7 +1757,10 @@ class NavigationService:
             )
 
             if imu_valid:
-                raw_yaw = float(sensor_data.imu.yaw)  # type: ignore[union-attr]
+                raw_yaw = float(imu_yaw)
+                received_mono = getattr(imu, "monotonic_received_s", None)
+                self._last_imu_monotonic_s = float(received_mono)
+                self._last_imu_raw_yaw_deg = raw_yaw
                 # BNO085 Game Rotation Vector uses ZYX aerospace convention (right-hand, z-up):
                 # positive yaw = CCW rotation (counter-clockwise when viewed from above).
                 # Navigation uses compass convention: North=0°, East=90°, South=180°, West=270°.
@@ -1521,6 +1856,8 @@ class NavigationService:
                                 self._session_heading_alignment + clamped_delta
                             ) % 360.0
                             self._heading_alignment_sample_count = 1
+                            self._alignment_imu_epoch_id = self._active_imu_epoch_id
+                            self._bootstrap_alignment_staged = True
                             self._require_gps_heading_alignment = False
                             if self._event_store is not None:
                                 from ..observability.events import HeadingAligned
@@ -1543,7 +1880,10 @@ class NavigationService:
                                 self._session_heading_alignment,
                                 gps_cog_source,
                             )
-                            self._save_alignment_to_disk("gps_cog_snap")
+                            logger.info(
+                                "Heading alignment staged pending minimum travel and "
+                                "confirmed motor stop"
+                            )
             elif gps_cog is not None:
                 # Use GPS course-over-ground as heading fallback while in motion.
                 # GPS COG is already in world frame; IMU yaw_offset does NOT apply here.
@@ -2008,6 +2348,10 @@ class NavigationService:
             data = self._calibration_repo.load_imu_alignment()
             self._session_heading_alignment = float(data.get("session_heading_alignment", 0.0)) % 360.0
             self._heading_alignment_sample_count = int(data.get("sample_count", 0))
+            epoch = data.get("imu_epoch_id")
+            self._alignment_imu_epoch_id = (
+                epoch.strip() if isinstance(epoch, str) and epoch.strip() else None
+            )
             logger.info(
                 "IMU alignment loaded via CalibrationRepository: %.1f° (source=%s, samples=%d)",
                 self._session_heading_alignment,
@@ -2024,6 +2368,10 @@ class NavigationService:
             source = data.get("source", "unknown")
             self._session_heading_alignment = saved % 360.0
             self._heading_alignment_sample_count = samples
+            epoch = data.get("imu_epoch_id")
+            self._alignment_imu_epoch_id = (
+                epoch.strip() if isinstance(epoch, str) and epoch.strip() else None
+            )
             logger.info(
                 "IMU alignment loaded from disk: %.1f° (source=%s, samples=%d)",
                 self._session_heading_alignment,
@@ -2033,8 +2381,12 @@ class NavigationService:
         except Exception as exc:
             logger.warning("Could not load IMU alignment file: %s", exc)
             self._session_heading_alignment = 0.0
+            self._heading_alignment_sample_count = 0
+            self._alignment_imu_epoch_id = None
 
     _ALIGNMENT_MAX_AGE_S: float = 24.0 * 3600.0  # 24 hours
+    _ALIGNMENT_MAX_FUTURE_SKEW_S: float = 30.0
+    _REUSABLE_ALIGNMENT_SOURCES = {"gps_cog_snap", "stop_navigation"}
 
     def _load_saved_alignment_for_mission_start(
         self,
@@ -2053,14 +2405,18 @@ class NavigationService:
         """
         try:
             if self._calibration_repo is not None:
-                data = self._calibration_repo.load_imu_alignment()
+                data = self._calibration_repo.load_reusable_imu_alignment(
+                    max_age_s=self._ALIGNMENT_MAX_AGE_S
+                )
+                if data is None:
+                    return None
             else:
                 if not self._ALIGNMENT_FILE.exists():
                     return None
                 data = json.loads(self._ALIGNMENT_FILE.read_text())
 
-            source = data.get("source", "default")
-            if source in {"mission_start_reset", "gps_cog_snap_fallback", "gps_cog_snap_no_imu"}:
+            source = str(data.get("source", "default")).strip()
+            if source not in self._REUSABLE_ALIGNMENT_SOURCES:
                 return None
 
             last_updated_str = data.get("last_updated")
@@ -2076,6 +2432,9 @@ class NavigationService:
             if last_updated.tzinfo is None:
                 last_updated = last_updated.replace(tzinfo=UTC)
             age_s = (now - last_updated).total_seconds()
+            if age_s < -self._ALIGNMENT_MAX_FUTURE_SKEW_S:
+                logger.warning("Mission start: saved alignment timestamp is in the future")
+                return None
             if age_s > self._ALIGNMENT_MAX_AGE_S:
                 logger.info(
                     "Mission start: saved alignment age %.0fs > %.0fs — discarding",
@@ -2085,13 +2444,20 @@ class NavigationService:
                 return None
 
             value = float(data.get("session_heading_alignment", 0.0)) % 360.0
+            if not math.isfinite(value):
+                return None
             samples = int(data.get("sample_count", 0))
             return (value, samples, age_s)
         except Exception as exc:
             logger.warning("Could not check saved alignment for mission start: %s", exc)
             return None
 
-    def _save_alignment_to_disk(self, source: str) -> None:
+    def has_reusable_heading_alignment(self) -> bool:
+        """Return whether fresh authoritative heading evidence can be reused."""
+        saved = self._load_saved_alignment_for_mission_start()
+        return saved is not None and int(saved[1]) >= 1
+
+    def _save_alignment_to_disk(self, source: str) -> bool:
         """Persist current session heading alignment to data/imu_alignment.json.
 
         Uses an atomic write (write to tmp then rename) to avoid partial files.
@@ -2101,12 +2467,12 @@ class NavigationService:
         writing the file directly.
         """
         if self._calibration_repo is not None:
-            self._calibration_repo.save_imu_alignment(
+            return bool(self._calibration_repo.save_imu_alignment(
                 heading_deg=self._session_heading_alignment,
                 sample_count=self._heading_alignment_sample_count,
                 source=source,
-            )
-            return
+                imu_epoch_id=self._alignment_imu_epoch_id,
+            ))
         try:
             payload = {
                 "session_heading_alignment": round(self._session_heading_alignment, 3),
@@ -2114,6 +2480,8 @@ class NavigationService:
                 "source": source,
                 "last_updated": datetime.now(UTC).isoformat(),
             }
+            if self._alignment_imu_epoch_id is not None:
+                payload["imu_epoch_id"] = self._alignment_imu_epoch_id
             tmp = self._ALIGNMENT_FILE.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(payload, indent=2))
             tmp.replace(self._ALIGNMENT_FILE)
@@ -2123,8 +2491,10 @@ class NavigationService:
                 source,
                 self._heading_alignment_sample_count,
             )
+            return True
         except Exception as exc:
             logger.warning("Could not save IMU alignment to disk: %s", exc)
+            return False
 
     async def stop_navigation(self) -> bool:
         """Stop navigation and return to idle"""

@@ -6,6 +6,7 @@ import pytest
 
 import backend.src.core.config_loader as _cl_mod
 from backend.src.core.config_loader import ConfigLoader, get_config_loader
+from backend.src.models.safety_limits import SafetyLimits, heading_bootstrap_stop_reserve_m
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +45,25 @@ def test_config_loader_minimal(tmp_path: Path):
     assert hw.gps_type is not None
     assert limits.estop_latency_ms == 100
     assert limits.tilt_cutoff_latency_ms == 200
+
+
+def test_default_heading_bootstrap_budget_has_stop_headroom():
+    limits = SafetyLimits()
+    reserve_m = heading_bootstrap_stop_reserve_m(
+        speed_mps=limits.bootstrap_speed_mps,
+        command_ttl_ms=limits.autonomous_command_ttl_ms,
+        braking_decel_mps2=limits.autonomous_braking_decel_mps2,
+    )
+
+    assert limits.bootstrap_min_travel_m == pytest.approx(0.25)
+    assert limits.bootstrap_max_travel_m == pytest.approx(0.60)
+    assert reserve_m == pytest.approx(0.15)
+    assert limits.bootstrap_min_travel_m + reserve_m < limits.bootstrap_max_travel_m
+
+
+def test_heading_bootstrap_budget_rejects_impossible_minimum():
+    with pytest.raises(ValueError, match="lease/braking reserve"):
+        SafetyLimits(bootstrap_min_travel_m=0.45, bootstrap_max_travel_m=0.60)
 
 
 def test_config_loader_maps_gps_position_offsets(tmp_path: Path):

@@ -169,6 +169,28 @@ async def test_stale_imu_while_blade_active_fails_closed():
 
 
 @pytest.mark.asyncio
+async def test_cached_imu_does_not_refresh_live_safety_age():
+    runtime = _runtime(blade_active=True)
+    coordinator = LiveSafetyCoordinator(runtime)
+
+    faults = await coordinator.evaluate_fast_sample(
+        SensorData(
+            imu=ImuReading(
+                roll=0.0,
+                pitch=0.0,
+                cached=True,
+                monotonic_received_s=0.0,
+            ),
+            tof_left=_tof("left"),
+            tof_right=_tof("right"),
+        )
+    )
+
+    assert "IMU_SAFETY_SAMPLE_STALE" in faults
+    assert coordinator.status.last_imu_sample_monotonic_s is None
+
+
+@pytest.mark.asyncio
 async def test_slow_power_stall_does_not_delay_fast_tilt_response():
     class SlowManager:
         initialized = True

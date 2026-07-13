@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -153,8 +154,20 @@ class LiveSafetyCoordinator:
         now_mono = time.monotonic()
 
         imu = sample.imu
-        if imu is not None:
-            self._status.last_imu_sample_monotonic_s = now_mono
+        imu_received_mono = getattr(imu, "monotonic_received_s", None)
+        max_imu_age_s = max(
+            0.05,
+            float(getattr(limits, "autonomous_command_ttl_ms", 350)) / 1000.0,
+        )
+        imu_is_fresh = bool(
+            imu is not None
+            and not bool(getattr(imu, "cached", False))
+            and isinstance(imu_received_mono, (int, float))
+            and math.isfinite(float(imu_received_mono))
+            and 0.0 <= now_mono - float(imu_received_mono) <= max_imu_age_s
+        )
+        if imu_is_fresh:
+            self._status.last_imu_sample_monotonic_s = float(imu_received_mono)
             roll = float(imu.roll or 0.0)
             pitch = float(imu.pitch or 0.0)
             if self._trigger_manager.trigger_tilt(

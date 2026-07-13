@@ -1,5 +1,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -291,7 +293,7 @@ async def test_bootstrap_heading_snap_uses_position_delta_gps_cog():
 
 @pytest.mark.asyncio
 async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
-    nav = NavigationService()
+    nav = NavigationService(load_runtime_config=False, load_persisted_alignment=False)
     calls = 0
 
     class FakeSensorManager:
@@ -299,9 +301,6 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
             nonlocal calls
             calls += 1
             return SensorData()
-
-    async def fake_set_speed(_left: float, _right: float) -> None:
-        pass
 
     async def fake_deliver_stop_command(
         *,
@@ -312,20 +311,27 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
         return True
 
     async def fake_update_navigation_state(_sensor_data: SensorData):
-        nonlocal calls
         nav._heading_alignment_sample_count = 1
+        nav._alignment_imu_epoch_id = "test-epoch"
+        nav._bootstrap_alignment_staged = True
         # Simulate ~2 m of forward movement so the min-distance gate passes.
         nav.navigation_state.current_position = Position(latitude=0.00002, longitude=0.0, accuracy=0.1)
         return nav.navigation_state
 
     original_manager = AppState.get_instance().sensor_manager
     set_sensor_manager(FakeSensorManager())
-    monkeypatch.setattr(nav, "set_speed", fake_set_speed)
     monkeypatch.setattr(nav, "_deliver_stop_command", fake_deliver_stop_command)
     monkeypatch.setattr(nav, "_global_emergency_active", lambda: False)
     monkeypatch.setattr(nav, "update_navigation_state", fake_update_navigation_state)
+    monkeypatch.setattr(nav, "_save_alignment_to_disk", lambda _source: True)
     # Pre-set a GPS fix so the pre-flight check passes immediately without waiting.
     nav.navigation_state.current_position = Position(latitude=0.0, longitude=0.0, accuracy=0.1)
+    nav.navigation_state.imu_valid = True
+    nav._active_imu_epoch_id = "test-epoch"
+    nav._last_imu_monotonic_s = navigation_service_module.time.monotonic()
+    nav._last_imu_raw_yaw_deg = 12.0
+    nav._mission_execution_phase = "heading_bootstrap"
+    nav._gateway_adapter.dispatch_drive_speeds = AsyncMock(return_value=True)
     nav.bootstrap_max_travel_m = 3.0
 
     try:
@@ -334,11 +340,16 @@ async def test_bootstrap_uses_shared_app_state_sensor_manager(monkeypatch):
         set_sensor_manager(original_manager)
 
     assert calls == 1
+    nav._gateway_adapter.dispatch_drive_speeds.assert_awaited_once_with(
+        nav.bootstrap_speed_mps,
+        nav.bootstrap_speed_mps,
+        heading_bootstrap=True,
+    )
 
 
 @pytest.mark.asyncio
 async def test_bootstrap_aborts_when_travel_budget_expires(monkeypatch):
-    nav = NavigationService()
+    nav = NavigationService(load_runtime_config=False, load_persisted_alignment=False)
 
     class FakeSensorManager:
         async def read_all_sensors(self, bootstrap_mode: bool = False):
@@ -367,6 +378,12 @@ async def test_bootstrap_aborts_when_travel_budget_expires(monkeypatch):
     monkeypatch.setattr(nav, "_global_emergency_active", lambda: False)
     monkeypatch.setattr(nav, "update_navigation_state", fake_update_navigation_state)
     nav.navigation_state.current_position = Position(latitude=0.0, longitude=0.0, accuracy=0.1)
+    nav.navigation_state.imu_valid = True
+    nav._active_imu_epoch_id = "test-epoch"
+    nav._last_imu_monotonic_s = navigation_service_module.time.monotonic()
+    nav._last_imu_raw_yaw_deg = 12.0
+    nav._mission_execution_phase = "heading_bootstrap"
+    nav._gateway_adapter.dispatch_drive_speeds = AsyncMock(return_value=True)
     nav.bootstrap_max_travel_m = 0.5
 
     try:
@@ -376,8 +393,158 @@ async def test_bootstrap_aborts_when_travel_budget_expires(monkeypatch):
         set_sensor_manager(original_manager)
 
 
+@pytest.mark.asyncio
+async def test_bootstrap_initial_gateway_rejection_aborts_without_retry(monkeypatch):
+    nav = NavigationService(load_runtime_config=False, load_persisted_alignment=False)
+    nav.navigation_state.current_position = Position(latitude=0.0, longitude=0.0, accuracy=0.1)
+    nav.navigation_state.imu_valid = True
+    nav._active_imu_epoch_id = "test-epoch"
+    nav._last_imu_monotonic_s = navigation_service_module.time.monotonic()
+    nav._last_imu_raw_yaw_deg = 5.0
+    nav._mission_execution_phase = "heading_bootstrap"
+    nav._gateway_adapter.dispatch_drive_speeds = AsyncMock(return_value=False)
+    stop = AsyncMock(return_value=True)
+    monkeypatch.setattr(nav, "_deliver_stop_command", stop)
+
+    with pytest.raises(RuntimeError, match="rejected by safety gateway"):
+        await nav._bootstrap_heading_from_gps_cog()
+
+    nav._gateway_adapter.dispatch_drive_speeds.assert_awaited_once_with(
+        nav.bootstrap_speed_mps,
+        nav.bootstrap_speed_mps,
+        heading_bootstrap=True,
+    )
+    stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stop_delivery_cancels_gateway_lease_with_hardware_ack() -> None:
+    nav = NavigationService(load_runtime_config=False, load_persisted_alignment=False)
+    dispatch = AsyncMock(return_value=True)
+    nav._gateway_adapter.dispatch_drive_speeds = dispatch
+
+    assert await nav._deliver_stop_command(reason="test stop") is True
+    dispatch.assert_awaited_once_with(0.0, 0.0, require_hardware_ack=True)
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_stop_ack_failure_escalates_emergency(monkeypatch):
+    nav = NavigationService(load_runtime_config=False, load_persisted_alignment=False)
+    nav.navigation_state.current_position = Position(latitude=0.0, longitude=0.0, accuracy=0.1)
+    nav.navigation_state.imu_valid = True
+    nav._active_imu_epoch_id = "test-epoch"
+    nav._last_imu_monotonic_s = navigation_service_module.time.monotonic()
+    nav._last_imu_raw_yaw_deg = 5.0
+    nav._mission_execution_phase = "heading_bootstrap"
+    nav._gateway_adapter.dispatch_drive_speeds = AsyncMock(return_value=False)
+    monkeypatch.setattr(nav, "_deliver_stop_command", AsyncMock(return_value=False))
+    emergency = AsyncMock(return_value=False)
+    monkeypatch.setattr(nav, "emergency_stop", emergency)
+
+    with pytest.raises(RuntimeError, match="STOP_CONFIRMATION_FAILED"):
+        await nav._bootstrap_heading_from_gps_cog()
+
+    emergency.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_in_process_imu_epoch_change_stops_active_mission(monkeypatch):
+    nav = NavigationService(load_runtime_config=False, load_persisted_alignment=False)
+    nav._active_imu_epoch_id = "epoch-a"
+    nav._alignment_imu_epoch_id = "epoch-a"
+    nav._heading_alignment_sample_count = 1
+    nav._session_heading_alignment = 45.0
+    nav._mission_execution_active = True
+    stop = AsyncMock(return_value=True)
+    latch = MagicMock()
+    monkeypatch.setattr(nav, "_deliver_stop_command", stop)
+    monkeypatch.setattr(nav, "_latch_global_emergency_state", latch)
+
+    with pytest.raises(RuntimeError, match="IMU_EPOCH_CHANGED"):
+        await nav.update_navigation_state(
+            SensorData(
+                imu=ImuReading(
+                    yaw=12.0,
+                    calibration_status="fully_calibrated",
+                    imu_epoch_id="epoch-b",
+                )
+            )
+        )
+
+    latch.assert_called_once()
+    stop.assert_awaited_once_with(reason="IMU epoch change")
+    assert nav._heading_alignment_sample_count == 0
+    assert nav.navigation_state.heading is None
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_checks_stop_reserve_before_renewing_lease(monkeypatch):
+    nav = NavigationService(load_runtime_config=False, load_persisted_alignment=False)
+
+    class FakeSensorManager:
+        async def read_all_sensors(self, bootstrap_mode: bool = False):
+            return SensorData()
+
+    async def fake_update_navigation_state(_sensor_data: SensorData):
+        nav.navigation_state.current_position = Position(
+            latitude=0.0000042,
+            longitude=0.0,
+            accuracy=0.03,
+        )
+        return nav.navigation_state
+
+    original_manager = AppState.get_instance().sensor_manager
+    set_sensor_manager(FakeSensorManager())
+    monkeypatch.setattr(nav, "update_navigation_state", fake_update_navigation_state)
+    monkeypatch.setattr(nav, "_deliver_stop_command", AsyncMock(return_value=True))
+    monkeypatch.setattr(nav, "_global_emergency_active", lambda: False)
+    nav.navigation_state.current_position = Position(latitude=0.0, longitude=0.0, accuracy=0.03)
+    nav.navigation_state.imu_valid = True
+    nav._active_imu_epoch_id = "test-epoch"
+    nav._last_imu_monotonic_s = navigation_service_module.time.monotonic()
+    nav._last_imu_raw_yaw_deg = 5.0
+    nav._mission_execution_phase = "heading_bootstrap"
+    drive = AsyncMock(return_value=True)
+    nav._gateway_adapter.dispatch_drive_speeds = drive
+
+    try:
+        with pytest.raises(RuntimeError, match="BUDGET_EXHAUSTED"):
+            await nav._bootstrap_heading_from_gps_cog()
+    finally:
+        set_sensor_manager(original_manager)
+
+    assert drive.await_count == 1
+
+
+def test_bootstrap_travel_stays_in_raw_antenna_frame_after_heading_snap():
+    nav = NavigationService(load_runtime_config=False, load_persisted_alignment=False)
+    antenna = Position(latitude=40.0, longitude=-75.0, accuracy=0.03)
+    nav._localization = SimpleNamespace(
+        canonical_pose=lambda: SimpleNamespace(
+            antenna_position=antenna,
+            sample_monotonic_s=navigation_service_module.time.monotonic(),
+        )
+    )
+    nav._bootstrap_start_antenna_position = antenna
+    nav.navigation_state.current_position = Position(
+        latitude=40.000004,
+        longitude=-75.0,
+        accuracy=0.03,
+    )
+
+    assert nav._bootstrap_travel_m() == pytest.approx(0.0)
+
+    moved_antenna = Position(latitude=40.0000025, longitude=-75.0, accuracy=0.03)
+    nav._localization.canonical_pose = lambda: SimpleNamespace(
+        antenna_position=moved_antenna,
+        sample_monotonic_s=navigation_service_module.time.monotonic(),
+    )
+
+    assert nav._bootstrap_travel_m() == pytest.approx(0.278, abs=0.01)
+
+
 def test_bootstrap_position_quality_requires_rtk_grade_accuracy():
-    nav = NavigationService()
+    nav = NavigationService(load_runtime_config=False, load_persisted_alignment=False)
 
     assert nav._position_ready_for_bootstrap(None) is False
     assert nav._position_ready_for_bootstrap(Position(latitude=0.0, longitude=0.0, accuracy=None)) is False
@@ -555,6 +722,9 @@ async def test_bootstrap_geofence_violation_aborts_mission():
     nav._latch_global_emergency_state = MagicMock()
     nav._bootstrap_heading_from_gps_cog = AsyncMock()
     nav._load_boundaries_from_zones = MagicMock()
+    nav._localization = None
+    nav._gps_antenna_offset_forward_m = 0.0
+    nav._gps_antenna_offset_right_m = 0.0
     nav._operating_area_snapshot = MagicMock()
     nav._operating_area_snapshot.validate_ready_for_autonomy.return_value = None
     nav._operating_area_snapshot.contains_footprint.return_value = False
@@ -851,9 +1021,9 @@ def test_load_saved_alignment_uses_calibration_repo(tmp_path):
     from datetime import UTC, datetime, timedelta
     from unittest.mock import MagicMock
 
-    nav = NavigationService()
+    nav = NavigationService(load_runtime_config=False, load_persisted_alignment=False)
     nav._calibration_repo = MagicMock()
-    nav._calibration_repo.load_imu_alignment.return_value = {
+    nav._calibration_repo.load_reusable_imu_alignment.return_value = {
         "session_heading_alignment": 22.5,
         "sample_count": 3,
         "source": "gps_cog_snap",

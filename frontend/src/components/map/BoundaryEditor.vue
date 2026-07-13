@@ -116,7 +116,7 @@
       <button
         class="btn btn-sm btn-secondary"
         :disabled="!mapStore.configuration?.boundary_zone || isVerificationActive"
-        @click="showVerificationChecklist = true"
+        @click="openVerificationChecklist"
       >
         Prepare Drive-To-Confirm
       </button>
@@ -133,8 +133,13 @@
         Cancel Verification
       </button>
       <span v-if="mapStore.verificationStatus" class="verification-status-chip">
-        Verification: {{ mapStore.verificationStatus.status }}{{ activeVerificationPoint ? ` · point ${activeVerificationPoint.index + 1} ${activeVerificationPoint.status}` : '' }}
+        Verification: {{ mapStore.verificationStatus.status }}{{ displayedVerificationPoint ? ` · point ${displayedVerificationPoint.index + 1} ${displayedVerificationPointStatus}` : '' }}
       </span>
+    </div>
+
+    <div v-if="latestVerificationProblem" class="verification-problem" role="alert">
+      <strong>Boundary point {{ latestVerificationProblem.index + 1 }} {{ latestVerificationProblem.status }}</strong>
+      <span>{{ latestVerificationProblem.error || 'The verification mission ended before arrival.' }}</span>
     </div>
 
     <div v-if="showVerificationChecklist" class="verification-checklist">
@@ -146,6 +151,11 @@
       <label><input v-model="verificationOperatorConfirmed" type="checkbox"> I am at the mower and will supervise every leg.</label>
       <label><input v-model="verificationBladeDisabled" type="checkbox"> The cutting blade is physically disabled.</label>
       <label><input v-model="verificationRouteClear" type="checkbox"> The route is clear and the master cutoff is reachable.</label>
+      <label>
+        <input v-model="verificationHeadingBootstrapConfirmed" type="checkbox">
+        I understand the first leg may begin with a bounded, straight blade-off heading bootstrap
+        from the mower's current clear interior position.
+      </label>
       <label>
         Physical intervention available
         <input
@@ -451,6 +461,12 @@ import {
   removeDisplayTransform,
   type MapAlignmentProfile,
 } from '@/utils/mapDisplayTransform';
+import {
+  activeBoundaryVerificationPoint as findActiveVerificationPoint,
+  boundaryVerificationFailureKey,
+  boundaryVerificationStatusLabel,
+  latestBoundaryVerificationProblem,
+} from '@/utils/boundaryVerification';
 
 const mapStore = useMapStore();
 const toast = useToastStore();
@@ -504,8 +520,12 @@ const showVerificationChecklist = ref(false);
 const verificationOperatorConfirmed = ref(false);
 const verificationBladeDisabled = ref(false);
 const verificationRouteClear = ref(false);
+const verificationHeadingBootstrapConfirmed = ref(false);
 const verificationPhysicalIntervention = ref('');
 const verificationPollTimer = ref<number | null>(null);
+const lastVerificationFailureNoticeKey = ref<string | null>(null);
+const verificationStartPending = ref(false);
+const verificationNextPending = ref(false);
 
 // Tile loading and error state
 const tileLoadingState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle');
@@ -780,12 +800,22 @@ const safeBoundaryLatLng = computed(() => {
 
 const hasImportedBoundary = computed(() => importedBoundaryLatLng.value.length >= 3);
 const isVerificationActive = computed(() => mapStore.verificationStatus?.status === 'active');
-const activeVerificationPoint = computed(() => {
-  const status = mapStore.verificationStatus;
-  return status?.points?.find(point => point.index === status.target_index) || null;
-});
+const activeVerificationPoint = computed(() => (
+  findActiveVerificationPoint(mapStore.verificationStatus)
+));
+const latestVerificationProblem = computed(() => (
+  latestBoundaryVerificationProblem(mapStore.verificationStatus)
+));
+const displayedVerificationPoint = computed(() => (
+  activeVerificationPoint.value || latestVerificationProblem.value
+));
+const displayedVerificationPointStatus = computed(() => (
+  boundaryVerificationStatusLabel(displayedVerificationPoint.value)
+));
 const canRequestNextVerificationPoint = computed(() => (
-  isVerificationActive.value && mapStore.verificationStatus?.target_index == null
+  isVerificationActive.value
+  && mapStore.verificationStatus?.target_index == null
+  && !verificationNextPending.value
 ));
 const canConfirmVerificationPoint = computed(() => {
   return isVerificationActive.value && activeVerificationPoint.value?.status === 'arrived';
@@ -795,9 +825,11 @@ const canRejectVerificationPoint = computed(() => (
   && ['starting', 'traveling', 'arrived'].includes(activeVerificationPoint.value?.status || '')
 ));
 const canStartVerification = computed(() => (
-  verificationOperatorConfirmed.value
+  !verificationStartPending.value
+  && verificationOperatorConfirmed.value
   && verificationBladeDisabled.value
   && verificationRouteClear.value
+  && verificationHeadingBootstrapConfirmed.value
   && verificationPhysicalIntervention.value.trim().length > 0
 ));
 const verificationTargetLatLng = computed(() => {
@@ -914,28 +946,77 @@ async function generateSafeBoundary() {
   }
 }
 
+function resetVerificationAcknowledgements() {
+  verificationOperatorConfirmed.value = false;
+  verificationBladeDisabled.value = false;
+  verificationRouteClear.value = false;
+  verificationHeadingBootstrapConfirmed.value = false;
+  verificationPhysicalIntervention.value = '';
+}
+
+function openVerificationChecklist() {
+  resetVerificationAcknowledgements();
+  showVerificationChecklist.value = true;
+}
+
 async function startVerification() {
+  if (verificationStartPending.value) return;
+  verificationStartPending.value = true;
   try {
     await mapStore.startVerificationFromConfirmed({
       operator_confirmed: verificationOperatorConfirmed.value,
       blade_physically_disabled: verificationBladeDisabled.value,
       route_clear_confirmed: verificationRouteClear.value,
+      heading_bootstrap_confirmed: verificationHeadingBootstrapConfirmed.value,
       physical_intervention: verificationPhysicalIntervention.value.trim(),
     });
     showVerificationChecklist.value = false;
+    resetVerificationAcknowledgements();
     toast.show('Blade-off session created; no motion has started', 'success', 3000);
   } catch (err: any) {
     toast.show(err?.response?.data?.detail || err?.message || 'Failed to start verification', 'error', 4000);
+  } finally {
+    verificationStartPending.value = false;
   }
 }
 
 async function goToNextVerificationPoint() {
+  if (verificationNextPending.value) return;
+  verificationNextPending.value = true;
   try {
-    await mapStore.goToNextVerificationPoint();
-    toast.show('Mower traveling to boundary point with blade off', 'info', 3500);
+    const status = await mapStore.goToNextVerificationPoint();
+    const problem = latestBoundaryVerificationProblem(status);
+    if (problem && status.target_index == null) {
+      lastVerificationFailureNoticeKey.value = boundaryVerificationFailureKey(problem);
+      toast.show(
+        `Boundary point ${problem.index + 1} ${problem.status}: ${problem.error || 'Mission admission failed.'}`,
+        'error',
+        6000,
+      );
+      return;
+    }
+    const pointNumber = status.target_index == null ? null : status.target_index + 1;
+    const message = pointNumber == null
+      ? 'Boundary verification has no remaining points'
+      : `Boundary point ${pointNumber} is starting; waiting for live mission status`;
+    toast.show(message, 'info', 3500);
   } catch (err: any) {
     toast.show(err?.response?.data?.detail || err?.message || 'Failed to start point travel', 'error', 4000);
+  } finally {
+    verificationNextPending.value = false;
   }
+}
+
+async function refreshVerificationStatus() {
+  const status = await mapStore.refreshVerificationStatus();
+  const problem = latestBoundaryVerificationProblem(status);
+  const failureKey = boundaryVerificationFailureKey(problem);
+  if (problem && failureKey && failureKey !== lastVerificationFailureNoticeKey.value) {
+    lastVerificationFailureNoticeKey.value = failureKey;
+    const detail = problem.error || 'The verification mission ended before arrival.';
+    toast.show(`Boundary point ${problem.index + 1} ${problem.status}: ${detail}`, 'error', 6000);
+  }
+  return status;
 }
 
 async function confirmVerificationPoint() {
@@ -1458,9 +1539,9 @@ onMounted(async () => {
     if (!mapStore.configuration) {
       await mapStore.loadConfiguration('default');
     }
-    await mapStore.refreshVerificationStatus().catch(() => null);
+    await refreshVerificationStatus().catch(() => null);
     verificationPollTimer.value = window.setInterval(() => {
-      void mapStore.refreshVerificationStatus().catch(() => null);
+      void refreshVerificationStatus().catch(() => null);
     }, 1500);
     safeBufferMeters.value = mapStore.safeBoundaryBufferMeters ?? 0.05;
     // Initialize center from configuration if available
@@ -2021,6 +2102,17 @@ function retryOriginalTiles() {
   background: rgba(38, 132, 255, 0.18);
   color: #9fc7ff;
   font-size: .8rem;
+}
+
+.verification-problem {
+  display: grid;
+  gap: .25rem;
+  padding: .65rem 1rem;
+  border-top: 1px solid rgba(255, 77, 79, 0.28);
+  border-bottom: 1px solid rgba(255, 77, 79, 0.28);
+  background: rgba(255, 77, 79, 0.12);
+  color: #ffb3b5;
+  font-size: .875rem;
 }
 
 .verification-checklist {

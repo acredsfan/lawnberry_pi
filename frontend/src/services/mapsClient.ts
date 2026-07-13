@@ -31,6 +31,8 @@ export interface BoundaryVerificationPoint {
   status: 'pending' | 'starting' | 'traveling' | 'arrived' | 'confirmed' | 'rejected' | 'failed' | 'interrupted'
   mission_id?: string | null
   mission_lifecycle?: string | null
+  mission_phase?: 'admitting' | 'heading_validation' | 'heading_bootstrap' | 'waypoint' | string | null
+  heading_bootstrap_required?: boolean
   error?: string | null
   evidence?: Record<string, unknown> | null
 }
@@ -50,6 +52,7 @@ export interface BoundaryVerificationAcknowledgement {
   operator_confirmed: boolean
   blade_physically_disabled: boolean
   route_clear_confirmed: boolean
+  heading_bootstrap_confirmed: boolean
   physical_intervention: string
 }
 

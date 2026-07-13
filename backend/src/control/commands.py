@@ -15,6 +15,7 @@ class DriveCommand:
     session_id: str | None = None
     max_speed_limit: float = 0.8
     legacy: bool = False
+    heading_bootstrap: bool = False
 
 
 @dataclass

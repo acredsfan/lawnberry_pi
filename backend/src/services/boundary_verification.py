@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import math
+import time
 import uuid
 from datetime import UTC, datetime
+from functools import wraps
 from typing import Any
 
 from ..control.commands import BladeCommand, CommandStatus
@@ -29,6 +33,17 @@ def _position_payload(position: Position) -> dict[str, float]:
     }
 
 
+def _serialized_mutation(method):
+    """Serialize operator mutations so one click can create at most one leg."""
+
+    @wraps(method)
+    async def wrapper(self, *args, **kwargs):
+        async with self._mutation_lock:
+            return await method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class BoundaryVerificationService:
     """Coordinates operator-paced verification through canonical mission owners."""
 
@@ -42,6 +57,7 @@ class BoundaryVerificationService:
         self._rtk_min_samples = max(1, int(rtk_min_samples))
         self._rtk_duration_s = max(0.1, float(rtk_duration_s))
         self._rtk_interval_s = max(0.01, float(rtk_interval_s))
+        self._mutation_lock = asyncio.Lock()
 
     def _read(self) -> dict[str, Any] | None:
         path = boundary_file(BOUNDARY_VERIFICATION_SESSION)
@@ -72,6 +88,11 @@ class BoundaryVerificationService:
         }
 
     async def status(self, runtime: Any | None = None) -> dict[str, Any]:
+        """Read and reconcile without racing an in-flight operator mutation."""
+        async with self._mutation_lock:
+            return await self._status_unlocked(runtime)
+
+    async def _status_unlocked(self, runtime: Any | None = None) -> dict[str, Any]:
         session = self._read()
         if session is None:
             return self._idle_status()
@@ -79,6 +100,7 @@ class BoundaryVerificationService:
             session = await self._reconcile_mission(session, runtime)
         return session
 
+    @_serialized_mutation
     async def start(
         self,
         points: list[dict[str, float]],
@@ -87,16 +109,22 @@ class BoundaryVerificationService:
         operator_confirmed: bool,
         blade_physically_disabled: bool,
         route_clear_confirmed: bool,
+        heading_bootstrap_confirmed: bool,
         physical_intervention: str,
     ) -> dict[str, Any]:
         if not all(
-            (operator_confirmed, blade_physically_disabled, route_clear_confirmed)
+            (
+                operator_confirmed,
+                blade_physically_disabled,
+                route_clear_confirmed,
+                heading_bootstrap_confirmed,
+            )
         ) or not physical_intervention.strip():
             raise BoundaryValidationError(
                 "All physical safety acknowledgements are required before verification"
             )
 
-        existing = await self.status(runtime)
+        existing = await self._status_unlocked(runtime)
         if existing.get("status") == "active":
             raise BoundaryValidationError(
                 "A boundary verification session is already active; cancel it first"
@@ -164,6 +192,7 @@ class BoundaryVerificationService:
                 "operator_confirmed": True,
                 "blade_physically_disabled": True,
                 "route_clear_confirmed": True,
+                "heading_bootstrap_confirmed": True,
                 "physical_intervention": physical_intervention.strip(),
                 "acknowledged_at": _now(),
             },
@@ -171,8 +200,9 @@ class BoundaryVerificationService:
         }
         return self._write(session)
 
+    @_serialized_mutation
     async def next_point(self, runtime: Any) -> dict[str, Any]:
-        session = await self.status(runtime)
+        session = await self._status_unlocked(runtime)
         if session.get("status") != "active":
             raise BoundaryValidationError("No active boundary verification session")
         if session.get("target_index") is not None:
@@ -195,8 +225,26 @@ class BoundaryVerificationService:
             session["updated_at"] = _now()
             return self._write(session)
 
-        await self._preflight(runtime, session)
+        reuse_heading_alignment = bool(
+            runtime.navigation.has_reusable_heading_alignment()
+        )
+        await self._preflight(
+            runtime,
+            session,
+            require_live_heading=reuse_heading_alignment,
+        )
         await self._ensure_safe_idle(runtime)
+        if not reuse_heading_alignment:
+            acknowledged = bool(
+                (session.get("physical_acknowledgement") or {}).get(
+                    "heading_bootstrap_confirmed"
+                )
+            )
+            if not acknowledged:
+                raise BoundaryValidationError(
+                    "Restart verification and acknowledge the bounded heading bootstrap"
+                )
+            runtime.navigation.assert_heading_bootstrap_ready()
 
         approach = target["approach"]
         waypoint = MissionWaypoint(
@@ -213,6 +261,8 @@ class BoundaryVerificationService:
         target["status"] = "starting"
         target["mission_id"] = mission.id
         target["mission_lifecycle"] = MissionLifecycleStatus.IDLE.value
+        target["mission_phase"] = "admitting"
+        target["heading_bootstrap_required"] = not reuse_heading_alignment
         target["error"] = None
         session["target_index"] = target["index"]
         session["active_mission_id"] = mission.id
@@ -223,7 +273,7 @@ class BoundaryVerificationService:
             await runtime.mission_service.start_mission(
                 mission.id,
                 blade_off_diagnostic=True,
-                reuse_heading_alignment=True,
+                reuse_heading_alignment=reuse_heading_alignment,
             )
         except Exception as exc:
             try:
@@ -239,13 +289,14 @@ class BoundaryVerificationService:
             await self._ensure_safe_idle(runtime, raise_on_failure=False)
             raise BoundaryValidationError(f"Verification mission failed to start: {exc}") from exc
 
-        target["status"] = "traveling"
-        target["mission_lifecycle"] = MissionLifecycleStatus.RUNNING.value
-        session["updated_at"] = _now()
-        return self._write(session)
+        # Let the new task run once, then return the observed lifecycle/phase.
+        # This prevents a fast admission failure from being reported as idle.
+        await asyncio.sleep(0)
+        return await self._reconcile_mission(session, runtime)
 
+    @_serialized_mutation
     async def confirm_point(self, runtime: Any) -> dict[str, Any]:
-        session = await self.status(runtime)
+        session = await self._status_unlocked(runtime)
         target = self._current_point(session)
         if target is None or target.get("status") != "arrived":
             raise BoundaryValidationError(
@@ -317,8 +368,9 @@ class BoundaryVerificationService:
             session["status"] = "complete"
         return self._write(session)
 
+    @_serialized_mutation
     async def reject_point(self, runtime: Any) -> dict[str, Any]:
-        session = await self.status(runtime)
+        session = await self._status_unlocked(runtime)
         target = self._current_point(session)
         if target is None or target.get("status") not in {"starting", "traveling", "arrived"}:
             raise BoundaryValidationError("No active or arrived verification point to reject")
@@ -333,8 +385,9 @@ class BoundaryVerificationService:
         session["updated_at"] = _now()
         return self._write(session)
 
+    @_serialized_mutation
     async def cancel(self, runtime: Any) -> dict[str, Any]:
-        session = await self.status(runtime)
+        session = await self._status_unlocked(runtime)
         try:
             await self._abort_active_mission(session, runtime)
         finally:
@@ -346,7 +399,13 @@ class BoundaryVerificationService:
         session["updated_at"] = _now()
         return self._write(session)
 
-    async def _preflight(self, runtime: Any, session: dict[str, Any]) -> None:
+    async def _preflight(
+        self,
+        runtime: Any,
+        session: dict[str, Any],
+        *,
+        require_live_heading: bool = True,
+    ) -> None:
         nav = runtime.navigation
         state = nav.navigation_state
         mode = getattr(state.navigation_mode, "value", state.navigation_mode)
@@ -356,7 +415,10 @@ class BoundaryVerificationService:
             raise BoundaryValidationError("Emergency stop is active")
         if bool(getattr(state, "obstacle_avoidance_active", False)):
             raise BoundaryValidationError("Front ToF reports an obstacle inside stopping clearance")
-        if not isinstance(getattr(state, "heading", None), (int, float)):
+        self._assert_live_imu(runtime)
+        if require_live_heading and not isinstance(
+            getattr(state, "heading", None), (int, float)
+        ):
             raise BoundaryValidationError(
                 "No live heading is available; run the center-yard heading bootstrap first"
             )
@@ -391,6 +453,52 @@ class BoundaryVerificationService:
         if reading.accuracy is None or float(reading.accuracy) > 0.05:
             raise BoundaryValidationError("GPS accuracy must be 0.05 m or better")
 
+    @staticmethod
+    def _assert_live_imu(runtime: Any) -> None:
+        state = runtime.navigation.navigation_state
+        if not bool(getattr(state, "imu_valid", False)):
+            raise BoundaryValidationError("IMU_NOT_READY: a valid live IMU sample is required")
+        imu = getattr(runtime.sensor_manager, "imu", None)
+        reading = getattr(imu, "last_reading", None) if imu is not None else None
+        if reading is None:
+            raise BoundaryValidationError("IMU_NOT_READY: live IMU owner has no sample")
+        yaw = getattr(reading, "yaw", None)
+        if not isinstance(yaw, (int, float)) or not math.isfinite(float(yaw)):
+            raise BoundaryValidationError("IMU_NOT_READY: live IMU yaw is unavailable")
+        timestamp = getattr(reading, "timestamp", None)
+        if not isinstance(timestamp, datetime):
+            raise BoundaryValidationError("IMU_NOT_READY: IMU sample timestamp is unavailable")
+        observed_at = timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=UTC)
+        age_s = (datetime.now(UTC) - observed_at).total_seconds()
+        if age_s < -1.0 or age_s > 2.0:
+            raise BoundaryValidationError("IMU_NOT_READY: IMU sample is stale")
+        if str(getattr(reading, "calibration_status", "")).lower() == "uncalibrated":
+            raise BoundaryValidationError("IMU_NOT_READY: IMU is uncalibrated")
+        if bool(getattr(reading, "cached", False)):
+            raise BoundaryValidationError("IMU_NOT_READY: IMU sample is cached")
+        received_mono = getattr(reading, "monotonic_received_s", None)
+        if not isinstance(received_mono, (int, float)) or not math.isfinite(
+            float(received_mono)
+        ):
+            raise BoundaryValidationError("IMU_NOT_READY: IMU receipt marker is unavailable")
+        max_age_s = max(
+            0.05,
+            float(getattr(runtime.navigation, "autonomous_command_ttl_ms", 350)) / 1000.0,
+        )
+        if not 0.0 <= time.monotonic() - float(received_mono) <= max_age_s:
+            raise BoundaryValidationError("IMU_NOT_READY: IMU sample is stale")
+        imu_epoch_id = getattr(reading, "imu_epoch_id", None)
+        repository = getattr(runtime, "calibration_repository", None)
+        if (
+            not isinstance(imu_epoch_id, str)
+            or not imu_epoch_id.strip()
+            or repository is None
+            or getattr(repository, "imu_epoch_id", None) != imu_epoch_id.strip()
+        ):
+            raise BoundaryValidationError(
+                "IMU_NOT_READY: IMU reset generation is not bound to calibration evidence"
+            )
+
     async def _reconcile_mission(
         self,
         session: dict[str, Any],
@@ -409,7 +517,22 @@ class BoundaryVerificationService:
             detail = str(exc)
         changed = target.get("mission_lifecycle") != lifecycle
         target["mission_lifecycle"] = lifecycle
-        if lifecycle == MissionLifecycleStatus.COMPLETED.value:
+        mission_phase = target.get("mission_phase")
+        if lifecycle == MissionLifecycleStatus.RUNNING.value:
+            phase_reader = getattr(runtime.navigation, "get_mission_execution_phase", None)
+            if callable(phase_reader):
+                mission_phase = phase_reader(mission_id)
+            if mission_phase is not None and target.get("mission_phase") != mission_phase:
+                target["mission_phase"] = mission_phase
+                changed = True
+        if (
+            lifecycle == MissionLifecycleStatus.RUNNING.value
+            and mission_phase == "waypoint"
+            and target.get("status") == "starting"
+        ):
+            changed = True
+            target["status"] = "traveling"
+        elif lifecycle == MissionLifecycleStatus.COMPLETED.value:
             changed = changed or target.get("status") != "arrived"
             target["status"] = "arrived"
             target["arrived_at"] = target.get("arrived_at") or _now()

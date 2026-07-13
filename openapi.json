@@ -2818,6 +2818,11 @@
             "title": "Coordinates",
             "type": "array"
           },
+          "heading_bootstrap_confirmed": {
+            "default": false,
+            "title": "Heading Bootstrap Confirmed",
+            "type": "boolean"
+          },
           "operator_confirmed": {
             "default": false,
             "title": "Operator Confirmed",

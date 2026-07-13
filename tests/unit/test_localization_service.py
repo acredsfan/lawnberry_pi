@@ -28,6 +28,7 @@ def test_localization_state_defaults():
 
 # --- Task 3: LocalizationService core behavior ------------------------------
 
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -221,8 +222,14 @@ async def test_bootstrap_alignment_snaps_from_gps_cog():
                     longitude=-122.0,
                     accuracy=0.03,
                     timestamp=started_at + timedelta(seconds=index),
+                    sample_id=index + 1,
+                    monotonic_received_s=time.monotonic(),
                 ),
-                imu=ImuReading(yaw=90.0, calibration_status="fully_calibrated"),
+                imu=ImuReading(
+                    yaw=90.0,
+                    calibration_status="fully_calibrated",
+                    imu_epoch_id="test-epoch",
+                ),
             )
         )
 
@@ -435,6 +442,26 @@ def test_diagnostic_alignment_reuse_still_requires_a_new_live_imu_tick():
     assert loc.state.imu_valid is False
 
 
+@pytest.mark.asyncio
+async def test_cached_imu_does_not_refresh_live_receipt_marker():
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(alignment_file=None)
+    await loc.update(
+        SensorData(
+            imu=ImuReading(
+                yaw=10.0,
+                calibration_status="fully_calibrated",
+                monotonic_received_s=time.monotonic() - 1.0,
+                cached=True,
+            )
+        )
+    )
+
+    assert loc.state.imu_valid is False
+    assert loc.state.imu_received_monotonic_s is None
+
+
 def test_reset_for_mission_none_still_resets_to_zero():
     """reset_for_mission(saved_alignment=None) behaves like the original reset."""
     from backend.src.services.localization_service import LocalizationService
@@ -486,12 +513,58 @@ def test_reset_for_mission_saved_alignment_does_not_overwrite_disk(tmp_path):
     )
 
 
+def test_attached_calibration_repository_is_localization_alignment_owner(tmp_path):
+    from backend.src.repositories.calibration_repository import CalibrationRepository
+    from backend.src.services.localization_service import LocalizationService
+
+    legacy = tmp_path / "imu_alignment.json"
+    repository = CalibrationRepository(calibration_path=tmp_path / "calibration.json")
+    loc = LocalizationService(alignment_file=legacy)
+    loc.attach_calibration_repository(repository)
+    loc.bind_imu_epoch("test-epoch")
+    loc._session_heading_alignment = 73.5
+    loc._heading_alignment_sample_count = 1
+    loc._alignment_imu_epoch_id = "test-epoch"
+
+    loc.save_alignment(source="gps_cog_snap")
+
+    assert legacy.exists() is False
+    assert repository.load_imu_alignment()["session_heading_alignment"] == pytest.approx(73.5)
+    recovered = LocalizationService(alignment_file=None)
+    recovered.attach_calibration_repository(repository)
+    assert recovered.session_heading_alignment == pytest.approx(73.5)
+    assert recovered.alignment_sample_count == 1
+
+
+def test_imu_reinitialization_invalidates_in_memory_alignment(tmp_path):
+    from backend.src.repositories.calibration_repository import CalibrationRepository
+    from backend.src.services.localization_service import LocalizationService
+
+    repository = CalibrationRepository(calibration_path=tmp_path / "calibration.json")
+    loc = LocalizationService(alignment_file=None)
+    loc.attach_calibration_repository(repository)
+    assert loc.bind_imu_epoch("epoch-a") is False
+    loc._session_heading_alignment = 73.5
+    loc._heading_alignment_sample_count = 1
+    loc._alignment_imu_epoch_id = "epoch-a"
+    loc.state.heading = 90.0
+
+    assert loc.bind_imu_epoch("epoch-b") is True
+    assert loc.alignment_sample_count == 0
+    assert loc.state.heading is None
+    assert loc._alignment_imu_epoch_id is None
+
+
 # ---------------------------------------------------------------------------
 # Fix 5: Bootstrap multi-sample snap
 # ---------------------------------------------------------------------------
 
+_BOOTSTRAP_SAMPLE_ID = 0
+
 def _make_sensor_fix5(gps_cog: float, imu_yaw: float = 90.0) -> SensorData:
     """Build a SensorData tick with a controlled GPS COG (receiver-reported)."""
+    global _BOOTSTRAP_SAMPLE_ID
+    _BOOTSTRAP_SAMPLE_ID += 1
     return SensorData(
         gps=GpsReading(
             latitude=37.0,
@@ -499,8 +572,14 @@ def _make_sensor_fix5(gps_cog: float, imu_yaw: float = 90.0) -> SensorData:
             accuracy=0.03,
             heading=gps_cog,
             speed=1.0,
+            sample_id=_BOOTSTRAP_SAMPLE_ID,
+            monotonic_received_s=time.monotonic(),
         ),
-        imu=ImuReading(yaw=imu_yaw, calibration_status="fully_calibrated"),
+        imu=ImuReading(
+            yaw=imu_yaw,
+            calibration_status="fully_calibrated",
+            imu_epoch_id="test-epoch",
+        ),
     )
 
 
@@ -561,8 +640,47 @@ async def test_bootstrap_snap_uses_cog_mean_not_spike_reading():
 
 
 @pytest.mark.asyncio
-async def test_end_bootstrap_fallback_commits_mean_when_no_snap():
-    """If bootstrap ends without a consistent snap, mean of buffer is committed."""
+async def test_bootstrap_repeated_gps_frame_cannot_form_alignment():
+    """One receiver frame repeated by polling is still only one COG sample."""
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(alignment_file=None)
+    loc.reset_for_mission()
+    loc.begin_bootstrap()
+    repeated = _make_sensor_fix5(gps_cog=210.0)
+
+    for _ in range(8):
+        await loc.update(repeated)
+
+    assert loc._gps_cog_history == [210.0]
+    assert loc.alignment_sample_count == 0
+    assert loc.end_bootstrap(commit_alignment=True) is False
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_alignment_persists_only_on_explicit_commit(tmp_path):
+    from backend.src.repositories.calibration_repository import CalibrationRepository
+    from backend.src.services.localization_service import LocalizationService
+
+    repository = CalibrationRepository(calibration_path=tmp_path / "calibration.json")
+    loc = LocalizationService(alignment_file=None)
+    loc.attach_calibration_repository(repository)
+    loc.bind_imu_epoch("test-epoch")
+    loc.reset_for_mission()
+    loc.begin_bootstrap()
+
+    for cog in [210.0, 211.0, 210.5, 210.0, 211.0]:
+        await loc.update(_make_sensor_fix5(gps_cog=cog))
+
+    assert loc.alignment_sample_count == 1
+    assert repository.load_reusable_imu_alignment(max_age_s=3600) is None
+    assert loc.end_bootstrap(commit_alignment=True) is True
+    assert repository.load_reusable_imu_alignment(max_age_s=3600) is not None
+
+
+@pytest.mark.asyncio
+async def test_end_bootstrap_without_consistent_snap_remains_incomplete():
+    """Ending a bootstrap must not turn GPS-only samples into reusable alignment."""
     from backend.src.services.localization_service import LocalizationService
 
     loc = LocalizationService(alignment_file=None)
@@ -575,25 +693,15 @@ async def test_end_bootstrap_fallback_commits_mean_when_no_snap():
 
     assert loc._heading_alignment_sample_count == 0, "No snap should have fired yet"
 
-    # Call end_bootstrap() — fallback should commit the mean of [210, 211]
     loc.end_bootstrap()
 
-    assert loc._heading_alignment_sample_count == 1
-    assert loc.alignment_ready is True
-    assert loc.state.heading is not None
-
-    from backend.src.nav.localization_helpers import heading_delta as hd
-
-    assert abs(hd(loc.state.heading, 210.5)) < 10.0, (
-        f"Heading {loc.state.heading:.1f}° should be near fallback mean 210.5°"
-    )
+    assert loc._heading_alignment_sample_count == 0
+    assert loc.alignment_ready is False
 
 
 @pytest.mark.asyncio
-async def test_end_bootstrap_fallback_logs_warning_when_spread_high(caplog):
+async def test_end_bootstrap_rejects_high_spread_without_staged_alignment():
     """end_bootstrap() fails closed when COG spread is too high."""
-    import logging
-
     from backend.src.services.localization_service import LocalizationService
 
     loc = LocalizationService(alignment_file=None)
@@ -602,16 +710,11 @@ async def test_end_bootstrap_fallback_logs_warning_when_spread_high(caplog):
 
     # High-spread readings — 60° spread → never going_straight
     for cog in [180.0, 220.0, 240.0]:
-        await loc.update(_make_sensor_no_imu(gps_cog=cog))
+        await loc.update(_make_sensor_fix5(gps_cog=cog))
 
     assert loc._heading_alignment_sample_count == 0
 
-    with caplog.at_level(logging.WARNING, logger="backend.src.services.localization_service"):
-        loc.end_bootstrap()
-
-    assert any("low-confidence" in r.message.lower() for r in caplog.records), (
-        "Expected low-confidence bootstrap warning when spread is high"
-    )
+    assert loc.end_bootstrap(commit_alignment=True) is False
     assert loc._heading_alignment_sample_count == 0
     assert loc.alignment_ready is False
 
@@ -642,7 +745,7 @@ async def test_reset_for_mission_clears_cog_buffer():
     loc = LocalizationService(alignment_file=None)
     loc.begin_bootstrap()
     for cog in [180.0, 181.0, 182.0]:
-        await loc.update(_make_sensor_no_imu(gps_cog=cog))
+        await loc.update(_make_sensor_fix5(gps_cog=cog))
 
     assert len(loc._gps_cog_history) > 0
 

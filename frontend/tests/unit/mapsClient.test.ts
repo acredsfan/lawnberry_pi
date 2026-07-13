@@ -186,6 +186,7 @@ describe('mapsClient', () => {
         operator_confirmed: true,
         blade_physically_disabled: true,
         route_clear_confirmed: true,
+        heading_bootstrap_confirmed: true,
         physical_intervention: 'master cutoff within reach',
       }
 

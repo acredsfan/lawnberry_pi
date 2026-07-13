@@ -97,6 +97,7 @@ lerna-debug.log*
 # Runtime / generated data
 # =============================================================
 data/*.json
+data/*.json.*
 data/*.csv
 data/exports/
 memory/*.json

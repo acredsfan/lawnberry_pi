@@ -448,8 +448,10 @@ Motor control code runs during systemd service startup (navigation service initi
 
 ## GPS COG Heading Bootstrap (Mission Start Behavior)
 
-At the start of every mission, `_bootstrap_heading_from_gps_cog()` drives the mower ~1-2m forward
-to acquire a GPS Course-Over-Ground (COG) reading and snap the IMU heading alignment to it.
+When the current IMU epoch has no reusable canonical alignment,
+`_bootstrap_heading_from_gps_cog()` drives the blade-off mower at low speed for at least `0.25 m`
+and no more than the configured `0.60 m` cap to acquire GPS Course-Over-Ground (COG) and snap the
+relative IMU yaw to it. A `0.15 m` default lease/poll/braking reserve is enforced before renewal.
 
 **This is intentional behavior** — the mower WILL move forward a short distance before navigating
 to the first waypoint. Ensure the area directly in front is clear before starting a mission.
@@ -468,13 +470,23 @@ WARN  GPS COG bootstrap timed out — no valid COG acquired
 ```
 Check:
 1. GPS fix quality: `curl -s http://localhost:8081/api/v2/sensors/gps` — needs RTK_FIXED or GPS_3D
-2. Speed threshold: mower must reach ≥0.3 m/s for COG to be valid — check for obstacles or motor issues
-3. `data/imu_alignment.json` — if `source` is `"mission_start_reset"` and `alignment` is 0.0, the
-   bootstrap did not complete; if `source` is `"gps_cog_snap"`, it succeeded
+2. Fresh IMU: the BNO085 payload must be uncached and no older than one autonomous command lease.
+3. GPS COG evidence: each contributing fix must be a unique non-cached sample received after bootstrap starts.
+4. Travel budget: the raw GPS antenna displacement plus GPS-age, lease, polling, and braking reserve must remain below
+   `bootstrap_max_travel_m`; an antenna lever arm is included in the direction-independent geofence envelope.
+5. `data/calibration.json` — `imu.source == "gps_cog_snap"`, `imu.sample_count >= 1`, and an `imu_epoch_id`
+   matching the current BNO085 reset generation indicate reusable evidence. The record is written only after minimum
+   travel and a gateway-confirmed zero command.
 
-**After a successful mission start**, `data/imu_alignment.json` will contain:
+For Maps **Drive-To-Confirm**, keep every physical acknowledgement session-scoped, serialize all verification mutations
+and status reconciliation across mission admission, disable repeat next-point clicks while the request is pending, and
+reconcile the mission lifecycle before returning from `POST /api/v2/boundary-verification/next`. One operator action must
+never create two diagnostic legs, let polling interrupt admission, or report stale idle state after asynchronous admission
+has already succeeded or failed.
+
+**After a successful mission start**, `data/calibration.json` will contain an IMU record like:
 ```json
-{"alignment": <degrees>, "source": "gps_cog_snap", "samples": 1, "timestamp": "..."}
+{"imu": {"session_heading_alignment": 42.0, "source": "gps_cog_snap", "sample_count": 1, "last_updated": "...", "imu_epoch_id": "..."}}
 ```
 
 ## Python Bytecode Cache

@@ -3,6 +3,7 @@ SensorData model for LawnBerry Pi v2
 Hardware sensor readings and status information
 """
 
+import time
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
@@ -88,6 +89,9 @@ class ImuReading(BaseModel):
     mag_z: float | None = None  # µT
     calibration_status: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    monotonic_received_s: float | None = Field(default_factory=time.monotonic)
+    cached: bool = False
+    imu_epoch_id: str | None = None
 
 
 class TofReading(BaseModel):

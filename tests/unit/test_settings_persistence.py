@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -244,7 +245,7 @@ def test_v14_settings_safety_hot_reloads_runtime_limits(monkeypatch):
             assert patch["battery_critical_voltage"] == 10.7
             return updated_limits
 
-    fake_nav = SimpleNamespace(obstacle_detector=SimpleNamespace())
+    fake_nav = SimpleNamespace(apply_safety_limits=MagicMock())
     runtime = SimpleNamespace(safety_limits=SafetyLimits())
 
     import backend.src.core.config_loader as config_loader
@@ -265,6 +266,4 @@ def test_v14_settings_safety_hot_reloads_runtime_limits(monkeypatch):
 
     assert response.status_code == 200
     assert runtime.safety_limits is updated_limits
-    assert fake_nav._safety_limits is updated_limits
-    assert fake_nav.obstacle_detector.limits is updated_limits
-    assert fake_nav.obstacle_detector.safety_distance == 0.33
+    fake_nav.apply_safety_limits.assert_called_once_with(updated_limits)

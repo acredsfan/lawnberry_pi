@@ -246,6 +246,22 @@ watch the mission status contract instead of assuming `running` alone means the 
 - Mission-start heading alignment is an explicit bootstrap step: the mower drives straight, polls the shared sensor manager,
   derives GPS course-over-ground from receiver course or actual coordinate deltas, then snaps the relative BNO085 yaw to
   that GPS movement vector before trusting IMU heading for waypoint turns.
+- The bootstrap is blade-off and uses an explicit `heading_bootstrap` command through `MotorCommandGateway`; ordinary
+  headingless mission commands remain blocked. Each command renewal requires a genuinely processed BNO085 SHTP game
+  rotation report, a straight relative-yaw trace, unique non-cached GPS samples acquired after bootstrap start, and enough
+  GPS-age + command-lease + braking reserve to stay under the configured travel cap.
+- Default bootstrap travel is at least `0.25 m` and at most `0.60 m`. At the default `0.20 m/s`, `350 ms` lease, `200 ms`
+  sensor cadence, and `0.50 m/s²` braking value, the stop reserve is `0.15 m`. Runtime also adds actual GPS sample age.
+- While world heading is unknown, clearance is direction-independent around the raw GPS antenna and includes mower
+  footprint, RTK uncertainty, fixed geofence allowance, antenna lever arm, and remaining bootstrap travel. This is a
+  one-time center-yard alignment envelope, not the mowing-edge clearance or boundary-point stand-off.
+- `data/calibration.json` is the canonical heading-alignment record used by both localization updates and mission admission.
+  At startup, a newer authoritative snap from the legacy `data/imu_alignment.json` may be promoted without changing its
+  original acquisition time and the legacy file is archived after promotion. Reuse additionally requires a finite value,
+  an allowlisted source, a nonfuture timestamp, and the current BNO085 reset generation. A process restart or in-process
+  IMU reinitialization therefore invalidates prior alignment and requires one fresh blade-off bootstrap. The GPS COG snap
+  remains staged in memory until minimum travel is observed and a zero command is acknowledged through the gateway; an
+  unconfirmed stop latches emergency and the staged record is discarded.
 - During normal waypoint pursuit, GPS course-over-ground is treated as a movement vector/fallback rather than a continuous
   IMU calibration source. This avoids corrupting chassis heading while the mower is arcing, tank-turning, slipping, or
   maneuvering around obstacles.
@@ -471,11 +487,20 @@ runtime authorization separately includes the configured mower footprint, RTK un
 and swept-motion prediction.
 
 1. Save the confirmed mowing boundary, then click **Generate Safe Boundary**.
-2. Click **Prepare Drive-To-Confirm**, acknowledge on-site supervision, physical blade disablement, a clear route, and the
-   available master cutoff. Creating the session causes no motion.
+2. Click **Prepare Drive-To-Confirm**, acknowledge on-site supervision, physical blade disablement, a clear route, the
+   available master cutoff, and that the first leg may need a bounded straight blade-off heading bootstrap. Creating the
+   session causes no motion. The checklist resets whenever it opens and must be freshly completed for every session.
 3. Click **Go To Next Point** for one low-speed leg. The target is a computed center-safe stand-off inside the authoritative
-   safe polygon; the mower never drives its center to the recorded physical edge.
-4. Wait for the UI point state to change from `traveling` to `arrived`. `Confirm Point` stays disabled until then.
+   safe polygon; the mower never drives its center to the recorded physical edge. The UI disables repeat clicks while the
+   request is pending, and the backend serializes verification mutations plus status reconciliation so one operator action
+   creates at most one leg and polling cannot interrupt an in-flight admission. The response is reconciled against the
+   observed asynchronous mission lifecycle instead of returning a stale idle state.
+   If no reusable canonical alignment exists, the normal mission path performs the acknowledged center-yard bootstrap
+   through `MotorCommandGateway` before approaching the point. The current `0.55 m` verification stand-off is the
+   mower-center-to-reference distance (`0.35 m` footprint + `0.10 m` fixed allowance + RTK uncertainty + verification
+   margin); it is not an extra mowing inset and does not prevent later edge coverage.
+4. Wait for the UI point state to advance through live status to `arrived`. `Confirm Point` stays disabled until then. A
+   failed/interrupted leg and its mission detail remain visible after the active target clears so the cause is not hidden.
 5. Confirming first reasserts zero drive and blade off, then requires at least five unique live stationary RTK-fixed samples
    at 0.05 m accuracy or better. Evidence records antenna and body-center coordinates plus residuals.
 6. After a backend restart, a previously running leg becomes `interrupted` and must be explicitly retried. It is never

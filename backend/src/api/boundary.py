@@ -62,6 +62,7 @@ class VerificationStartRequest(BaseModel):
     operator_confirmed: bool = False
     blade_physically_disabled: bool = False
     route_clear_confirmed: bool = False
+    heading_bootstrap_confirmed: bool = False
     physical_intervention: str = Field(default="", max_length=240)
 
 
@@ -282,6 +283,7 @@ async def start_verification(
             operator_confirmed=payload.operator_confirmed,
             blade_physically_disabled=payload.blade_physically_disabled,
             route_clear_confirmed=payload.route_clear_confirmed,
+            heading_bootstrap_confirmed=payload.heading_bootstrap_confirmed,
             physical_intervention=payload.physical_intervention,
         )
     except BoundaryValidationError as exc:

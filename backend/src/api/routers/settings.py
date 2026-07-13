@@ -1224,10 +1224,7 @@ async def put_safety_settings(request: Request):
     # Hot-reload live services that hold direct references to safety limits.
     try:
         nav = NavigationService.get_instance()
-        nav._safety_limits = updated
-        nav.obstacle_avoidance_distance = float(updated.tof_obstacle_distance_meters)
-        nav.obstacle_detector.safety_distance = float(updated.tof_obstacle_distance_meters)
-        nav.obstacle_detector.limits = updated
+        nav.apply_safety_limits(updated)
         logger.info(
             "Live-reloaded safety limits; obstacle threshold %.3f m, critical battery %.2f V",
             updated.tof_obstacle_distance_meters,

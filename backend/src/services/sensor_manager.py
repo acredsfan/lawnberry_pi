@@ -209,14 +209,26 @@ class IMUSensorInterface:
                         gyro_y=o.get("gyro_y"),
                         gyro_z=o.get("gyro_z"),
                         calibration_status=cal,
+                        monotonic_received_s=o.get("monotonic_received_s"),
+                        cached=bool(o.get("cached", False)),
+                        imu_epoch_id=o.get("imu_epoch_id"),
                     )
                 else:
-                    reading = self.last_reading
+                    reading = (
+                        self.last_reading.model_copy(update={"cached": True})
+                        if self.last_reading is not None
+                        else None
+                    )
             else:
                 # Driver unavailable but interface is ONLINE -- report
                 # "uncalibrated" rather than "unknown".
                 reading = ImuReading(
-                    roll=0.0, pitch=0.0, yaw=0.0, calibration_status="uncalibrated"
+                    roll=0.0,
+                    pitch=0.0,
+                    yaw=0.0,
+                    calibration_status="uncalibrated",
+                    monotonic_received_s=None,
+                    cached=True,
                 )
 
             if reading is not None:

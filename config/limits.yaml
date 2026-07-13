@@ -24,6 +24,7 @@ autonomous_prediction_horizon_s: 1.0
 autonomous_command_ttl_ms: 350
 autonomous_braking_decel_mps2: 0.5
 bootstrap_speed_mps: 0.20
+bootstrap_min_travel_m: 0.25
 bootstrap_max_travel_m: 0.60
 coverage_endpoint_clearance_m: 0.25
 max_operational_cross_track_error_m: 1.5

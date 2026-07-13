@@ -316,7 +316,9 @@ async def lifespan(app: FastAPI):
     _calibration_repo = CalibrationRepository(calibration_path=_data_dir / "calibration.json")
     _telemetry_repo = TelemetryRepository(db_path=_db_path)
 
-    # Wire CalibrationRepository into the already-constructed NavigationService singleton.
+    # One repository owns alignment for both localization updates and mission admission.
+    if _localization_service is not None:
+        _localization_service.attach_calibration_repository(_calibration_repo)
     nav_service.attach_calibration_repository(_calibration_repo)
 
     # Wire MapRepository into the already-constructed NavigationService singleton.

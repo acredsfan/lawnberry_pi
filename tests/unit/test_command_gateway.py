@@ -632,6 +632,208 @@ async def test_mission_drive_blocks_without_operating_area_in_hardware_mode(monk
 
 
 @pytest.mark.asyncio
+async def test_heading_bootstrap_uses_bounded_isotropic_gateway_check() -> None:
+    from backend.src.control.commands import DriveCommand
+
+    snapshot = MagicMock(valid=True)
+    snapshot.contains_footprint.return_value = True
+    position = SimpleNamespace(accuracy=0.03)
+    gw, _, _ = _make_gw()
+    gw.set_autonomy_context_provider(
+        lambda _cmd: {
+            "snapshot": snapshot,
+            "position": position,
+            "last_gps_fix": object(),
+            "dead_reckoning_active": False,
+            "max_fix_age_s": 2.0,
+            "max_accuracy_m": 0.25,
+            "footprint_radius_m": 0.35,
+            "fixed_allowance_m": 0.10,
+            "accuracy_m": 0.03,
+            "heading": None,
+            "imu_valid": True,
+            "imu_epoch_valid": True,
+            "imu_age_s": 0.10,
+            "heading_bootstrap_active": True,
+            "mission_phase": "heading_bootstrap",
+            "bootstrap_travel_m": 0.0,
+            "bootstrap_remaining_m": 0.60,
+            "bootstrap_stop_reserve_m": 0.15,
+            "bootstrap_max_travel_m": 0.60,
+            "bootstrap_imu_yaw_delta_deg": 0.0,
+            "bootstrap_max_yaw_delta_deg": 15.0,
+            "antenna_offset_m": 0.46,
+            "tof_blocked": False,
+        }
+    )
+
+    interlocks = await gw._check_mission_drive_interlocks(
+        DriveCommand(
+            left=0.2,
+            right=0.2,
+            source="mission",
+            duration_ms=350,
+            heading_bootstrap=True,
+        )
+    )
+
+    assert interlocks == []
+    snapshot.contains_footprint.assert_called_once_with(position, pytest.approx(1.54))
+    snapshot.swept_motion_is_safe.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_heading_bootstrap_gateway_rejects_invalid_imu_or_turn() -> None:
+    from backend.src.control.commands import DriveCommand
+
+    snapshot = MagicMock(valid=True)
+    snapshot.contains_footprint.return_value = True
+    context = {
+        "snapshot": snapshot,
+        "position": SimpleNamespace(accuracy=0.03),
+        "last_gps_fix": object(),
+        "dead_reckoning_active": False,
+        "max_fix_age_s": 2.0,
+        "max_accuracy_m": 0.25,
+        "footprint_radius_m": 0.35,
+        "fixed_allowance_m": 0.10,
+        "accuracy_m": 0.03,
+        "heading": None,
+        "imu_valid": False,
+        "imu_epoch_valid": True,
+        "imu_age_s": 0.10,
+        "heading_bootstrap_active": True,
+        "mission_phase": "heading_bootstrap",
+        "bootstrap_travel_m": 0.0,
+        "bootstrap_remaining_m": 0.60,
+        "bootstrap_stop_reserve_m": 0.15,
+        "bootstrap_max_travel_m": 0.60,
+        "bootstrap_imu_yaw_delta_deg": 0.0,
+        "bootstrap_max_yaw_delta_deg": 15.0,
+        "antenna_offset_m": 0.0,
+        "tof_blocked": False,
+    }
+    gw, _, _ = _make_gw()
+    gw.set_autonomy_context_provider(lambda _cmd: context)
+
+    invalid_imu = await gw._check_mission_drive_interlocks(
+        DriveCommand(
+            left=0.2,
+            right=0.2,
+            source="mission",
+            duration_ms=350,
+            heading_bootstrap=True,
+        )
+    )
+    context["imu_valid"] = True
+    context["imu_epoch_valid"] = False
+    invalid_epoch = await gw._check_mission_drive_interlocks(
+        DriveCommand(
+            left=0.2,
+            right=0.2,
+            source="mission",
+            duration_ms=350,
+            heading_bootstrap=True,
+        )
+    )
+    context["imu_epoch_valid"] = True
+    turning = await gw._check_mission_drive_interlocks(
+        DriveCommand(
+            left=0.2,
+            right=0.1,
+            source="mission",
+            duration_ms=350,
+            heading_bootstrap=True,
+        )
+    )
+
+    assert "imu_not_ready" in invalid_imu
+    assert "imu_not_ready" in invalid_epoch
+    assert "heading_bootstrap_invalid" in turning
+
+
+@pytest.mark.asyncio
+async def test_headingless_untagged_mission_command_never_uses_bootstrap_exception() -> None:
+    from backend.src.control.commands import DriveCommand
+
+    snapshot = MagicMock(valid=True)
+    snapshot.swept_motion_is_safe.return_value = False
+    context = {
+        "snapshot": snapshot,
+        "position": SimpleNamespace(accuracy=0.03),
+        "last_gps_fix": object(),
+        "dead_reckoning_active": False,
+        "max_fix_age_s": 2.0,
+        "max_accuracy_m": 0.25,
+        "footprint_radius_m": 0.35,
+        "fixed_allowance_m": 0.10,
+        "accuracy_m": 0.03,
+        "heading": None,
+        "heading_bootstrap_active": True,
+        "mission_phase": "heading_bootstrap",
+        "tof_blocked": False,
+    }
+    gw, _, _ = _make_gw()
+    gw.set_autonomy_context_provider(lambda _cmd: context)
+
+    interlocks = await gw._check_mission_drive_interlocks(
+        DriveCommand(left=0.2, right=0.2, source="mission", duration_ms=350)
+    )
+
+    assert "geofence_prediction_blocked" in interlocks
+    snapshot.contains_footprint.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_heading_bootstrap_rejects_stale_imu_and_exhausted_stop_budget() -> None:
+    from backend.src.control.commands import DriveCommand
+
+    snapshot = MagicMock(valid=True)
+    snapshot.contains_footprint.return_value = True
+    context = {
+        "snapshot": snapshot,
+        "position": SimpleNamespace(accuracy=0.03),
+        "last_gps_fix": object(),
+        "dead_reckoning_active": False,
+        "max_fix_age_s": 2.0,
+        "max_accuracy_m": 0.25,
+        "footprint_radius_m": 0.35,
+        "fixed_allowance_m": 0.10,
+        "accuracy_m": 0.03,
+        "heading": None,
+        "imu_valid": True,
+        "imu_epoch_valid": True,
+        "imu_age_s": 0.36,
+        "heading_bootstrap_active": True,
+        "mission_phase": "heading_bootstrap",
+        "bootstrap_travel_m": 0.46,
+        "bootstrap_remaining_m": 0.14,
+        "bootstrap_stop_reserve_m": 0.15,
+        "bootstrap_max_travel_m": 0.60,
+        "bootstrap_imu_yaw_delta_deg": 0.0,
+        "bootstrap_max_yaw_delta_deg": 15.0,
+        "antenna_offset_m": 0.0,
+        "tof_blocked": False,
+    }
+    gw, _, _ = _make_gw()
+    gw.set_autonomy_context_provider(lambda _cmd: context)
+
+    interlocks = await gw._check_mission_drive_interlocks(
+        DriveCommand(
+            left=0.2,
+            right=0.2,
+            source="mission",
+            duration_ms=350,
+            heading_bootstrap=True,
+        )
+    )
+
+    assert "imu_not_ready" in interlocks
+    assert "heading_bootstrap_budget_exhausted" in interlocks
+    snapshot.contains_footprint.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_dispatch_drive_in_summary_mode_does_not_persist_issued(monkeypatch):
     """In summary mode, MotionCommandIssued is not written to DB."""
     import os
