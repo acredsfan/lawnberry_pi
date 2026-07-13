@@ -69,6 +69,26 @@ npm run build
 
 All frontend dependencies are compatible with ARM64.
 
+## 2a) Dependency security audits
+
+The `dep-audit` pull-request workflow is blocking. It audits only third-party Python requirements
+and the committed npm lockfile; known vulnerabilities must be upgraded or explicitly reviewed,
+not hidden with `|| true`.
+
+Run the same checks locally:
+
+```bash
+uv export --frozen --format requirements-txt --all-extras \
+  --no-emit-project --no-hashes \
+  | uvx pip-audit -r /dev/stdin --progress-spinner off
+
+cd frontend
+npm ci --ignore-scripts
+npm audit
+```
+
+`tests/unit/test_dependency_audit_workflow.py` protects the fail-closed workflow contract.
+
 ## 3) Docs drift guard
 
 CI will fail if code changes without corresponding documentation or journal updates. You can run the check locally:
