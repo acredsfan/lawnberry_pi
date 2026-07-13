@@ -123,6 +123,26 @@ Environment variables (set in `.env`):
 - `ALT_DOMAINS` – optional hostname SANs (comma-separated), e.g., `www.example.com,api.example.com`; do not put LAN/private IPs here because Let’s Encrypt will not issue IP-address certificates
 - `CLOUDFLARE_API_TOKEN` – optional, for DNS-01 (wildcards or no port 80)
 
+The Cloudflare Tunnel connector token is not the DNS-01 API token and must not be stored in `.env`, a systemd
+`ExecStart`, shell history, or the repository. LawnBerry installs the remotely managed connector with
+`systemd/cloudflared.service`, which reads `/etc/cloudflared/tunnel-token` through `--token-file`. Manage and verify it
+with:
+
+```bash
+# One-time migration from a legacy inline-token service
+sudo python scripts/manage_cloudflared_service.py --migrate-existing
+
+# Install a replacement token without echoing it
+sudo python scripts/manage_cloudflared_service.py --prompt-token
+
+# Prove the unit, file permissions, and live argv are safe
+sudo python scripts/manage_cloudflared_service.py --check
+```
+
+If the connector token was exposed, first rotate it in **Cloudflare Dashboard → Networking → Tunnels** (or with a
+short-lived API credential that has `Cloudflare Tunnel Write`), then install the replacement. The DNS-01 token in `.env`
+should remain narrowly scoped and must not be expanded for routine tunnel administration.
+
 Practical note: a self-signed certificate is still untrusted by default, but with SANs present the browser warning should now be about trust only, not both trust and hostname mismatch.
 
 If you protect the public hostname with Cloudflare Access, HTTP-01 issuance will fail unless `/.well-known/acme-challenge/*` is excluded from the Access policy. Otherwise use DNS-01 with `CLOUDFLARE_API_TOKEN`.

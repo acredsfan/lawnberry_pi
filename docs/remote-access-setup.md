@@ -118,17 +118,63 @@ lawnberry-pi config remote-access --test
 
 ### Step 7: Start Tunnel Service
 
-```bash
-# Install as systemd service
-sudo cloudflared service install
+The configuration in Steps 2–5 is a locally managed tunnel. Install that configuration without passing a token:
 
-# Start the service
-sudo systemctl start cloudflared
+```bash
+sudo cloudflared --config /home/pi/.cloudflared/config.yml service install
+sudo systemctl enable --now cloudflared
+```
+
+If the tunnel was instead created in the Cloudflare dashboard and deployed with an **Add replica** token, use LawnBerry's
+token-file unit. For an existing legacy service that embeds its token, migrate it once:
+
+```bash
+sudo python scripts/manage_cloudflared_service.py --migrate-existing
+
+# Verify the installed unit, owner-only token file, and live process arguments.
+sudo python scripts/manage_cloudflared_service.py --check
 sudo systemctl enable cloudflared
 
 # Check status
 sudo systemctl status cloudflared
 ```
+
+Do not run `cloudflared service install <TOKEN>` for a remotely managed LawnBerry tunnel. That command embeds the bearer token in
+`cloudflared.service` and exposes it through process listings. The tracked unit reads the credential from
+`/etc/cloudflared/tunnel-token`, which is owned by root with mode `0600`.
+
+For a new or rotated token, use either a hidden prompt:
+
+```bash
+sudo python scripts/manage_cloudflared_service.py --prompt-token
+```
+
+or place the token in an owner-only file outside the repository and install it by path:
+
+```bash
+chmod 600 /run/cloudflared-token.next
+sudo python scripts/manage_cloudflared_service.py --token-file /run/cloudflared-token.next
+rm -f /run/cloudflared-token.next
+```
+
+The installer never accepts the token as a command-line argument. It validates the new service, restarts it, checks
+the live argument vector, and restores the previous unit and token if any gate fails.
+
+### Rotate an exposed tunnel token
+
+Moving a token into a file prevents future process-list disclosure, but it does not invalidate a token that was already
+exposed. Rotate it in Cloudflare before installing the replacement:
+
+1. In **Cloudflare Dashboard → Networking → Tunnels**, open the LawnBerry tunnel and select **Rotate token**.
+2. Copy only the replacement token into the installer's hidden prompt, or into an owner-only file under `/run`.
+3. Run `sudo python scripts/manage_cloudflared_service.py --check` and confirm
+   `credential_boundary_safe=true`.
+4. For a compromised token, force-disconnect old connectors from the Cloudflare dashboard after the replacement service
+   is active, then verify the service reconnects and the public hostname responds.
+
+API-based rotation requires a separate short-lived token with `Cloudflare Tunnel Write` (or the equivalent Cloudflare One
+connector write permission). Do not broaden the DNS-01 token in `.env`; keep certificate DNS access and tunnel
+administration as separate credentials.
 
 ### Step 8: Configure Cloudflare Access (Optional)
 
@@ -407,6 +453,7 @@ sudo systemctl start lawnberry-acme-renew.service
 3. **Use strong passwords** - Enable TOTP or OAuth when possible
 4. **Monitor access logs** - Review authentication attempts
 5. **Keep system updated** - Regular security updates
+6. **Keep tunnel tokens out of argv and the repository** - Use the owner-only token file and management script
 
 ### Authentication Integration
 

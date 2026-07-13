@@ -1,0 +1,28 @@
+[Unit]
+Description=Cloudflare Tunnel for LawnBerry
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+TimeoutStartSec=30
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/cloudflared/tunnel-token
+Restart=always
+RestartSec=10s
+UMask=0077
+
+# Keep the remotely managed tunnel credential out of the unit and process arguments.
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
