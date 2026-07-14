@@ -241,6 +241,48 @@ async def test_bootstrap_alignment_snaps_from_gps_cog():
 
 
 @pytest.mark.asyncio
+async def test_bootstrap_accumulates_subthreshold_low_speed_gps_steps():
+    """Several unique low-speed fixes must accumulate into derived COG samples."""
+    from backend.src.services.localization_service import LocalizationService
+
+    loc = LocalizationService(
+        imu_yaw_offset=0.0,
+        antenna_forward_m=0.0,
+        antenna_right_m=0.0,
+        max_fix_age_seconds=2.0,
+        max_accuracy_m=5.0,
+        alignment_file=None,
+    )
+    loc.begin_bootstrap()
+    started_at = datetime.now(UTC)
+    received_after_start = time.monotonic()
+
+    # About 0.08 m per 1 Hz fix: each step is below the 0.15 m bootstrap COG
+    # threshold, but pairs of steps provide three independent COG samples.
+    for index in range(7):
+        await loc.update(
+            SensorData(
+                gps=GpsReading(
+                    latitude=37.0 + index * 0.00000072,
+                    longitude=-122.0,
+                    accuracy=0.03,
+                    timestamp=started_at + timedelta(seconds=index),
+                    sample_id=index + 1,
+                    monotonic_received_s=received_after_start + index * 0.01,
+                ),
+                imu=ImuReading(
+                    yaw=90.0,
+                    calibration_status="fully_calibrated",
+                    imu_epoch_id="test-epoch",
+                ),
+            )
+        )
+
+    assert loc.alignment_sample_count == 1
+    assert loc.state.gps_cog == pytest.approx(0.0, abs=1.0)
+
+
+@pytest.mark.asyncio
 async def test_bootstrap_end_clears_active_flag():
     from backend.src.services.localization_service import LocalizationService
 

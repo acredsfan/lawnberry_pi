@@ -549,7 +549,12 @@ class LocalizationService:
             self.state.current_position = new_position
 
         # 3. Resolve GPS COG from this tick
-        speed_threshold = 0.1 if self._bootstrap_start_time is not None else 0.3
+        # The reference mower's bounded crawl can be materially slower than the
+        # nominal 0.20 m/s command under load. During bootstrap, real motion is
+        # already guarded by a 0.15 m RTK displacement plus unique-frame and
+        # straightness checks, so use a drift-rejecting 0.05 m/s floor instead of
+        # rejecting the observed ~0.08 m/s crawl. Normal navigation keeps 0.3 m/s.
+        speed_threshold = 0.05 if self._bootstrap_start_time is not None else 0.3
         gps_cog, gps_cog_speed, gps_cog_source = self._resolve_gps_cog(
             sensor_data,
             self._last_antenna_position or new_position,
@@ -937,11 +942,13 @@ class LocalizationService:
                         derived_cog = self._path_planner.calculate_bearing(
                             previous_position, current_position
                         )
-                # Advance the baseline only after a proper elapsed-time window so
-                # rapid back-to-back callers (background telemetry + bootstrap loop)
-                # don't reset the delta before enough movement has accumulated.
-                self._last_gps_track_position = current_position
-                self._last_gps_track_time = now
+                    # Consume the baseline only once enough real displacement has
+                    # accumulated to evaluate a motion sample. Low-speed GPS frames
+                    # below the threshold must keep accumulating; otherwise a 1 Hz
+                    # receiver can reset every ~0.08 m and never derive COG during
+                    # the bounded 0.60 m heading bootstrap.
+                    self._last_gps_track_position = current_position
+                    self._last_gps_track_time = now
         else:
             # First call — initialize tracking baseline.
             self._last_gps_track_position = current_position

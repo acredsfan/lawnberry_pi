@@ -498,7 +498,9 @@ and swept-motion prediction.
    If no reusable canonical alignment exists, the normal mission path performs the acknowledged center-yard bootstrap
    through `MotorCommandGateway` before approaching the point. The current `0.55 m` verification stand-off is the
    mower-center-to-reference distance (`0.35 m` footprint + `0.10 m` fixed allowance + RTK uncertainty + verification
-   margin); it is not an extra mowing inset and does not prevent later edge coverage.
+   margin); it is not an extra mowing inset and does not prevent later edge coverage. Position-derived bootstrap COG
+   retains its live RTK baseline across sub-0.15 m crawl steps so displacement can accumulate; the 0.05 m/s crawl floor
+   remains subordinate to the unique-frame, displacement, straightness, radial-budget, and confirmed-stop gates.
 4. Wait for the UI point state to advance through live status to `arrived`. `Confirm Point` stays disabled until then. A
    failed/interrupted leg and its mission detail remain visible after the active target clears so the cause is not hidden.
 5. Confirming first reasserts zero drive and blade off, then requires at least five unique live stationary RTK-fixed samples
