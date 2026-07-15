@@ -1,93 +1,189 @@
-"""GPS Degradation Handler (T063)
+"""Mission-owned GPS degradation policy.
 
-Monitors GPS quality and triggers graceful degradation to MANUAL mode when:
-- Reported accuracy exceeds 5 meters, or
-- GPS signal appears lost for more than 10 seconds
-
-This module is SIM_MODE-safe and only manipulates the in-memory RobotState.
-It does not own any hardware resources. It should be started during app
-startup and stopped during shutdown.
+The state machine is deliberately side-effect free: it classifies fresh
+localization samples and exposes the motion cap/terminal decision.  The
+mission executor owns stopping and termination, while MotorCommandGateway's
+navigation adapter applies the cap as a final defence-in-depth boundary.
 """
 
 from __future__ import annotations
 
-import asyncio
-import datetime as _dt
+import time
 from dataclasses import dataclass
-
-from ..core.robot_state_manager import get_robot_state_manager
-from ..models.robot_state import NavigationMode
+from enum import Enum
 
 
-@dataclass
+class GPSDegradationState(str, Enum):
+    NOMINAL = "nominal"
+    HOLD = "hold"
+    DEAD_RECKONING = "dead_reckoning"
+    RECOVERING = "recovering"
+    TERMINAL = "terminal"
+
+
+@dataclass(frozen=True)
 class GPSDegradationConfig:
-    max_accuracy_m: float = 5.0
-    max_fix_age_s: float = 10.0
-    check_interval_s: float = 1.0
+    max_accuracy_m: float = 0.25
+    max_fix_age_s: float = 2.0
+    hold_grace_s: float = 2.0
+    max_degraded_s: float = 15.0
+    recovery_samples: int = 5
+    degraded_speed_cap_mps: float = 0.20
+
+    def __post_init__(self) -> None:
+        if self.max_accuracy_m <= 0 or self.max_fix_age_s <= 0:
+            raise ValueError("GPS quality thresholds must be positive")
+        if self.hold_grace_s < 0 or self.max_degraded_s <= self.hold_grace_s:
+            raise ValueError("GPS degraded timeout must exceed the hold grace period")
+        if self.recovery_samples < 1 or self.degraded_speed_cap_mps < 0:
+            raise ValueError("GPS recovery samples and speed cap are invalid")
 
 
-class GPSDegradationMonitor:
-    """Periodic monitor for GPS quality with mode fallback.
+@dataclass(frozen=True)
+class GPSDegradationSnapshot:
+    state: GPSDegradationState
+    reason: str | None
+    degraded_for_s: float
+    recovery_samples: int
+    speed_cap_mps: float | None
 
-    If the robot is in AUTONOMOUS mode and GPS quality degrades beyond
-    acceptable thresholds, switch to MANUAL mode. EMERGENCY_STOP transitions
-    are handled elsewhere (e.g., geofence enforcer).
-    """
+    @property
+    def terminal(self) -> bool:
+        return self.state is GPSDegradationState.TERMINAL
 
-    def __init__(self, config: GPSDegradationConfig | None = None):
-        self.cfg = config or GPSDegradationConfig()
-        self._task: asyncio.Task | None = None
-        self._stopping = asyncio.Event()
+    @property
+    def motion_held(self) -> bool:
+        return self.state in {
+            GPSDegradationState.HOLD,
+            GPSDegradationState.RECOVERING,
+            GPSDegradationState.TERMINAL,
+        }
 
-    async def start(self) -> None:
-        if self._task is None or self._task.done():
-            self._stopping.clear()
-            self._task = asyncio.create_task(self._run())
-
-    async def stop(self) -> None:
-        self._stopping.set()
-        if self._task is not None:
-            try:
-                await asyncio.wait_for(self._task, timeout=self.cfg.check_interval_s * 2)
-            except Exception:
-                # Best-effort shutdown
-                pass
-            self._task = None
-
-    async def _run(self) -> None:
-        while not self._stopping.is_set():
-            try:
-                self._tick()
-            except Exception:
-                # Do not crash on monitoring exceptions
-                pass
-            try:
-                await asyncio.wait_for(self._stopping.wait(), timeout=self.cfg.check_interval_s)
-            except TimeoutError:
-                continue
-
-    def _tick(self) -> None:
-        mgr = get_robot_state_manager()
-        st = mgr.get_state()
-
-        # Only enforce degradation during autonomous operation
-        if st.navigation_mode != NavigationMode.AUTONOMOUS:
-            return
-
-        now = _dt.datetime.now(_dt.UTC)
-        last = st.last_updated
-
-        # Accuracy threshold
-        accuracy = st.position.accuracy_m
-        if accuracy is not None and accuracy > self.cfg.max_accuracy_m:
-            st.navigation_mode = NavigationMode.MANUAL
-            st.touch()
-            return
-
-        # Fix age threshold (if last state update older than limit)
-        if last and (now - last).total_seconds() > self.cfg.max_fix_age_s:
-            st.navigation_mode = NavigationMode.MANUAL
-            st.touch()
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "state": self.state.value,
+            "reason": self.reason,
+            "degraded_for_s": self.degraded_for_s,
+            "recovery_samples": self.recovery_samples,
+            "speed_cap_mps": self.speed_cap_mps,
+            "terminal": self.terminal,
+            "motion_held": self.motion_held,
+        }
 
 
-__all__ = ["GPSDegradationMonitor", "GPSDegradationConfig"]
+class GPSDegradationStateMachine:
+    """Classify GPS loss with bounded degradation and hysteretic recovery."""
+
+    def __init__(self, config: GPSDegradationConfig | None = None) -> None:
+        self.config = config or GPSDegradationConfig()
+        self._state = GPSDegradationState.NOMINAL
+        self._reason: str | None = None
+        self._degraded_at: float | None = None
+        self._recovery_samples = 0
+
+    def configure(self, config: GPSDegradationConfig) -> None:
+        self.config = config
+
+    def start_mission(self) -> GPSDegradationSnapshot:
+        self._state = GPSDegradationState.NOMINAL
+        self._reason = None
+        self._degraded_at = None
+        self._recovery_samples = 0
+        return self.snapshot()
+
+    def end_mission(self) -> GPSDegradationSnapshot:
+        return self.start_mission()
+
+    def update(
+        self,
+        *,
+        position_available: bool,
+        fix_age_s: float | None,
+        accuracy_m: float | None,
+        dead_reckoning_active: bool,
+        now_monotonic: float | None = None,
+    ) -> GPSDegradationSnapshot:
+        now = time.monotonic() if now_monotonic is None else float(now_monotonic)
+        healthy, reason = self._quality(
+            position_available=position_available,
+            fix_age_s=fix_age_s,
+            accuracy_m=accuracy_m,
+            dead_reckoning_active=dead_reckoning_active,
+        )
+
+        if self._state is GPSDegradationState.TERMINAL:
+            return self.snapshot(now)
+
+        if healthy:
+            if self._state is GPSDegradationState.NOMINAL:
+                self._reason = None
+                return self.snapshot(now)
+            if self._state is not GPSDegradationState.RECOVERING:
+                self._state = GPSDegradationState.RECOVERING
+                self._recovery_samples = 1
+            else:
+                self._recovery_samples += 1
+            self._reason = "GPS_RECOVERY_CONFIRMING"
+            if self._recovery_samples >= self.config.recovery_samples:
+                self._state = GPSDegradationState.NOMINAL
+                self._reason = None
+                self._degraded_at = None
+                self._recovery_samples = 0
+            return self.snapshot(now)
+
+        self._reason = reason
+        self._recovery_samples = 0
+        if self._degraded_at is None:
+            self._degraded_at = now
+        degraded_for = max(0.0, now - self._degraded_at)
+        if degraded_for >= self.config.max_degraded_s:
+            self._state = GPSDegradationState.TERMINAL
+        elif degraded_for >= self.config.hold_grace_s:
+            self._state = GPSDegradationState.DEAD_RECKONING
+        else:
+            self._state = GPSDegradationState.HOLD
+        return self.snapshot(now)
+
+    def snapshot(self, now_monotonic: float | None = None) -> GPSDegradationSnapshot:
+        now = time.monotonic() if now_monotonic is None else float(now_monotonic)
+        degraded_for = (
+            max(0.0, now - self._degraded_at) if self._degraded_at is not None else 0.0
+        )
+        speed_cap = (
+            self.config.degraded_speed_cap_mps
+            if self._state is not GPSDegradationState.NOMINAL
+            else None
+        )
+        return GPSDegradationSnapshot(
+            state=self._state,
+            reason=self._reason,
+            degraded_for_s=degraded_for,
+            recovery_samples=self._recovery_samples,
+            speed_cap_mps=speed_cap,
+        )
+
+    def _quality(
+        self,
+        *,
+        position_available: bool,
+        fix_age_s: float | None,
+        accuracy_m: float | None,
+        dead_reckoning_active: bool,
+    ) -> tuple[bool, str | None]:
+        if not position_available:
+            return False, "GPS_POSITION_UNAVAILABLE"
+        if dead_reckoning_active:
+            return False, "GPS_DEAD_RECKONING_ACTIVE"
+        if fix_age_s is None or fix_age_s > self.config.max_fix_age_s:
+            return False, "GPS_FIX_STALE"
+        if accuracy_m is None or accuracy_m > self.config.max_accuracy_m:
+            return False, "GPS_ACCURACY_INSUFFICIENT"
+        return True, None
+
+
+__all__ = [
+    "GPSDegradationConfig",
+    "GPSDegradationSnapshot",
+    "GPSDegradationState",
+    "GPSDegradationStateMachine",
+]

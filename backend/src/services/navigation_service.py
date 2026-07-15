@@ -35,6 +35,11 @@ from ..models.safety_limits import (
     heading_bootstrap_stop_reserve_m,
 )
 from ..nav.geoutils import body_offset_to_north_east, haversine_m, offset_lat_lon, point_in_polygon
+from ..nav.gps_degradation import (
+    GPSDegradationConfig,
+    GPSDegradationState,
+    GPSDegradationStateMachine,
+)
 from ..nav.obstacle_clearance import required_obstacle_clearance_m
 from ..nav.odometry import OdometryIntegrator
 from ..nav.path_planner import PathPlanner
@@ -262,6 +267,10 @@ class _NavStateLocalizationAdapter:
         return list(self._nav.navigation_state.obstacle_map)
 
     @property
+    def gps_degradation(self) -> Any:
+        return self._nav.gps_degradation.snapshot()
+
+    @property
     def state(self) -> _NavStateLocalizationAdapter:
         return self
 
@@ -284,6 +293,22 @@ class _NavGatewayAdapter:
         require_hardware_ack: bool = False,
     ) -> bool:
         try:
+            degradation = self._nav.gps_degradation.snapshot()
+            motion_requested = abs(float(left)) > 1e-6 or abs(float(right)) > 1e-6
+            if motion_requested and (degradation.terminal or degradation.motion_held):
+                self._nav.navigation_state.target_velocity = 0.0
+                logger.warning(
+                    "Mission drive held by GPS policy: state=%s reason=%s",
+                    degradation.state.value,
+                    degradation.reason,
+                )
+                return False
+            if motion_requested and degradation.speed_cap_mps is not None:
+                peak = max(abs(float(left)), abs(float(right)))
+                if peak > degradation.speed_cap_mps and peak > 0:
+                    scale = degradation.speed_cap_mps / peak
+                    left = float(left) * scale
+                    right = float(right) * scale
             self._nav.navigation_state.target_velocity = float(max(abs(left), abs(right)))
             if self._nav._command_gateway is None:
                 if heading_bootstrap:
@@ -352,6 +377,7 @@ class NavigationService:
         self.navigation_state = NavigationState()
         self.path_planner = PathPlanner()
         self.dead_reckoning = DeadReckoningSystem()
+        self.gps_degradation = GPSDegradationStateMachine()
         # Optional weather service with get_current() and get_planning_advice()
         self.weather = weather
         # Optional CalibrationRepository for IMU alignment persistence.
@@ -556,6 +582,7 @@ class NavigationService:
             docking_confirmed_provider=self._cached_docking_confirmed,
             obstacle_active_provider=lambda: self.navigation_state.obstacle_avoidance_active,
             obstacle_replan_provider=self._plan_obstacle_detour,
+            gps_degradation_provider=self.gps_degradation.snapshot,
             max_speed=self.max_speed,
             cruise_speed=self.cruise_speed,
             waypoint_tolerance=self.waypoint_tolerance,
@@ -766,6 +793,17 @@ class NavigationService:
         self.obstacle_detector.limits = limits
         self.autonomous_max_gps_accuracy_m = float(limits.autonomous_max_gps_accuracy_m)
         self.autonomous_max_gps_fix_age_s = float(limits.autonomous_max_gps_fix_age_s)
+        prior_gps_policy = self.gps_degradation.config
+        self.gps_degradation.configure(
+            GPSDegradationConfig(
+                max_accuracy_m=self.autonomous_max_gps_accuracy_m,
+                max_fix_age_s=self.autonomous_max_gps_fix_age_s,
+                hold_grace_s=prior_gps_policy.hold_grace_s,
+                max_degraded_s=prior_gps_policy.max_degraded_s,
+                recovery_samples=prior_gps_policy.recovery_samples,
+                degraded_speed_cap_mps=prior_gps_policy.degraded_speed_cap_mps,
+            )
+        )
         self.bootstrap_required_accuracy_m = self.autonomous_max_gps_accuracy_m
         self.mower_footprint_radius_m = float(limits.mower_footprint_radius_m)
         self.differential_drive_wheelbase_m = float(limits.differential_drive_wheelbase_m)
@@ -950,6 +988,11 @@ class NavigationService:
                 "HEADING_ALIGNMENT_REQUIRED: run one fresh center-yard heading bootstrap first"
             )
         self._active_mission_id = mission.id
+        gps_snapshot = self.gps_degradation.start_mission()
+        self.navigation_state.gps_degradation_state = gps_snapshot.state.value
+        self.navigation_state.gps_degradation_reason = None
+        self.navigation_state.gps_degradation_seconds = 0.0
+        self.navigation_state.gps_speed_cap_mps = None
         self._mission_execution_phase = "admitting"
         self.navigation_state.navigation_mode = NavigationMode.AUTO
         self.navigation_state.path_status = PathStatus.EXECUTING
@@ -1806,10 +1849,41 @@ class NavigationService:
         )
         start = time.perf_counter()
         try:
-            return await _dispatch(sensor_data)
+            state = await _dispatch(sensor_data)
+            self._update_gps_degradation_state()
+            return state
         finally:
             duration_ms = (time.perf_counter() - start) * 1000.0
             observability.metrics.record_timer("navigation_tick_duration", duration_ms)
+
+    def _update_gps_degradation_state(self) -> None:
+        """Project canonical localization freshness into mission GPS policy."""
+        if not self._mission_execution_active:
+            return
+        state = self.navigation_state
+        fix_age_s = None
+        if state.last_gps_fix is not None:
+            fix = state.last_gps_fix
+            if fix.tzinfo is None:
+                fix = fix.replace(tzinfo=UTC)
+            fix_age_s = max(0.0, (datetime.now(UTC) - fix).total_seconds())
+        accuracy_m = (
+            float(state.current_position.accuracy)
+            if state.current_position is not None and state.current_position.accuracy is not None
+            else None
+        )
+        snapshot = self.gps_degradation.update(
+            position_available=state.current_position is not None,
+            fix_age_s=fix_age_s,
+            accuracy_m=accuracy_m,
+            dead_reckoning_active=state.dead_reckoning_active,
+        )
+        state.gps_degradation_state = snapshot.state.value
+        state.gps_degradation_reason = snapshot.reason
+        state.gps_degradation_seconds = snapshot.degraded_for_s
+        state.gps_speed_cap_mps = snapshot.speed_cap_mps
+        if snapshot.state is GPSDegradationState.TERMINAL:
+            state.target_velocity = 0.0
 
     async def _update_navigation_state_impl(self, sensor_data: SensorData) -> NavigationState:
         """Original update_navigation_state body — measured by the public wrapper."""
@@ -2400,8 +2474,8 @@ class NavigationService:
                     logger.warning("Navigation start blocked by weather: %s", advice)
                     return False
         except Exception as e:
-            # Fail-open to avoid hard-blocking in case of weather service errors
-            logger.warning("Weather check failed, proceeding: %s", e)
+            logger.error("Weather check failed closed: %s", e)
+            return False
 
         self.navigation_state.navigation_mode = NavigationMode.AUTO
         self.navigation_state.path_status = PathStatus.EXECUTING
@@ -2873,6 +2947,7 @@ class NavigationService:
             "distance_traveled": self.navigation_state.distance_traveled,
             "obstacles_detected": len(self.navigation_state.obstacle_map),
             "dead_reckoning_active": self.navigation_state.dead_reckoning_active,
+            "gps_degradation": self.gps_degradation.snapshot().to_dict(),
             "path_confidence": self.navigation_state.path_confidence,
             "pose_quality": pose.quality.value if pose else None,
             "pose_x_m": pose.x_m if pose else None,

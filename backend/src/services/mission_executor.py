@@ -68,6 +68,7 @@ class MissionExecutor:
         docking_confirmation_timeout_seconds: float = 30.0,
         obstacle_active_provider: Any = None,
         obstacle_replan_provider: Any = None,
+        gps_degradation_provider: Any = None,
         obstacle_wait_timeout_seconds: float = 5.0,
         max_obstacle_replans_per_leg: int = 2,
         max_speed: float = 0.8,
@@ -95,6 +96,7 @@ class MissionExecutor:
         )
         self._obstacle_active_provider = obstacle_active_provider
         self._obstacle_replan_provider = obstacle_replan_provider
+        self._gps_degradation_provider = gps_degradation_provider
         self.obstacle_wait_timeout_seconds = max(0.0, float(obstacle_wait_timeout_seconds))
         self.max_obstacle_replans_per_leg = max(0, int(max_obstacle_replans_per_leg))
         import os
@@ -523,6 +525,23 @@ class MissionExecutor:
                 logger.critical("Waypoint navigation blocked by active emergency stop latch")
                 await self._enter_safety_hold(reason="global emergency hold")
                 return False
+
+            if self._gps_degradation_provider is not None:
+                degradation = self._gps_degradation_provider()
+                degradation_state = getattr(degradation, "state", "nominal")
+                state_value = getattr(degradation_state, "value", degradation_state)
+                if bool(getattr(degradation, "terminal", False)):
+                    await self._enter_safety_hold(reason="GPS degradation terminal stop")
+                    raise RuntimeError(
+                        f"GPS_DEGRADATION_TERMINAL: {getattr(degradation, 'reason', None)}"
+                    )
+                if state_value != "nominal":
+                    heading_wait_start = None
+                    await self._enter_safety_hold(
+                        reason=f"GPS degradation hold:{state_value}"
+                    )
+                    await asyncio.sleep(0.2)
+                    continue
 
             current_position = self._loc.current_position
             if current_position is None:

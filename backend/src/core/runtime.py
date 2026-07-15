@@ -69,6 +69,8 @@ class RuntimeContext:
     jobs_service: Any = None         # JobsService; Any to avoid import cycle
     planning_service: Any = None     # PlanningService; Any to avoid import cycle
     qualification_service: Any = None  # AutonomyQualificationService; Any to avoid import cycle
+    weather_service: Any = None      # WeatherService; canonical admission weather input
+    energy_service: Any = None       # EnergyService; canonical SOC/reserve owner
 
     @property
     def sensor_manager(self) -> Any:

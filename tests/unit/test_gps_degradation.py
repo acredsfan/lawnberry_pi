@@ -1,58 +1,85 @@
-import asyncio
-import os
-
 import pytest
 
-from backend.src.core.robot_state_manager import get_robot_state_manager
-from backend.src.models.robot_state import NavigationMode
 from backend.src.nav.gps_degradation import (
     GPSDegradationConfig,
-    GPSDegradationMonitor,
+    GPSDegradationState,
+    GPSDegradationStateMachine,
 )
 
 
-@pytest.mark.asyncio
-async def test_gps_degradation_switches_to_manual_on_poor_accuracy():
-    os.environ["SIM_MODE"] = "1"
-
-    # Ensure AUTONOMOUS mode with poor accuracy
-    mgr = get_robot_state_manager()
-    st = mgr.get_state()
-    st.navigation_mode = NavigationMode.AUTONOMOUS
-    st.position.latitude = 37.0
-    st.position.longitude = -122.0
-    st.position.accuracy_m = 6.5  # > 5m threshold
-    st.touch()
-
-    monitor = GPSDegradationMonitor(
-        GPSDegradationConfig(max_accuracy_m=5.0, max_fix_age_s=10.0, check_interval_s=0.05)
+def _policy() -> GPSDegradationStateMachine:
+    return GPSDegradationStateMachine(
+        GPSDegradationConfig(
+            max_accuracy_m=0.25,
+            max_fix_age_s=2.0,
+            hold_grace_s=2.0,
+            max_degraded_s=10.0,
+            recovery_samples=3,
+            degraded_speed_cap_mps=0.2,
+        )
     )
-    await monitor.start()
-    await asyncio.sleep(0.2)
-    await monitor.stop()
-
-    assert st.navigation_mode == NavigationMode.MANUAL
 
 
-@pytest.mark.asyncio
-async def test_gps_degradation_switches_to_manual_on_fix_timeout():
-    os.environ["SIM_MODE"] = "1"
+def _update(policy: GPSDegradationStateMachine, now: float, **overrides):
+    values = {
+        "position_available": True,
+        "fix_age_s": 0.1,
+        "accuracy_m": 0.05,
+        "dead_reckoning_active": False,
+        "now_monotonic": now,
+    }
+    values.update(overrides)
+    return policy.update(**values)
 
-    mgr = get_robot_state_manager()
-    st = mgr.get_state()
-    st.navigation_mode = NavigationMode.AUTONOMOUS
-    st.position.latitude = 37.0
-    st.position.longitude = -122.0
-    st.position.accuracy_m = 1.0  # good accuracy, but we'll age it out
-    # Manually set last_updated sufficiently in the past
-    import datetime as dt
-    st.last_updated = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1.0)
 
-    monitor = GPSDegradationMonitor(
-        GPSDegradationConfig(max_accuracy_m=5.0, max_fix_age_s=0.2, check_interval_s=0.05)
-    )
-    await monitor.start()
-    await asyncio.sleep(0.3)
-    await monitor.stop()
+def test_gps_degradation_holds_then_enters_bounded_dead_reckoning():
+    policy = _policy()
+    policy.start_mission()
 
-    assert st.navigation_mode == NavigationMode.MANUAL
+    first = _update(policy, 100.0, fix_age_s=3.0)
+    degraded = _update(policy, 102.1, fix_age_s=3.0, dead_reckoning_active=True)
+
+    assert first.state is GPSDegradationState.HOLD
+    assert first.motion_held
+    assert degraded.state is GPSDegradationState.DEAD_RECKONING
+    assert degraded.speed_cap_mps == pytest.approx(0.2)
+
+
+def test_gps_degradation_becomes_terminal_after_budget():
+    policy = _policy()
+    _update(policy, 100.0, position_available=False)
+
+    terminal = _update(policy, 110.1, position_available=False)
+
+    assert terminal.state is GPSDegradationState.TERMINAL
+    assert terminal.terminal
+    assert terminal.reason == "GPS_POSITION_UNAVAILABLE"
+
+
+def test_gps_recovery_requires_consecutive_good_samples():
+    policy = _policy()
+    _update(policy, 100.0, accuracy_m=1.0)
+    _update(policy, 102.1, accuracy_m=1.0)
+
+    recovering = _update(policy, 103.0)
+    second = _update(policy, 103.1)
+    nominal = _update(policy, 103.2)
+
+    assert recovering.state is GPSDegradationState.RECOVERING
+    assert second.state is GPSDegradationState.RECOVERING
+    assert nominal.state is GPSDegradationState.NOMINAL
+    assert nominal.speed_cap_mps is None
+
+
+def test_terminal_state_is_sticky_until_next_mission():
+    policy = _policy()
+    _update(policy, 10.0, position_available=False)
+    _update(policy, 20.1, position_available=False)
+
+    assert _update(policy, 21.0).state is GPSDegradationState.TERMINAL
+    assert policy.start_mission().state is GPSDegradationState.NOMINAL
+
+
+def test_invalid_policy_is_rejected():
+    with pytest.raises(ValueError):
+        GPSDegradationConfig(hold_grace_s=10.0, max_degraded_s=5.0)

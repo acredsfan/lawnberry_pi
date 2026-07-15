@@ -19,6 +19,12 @@ It is not a substitute for field validation with the blade physically disabled.
   freshness authorization.
 - Obstacle clearance is based on speed, latency, braking, front offset, and fixed margin
   fields in `config/limits.yaml`.
+- Live mission admission captures one report containing the exact qualification, controller,
+  fresh RTK pose, heading, operating-area revision, full-path, obstacle, weather, conflict, and
+  energy-reserve facts used for the decision. Missing wiring or evaluation errors fail closed.
+- GPS quality is mission-owned and progresses through `nominal`, `hold`, `dead_reckoning`,
+  `recovering`, and bounded `terminal` states. Non-nominal state holds the blade off; the motor
+  gateway also enforces the degraded speed cap, and recovery requires consecutive live samples.
 
 ## Safe Hardware Validation
 
@@ -56,4 +62,3 @@ Run these only on Raspberry Pi OS with the mower secured.
 3. Disconnect each ToF sensor and verify autonomy blocks or stops.
 4. Interrupt GPS updates while leaving the last coordinate visible; verify autonomy blocks on stale sample.
 5. Simulate low and critical battery thresholds with a safe test source.
-

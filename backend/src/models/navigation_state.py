@@ -130,6 +130,10 @@ class NavigationState(BaseModel):
     dead_reckoning_active: bool = False
     dead_reckoning_drift: float | None = None  # estimated drift in meters
     last_gps_fix: datetime | None = None
+    gps_degradation_state: str = "nominal"
+    gps_degradation_reason: str | None = None
+    gps_degradation_seconds: float = 0.0
+    gps_speed_cap_mps: float | None = None
 
     # References
     job_id: str | None = None  # Current job being executed

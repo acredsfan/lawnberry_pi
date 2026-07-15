@@ -604,27 +604,6 @@ class MissionService:
                 "Saved heading alignment reuse is restricted to blade-off diagnostics."
             )
 
-        try:
-            from ..main import app
-            from .autonomy_readiness_service import (
-                AutonomyReadinessError,
-                AutonomyReadinessService,
-            )
-
-            runtime = getattr(app.state, "runtime", None)
-            if runtime is not None and os.getenv("SIM_MODE", "0") != "1":
-                try:
-                    await AutonomyReadinessService(runtime).assert_ready(
-                        require_blade=not blade_off_diagnostic
-                    )
-                except AutonomyReadinessError as exc:
-                    codes = ", ".join(exc.report.blocking_reason_codes)
-                    raise MissionStateError(f"Autonomy readiness failed: {codes}") from exc
-        except MissionStateError:
-            raise
-        except Exception:
-            logger.debug("Autonomy readiness preflight unavailable", exc_info=True)
-
         # Pre-flight: verify motor controller is available (skip in simulation)
         # Only block when a robohat service IS registered but currently disconnected.
         # None means no service configured (dev / test without hardware) — allow.
@@ -684,6 +663,35 @@ class MissionService:
                 mission.waypoints,
                 require_boundary=self._live_autonomy_requires_boundary(),
             )
+
+        if os.getenv("SIM_MODE", "0") != "1":
+            try:
+                from ..main import app
+                from .autonomy_readiness_service import (
+                    AutonomyReadinessError,
+                    AutonomyReadinessService,
+                )
+
+                runtime = getattr(app.state, "runtime", None)
+                if runtime is None:
+                    raise MissionStateError(
+                        "Autonomy readiness failed: RUNTIME_CONTEXT_UNAVAILABLE"
+                    )
+                try:
+                    await AutonomyReadinessService(runtime).assert_ready(
+                        require_blade=not blade_off_diagnostic,
+                        mission=mission,
+                    )
+                except AutonomyReadinessError as exc:
+                    codes = ", ".join(exc.report.blocking_reason_codes)
+                    raise MissionStateError(f"Autonomy readiness failed: {codes}") from exc
+            except MissionStateError:
+                raise
+            except Exception as exc:
+                logger.exception("Autonomy readiness preflight failed closed")
+                raise MissionStateError(
+                    "Autonomy readiness failed: PREFLIGHT_EVALUATION_FAILED"
+                ) from exc
 
         self._mission_terminal_events.setdefault(mission_id, asyncio.Event()).clear()
         self.mission_statuses[mission_id] = self._build_status(

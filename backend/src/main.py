@@ -44,7 +44,6 @@ from .middleware.input_validation import register_input_validation_middleware
 from .middleware.rate_limiting import register_global_rate_limiter
 from .middleware.sanitization import register_sanitization_middleware
 from .middleware.security import register_security_middleware
-from .nav.gps_degradation import GPSDegradationMonitor
 from .safety.safety_monitor import get_safety_monitor
 from .safety.safety_triggers import set_safety_event_handler
 from .safety.safety_validator import validate_on_start
@@ -134,10 +133,6 @@ async def lifespan(app: FastAPI):
                     _log.warning("ToF pair addressing failed: %s", e)
     except Exception:
         pass
-    # Start GPS degradation monitor
-    app.state.gps_deg_monitor = GPSDegradationMonitor()
-    await app.state.gps_deg_monitor.start()
-
     # Validate safety limits at startup and attach report
     try:
         ok, report = validate_on_start(loader)
@@ -173,6 +168,12 @@ async def lifespan(app: FastAPI):
         pass
     try:
         nav_service = NavigationService.get_instance()
+        from backend.src.services.weather_service import weather_service
+
+        weather_service.register_sensor_manager(
+            lambda: AppState.get_instance().sensor_manager
+        )
+        nav_service.weather = weather_service
         _maybe_attach_telemetry_capture(nav_service)
         mission_service = get_mission_service(
             nav_service, websocket_hub=websocket_hub
@@ -376,6 +377,7 @@ async def lifespan(app: FastAPI):
         persistence_mode=_persistence_mode.value,
         jobs_service=_jobs_service_singleton,
         planning_service=_planning_svc,
+        weather_service=weather_service,
     )
     from backend.src.services.autonomy_qualification_service import (
         AutonomyQualificationService,
@@ -492,8 +494,6 @@ async def lifespan(app: FastAPI):
     if getattr(app.state, "watchdog", None):
         await app.state.watchdog.stop()
     set_safety_event_handler(None)
-    if getattr(app.state, "gps_deg_monitor", None):
-        await app.state.gps_deg_monitor.stop()
     await websocket_hub.stop_telemetry_loop()
     try:
         await _jobs_service_singleton.shutdown()
