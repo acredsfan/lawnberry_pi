@@ -57,7 +57,6 @@ const routes = computed(() => [
   { name: 'Mission Planner', path: '/mission-planner' },
   { name: 'Settings', path: '/settings' },
   { name: 'AI', path: '/ai' },
-  { name: 'Telemetry', path: '/telemetry' },
   { name: 'Docs', path: '/docs' },
 ])
 

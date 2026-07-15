@@ -42,9 +42,7 @@ def _service_for_request(request: Request = None) -> HealthService:
 
 def _with_compatibility_aliases(report: dict) -> dict:
     subsystems = report.get("subsystems") if isinstance(report.get("subsystems"), dict) else {}
-    compatibility_status = report.get("overall_status") or "healthy"
-    if compatibility_status == "unknown":
-        compatibility_status = "healthy"
+    compatibility_status = report.get("overall_status") or "unknown"
     return {
         **report,
         "status": compatibility_status,

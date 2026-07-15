@@ -3,9 +3,10 @@ import os
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ...core.build_info import get_build_info
 from ...core.globals import _debug_overrides
 from ...models.sensor_data import GpsReading
 from ...services.stationary_rtk_averaging import (
@@ -30,20 +31,29 @@ class Position(BaseModel):
 
 class SafetyStatus(BaseModel):
     emergency_stop_active: bool = False
-    tilt_detected: bool = False
-    obstacle_detected: bool = False
-    blade_safety_ok: bool = True
-    safety_interlocks: list[str] = []
+    tilt_detected: bool | None = None
+    obstacle_detected: bool | None = None
+    blade_safety_ok: bool | None = None
+    safety_interlocks: list[str] = Field(default_factory=list)
 
 
 class MowerStatus(BaseModel):
     position: Position | None = None
-    battery_percentage: float = 0
-    power_mode: str = "NORMAL"
-    navigation_state: str = "IDLE"
-    safety_status: SafetyStatus = SafetyStatus()
+    battery_percentage: float | None = None
+    power_mode: str = "UNKNOWN"
+    navigation_state: str = "UNKNOWN"
+    safety_status: SafetyStatus = Field(default_factory=SafetyStatus)
     blade_active: bool = False
-    last_updated: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_updated: datetime | None = None
+    source: str = "unavailable"
+    sample_age_seconds: float | None = None
+    fresh: bool = False
+    power_source: str | None = None
+    power_sample_age_seconds: float | None = None
+    power_fresh: bool = False
+    reason_code: str | None = None
+    build_sha: str | None = None
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class SensorHealthResponse(BaseModel):
@@ -151,10 +161,117 @@ class PowerSummary(BaseModel):
 # ----------------------- Endpoints -----------------------
 
 
+def _parse_timestamp(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _enum_value(value: object, default: str = "UNKNOWN") -> str:
+    if value is None:
+        return default
+    return str(getattr(value, "value", value))
+
+
 @router.get("/dashboard/status", response_model=MowerStatus)
-def dashboard_status():
-    # Placeholder data; will be wired to services later
-    return MowerStatus()
+async def dashboard_status(request: Request) -> MowerStatus:
+    """Return a read-only snapshot without inventing missing mower state."""
+
+    runtime = getattr(request.app.state, "runtime", None)
+    hub = getattr(runtime, "websocket_hub", None) if runtime is not None else websocket_hub
+    try:
+        telemetry = await hub.get_cached_telemetry()
+    except Exception:
+        telemetry = {"source": "unavailable"}
+
+    sample = telemetry.get("sample") if isinstance(telemetry.get("sample"), dict) else {}
+    source = str(sample.get("source") or telemetry.get("source") or "unavailable")
+    sample_age = sample.get("age_seconds")
+    try:
+        sample_age = float(sample_age) if sample_age is not None else None
+    except (TypeError, ValueError):
+        sample_age = None
+    fresh = bool(sample.get("fresh", False)) and source != "unavailable"
+
+    position_payload = (
+        telemetry.get("position") if isinstance(telemetry.get("position"), dict) else {}
+    )
+    position_values = {
+        key: position_payload.get(key)
+        for key in ("latitude", "longitude", "altitude", "accuracy", "gps_mode")
+    }
+    position = Position(**position_values) if any(v is not None for v in position_values.values()) else None
+
+    navigation_state = "UNKNOWN"
+    safety_state: dict[str, Any] = {}
+    blade_state: dict[str, Any] = {}
+    energy_state = None
+    if runtime is not None:
+        navigation = getattr(runtime, "navigation", None)
+        navigation_state = _enum_value(
+            getattr(getattr(navigation, "navigation_state", None), "navigation_mode", None)
+        )
+        safety_state = getattr(runtime, "safety_state", {}) or {}
+        blade_state = getattr(runtime, "blade_state", {}) or {}
+        energy_service = getattr(runtime, "energy_service", None)
+        if energy_service is not None:
+            try:
+                energy_state = energy_service.current_state()
+            except Exception:
+                logger.exception("Canonical energy state unavailable for dashboard status")
+
+    active_interlocks: list[str] = []
+    try:
+        from ...core.robot_state_manager import get_robot_state_manager
+
+        robot_state = get_robot_state_manager().get_state()
+        active_interlocks = [
+            _enum_value(getattr(item, "interlock_type", item), default="unknown")
+            for item in robot_state.active_interlocks
+        ]
+    except Exception:
+        pass
+
+    obstacle_detected = "obstacle_detected" in active_interlocks if fresh else None
+    tilt_detected = "tilt_detected" in active_interlocks if fresh else None
+    emergency_active = bool(safety_state.get("emergency_stop_active", False))
+    blade_safety_ok = not emergency_active and not active_interlocks if fresh else None
+
+    battery_percentage = getattr(energy_state, "soc_percent", None)
+    power_available = bool(getattr(energy_state, "available", False))
+    charging = bool(getattr(energy_state, "charging_confirmed", False))
+    power_mode = "CHARGING" if charging else "NORMAL" if power_available else "UNKNOWN"
+    observed_at = _parse_timestamp(sample.get("observed_at"))
+
+    return MowerStatus(
+        position=position,
+        battery_percentage=battery_percentage,
+        power_mode=power_mode,
+        navigation_state=navigation_state,
+        safety_status=SafetyStatus(
+            emergency_stop_active=emergency_active,
+            tilt_detected=tilt_detected,
+            obstacle_detected=obstacle_detected,
+            blade_safety_ok=blade_safety_ok,
+            safety_interlocks=active_interlocks,
+        ),
+        blade_active=bool(blade_state.get("active", False)),
+        last_updated=observed_at,
+        source=source,
+        sample_age_seconds=sample_age,
+        fresh=fresh,
+        power_source=getattr(energy_state, "source", None),
+        power_sample_age_seconds=getattr(energy_state, "sample_age_seconds", None),
+        power_fresh=bool(getattr(energy_state, "fresh", False)),
+        reason_code=getattr(energy_state, "reason_code", "POWER_SERVICE_UNAVAILABLE"),
+        build_sha=get_build_info().get("short_sha"),
+    )
 
 
 @router.get("/sensors/health")

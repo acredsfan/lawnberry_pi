@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from backend.src.api.health import (
+    _with_compatibility_aliases,
     health_api_v2,
     health_liveness,
     health_readiness,
@@ -88,3 +89,10 @@ def test_health_api_v2_includes_firmware_section():
     assert "firmware" in data
     firmware = data["firmware"]
     assert "firmware_version" in firmware
+
+
+def test_compatibility_health_never_promotes_unknown_to_healthy():
+    report = _with_compatibility_aliases({"overall_status": "unknown", "subsystems": {}})
+
+    assert report["status"] == "unknown"
+    assert report["safety"]["status"] == "unknown"

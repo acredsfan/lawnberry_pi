@@ -53,7 +53,7 @@ collect_meta() {
   )
   # Dump systemd service states (best-effort)
   if command -v systemctl >/dev/null 2>&1; then
-    for svc in lawnberry-backend.service lawnberry-sensors.service lawnberry-camera.service lawnberry-remote-access.service lawnberry-database.service lawnberry-health.service lawnberry-frontend.service; do
+    for svc in lawnberry-backend.service lawnberry-camera.service lawnberry-remote-access.service lawnberry-database.service lawnberry-health.service lawnberry-frontend.service; do
       systemctl status "$svc" --no-pager --full || true
     done >"$SNAPSHOT_DIR/meta/systemd-status.txt" 2>&1 || true
   fi

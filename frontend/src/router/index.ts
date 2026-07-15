@@ -47,12 +47,6 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
-      path: '/telemetry',
-      name: 'Telemetry',
-      component: () => import('@/views/TelemetryView.vue'),
-      meta: { requiresAuth: true }
-    },
-    {
       path: '/docs',
       name: 'DocsHub',
       component: () => import('@/views/DocsHubView.vue'),

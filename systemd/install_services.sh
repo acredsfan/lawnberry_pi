@@ -21,7 +21,6 @@ fi
 echo "Copying service files to $SYSTEMD_DIR..."
 cp "$SCRIPT_DIR/lawnberry-database.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-backend.service" "$SYSTEMD_DIR/"
-cp "$SCRIPT_DIR/lawnberry-sensors.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-health.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-frontend.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-camera.service" "$SYSTEMD_DIR/"
@@ -31,6 +30,11 @@ cp "$SCRIPT_DIR/lawnberry-cert-renewal.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-cert-renewal.timer" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-backup.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-backup.timer" "$SYSTEMD_DIR/"
+
+# Sensor ownership lives in the backend process. Retire the historical unit,
+# which only slept forever and could therefore appear healthy without doing work.
+systemctl disable --now lawnberry-sensors.service 2>/dev/null || true
+rm -f "$SYSTEMD_DIR/lawnberry-sensors.service"
 
 # Set correct permissions
 chmod 644 "$SYSTEMD_DIR/lawnberry-"*.service
@@ -46,7 +50,6 @@ systemctl daemon-reload
 echo "Enabling LawnBerry Pi services..."
 systemctl enable lawnberry-database.service
 systemctl enable lawnberry-backend.service
-systemctl enable lawnberry-sensors.service
 systemctl enable lawnberry-health.service
 systemctl enable lawnberry-frontend.service
 systemctl enable lawnberry-camera.service
@@ -70,7 +73,6 @@ echo ""
 echo "To start all services:"
 echo "  sudo systemctl start lawnberry-database"
 echo "  sudo systemctl start lawnberry-backend"
-echo "  sudo systemctl start lawnberry-sensors"
 echo "  sudo systemctl start lawnberry-health"
 echo "  sudo systemctl start lawnberry-frontend"
 echo "  sudo systemctl start lawnberry-camera"

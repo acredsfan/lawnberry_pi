@@ -1517,8 +1517,8 @@ async def control_preset_turn(
     """
     import os
 
+    from ..control.commands import CommandStatus, DriveCommand
     from ..services.navigation_service import NavigationService
-    from ..services.robohat_service import get_robohat_service
 
     if runtime.command_gateway.is_emergency_active(request):
         return JSONResponse(status_code=403, content={"detail": "Emergency stop active"})
@@ -1533,13 +1533,18 @@ async def control_preset_turn(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, detail="target_degrees must be numeric"
         )
+    if abs(target_degrees) > 360.0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="target_degrees must be between -360 and 360"
+        )
     if target_degrees == 0.0:
         return {
             "ok": True,
             "target_degrees": 0.0,
             "actual_degrees": 0.0,
             "duration_ms": 0,
-            "method": "imu",
+            "method": "none",
+            "source": "simulated" if os.getenv("SIM_MODE", "0") == "1" else "hardware",
         }
 
     try:
@@ -1568,34 +1573,45 @@ async def control_preset_turn(
             "target_degrees": target_degrees,
             "actual_degrees": target_degrees,
             "duration_ms": elapsed_ms,
-            "method": "timed",
+            "method": "simulation",
+            "source": "simulated",
         }
 
     nav_service = NavigationService.get_instance()
-    robohat = get_robohat_service()
-
     initial_heading = nav_service.navigation_state.heading if nav_service else None
 
     if initial_heading is None:
-        # No IMU available — fall back to timed
-        if robohat:
-            await robohat.send_motor_command(left_cmd, right_cmd)
-        duration_s = abs(target_degrees) / _PRESET_TURN_DPS
-        await asyncio.sleep(duration_s)
-        if robohat:
-            await robohat.send_motor_command(0.0, 0.0)
-        elapsed_ms = int((time.monotonic() - start_time) * 1000)
-        return {
-            "ok": True,
-            "target_degrees": target_degrees,
-            "actual_degrees": target_degrees,
-            "duration_ms": elapsed_ms,
-            "method": "timed",
-        }
+        return JSONResponse(
+            status_code=409,
+            content={
+                "ok": False,
+                "status_reason": "heading_unavailable",
+                "detail": "Fresh IMU heading is required for a preset turn",
+            },
+        )
 
-    # IMU closed-loop turn
-    if robohat:
-        await robohat.send_motor_command(left_cmd, right_cmd)
+    async def dispatch_turn(left: float, right: float) -> None:
+        outcome = await runtime.command_gateway.dispatch_drive(
+            DriveCommand(
+                left=left,
+                right=right,
+                source="manual",
+                duration_ms=350,
+                session_id=cmd.get("session_id"),
+                max_speed_limit=speed,
+                legacy=False,
+            ),
+            request=request,
+        )
+        if outcome.status not in (CommandStatus.ACCEPTED, CommandStatus.QUEUED):
+            raise HTTPException(
+                status_code=423,
+                detail={
+                    "status_reason": outcome.status_reason or outcome.status.value,
+                    "active_interlocks": outcome.active_interlocks,
+                    "audit_id": outcome.audit_id,
+                },
+            )
 
     cumulative = 0.0
     prev_heading = float(initial_heading)
@@ -1606,17 +1622,17 @@ async def control_preset_turn(
             if time.monotonic() - start_time > _PRESET_TURN_TIMEOUT_S:
                 timed_out = True
                 break
-            await asyncio.sleep(0.05)
+            await dispatch_turn(left_cmd, right_cmd)
+            await asyncio.sleep(0.1)
             curr_heading = nav_service.navigation_state.heading
             if curr_heading is None:
-                continue
+                raise HTTPException(status_code=409, detail="IMU heading was lost during preset turn")
             curr = float(curr_heading)
             step = (curr - prev_heading + 180.0) % 360.0 - 180.0
             cumulative += step
             prev_heading = curr
     finally:
-        if robohat:
-            await robohat.send_motor_command(0.0, 0.0)
+        await dispatch_turn(0.0, 0.0)
 
     elapsed_ms = int((time.monotonic() - start_time) * 1000)
     return {
@@ -1625,6 +1641,7 @@ async def control_preset_turn(
         "actual_degrees": round(cumulative, 1),
         "duration_ms": elapsed_ms,
         "method": "imu",
+        "source": "hardware",
     }
 
 
@@ -1950,208 +1967,4 @@ async def control_navigation_status():
         "status": "emergency_stop" if _safety_state.get("emergency_stop_active") else "ready",
         "estop_reason": _safety_state.get("estop_reason"),
         **_control_navigation_snapshot(nav_service),
-    }
-
-
-@router.post("/control/diagnose/stiffness")
-async def diagnose_stiffness_progressive(
-    cmd: dict, request: Request, runtime: RuntimeContext = Depends(get_runtime)
-):
-    """Start progressive stiffness detection test (slowly increase turn effort until stuck).
-
-    POST /api/v2/control/diagnose/stiffness
-    Body: {
-        "session_id": "<session>",
-        "direction": "left|right",
-        "initial_effort": 0.1,  # Start at 10% effort, optional
-        "step": 0.05,            # Increase by 5% each iteration, optional
-        "max_effort": 1.0        # Stop at 100%, optional
-    }
-
-    Returns:
-    {
-        "ok": true,
-        "test_active": true,
-        "current_effort": 0.10,
-        "heading": 45.2,
-        "heading_delta": 0.0,  # degrees changed since last step
-        "status": "testing|stuck|completed"
-    }
-    """
-    from ..services.navigation_service import NavigationService
-    from ..services.robohat_service import get_robohat_service
-
-    nav_service = NavigationService.get_instance()
-    robohat = get_robohat_service()
-
-    if runtime.command_gateway.is_emergency_active():
-        return JSONResponse(status_code=403, content={"detail": "Emergency stop active"})
-
-    direction = cmd.get("direction", "left")
-    initial_effort = float(cmd.get("initial_effort", 0.1))
-    step = float(cmd.get("step", 0.05))
-    max_effort = float(cmd.get("max_effort", 1.0))
-
-    # Start or continue test
-    heading_delta_out = 0.0  # Default value for initial request
-    if not nav_service._stiffness_test_active:
-        nav_service._stiffness_test_active = True
-        nav_service._stiffness_test_start_time = time.time()
-        nav_service._stiffness_test_effort = initial_effort
-        nav_service._stiffness_test_effort_step = step
-        nav_service._stiffness_test_max_effort = max_effort
-        nav_service._stiffness_test_direction = direction
-        nav_service._stiffness_test_last_heading: Optional[float] = None
-        nav_service._stiffness_test_last_check: Optional[float] = None
-        test_status = "started"
-    else:
-        elapsed = time.time() - nav_service._stiffness_test_start_time
-        heading = nav_service.navigation_state.current_heading or 0.0
-
-        # Check if stuck (heading barely changed in last 2 seconds)
-        if nav_service._stiffness_test_last_heading is not None and elapsed > 2.0:
-            heading_delta = abs(heading - nav_service._stiffness_test_last_heading)
-            if heading_delta < nav_service._stiffness_test_stuck_threshold:
-                # Motor is stuck - cease test
-                nav_service._stiffness_test_active = False
-                await robohat.send_motor_command(0.0, 0.0)
-                test_status = "stuck"
-                heading_delta_out = heading_delta
-            else:
-                # Not stuck yet, increase effort
-                nav_service._stiffness_test_effort = min(
-                    max_effort, nav_service._stiffness_test_effort + step
-                )
-                if nav_service._stiffness_test_effort >= max_effort:
-                    nav_service._stiffness_test_active = False
-                    await robohat.send_motor_command(0.0, 0.0)
-                    test_status = "completed"
-                else:
-                    test_status = "testing"
-                heading_delta_out = heading_delta
-        else:
-            test_status = "testing"
-            heading_delta_out = 0.0
-
-        nav_service._stiffness_test_last_heading = heading
-        nav_service._stiffness_test_last_check = elapsed
-
-    # Apply current effort in requested direction
-    # Convert throttle/turn to left/right speeds using arcade math
-    # RoboHAT service uses INVERTED arcade formula to compensate for motor wiring
-    if nav_service._stiffness_test_active:
-        effort = nav_service._stiffness_test_effort
-        throttle = 0.3
-        turn = effort if direction == "right" else -effort
-        left_speed = throttle - turn
-        right_speed = throttle + turn
-        await robohat.send_motor_command(left_speed, right_speed)
-
-    return {
-        "ok": True,
-        "test_active": nav_service._stiffness_test_active,
-        "current_effort": nav_service._stiffness_test_effort,
-        "heading": nav_service.navigation_state.heading or 0.0,
-        "heading_delta": heading_delta_out if test_status != "started" else 0.0,
-        "status": test_status,
-    }
-
-
-@router.post("/control/diagnose/heading-validation")
-async def diagnose_heading_validation(
-    cmd: dict, request: Request, runtime: RuntimeContext = Depends(get_runtime)
-):
-    """Validate heading by comparing GPS Course-Over-Ground vs IMU yaw.
-
-    POST /api/v2/control/diagnose/heading-validation
-    Body: {
-        "session_id": "<session>",
-        "distance_m": 5.0,       # Drive forward this far
-        "samples": 10            # Collect this many GPS/IMU samples
-    }
-
-    Returns:
-    {
-        "ok": true,
-        "heading_source": "gps|imu|conflict",
-        "gps_cog": 45.2,
-        "imu_yaw": 45.5,
-        "difference": 0.3,
-        "confidence": 0.95,
-        "recommendation": "GPS source is reliable" | "IMU appears inverted" | "Conflict detected"
-    }
-    """
-    from ..services.navigation_service import NavigationService
-    from ..services.robohat_service import get_robohat_service
-
-    nav_service = NavigationService.get_instance()
-    robohat = get_robohat_service()
-
-    if runtime.command_gateway.is_emergency_active():
-        return JSONResponse(status_code=403, content={"detail": "Emergency stop active"})
-
-    # Collect GPS and IMU heading data while driving forward
-    samples = int(cmd.get("samples", 10))
-
-    # Start forward movement (pure forward, no turn)
-    await robohat.send_motor_command(0.5, 0.5)
-
-    gps_headings = []
-    imu_headings = []
-
-    try:
-        for _ in range(samples):
-            gps_cog = nav_service.navigation_state.gps_cog
-            imu_heading = nav_service.navigation_state.heading
-
-            if gps_cog is not None:
-                gps_headings.append(float(gps_cog))
-            if imu_heading is not None:
-                imu_headings.append(float(imu_heading))
-
-            await asyncio.sleep(0.2)
-    finally:
-        # Stop movement
-        await robohat.send_motor_command(0.0, 0.0)
-
-    if not gps_headings or not imu_headings:
-        return {
-            "ok": False,
-            "error": "Insufficient sensor data collected",
-            "gps_samples": len(gps_headings),
-            "imu_samples": len(imu_headings),
-        }
-
-    # Compute average headings
-    avg_gps = sum(gps_headings) / len(gps_headings)
-    avg_imu = sum(imu_headings) / len(imu_headings)
-
-    # Normalize angle difference to [-180, 180]
-    diff = (avg_imu - avg_gps + 180) % 360 - 180
-    abs_diff = abs(diff)
-
-    # Determine heading source and recommendation
-    if abs_diff < 5.0:
-        heading_source = "gps"  # GPS and IMU agree
-        recommendation = "GPS Course-Over-Ground is reliable; IMU calibration is correct"
-        confidence = 1.0 - (abs_diff / 180.0)
-    elif abs_diff > 170.0:
-        heading_source = "imu"  # 180° difference suggests IMU inverted
-        recommendation = "IMU yaw appears to be inverted (180° offset); check BNO085 calibration or fix yaw formula"
-        confidence = 0.95
-    else:
-        heading_source = "conflict"  # Significant mismatch
-        recommendation = f"Heading conflict detected ({abs_diff:.1f}°). Verify GPS fix quality and IMU calibration"
-        confidence = max(0.0, 1.0 - (abs_diff / 90.0))
-
-    return {
-        "ok": True,
-        "heading_source": heading_source,
-        "gps_cog": round(avg_gps, 2),
-        "imu_yaw": round(avg_imu, 2),
-        "difference": round(abs_diff, 2),
-        "confidence": round(confidence, 3),
-        "recommendation": recommendation,
-        "gps_samples": len(gps_headings),
-        "imu_samples": len(imu_headings),
     }

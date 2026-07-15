@@ -65,7 +65,6 @@ stop_services() {
   if command -v systemctl >/dev/null 2>&1; then
     log "Stopping services"
     run sudo systemctl stop lawnberry-backend.service || true
-    run sudo systemctl stop lawnberry-sensors.service || true
     run sudo systemctl stop lawnberry-camera.service || true
     run sudo systemctl stop lawnberry-remote-access.service || true
     run sudo systemctl stop lawnberry-database.service || true
@@ -83,7 +82,6 @@ start_services() {
     log "Starting services"
     run sudo systemctl start lawnberry-database.service || true
     run sudo systemctl start lawnberry-backend.service || true
-    run sudo systemctl start lawnberry-sensors.service || true
     run sudo systemctl start lawnberry-camera.service || true
     run sudo systemctl start lawnberry-remote-access.service || true
     run sudo systemctl start lawnberry-health.service || true
