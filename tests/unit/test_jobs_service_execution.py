@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from backend.src.core.persistence import PersistenceLayer
 from backend.src.models import NavigationMode
 from backend.src.models.job import Job, JobStatus, JobType
 from backend.src.models.mission import (
@@ -45,6 +46,7 @@ class _FakeMissionService:
         self.pause_calls: list[str] = []
         self.resume_calls: list[str] = []
         self.abort_calls: list[str] = []
+        self.delete_calls: list[str] = []
 
     async def list_missions(self) -> list[Mission]:
         return list(self.missions.values())
@@ -102,6 +104,12 @@ class _FakeMissionService:
         )
         self._terminal_events[mission_id].set()
 
+    async def delete_mission(self, mission_id: str) -> None:
+        self.delete_calls.append(mission_id)
+        self.missions.pop(mission_id, None)
+        self.mission_statuses.pop(mission_id, None)
+        self._terminal_events.pop(mission_id, None)
+
     def finish(
         self,
         mission_id: str,
@@ -115,6 +123,14 @@ class _FakeMissionService:
         mission_status.detail = detail
         mission_status.completion_percentage = completion_percentage
         self._terminal_events[mission_id].set()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_persistence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "backend.src.core.persistence.persistence",
+        PersistenceLayer(str(tmp_path / "jobs.db")),
+    )
 
 
 class _BlockingWebSocketHub:
@@ -168,6 +184,14 @@ async def _wait_for_mission_link(job: Job) -> None:
             return
         await asyncio.sleep(0)
     raise AssertionError("job did not link a mission")
+
+
+async def _wait_for_mission_id(job: Job, mission_id: str) -> None:
+    for _ in range(50):
+        if job.mission_id == mission_id:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError(f"job did not link mission {mission_id}; current={job.mission_id}")
 
 
 async def _wait_for_job_task(service: JobsService, job_id: str) -> None:
@@ -227,6 +251,101 @@ async def test_start_job_runs_real_mission_and_projects_completion(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_multi_zone_job_runs_ordered_child_missions(monkeypatch):
+    mission_service = _FakeMissionService()
+    service = _make_service(monkeypatch, mission_service)
+    job = service.create_job(
+        "Both yards",
+        zones=["zone-front", "zone-back"],
+        parameters={"angle": 10},
+    )
+
+    assert service.start_job(job.id) is True
+    await _wait_for_mission_id(job, "mission-1")
+    mission_service.finish(
+        "mission-1",
+        MissionLifecycleStatus.COMPLETED,
+        completion_percentage=100.0,
+    )
+    await _wait_for_mission_id(job, "mission-2")
+
+    assert job.status == JobStatus.RUNNING
+    assert job.progress is not None
+    assert job.progress.zones_completed == ["zone-front"]
+    assert job.progress.percentage_complete == 50.0
+    assert [call["zone_id"] for call in mission_service.create_calls] == [
+        "zone-front",
+        "zone-back",
+    ]
+
+    mission_service.finish(
+        "mission-2",
+        MissionLifecycleStatus.COMPLETED,
+        completion_percentage=100.0,
+    )
+    await _wait_for_job_task(service, job.id)
+
+    assert job.status == JobStatus.COMPLETED
+    assert job.progress.zones_completed == ["zone-front", "zone-back"]
+    assert job.progress.percentage_complete == 100.0
+
+
+@pytest.mark.asyncio
+async def test_restart_reconciles_occurrence_and_resumes_terminal_projection(monkeypatch):
+    from backend.src.core.persistence import persistence
+
+    mission_service = _FakeMissionService()
+    service = _make_service(monkeypatch, mission_service)
+    job = {
+        "id": "persisted-recovery-job",
+        "name": "Recovery job",
+        "schedule": "",
+        "zones": ["zone-front"],
+        "pattern": "parallel",
+        "pattern_params": {},
+        "created_at": datetime.now(UTC).isoformat(),
+        "status": "running",
+    }
+    persistence.save_planning_job(job)
+    occurrence, _created = persistence.claim_planning_job_occurrence(
+        occurrence_id="occurrence-recovery",
+        job_id=job["id"],
+        scheduled_for=job["created_at"],
+    )
+    mission = await mission_service.create_mission(name="Recovery child")
+    await mission_service.start_mission(mission.id)
+    await mission_service.pause_mission(mission.id)
+    persistence.update_planning_job_occurrence(
+        occurrence["occurrence_id"],
+        status="running",
+        mission_ids=[mission.id],
+        active_mission_id=mission.id,
+        started_at=job["created_at"],
+    )
+
+    await service._recover_planning_occurrences()
+
+    recovered = persistence.load_latest_planning_job_occurrence(job["id"])
+    assert recovered is not None
+    assert recovered["status"] == "paused"
+    await service.control_persisted_planning_job(job["id"], "resume")
+    mission_service.finish(
+        mission.id,
+        MissionLifecycleStatus.COMPLETED,
+        completion_percentage=100.0,
+    )
+    await asyncio.wait_for(
+        service._planning_occurrence_tasks[occurrence["occurrence_id"]],
+        timeout=1.0,
+    )
+
+    terminal = persistence.load_latest_planning_job_occurrence(job["id"])
+    assert terminal is not None
+    assert terminal["status"] == "completed"
+    assert terminal["zones_completed"] == ["zone-front"]
+
+
+@pytest.mark.asyncio
 async def test_start_rejection_fails_job_without_recording_last_run(monkeypatch):
     mission_service = _FakeMissionService(start_error=RuntimeError("Navigation not ready"))
     service = _make_service(monkeypatch, mission_service)
@@ -237,7 +356,8 @@ async def test_start_rejection_fails_job_without_recording_last_run(monkeypatch)
 
     assert job.status == JobStatus.FAILED
     assert job.last_run is None
-    assert job.mission_id == "mission-1"
+    assert job.mission_id is None
+    assert mission_service.delete_calls == ["mission-1"]
     assert "Navigation not ready" in (job.error_message or "")
     assert job.result_message is None
 

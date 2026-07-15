@@ -26,6 +26,26 @@ export async function deletePlanningJob(id: string): Promise<void> {
   await apiService.delete(`/api/v2/planning/jobs/${id}`)
 }
 
+async function controlPlanningJob(
+  id: string,
+  action: 'start' | 'pause' | 'resume' | 'cancel'
+): Promise<PlanningJob> {
+  const response = await apiService.post<PlanningJob>(`/api/v2/planning/jobs/${id}/${action}`)
+  return response.data
+}
+
+export const startPlanningJob = (id: string): Promise<PlanningJob> =>
+  controlPlanningJob(id, 'start')
+
+export const pausePlanningJob = (id: string): Promise<PlanningJob> =>
+  controlPlanningJob(id, 'pause')
+
+export const resumePlanningJob = (id: string): Promise<PlanningJob> =>
+  controlPlanningJob(id, 'resume')
+
+export const cancelPlanningJob = (id: string): Promise<PlanningJob> =>
+  controlPlanningJob(id, 'cancel')
+
 // ---- Schedules (/api/v2/schedules) ----
 
 export async function getSchedules(): Promise<PlanningJob[]> {
@@ -38,7 +58,10 @@ export async function createSchedule(data: Record<string, unknown>): Promise<Pla
   return response.data
 }
 
-export async function updateSchedule(id: string, data: Record<string, unknown>): Promise<PlanningJob> {
+export async function updateSchedule(
+  id: string,
+  data: Record<string, unknown>
+): Promise<PlanningJob> {
   const response = await apiService.put<PlanningJob>(`/api/v2/schedules/${id}`, data)
   return response.data
 }

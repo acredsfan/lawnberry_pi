@@ -26,6 +26,7 @@ from ..core.globals import (
 from ..core.http_util import client_key
 from .routers import telemetry
 from .routers.auth import _resolve_manual_session
+from .routers.planning import PlanningJobResponse
 from ..services.websocket_hub import websocket_hub
 from ..services.timezone_service import detect_system_timezone
 
@@ -221,6 +222,7 @@ async def post_map_zone_single(
                 detail=f"Zone overlaps with existing zones: {conflicts}",
             )
         import sqlite3 as _sqlite3
+
         try:
             repo.save_zone(zone.model_dump(mode="json"))
         except _sqlite3.IntegrityError:
@@ -399,13 +401,25 @@ def put_map_locations(locations: MapLocations):
 # TODO(v3): extract PlanningRepository(BaseRepository) once subsystem is end-to-end green - Issue #60
 
 
-@router.get("/planning/jobs")
-async def list_planning_jobs():
-    return persistence.load_planning_jobs()
+def _planning_jobs_service(runtime: RuntimeContext):
+    """Return the canonical singleton when a lightweight test app skips lifespan."""
+    if runtime.jobs_service is not None:
+        return runtime.jobs_service
+    from ..services.jobs_service import jobs_service
+
+    return jobs_service
 
 
-@router.post("/planning/jobs")
-async def create_planning_job(payload: dict[str, Any]):
+@router.get("/planning/jobs", response_model=list[PlanningJobResponse])
+async def list_planning_jobs(runtime: RuntimeContext = Depends(get_runtime)):
+    return _planning_jobs_service(runtime).list_persisted_planning_jobs()
+
+
+@router.post("/planning/jobs", response_model=PlanningJobResponse, status_code=201)
+async def create_planning_job(
+    payload: dict[str, Any],
+    runtime: RuntimeContext = Depends(get_runtime),
+):
     job_id = str(uuid.uuid4())
     job = {
         "id": job_id,
@@ -421,15 +435,96 @@ async def create_planning_job(payload: dict[str, Any]):
         "pattern_params": dict(payload.get("pattern_params") or {}),
     }
     persistence.save_planning_job(job)
-    return JSONResponse(status_code=201, content=job)
+    if payload.get("start_immediately"):
+        state = await _planning_jobs_service(runtime).start_persisted_planning_job(job_id)
+        if state.get("status") != "running":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Planning job start was not accepted",
+                    "job_id": job_id,
+                    "status": state.get("status"),
+                    "reason": state.get("error_message"),
+                },
+            )
+        return state
+    state = _planning_jobs_service(runtime).get_persisted_planning_job(job_id)
+    return state or job
+
+
+async def _control_planning_job(
+    runtime: RuntimeContext,
+    job_id: str,
+    action: str,
+) -> dict[str, Any]:
+    try:
+        if action == "start":
+            state = await _planning_jobs_service(runtime).start_persisted_planning_job(job_id)
+            if state.get("status") != "running":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": "Planning job start was not accepted",
+                        "status": state.get("status"),
+                        "reason": state.get("error_message"),
+                    },
+                )
+            return state
+        return await _planning_jobs_service(runtime).control_persisted_planning_job(job_id, action)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Planning job not found") from exc
+    except HTTPException:
+        raise
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/planning/jobs/{job_id}/start", response_model=PlanningJobResponse)
+async def start_planning_job(
+    job_id: str,
+    runtime: RuntimeContext = Depends(get_runtime),
+):
+    return await _control_planning_job(runtime, job_id, "start")
+
+
+@router.post("/planning/jobs/{job_id}/pause", response_model=PlanningJobResponse)
+async def pause_planning_job(
+    job_id: str,
+    runtime: RuntimeContext = Depends(get_runtime),
+):
+    return await _control_planning_job(runtime, job_id, "pause")
+
+
+@router.post("/planning/jobs/{job_id}/resume", response_model=PlanningJobResponse)
+async def resume_planning_job(
+    job_id: str,
+    runtime: RuntimeContext = Depends(get_runtime),
+):
+    return await _control_planning_job(runtime, job_id, "resume")
+
+
+@router.post("/planning/jobs/{job_id}/cancel", response_model=PlanningJobResponse)
+async def cancel_planning_job(
+    job_id: str,
+    runtime: RuntimeContext = Depends(get_runtime),
+):
+    return await _control_planning_job(runtime, job_id, "cancel")
 
 
 @router.delete("/planning/jobs/{job_id}")
-async def delete_planning_job(job_id: str):
+async def delete_planning_job(
+    job_id: str,
+    runtime: RuntimeContext = Depends(get_runtime),
+):
+    job = _planning_jobs_service(runtime).get_persisted_planning_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Planning job not found")
+    if job.get("status") in {"running", "paused"}:
+        raise HTTPException(status_code=409, detail="Cancel the active planning job first")
     deleted = persistence.delete_planning_job(job_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Planning job not found")
-    return JSONResponse(status_code=204, content=None)
+    return Response(status_code=204)
 
 
 def _normalize_map_provider(provider: Any) -> str:
@@ -678,6 +773,7 @@ def _validate_zone_against_existing(
 
     try:
         from shapely.geometry import Polygon as ShapelyPolygon
+
         polys = []
         for zid, ring in candidate_rings:
             poly = ShapelyPolygon(ring)
@@ -831,7 +927,9 @@ def _extract_legacy_envelope_zones(payload: dict[str, Any]) -> list[dict[str, An
             if not isinstance(entry, dict):
                 continue
             zone_type = str(entry.get("zone_type") or "boundary").lower()
-            zone_kind = "boundary" if zone_type not in {"boundary", "exclusion", "mow"} else zone_type
+            zone_kind = (
+                "boundary" if zone_type not in {"boundary", "exclusion", "mow"} else zone_type
+            )
             polygon = _repo_polygon_from_geojson_zone(entry)
             if not polygon:
                 continue
@@ -898,7 +996,9 @@ def _extract_legacy_envelope_zones(payload: dict[str, Any]) -> list[dict[str, An
         for index, entry in enumerate(mows):
             if isinstance(entry, dict):
                 _append(
-                    _repo_zone_from_modern_zone(entry, zone_kind="mow", fallback_id=f"mow-{index + 1}")
+                    _repo_zone_from_modern_zone(
+                        entry, zone_kind="mow", fallback_id=f"mow-{index + 1}"
+                    )
                 )
 
     return [z for z in recovered if isinstance(z.get("polygon"), list) and len(z["polygon"]) >= 3]
@@ -1034,7 +1134,6 @@ class ControlResponseV2(BaseModel):
     timestamp: str
 
 
-
 def _enum_value(value: Any) -> Any:
     return value.value if hasattr(value, "value") else value
 
@@ -1167,6 +1266,7 @@ async def robohat_soft_reset():
     result = await robohat.soft_reset()
     status_code = 200 if result["success"] else 503
     from fastapi.responses import JSONResponse
+
     return JSONResponse(content=result, status_code=status_code)
 
 
@@ -1183,7 +1283,9 @@ class DriveContractIn(BaseModel):
 
 
 @router.post("/control/drive", response_model=ControlResponseV2, status_code=202)
-async def control_drive_v2(cmd: dict, request: Request, runtime: RuntimeContext = Depends(get_runtime)):
+async def control_drive_v2(
+    cmd: dict, request: Request, runtime: RuntimeContext = Depends(get_runtime)
+):
     """Execute drive command with safety checks and audit logging"""
     from ..control.commands import CommandStatus, DriveCommand
 
@@ -1254,7 +1356,12 @@ async def control_drive_v2(cmd: dict, request: Request, runtime: RuntimeContext 
     outcome = await runtime.command_gateway.dispatch_drive(drive_cmd, request=request)
 
     if outcome.status == CommandStatus.BLOCKED and outcome.active_interlocks:
-        _transient = {"telemetry_unavailable", "telemetry_stale", "location_awareness_unavailable", "obstacle_detected"}
+        _transient = {
+            "telemetry_unavailable",
+            "telemetry_stale",
+            "location_awareness_unavailable",
+            "obstacle_detected",
+        }
         has_only_transient = all(i in _transient for i in outcome.active_interlocks)
         lockout_until_str: str | None = None
         if has_only_transient:
@@ -1382,8 +1489,8 @@ async def get_encoder_status(runtime: RuntimeContext = Depends(get_runtime)):
 
 
 _PRESET_TURN_SPEED = 0.5
-_PRESET_TURN_TIMEOUT_S = 8.0   # must be < axios 10 s client timeout
-_PRESET_TURN_DPS = 60.0        # fallback timed rate (degrees per second)
+_PRESET_TURN_TIMEOUT_S = 8.0  # must be < axios 10 s client timeout
+_PRESET_TURN_DPS = 60.0  # fallback timed rate (degrees per second)
 
 
 @router.post("/control/preset-turn")
@@ -1423,9 +1530,17 @@ async def control_preset_turn(
     try:
         target_degrees = float(cmd.get("target_degrees", 0.0))
     except (TypeError, ValueError):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="target_degrees must be numeric")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, detail="target_degrees must be numeric"
+        )
     if target_degrees == 0.0:
-        return {"ok": True, "target_degrees": 0.0, "actual_degrees": 0.0, "duration_ms": 0, "method": "imu"}
+        return {
+            "ok": True,
+            "target_degrees": 0.0,
+            "actual_degrees": 0.0,
+            "duration_ms": 0,
+            "method": "imu",
+        }
 
     try:
         speed = float(cmd.get("speed", _PRESET_TURN_SPEED))
@@ -1520,7 +1635,9 @@ class BladeContractIn(BaseModel):
 
 
 @router.post("/control/blade")
-async def control_blade_v2(cmd: dict, request: Request, runtime: RuntimeContext = Depends(get_runtime)):
+async def control_blade_v2(
+    cmd: dict, request: Request, runtime: RuntimeContext = Depends(get_runtime)
+):
     """Execute blade command with safety interlocks and audit logging."""
     from ..control.commands import BladeCommand, CommandStatus
 
@@ -1544,7 +1661,9 @@ async def control_blade_v2(cmd: dict, request: Request, runtime: RuntimeContext 
     if desired is None:
         return JSONResponse(
             status_code=422,
-            content={"detail": "Invalid blade command — provide 'active' (bool) or 'action' (enable/disable)"},
+            content={
+                "detail": "Invalid blade command — provide 'active' (bool) or 'action' (enable/disable)"
+            },
         )
 
     blade_cmd = BladeCommand(
@@ -1556,22 +1675,28 @@ async def control_blade_v2(cmd: dict, request: Request, runtime: RuntimeContext 
 
     if outcome.status == CommandStatus.BLOCKED:
         if "motors_active" in (outcome.status_reason or ""):
-            body = {"detail": "safety_interlock: motors_active — blade enable blocked while motors running"}
-            persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
+            body = {
+                "detail": "safety_interlock: motors_active — blade enable blocked while motors running"
+            }
+            persistence.add_audit_log(
+                "control.blade.blocked", details={"command": cmd, "response": body}
+            )
             return JSONResponse(status_code=403, content=body)
         if "QUALIFICATION_" in (outcome.status_reason or ""):
-            reason_codes = [
-                code for code in str(outcome.status_reason).split(";") if code
-            ]
+            reason_codes = [code for code in str(outcome.status_reason).split(";") if code]
             body = {
                 "detail": "qualification_required: blade enable blocked until current qualification evidence passes",
                 "status_reason": outcome.status_reason,
                 "reason_codes": reason_codes,
             }
-            persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
+            persistence.add_audit_log(
+                "control.blade.blocked", details={"command": cmd, "response": body}
+            )
             return JSONResponse(status_code=409, content=body)
         body = {"detail": "safety_interlock: emergency_stop_active — blade commands blocked"}
-        persistence.add_audit_log("control.blade.blocked", details={"command": cmd, "response": body})
+        persistence.add_audit_log(
+            "control.blade.blocked", details={"command": cmd, "response": body}
+        )
         return JSONResponse(status_code=409, content=body)
 
     ok = outcome.status in (CommandStatus.ACCEPTED, CommandStatus.QUEUED)
@@ -1580,7 +1705,9 @@ async def control_blade_v2(cmd: dict, request: Request, runtime: RuntimeContext 
         "audit_id": audit_id,
         "result": "accepted" if ok else "rejected",
         "blade_active": desired if ok else _blade_state.get("active", False),
-        "blade_status": "ENABLED" if (ok and desired) else ("LOCKED_OUT" if desired else "DISABLED"),
+        "blade_status": "ENABLED"
+        if (ok and desired)
+        else ("LOCKED_OUT" if desired else "DISABLED"),
         "status_reason": outcome.status_reason,
         "timestamp": timestamp.isoformat(),
     }

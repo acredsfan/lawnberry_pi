@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 import zoneinfo
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
@@ -34,6 +35,7 @@ class JobsService:
         self._running_tasks: set[asyncio.Task] = set()
         self._job_tasks: dict[str, asyncio.Task] = {}
         self._job_control_tasks: dict[str, asyncio.Task[bool]] = {}
+        self._planning_occurrence_tasks: dict[str, asyncio.Task[None]] = {}
         self._mission_admission_lock = asyncio.Lock()
         self._mission_service: MissionService | None = None
         self._websocket_hub: WebSocketHub | None = None
@@ -173,9 +175,7 @@ class JobsService:
         self._running_tasks.add(task)
         self._job_tasks[job.id] = task
         task.add_done_callback(self._running_tasks.discard)
-        task.add_done_callback(
-            lambda done, job_id=job.id: self._on_job_task_done(job_id, done)
-        )
+        task.add_done_callback(lambda done, job_id=job.id: self._on_job_task_done(job_id, done))
         return True
 
     def _on_job_task_done(self, job_id: str, task: asyncio.Task) -> None:
@@ -419,6 +419,7 @@ class JobsService:
         if self.scheduler_running:
             return
 
+        await self._recover_planning_occurrences()
         self.scheduler_running = True
         self._scheduler_task = asyncio.create_task(self._scheduler_loop())
 
@@ -448,11 +449,14 @@ class JobsService:
                 *(self.cancel_job_async(job_id) for job_id in active_job_ids),
                 return_exceptions=True,
             )
+        for task in list(self._planning_occurrence_tasks.values()):
+            task.cancel()
         if self._running_tasks:
             await asyncio.gather(*self._running_tasks, return_exceptions=True)
         self._running_tasks.clear()
         self._job_tasks.clear()
         self._job_control_tasks.clear()
+        self._planning_occurrence_tasks.clear()
 
     async def _scheduler_loop(self):
         """Main scheduler loop."""
@@ -508,6 +512,7 @@ class JobsService:
 
         try:
             from ..core.persistence import persistence
+
             planning_jobs = persistence.load_planning_jobs()
         except Exception as exc:
             logger.warning("Could not load planning jobs for dispatch: %s", exc)
@@ -541,7 +546,9 @@ class JobsService:
 
                 schedule = SchedulePattern.model_validate(schedule_dict)
                 # Build a minimal Job-like object for schedule calculations.
-                job_obj = JobModel(id=job.get("id", "tmp"), name=job.get("name", ""), schedule=schedule)
+                job_obj = JobModel(
+                    id=job.get("id", "tmp"), name=job.get("name", ""), schedule=schedule
+                )
                 due_occurrence = self._calculate_due_occurrence(job_obj, from_time=now)
             except Exception as exc:
                 logger.warning(
@@ -706,11 +713,12 @@ class JobsService:
         pattern: str,
         pattern_params: dict[str, Any],
         mission_name: str,
+        on_mission_allocated: Callable[[str], None] | None = None,
         on_mission_created: Callable[[str], None] | None = None,
     ) -> Mission:
         """Apply the canonical job gates, then create and start one mission."""
         if self._mission_service is None:
-            raise RuntimeError(
+            raise _JobAdmissionBlocked(
                 "JobsService: MissionService is not wired. "
                 "Call set_mission_service() before dispatching scheduled jobs."
             )
@@ -754,15 +762,6 @@ class JobsService:
 
             if not zones:
                 raise _JobAdmissionBlocked("no zones configured")
-            if len(zones) > 1:
-                logger.info(
-                    "Job %s has %d zones; dispatching for zones[0]=%s only"
-                    " (multi-zone queuing not yet implemented)",
-                    job_id,
-                    len(zones),
-                    zones[0],
-                )
-
             try:
                 mission = await self._mission_service.create_mission(
                     name=mission_name,
@@ -773,15 +772,23 @@ class JobsService:
             except Exception as exc:
                 raise _JobAdmissionBlocked(f"create_mission failed: {exc}") from exc
 
-            if on_mission_created is not None:
-                on_mission_created(mission.id)
+            if on_mission_allocated is not None:
+                on_mission_allocated(mission.id)
 
             try:
                 await self._mission_service.start_mission(mission.id)
             except Exception as exc:
+                cleanup_detail = ""
+                try:
+                    await self._mission_service.delete_mission(mission.id)
+                except Exception as cleanup_exc:
+                    cleanup_detail = f"; idle mission cleanup failed: {cleanup_exc}"
                 raise _JobAdmissionBlocked(
-                    f"start_mission({mission.id}) failed: {exc}"
+                    f"start_mission({mission.id}) failed: {exc}{cleanup_detail}"
                 ) from exc
+
+            if on_mission_created is not None:
+                on_mission_created(mission.id)
 
         return mission
 
@@ -814,6 +821,471 @@ class JobsService:
                     exc,
                 )
 
+    @staticmethod
+    def _planning_occurrence_id(job_id: str, scheduled_for: str) -> str:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"lawnberry:{job_id}:{scheduled_for}"))
+
+    @staticmethod
+    def _find_persisted_planning_job(job_id: str) -> dict[str, Any] | None:
+        from ..core.persistence import persistence
+
+        return next(
+            (job for job in persistence.load_planning_jobs() if job.get("id") == job_id),
+            None,
+        )
+
+    @staticmethod
+    def _planning_job_with_occurrence(job: dict[str, Any]) -> dict[str, Any]:
+        """Project the latest durable occurrence onto the planning API record."""
+        from ..core.persistence import persistence
+
+        result = dict(job)
+        occurrence = persistence.load_latest_planning_job_occurrence(str(job["id"]))
+        result["occurrence"] = occurrence
+        if occurrence is None:
+            result.update(
+                {
+                    "mission_id": None,
+                    "mission_ids": [],
+                    "zones_completed": [],
+                    "progress_percentage": 0.0,
+                    "error_message": None,
+                }
+            )
+            return result
+
+        zones = list(job.get("zones") or [])
+        zones_completed = list(occurrence.get("zones_completed") or [])
+        result.update(
+            {
+                "status": occurrence["status"],
+                "mission_id": occurrence.get("active_mission_id"),
+                "mission_ids": list(occurrence.get("mission_ids") or []),
+                "zones_completed": zones_completed,
+                "progress_percentage": (
+                    round(100.0 * len(zones_completed) / len(zones), 1) if zones else 0.0
+                ),
+                "error_message": occurrence.get("error_message"),
+                "started_at": occurrence.get("started_at"),
+                "completed_at": occurrence.get("completed_at"),
+            }
+        )
+        return result
+
+    def list_persisted_planning_jobs(self) -> list[dict[str, Any]]:
+        from ..core.persistence import persistence
+
+        return [self._planning_job_with_occurrence(job) for job in persistence.load_planning_jobs()]
+
+    def get_persisted_planning_job(self, job_id: str) -> dict[str, Any] | None:
+        job = self._find_persisted_planning_job(job_id)
+        return self._planning_job_with_occurrence(job) if job is not None else None
+
+    def _launch_planning_occurrence(
+        self,
+        job: dict[str, Any],
+        occurrence: dict[str, Any],
+        mission: Mission | None,
+    ) -> None:
+        occurrence_id = str(occurrence["occurrence_id"])
+        existing = self._planning_occurrence_tasks.get(occurrence_id)
+        if existing is not None and not existing.done():
+            return
+        task = asyncio.create_task(
+            self._execute_planning_occurrence(dict(job), occurrence, mission),
+            name=f"planning-occurrence:{occurrence_id}",
+        )
+        self._planning_occurrence_tasks[occurrence_id] = task
+        self._running_tasks.add(task)
+        task.add_done_callback(self._running_tasks.discard)
+        task.add_done_callback(
+            lambda _done, target=occurrence_id: self._planning_occurrence_tasks.pop(target, None)
+        )
+
+    async def _recover_planning_occurrences(self) -> None:
+        """Reconcile interrupted occurrences with MissionService restart truth."""
+        from ..core.persistence import persistence
+
+        if self._mission_service is None:
+            return
+        for occurrence in persistence.load_active_planning_job_occurrences():
+            job = self._find_persisted_planning_job(str(occurrence["job_id"]))
+            if job is None:
+                persistence.update_planning_job_occurrence(
+                    occurrence["occurrence_id"],
+                    status="failed",
+                    completed_at=datetime.now(UTC).isoformat(),
+                    error_message="Planning job was deleted during an active occurrence",
+                )
+                continue
+
+            mission: Mission | None = None
+            mission_id = occurrence.get("active_mission_id")
+            if mission_id:
+                mission = getattr(self._mission_service, "missions", {}).get(mission_id)
+                if mission is None:
+                    persistence.update_planning_job_occurrence(
+                        occurrence["occurrence_id"],
+                        status="failed",
+                        active_mission_id=None,
+                        completed_at=datetime.now(UTC).isoformat(),
+                        error_message=f"Linked mission {mission_id} is unavailable after restart",
+                    )
+                    job["status"] = "failed"
+                    persistence.save_planning_job(job)
+                    continue
+                mission_status = await self._mission_service.get_mission_status(mission_id)
+                lifecycle = self._mission_status_value(mission_status)
+                if lifecycle == MissionLifecycleStatus.IDLE:
+                    await self._mission_service.delete_mission(mission_id)
+                    persistence.update_planning_job_occurrence(
+                        occurrence["occurrence_id"],
+                        status="blocked",
+                        active_mission_id=None,
+                        completed_at=datetime.now(UTC).isoformat(),
+                        error_message="Restart interrupted mission admission before start acceptance",
+                    )
+                    job["status"] = "failed"
+                    persistence.save_planning_job(job)
+                    continue
+                if lifecycle == MissionLifecycleStatus.PAUSED:
+                    occurrence = persistence.update_planning_job_occurrence(
+                        occurrence["occurrence_id"], status="paused"
+                    )
+                    job["status"] = "paused"
+                    persistence.save_planning_job(job)
+            elif occurrence["status"] == "pending":
+                persistence.update_planning_job_occurrence(
+                    occurrence["occurrence_id"],
+                    status="blocked",
+                    completed_at=datetime.now(UTC).isoformat(),
+                    error_message="Restart interrupted occurrence before mission identity was persisted",
+                )
+                job["status"] = "failed"
+                persistence.save_planning_job(job)
+                continue
+
+            self._launch_planning_occurrence(job, occurrence, mission)
+
+    async def _start_planning_occurrence(
+        self,
+        job: dict[str, Any],
+        *,
+        scheduled_for: datetime,
+        mission_name_prefix: str | None = None,
+    ) -> tuple[dict[str, Any], Mission | None]:
+        """Claim and admit the first mission for one durable occurrence."""
+        from ..core.persistence import persistence
+
+        if not job.get("enabled", True):
+            raise _JobAdmissionBlocked("planning job is disabled")
+        zones = list(job.get("zones") or [])
+        if not zones:
+            raise _JobAdmissionBlocked("no zones configured")
+
+        scheduled_key = scheduled_for.astimezone(UTC).isoformat()
+        occurrence, created = persistence.claim_planning_job_occurrence(
+            occurrence_id=self._planning_occurrence_id(str(job["id"]), scheduled_key),
+            job_id=str(job["id"]),
+            scheduled_for=scheduled_key,
+        )
+        if not created:
+            return occurrence, None
+
+        def record_allocated_mission(mission_id: str) -> None:
+            persistence.update_planning_job_occurrence(
+                occurrence["occurrence_id"],
+                mission_ids=[mission_id],
+                active_mission_id=mission_id,
+            )
+
+        try:
+            mission = await self._admit_job_mission(
+                job_id=str(job["id"]),
+                job_name=str(job.get("name") or "Planning job"),
+                zones=[zones[0]],
+                pattern=str(job.get("pattern") or "parallel"),
+                pattern_params=dict(job.get("pattern_params") or {}),
+                mission_name=(
+                    f"{mission_name_prefix or job.get('name', 'Planning job')} — "
+                    f"zone 1/{len(zones)}"
+                    if len(zones) > 1
+                    else str(mission_name_prefix or job.get("name") or "Planning job")
+                ),
+                on_mission_allocated=record_allocated_mission,
+            )
+        except Exception as exc:
+            occurrence = persistence.update_planning_job_occurrence(
+                occurrence["occurrence_id"],
+                status="blocked",
+                active_mission_id=None,
+                completed_at=datetime.now(UTC).isoformat(),
+                error_message=str(exc),
+            )
+            job["status"] = "failed"
+            persistence.save_planning_job(job)
+            if isinstance(exc, _JobAdmissionBlocked):
+                return occurrence, None
+            raise
+
+        now = datetime.now(UTC).isoformat()
+        occurrence = persistence.update_planning_job_occurrence(
+            occurrence["occurrence_id"],
+            status="running",
+            zone_index=0,
+            mission_ids=[mission.id],
+            active_mission_id=mission.id,
+            started_at=now,
+            error_message=None,
+        )
+        job["status"] = "running"
+        job["last_run"] = scheduled_key
+        persistence.save_planning_job(job)
+
+        self._launch_planning_occurrence(job, occurrence, mission)
+        return occurrence, mission
+
+    async def _execute_planning_occurrence(
+        self,
+        job: dict[str, Any],
+        occurrence: dict[str, Any],
+        first_mission: Mission | None,
+    ) -> None:
+        """Execute ordered zone missions and aggregate only confirmed terminal truth."""
+        from ..core.persistence import persistence
+
+        if self._mission_service is None:  # pragma: no cover - admission already enforces this
+            return
+
+        zones = list(job.get("zones") or [])
+        mission = first_mission
+        mission_ids = list(occurrence.get("mission_ids") or [])
+        zones_completed = list(occurrence.get("zones_completed") or [])
+        occurrence_id = str(occurrence["occurrence_id"])
+        start_index = max(0, int(occurrence.get("zone_index") or 0))
+
+        try:
+            for zone_index in range(start_index, len(zones)):
+                zone_id = zones[zone_index]
+                if mission is None:
+
+                    def record_allocated_mission(
+                        mission_id: str,
+                        current_zone_index: int = zone_index,
+                    ) -> None:
+                        allocated_ids = [*mission_ids, mission_id]
+                        persistence.update_planning_job_occurrence(
+                            occurrence_id,
+                            zone_index=current_zone_index,
+                            mission_ids=allocated_ids,
+                            active_mission_id=mission_id,
+                        )
+
+                    mission = await self._admit_job_mission(
+                        job_id=str(job["id"]),
+                        job_name=str(job.get("name") or "Planning job"),
+                        zones=[zone_id],
+                        pattern=str(job.get("pattern") or "parallel"),
+                        pattern_params=dict(job.get("pattern_params") or {}),
+                        mission_name=(
+                            f"{job.get('name', 'Planning job')} — "
+                            f"zone {zone_index + 1}/{len(zones)}"
+                        ),
+                        on_mission_allocated=record_allocated_mission,
+                    )
+                    mission_ids.append(mission.id)
+                    persistence.update_planning_job_occurrence(
+                        occurrence_id,
+                        status="running",
+                        zone_index=zone_index,
+                        mission_ids=mission_ids,
+                        active_mission_id=mission.id,
+                    )
+                    await self._broadcast_job_started(
+                        job_id=str(job["id"]),
+                        job_name=str(job.get("name") or "Planning job"),
+                        mission_id=mission.id,
+                        zone_id=str(zone_id),
+                    )
+
+                terminal = await self._mission_service.wait_for_terminal_state(mission.id)
+                terminal_status = self._mission_status_value(terminal)
+                if terminal_status != MissionLifecycleStatus.COMPLETED:
+                    state = (
+                        "cancelled"
+                        if terminal_status == MissionLifecycleStatus.ABORTED
+                        else "failed"
+                    )
+                    detail = terminal.detail or (
+                        f"Mission {mission.id} ended in {terminal_status.value}"
+                    )
+                    persistence.update_planning_job_occurrence(
+                        occurrence_id,
+                        status=state,
+                        active_mission_id=None,
+                        completed_at=datetime.now(UTC).isoformat(),
+                        error_message=detail,
+                    )
+                    job["status"] = state
+                    persistence.save_planning_job(job)
+                    return
+
+                zones_completed.append(str(zone_id))
+                persistence.update_planning_job_occurrence(
+                    occurrence_id,
+                    zone_index=zone_index + 1,
+                    zones_completed=zones_completed,
+                    active_mission_id=None,
+                )
+                mission = None
+
+            persistence.update_planning_job_occurrence(
+                occurrence_id,
+                status="completed",
+                active_mission_id=None,
+                completed_at=datetime.now(UTC).isoformat(),
+                error_message=None,
+            )
+            job["status"] = "completed"
+            persistence.save_planning_job(job)
+        except asyncio.CancelledError:
+            try:
+                if mission is not None:
+                    status = await self._mission_service.get_mission_status(mission.id)
+                    if self._mission_status_value(status) in {
+                        MissionLifecycleStatus.RUNNING,
+                        MissionLifecycleStatus.PAUSED,
+                    }:
+                        await self._mission_service.abort_mission(mission.id)
+                persistence.update_planning_job_occurrence(
+                    occurrence_id,
+                    status="cancelled",
+                    active_mission_id=None,
+                    completed_at=datetime.now(UTC).isoformat(),
+                    error_message="Planning occurrence cancelled during shutdown",
+                )
+                job["status"] = "cancelled"
+                persistence.save_planning_job(job)
+            except Exception as exc:
+                persistence.update_planning_job_occurrence(
+                    occurrence_id,
+                    status="failed",
+                    completed_at=datetime.now(UTC).isoformat(),
+                    error_message=f"Shutdown stop could not be confirmed: {exc}",
+                )
+            raise
+        except Exception as exc:
+            persistence.update_planning_job_occurrence(
+                occurrence_id,
+                status="failed",
+                active_mission_id=None,
+                completed_at=datetime.now(UTC).isoformat(),
+                error_message=str(exc),
+            )
+            job["status"] = "failed"
+            persistence.save_planning_job(job)
+            logger.error(
+                "Planning occurrence %s failed: %s",
+                occurrence_id,
+                exc,
+                exc_info=True,
+            )
+
+    async def start_persisted_planning_job(self, job_id: str) -> dict[str, Any]:
+        """Start a one-off planning job and return authoritative persisted state."""
+        job = self._find_persisted_planning_job(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        created_at = datetime.fromisoformat(str(job.get("created_at")))
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        occurrence, mission = await self._start_planning_occurrence(
+            job,
+            scheduled_for=created_at,
+        )
+        if mission is not None:
+            asyncio.create_task(
+                self._broadcast_job_started(
+                    job_id=str(job["id"]),
+                    job_name=str(job.get("name") or "Planning job"),
+                    mission_id=mission.id,
+                    zone_id=str(list(job.get("zones") or [""])[0]),
+                )
+            )
+        state = self.get_persisted_planning_job(job_id)
+        if state is None:  # pragma: no cover - job was loaded above
+            raise KeyError(job_id)
+        state["occurrence"] = occurrence
+        return state
+
+    async def control_persisted_planning_job(
+        self,
+        job_id: str,
+        action: str,
+    ) -> dict[str, Any]:
+        """Pause, resume, or cancel the active child mission with confirmation."""
+        from ..core.persistence import persistence
+
+        if self._mission_service is None:
+            raise _JobAdmissionBlocked("mission service is unavailable")
+        job = self._find_persisted_planning_job(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        occurrence = persistence.load_latest_planning_job_occurrence(job_id)
+        if occurrence is None:
+            raise _JobAdmissionBlocked("planning job has no occurrence")
+        mission_id = occurrence.get("active_mission_id")
+
+        if action == "pause":
+            if occurrence["status"] != "running" or not mission_id:
+                raise _JobAdmissionBlocked("planning job is not running")
+            await self._mission_service.pause_mission(mission_id)
+            confirmed = await self._mission_service.get_mission_status(mission_id)
+            if self._mission_status_value(confirmed) != MissionLifecycleStatus.PAUSED:
+                raise _JobAdmissionBlocked("mission pause was not confirmed")
+            new_status = "paused"
+        elif action == "resume":
+            if occurrence["status"] != "paused" or not mission_id:
+                raise _JobAdmissionBlocked("planning job is not paused")
+            await self._mission_service.resume_mission(mission_id)
+            confirmed = await self._mission_service.get_mission_status(mission_id)
+            if self._mission_status_value(confirmed) != MissionLifecycleStatus.RUNNING:
+                raise _JobAdmissionBlocked("mission resume was not confirmed")
+            new_status = "running"
+        elif action == "cancel":
+            if occurrence["status"] not in {"pending", "running", "paused"}:
+                raise _JobAdmissionBlocked("planning job is already terminal")
+            if mission_id:
+                await self._mission_service.abort_mission(mission_id)
+                confirmed = await self._mission_service.get_mission_status(mission_id)
+                if self._mission_status_value(confirmed) not in {
+                    MissionLifecycleStatus.ABORTED,
+                    MissionLifecycleStatus.FAILED,
+                }:
+                    raise _JobAdmissionBlocked("mission cancellation was not confirmed")
+            new_status = "cancelled"
+        else:
+            raise ValueError(f"Unsupported planning action: {action}")
+
+        terminal_updates: dict[str, Any] = {}
+        if new_status == "cancelled":
+            terminal_updates = {
+                "active_mission_id": None,
+                "completed_at": datetime.now(UTC).isoformat(),
+                "error_message": "Cancelled by operator",
+            }
+        persistence.update_planning_job_occurrence(
+            occurrence["occurrence_id"],
+            status=new_status,
+            **terminal_updates,
+        )
+        job["status"] = new_status
+        persistence.save_planning_job(job)
+        state = self.get_persisted_planning_job(job_id)
+        if state is None:  # pragma: no cover - job was loaded above
+            raise KeyError(job_id)
+        return state
+
     async def _dispatch_scheduled_job(
         self,
         job: dict[str, Any],
@@ -824,30 +1296,16 @@ class JobsService:
         job_id = job.get("id", "<unknown>")
         job_name = job.get("name", "<unnamed>")
         try:
-            mission = await self._admit_job_mission(
-                job_id=job_id,
-                job_name=job_name,
-                zones=list(job.get("zones") or []),
-                pattern=job.get("pattern", "parallel"),
-                pattern_params=dict(job.get("pattern_params") or {}),
-                mission_name=f"Scheduled: {job_name}",
+            _occurrence, mission = await self._start_planning_occurrence(
+                job,
+                scheduled_for=due_occurrence or datetime.now(UTC),
+                mission_name_prefix=f"Scheduled: {job_name}",
             )
         except _JobAdmissionBlocked as exc:
             logger.warning("Scheduled job %r (%s) skipped: %s.", job_name, job_id, exc)
             return None
-
-        job["last_run"] = (due_occurrence or datetime.now(UTC)).isoformat()
-        try:
-            from ..core.persistence import persistence
-
-            persistence.save_planning_job(job)
-        except Exception as exc:
-            logger.warning(
-                "Scheduled job %r (%s): could not persist last_run: %s",
-                job_name,
-                job_id,
-                exc,
-            )
+        if mission is None:
+            return None
 
         logger.info(
             "Scheduled job %r (%s) dispatched → mission %s started.",
@@ -871,34 +1329,56 @@ class JobsService:
                 raise _JobAdmissionBlocked(
                     f"job type {job_type.value!r} has no MissionService executor"
                 )
+            if not job.zones:
+                raise _JobAdmissionBlocked("no zones configured")
 
-            mission = await self._admit_job_mission(
-                job_id=job.id,
-                job_name=job.name,
-                zones=job.zones,
-                pattern=job.cutting_pattern,
-                pattern_params=dict(job.parameters),
-                mission_name=f"Job: {job.name}",
-                on_mission_created=lambda mission_id: setattr(job, "mission_id", mission_id),
+            deadline = (
+                asyncio.get_running_loop().time() + job.timeout_minutes * 60
+                if job.timeout_minutes and job.timeout_minutes > 0
+                else None
             )
-            job.last_run = datetime.now(UTC)
-            job.execution_logs.append(f"Mission {mission.id} accepted")
-            job.result_message = f"Mission {mission.id} running"
+            for zone_index, zone_id in enumerate(job.zones):
+                mission = await self._admit_job_mission(
+                    job_id=job.id,
+                    job_name=job.name,
+                    zones=[zone_id],
+                    pattern=job.cutting_pattern,
+                    pattern_params=dict(job.parameters),
+                    mission_name=(
+                        f"Job: {job.name} — zone {zone_index + 1}/{len(job.zones)}"
+                        if len(job.zones) > 1
+                        else f"Job: {job.name}"
+                    ),
+                    on_mission_created=lambda mission_id: setattr(job, "mission_id", mission_id),
+                )
+                if job.last_run is None:
+                    job.last_run = datetime.now(UTC)
+                job.execution_logs.append(f"Mission {mission.id} accepted for zone {zone_id}")
+                job.result_message = (
+                    f"Mission {mission.id} running"
+                    if len(job.zones) == 1
+                    else f"Mission {mission.id} running for zone {zone_id}"
+                )
 
-            await self._broadcast_job_started(
-                job_id=job.id,
-                job_name=job.name,
-                mission_id=mission.id,
-                zone_id=job.zones[0],
-            )
+                await self._broadcast_job_started(
+                    job_id=job.id,
+                    job_name=job.name,
+                    mission_id=mission.id,
+                    zone_id=zone_id,
+                )
 
-            wait_for_terminal = self._mission_service.wait_for_terminal_state(mission.id)
-            if job.timeout_minutes and job.timeout_minutes > 0:
-                async with asyncio.timeout(job.timeout_minutes * 60):
+                wait_for_terminal = self._mission_service.wait_for_terminal_state(mission.id)
+                if deadline is not None:
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        raise TimeoutError
+                    async with asyncio.timeout(remaining):
+                        mission_status = await wait_for_terminal
+                else:
                     mission_status = await wait_for_terminal
-            else:
-                mission_status = await wait_for_terminal
-            self._project_terminal_status(job, mission_status)
+                self._project_terminal_status(job, mission_status, zone_id=zone_id)
+                if self._mission_status_value(mission_status) != MissionLifecycleStatus.COMPLETED:
+                    return
         except TimeoutError:
             detail = f"Mission exceeded job timeout of {job.timeout_minutes} minutes"
             try:
@@ -915,9 +1395,10 @@ class JobsService:
         except asyncio.CancelledError:
             try:
                 mission_status = await asyncio.shield(self._abort_linked_mission(job))
-                if mission_status is None or self._mission_status_value(
-                    mission_status
-                ) == MissionLifecycleStatus.IDLE:
+                if (
+                    mission_status is None
+                    or self._mission_status_value(mission_status) == MissionLifecycleStatus.IDLE
+                ):
                     self._finalize_cancelled(job, "Job cancelled before mission start")
                 else:
                     self._project_terminal_status(job, mission_status)
@@ -932,8 +1413,7 @@ class JobsService:
                 detail = str(exc)
                 if (
                     mission_status is not None
-                    and self._mission_status_value(mission_status)
-                    == MissionLifecycleStatus.FAILED
+                    and self._mission_status_value(mission_status) == MissionLifecycleStatus.FAILED
                     and mission_status.detail
                 ):
                     detail = f"{detail}; {mission_status.detail}"
@@ -956,19 +1436,39 @@ class JobsService:
         value = status.status
         return value if isinstance(value, MissionLifecycleStatus) else MissionLifecycleStatus(value)
 
-    def _project_terminal_status(self, job: Job, mission_status: MissionStatus) -> None:
+    def _project_terminal_status(
+        self,
+        job: Job,
+        mission_status: MissionStatus,
+        *,
+        zone_id: str | None = None,
+    ) -> None:
         status = self._mission_status_value(mission_status)
         if job.progress is None:
             job.progress = JobProgress()
         job.progress.percentage_complete = mission_status.completion_percentage
-        job.progress.current_zone = job.zones[0] if job.zones else None
+        current_zone = zone_id or (job.zones[0] if job.zones else None)
+        job.progress.current_zone = current_zone
 
         if status == MissionLifecycleStatus.COMPLETED:
-            job.status = JobStatus.COMPLETED
-            job.progress.percentage_complete = 100.0
-            if job.zones:
-                job.progress.zones_completed = [job.zones[0]]
-            job.result_message = f"Mission {mission_status.mission_id} completed successfully"
+            if current_zone and current_zone not in job.progress.zones_completed:
+                job.progress.zones_completed.append(current_zone)
+            completed_count = len(job.progress.zones_completed)
+            total_count = max(1, len(job.zones))
+            job.progress.percentage_complete = min(100.0, 100.0 * completed_count / total_count)
+            if completed_count >= len(job.zones):
+                job.status = JobStatus.COMPLETED
+                job.result_message = (
+                    f"Mission {mission_status.mission_id} completed successfully"
+                    if len(job.zones) == 1
+                    else f"All {completed_count} zone missions completed successfully"
+                )
+            else:
+                job.status = JobStatus.RUNNING
+                job.result_message = (
+                    f"Mission {mission_status.mission_id} completed; "
+                    f"{completed_count}/{len(job.zones)} zones done"
+                )
             job.error_message = None
         elif status == MissionLifecycleStatus.ABORTED:
             self._finalize_cancelled(

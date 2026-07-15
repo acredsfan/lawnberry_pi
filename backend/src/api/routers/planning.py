@@ -3,6 +3,7 @@
 All mutations delegate to the same SQLite helpers as the /planning/jobs
 endpoints in rest.py so both surfaces always reflect the same data.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -11,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ...core.persistence import persistence
 
@@ -27,7 +28,7 @@ class PlanningJobResponse(BaseModel):
     id: str
     name: str
     schedule: str | None = None
-    zones: list[Any] = []
+    zones: list[Any] = Field(default_factory=list)
     priority: int = 1
     enabled: bool = True
     created_at: str | None = None
@@ -35,6 +36,14 @@ class PlanningJobResponse(BaseModel):
     status: str = "pending"
     pattern: str | None = None
     pattern_params: dict | None = None
+    mission_id: str | None = None
+    mission_ids: list[str] = Field(default_factory=list)
+    zones_completed: list[str] = Field(default_factory=list)
+    progress_percentage: float = 0.0
+    error_message: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    occurrence: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +113,9 @@ async def update_schedule(schedule_id: str, payload: dict[str, Any]):
         "enabled": bool(payload.get("enabled", existing.get("enabled", True))),
         "status": str(payload.get("status") or existing.get("status") or "pending"),
         "pattern": str(payload.get("pattern") or existing.get("pattern") or "parallel"),
-        "pattern_params": dict(payload.get("pattern_params") or existing.get("pattern_params") or {}),
+        "pattern_params": dict(
+            payload.get("pattern_params") or existing.get("pattern_params") or {}
+        ),
     }
     persistence.save_planning_job(updated)
     return updated

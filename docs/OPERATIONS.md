@@ -176,14 +176,18 @@ If you protect the public hostname with Cloudflare Access, HTTP-01 issuance will
 - POST http://127.0.0.1:8081/api/v2/map/provider-fallback → trigger provider fallback
 - GET http://127.0.0.1:8081/api/v2/nav/coverage-plan?config_id=default&spacing_m=0.6 → generated coverage preview polyline
 - GET/POST/DELETE http://127.0.0.1:8081/api/v2/planning/jobs
+- POST http://127.0.0.1:8081/api/v2/planning/jobs/{job_id}/start|pause|resume|cancel
 
 Scheduled and compatibility mower-job starts have one execution owner: `JobsService` dispatches through
 `MissionService`. For an in-memory compatibility `Job`, `mission_id` retains the linked identity and completion is projected
-from that mission. For a persistence-backed schedule, `last_run` means only that `MissionService` accepted a dispatch; the
-mission record remains authoritative afterward. A compatibility job may report `COMPLETED`, 100% progress, or success only
-after its linked mission reaches `COMPLETED`. Qualification blocks, E-stop, conflicts, missing zones, rejected starts,
-mission failure/abort/cancel, and unsupported job types remain explicit non-success outcomes. Elapsed time or synthetic
-progress must never be treated as mission evidence.
+from that mission. Persistence-backed schedules atomically claim one occurrence per scheduled instant. Multi-zone jobs run
+one ordered child mission per zone; the first path leg and every inter-zone approach are blade-off transit. `last_run` means
+only that `MissionService` accepted the first child. The occurrence exposes `mission_ids`, `zones_completed`, progress, and
+terminal detail, and restart recovery reconciles the active child before any later zone is admitted. A job may report
+`completed` only after every linked child reaches `completed`. Qualification blocks, E-stop, conflicts, missing zones,
+rejected starts, mission failure/abort/cancel, and unsupported job types remain explicit non-success outcomes. A blocked
+occurrence is durable and is not retried every scheduler poll; a rejected start deletes the idle mission record. Elapsed
+time, browser-local mutation, or synthetic progress must never be treated as mission evidence.
 
 ## Control
 - POST http://127.0.0.1:8081/api/v2/control/drive

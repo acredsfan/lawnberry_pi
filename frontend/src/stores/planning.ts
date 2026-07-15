@@ -5,6 +5,10 @@ import {
   getPlanningJobs,
   createPlanningJob,
   deletePlanningJob,
+  startPlanningJob,
+  pausePlanningJob,
+  resumePlanningJob,
+  cancelPlanningJob,
   getSchedules,
   createSchedule as apiCreateSchedule,
   deleteSchedule as apiDeleteSchedule,
@@ -46,12 +50,38 @@ export const usePlanningStore = defineStore('planning', () => {
 
   async function deleteJob(id: string): Promise<void> {
     await deletePlanningJob(id)
-    jobs.value = jobs.value.filter(j => j.id !== id)
+    jobs.value = jobs.value.filter((j) => j.id !== id)
+  }
+
+  function applyJob(updated: PlanningJob): PlanningJob {
+    const idx = jobs.value.findIndex((job) => job.id === updated.id)
+    if (idx === -1) {
+      jobs.value.push(updated)
+    } else {
+      jobs.value[idx] = updated
+    }
+    return updated
+  }
+
+  async function startJob(id: string): Promise<PlanningJob> {
+    return applyJob(await startPlanningJob(id))
+  }
+
+  async function pauseJob(id: string): Promise<PlanningJob> {
+    return applyJob(await pausePlanningJob(id))
+  }
+
+  async function resumeJob(id: string): Promise<PlanningJob> {
+    return applyJob(await resumePlanningJob(id))
+  }
+
+  async function cancelJob(id: string): Promise<PlanningJob> {
+    return applyJob(await cancelPlanningJob(id))
   }
 
   async function enableJob(id: string): Promise<void> {
     const updated = await enableSchedule(id)
-    const idx = jobs.value.findIndex(j => j.id === id)
+    const idx = jobs.value.findIndex((j) => j.id === id)
     if (idx !== -1) {
       jobs.value[idx] = updated
     }
@@ -59,7 +89,7 @@ export const usePlanningStore = defineStore('planning', () => {
 
   async function disableJob(id: string): Promise<void> {
     const updated = await disableSchedule(id)
-    const idx = jobs.value.findIndex(j => j.id === id)
+    const idx = jobs.value.findIndex((j) => j.id === id)
     if (idx !== -1) {
       jobs.value[idx] = updated
     }
@@ -83,12 +113,12 @@ export const usePlanningStore = defineStore('planning', () => {
 
   async function deleteSchedule(id: string): Promise<void> {
     await apiDeleteSchedule(id)
-    schedules.value = schedules.value.filter(s => s.id !== id)
+    schedules.value = schedules.value.filter((s) => s.id !== id)
   }
 
   async function enableScheduleById(id: string): Promise<void> {
     const updated = await enableSchedule(id)
-    const idx = schedules.value.findIndex(s => s.id === id)
+    const idx = schedules.value.findIndex((s) => s.id === id)
     if (idx !== -1) {
       schedules.value[idx] = updated
     }
@@ -96,7 +126,7 @@ export const usePlanningStore = defineStore('planning', () => {
 
   async function disableScheduleById(id: string): Promise<void> {
     const updated = await disableSchedule(id)
-    const idx = schedules.value.findIndex(s => s.id === id)
+    const idx = schedules.value.findIndex((s) => s.id === id)
     if (idx !== -1) {
       schedules.value[idx] = updated
     }
@@ -123,6 +153,10 @@ export const usePlanningStore = defineStore('planning', () => {
     fetchJobs,
     createJob,
     deleteJob,
+    startJob,
+    pauseJob,
+    resumeJob,
+    cancelJob,
     enableJob,
     disableJob,
     fetchSchedules,

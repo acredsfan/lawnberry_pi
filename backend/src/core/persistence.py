@@ -32,7 +32,7 @@ class Migration:
 class PersistenceLayer:
     """SQLite-based persistence layer for LawnBerry Pi v2."""
 
-    SCHEMA_VERSION = 7
+    SCHEMA_VERSION = 8
 
     MIGRATIONS = [
         Migration(
@@ -204,6 +204,35 @@ class PersistenceLayer:
             INSERT OR REPLACE INTO schema_version (version) VALUES (7);
             """,
         ),
+        Migration(
+            version=8,
+            description="Add durable idempotent planning job occurrences",
+            sql="""
+            CREATE TABLE IF NOT EXISTS planning_job_occurrences (
+                occurrence_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                scheduled_for TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                zone_index INTEGER NOT NULL DEFAULT 0,
+                mission_ids_json TEXT NOT NULL DEFAULT '[]',
+                active_mission_id TEXT,
+                zones_completed_json TEXT NOT NULL DEFAULT '[]',
+                started_at TEXT,
+                completed_at TEXT,
+                error_message TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE(job_id, scheduled_for),
+                FOREIGN KEY (job_id) REFERENCES planning_jobs(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_planning_occurrence_job
+                ON planning_job_occurrences(job_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_planning_occurrence_status
+                ON planning_job_occurrences(status, updated_at DESC);
+
+            INSERT OR REPLACE INTO schema_version (version) VALUES (8);
+            """,
+        ),
     ]
 
     def __init__(self, db_path: str = "data/lawnberry.db"):
@@ -282,10 +311,20 @@ class PersistenceLayer:
         with self.get_connection() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO planning_jobs
+                INSERT INTO planning_jobs
                 (id, name, schedule, zones_json, priority, enabled, created_at, last_run, status,
                  pattern, pattern_params_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    schedule = excluded.schedule,
+                    zones_json = excluded.zones_json,
+                    priority = excluded.priority,
+                    enabled = excluded.enabled,
+                    last_run = excluded.last_run,
+                    status = excluded.status,
+                    pattern = excluded.pattern,
+                    pattern_params_json = excluded.pattern_params_json
             """,
                 (
                     job_data["id"],
@@ -302,6 +341,128 @@ class PersistenceLayer:
                 ),
             )
             conn.commit()
+
+    @staticmethod
+    def _decode_planning_occurrence(row: sqlite3.Row) -> dict[str, Any]:
+        occurrence = dict(row)
+        for source, target in (
+            ("mission_ids_json", "mission_ids"),
+            ("zones_completed_json", "zones_completed"),
+        ):
+            try:
+                occurrence[target] = json.loads(occurrence.pop(source) or "[]")
+            except (json.JSONDecodeError, TypeError):
+                occurrence[target] = []
+        return occurrence
+
+    def claim_planning_job_occurrence(
+        self,
+        *,
+        occurrence_id: str,
+        job_id: str,
+        scheduled_for: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically create an occurrence, or return the existing claim.
+
+        The unique ``(job_id, scheduled_for)`` key is the durable scheduler
+        idempotency boundary.  A restart or repeated poll cannot create a
+        second execution for the same scheduled instant.
+        """
+        now = datetime.now(UTC).isoformat()
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO planning_job_occurrences
+                (occurrence_id, job_id, scheduled_for, status, updated_at)
+                VALUES (?, ?, ?, 'pending', ?)
+                """,
+                (occurrence_id, job_id, scheduled_for, now),
+            )
+            created = cursor.rowcount == 1
+            row = conn.execute(
+                """
+                SELECT * FROM planning_job_occurrences
+                WHERE job_id = ? AND scheduled_for = ?
+                """,
+                (job_id, scheduled_for),
+            ).fetchone()
+            conn.commit()
+        if row is None:  # pragma: no cover - guarded by the insert/select transaction
+            raise RuntimeError("Planning occurrence claim was not persisted")
+        return self._decode_planning_occurrence(row), created
+
+    def update_planning_job_occurrence(
+        self,
+        occurrence_id: str,
+        **updates: Any,
+    ) -> dict[str, Any]:
+        """Persist a controlled set of occurrence lifecycle fields."""
+        allowed = {
+            "status",
+            "zone_index",
+            "mission_ids",
+            "active_mission_id",
+            "zones_completed",
+            "started_at",
+            "completed_at",
+            "error_message",
+        }
+        unknown = set(updates) - allowed
+        if unknown:
+            raise ValueError(f"Unsupported occurrence fields: {sorted(unknown)}")
+
+        encoded: dict[str, Any] = {}
+        for key, value in updates.items():
+            if key == "mission_ids":
+                encoded["mission_ids_json"] = json.dumps(value or [])
+            elif key == "zones_completed":
+                encoded["zones_completed_json"] = json.dumps(value or [])
+            else:
+                encoded[key] = value
+        encoded["updated_at"] = datetime.now(UTC).isoformat()
+
+        assignments = ", ".join(f"{key} = ?" for key in encoded)
+        values = [*encoded.values(), occurrence_id]
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                f"UPDATE planning_job_occurrences SET {assignments} WHERE occurrence_id = ?",
+                values,
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"Planning occurrence not found: {occurrence_id}")
+            row = conn.execute(
+                "SELECT * FROM planning_job_occurrences WHERE occurrence_id = ?",
+                (occurrence_id,),
+            ).fetchone()
+            conn.commit()
+        if row is None:  # pragma: no cover - guarded by rowcount
+            raise KeyError(f"Planning occurrence not found: {occurrence_id}")
+        return self._decode_planning_occurrence(row)
+
+    def load_latest_planning_job_occurrence(self, job_id: str) -> dict[str, Any] | None:
+        """Return the most recently updated occurrence for a planning job."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM planning_job_occurrences
+                WHERE job_id = ?
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (job_id,),
+            ).fetchone()
+        return self._decode_planning_occurrence(row) if row is not None else None
+
+    def load_active_planning_job_occurrences(self) -> list[dict[str, Any]]:
+        """Load non-terminal occurrences that require restart reconciliation."""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM planning_job_occurrences
+                WHERE status IN ('pending', 'running', 'paused')
+                ORDER BY updated_at
+                """
+            ).fetchall()
+        return [self._decode_planning_occurrence(row) for row in rows]
 
     def load_planning_jobs(self) -> list[dict[str, Any]]:
         """Load all planning jobs from database."""
@@ -328,6 +489,7 @@ class PersistenceLayer:
     def delete_planning_job(self, job_id: str) -> bool:
         """Delete planning job from database."""
         with self.get_connection() as conn:
+            conn.execute("DELETE FROM planning_job_occurrences WHERE job_id = ?", (job_id,))
             cursor = conn.execute("DELETE FROM planning_jobs WHERE id = ?", (job_id,))
             conn.commit()
             return cursor.rowcount > 0

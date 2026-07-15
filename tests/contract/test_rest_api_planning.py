@@ -19,7 +19,7 @@ async def test_get_planning_jobs_returns_list():
             "schedule": "08:00",
             "zones": ["front", "back"],
             "priority": 1,
-            "enabled": True
+            "enabled": True,
         }
         resp = await client.post("/api/v2/planning/jobs", json=payload)
         assert resp.status_code == 201
@@ -32,34 +32,53 @@ async def test_get_planning_jobs_returns_list():
 
 @pytest.mark.asyncio
 async def test_delete_planning_job_removes_job():
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-                # First create a job
-                payload = {
-                        "name": "Test Job",
-                        "schedule": "12:00",
-                        "zones": ["test"],
-                        "priority": 1,
-                        "enabled": True
-                }
-                create_resp = await client.post("/api/v2/planning/jobs", json=payload)
-                assert create_resp.status_code == 201
-                job_id = create_resp.json()["id"]
-        
-                # Then delete it
-                delete_resp = await client.delete(f"/api/v2/planning/jobs/{job_id}")
-                assert delete_resp.status_code == 204
-        
-                # Verify it's gone by checking the list
-                list_resp = await client.get("/api/v2/planning/jobs")
-                jobs = list_resp.json()
-                job_ids = [job["id"] for job in jobs]
-                assert job_id not in job_ids
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        # First create a job
+        payload = {
+            "name": "Test Job",
+            "schedule": "12:00",
+            "zones": ["test"],
+            "priority": 1,
+            "enabled": True,
+        }
+        create_resp = await client.post("/api/v2/planning/jobs", json=payload)
+        assert create_resp.status_code == 201
+        job_id = create_resp.json()["id"]
+
+        # Then delete it
+        delete_resp = await client.delete(f"/api/v2/planning/jobs/{job_id}")
+        assert delete_resp.status_code == 204
+
+        # Verify it's gone by checking the list
+        list_resp = await client.get("/api/v2/planning/jobs")
+        jobs = list_resp.json()
+        job_ids = [job["id"] for job in jobs]
+        assert job_id not in job_ids
 
 
 @pytest.mark.asyncio
 async def test_delete_nonexistent_job_returns_404():
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.delete("/api/v2/planning/jobs/nonexistent-id")
-                assert resp.status_code == 404
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.delete("/api/v2/planning/jobs/nonexistent-id")
+        assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_start_immediately_is_explicit_non_success_without_admission_wiring():
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v2/planning/jobs",
+            json={
+                "name": "Fail closed quick mow",
+                "zones": ["front"],
+                "start_immediately": True,
+            },
+        )
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["message"] == "Planning job start was not accepted"
+    assert detail["status"] == "blocked"

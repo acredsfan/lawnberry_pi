@@ -8,13 +8,16 @@ Tests verify:
   - WS broadcast is best-effort (failure does not crash dispatch).
   - last_run is updated and persisted after successful dispatch.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from backend.src.core.persistence import PersistenceLayer
 from backend.src.models.mission import Mission, MissionLifecycleStatus, MissionStatus
 from backend.src.services.jobs_service import JobsService
 
@@ -83,6 +86,25 @@ def _allow_qualification(service: JobsService) -> None:
     service.set_qualification_service(_AllowQualification())
 
 
+def _configure_mission_lifecycle(mock_service: MagicMock) -> None:
+    mock_service.wait_for_terminal_state = AsyncMock(
+        side_effect=lambda mission_id: MissionStatus(
+            mission_id=mission_id,
+            status=MissionLifecycleStatus.COMPLETED,
+            completion_percentage=100.0,
+        )
+    )
+    mock_service.delete_mission = AsyncMock(return_value=None)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_persistence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "backend.src.core.persistence.persistence",
+        PersistenceLayer(str(tmp_path / "scheduled-jobs.db")),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -104,6 +126,7 @@ async def test_scheduled_job_creates_and_starts_mission():
     mock_mission_svc.list_missions = AsyncMock(return_value=[])
     mock_mission_svc.create_mission = AsyncMock(return_value=created_mission)
     mock_mission_svc.start_mission = AsyncMock(return_value=None)
+    _configure_mission_lifecycle(mock_mission_svc)
 
     # Mock WebSocketHub
     mock_ws_hub = MagicMock()
@@ -116,11 +139,16 @@ async def test_scheduled_job_creates_and_starts_mission():
     job = _make_job(zones=["zone-abc"], pattern="parallel", pattern_params={"angle": 45})
 
     # Safety state: no emergency
+    due_occurrence = datetime(2026, 1, 1, 8, 0, tzinfo=UTC)
     with patch(
         "backend.src.services.jobs_service.get_safety_state",
         return_value={"emergency_stop_active": False},
     ):
-        await svc._dispatch_scheduled_job(job)
+        first = await svc._dispatch_scheduled_job(job, due_occurrence=due_occurrence)
+        duplicate = await svc._dispatch_scheduled_job(job, due_occurrence=due_occurrence)
+
+    assert first is created_mission
+    assert duplicate is None
 
     # create_mission called with right args
     mock_mission_svc.create_mission.assert_awaited_once_with(
@@ -159,6 +187,7 @@ async def test_check_and_dispatch_planning_jobs_detects_due_job():
     mock_mission_svc.list_missions = AsyncMock(return_value=[])
     mock_mission_svc.create_mission = AsyncMock(return_value=created_mission)
     mock_mission_svc.start_mission = AsyncMock(return_value=None)
+    _configure_mission_lifecycle(mock_mission_svc)
     svc.set_mission_service(mock_mission_svc)
     _allow_qualification(svc)
 
@@ -167,7 +196,10 @@ async def test_check_and_dispatch_planning_jobs_detects_due_job():
     job["schedule"] = due_time.strftime("%H:%M")
 
     with (
-        patch("backend.src.services.jobs_service.get_safety_state", return_value={"emergency_stop_active": False}),
+        patch(
+            "backend.src.services.jobs_service.get_safety_state",
+            return_value={"emergency_stop_active": False},
+        ),
         patch("backend.src.core.persistence.persistence.load_planning_jobs", return_value=[job]),
         patch("backend.src.core.persistence.persistence.save_planning_job") as save_job,
     ):
@@ -175,7 +207,8 @@ async def test_check_and_dispatch_planning_jobs_detects_due_job():
 
     mock_mission_svc.start_mission.assert_awaited_once_with(created_mission.id)
     assert job["last_run"] is not None
-    save_job.assert_called_once()
+    assert save_job.call_count >= 1
+    assert any(call.args[0].get("last_run") for call in save_job.call_args_list)
 
 
 @pytest.mark.asyncio
@@ -274,6 +307,7 @@ async def test_scheduled_job_ws_broadcast_failure_does_not_crash():
     mock_mission_svc.list_missions = AsyncMock(return_value=[])
     mock_mission_svc.create_mission = AsyncMock(return_value=created_mission)
     mock_mission_svc.start_mission = AsyncMock(return_value=None)
+    _configure_mission_lifecycle(mock_mission_svc)
 
     mock_ws_hub = MagicMock()
     mock_ws_hub.broadcast_to_topic = AsyncMock(side_effect=RuntimeError("WS down"))
@@ -308,9 +342,8 @@ async def test_scheduled_job_start_mission_error_logged_not_raised():
     mock_mission_svc = MagicMock()
     mock_mission_svc.list_missions = AsyncMock(return_value=[])
     mock_mission_svc.create_mission = AsyncMock(return_value=created_mission)
-    mock_mission_svc.start_mission = AsyncMock(
-        side_effect=RuntimeError("Navigation not ready")
-    )
+    mock_mission_svc.start_mission = AsyncMock(side_effect=RuntimeError("Navigation not ready"))
+    _configure_mission_lifecycle(mock_mission_svc)
 
     svc.set_mission_service(mock_mission_svc)
     _allow_qualification(svc)
@@ -324,8 +357,9 @@ async def test_scheduled_job_start_mission_error_logged_not_raised():
         # Must not raise despite start_mission failure
         await svc._dispatch_scheduled_job(job)
 
-    # Failed starts must not suppress the next eligible retry.
+    # A blocked occurrence is durable and must not create an orphan or retry loop.
     assert job["last_run"] is None
+    mock_mission_svc.delete_mission.assert_awaited_once_with(created_mission.id)
 
 
 @pytest.mark.asyncio
