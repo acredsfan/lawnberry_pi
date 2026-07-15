@@ -133,6 +133,9 @@ class PowerReading(BaseModel):
     battery_consumed_today_wh: float | None = None  # Wh (accumulated load consumption today)
     load_voltage: float | None = None  # V (if applicable)
     load_current: float | None = None  # A (if applicable)
+    battery_source: str | None = None  # victron, ina3221, or an explicit mixed source
+    solar_source: str | None = None
+    load_source: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

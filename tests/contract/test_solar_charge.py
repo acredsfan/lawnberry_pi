@@ -1,4 +1,16 @@
-def test_solar_charge_triggers_return_when_below_threshold():
+from types import SimpleNamespace
+
+
+class _Energy:
+    def __init__(self, action: str, reason: str):
+        self.action = action
+        self.reason = reason
+
+    def runtime_policy(self, _mission):
+        return SimpleNamespace(action=self.action, reason_code=self.reason)
+
+
+def test_solar_charge_triggers_canonical_return_policy():
     """Contract (FR-038): Battery <20% should trigger return to solar waypoint.
 
     This test exercises a light-weight charge monitor that evaluates
@@ -8,33 +20,37 @@ def test_solar_charge_triggers_return_when_below_threshold():
     """
     from backend.src.scheduler.charge_monitor import ChargeMonitor
 
-    monitor = ChargeMonitor(min_percent=20.0)
+    energy = _Energy("return_home", "ENERGY_RETURN_RESERVE_REACHED")
+    monitor = ChargeMonitor(energy)
 
     # Below threshold → should return to charging station
-    decision = monitor.decide(battery_percent=15.0, battery_voltage=11.9)
+    decision = monitor.decide()
     assert decision.should_return is True
     assert decision.target_waypoint_type == "charging_station"
-    assert "below minimum" in decision.reason
+    assert decision.reason == "ENERGY_RETURN_RESERVE_REACHED"
 
-    # Above threshold → continue
-    ok_decision = monitor.decide(battery_percent=35.0, battery_voltage=12.2)
+    energy.action = "continue"
+    energy.reason = "ENERGY_RESERVE_AVAILABLE"
+    ok_decision = monitor.decide()
     assert ok_decision.should_return is False
 
 
 def test_solar_charge_predicate_reflects_threshold():
     from backend.src.scheduler.charge_monitor import ChargeMonitor
 
-    monitor = ChargeMonitor(min_percent=20.0)
+    energy = _Energy("return_home", "ENERGY_RETURN_RESERVE_REACHED")
+    monitor = ChargeMonitor(energy)
+    charge_ok = monitor.make_charge_ok_predicate()
+    assert charge_ok() is False
 
-    # Predicate returning latest battery percent
-    percent = 18.0
-
-    def get_percent():
-        return percent
-
-    charge_ok = monitor.make_charge_ok_predicate(get_battery_percent=get_percent)
-    assert charge_ok() is False  # 18% < 20%
-
-    # Increase charge to resume
-    percent = 25.0
+    energy.action = "continue"
     assert charge_ok() is True
+
+
+def test_critical_energy_policy_never_requests_return():
+    from backend.src.scheduler.charge_monitor import ChargeMonitor
+
+    decision = ChargeMonitor(_Energy("critical_stop", "ENERGY_CRITICAL_STOP")).decide()
+
+    assert decision.should_return is False
+    assert decision.hard_stop is True

@@ -285,6 +285,7 @@ watch the mission status contract instead of assuming `running` alone means the 
   samples so tilt and near-field obstacle stops do not wait for GPS, Victron/power, environmental, camera, persistence,
   HTTP, or WebSocket work. Slow battery/temperature samples are evaluated separately and still fail closed on critical
   thresholds.
+- `GET /api/v2/power/state` is the canonical operator view of battery source, sample age, SOC, remaining energy, and reserve. Mission admission uses the same cached state plus a conservative path/return forecast. Reaching the return reserve first stops drive and blade and starts the normal blade-off return-home mission; reaching critical SOC latches an emergency stop instead.
 - Any localization, GPS freshness, pause, abort, geofence, obstacle, tilt, critical battery, thermal, or mission exception
   hold commands zero drive and blade-off through the command gateway. If blade-off acknowledgement is not confirmed, the
   mission path escalates through the emergency latch.

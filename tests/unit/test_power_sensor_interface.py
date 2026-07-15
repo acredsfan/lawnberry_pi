@@ -20,6 +20,7 @@ def test_merge_prefers_victron_battery_current_when_requested():
     assert reading is not None
     assert math.isclose(reading.battery_current, 1.2, rel_tol=1e-6)
     assert math.isclose(reading.battery_voltage, 12.6, rel_tol=1e-6)
+    assert reading.battery_source == "victron"
 
 
 def test_v14_preferred_victron_battery_voltage_does_not_fallback_to_ina():
@@ -34,6 +35,7 @@ def test_v14_preferred_victron_battery_voltage_does_not_fallback_to_ina():
     assert reading is not None
     assert reading.battery_voltage is None
     assert math.isclose(reading.battery_current, -0.5, rel_tol=1e-6)
+    assert reading.battery_source == "ina3221"
 
 
 def test_merge_prefers_ina_battery_current_by_default():
@@ -44,6 +46,7 @@ def test_merge_prefers_ina_battery_current_by_default():
 
     assert reading is not None
     assert math.isclose(reading.battery_current, 2.5, rel_tol=1e-6)
+    assert reading.battery_source == "mixed:victron+ina3221"
 
 
 def test_merge_prefers_victron_load_when_enabled():

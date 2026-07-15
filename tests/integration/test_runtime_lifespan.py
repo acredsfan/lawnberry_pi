@@ -39,6 +39,7 @@ def test_lifespan_startup_assigns_runtime_to_app_state():
             "mission_service",
             "websocket_hub",
             "persistence",
+            "energy_service",
         ):
             assert getattr(runtime, field_name) is not None, (
                 f"runtime.{field_name} should not be None after lifespan startup"

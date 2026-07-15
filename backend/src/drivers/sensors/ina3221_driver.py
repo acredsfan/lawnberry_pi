@@ -1,8 +1,8 @@
 """INA3221 triple-channel current/voltage monitor driver (T048).
 
-Channels per deployed wiring (FR-024 hardware rev B):
-    - Channel 1: Solar input
-    - Channel 3: Battery pack
+Channels per the tracked hardware contract (``spec/hardware.yaml``):
+    - Channel 1: Battery pack
+    - Channel 3: Solar input
 Channel 2 unused. Uses smbus2 to read shunt/bus voltage registers and compute
 approximate currents with configurable shunt resistors. Falls back to the last
 known reading if hardware access fails so higher layers remain resilient.
@@ -27,13 +27,13 @@ class _Ina3221Config:
     bus: int = 1
     # Ohmic values for each channel shunt resistor; tune via config if wiring differs.
     # Physical shunt specs (hardware rev B):
-    #  - Solar/charger (CH1): 50 A / 75 mV = 0.0015 ohm physical, but sense wire adds
+    #  - Solar/charger (CH3): 50 A / 75 mV = 0.0015 ohm physical, but sense wire adds
     #    ~4.8 mΩ series resistance — effective calibrated value in hardware.yaml is 0.0062 ohm.
-    #    IN+/IN- are reversed on CH1; solar_current_scale: -1.0 corrects the sign.
-    #  - Battery (CH3): 30 A / 75 mV -> R = 0.075 V / 30 A = 0.0025 ohm
-    shunt_ohms_ch1: float = 0.0062  # Solar/charger input (calibrated incl. sense wire)
+    #    IN+/IN- may be reversed; solar_current_scale: -1.0 corrects the sign.
+    #  - Battery (CH1): 30 A / 75 mV -> R = 0.075 V / 30 A = 0.0025 ohm
+    shunt_ohms_ch1: float = 0.0025  # Battery pack
     shunt_ohms_ch2: float = 0.01  # Reserved
-    shunt_ohms_ch3: float = 0.0025  # Battery pack
+    shunt_ohms_ch3: float = 0.0062  # Solar/charger input (calibrated incl. sense wire)
     battery_voltage_offset_v: float = 0.0
     battery_voltage_scale: float = 1.0
     solar_voltage_offset_v: float = 0.0
@@ -43,6 +43,8 @@ class _Ina3221Config:
 
 
 class INA3221Driver(HardwareDriver):
+    BATTERY_CHANNEL_INDEX = 0
+    SOLAR_CHANNEL_INDEX = 2
     _REG_BUS_VOLTAGES = (0x02, 0x04, 0x06)
     _REG_SHUNT_VOLTAGES = (0x01, 0x03, 0x05)
     _REG_CONFIG = 0x00
@@ -112,7 +114,7 @@ class INA3221Driver(HardwareDriver):
         # Allow environment overrides. Two forms are supported:
         #  - Direct ohms value: INA3221_SHUNT_OHMS_CH1=0.0025
         #  - Shunt spec: INA3221_SHUNT_SPEC_CH1="30A/75mV" (will be parsed to ohms)
-        # Channel mapping: ch1 = solar, ch3 = battery (per driver wiring)
+        # Channel mapping is fixed by spec/hardware.yaml: ch1 battery, ch3 solar.
         env_mappings = [
             (1, "INA3221_SHUNT_OHMS_CH1", "INA3221_SHUNT_SPEC_CH1"),
             (2, "INA3221_SHUNT_OHMS_CH2", "INA3221_SHUNT_SPEC_CH2"),
@@ -128,6 +130,43 @@ class INA3221Driver(HardwareDriver):
         self._last_power: dict[str, float] | None = None
         self._last_read_ts: float | None = None
         self._cycle: int = 0  # retained for SIM_MODE behaviour
+
+    def _build_power_payload(
+        self,
+        bus_voltages: list[float],
+        currents: list[float | None],
+    ) -> dict[str, float | None]:
+        """Map decoded channels according to the canonical hardware specification."""
+        battery_index = self.BATTERY_CHANNEL_INDEX
+        solar_index = self.SOLAR_CHANNEL_INDEX
+        battery_voltage = (
+            bus_voltages[battery_index] * self._cfg.battery_voltage_scale
+            + self._cfg.battery_voltage_offset_v
+        )
+        battery_current = (
+            currents[battery_index] + self._cfg.battery_current_offset_a
+            if currents[battery_index] is not None
+            else None
+        )
+        solar_voltage = (
+            bus_voltages[solar_index] * self._cfg.solar_voltage_scale
+            + self._cfg.solar_voltage_offset_v
+        )
+        solar_current = (
+            currents[solar_index] * self._cfg.solar_current_scale
+            if currents[solar_index] is not None
+            else None
+        )
+        return {
+            "battery_voltage": battery_voltage,
+            "battery_current_amps": battery_current,
+            "battery_power_w": (
+                battery_voltage * battery_current if battery_current is not None else None
+            ),
+            "solar_voltage": solar_voltage,
+            "solar_current_amps": solar_current,
+            "solar_power_w": solar_voltage * solar_current if solar_current is not None else None,
+        }
 
     async def initialize(self) -> None:  # noqa: D401
         self.initialized = True
@@ -223,23 +262,7 @@ class INA3221Driver(HardwareDriver):
                     else:
                         currents.append(sv / sh)
 
-                battery_voltage = bus_voltages[2] * self._cfg.battery_voltage_scale + self._cfg.battery_voltage_offset_v
-                battery_current = (currents[2] + self._cfg.battery_current_offset_a) if currents[2] is not None else None
-                solar_voltage = bus_voltages[0] * self._cfg.solar_voltage_scale + self._cfg.solar_voltage_offset_v
-                solar_current = (currents[0] * self._cfg.solar_current_scale) if currents[0] is not None else None
-
-                return {
-                    "battery_voltage": battery_voltage,
-                    "battery_current_amps": battery_current,
-                    "battery_power_w": (battery_voltage * battery_current)
-                    if battery_current is not None
-                    else None,
-                    "solar_voltage": solar_voltage,
-                    "solar_current_amps": solar_current,
-                    "solar_power_w": (solar_voltage * solar_current)
-                    if solar_current is not None
-                    else None,
-                }
+                return self._build_power_payload(bus_voltages, currents)
 
             result = await asyncio.to_thread(_read_all)
             if result:

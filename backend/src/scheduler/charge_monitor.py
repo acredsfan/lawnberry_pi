@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import Any
 
 
 @dataclass
@@ -9,78 +10,50 @@ class ChargeDecision:
     should_return: bool
     reason: str
     target_waypoint_type: str | None = None  # e.g., "charging_station" or "home"
+    hard_stop: bool = False
 
 
 class ChargeMonitor:
-    """Simple solar/battery charge monitor (FR-038).
+    """Compatibility adapter over the canonical :class:`EnergyService` policy."""
 
-    Decision contract only: determines whether the robot should
-    return to a charging station based on state-of-charge. This is
-    intentionally minimal for contract tests and SIM_MODE.
-    """
-
-    def __init__(self, min_percent: float = 20.0, critical_percent: float = 10.0):
-        if min_percent <= 0 or min_percent > 100:
-            raise ValueError("min_percent must be in (0, 100]")
-        if not (0 < critical_percent <= min_percent):
-            raise ValueError("critical_percent must be >0 and <= min_percent")
-        self.min_percent = float(min_percent)
-        self.critical_percent = float(critical_percent)
+    def __init__(self, energy_service: Any):
+        if not callable(getattr(energy_service, "runtime_policy", None)):
+            raise TypeError("ChargeMonitor requires the canonical EnergyService")
+        self._energy = energy_service
 
     def decide(
         self,
-        *,
-        battery_percent: float | None,
-        battery_voltage: float | None = None,
+        mission: Any | None = None,
     ) -> ChargeDecision:
-        """Return a decision about whether to return to the charger.
-
-        Inputs:
-        - battery_percent: SOC percentage (0-100)
-        - battery_voltage: optional diagnostic info (not used in threshold yet)
-        """
-        if battery_percent is None:
-            # Fail-safe: without SOC info, recommend return conservatively
+        """Translate the canonical runtime policy into the legacy decision shape."""
+        policy = self._energy.runtime_policy(
+            mission or SimpleNamespace(name="", waypoints=[])
+        )
+        if policy.action == "critical_stop":
+            return ChargeDecision(
+                should_return=False,
+                reason=policy.reason_code,
+                hard_stop=True,
+            )
+        if policy.action in {"return_home", "stop"}:
             return ChargeDecision(
                 should_return=True,
-                reason="unknown battery percent; conservative return",
+                reason=policy.reason_code,
                 target_waypoint_type="charging_station",
             )
-
-        if battery_percent < self.critical_percent:
-            return ChargeDecision(
-                should_return=True,
-                reason=f"critical battery {battery_percent:.1f}% < {self.critical_percent:.0f}%",
-                target_waypoint_type="charging_station",
-            )
-
-        if battery_percent < self.min_percent:
-            return ChargeDecision(
-                should_return=True,
-                reason=f"battery {battery_percent:.1f}% below minimum {self.min_percent:.0f}%",
-                target_waypoint_type="charging_station",
-            )
-
         return ChargeDecision(
             should_return=False,
-            reason="battery sufficient",
+            reason=policy.reason_code,
             target_waypoint_type=None,
         )
 
-    def make_charge_ok_predicate(
-        self, *, get_battery_percent: Callable[[], float | None]
-    ) -> Callable[[], bool]:
-        """Build a predicate compatible with JobScheduler's gating.
-
-        Returns True when charge is sufficient to continue or start jobs.
-        """
+    def make_charge_ok_predicate(self, mission: Any | None = None):
+        """Build a legacy scheduler predicate backed by canonical live policy."""
 
         def predicate() -> bool:
-            soc = get_battery_percent()
-            # JobScheduler expects True to proceed; proceed only if SOC >= min_percent
-            if soc is None:
-                return False
-            return float(soc) >= self.min_percent
+            return self._energy.runtime_policy(
+                mission or SimpleNamespace(name="", waypoints=[])
+            ).action in {"continue", "continue_return"}
 
         return predicate
 

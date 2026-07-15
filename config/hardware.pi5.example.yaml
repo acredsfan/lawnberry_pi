@@ -76,6 +76,11 @@ battery:
   nominal_voltage: 12.8
   min_voltage: 10.0
   max_voltage: 14.6
+  return_reserve_percent: 20.0
+  critical_soc_percent: 5.0
+  mission_wh_per_meter: 0.08
+  mission_fixed_overhead_wh: 3.0
+  max_sample_age_seconds: 15.0
 
 motor_controller: robohat-rp2040
 motor_controller_port: null

@@ -739,6 +739,22 @@ class MissionService:
         )
         return await self.get_mission_status(mission_id)
 
+    async def _start_energy_return_after_terminal(self, source_mission_id: str) -> None:
+        """Start the canonical return only after the interrupted mission is terminal."""
+        await asyncio.sleep(0)
+        try:
+            mission = await self.start_return_home()
+            logger.warning(
+                "Energy reserve diverted mission %s to return-home mission %s",
+                source_mission_id,
+                mission.id,
+            )
+        except Exception:
+            logger.exception(
+                "ENERGY_RETURN_START_FAILED after mission %s; mower remains in safety hold",
+                source_mission_id,
+            )
+
     def _mission_completed_callback(self, mission_id: str):
         def callback(task: asyncio.Task):
             try:
@@ -778,6 +794,16 @@ class MissionService:
                 asyncio.ensure_future(
                     self._broadcast_status(mission_id, getattr(status, "detail", "") or "")
                 )
+                from .energy_service import EnergyReturnRequired
+
+                mission = self.missions.get(mission_id)
+                if isinstance(e, EnergyReturnRequired) and mission is not None:
+                    is_return = str(mission.name).strip().lower() == "return to home"
+                    if not is_return:
+                        self._spawn_background(
+                            self._start_energy_return_after_terminal(mission_id),
+                            name=f"energy-return:{mission_id}",
+                        )
                 logger.exception("Mission %s failed", mission_id)
             finally:
                 self.mission_tasks.pop(mission_id, None)

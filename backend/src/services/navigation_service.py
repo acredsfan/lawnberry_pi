@@ -785,6 +785,10 @@ class NavigationService:
             command_gateway.set_autonomy_context_provider(self._autonomy_context_for_gateway)
         logger.info("MotorCommandGateway attached to NavigationService")
 
+    def attach_energy_service(self, energy_service: Any) -> None:
+        """Route mission energy decisions through the canonical cached owner."""
+        self._mission_executor.set_energy_policy_provider(energy_service.runtime_policy)
+
     def apply_safety_limits(self, limits: Any) -> None:
         """Hot-reload navigation-owned safety thresholds from the canonical model."""
         self._safety_limits = limits

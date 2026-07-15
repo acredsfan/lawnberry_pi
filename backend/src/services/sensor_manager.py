@@ -618,23 +618,6 @@ class PowerSensorInterface:
                 reading = self.last_reading
             else:
                 reading = merged
-                if isinstance(self.last_reading, PowerReading):
-                    # Carry forward stable values when current sample omits them.
-                    if reading.battery_voltage is None:
-                        reading.battery_voltage = self.last_reading.battery_voltage
-                    if reading.battery_current is None:
-                        reading.battery_current = self.last_reading.battery_current
-                    if reading.solar_voltage is None:
-                        reading.solar_voltage = self.last_reading.solar_voltage
-                    if reading.solar_current is None:
-                        reading.solar_current = self.last_reading.solar_current
-                    if (
-                        reading.battery_power is None
-                        and self.last_reading.battery_power is not None
-                    ):
-                        reading.battery_power = self.last_reading.battery_power
-                    if reading.solar_power is None and self.last_reading.solar_power is not None:
-                        reading.solar_power = self.last_reading.solar_power
 
             # Accumulate battery consumption and solar yield for fresh readings
             if merged is not None and reading is not None:
@@ -729,6 +712,38 @@ class PowerSensorInterface:
         return None
 
     @classmethod
+    def _source_for(
+        cls,
+        candidates: list[tuple[str, Any]],
+        *,
+        min_abs: float | None = None,
+    ) -> str | None:
+        for source, value in candidates:
+            if not cls._valid_number(value):
+                continue
+            if min_abs is not None and abs(float(value)) < min_abs:
+                continue
+            return source
+        return None
+
+    @staticmethod
+    def _combine_sources(*sources: str | None) -> str | None:
+        expanded: list[str] = []
+        for source in sources:
+            if not source:
+                continue
+            if source.startswith("mixed:"):
+                expanded.extend(part for part in source.removeprefix("mixed:").split("+") if part)
+            else:
+                expanded.append(source)
+        unique = list(dict.fromkeys(expanded))
+        if not unique:
+            return None
+        if len(unique) == 1:
+            return unique[0]
+        return "mixed:" + "+".join(unique)
+
+    @classmethod
     def _merge_power_payload(
         cls,
         ina: dict[str, Any] | None,
@@ -741,45 +756,61 @@ class PowerSensorInterface:
         if not ina and not victron:
             return None
 
-        battery_voltage_sources: list[Any] = [victron.get("battery_voltage") if victron else None]
+        battery_voltage_candidates = [
+            ("victron", victron.get("battery_voltage") if victron else None)
+        ]
         if not prefer_battery:
-            battery_voltage_sources.append(ina.get("battery_voltage") if ina else None)
-        battery_voltage = cls._pick(*battery_voltage_sources, min_abs=0.05)
-        battery_current_sources: list[Any] = []
+            battery_voltage_candidates.append(
+                ("ina3221", ina.get("battery_voltage") if ina else None)
+            )
+        battery_voltage = cls._pick(
+            *(value for _, value in battery_voltage_candidates), min_abs=0.05
+        )
+        battery_voltage_source = cls._source_for(
+            battery_voltage_candidates, min_abs=0.05
+        )
+        battery_current_candidates: list[tuple[str, Any]] = []
         if prefer_battery:
-            battery_current_sources.extend(
+            battery_current_candidates.extend(
                 [
-                    victron.get("battery_current_amps") if victron else None,
-                    victron.get("battery_current") if victron else None,
+                    ("victron", victron.get("battery_current_amps") if victron else None),
+                    ("victron", victron.get("battery_current") if victron else None),
                 ]
             )
-        battery_current_sources.extend(
+        battery_current_candidates.extend(
             [
-                ina.get("battery_current") if ina else None,
-                ina.get("battery_current_amps") if ina else None,
+                ("ina3221", ina.get("battery_current") if ina else None),
+                ("ina3221", ina.get("battery_current_amps") if ina else None),
             ]
         )
         if not prefer_battery:
-            battery_current_sources.extend(
+            battery_current_candidates.extend(
                 [
-                    victron.get("battery_current_amps") if victron else None,
-                    victron.get("battery_current") if victron else None,
+                    ("victron", victron.get("battery_current_amps") if victron else None),
+                    ("victron", victron.get("battery_current") if victron else None),
                 ]
             )
-        battery_current = cls._pick(*battery_current_sources)
-        solar_voltage = cls._pick(
-            victron.get("solar_voltage") if victron else None,
-            ina.get("solar_voltage") if ina else None,
-            min_abs=0.05,
+        battery_current = cls._pick(
+            *(value for _, value in battery_current_candidates)
         )
+        battery_current_source = cls._source_for(battery_current_candidates)
+        solar_voltage_candidates = [
+            ("victron", victron.get("solar_voltage") if victron else None),
+            ("ina3221", ina.get("solar_voltage") if ina else None),
+        ]
+        solar_voltage = cls._pick(
+            *(value for _, value in solar_voltage_candidates), min_abs=0.05
+        )
+        solar_voltage_source = cls._source_for(solar_voltage_candidates, min_abs=0.05)
         # Capture per-source solar current/power to avoid cross-source derivations
         victron_solar_current = victron.get("solar_current_amps") if victron else None
         ina_solar_current = ina.get("solar_current_amps") if ina else None
-        solar_current_sources: list[Any] = []
+        solar_current_candidates: list[tuple[str, Any]] = []
         # Prefer Victron for PV-side semantics when present
-        solar_current_sources.append(victron_solar_current)
-        solar_current_sources.append(ina_solar_current)
-        solar_current = cls._pick(*solar_current_sources)
+        solar_current_candidates.append(("victron", victron_solar_current))
+        solar_current_candidates.append(("ina3221", ina_solar_current))
+        solar_current = cls._pick(*(value for _, value in solar_current_candidates))
+        solar_current_source = cls._source_for(solar_current_candidates)
 
         victron_solar_power = (
             (victron.get("solar_power_w") if victron else None) if victron else None
@@ -787,32 +818,39 @@ class PowerSensorInterface:
         if victron_solar_power is None and victron:
             victron_solar_power = victron.get("solar_power")
         ina_solar_power = ina.get("solar_power_w") if ina else None
-        solar_power_sources: list[Any] = []
+        solar_power_candidates: list[tuple[str, Any]] = []
         # Prefer Victron for PV-side power as well
-        solar_power_sources.append(victron_solar_power)
-        solar_power_sources.append(ina_solar_power)
-        solar_power = cls._pick(*solar_power_sources)
+        solar_power_candidates.append(("victron", victron_solar_power))
+        solar_power_candidates.append(("ina3221", ina_solar_power))
+        solar_power = cls._pick(*(value for _, value in solar_power_candidates))
+        solar_power_source = cls._source_for(solar_power_candidates)
 
-        battery_power_sources: list[Any] = []
+        battery_power_candidates: list[tuple[str, Any]] = []
         if prefer_battery:
-            battery_power_sources.extend(
+            battery_power_candidates.extend(
                 [
-                    victron.get("battery_power_w") if victron else None,
-                    victron.get("battery_power") if victron else None,
+                    ("victron", victron.get("battery_power_w") if victron else None),
+                    ("victron", victron.get("battery_power") if victron else None),
                 ]
             )
-        battery_power_sources.append(ina.get("battery_power_w") if ina else None)
+        battery_power_candidates.append(
+            ("ina3221", ina.get("battery_power_w") if ina else None)
+        )
         if not prefer_battery:
-            battery_power_sources.extend(
+            battery_power_candidates.extend(
                 [
-                    victron.get("battery_power_w") if victron else None,
-                    victron.get("battery_power") if victron else None,
+                    ("victron", victron.get("battery_power_w") if victron else None),
+                    ("victron", victron.get("battery_power") if victron else None),
                 ]
             )
-        battery_power = cls._pick(*battery_power_sources)
+        battery_power = cls._pick(*(value for _, value in battery_power_candidates))
+        battery_power_source = cls._source_for(battery_power_candidates)
 
         if battery_power is None and battery_voltage is not None and battery_current is not None:
             battery_power = round(battery_voltage * battery_current, 3)
+            battery_power_source = cls._combine_sources(
+                battery_voltage_source, battery_current_source
+            )
         # Prefer computing missing solar metrics only when both operands come from the same source
         if solar_power is None and solar_voltage is not None and solar_current is not None:
             # Derive power only when voltage/current share origin
@@ -837,6 +875,9 @@ class PowerSensorInterface:
                 same_origin = False
             if same_origin:
                 solar_power = round(solar_voltage * solar_current, 3)
+                solar_power_source = cls._combine_sources(
+                    solar_voltage_source, solar_current_source
+                )
 
         if (
             solar_voltage is None
@@ -878,14 +919,24 @@ class PowerSensorInterface:
             # Solar panel voltage is always positive — discard non-positive derived values
             if derived is not None and derived >= 0.05:
                 solar_voltage = round(derived, 3)
+                solar_voltage_source = cls._combine_sources(
+                    solar_power_source, solar_current_source
+                )
 
-        load_current_sources: list[Any] = []
+        load_current_candidates: list[tuple[str, Any]] = []
         if prefer_load:
-            load_current_sources.append(victron.get("load_current_amps") if victron else None)
-        load_current_sources.append(ina.get("load_current_amps") if ina else None)
+            load_current_candidates.append(
+                ("victron", victron.get("load_current_amps") if victron else None)
+            )
+        load_current_candidates.append(
+            ("ina3221", ina.get("load_current_amps") if ina else None)
+        )
         if not prefer_load:
-            load_current_sources.append(victron.get("load_current_amps") if victron else None)
-        load_current = cls._pick(*load_current_sources)
+            load_current_candidates.append(
+                ("victron", victron.get("load_current_amps") if victron else None)
+            )
+        load_current = cls._pick(*(value for _, value in load_current_candidates))
+        load_source = cls._source_for(load_current_candidates)
 
         # Daily solar yield (Wh) when available from Victron
         solar_yield_today_wh = None
@@ -917,6 +968,17 @@ class PowerSensorInterface:
             solar_power=solar_power,
             solar_yield_today_wh=solar_yield_today_wh,
             load_current=load_current,
+            battery_source=cls._combine_sources(
+                battery_voltage_source,
+                battery_current_source,
+                battery_power_source,
+            ),
+            solar_source=cls._combine_sources(
+                solar_voltage_source,
+                solar_current_source,
+                solar_power_source,
+            ),
+            load_source=load_source,
         )
 
         return reading

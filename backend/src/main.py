@@ -178,11 +178,8 @@ async def lifespan(app: FastAPI):
         mission_service = get_mission_service(
             nav_service, websocket_hub=websocket_hub
         )
-        await asyncio.wait_for(mission_service.recover_persisted_missions(), timeout=30.0)
-    except TimeoutError:
-        _log.error("Mission recovery timed out after 30 s; continuing startup")
     except Exception:
-        _log.exception("Mission recovery failed during startup")
+        _log.exception("Navigation and mission service initialization failed during startup")
     ai_service = get_ai_service()
     try:
         ai_service.set_camera_frame_provider(camera_service.get_current_frame)
@@ -332,6 +329,12 @@ async def lifespan(app: FastAPI):
 
     # Wire MissionRepository into the already-constructed MissionService singleton.
     get_mission_service(nav_service, mission_repository=_mission_repo)
+    try:
+        await asyncio.wait_for(mission_service.recover_persisted_missions(), timeout=30.0)
+    except TimeoutError:
+        _log.error("Mission recovery timed out after 30 s; continuing startup")
+    except Exception:
+        _log.exception("Mission recovery failed during startup")
 
     # --- EventStore construction (W1-3) ---
     from backend.src.observability.event_store import EventStore
@@ -379,6 +382,17 @@ async def lifespan(app: FastAPI):
         planning_service=_planning_svc,
         weather_service=weather_service,
     )
+    from backend.src.services.energy_service import EnergyService
+
+    _energy_service = EnergyService(
+        sensor_manager_provider=lambda: app.state.runtime.sensor_manager,
+        battery_config=hardware_cfg.battery_config,
+        position_provider=lambda: nav_service.navigation_state.current_position,
+        home_position_provider=lambda: nav_service.navigation_state.home_position,
+    )
+    app.state.runtime.energy_service = _energy_service
+    app.state.energy_service = _energy_service
+    nav_service.attach_energy_service(_energy_service)
     from backend.src.services.autonomy_qualification_service import (
         AutonomyQualificationService,
     )
@@ -461,7 +475,7 @@ async def lifespan(app: FastAPI):
     # These are initialised here (after persistence is ready and _db_path is known)
     # and stored on app.state so the shutdown block can tear them down cleanly.
     try:
-        _power_history_svc = init_power_history_service(persistence)
+        _power_history_svc = init_power_history_service(persistence, _energy_service)
         await _power_history_svc.start()
         _power_manager = init_power_manager(_power_history_svc)
         await _power_manager.start()

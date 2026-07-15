@@ -14,8 +14,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from ...core.runtime import RuntimeContext, get_runtime
+from ...services.energy_service import EnergyState
 from ...services.power_history_service import (
     ACTIVITY_CHARGING,
     ACTIVITY_ESTOP,
@@ -31,6 +33,17 @@ from ...services.power_history_service import (
 router = APIRouter(prefix="/api/v2/power", tags=["power"])
 
 
+@router.get("/state", response_model=EnergyState)
+async def get_power_state(
+    runtime: RuntimeContext = Depends(get_runtime),
+) -> EnergyState:
+    """Return canonical cached energy state with source and freshness truth."""
+    service = runtime.energy_service
+    if service is None:
+        raise HTTPException(status_code=503, detail="Canonical energy service unavailable")
+    return service.current_state()
+
+
 @router.get("/history")
 async def get_power_history(
     hours: float = Query(24.0, ge=0.1, le=168.0, description="Look-back window in hours (max 7 days)"),
@@ -44,7 +57,7 @@ async def get_power_history(
     """
     svc = get_power_history_service()
     if svc is None:
-        return {"data": [], "message": "Power history service not initialised"}
+        raise HTTPException(status_code=503, detail="Power history service unavailable")
     rows = svc.query_history(
         hours=hours,
         resolution_minutes=resolution,
@@ -66,7 +79,7 @@ async def get_power_history_raw(
     """Return raw (un-bucketed) power samples for the last *hours* hours."""
     svc = get_power_history_service()
     if svc is None:
-        return {"data": [], "message": "Power history service not initialised"}
+        raise HTTPException(status_code=503, detail="Power history service unavailable")
     rows = svc.query_raw(hours=hours, limit=limit)
     return {"data": rows, "hours": hours, "count": len(rows)}
 

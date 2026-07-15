@@ -69,6 +69,7 @@ class MissionExecutor:
         obstacle_active_provider: Any = None,
         obstacle_replan_provider: Any = None,
         gps_degradation_provider: Any = None,
+        energy_policy_provider: Any = None,
         obstacle_wait_timeout_seconds: float = 5.0,
         max_obstacle_replans_per_leg: int = 2,
         max_speed: float = 0.8,
@@ -97,6 +98,7 @@ class MissionExecutor:
         self._obstacle_active_provider = obstacle_active_provider
         self._obstacle_replan_provider = obstacle_replan_provider
         self._gps_degradation_provider = gps_degradation_provider
+        self._energy_policy_provider = energy_policy_provider
         self.obstacle_wait_timeout_seconds = max(0.0, float(obstacle_wait_timeout_seconds))
         self.max_obstacle_replans_per_leg = max(0, int(max_obstacle_replans_per_leg))
         import os
@@ -113,6 +115,19 @@ class MissionExecutor:
         self._failure_detail: str | None = None
         # Per-tick debug snapshot — read by NavigationService for telemetry.nav_debug
         self._debug_state: dict = {}
+
+    def set_energy_policy_provider(self, provider: Any) -> None:
+        """Attach the canonical cached energy policy after runtime construction."""
+        self._energy_policy_provider = provider
+
+    async def _energy_policy(self, mission: Mission) -> Any | None:
+        provider = self._energy_policy_provider
+        if provider is None:
+            return None
+        result = provider(mission)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
 
     # ------------------------------------------------------------------
     # Position verification helpers
@@ -525,6 +540,33 @@ class MissionExecutor:
                 logger.critical("Waypoint navigation blocked by active emergency stop latch")
                 await self._enter_safety_hold(reason="global emergency hold")
                 return False
+
+            if self._energy_policy_provider is not None:
+                try:
+                    energy_policy = await self._energy_policy(mission)
+                except Exception as exc:
+                    await self._enter_safety_hold(reason="energy policy evaluation failure")
+                    raise RuntimeError("ENERGY_POLICY_EVALUATION_FAILED") from exc
+                action = getattr(energy_policy, "action", None)
+                reason_code = getattr(
+                    energy_policy,
+                    "reason_code",
+                    "ENERGY_POLICY_UNAVAILABLE",
+                )
+                if action == "critical_stop":
+                    from .energy_service import EnergyCriticalStop
+
+                    await self._enter_safety_hold(reason=reason_code)
+                    await self._trigger_emergency(reason=reason_code)
+                    raise EnergyCriticalStop(reason_code)
+                if action == "return_home":
+                    from .energy_service import EnergyReturnRequired
+
+                    await self._enter_safety_hold(reason=reason_code)
+                    raise EnergyReturnRequired(reason_code)
+                if action == "stop" or energy_policy is None:
+                    await self._enter_safety_hold(reason=reason_code)
+                    raise RuntimeError(reason_code)
 
             if self._gps_degradation_provider is not None:
                 degradation = self._gps_degradation_provider()

@@ -229,8 +229,8 @@ venv/bin/python -m scripts.gps_smoke_test --duration 20 --interval 0.5
 
 ### Optional Victron SmartSolar BLE telemetry
 Some deployments also use Victron SmartSolar BLE telemetry as an optional supplement or preferred source for battery and
-solar data. When configured, the backend can prefer Victron values and fall back to INA3221 readings if Victron data
-is temporarily unavailable.
+solar data. Every merged reading reports source provenance. A configured preferred Victron battery-voltage source fails
+unavailable when absent rather than silently substituting INA3221 voltage.
 
 ## Motor and Drive Systems
 

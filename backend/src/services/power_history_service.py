@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -45,6 +44,9 @@ CREATE TABLE IF NOT EXISTS power_history (
     solar_w     REAL,                      -- solar power (W)
     load_w      REAL,                      -- load power (W)
     soc_pct     REAL,                      -- state of charge estimate (0–100)
+    source      TEXT,                      -- canonical battery telemetry provenance
+    sample_age_s REAL,                     -- age of source sample when logged
+    fresh       INTEGER NOT NULL DEFAULT 0,
     activity    TEXT    NOT NULL DEFAULT 'idle'
 );
 CREATE INDEX IF NOT EXISTS idx_power_history_ts ON power_history(ts);
@@ -53,47 +55,15 @@ CREATE INDEX IF NOT EXISTS idx_power_history_ts ON power_history(ts);
 # Prune records older than this many days to keep the DB from growing unbounded
 _PRUNE_DAYS = 7
 
-
-def _estimate_soc(battery_voltage: float | None) -> float | None:
-    """Very rough LiFePO4 SoC estimate from resting voltage.
-
-    LiFePO4 12 V (4S) approximate voltage → SoC mapping:
-      14.6 V → 100%  (fully charged / absorption)
-      13.3 V →  90%
-      13.2 V →  70%
-      13.1 V →  40%
-      12.8 V →  20%
-      12.0 V →   0%  (cut-off)
-
-    The flat discharge curve makes this imprecise; treat as a rough indicator.
-    """
-    if battery_voltage is None:
-        return None
-    v = float(battery_voltage)
-    if v >= 14.4:
-        return 100.0
-    if v >= 13.3:
-        return 90.0 + (v - 13.3) / (14.4 - 13.3) * 10.0
-    if v >= 13.2:
-        return 70.0 + (v - 13.2) / (13.3 - 13.2) * 20.0
-    if v >= 13.1:
-        return 40.0 + (v - 13.1) / (13.2 - 13.1) * 30.0
-    if v >= 12.8:
-        return 20.0 + (v - 12.8) / (13.1 - 12.8) * 20.0
-    if v >= 12.0:
-        return max(0.0, (v - 12.0) / (12.8 - 12.0) * 20.0)
-    return 0.0
-
-
 class PowerHistoryService:
     """Logs power samples to SQLite and provides query helpers."""
 
-    def __init__(self, persistence) -> None:
+    def __init__(self, persistence, energy_service) -> None:
         self._persistence = persistence  # PersistenceLayer instance
+        self._energy = energy_service
         self._running = False
         self._task: asyncio.Task | None = None
         self._is_day = True  # set by PowerManager
-        self._sensor_manager = None  # lazily initialised on first _log_sample
         self._ensure_table()
 
     # ------------------------------------------------------------------
@@ -104,6 +74,17 @@ class PowerHistoryService:
         try:
             with self._persistence.get_connection() as conn:
                 conn.executescript(_CREATE_TABLE_SQL)
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(power_history)")}
+                for name, declaration in (
+                    ("source", "TEXT"),
+                    ("sample_age_s", "REAL"),
+                    ("fresh", "INTEGER NOT NULL DEFAULT 0"),
+                ):
+                    if name not in columns:
+                        conn.execute(
+                            f"ALTER TABLE power_history ADD COLUMN {name} {declaration}"
+                        )
+                conn.commit()
         except Exception:
             logger.exception("PowerHistoryService: failed to create power_history table")
 
@@ -140,35 +121,10 @@ class PowerHistoryService:
                 logger.exception("PowerHistoryService: error logging sample")
 
     async def _log_sample(self) -> None:
-        from .navigation_service import NavigationService
         from ..models.navigation_state import NavigationMode
+        from .navigation_service import NavigationService
 
-        # --- Get / lazily initialise the sensor manager ---
-        sm = self._sensor_manager
-        if sm is None:
-            try:
-                # Prefer the already-running instance from the websocket hub
-                from .websocket_hub import websocket_hub
-                sm = getattr(websocket_hub, "_sensor_manager", None)
-            except Exception:
-                pass
-        if sm is None:
-            try:
-                from .sensor_manager import SensorManager
-                sm = SensorManager()
-                await sm.initialize()
-            except Exception:
-                pass
-        self._sensor_manager = sm
-
-        power = None
-        if sm is not None:
-            try:
-                power = await sm.power.read_power()
-                if power is None:
-                    power = sm.power.last_reading
-            except Exception:
-                pass
+        state = self._energy.current_state()
 
         activity = ACTIVITY_IDLE
         try:
@@ -198,31 +154,8 @@ class PowerHistoryService:
         except Exception:
             pass
 
-        # Detect charging: solar power > minimal threshold and battery current
-        # positive (from Victron perspective, positive I = charging)
-        if power is not None:
-            solar_w = getattr(power, "solar_power", None)
-            batt_a = getattr(power, "battery_current", None)
-            if solar_w is not None and solar_w > 5.0 and activity == ACTIVITY_IDLE:
-                if batt_a is None or batt_a >= 0:
-                    activity = ACTIVITY_CHARGING
-
-        batt_v = getattr(power, "battery_voltage", None) if power else None
-        batt_a = getattr(power, "battery_current", None) if power else None
-        solar_w = getattr(power, "solar_power", None) if power else None
-        load_w = getattr(power, "load_power", None) if power else None
-
-        # Derive load_w from load current × voltage if not directly available
-        if load_w is None and power is not None:
-            lc = getattr(power, "load_current", None)
-            if lc is not None and batt_v is not None:
-                load_w = round(float(lc) * float(batt_v), 2)
-
-        batt_w: float | None = None
-        if batt_v is not None and batt_a is not None:
-            batt_w = round(float(batt_v) * float(batt_a), 2)
-
-        soc_pct = _estimate_soc(batt_v)
+        if state.charging_confirmed and activity == ACTIVITY_IDLE:
+            activity = ACTIVITY_CHARGING
 
         now = datetime.now(UTC)
         ts = now.timestamp()
@@ -231,12 +164,15 @@ class PowerHistoryService:
         self._write_sample(
             ts=ts,
             iso_ts=iso_ts,
-            batt_v=batt_v,
-            batt_a=batt_a,
-            batt_w=batt_w,
-            solar_w=solar_w,
-            load_w=load_w,
-            soc_pct=soc_pct,
+            batt_v=state.voltage,
+            batt_a=state.battery_current,
+            batt_w=state.battery_power,
+            solar_w=state.solar_power,
+            load_w=state.load_power,
+            soc_pct=state.soc_percent,
+            source=state.source,
+            sample_age_s=state.sample_age_seconds,
+            fresh=int(state.fresh),
             activity=activity,
         )
 
@@ -246,8 +182,10 @@ class PowerHistoryService:
                 conn.execute(
                     """
                     INSERT INTO power_history
-                        (ts, iso_ts, batt_v, batt_a, batt_w, solar_w, load_w, soc_pct, activity)
-                    VALUES (:ts, :iso_ts, :batt_v, :batt_a, :batt_w, :solar_w, :load_w, :soc_pct, :activity)
+                        (ts, iso_ts, batt_v, batt_a, batt_w, solar_w, load_w, soc_pct,
+                         source, sample_age_s, fresh, activity)
+                    VALUES (:ts, :iso_ts, :batt_v, :batt_a, :batt_w, :solar_w, :load_w,
+                            :soc_pct, :source, :sample_age_s, :fresh, :activity)
                     """,
                     kwargs,
                 )
@@ -296,7 +234,8 @@ class PowerHistoryService:
             SELECT
                 CAST(ts / {bucket_s} AS INTEGER) * {bucket_s} + {bucket_s} / 2 AS bucket_ts,
                 AVG(batt_v), AVG(batt_a), AVG(batt_w), AVG(solar_w), AVG(load_w),
-                AVG(soc_pct), activity
+                AVG(soc_pct), GROUP_CONCAT(DISTINCT source), MAX(sample_age_s),
+                MIN(fresh), activity
             FROM power_history
             WHERE ts >= ?
             {activity_clause}
@@ -308,7 +247,19 @@ class PowerHistoryService:
                 cursor = conn.execute(sql, where_params)
                 rows = []
                 for row in cursor.fetchall():
-                    (bucket_ts, batt_v, batt_a, batt_w, solar_w, load_w, soc_pct, activity) = row
+                    (
+                        bucket_ts,
+                        batt_v,
+                        batt_a,
+                        batt_w,
+                        solar_w,
+                        load_w,
+                        soc_pct,
+                        source,
+                        sample_age_s,
+                        fresh,
+                        activity,
+                    ) = row
                     rows.append(
                         {
                             "ts": bucket_ts,
@@ -319,6 +270,9 @@ class PowerHistoryService:
                             "solar_w": round(solar_w, 2) if solar_w is not None else None,
                             "load_w": round(load_w, 2) if load_w is not None else None,
                             "soc_pct": round(soc_pct, 1) if soc_pct is not None else None,
+                            "source": source,
+                            "sample_age_s": sample_age_s,
+                            "fresh": bool(fresh),
                             "activity": activity,
                         }
                     )
@@ -340,7 +294,8 @@ class PowerHistoryService:
             with self._persistence.get_connection() as conn:
                 cursor = conn.execute(
                     """
-                    SELECT ts, iso_ts, batt_v, batt_a, batt_w, solar_w, load_w, soc_pct, activity
+                    SELECT ts, iso_ts, batt_v, batt_a, batt_w, solar_w, load_w, soc_pct,
+                           source, sample_age_s, fresh, activity
                     FROM power_history
                     WHERE ts >= ?
                     ORDER BY ts ASC
@@ -350,7 +305,20 @@ class PowerHistoryService:
                 )
                 rows = []
                 for row in cursor.fetchall():
-                    (ts, iso_ts, batt_v, batt_a, batt_w, solar_w, load_w, soc_pct, activity) = row
+                    (
+                        ts,
+                        iso_ts,
+                        batt_v,
+                        batt_a,
+                        batt_w,
+                        solar_w,
+                        load_w,
+                        soc_pct,
+                        source,
+                        sample_age_s,
+                        fresh,
+                        activity,
+                    ) = row
                     rows.append(
                         {
                             "ts": ts,
@@ -361,6 +329,9 @@ class PowerHistoryService:
                             "solar_w": solar_w,
                             "load_w": load_w,
                             "soc_pct": soc_pct,
+                            "source": source,
+                            "sample_age_s": sample_age_s,
+                            "fresh": bool(fresh),
                             "activity": activity,
                         }
                     )
@@ -391,7 +362,7 @@ def get_power_history_service() -> PowerHistoryService | None:
     return _instance
 
 
-def init_power_history_service(persistence) -> PowerHistoryService:
+def init_power_history_service(persistence, energy_service) -> PowerHistoryService:
     global _instance
-    _instance = PowerHistoryService(persistence)
+    _instance = PowerHistoryService(persistence, energy_service)
     return _instance

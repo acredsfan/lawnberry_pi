@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class StrictHardwareModel(BaseModel):
@@ -13,13 +13,13 @@ class Ina3221Config(StrictHardwareModel):
     address: int | None = Field(default=None, description="I2C address override for INA3221")
     bus: int | None = Field(default=None, description="I2C bus override for INA3221")
     shunt_ohms_ch1: float | None = Field(
-        default=None, description="Override shunt resistance for channel 1 (solar)"
+        default=None, description="Override shunt resistance for channel 1 (battery)"
     )
     shunt_ohms_ch2: float | None = Field(
         default=None, description="Override shunt resistance for channel 2"
     )
     shunt_ohms_ch3: float | None = Field(
-        default=None, description="Override shunt resistance for channel 3 (battery)"
+        default=None, description="Override shunt resistance for channel 3 (solar input)"
     )
     shunt_spec_ch1: str | None = Field(
         default=None, description="Channel 1 shunt spec, e.g. '30A/75mV'"
@@ -31,13 +31,13 @@ class Ina3221Config(StrictHardwareModel):
         default=None, description="Channel 3 shunt spec, e.g. '50A/75mV'"
     )
     battery_voltage_offset_v: float = Field(
-        default=0.0, description="Additive calibration offset for battery (ch3) bus voltage reading"
+        default=0.0, description="Additive calibration offset for battery (ch1) bus voltage reading"
     )
     battery_voltage_scale: float = Field(
         default=1.0, description="Multiplicative scale for battery bus voltage"
     )
     solar_voltage_offset_v: float = Field(
-        default=0.0, description="Additive calibration offset for solar (ch1) bus voltage reading"
+        default=0.0, description="Additive calibration offset for solar (ch3) bus voltage reading"
     )
     solar_voltage_scale: float = Field(
         default=1.0, description="Multiplicative scale for solar bus voltage"
@@ -197,6 +197,41 @@ class BatteryConfig(StrictHardwareModel):
         gt=0,
         description="Full-charge voltage — maps to 100 % SOC (e.g. 14.6 V for 4S LiFePO4).",
     )
+    return_reserve_percent: float = Field(
+        default=20.0,
+        ge=0.0,
+        le=100.0,
+        description="Minimum capacity reserved for a blade-off return to the dock.",
+    )
+    critical_soc_percent: float = Field(
+        default=5.0,
+        ge=0.0,
+        le=100.0,
+        description="SOC at which motion is stopped immediately instead of attempting a return.",
+    )
+    mission_wh_per_meter: float = Field(
+        default=0.08,
+        gt=0.0,
+        description="Conservative mission energy forecast in watt-hours per path metre.",
+    )
+    mission_fixed_overhead_wh: float = Field(
+        default=3.0,
+        ge=0.0,
+        description="Fixed energy overhead included in every mission forecast.",
+    )
+    max_sample_age_seconds: float = Field(
+        default=15.0,
+        gt=0.0,
+        description="Maximum age of cached power telemetry allowed for mission decisions.",
+    )
+
+    @model_validator(mode="after")
+    def validate_energy_thresholds(self) -> BatteryConfig:
+        if self.critical_soc_percent >= self.return_reserve_percent:
+            raise ValueError("critical_soc_percent must be below return_reserve_percent")
+        if self.min_voltage >= self.max_voltage:
+            raise ValueError("min_voltage must be below max_voltage")
+        return self
 
 
 class ToFConfig(StrictHardwareModel):

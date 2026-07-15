@@ -70,7 +70,7 @@ Verification steps:
 - Optional replacement or supplement for INA3221 readings.
 - Follow `docs/victron-ble-integration.md` to install the `victron-ble` CLI, patch the upstream scanner guard, and register the Instant Readout key.
 - Configure the `victron` block in the ignored runtime `config/hardware.yaml`; set `prefer_battery`, `prefer_solar`, and `prefer_load` to prioritize SmartSolar data when both sources are available. Never put a live Instant Readout key in tracked examples or docs.
-- Backend automatically falls back to INA3221 values if Victron telemetry is temporarily unavailable.
+- Each response reports its actual source. When `prefer_battery: true`, missing Victron battery voltage stays unavailable instead of silently switching to INA3221; this keeps a disconnected preferred source from looking healthy. Other metrics follow their configured preference policy.
 
 ### IMU (BNO085)
 - Preferred: UART4 at 3,000,000 baud

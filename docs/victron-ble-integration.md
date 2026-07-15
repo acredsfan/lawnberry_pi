@@ -101,7 +101,7 @@ Once the backend is running, the `/api/telemetry` power block should contain:
 - `solar_power` (watts)  
 - `load_current` (amps drawn by external devices)
 
-If both Victron and INA3221 are enabled, the preference flags control which source wins per channel; the backend will automatically fall back to the other source if the preferred reading is missing.
+If both Victron and INA3221 are enabled, the preference flags control which source wins per metric and the response identifies the source. With `prefer_battery: true`, absent Victron battery voltage remains unavailable instead of silently falling back to INA3221 voltage.
 
 ## 6. Troubleshooting
 
