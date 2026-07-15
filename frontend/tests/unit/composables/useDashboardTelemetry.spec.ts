@@ -24,7 +24,10 @@ vi.mock('@/services/websocket', () => ({
 function mountWithComposable() {
   let result: ReturnType<typeof useDashboardTelemetry>
   const Wrapper = defineComponent({
-    setup() { result = useDashboardTelemetry(); return {} },
+    setup() {
+      result = useDashboardTelemetry()
+      return {}
+    },
     template: '<div />',
   })
   const wrapper = mount(Wrapper)
@@ -44,12 +47,24 @@ describe('useDashboardTelemetry', () => {
     const { getResult } = mountWithComposable()
     await nextTick()
     // Simulate the callback registered for telemetry.power
-    const powerCall = mockSubscribe.mock.calls.find(([topic]: [string]) => topic === 'telemetry.power')
+    const powerCall = mockSubscribe.mock.calls.find(
+      ([topic]: [string]) => topic === 'telemetry.power'
+    )
     expect(powerCall).toBeDefined()
     const [, handler] = powerCall!
-    handler({ battery: { percentage: 87.5, voltage: 12.4 }, power: { battery_current: -0.5, battery_power: 6.0 } })
+    handler({
+      battery: { percentage: 87.5, voltage: 12.4 },
+      power: {
+        battery_current: -0.5,
+        battery_power: 6.0,
+        source: 'ina3221',
+        sample_age_seconds: 0.2,
+        fresh: true,
+      },
+    })
     await nextTick()
     expect(getResult().batteryData.value?.percentage).toBe(87.5)
+    expect(getResult().batteryData.value?.source).toBe('ina3221')
   })
 
   it('unsubscribes all topics on unmount', () => {

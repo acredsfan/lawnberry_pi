@@ -34,6 +34,7 @@ from .api.routers import weather as weather_router
 from .api.run_summary import router as run_summary_router
 from .api.safety import router as safety_router
 from .api.status import router as status_router
+from .core.build_info import APP_VERSION, get_build_info
 from .core.config_loader import get_config_loader
 from .core.env_validation import validate_environment
 from .core.state_manager import AppState
@@ -634,7 +635,8 @@ app.include_router(rest_v1_router, prefix="/api/v1")
 def root():
     return {
         "service": "LawnBerry Pi v2 Backend API",
-        "version": "2.0.0",
+        "version": APP_VERSION,
+        "build": get_build_info(),
         "status": "running",
         "api_docs": "/docs",
         "api_redoc": "/redoc",

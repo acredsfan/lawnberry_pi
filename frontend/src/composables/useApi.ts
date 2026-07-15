@@ -315,6 +315,28 @@ export const telemetryApi = {
   },
 }
 
+export const powerApi = {
+  getState: async () => {
+    const response = await apiClient.get('/power/state')
+    return response.data as {
+      available: boolean
+      fresh: boolean
+      reason_code: string | null
+      source: string | null
+      sampled_at: string | null
+      sample_age_seconds: number | null
+      voltage: number | null
+      battery_current: number | null
+      battery_power: number | null
+      solar_current: number | null
+      solar_power: number | null
+      load_power: number | null
+      soc_percent: number | null
+      charging_confirmed: boolean
+    }
+  },
+}
+
 // AI API endpoints
 export const aiApi = {
   getStatus: async () => {
@@ -395,21 +417,23 @@ export const weatherApi = {
     const path = query.toString() ? `/weather/current?${query}` : '/weather/current'
     const response = await apiClient.get(path)
     return response.data as {
-      temperature_c: number
-      humidity_percent: number
-      wind_speed_mps: number
-      condition: string
+      temperature_c: number | null
+      humidity_percent: number | null
+      pressure_hpa?: number | null
+      wind_speed_mps: number | null
+      precipitation_mm?: number | null
+      condition: string | null
       source: string
-      ts: string
+      timestamp: string
     }
   },
 
   getPlanningAdvice: async () => {
     const response = await apiClient.get('/weather/planning-advice')
     return response.data as {
-      advice: 'proceed' | 'avoid' | 'caution'
-      reason: string
-      next_review_at: string
+      advice: 'proceed' | 'avoid' | 'caution' | 'insufficient-data'
+      reasons: string[]
+      current: Record<string, unknown>
     }
   },
 }

@@ -10,7 +10,25 @@ import type { components } from '@/types/api'
 // Re-export from generated types
 export type PlanningJob = components['schemas']['PlanningJobResponse']
 
+export interface PlanningPatternCapability {
+  id: string
+  name: string
+  description: string
+}
+
+export interface PlanningCapabilities {
+  patterns: PlanningPatternCapability[]
+  blade_safe_connectors: boolean
+  footprint_clearance: boolean
+  dynamic_obstacle_replan: boolean
+}
+
 // ---- Planning jobs (/api/v2/planning/jobs) ----
+
+export async function getPlanningCapabilities(): Promise<PlanningCapabilities> {
+  const response = await apiService.get<PlanningCapabilities>('/api/v2/planning/capabilities')
+  return response.data
+}
 
 export async function getPlanningJobs(): Promise<PlanningJob[]> {
   const response = await apiService.get<PlanningJob[]>('/api/v2/planning/jobs')

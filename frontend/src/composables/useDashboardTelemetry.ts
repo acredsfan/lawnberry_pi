@@ -23,7 +23,13 @@ export function useDashboardTelemetry() {
       voltage: battery?.voltage ?? power?.battery_voltage,
       current: power?.battery_current,
       power: power?.battery_power,
-      charging: typeof power?.battery_current === 'number' ? (power!.battery_current as number) < -0.05 : false,
+      charging:
+        typeof power?.battery_current === 'number'
+          ? (power.battery_current as number) < -0.05
+          : null,
+      source: power?.source ?? data.source,
+      sampleAgeSeconds: power?.sample_age_seconds,
+      fresh: power?.fresh,
     }
   }
 
@@ -39,6 +45,7 @@ export function useDashboardTelemetry() {
       satellites: pos?.satellites,
       hdop: pos?.hdop,
       rtk_status: pos?.rtk_status,
+      sample: pos?.sample,
     }
     // Speed and heading live here; merge with any existing imu orientation fields
     orientationData.value = {
@@ -70,6 +77,7 @@ export function useDashboardTelemetry() {
       humidity: env?.humidity_percent,
       pressure: env?.pressure_hpa,
       altitude: env?.altitude_m,
+      source: env?.source ?? data.source,
     }
   }
 
@@ -83,8 +91,12 @@ export function useDashboardTelemetry() {
     }
   }
 
-  function handleTof(data: Record<string, unknown>) { tofData.value = data }
-  function handleSafety(data: Record<string, unknown>) { safetyData.value = data }
+  function handleTof(data: Record<string, unknown>) {
+    tofData.value = data
+  }
+  function handleSafety(data: Record<string, unknown>) {
+    safetyData.value = data
+  }
   function handleEvent(data: Record<string, unknown>) {
     eventLog.value = [data, ...eventLog.value].slice(0, 100)
   }
@@ -115,7 +127,14 @@ export function useDashboardTelemetry() {
   })
 
   return {
-    batteryData, positionData, orientationData, environmentalData,
-    systemData, tofData, imuData, safetyData, eventLog,
+    batteryData,
+    positionData,
+    orientationData,
+    environmentalData,
+    systemData,
+    tofData,
+    imuData,
+    safetyData,
+    eventLog,
   }
 }

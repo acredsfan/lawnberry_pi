@@ -19,6 +19,19 @@ from ...core.persistence import persistence
 router = APIRouter(tags=["schedules"])
 
 
+class PlanningPatternCapability(BaseModel):
+    id: str
+    name: str
+    description: str
+
+
+class PlanningCapabilitiesResponse(BaseModel):
+    patterns: list[PlanningPatternCapability]
+    blade_safe_connectors: bool
+    footprint_clearance: bool
+    dynamic_obstacle_replan: bool
+
+
 # ---------------------------------------------------------------------------
 # Response model
 # ---------------------------------------------------------------------------
@@ -27,7 +40,7 @@ router = APIRouter(tags=["schedules"])
 class PlanningJobResponse(BaseModel):
     id: str
     name: str
-    schedule: str | None = None
+    schedule: str | dict[str, Any] | None = None
     zones: list[Any] = Field(default_factory=list)
     priority: int = 1
     enabled: bool = True
@@ -63,6 +76,14 @@ def _find_job(job_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+
+@router.get("/planning/capabilities", response_model=PlanningCapabilitiesResponse)
+async def get_planning_capabilities() -> dict[str, Any]:
+    """Report the coverage features actually implemented by this build."""
+    from ...services.planning_service import get_planning_service
+
+    return get_planning_service().get_capabilities()
 
 
 @router.get("/schedules", response_model=list[PlanningJobResponse])

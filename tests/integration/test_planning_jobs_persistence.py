@@ -7,8 +7,8 @@ by being stored in SQLite via persistence.save_planning_job / load_planning_jobs
 import pytest
 from starlette.testclient import TestClient
 
-from backend.src.main import app
 from backend.src.core.persistence import persistence
+from backend.src.main import app
 
 
 @pytest.fixture(autouse=True)
@@ -75,3 +75,26 @@ def test_delete_job_404_after_delete():
         assert list_resp.status_code == 200
         job_ids = [j["id"] for j in list_resp.json()]
         assert job_id not in job_ids, f"Job {job_id!r} still present after delete"
+
+
+def test_structured_schedule_round_trips_for_durable_scheduler():
+    payload = {
+        "name": "Weekly mowing",
+        "schedule": {
+            "days_of_week": [2],
+            "start_time": "10:30",
+            "timezone": "America/New_York",
+            "enabled": True,
+        },
+        "zones": ["zone-a"],
+        "pattern": "parallel",
+    }
+
+    with TestClient(app) as client:
+        response = client.post("/api/v2/schedules", json=payload)
+        assert response.status_code == 201
+        job_id = response.json()["id"]
+        loaded = client.get(f"/api/v2/schedules/{job_id}")
+
+    assert loaded.status_code == 200
+    assert loaded.json()["schedule"] == payload["schedule"]

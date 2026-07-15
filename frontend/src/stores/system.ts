@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { SystemStatus, ConnectionStatus } from '@/types/system'
-import type { 
-  HardwareTelemetryStream, 
-  TelemetryLatencyBadge, 
-  RTKStatus, 
+import type {
+  HardwareTelemetryStream,
+  TelemetryLatencyBadge,
+  RTKStatus,
   IMUOrientation,
-  PowerMetrics 
+  PowerMetrics,
 } from '@/types/telemetry'
 import { useWebSocket } from '@/services/websocket'
 import apiService from '@/services/api'
@@ -17,7 +17,19 @@ export const useSystemStore = defineStore('system', () => {
   const telemetryData = ref<any>(null)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
-  
+  const buildInfo = ref<{
+    version: string
+    commit_sha: string | null
+    short_sha: string | null
+    source: string
+    started_at: string
+  } | null>(null)
+  const telemetrySource = ref<string | null>(null)
+  const telemetryObservedAt = ref<string | null>(null)
+  const lastTelemetryReceivedAt = ref<number | null>(null)
+  const clockMs = ref(Date.now())
+  let clockTimer: ReturnType<typeof setInterval> | null = null
+
   // Telemetry-specific state
   const latencyBadge = ref<TelemetryLatencyBadge | null>(null)
   const rtkStatus = ref<RTKStatus | null>(null)
@@ -28,21 +40,55 @@ export const useSystemStore = defineStore('system', () => {
   const { connect, disconnect, connected, subscribe, unsubscribe } = useWebSocket()
 
   const isOnline = computed(() => connectionStatus.value === 'connected')
-  const isSystemHealthy = computed(() => status.value === 'active')
+  const telemetrySampleAgeSeconds = computed<number | null>(() => {
+    if (telemetryObservedAt.value) {
+      const observedMs = Date.parse(telemetryObservedAt.value)
+      if (Number.isFinite(observedMs)) return Math.max(0, (clockMs.value - observedMs) / 1000)
+    }
+    return lastTelemetryReceivedAt.value === null
+      ? null
+      : Math.max(0, (clockMs.value - lastTelemetryReceivedAt.value) / 1000)
+  })
+  const telemetryFresh = computed(
+    () => telemetrySampleAgeSeconds.value !== null && telemetrySampleAgeSeconds.value <= 5
+  )
+  const isSystemHealthy = computed(() => status.value === 'active' && telemetryFresh.value)
+  const effectiveStatus = computed<SystemStatus>(() => {
+    if (status.value === 'error') return 'error'
+    if (!telemetryFresh.value) return 'unknown'
+    return status.value
+  })
+
+  watch(
+    connected,
+    (isConnected) => {
+      connectionStatus.value = isConnected ? 'connected' : 'disconnected'
+    },
+    { immediate: true }
+  )
 
   const initialize = async () => {
     try {
       isLoading.value = true
       error.value = null
-      
+
+      if (clockTimer === null) {
+        clockTimer = setInterval(() => {
+          clockMs.value = Date.now()
+        }, 1000)
+      }
+
+      try {
+        const response = await apiService.get('/api/v2/system/info')
+        buildInfo.value = response.data
+      } catch {
+        buildInfo.value = null
+      }
+
       // Connect to WebSocket for real-time updates
       await connect()
-      connectionStatus.value = connected.value ? 'connected' : 'disconnected'
-      if (connected.value) {
-        subscribe('telemetry.system', updateSystemStatus)
-        subscribe('telemetry/updates', updateSystemStatus)
-      }
-      
+      subscribe('telemetry.system', updateSystemStatus)
+      subscribe('telemetry/updates', updateSystemStatus)
     } catch (err: any) {
       error.value = err.message || 'System initialization failed'
       connectionStatus.value = 'error'
@@ -57,6 +103,10 @@ export const useSystemStore = defineStore('system', () => {
       return
     }
 
+    lastTelemetryReceivedAt.value = Date.now()
+    telemetrySource.value = data?.sample?.source ?? data?.source ?? null
+    telemetryObservedAt.value = data?.sample?.observed_at ?? data?.timestamp ?? null
+
     if (data?.type === 'system_status') {
       status.value = data.status
     } else if (data?.type === 'telemetry') {
@@ -64,10 +114,19 @@ export const useSystemStore = defineStore('system', () => {
       // Update system status based on telemetry health
       const isHealthy = data.sensors?.health || data.motors?.health || data.navigation?.health
       status.value = isHealthy ? 'active' : 'warning'
-    } else if (data?.safety_state || data?.position || data?.battery || data?.environmental || data?.power) {
+    } else if (
+      data?.safety_state ||
+      data?.position ||
+      data?.battery ||
+      data?.environmental ||
+      data?.power
+    ) {
       telemetryData.value = data
       const safety = String(data.safety_state || '').toLowerCase()
-      if (safety === 'nominal' || safety === 'safe' || safety === 'active') {
+      if (
+        (safety === 'nominal' || safety === 'safe' || safety === 'active') &&
+        telemetryFresh.value
+      ) {
         status.value = 'active'
       } else if (safety === 'emergency_stop') {
         status.value = 'error'
@@ -81,6 +140,10 @@ export const useSystemStore = defineStore('system', () => {
     unsubscribe('telemetry.system')
     unsubscribe('telemetry/updates')
     await disconnect()
+    if (clockTimer !== null) {
+      clearInterval(clockTimer)
+      clockTimer = null
+    }
     connectionStatus.value = 'disconnected'
     status.value = 'unknown'
   }
@@ -93,7 +156,7 @@ export const useSystemStore = defineStore('system', () => {
     try {
       isLoading.value = true
       error.value = null
-      
+
       const response = await apiService.getTelemetryStream(params)
       const data = response.data
       const streamItems = Array.isArray(data.streams)
@@ -104,32 +167,38 @@ export const useSystemStore = defineStore('system', () => {
 
       hardwareStreams.value = streamItems.map((item: any) => ({
         ...item,
-        power_data: item.power_data || item.metadata?.power_data || item.power || item.metadata?.power,
+        power_data:
+          item.power_data || item.metadata?.power_data || item.power || item.metadata?.power,
       }))
-      
+
       // Update latency badge
       const latencyStats = data.latency_stats || data.latency_summary_ms
       if (latencyStats) {
         const avgLatency = latencyStats.avg_latency_ms ?? latencyStats.avg ?? 0
         const device = avgLatency <= 250 ? 'pi5' : 'pi4'
         const targetMs = device === 'pi5' ? 250 : 350
-        
+
         latencyBadge.value = {
           latency_ms: avgLatency,
-          status: avgLatency <= targetMs ? 'healthy' : avgLatency <= targetMs * 1.2 ? 'warning' : 'critical',
+          status:
+            avgLatency <= targetMs
+              ? 'healthy'
+              : avgLatency <= targetMs * 1.2
+                ? 'warning'
+                : 'critical',
           target_ms: targetMs,
-          device
+          device,
         }
       }
-      
+
       // Update RTK status
       rtkStatus.value = data.rtk_status || null
-      
+
       // Update IMU orientation
       imuOrientation.value = data.imu_orientation || null
-      
+
       // Extract power metrics from streams
-      const powerStream = hardwareStreams.value.find(s => s.component_id === 'power')
+      const powerStream = hardwareStreams.value.find((s) => s.component_id === 'power')
       if (powerStream && powerStream.power_data) {
         powerMetrics.value = {
           battery: {
@@ -137,17 +206,16 @@ export const useSystemStore = defineStore('system', () => {
             current: powerStream.power_data.battery_current,
             power: powerStream.power_data.battery_power,
             soc_percent: powerStream.power_data.battery_soc_percent,
-            health: powerStream.power_data.battery_health
+            health: powerStream.power_data.battery_health,
           },
           solar: {
             voltage: powerStream.power_data.solar_voltage,
             current: powerStream.power_data.solar_current,
-            power: powerStream.power_data.solar_power
+            power: powerStream.power_data.solar_power,
           },
-          timestamp: powerStream.timestamp
+          timestamp: powerStream.timestamp,
         }
       }
-      
     } catch (err: any) {
       error.value = err.message || 'Failed to load telemetry stream'
     } finally {
@@ -163,9 +231,9 @@ export const useSystemStore = defineStore('system', () => {
     try {
       isLoading.value = true
       error.value = null
-      
+
       const response = await apiService.exportTelemetryDiagnostic(params)
-      
+
       // Create a download link
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement('a')
@@ -175,7 +243,6 @@ export const useSystemStore = defineStore('system', () => {
       link.click()
       link.remove()
       window.URL.revokeObjectURL(url)
-      
     } catch (err: any) {
       error.value = err.message || 'Failed to export telemetry diagnostic'
       throw err
@@ -188,7 +255,7 @@ export const useSystemStore = defineStore('system', () => {
     try {
       const response = await apiService.pingTelemetry({
         component_id: componentId,
-        sample_count: sampleCount
+        sample_count: sampleCount,
       })
       return response.data
     } catch (err: any) {
@@ -205,6 +272,11 @@ export const useSystemStore = defineStore('system', () => {
     error,
     isOnline,
     isSystemHealthy,
+    effectiveStatus,
+    buildInfo,
+    telemetrySource,
+    telemetrySampleAgeSeconds,
+    telemetryFresh,
     initialize,
     updateSystemStatus,
     shutdown,
@@ -217,6 +289,6 @@ export const useSystemStore = defineStore('system', () => {
     // Telemetry methods
     loadTelemetryStream,
     exportTelemetryDiagnostic,
-    pingTelemetry
+    pingTelemetry,
   }
 })

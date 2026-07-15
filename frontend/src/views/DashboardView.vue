@@ -15,14 +15,31 @@
       <!-- Power / Battery -->
       <PowerSystemCard :data="batteryDisplayData" />
       <!-- Power History shortcut -->
-      <div class="retro-card power-history-link-card" @click="$router.push('/power-history')" style="cursor:pointer;">
+      <div
+        class="retro-card power-history-link-card"
+        @click="$router.push('/power-history')"
+        style="cursor: pointer"
+      >
         <div class="card-header">
           <h4>POWER HISTORY</h4>
-          <span style="font-size:1.2em;">📈</span>
+          <span style="font-size: 1.2em">📈</span>
         </div>
-        <div class="card-content" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 0;">
-          <span style="font-size:0.75rem;color:#94a3b8;text-align:center;">View trends, charging cycles &amp; activity logs</span>
-          <span style="margin-top:8px;font-size:0.7rem;color:#0891b2;letter-spacing:0.08em;">TAP TO OPEN →</span>
+        <div
+          class="card-content"
+          style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 0;
+          "
+        >
+          <span style="font-size: 0.75rem; color: #94a3b8; text-align: center"
+            >View trends, charging cycles &amp; activity logs</span
+          >
+          <span style="margin-top: 8px; font-size: 0.7rem; color: #0891b2; letter-spacing: 0.08em"
+            >TAP TO OPEN →</span
+          >
         </div>
       </div>
 
@@ -44,13 +61,21 @@
         <div class="card-content tof-grid">
           <div class="tof-column">
             <div class="metric-label">LEFT</div>
-            <div class="metric-value">{{ tofLeftDisplay }}<span class="unit">{{ tofUnit }}</span></div>
-            <div class="metric-status" :class="tofStatusClass(tofLeft.status)">{{ formatTofStatus(tofLeft.status) }}</div>
+            <div class="metric-value">
+              {{ tofLeftDisplay }}<span class="unit">{{ tofUnit }}</span>
+            </div>
+            <div class="metric-status" :class="tofStatusClass(tofLeft.status)">
+              {{ formatTofStatus(tofLeft.status) }}
+            </div>
           </div>
           <div class="tof-column">
             <div class="metric-label">RIGHT</div>
-            <div class="metric-value">{{ tofRightDisplay }}<span class="unit">{{ tofUnit }}</span></div>
-            <div class="metric-status" :class="tofStatusClass(tofRight.status)">{{ formatTofStatus(tofRight.status) }}</div>
+            <div class="metric-value">
+              {{ tofRightDisplay }}<span class="unit">{{ tofUnit }}</span>
+            </div>
+            <div class="metric-status" :class="tofStatusClass(tofRight.status)">
+              {{ formatTofStatus(tofRight.status) }}
+            </div>
           </div>
         </div>
       </div>
@@ -75,13 +100,23 @@
           <span class="metric-label">Last Run</span>
           <span class="metric-value">{{ lastCalibrationSummary }}</span>
         </div>
-        <button class="retro-btn calibrate-btn" :disabled="imuCalibrating || !imuSupported" @click="runImuCalibration">
+        <button
+          class="retro-btn calibrate-btn"
+          :disabled="imuCalibrating || !imuSupported"
+          @click="runImuCalibration"
+        >
           <span class="btn-icon">♻</span>
-          {{ !imuSupported ? 'NOT SUPPORTED' : imuCalibrating ? 'CALIBRATING…' : 'RUN CALIBRATION' }}
+          {{
+            !imuSupported ? 'NOT SUPPORTED' : imuCalibrating ? 'CALIBRATING…' : 'RUN CALIBRATION'
+          }}
         </button>
         <p v-if="calibrationError" class="calibration-error">⚠ {{ calibrationError }}</p>
-        <p v-else-if="!imuSupported" class="calibration-note unsupported">IMU calibration not supported on this hardware.</p>
-        <p v-else-if="lastCalibration?.notes" class="calibration-note">{{ lastCalibration?.notes }}</p>
+        <p v-else-if="!imuSupported" class="calibration-note unsupported">
+          IMU calibration not supported on this hardware.
+        </p>
+        <p v-else-if="lastCalibration?.notes" class="calibration-note">
+          {{ lastCalibration?.notes }}
+        </p>
       </div>
     </div>
 
@@ -93,12 +128,7 @@
       </div>
       <div class="card-content">
         <div class="events-terminal">
-          <div
-            v-for="event in recentEvents"
-            :key="event.id"
-            class="log-entry"
-            :class="event.level"
-          >
+          <div v-for="event in recentEvents" :key="event.id" class="log-entry" :class="event.level">
             <span class="log-time">[{{ formatTime(event.timestamp) }}]</span>
             <span class="log-level">{{ event.level.toUpperCase() }}:</span>
             <span class="log-message">{{ event.message }}</span>
@@ -112,7 +142,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { systemApi, controlApi, telemetryApi, weatherApi, maintenanceApi } from '@/composables/useApi'
+  import {
+    systemApi,
+    controlApi,
+    telemetryApi,
+    weatherApi,
+    maintenanceApi,
+    powerApi,
+  } from '@/composables/useApi'
 import { useWebSocket } from '@/services/websocket'
 import { usePreferencesStore } from '@/stores/preferences'
 import { useDashboardTelemetry } from '@/composables/useDashboardTelemetry'
@@ -138,7 +175,15 @@ interface ImuCalibrationResult {
   steps: Array<Record<string, any>>
 }
 
-const { connected, connecting, connect, subscribe, unsubscribe, setCadence, dispatchTestMessage } = useWebSocket()
+  const {
+    connected,
+    connecting,
+    connect,
+    subscribe,
+    unsubscribe,
+    setCadence,
+    dispatchTestMessage,
+  } = useWebSocket()
 
 const {
   batteryData,
@@ -174,8 +219,8 @@ const gpsHdop = ref<number | null>(null)
 const gpsSatellites = ref<number | null>(null)
 const gpsRtkStatus = ref<string | null>(null)
 
-const batteryLevel = ref(0)
-const batteryVoltage = ref(0)
+  const batteryLevel = ref<number | null>(null)
+  const batteryVoltage = ref<number | null>(null)
 const batteryCurrent = ref<number | null>(null)
 const batteryPower = ref<number | null>(null)
 const batteryChargeState = ref<string | null>(null)
@@ -186,6 +231,10 @@ const solarYieldTodayWh = ref<number | null>(null)
 const batteryConsumedTodayWh = ref<number | null>(null)
 const loadCurrent = ref<number | null>(null)
 const loadPower = ref<number | null>(null)
+  const powerSource = ref<string | null>(null)
+  const powerSampleAgeSeconds = ref<number | null>(null)
+  const powerFresh = ref(false)
+  const powerReasonCode = ref<string | null>(null)
 const speed = ref(0)
 const speedTrend = ref(0)
 const imuYaw = ref<number | null>(null)
@@ -249,7 +298,7 @@ const connectionStatusClass = computed(() => {
 
 const hasGpsFix = computed(() => gpsLatitude.value !== null && gpsLongitude.value !== null)
 
-const gpsAccuracyUnit = computed(() => unitSystem.value === 'imperial' ? 'ft' : 'm')
+  const gpsAccuracyUnit = computed(() => (unitSystem.value === 'imperial' ? 'ft' : 'm'))
 
 const gpsAccuracyDisplay = computed(() => {
   if (gpsAccuracy.value === null) return '--'
@@ -280,19 +329,25 @@ const gpsAccuracySummary = computed(() => {
 })
 
 const batteryIconClass = computed(() => {
+    if (batteryLevel.value === null) return 'battery-unknown'
   if (batteryLevel.value > 50) return 'battery-high'
   if (batteryLevel.value > 20) return 'battery-medium'
   return 'battery-low'
 })
 
 const batteryBarClass = computed(() => {
+    if (batteryLevel.value === null) return 'battery-unknown'
   if (batteryLevel.value > 50) return 'battery-good'
   if (batteryLevel.value > 20) return 'battery-warning'
   return 'battery-critical'
 })
 
-const batteryLevelDisplay = computed(() => batteryLevel.value.toFixed(1))
-const batteryVoltageDisplay = computed(() => batteryVoltage.value.toFixed(1))
+  const batteryLevelDisplay = computed(() =>
+    batteryLevel.value === null ? '--' : batteryLevel.value.toFixed(1)
+  )
+  const batteryVoltageDisplay = computed(() =>
+    batteryVoltage.value === null ? '--' : batteryVoltage.value.toFixed(1)
+  )
 const batteryCurrentDisplay = computed(() => {
   if (batteryCurrent.value === null || Number.isNaN(batteryCurrent.value)) return '--'
   const val = batteryCurrent.value
@@ -303,7 +358,9 @@ const batteryPowerDisplay = computed(() => {
   const val = batteryPower.value
   return Math.abs(val) >= 100 ? val.toFixed(0) : val.toFixed(1)
 })
-const batteryChargeStateDisplay = computed(() => batteryChargeState.value ? batteryChargeState.value.toUpperCase() : 'UNKNOWN')
+  const batteryChargeStateDisplay = computed(() =>
+    batteryChargeState.value ? batteryChargeState.value.toUpperCase() : 'UNKNOWN'
+  )
 
 const solarVoltageDisplay = computed(() => {
   if (solarVoltage.value === null) return '--'
@@ -370,7 +427,9 @@ const solarStatusClass = computed(() => {
   }
 })
 
-const speedTrendClass = computed(() => (speedTrend.value > 0 ? 'trend-up' : speedTrend.value < 0 ? 'trend-down' : 'trend-stable'))
+  const speedTrendClass = computed(() =>
+    speedTrend.value > 0 ? 'trend-up' : speedTrend.value < 0 ? 'trend-down' : 'trend-stable'
+  )
 
 const speedDisplay = computed(() => {
   const value = speed.value || 0
@@ -391,12 +450,17 @@ function formatHeading(deg: number | null): string {
 const imuYawDisplay = computed(() => formatHeading(imuYaw.value))
 const gpsHeadingDisplay = computed(() => formatHeading(gpsHeading.value))
 const navHeadingDisplay = computed(() => formatHeading(navHeading.value))
-const imuPitchDisplay = computed(() => (imuPitch.value !== null ? `${imuPitch.value.toFixed(1)}°` : '--'))
-const imuRollDisplay = computed(() => (imuRoll.value !== null ? `${imuRoll.value.toFixed(1)}°` : '--'))
+  const imuPitchDisplay = computed(() =>
+    imuPitch.value !== null ? `${imuPitch.value.toFixed(1)}°` : '--'
+  )
+  const imuRollDisplay = computed(() =>
+    imuRoll.value !== null ? `${imuRoll.value.toFixed(1)}°` : '--'
+  )
 
 const temperatureDisplay = computed(() => {
   if (temperature.value === null) return '--'
-  const converted = unitSystem.value === 'imperial' ? (temperature.value * 9) / 5 + 32 : temperature.value
+    const converted =
+      unitSystem.value === 'imperial' ? (temperature.value * 9) / 5 + 32 : temperature.value
   return converted.toFixed(1)
 })
 
@@ -416,7 +480,9 @@ const tempStatusClass = computed(() => {
   return 'status-active'
 })
 
-const humidityDisplay = computed(() => (humidity.value === null ? '--' : humidity.value.toFixed(1)))
+  const humidityDisplay = computed(() =>
+    humidity.value === null ? '--' : humidity.value.toFixed(1)
+  )
 
 const pressureDisplay = computed(() => {
   if (pressure.value === null) return '--'
@@ -474,6 +540,10 @@ const batteryDisplayData = computed<Record<string, unknown>>(() => ({
   batteryConsumedTodayWh: batteryConsumedTodayWh.value,
   loadCurrent: loadCurrent.value,
   loadPower: loadPower.value,
+    source: powerSource.value,
+    sampleAgeSeconds: powerSampleAgeSeconds.value,
+    fresh: powerFresh.value,
+    reasonCode: powerReasonCode.value,
 }))
 
 const orientationDisplayData = computed<Record<string, unknown>>(() => ({
@@ -503,7 +573,8 @@ const tofStatusClass = (status: string | null) => {
 const imuCalibrationLabel = computed(() => {
   if (!imuSupported.value) return 'NOT SUPPORTED'
   if (imuCalibrating.value) return 'Calibrating…'
-  if (imuCalibrationStatus.value) return imuCalibrationStatus.value.replace(/_/g, ' ').toUpperCase()
+    if (imuCalibrationStatus.value)
+      return imuCalibrationStatus.value.replace(/_/g, ' ').toUpperCase()
   return 'UNKNOWN'
 })
 
@@ -538,18 +609,6 @@ const coerceFiniteNumber = (value: unknown): number | undefined => {
     }
   }
   return undefined
-}
-
-const estimateBatteryFromVoltage = (voltage: unknown): number | null => {
-  if (typeof voltage !== 'number' || Number.isNaN(voltage)) {
-    return null
-  }
-  const minV = 11.5
-  const maxV = 13.0
-  if (voltage <= minV) return 0.0
-  if (voltage >= maxV) return 100.0
-  const pct = ((voltage - minV) / (maxV - minV)) * 100.0
-  return Number.isFinite(pct) ? Number(pct.toFixed(1)) : null
 }
 
 const applySolarMetrics = (payload: any) => {
@@ -710,20 +769,12 @@ const applySolarMetrics = (payload: any) => {
 const applyBatteryMetrics = (payload: any) => {
   if (payload === null || payload === undefined) return
   if (typeof payload === 'number') {
-    const estimated = estimateBatteryFromVoltage(payload)
-    if (estimated !== null) {
-      batteryLevel.value = Math.max(0, Math.min(100, estimated))
-    }
     batteryVoltage.value = payload
     return
   }
   if (typeof payload === 'string') {
     const numeric = coerceFiniteNumber(payload)
     if (numeric !== undefined) {
-      const estimated = estimateBatteryFromVoltage(numeric)
-      if (estimated !== null) {
-        batteryLevel.value = Math.max(0, Math.min(100, estimated))
-      }
       batteryVoltage.value = numeric
     }
     return
@@ -754,11 +805,7 @@ const applyBatteryMetrics = (payload: any) => {
     payload?.battery_current,
     payload?.power?.battery_current,
   ]
-  const powerCandidates = [
-    battery?.power,
-    payload?.battery_power,
-    payload?.power?.battery_power,
-  ]
+    const powerCandidates = [battery?.power, payload?.battery_power, payload?.power?.battery_power]
   const chargeStateCandidates = [
     battery?.charging_state,
     battery?.state,
@@ -781,18 +828,16 @@ const applyBatteryMetrics = (payload: any) => {
   const chg = chargeStateCandidates
     .map((v) => (typeof v === 'string' ? v : null))
     .find((v) => v !== undefined && v !== null) as string | undefined
-  if ((percent === undefined || percent === null) && voltage !== undefined) {
-    const estimated = estimateBatteryFromVoltage(voltage)
-    if (estimated !== null) {
-      percent = estimated
-    }
-  }
   if (typeof percent === 'number' && !Number.isNaN(percent)) {
     const normalizedPercent = Number(percent.toFixed(1))
     batteryLevel.value = Math.max(0, Math.min(100, normalizedPercent))
+    } else if (percentCandidates.some((value) => value === null)) {
+      batteryLevel.value = null
   }
   if (typeof voltage === 'number' && !Number.isNaN(voltage)) {
     batteryVoltage.value = voltage
+    } else if (voltageCandidates.some((value) => value === null)) {
+      batteryVoltage.value = null
   }
 
   if (typeof cur === 'number' && !Number.isNaN(cur)) {
@@ -809,6 +854,13 @@ const applyBatteryMetrics = (payload: any) => {
     batteryChargeState.value = cur > 0.05 ? 'charging' : cur < -0.05 ? 'discharging' : 'idle'
   }
 
+    const powerEnvelope = payload?.power && typeof payload.power === 'object' ? payload.power : null
+    const source = powerEnvelope?.source ?? payload?.source
+    if (typeof source === 'string') powerSource.value = source
+    const age = coerceFiniteNumber(powerEnvelope?.sample_age_seconds ?? payload?.sample_age_seconds)
+    if (age !== undefined) powerSampleAgeSeconds.value = age
+    if (typeof powerEnvelope?.fresh === 'boolean') powerFresh.value = powerEnvelope.fresh
+
   if (typeof payload === 'object') {
     applySolarMetrics(payload)
     // Load metrics
@@ -818,11 +870,7 @@ const applyBatteryMetrics = (payload: any) => {
       loadSrc?.load_current,
       payload?.power?.load_current,
     ]
-    const loadPowerCandidates = [
-      loadSrc?.power,
-      loadSrc?.load_power,
-      payload?.power?.load_power,
-    ]
+      const loadPowerCandidates = [loadSrc?.power, loadSrc?.load_power, payload?.power?.load_power]
     const lcur = loadCurrentCandidates
       .map((v) => coerceFiniteNumber(v))
       .find((v) => v !== undefined)
@@ -868,7 +916,8 @@ const coerceTofReading = (reading: any): TofState => {
     .map((value) => coerceFiniteNumber(value))
     .find((value) => value !== undefined)
 
-  const status = reading.range_status ?? reading.status ?? reading.state ?? reading.quality ?? null
+    const status =
+      reading.range_status ?? reading.status ?? reading.state ?? reading.quality ?? null
   const signalCandidates = [
     reading.signal_strength,
     reading.signal_rate,
@@ -881,7 +930,7 @@ const coerceTofReading = (reading: any): TofState => {
   return {
     distance: distance ?? null,
     status,
-    signal: signal ?? null
+      signal: signal ?? null,
   }
 }
 
@@ -1016,7 +1065,7 @@ const addLogEntry = (message: string, level: 'info' | 'success' | 'warning' | 'e
     id: Date.now() + Math.random(),
     timestamp: new Date(),
     message,
-    level
+      level,
   })
   // Keep only last 10 entries
   if (recentEvents.value.length > 10) {
@@ -1035,7 +1084,8 @@ const loadUnitPreference = async () => {
 const applyCalibrationResult = (result: ImuCalibrationResult) => {
   lastCalibration.value = result
   imuCalibrationStatus.value = result.calibration_status ?? result.status
-  imuCalibrationScore.value = typeof result.calibration_score === 'number' ? result.calibration_score : 0
+    imuCalibrationScore.value =
+      typeof result.calibration_score === 'number' ? result.calibration_score : 0
 }
 
 const stopCalibrationPolling = () => {
@@ -1044,7 +1094,6 @@ const stopCalibrationPolling = () => {
     calibrationPollHandle = null
   }
 }
-
 
 const handleImuUnsupported = () => {
   if (!imuSupported.value) return
@@ -1101,7 +1150,8 @@ const runImuCalibration = async () => {
     const result = await maintenanceApi.runImuCalibration()
     applyCalibrationResult(result)
     const level = result.calibration_score >= 2 ? 'success' : 'warning'
-    const message = result.calibration_score >= 2
+      const message =
+        result.calibration_score >= 2
       ? 'IMU calibration completed successfully'
       : 'IMU calibration incomplete—continue motion for better score'
     addLogEntry(message, level)
@@ -1129,8 +1179,10 @@ const loadSystemStatus = async () => {
     const status = await systemApi.getStatus()
     systemStatus.value = status.status || 'Unknown'
     uptime.value = status.uptime || '0h 0m'
-    connectionStatus.value = 'Connected'
-    dataStreamText.value = '>>> SYSTEM ONLINE - DATA STREAMING ACTIVE'
+      connectionStatus.value = connected.value ? 'Connected' : 'REST only'
+      dataStreamText.value = connected.value
+        ? '>>> SYSTEM ONLINE - REAL-TIME TELEMETRY ACTIVE'
+        : '>>> BACKEND REACHABLE - REAL-TIME TELEMETRY DISCONNECTED'
   } catch (error) {
     console.error('Failed to load system status:', error)
     systemStatus.value = 'Error'
@@ -1138,6 +1190,13 @@ const loadSystemStatus = async () => {
     dataStreamText.value = '>>> CONNECTION LOST - ATTEMPTING RECONNECT...'
   }
 }
+
+  watch(connected, (isConnected) => {
+    connectionStatus.value = isConnected ? 'Connected' : 'Disconnected'
+    if (!isConnected) {
+      dataStreamText.value = '>>> REAL-TIME TELEMETRY DISCONNECTED - REST FALLBACK ACTIVE'
+    }
+  })
 
 const loadTelemetryData = async () => {
   try {
@@ -1152,9 +1211,12 @@ const loadTelemetryData = async () => {
     if (typeof lat === 'number' && typeof lon === 'number') {
       gpsLatitude.value = lat.toFixed(6)
       gpsLongitude.value = lon.toFixed(6)
-      gpsAccuracy.value = typeof telemetry.position?.accuracy === 'number' ? telemetry.position.accuracy : null
-      gpsHdop.value = typeof telemetry.position?.hdop === 'number' ? telemetry.position.hdop : null
-      gpsSatellites.value = typeof telemetry.position?.satellites === 'number' ? telemetry.position.satellites : null
+        gpsAccuracy.value =
+          typeof telemetry.position?.accuracy === 'number' ? telemetry.position.accuracy : null
+        gpsHdop.value =
+          typeof telemetry.position?.hdop === 'number' ? telemetry.position.hdop : null
+        gpsSatellites.value =
+          typeof telemetry.position?.satellites === 'number' ? telemetry.position.satellites : null
       gpsRtkStatus.value = telemetry.position?.rtk_status ?? null
       gpsStatus.value = gpsAccuracySummary.value
     } else {
@@ -1177,12 +1239,15 @@ const loadTelemetryData = async () => {
     // Orientation: IMU angles + GPS/nav headings
     if (telemetry.imu) {
       imuYaw.value = typeof telemetry.imu.yaw === 'number' ? telemetry.imu.yaw : imuYaw.value
-      imuPitch.value = typeof telemetry.imu.pitch === 'number' ? telemetry.imu.pitch : imuPitch.value
+        imuPitch.value =
+          typeof telemetry.imu.pitch === 'number' ? telemetry.imu.pitch : imuPitch.value
       imuRoll.value = typeof telemetry.imu.roll === 'number' ? telemetry.imu.roll : imuRoll.value
     }
-    if (typeof telemetry.position?.heading === 'number') gpsHeading.value = telemetry.position.heading
+      if (typeof telemetry.position?.heading === 'number')
+        gpsHeading.value = telemetry.position.heading
     if (typeof telemetry.nav_heading === 'number') navHeading.value = telemetry.nav_heading
-    if (typeof telemetry.nav_heading_source === 'string') navHeadingSource.value = telemetry.nav_heading_source
+      if (typeof telemetry.nav_heading_source === 'string')
+        navHeadingSource.value = telemetry.nav_heading_source
 
     // Update environmental data
     if (telemetry.environmental) {
@@ -1207,12 +1272,50 @@ const loadTelemetryData = async () => {
     if (telemetry.motor_status) {
       currentMode.value = telemetry.motor_status.toUpperCase()
     }
-    
   } catch (error) {
     console.error('Failed to load telemetry:', error)
     addLogEntry('Telemetry data unavailable', 'warning')
   }
 }
+
+  const loadCanonicalPowerState = async () => {
+    try {
+      const state = await powerApi.getState()
+      powerSource.value = state.source
+      powerSampleAgeSeconds.value = state.sample_age_seconds
+      powerFresh.value = state.fresh
+      powerReasonCode.value = state.reason_code
+      batteryLevel.value = state.soc_percent
+      batteryVoltage.value = state.voltage
+      batteryCurrent.value = state.battery_current
+      batteryPower.value = state.battery_power
+      solarCurrent.value = state.solar_current
+      solarPower.value = state.solar_power
+      loadPower.value = state.load_power
+      batteryChargeState.value = state.charging_confirmed
+        ? 'charging'
+        : state.battery_current === null
+          ? null
+          : state.battery_current < -0.05
+            ? 'discharging'
+            : 'idle'
+      if (!state.available) {
+        batteryLevel.value = null
+        batteryVoltage.value = null
+        batteryCurrent.value = null
+        batteryPower.value = null
+      }
+    } catch (error) {
+      powerSource.value = 'unavailable'
+      powerSampleAgeSeconds.value = null
+      powerFresh.value = false
+      powerReasonCode.value = 'POWER_STATE_API_UNAVAILABLE'
+      batteryLevel.value = null
+      batteryVoltage.value = null
+      batteryCurrent.value = null
+      batteryPower.value = null
+    }
+  }
 
 const loadWeatherData = async () => {
   try {
@@ -1251,14 +1354,17 @@ function applyRealtimeTelemetrySnapshot(telemetry: any) {
   if (typeof lat === 'number' && typeof lon === 'number') {
     gpsLatitude.value = lat.toFixed(6)
     gpsLongitude.value = lon.toFixed(6)
-    gpsAccuracy.value = typeof telemetry.position?.accuracy === 'number' ? telemetry.position.accuracy : null
+      gpsAccuracy.value =
+        typeof telemetry.position?.accuracy === 'number' ? telemetry.position.accuracy : null
     gpsHdop.value = typeof telemetry.position?.hdop === 'number' ? telemetry.position.hdop : null
-    gpsSatellites.value = typeof telemetry.position?.satellites === 'number' ? telemetry.position.satellites : null
+      gpsSatellites.value =
+        typeof telemetry.position?.satellites === 'number' ? telemetry.position.satellites : null
     gpsRtkStatus.value = telemetry.position?.rtk_status ?? null
     gpsStatus.value = gpsAccuracySummary.value
   }
 
-  const realtimeSpeed = typeof telemetry.position?.speed === 'number'
+    const realtimeSpeed =
+      typeof telemetry.position?.speed === 'number'
     ? telemetry.position.speed
     : typeof telemetry.speed_mps === 'number'
       ? telemetry.speed_mps
@@ -1273,14 +1379,18 @@ function applyRealtimeTelemetrySnapshot(telemetry: any) {
     if (typeof telemetry.imu.pitch === 'number') imuPitch.value = telemetry.imu.pitch
     if (typeof telemetry.imu.roll === 'number') imuRoll.value = telemetry.imu.roll
   }
-  if (typeof telemetry.position?.heading === 'number') gpsHeading.value = telemetry.position.heading
+    if (typeof telemetry.position?.heading === 'number')
+      gpsHeading.value = telemetry.position.heading
   if (typeof telemetry.nav_heading === 'number') navHeading.value = telemetry.nav_heading
-  if (typeof telemetry.nav_heading_source === 'string') navHeadingSource.value = telemetry.nav_heading_source
+    if (typeof telemetry.nav_heading_source === 'string')
+      navHeadingSource.value = telemetry.nav_heading_source
 
   if (telemetry.environmental) {
     const env = telemetry.environmental
-    temperature.value = typeof env.temperature_c === 'number' ? env.temperature_c : temperature.value
-    humidity.value = typeof env.humidity_percent === 'number' ? env.humidity_percent : humidity.value
+      temperature.value =
+        typeof env.temperature_c === 'number' ? env.temperature_c : temperature.value
+      humidity.value =
+        typeof env.humidity_percent === 'number' ? env.humidity_percent : humidity.value
     pressure.value = typeof env.pressure_hpa === 'number' ? env.pressure_hpa : pressure.value
     altitude.value = typeof env.altitude_m === 'number' ? env.altitude_m : altitude.value
     environmentalSource.value = 'hardware'
@@ -1314,9 +1424,8 @@ function registerTelemetrySubscriptions() {
   subscribe('telemetry.power', (data) => {
     lastRealtimeUpdateAt.value = Date.now()
     applyBatteryMetrics(data)
-    const solarText = solarPowerDisplay.value === '--'
-      ? 'SOLAR --'
-      : `SOLAR ${solarPowerDisplay.value}W`
+      const solarText =
+        solarPowerDisplay.value === '--' ? 'SOLAR --' : `SOLAR ${solarPowerDisplay.value}W`
     dataStreamText.value = `>>> POWER: ${batteryLevelDisplay.value}% | ${batteryVoltageDisplay.value}V | ${solarText}`
   })
 
@@ -1327,9 +1436,14 @@ function registerTelemetrySubscriptions() {
     if (typeof lat === 'number' && typeof lon === 'number') {
       gpsLatitude.value = lat.toFixed(6)
       gpsLongitude.value = lon.toFixed(6)
-      gpsAccuracy.value = typeof data.position?.accuracy === 'number' ? data.position.accuracy : null
-      gpsHdop.value = typeof (data.hdop ?? data.position?.hdop) === 'number' ? (data.hdop ?? data.position?.hdop) : null
-      gpsSatellites.value = typeof data.position?.satellites === 'number' ? data.position.satellites : null
+        gpsAccuracy.value =
+          typeof data.position?.accuracy === 'number' ? data.position.accuracy : null
+        gpsHdop.value =
+          typeof (data.hdop ?? data.position?.hdop) === 'number'
+            ? (data.hdop ?? data.position?.hdop)
+            : null
+        gpsSatellites.value =
+          typeof data.position?.satellites === 'number' ? data.position.satellites : null
       gpsRtkStatus.value = data.position?.rtk_status ?? null
       gpsStatus.value = gpsAccuracySummary.value
     } else {
@@ -1342,7 +1456,8 @@ function registerTelemetrySubscriptions() {
       gpsStatus.value = 'SEARCHING...'
     }
 
-    const navSpeed = typeof data.speed_mps === 'number'
+      const navSpeed =
+        typeof data.speed_mps === 'number'
       ? data.speed_mps
       : typeof data.position?.speed === 'number'
         ? data.position.speed
@@ -1360,7 +1475,8 @@ function registerTelemetrySubscriptions() {
     }
     if (typeof data.position?.heading === 'number') gpsHeading.value = data.position.heading
     if (typeof data.nav_heading === 'number') navHeading.value = data.nav_heading
-    if (typeof data.nav_heading_source === 'string') navHeadingSource.value = data.nav_heading_source
+      if (typeof data.nav_heading_source === 'string')
+        navHeadingSource.value = data.nav_heading_source
   })
 
   subscribe('telemetry.motors', (data) => {
@@ -1464,6 +1580,9 @@ function registerTelemetrySubscriptions() {
   }
 }
 
+  let refreshInterval: ReturnType<typeof setInterval> | null = null
+  let cadenceTimeout: ReturnType<typeof setTimeout> | null = null
+
 // Component lifecycle and data initialization
 onMounted(async () => {
   addLogEntry('Dashboard initializing...', 'info')
@@ -1499,8 +1618,9 @@ onMounted(async () => {
     loadUnitPreference(),
     loadSystemStatus(),
     loadTelemetryData(),
+      loadCanonicalPowerState(),
     loadWeatherData(),
-    refreshCalibrationStatus()
+      refreshCalibrationStatus(),
   ])
 
   // Connect to WebSocket for real-time updates
@@ -1512,7 +1632,7 @@ onMounted(async () => {
       addLogEntry('WebSocket connected - subscribing to telemetry feeds', 'success')
 
       // Set telemetry cadence to 5Hz for real-time dashboard
-      setTimeout(() => {
+        cadenceTimeout = setTimeout(() => {
         setCadence(5)
         addLogEntry('Telemetry cadence set to 5Hz', 'info')
       }, 1000)
@@ -1525,21 +1645,29 @@ onMounted(async () => {
   }
   
   // Set up periodic data refresh for fallback
-  const refreshInterval = setInterval(async () => {
+    refreshInterval = setInterval(async () => {
     const realtimeStale = Date.now() - lastRealtimeUpdateAt.value > 5000
     if (!connected.value || realtimeStale) {
       await Promise.all([
         loadUnitPreference(),
         loadSystemStatus(),
         loadTelemetryData(),
-        loadWeatherData()
+          loadCanonicalPowerState(),
+          loadWeatherData(),
       ])
     }
   }, 2000) // 0.5Hz fallback rate
+  })
   
-  // Cleanup on unmount
   onUnmounted(() => {
+    if (refreshInterval !== null) {
     clearInterval(refreshInterval)
+      refreshInterval = null
+    }
+    if (cadenceTimeout !== null) {
+      clearTimeout(cadenceTimeout)
+      cadenceTimeout = null
+    }
     stopCalibrationPolling()
     unsubscribe('telemetry.power')
     unsubscribe('telemetry.navigation')
@@ -1559,7 +1687,6 @@ onMounted(async () => {
       }
     }
   })
-})
 </script>
 
 <style scoped>
@@ -1590,13 +1717,23 @@ onMounted(async () => {
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.3), rgba(255, 0, 255, 0.3), transparent);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(0, 255, 255, 0.3),
+      rgba(255, 0, 255, 0.3),
+      transparent
+    );
   animation: scanline 4s linear infinite;
 }
 
 @keyframes scanline {
-  0% { left: -100%; }
-  100% { left: 100%; }
+    0% {
+      left: -100%;
+    }
+    100% {
+      left: 100%;
+    }
 }
 
 .retro-title {
@@ -1613,7 +1750,9 @@ onMounted(async () => {
   -webkit-text-fill-color: transparent;
   background-clip: text;
   animation: titleGlow 4s ease-in-out infinite;
-  text-shadow: 0 0 30px rgba(0, 255, 255, 0.8), 0 0 60px rgba(255, 0, 255, 0.4);
+    text-shadow:
+      0 0 30px rgba(0, 255, 255, 0.8),
+      0 0 60px rgba(255, 0, 255, 0.4);
   position: relative;
 }
 
@@ -1631,16 +1770,32 @@ onMounted(async () => {
 }
 
 @keyframes glitchShadow {
-  0%, 100% { transform: translate(0, 0); }
-  20% { transform: translate(-2px, 2px); }
-  40% { transform: translate(2px, -1px); }
-  60% { transform: translate(-1px, -2px); }
-  80% { transform: translate(1px, 1px); }
+    0%,
+    100% {
+      transform: translate(0, 0);
+    }
+    20% {
+      transform: translate(-2px, 2px);
+    }
+    40% {
+      transform: translate(2px, -1px);
+    }
+    60% {
+      transform: translate(-1px, -2px);
+    }
+    80% {
+      transform: translate(1px, 1px);
+    }
 }
 
 @keyframes titleGlow {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
+    0%,
+    100% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
 }
 
 .retro-subtitle {
@@ -1651,7 +1806,9 @@ onMounted(async () => {
   color: #ffff00;
   margin: 0 0 1.5rem 0;
   font-family: 'Orbitron', 'Courier New', monospace;
-  text-shadow: 0 0 15px rgba(255, 255, 0, 0.8), 0 0 30px rgba(255, 255, 0, 0.4);
+    text-shadow:
+      0 0 15px rgba(255, 255, 0, 0.8),
+      0 0 30px rgba(255, 255, 0, 0.4);
   text-transform: uppercase;
   position: relative;
 }
@@ -1669,13 +1826,27 @@ onMounted(async () => {
 }
 
 @keyframes subtitleLine {
-  0%, 100% { opacity: 0.6; width: 200px; }
-  50% { opacity: 1; width: 300px; }
+    0%,
+    100% {
+      opacity: 0.6;
+      width: 200px;
+    }
+    50% {
+      opacity: 1;
+      width: 300px;
+    }
 }
 
 @keyframes metricUnderline {
-  0%, 100% { opacity: 0.4; transform: scaleX(0.8); }
-  50% { opacity: 0.8; transform: scaleX(1.2); }
+    0%,
+    100% {
+      opacity: 0.4;
+      transform: scaleX(0.8);
+    }
+    50% {
+      opacity: 0.8;
+      transform: scaleX(1.2);
+    }
 }
 
 .data-stream {
@@ -1706,24 +1877,38 @@ onMounted(async () => {
 }
 
 @keyframes dataStream {
-  0%, 100% { 
+    0%,
+    100% {
     opacity: 0.8; 
     text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
   }
   50% { 
     opacity: 1; 
-    text-shadow: 0 0 20px rgba(0, 255, 0, 0.8), 0 0 30px rgba(0, 255, 0, 0.4);
+      text-shadow:
+        0 0 20px rgba(0, 255, 0, 0.8),
+        0 0 30px rgba(0, 255, 0, 0.4);
   }
 }
 
 @keyframes blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0.3; }
+    0%,
+    50% {
+      opacity: 1;
+    }
+    51%,
+    100% {
+      opacity: 0.3;
+    }
 }
 
 @keyframes textPulse {
-  0%, 100% { opacity: 0.7; }
-  50% { opacity: 1; }
+    0%,
+    100% {
+      opacity: 0.7;
+    }
+    50% {
+      opacity: 1;
+    }
 }
 
 /* Dashboard Grid Layout */
@@ -1792,8 +1977,12 @@ onMounted(async () => {
 }
 
 @keyframes borderScan {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
 }
 
 .card-header {
@@ -1805,7 +1994,8 @@ onMounted(async () => {
   align-items: center;
 }
 
-.card-header h3, .card-header h4 {
+  .card-header h3,
+  .card-header h4 {
   margin: 0;
   font-size: 1.1rem;
   font-weight: 700;
@@ -1967,7 +2157,10 @@ onMounted(async () => {
 }
 
 /* Status Indicators */
-.status-indicator, .power-indicator, .activity-pulse, .log-indicator {
+  .status-indicator,
+  .power-indicator,
+  .activity-pulse,
+  .log-indicator {
   width: 16px;
   height: 16px;
   border-radius: 50%;
@@ -1977,11 +2170,19 @@ onMounted(async () => {
 }
 
 @keyframes pulse {
-  0%, 100% { transform: scale(1); opacity: 0.8; }
-  50% { transform: scale(1.3); opacity: 1; }
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.8;
+    }
+    50% {
+      transform: scale(1.3);
+      opacity: 1;
+    }
 }
 
-.status-indicator.active, .power-indicator.active {
+  .status-indicator.active,
+  .power-indicator.active {
   background: #00ff00;
   color: #00ff00;
 }
@@ -2119,7 +2320,8 @@ onMounted(async () => {
   letter-spacing: 1px;
 }
 
-.status-value.status-active, .status-value.uptime {
+  .status-value.status-active,
+  .status-value.uptime {
   color: #00ff00;
   text-shadow: 0 0 10px rgba(0, 255, 0, 0.7);
 }
@@ -2255,8 +2457,13 @@ onMounted(async () => {
 }
 
 @keyframes emergencyFlash {
-  0%, 100% { box-shadow: 0 0 20px rgba(255, 0, 64, 0.8); }
-  50% { box-shadow: 0 0 40px rgba(255, 0, 64, 1); }
+    0%,
+    100% {
+      box-shadow: 0 0 20px rgba(255, 0, 64, 0.8);
+    }
+    50% {
+      box-shadow: 0 0 40px rgba(255, 0, 64, 1);
+    }
 }
 
 .btn-icon {
@@ -2311,8 +2518,12 @@ onMounted(async () => {
 }
 
 @keyframes progressGlow {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
 }
 
 .progress-grid {
@@ -2420,7 +2631,10 @@ onMounted(async () => {
   text-shadow: 0 0 12px rgba(255, 0, 64, 0.6);
 }
 
-.gps-icon, .battery-icon, .speed-icon, .temp-icon {
+  .gps-icon,
+  .battery-icon,
+  .speed-icon,
+  .temp-icon {
   font-size: 1.5rem;
   filter: drop-shadow(0 0 10px currentColor);
 }
@@ -2459,8 +2673,13 @@ onMounted(async () => {
 }
 
 @keyframes batteryWarning {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
 }
 
 .battery-segments {
@@ -2491,8 +2710,13 @@ onMounted(async () => {
 }
 
 @keyframes batteryLowBlink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.3;
+    }
 }
 
 /* Speed Trends */
@@ -2663,8 +2887,13 @@ onMounted(async () => {
 }
 
 @keyframes errorBlink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.6;
+    }
 }
 
 .log-message {

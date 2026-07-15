@@ -42,8 +42,12 @@
         </div>
         <div class="connection-status" :class="connectionStatus">
           <span class="status-indicator" />
-          Connection: {{ connectionStatus }}
+          Realtime: {{ connectionStatus }}
         </div>
+        <div class="runtime-truth" :class="telemetryFresh ? 'active' : 'warning'">
+          Telemetry: {{ telemetryFreshnessLabel }}
+        </div>
+        <div class="runtime-truth">Build: {{ buildLabel }}</div>
       </div>
     </footer>
   </div>
@@ -69,8 +73,16 @@ const missionStore = useMissionStore()
 preferencesStore.ensureInitialized()
 
 const user = computed(() => authStore.user)
-const systemStatus = computed(() => systemStore.status)
+const systemStatus = computed(() => systemStore.effectiveStatus)
 const connectionStatus = computed(() => systemStore.connectionStatus)
+const telemetryFresh = computed(() => systemStore.telemetryFresh)
+const telemetryFreshnessLabel = computed(() => {
+  const source = systemStore.telemetrySource ?? 'unavailable'
+  const age = systemStore.telemetrySampleAgeSeconds
+  if (age === null) return `${source} / no sample`
+  return `${source} / ${age.toFixed(age < 10 ? 1 : 0)}s / ${systemStore.telemetryFresh ? 'fresh' : 'stale'}`
+})
+const buildLabel = computed(() => systemStore.buildInfo?.short_sha ?? 'unavailable')
 
 const theme = computed({
   get: () => (document.documentElement.getAttribute('data-theme') || 'retro'),
@@ -363,7 +375,8 @@ onMounted(async () => {
 }
 
 .system-status,
-.connection-status {
+.connection-status,
+.runtime-truth {
   display: flex;
   align-items: center;
   gap: 0.8rem;

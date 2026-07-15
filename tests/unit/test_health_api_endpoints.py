@@ -9,6 +9,7 @@ from backend.src.api.health import (
     health_readiness,
     health_root,
     health_service,
+    system_info,
 )
 
 
@@ -59,6 +60,15 @@ def test_health_response_includes_firmware_section():
     firmware = data["firmware"]
     assert "status" in firmware
     assert "firmware_version" in firmware
+
+
+def test_system_info_exposes_build_identity_contract():
+    info = system_info()
+
+    assert info["version"] == "2.0.0"
+    assert info["source"] in {"environment", "git", "unavailable"}
+    if info["commit_sha"] is not None:
+        assert info["short_sha"] == info["commit_sha"][:12]
 
 
 def test_health_api_v2_includes_firmware_section():

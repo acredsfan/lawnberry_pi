@@ -206,3 +206,11 @@ async def test_planned_path_length_and_duration_positive() -> None:
 
     assert result.length_m > 0
     assert result.est_duration_s > 0
+
+
+def test_capabilities_publish_only_implemented_patterns() -> None:
+    capabilities = PlanningService.get_capabilities()
+
+    assert [pattern["id"] for pattern in capabilities["patterns"]] == ["parallel"]
+    assert capabilities["footprint_clearance"] is True
+    assert capabilities["blade_safe_connectors"] is True

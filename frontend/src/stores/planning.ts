@@ -14,8 +14,9 @@ import {
   deleteSchedule as apiDeleteSchedule,
   enableSchedule,
   disableSchedule,
+  getPlanningCapabilities,
 } from '@/services/planningClient'
-import type { PlanningJob } from '@/services/planningClient'
+import type { PlanningCapabilities, PlanningJob } from '@/services/planningClient'
 import { getMapZones } from '@/services/mapsClient'
 import type { Zone } from '@/services/mapsClient'
 
@@ -25,6 +26,7 @@ export const usePlanningStore = defineStore('planning', () => {
   const jobs = ref<PlanningJob[]>([])
   const schedules = ref<PlanningJob[]>([])
   const zones = ref<Zone[]>([])
+  const capabilities = ref<PlanningCapabilities | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -140,6 +142,15 @@ export const usePlanningStore = defineStore('planning', () => {
     }
   }
 
+  async function fetchCapabilities(): Promise<void> {
+    try {
+      capabilities.value = await getPlanningCapabilities()
+    } catch (err) {
+      capabilities.value = null
+      error.value = (err as { message?: string })?.message ?? 'Planning capabilities unavailable'
+    }
+  }
+
   // Auto-refresh on relevant WebSocket events
   subscribe('planning.zone.changed', () => void fetchJobs())
   subscribe('planning.schedule.fired', () => void fetchJobs())
@@ -148,6 +159,7 @@ export const usePlanningStore = defineStore('planning', () => {
     jobs,
     schedules,
     zones,
+    capabilities,
     loading,
     error,
     fetchJobs,
@@ -165,5 +177,6 @@ export const usePlanningStore = defineStore('planning', () => {
     enableScheduleById,
     disableScheduleById,
     fetchZones,
+    fetchCapabilities,
   }
 })

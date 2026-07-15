@@ -30,6 +30,7 @@ class TelemetryService:
     def __init__(self):
         self.app_state = AppState.get_instance()
         self._last_position: dict[str, Any] = {}
+        self._last_position_observed_at: datetime | None = None
         self._gps_warm_done = False
 
     @staticmethod
@@ -37,6 +38,33 @@ class TelemetryService:
         if isinstance(value, (int, float)):
             return float(value)
         return None
+
+    @staticmethod
+    def _as_utc(value: Any) -> datetime | None:
+        if not isinstance(value, datetime):
+            return None
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+    @classmethod
+    def _sample_metadata(
+        cls,
+        observed_at: Any,
+        *,
+        source: str,
+        freshness_seconds: float = 2.0,
+    ) -> dict[str, Any]:
+        timestamp = cls._as_utc(observed_at)
+        age_seconds = (
+            max(0.0, (datetime.now(UTC) - timestamp).total_seconds())
+            if timestamp is not None
+            else None
+        )
+        return {
+            "source": source,
+            "observed_at": timestamp.isoformat() if timestamp is not None else None,
+            "age_seconds": age_seconds,
+            "fresh": bool(age_seconds is not None and age_seconds <= freshness_seconds),
+        }
 
     def _get_navigation_heading(self) -> float | None:
         try:
@@ -258,7 +286,7 @@ class TelemetryService:
     async def get_telemetry(self, sim_mode: bool = False) -> dict[str, Any]:
         """Generate telemetry data from hardware or simulation."""
 
-        if self.app_state.sensor_manager is None:
+        if not sim_mode and self.app_state.sensor_manager is None:
             try:
                 await self.initialize_sensors()
             except Exception as e:
@@ -306,17 +334,16 @@ class TelemetryService:
     def _format_telemetry(self, data: SensorData | None, sim_mode: bool) -> dict[str, Any]:
         """Format sensor data into the standard telemetry dictionary."""
 
-        # Default/Fallback values
-        battery_pct = 0.0
-        batt_v = 0.0
+        battery_pct: float | None = None
+        batt_v: float | None = None
 
         if data and data.power:
-            batt_v = float(data.power.battery_voltage or 0.0)
+            batt_v = self._numeric(data.power.battery_voltage)
             batt_cur = getattr(data.power, "battery_current", None)
             solar_cur = getattr(data.power, "solar_current", None)
             bc = getattr(getattr(self.app_state, "hardware_config", None), "battery_config", None)
-            battery_pct = (
-                voltage_current_to_soc(
+            if batt_v is not None:
+                battery_pct = voltage_current_to_soc(
                     batt_v,
                     battery_current_a=batt_cur,
                     solar_current_a=solar_cur,
@@ -324,8 +351,6 @@ class TelemetryService:
                     max_voltage=bc.max_voltage if bc else None,
                     chemistry=bc.chemistry if bc else "lifepo4",
                 )
-                or 0.0
-            )
 
         # Position handling with caching
         pos = data.gps if data else None
@@ -345,12 +370,19 @@ class TelemetryService:
             "hdop": getattr(pos, "hdop", None),
         }
 
-        # Update cache and fill missing values
+        live_position = any(value is not None for value in current_pos.values())
+        if live_position:
+            self._last_position_observed_at = self._as_utc(getattr(pos, "timestamp", None))
+        used_cached_position = False
+
+        # Update cache and fill missing values while retaining the original
+        # sample timestamp so consumers can see that a displayed fix is stale.
         for k, v in current_pos.items():
             if v is not None:
                 self._last_position[k] = v
             elif k in self._last_position:
                 current_pos[k] = self._last_position[k]
+                used_cached_position = True
 
         nav_heading = self._get_navigation_heading()
         nav_heading_source = "localization"
@@ -405,7 +437,7 @@ class TelemetryService:
 
         # IMU Calibration
         cal_status = getattr(imu, "calibration_status", None)
-        cal_score = 0
+        cal_score: int | None = None
         if cal_status:
             _cal_map = {
                 "fully_calibrated": 3,
@@ -416,12 +448,29 @@ class TelemetryService:
             }
             cal_score = _cal_map.get(cal_status, 1)
 
+        source = "simulated" if sim_mode else "hardware" if data is not None else "unavailable"
         telemetry = {
-            "source": "hardware" if data else "simulated",
+            "source": source,
             "simulated": sim_mode,
             "timestamp": datetime.now(UTC).isoformat(),
+            "sample": self._sample_metadata(
+                getattr(data, "timestamp", None),
+                source=source,
+            ),
             "battery": {"percentage": battery_pct, "voltage": batt_v},
-            "position": current_pos,
+            "position": {
+                **current_pos,
+                "sample": self._sample_metadata(
+                    getattr(self, "_last_position_observed_at", None),
+                    source=(
+                        "cached"
+                        if used_cached_position or not live_position
+                        else "gps"
+                    )
+                    if self._last_position
+                    else "unavailable",
+                ),
+            },
             "imu": {
                 "roll": getattr(imu, "roll", None),
                 "pitch": getattr(imu, "pitch", None),
@@ -433,8 +482,8 @@ class TelemetryService:
             "velocity": {
                 "linear": {
                     "x": current_pos.get("speed"),
-                    "y": 0.0,   # ground vehicle: no lateral motion
-                    "z": 0.0,   # ground vehicle: no vertical motion
+                    "y": 0.0 if data is not None else None,
+                    "z": 0.0 if data is not None else None,
                 },
                 "angular": {
                     "x": getattr(imu, "gyro_x", None),
@@ -496,6 +545,14 @@ class TelemetryService:
 
     def _format_power_data(self, power_data: Any) -> dict[str, Any]:
         """Format power specific data."""
+        metadata = self._sample_metadata(
+            getattr(power_data, "timestamp", None),
+            source=(
+                getattr(power_data, "battery_source", None)
+                or getattr(power_data, "solar_source", None)
+                or "hardware"
+            ),
+        )
         return {
             "battery_voltage": getattr(power_data, "battery_voltage", None),
             "battery_current": getattr(power_data, "battery_current", None),
@@ -506,7 +563,10 @@ class TelemetryService:
             "solar_yield_today_wh": getattr(power_data, "solar_yield_today_wh", None),
             "battery_consumed_today_wh": getattr(power_data, "battery_consumed_today_wh", None),
             "load_current": getattr(power_data, "load_current", None),
-            "timestamp": getattr(power_data, "timestamp", None),
+            "timestamp": metadata["observed_at"],
+            "source": metadata["source"],
+            "sample_age_seconds": metadata["age_seconds"],
+            "fresh": metadata["fresh"],
         }
 
     def _empty_power_payload(self) -> dict[str, Any]:
@@ -521,7 +581,10 @@ class TelemetryService:
             "solar_yield_today_wh": None,
             "battery_consumed_today_wh": None,
             "load_current": None,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": None,
+            "source": "unavailable",
+            "sample_age_seconds": None,
+            "fresh": False,
         }
 
     def _format_tof(self, tof_data: Any) -> dict[str, Any]:

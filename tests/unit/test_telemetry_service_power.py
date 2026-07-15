@@ -1,9 +1,8 @@
 """Tests for TelemetryService power always-emit and power_status contract."""
 
-import pytest
 from unittest.mock import MagicMock, patch
 
-from backend.src.models.sensor_data import SensorData, PowerReading
+from backend.src.models.sensor_data import PowerReading, SensorData
 from backend.src.services.telemetry_service import TelemetryService
 
 _FLAT_POWER_KEYS = {
@@ -17,6 +16,9 @@ _FLAT_POWER_KEYS = {
     "battery_consumed_today_wh",
     "load_current",
     "timestamp",
+    "source",
+    "sample_age_seconds",
+    "fresh",
 }
 
 
@@ -60,8 +62,26 @@ def test_power_keys_are_flat_when_data_missing():
         f"Missing keys: {_FLAT_POWER_KEYS - set(result['power'].keys())}"
     )
     # All value fields should be None
-    for key in _FLAT_POWER_KEYS - {"timestamp"}:
+    for key in _FLAT_POWER_KEYS - {"timestamp", "source", "fresh"}:
         assert result["power"][key] is None, f"Expected None for {key}, got {result['power'][key]}"
+    assert result["power"]["source"] == "unavailable"
+    assert result["power"]["fresh"] is False
+    assert result["battery"] == {"percentage": None, "voltage": None}
+
+
+def test_missing_snapshot_is_unavailable_not_simulated_or_zero():
+    svc = _make_service()
+    with (
+        patch.object(svc, "_get_navigation_heading", return_value=None),
+        patch.object(svc, "_apply_position_offsets", return_value=({}, None, None)),
+    ):
+        result = svc._format_telemetry(None, sim_mode=False)
+
+    assert result["source"] == "unavailable"
+    assert result["simulated"] is False
+    assert result["sample"]["fresh"] is False
+    assert result["battery"]["percentage"] is None
+    assert result["battery"]["voltage"] is None
 
 
 def test_power_status_ok_when_reading_present():

@@ -7,14 +7,26 @@
     <div class="card-content power-content">
       <div class="battery-panel">
         <div class="battery-shell" :class="batteryBarClass">
-          <span class="battery-percentage" data-testid="battery-percentage">{{ batteryLevelDisplay }}</span>
+          <span class="battery-percentage" data-testid="battery-percentage">{{
+            batteryLevelDisplay
+          }}</span>
         </div>
         <div class="battery-terminal" />
       </div>
       <div class="power-metrics">
         <div class="metric-line">
+          <span class="metric-label">Source</span>
+          <span class="metric-value" data-testid="power-source">{{ sourceDisplay }}</span>
+        </div>
+        <div class="metric-line">
+          <span class="metric-label">Sample Age</span>
+          <span class="metric-value" data-testid="power-sample-age">{{ sampleAgeDisplay }}</span>
+        </div>
+        <div class="metric-line">
           <span class="metric-label">Battery Voltage</span>
-          <span class="metric-value" data-testid="battery-voltage">{{ fmt(data?.voltage, 'V') }}</span>
+          <span class="metric-value" data-testid="battery-voltage">{{
+            fmt(data?.voltage, 'V')
+          }}</span>
         </div>
         <div class="metric-line">
           <span class="metric-label">Battery Current</span>
@@ -68,25 +80,29 @@ import { computed } from 'vue'
 const props = defineProps<{ data: Record<string, unknown> | null }>()
 
 function fmt(value: unknown, unit = '') {
-  const n = Number(value ?? null)
+    if (value === null || value === undefined || value === '') return '—'
+    const n = Number(value)
   if (!Number.isFinite(n)) return '—'
   return `${n.toFixed(1)}${unit}`
 }
 
 function fmtAbs(value: unknown, unit = '') {
-  const n = Number(value ?? null)
+    if (value === null || value === undefined || value === '') return '—'
+    const n = Number(value)
   if (!Number.isFinite(n)) return '—'
   return `${Math.abs(n).toFixed(1)}${unit}`
 }
 
 function fmtWh(value: unknown) {
-  const n = Number(value ?? null)
+    if (value === null || value === undefined || value === '') return '—'
+    const n = Number(value)
   if (!Number.isFinite(n)) return '—'
   return `${new Intl.NumberFormat('en-US').format(Math.round(Math.max(0, n)))}Wh`
 }
 
 const batteryLevelDisplay = computed(() => {
-  const pct = Number(props.data?.percentage ?? null)
+    if (props.data?.percentage === null || props.data?.percentage === undefined) return '—'
+    const pct = Number(props.data.percentage)
   if (!Number.isFinite(pct)) return '—'
   return `${pct.toFixed(0)}%`
 })
@@ -110,13 +126,15 @@ const batteryIconClass = computed(() => {
 const chargeStateDisplay = computed(() => {
   const cs = props.data?.chargeState
   if (typeof cs === 'string' && cs.length > 0) return cs.toUpperCase()
-  const cur = Number(props.data?.current ?? null)
+    if (props.data?.current === null || props.data?.current === undefined) return '—'
+    const cur = Number(props.data.current)
   if (!Number.isFinite(cur)) return '—'
   return cur > 0.05 ? 'CHARGING' : cur < -0.05 ? 'DISCHARGING' : 'IDLE'
 })
 
 const solarStatus = computed(() => {
-  const val = Number(props.data?.solarPower ?? null)
+    if (props.data?.solarPower === null || props.data?.solarPower === undefined) return 'SOLAR: —'
+    const val = Number(props.data.solarPower)
   if (!Number.isFinite(val)) return 'SOLAR: —'
   if (val > 150) return 'PEAK OUTPUT'
   if (val > 50) return 'HARVESTING'
@@ -124,6 +142,19 @@ const solarStatus = computed(() => {
   if (val > 0.5) return 'IDLE'
   return 'DARK'
 })
+
+  const sourceDisplay = computed(() => {
+    const source = props.data?.source
+    return typeof source === 'string' && source.length > 0 ? source.toUpperCase() : 'UNAVAILABLE'
+  })
+
+  const sampleAgeDisplay = computed(() => {
+    const age = props.data?.sampleAgeSeconds
+    if (age === null || age === undefined) return '—'
+    const numeric = Number(age)
+    if (!Number.isFinite(numeric)) return '—'
+    return `${numeric.toFixed(numeric < 10 ? 1 : 0)}s${props.data?.fresh === false ? ' (STALE)' : ''}`
+  })
 
 const solarStatusClass = computed(() => {
   switch (solarStatus.value) {
@@ -193,8 +224,13 @@ const solarStatusClass = computed(() => {
 }
 
 @keyframes batteryWarning {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
 }
 
 .battery-percentage {
@@ -254,13 +290,29 @@ const solarStatusClass = computed(() => {
 }
 
 @keyframes pulse {
-  0%, 100% { transform: scale(1); opacity: 0.8; }
-  50% { transform: scale(1.3); opacity: 1; }
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.8;
+    }
+    50% {
+      transform: scale(1.3);
+      opacity: 1;
+    }
 }
 
-.power-indicator.active { background: #00ff00; color: #00ff00; }
-.power-indicator.warning { background: #ffff00; color: #ffff00; }
-.power-indicator.error { background: #ff0040; color: #ff0040; }
+  .power-indicator.active {
+    background: #00ff00;
+    color: #00ff00;
+  }
+  .power-indicator.warning {
+    background: #ffff00;
+    color: #ffff00;
+  }
+  .power-indicator.error {
+    background: #ff0040;
+    color: #ff0040;
+  }
 
 .metric-status {
   font-size: 1rem;
@@ -270,8 +322,19 @@ const solarStatusClass = computed(() => {
   padding: 0.25rem 1.5rem 0.75rem;
 }
 
-.solar-status.status-active { color: #00ff00; text-shadow: 0 0 10px rgba(0, 255, 0, 0.7); }
-.solar-status.status-warning { color: #ffff00; text-shadow: 0 0 10px rgba(255, 255, 0, 0.7); }
-.solar-status.status-error { color: #ff6600; text-shadow: 0 0 10px rgba(255, 102, 0, 0.7); }
-.solar-status.status-unknown { color: #888; }
+  .solar-status.status-active {
+    color: #00ff00;
+    text-shadow: 0 0 10px rgba(0, 255, 0, 0.7);
+  }
+  .solar-status.status-warning {
+    color: #ffff00;
+    text-shadow: 0 0 10px rgba(255, 255, 0, 0.7);
+  }
+  .solar-status.status-error {
+    color: #ff6600;
+    text-shadow: 0 0 10px rgba(255, 102, 0, 0.7);
+  }
+  .solar-status.status-unknown {
+    color: #888;
+  }
 </style>

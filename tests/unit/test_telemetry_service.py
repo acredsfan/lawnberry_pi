@@ -45,6 +45,7 @@ async def test_get_telemetry_simulated():
     assert "battery" in telemetry
     assert "position" in telemetry
     assert telemetry["source"] == "simulated"
+    assert mock_app_state.sensor_manager is None
 
 @pytest.mark.asyncio
 async def test_get_telemetry_hardware():

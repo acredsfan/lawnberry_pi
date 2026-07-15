@@ -57,7 +57,8 @@ function fmt6(v: unknown) {
 }
 
 const accuracyDisplay = computed(() => {
-  const a = Number(props.data?.accuracy ?? null)
+    if (props.data?.accuracy === null || props.data?.accuracy === undefined) return 'N/A'
+    const a = Number(props.data.accuracy)
   if (!Number.isFinite(a)) return 'N/A'
   if (unitSystem.value === 'imperial') return `${(a * 3.28084).toFixed(2)}ft`
   return `${a.toFixed(2)}m`

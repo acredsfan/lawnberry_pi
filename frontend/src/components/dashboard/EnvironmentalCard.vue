@@ -8,23 +8,31 @@
       <div class="env-grid">
         <div class="env-metric">
           <span class="metric-label">Temp</span>
-          <span class="metric-value" data-testid="temperature-value">{{ tempDisplay }}<span class="unit">{{ tempUnit }}</span></span>
+          <span class="metric-value" data-testid="temperature-value"
+            >{{ tempDisplay }}<span class="unit">{{ tempUnit }}</span></span
+          >
           <span class="metric-status" :class="tempStatusClass">{{ tempStatus }}</span>
         </div>
         <div class="env-metric">
           <span class="metric-label">Humidity</span>
-          <span class="metric-value" data-testid="humidity-value">{{ fmt(data?.humidity) }}<span class="unit">%</span></span>
+          <span class="metric-value" data-testid="humidity-value"
+            >{{ fmt(data?.humidity) }}<span class="unit">%</span></span
+          >
         </div>
         <div class="env-metric">
           <span class="metric-label">Pressure</span>
-          <span class="metric-value" data-testid="pressure-value">{{ pressureDisplay }}<span class="unit"> {{ pressureUnit }}</span></span>
+          <span class="metric-value" data-testid="pressure-value"
+            >{{ pressureDisplay }}<span class="unit"> {{ pressureUnit }}</span></span
+          >
         </div>
         <div class="env-metric">
           <span class="metric-label">Altitude</span>
-          <span class="metric-value" data-testid="altitude-value">{{ altitudeDisplay }}<span class="unit">{{ altitudeUnit }}</span></span>
+          <span class="metric-value" data-testid="altitude-value"
+            >{{ altitudeDisplay }}<span class="unit">{{ altitudeUnit }}</span></span
+          >
         </div>
       </div>
-      <div class="env-source">Source: telemetry</div>
+      <div class="env-source">Source: {{ sourceDisplay }}</div>
     </div>
   </div>
 </template>
@@ -45,31 +53,34 @@ function fmt(v: unknown) {
 }
 
 const tempDisplay = computed(() => {
-  const t = Number(props.data?.temperature ?? null)
+    if (props.data?.temperature === null || props.data?.temperature === undefined) return 'N/A'
+    const t = Number(props.data.temperature)
   if (!Number.isFinite(t)) return 'N/A'
-  const converted = unitSystem.value === 'imperial' ? t * 9 / 5 + 32 : t
+    const converted = unitSystem.value === 'imperial' ? (t * 9) / 5 + 32 : t
   return converted.toFixed(1)
 })
 
-const tempUnit = computed(() => unitSystem.value === 'imperial' ? '°F' : '°C')
+  const tempUnit = computed(() => (unitSystem.value === 'imperial' ? '°F' : '°C'))
 
 const pressureDisplay = computed(() => {
-  const p = Number(props.data?.pressure ?? null)
+    if (props.data?.pressure === null || props.data?.pressure === undefined) return 'N/A'
+    const p = Number(props.data.pressure)
   if (!Number.isFinite(p)) return 'N/A'
   const converted = unitSystem.value === 'imperial' ? p * 0.0295299831 : p
   return converted.toFixed(unitSystem.value === 'imperial' ? 2 : 1)
 })
 
-const pressureUnit = computed(() => unitSystem.value === 'imperial' ? 'inHg' : 'hPa')
+  const pressureUnit = computed(() => (unitSystem.value === 'imperial' ? 'inHg' : 'hPa'))
 
 const altitudeDisplay = computed(() => {
-  const a = Number(props.data?.altitude ?? null)
+    if (props.data?.altitude === null || props.data?.altitude === undefined) return 'N/A'
+    const a = Number(props.data.altitude)
   if (!Number.isFinite(a)) return 'N/A'
   const converted = unitSystem.value === 'imperial' ? a * 3.28084 : a
   return converted.toFixed(1)
 })
 
-const altitudeUnit = computed(() => unitSystem.value === 'imperial' ? 'ft' : 'm')
+  const altitudeUnit = computed(() => (unitSystem.value === 'imperial' ? 'ft' : 'm'))
 
 const tempStatusClass = computed(() => {
   const t = Number(props.data?.temperature ?? NaN)
@@ -87,6 +98,11 @@ const tempStatus = computed(() => {
   if (t > 30) return 'WARM'
   return 'NORMAL'
 })
+
+  const sourceDisplay = computed(() => {
+    const source = props.data?.source
+    return typeof source === 'string' && source.length > 0 ? source : 'unavailable'
+  })
 </script>
 
 <style scoped>
@@ -130,10 +146,21 @@ const tempStatus = computed(() => {
   text-transform: uppercase;
 }
 
-.metric-status.status-active { color: #00ff00; text-shadow: 0 0 8px rgba(0, 255, 0, 0.6); }
-.metric-status.status-warning { color: #ffff00; text-shadow: 0 0 8px rgba(255, 255, 0, 0.6); }
-.metric-status.status-error { color: #ff0040; text-shadow: 0 0 8px rgba(255, 0, 64, 0.6); }
-.metric-status.status-unknown { color: #888; }
+  .metric-status.status-active {
+    color: #00ff00;
+    text-shadow: 0 0 8px rgba(0, 255, 0, 0.6);
+  }
+  .metric-status.status-warning {
+    color: #ffff00;
+    text-shadow: 0 0 8px rgba(255, 255, 0, 0.6);
+  }
+  .metric-status.status-error {
+    color: #ff0040;
+    text-shadow: 0 0 8px rgba(255, 0, 64, 0.6);
+  }
+  .metric-status.status-unknown {
+    color: #888;
+  }
 
 .env-source {
   margin-top: 1rem;

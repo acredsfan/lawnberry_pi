@@ -55,6 +55,9 @@ class WeatherService:
             "humidity_percent": humidity,
             "pressure_hpa": pressure,
             "altitude_m": altitude,
+            "wind_speed_mps": None,
+            "precipitation_mm": None,
+            "condition": None,
         }
 
     async def get_current_async(
@@ -80,6 +83,9 @@ class WeatherService:
                 "temperature_c": ext.get("temperature_c"),
                 "humidity_percent": ext.get("humidity_percent"),
                 "pressure_hpa": ext.get("pressure_hpa"),
+                "wind_speed_mps": ext.get("wind_speed_mps"),
+                "precipitation_mm": ext.get("precipitation_mm"),
+                "condition": ext.get("condition"),
             }
         return {
             "timestamp": now,
@@ -87,6 +93,9 @@ class WeatherService:
             "temperature_c": None,
             "humidity_percent": None,
             "pressure_hpa": None,
+            "wind_speed_mps": None,
+            "precipitation_mm": None,
+            "condition": None,
         }
 
     def get_current(
@@ -101,12 +110,31 @@ class WeatherService:
         return asyncio.run(self.get_current_async(latitude=latitude, longitude=longitude))
 
     def get_planning_advice(self, current: dict[str, Any]) -> dict[str, Any]:
-        # Simple rule: if we lack data, return insufficient-data; else proceed
-        reasons = []
-        if current.get("temperature_c") is None or current.get("humidity_percent") is None:
-            return {"advice": "insufficient-data", "reasons": ["no-sensor-data"]}
-        # Placeholder: could add rain/wind thresholds here
-        return {"advice": "proceed", "reasons": reasons}
+        """Return advice only when every weather safety input is available."""
+        required = {
+            "temperature_c": "temperature-unavailable",
+            "humidity_percent": "humidity-unavailable",
+            "wind_speed_mps": "wind-unavailable",
+            "precipitation_mm": "precipitation-unavailable",
+        }
+        missing = [reason for field, reason in required.items() if current.get(field) is None]
+        if missing:
+            return {"advice": "insufficient-data", "reasons": missing}
+
+        precipitation = float(current["precipitation_mm"])
+        wind = float(current["wind_speed_mps"])
+        humidity = float(current["humidity_percent"])
+        temperature = float(current["temperature_c"])
+        if precipitation > 0:
+            return {"advice": "avoid", "reasons": ["active-precipitation"]}
+        if wind > 8.0:
+            return {"advice": "avoid", "reasons": ["wind-too-high"]}
+        reasons: list[str] = []
+        if humidity > 90:
+            reasons.append("high-humidity")
+        if temperature < 2 or temperature > 35:
+            reasons.append("temperature-outside-preferred-range")
+        return {"advice": "caution" if reasons else "proceed", "reasons": reasons}
 
 
 weather_service = WeatherService()

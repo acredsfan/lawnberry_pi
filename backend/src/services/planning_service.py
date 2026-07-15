@@ -73,6 +73,22 @@ class PlanningService:
         """Inject the MapRepository after construction (called from lifespan)."""
         self._map_repository = map_repository
 
+    @staticmethod
+    def get_capabilities() -> dict[str, Any]:
+        """Return only planning behavior implemented by this runtime."""
+        return {
+            "patterns": [
+                {
+                    "id": "parallel",
+                    "name": "Parallel Lines",
+                    "description": "Footprint-safe parallel coverage with blade-off connectors",
+                }
+            ],
+            "blade_safe_connectors": True,
+            "footprint_clearance": True,
+            "dynamic_obstacle_replan": True,
+        }
+
     # ------------------------------------------------------------------
     # Main public method
     # ------------------------------------------------------------------

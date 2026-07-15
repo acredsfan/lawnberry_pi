@@ -7,8 +7,12 @@
     <div class="card-content orientation-content">
       <div class="orient-row">
         <span class="metric-label">Speed</span>
-        <span class="metric-value" data-testid="speed-value">{{ speedDisplay }}<span class="unit"> {{ speedUnit }}</span></span>
-        <span class="speed-trend" :class="speedTrendClass">{{ speedTrendArrow }} {{ Math.abs(speedTrendPct).toFixed(0) }}%</span>
+        <span class="metric-value" data-testid="speed-value"
+          >{{ speedDisplay }}<span class="unit"> {{ speedUnit }}</span></span
+        >
+        <span class="speed-trend" :class="speedTrendClass"
+          >{{ speedTrendArrow }} {{ Math.abs(speedTrendPct).toFixed(0) }}%</span
+        >
       </div>
       <div class="orient-row">
         <span class="metric-label">Heading (Nav)</span>
@@ -17,7 +21,8 @@
           v-if="data?.navHeadingSource === 'imu_raw'"
           class="heading-source-tag"
           title="Source: IMU raw (localization alignment pending)"
-        >(IMU)</span>
+          >(IMU)</span
+        >
       </div>
       <div class="orient-row">
         <span class="metric-label">IMU Yaw</span>
@@ -50,15 +55,20 @@ const preferences = usePreferencesStore()
 const { unitSystem } = storeToRefs(preferences)
 
 const speedDisplay = computed(() => {
-  const v = Number(props.data?.speed ?? null)
+    if (props.data?.speed === null || props.data?.speed === undefined) return '—'
+    const v = Number(props.data.speed)
   if (!Number.isFinite(v)) return '—'
   const converted = unitSystem.value === 'imperial' ? v * 2.23694 : v
   return converted.toFixed(1)
 })
 
-const speedUnit = computed(() => unitSystem.value === 'imperial' ? 'mph' : 'm/s')
+  const speedUnit = computed(() => (unitSystem.value === 'imperial' ? 'mph' : 'm/s'))
 
-const speedTrendPct = computed(() => Number(props.data?.speedTrend ?? 0))
+  const speedTrendPct = computed(() => {
+    if (props.data?.speedTrend === null || props.data?.speedTrend === undefined) return 0
+    const value = Number(props.data.speedTrend)
+    return Number.isFinite(value) ? value : 0
+  })
 const speedTrendClass = computed(() =>
   speedTrendPct.value > 0 ? 'trend-up' : speedTrendPct.value < 0 ? 'trend-down' : 'trend-stable'
 )
@@ -67,7 +77,8 @@ const speedTrendArrow = computed(() =>
 )
 
 function formatHeading(deg: unknown) {
-  const d = Number(deg ?? null)
+    if (deg === null || deg === undefined || deg === '') return '—'
+    const d = Number(deg)
   if (!Number.isFinite(d)) return '—'
   const norm = ((d % 360) + 360) % 360
   const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
@@ -76,7 +87,8 @@ function formatHeading(deg: unknown) {
 }
 
 function fmtDeg(v: unknown) {
-  const n = Number(v ?? null)
+    if (v === null || v === undefined || v === '') return '—'
+    const n = Number(v)
   if (!Number.isFinite(n)) return '—'
   return `${n.toFixed(1)}°`
 }
@@ -126,9 +138,18 @@ function fmtDeg(v: unknown) {
   letter-spacing: 1px;
 }
 
-.speed-trend.trend-up { color: #00ff00; text-shadow: 0 0 8px rgba(0, 255, 0, 0.7); }
-.speed-trend.trend-down { color: #ff0040; text-shadow: 0 0 8px rgba(255, 0, 64, 0.7); }
-.speed-trend.trend-stable { color: #ffff00; text-shadow: 0 0 8px rgba(255, 255, 0, 0.7); }
+  .speed-trend.trend-up {
+    color: #00ff00;
+    text-shadow: 0 0 8px rgba(0, 255, 0, 0.7);
+  }
+  .speed-trend.trend-down {
+    color: #ff0040;
+    text-shadow: 0 0 8px rgba(255, 0, 64, 0.7);
+  }
+  .speed-trend.trend-stable {
+    color: #ffff00;
+    text-shadow: 0 0 8px rgba(255, 255, 0, 0.7);
+  }
 
 .heading-source-tag {
   font-size: 0.75rem;

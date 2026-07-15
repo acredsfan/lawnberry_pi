@@ -307,7 +307,12 @@ class PersistenceLayer:
         pattern_params = job_data.get("pattern_params") or {}
         # Ensure schedule is never NULL (NOT NULL constraint on legacy schema).
         # An empty string is used as sentinel for "no schedule configured".
-        schedule = job_data.get("schedule") or ""
+        schedule_value = job_data.get("schedule") or ""
+        schedule = (
+            json.dumps(schedule_value, sort_keys=True)
+            if isinstance(schedule_value, dict)
+            else str(schedule_value)
+        )
         with self.get_connection() as conn:
             conn.execute(
                 """
@@ -471,6 +476,12 @@ class PersistenceLayer:
             jobs = []
             for row in cursor.fetchall():
                 job = dict(row)
+                schedule_raw = job.get("schedule")
+                if isinstance(schedule_raw, str) and schedule_raw.strip().startswith("{"):
+                    try:
+                        job["schedule"] = json.loads(schedule_raw)
+                    except json.JSONDecodeError:
+                        pass
                 job["zones"] = json.loads(job["zones_json"])
                 del job["zones_json"]
                 # Deserialise pattern_params_json if the column exists (migration 7+)

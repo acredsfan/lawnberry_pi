@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
+import { ref } from 'vue'
 
 vi.mock('@/composables/useApi', () => ({
   systemApi: {
@@ -35,14 +36,34 @@ vi.mock('@/composables/useApi', () => ({
       steps: [],
     }),
   },
+  powerApi: {
+    getState: vi.fn().mockResolvedValue({
+      available: true,
+      fresh: true,
+      reason_code: null,
+      source: 'victron',
+      sampled_at: new Date().toISOString(),
+      sample_age_seconds: 0.4,
+      voltage: 12.6,
+      battery_current: 1.6,
+      battery_power: 20.2,
+      solar_current: -1.4,
+      solar_power: -30.5,
+      load_power: 6.3,
+      soc_percent: 77.1,
+      charging_confirmed: true,
+    }),
+  },
 }))
 
 vi.mock('@/services/websocket', () => ({
   useWebSocket: () => {
     return {
-      connected: { value: false },
-      connecting: { value: false },
-      connect: vi.fn(async () => { /* no-op */ }),
+      connected: ref(false),
+      connecting: ref(false),
+      connect: vi.fn(async () => {
+        /* no-op */
+      }),
       subscribe: vi.fn(),
       unsubscribe: vi.fn(),
       setCadence: vi.fn(),
@@ -52,6 +73,7 @@ vi.mock('@/services/websocket', () => ({
 }))
 
 import DashboardView from '@/views/DashboardView.vue'
+import PowerSystemCard from '@/components/dashboard/PowerSystemCard.vue'
 import { telemetryApi } from '@/composables/useApi'
 
 const makePowerTelemetry = () => ({
@@ -104,5 +126,26 @@ describe('Power card metrics', () => {
     expect(wrapper.vm.loadPowerDisplay).toBe('6.3')
 
     wrapper.unmount()
+  })
+
+  it('renders missing numeric power telemetry as unavailable, never zero', () => {
+    const wrapper = mount(PowerSystemCard, {
+      props: {
+        data: {
+          percentage: null,
+          voltage: null,
+          current: null,
+          solarPower: null,
+          source: 'unavailable',
+          sampleAgeSeconds: null,
+          fresh: false,
+        },
+      },
+    })
+
+    expect(wrapper.get('[data-testid="battery-percentage"]').text()).toBe('—')
+    expect(wrapper.get('[data-testid="battery-voltage"]').text()).toBe('—')
+    expect(wrapper.get('[data-testid="power-source"]').text()).toBe('UNAVAILABLE')
+    expect(wrapper.text()).not.toContain('0.0V')
   })
 })

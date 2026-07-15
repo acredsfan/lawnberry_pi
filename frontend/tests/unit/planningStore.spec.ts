@@ -16,6 +16,7 @@ vi.mock('@/services/planningClient', () => ({
   deleteSchedule: vi.fn(),
   enableSchedule: vi.fn(),
   disableSchedule: vi.fn(),
+  getPlanningCapabilities: vi.fn(),
 }))
 
 const planningJob = (status: string) =>
@@ -65,5 +66,19 @@ describe('planning store authoritative controls', () => {
 
     expect(store.jobs).toHaveLength(1)
     expect(store.jobs[0].status).toBe('cancelled')
+  })
+
+  it('publishes only capabilities returned by the planning runtime', async () => {
+    const store = usePlanningStore()
+    vi.mocked(planningClient.getPlanningCapabilities).mockResolvedValue({
+      patterns: [{ id: 'parallel', name: 'Parallel Lines', description: 'Safe parallel coverage' }],
+      blade_safe_connectors: true,
+      footprint_clearance: true,
+      dynamic_obstacle_replan: true,
+    })
+
+    await store.fetchCapabilities()
+
+    expect(store.capabilities?.patterns.map((pattern) => pattern.id)).toEqual(['parallel'])
   })
 })

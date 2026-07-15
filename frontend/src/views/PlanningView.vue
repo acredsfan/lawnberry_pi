@@ -9,7 +9,7 @@
     <div class="quick-actions">
       <button class="btn btn-primary quick-btn" @click="startQuickMow">⚡ Quick Mow</button>
       <button class="btn btn-success quick-btn" @click="openScheduleModal">📅 Schedule Job</button>
-      <button class="btn btn-info quick-btn" @click="activeTab = 'zones'">🗺️ Manage Zones</button>
+      <button class="btn btn-info quick-btn" @click="goToMapEditor">🗺️ Manage Zones</button>
     </div>
 
     <!-- Planning Tabs -->
@@ -109,15 +109,17 @@
           <h3>Recent Job History</h3>
         </div>
         <div class="card-body">
-          <div class="history-list">
+          <div v-if="completedJobs.length === 0" class="empty-state">
+            <p>No completed jobs have been reported by the mower.</p>
+          </div>
+          <div v-else class="history-list">
             <div v-for="job in completedJobs" :key="job.id" class="history-item">
               <div class="history-header">
                 <span class="job-name">{{ job.name }}</span>
                 <span class="completion-time">{{ formatDateTime(job.completed_at) }}</span>
               </div>
               <div class="history-details">
-                <span>Duration: {{ job.actual_duration }} min</span>
-                <span>Area: {{ formatArea(job.area_covered) }} {{ areaUnit }}</span>
+                <span>Zones: {{ job.zones.join(', ') || '—' }}</span>
                 <span class="success-indicator">✅ Completed</span>
               </div>
             </div>
@@ -143,9 +145,7 @@
               <div class="schedule-header">
                 <div class="schedule-info">
                   <h4>{{ schedule.name }}</h4>
-                  <span class="schedule-frequency">{{
-                    schedule.frequency ? formatFrequency(schedule.frequency) : '—'
-                  }}</span>
+                  <span class="schedule-frequency">{{ scheduleSummary(schedule) }}</span>
                 </div>
                 <div class="schedule-actions">
                   <button
@@ -167,9 +167,7 @@
               <div class="schedule-details">
                 <span>Zones: {{ schedule.zones.join(', ') }}</span>
                 <span>Pattern: {{ schedule.pattern }}</span>
-                <span
-                  >Next run: {{ schedule.next_run ? formatDateTime(schedule.next_run) : '—' }}</span
-                >
+                <span>Next run: calculated by mower scheduler</span>
               </div>
             </div>
           </div>
@@ -186,28 +184,21 @@
             <div class="condition-item">
               <div class="condition-label">Weather</div>
               <div class="condition-value" :class="weatherClass">
-                {{ currentWeather.condition || 'Loading...' }}
+                {{ currentWeather?.condition || 'Unavailable' }}
               </div>
               <div class="condition-detail">
-                {{ weatherTemperatureDisplay }}{{ temperatureUnit }},
-                {{ currentWeather.humidity_percent }}% humidity
+                {{ weatherTemperatureDisplay
+                }}{{ weatherTemperatureDisplay === '--' ? '' : temperatureUnit }},
+                {{ humidityDisplay }} humidity · {{ weatherSourceLabel }}
               </div>
             </div>
 
             <div class="condition-item">
               <div class="condition-label">Mowing Recommendation</div>
               <div class="condition-value" :class="recommendationClass">
-                {{ recommendation.advice }}
+                {{ recommendation?.advice || 'Unavailable' }}
               </div>
-              <div class="condition-detail">{{ recommendation.reason }}</div>
-            </div>
-
-            <div class="condition-item">
-              <div class="condition-label">Ground Conditions</div>
-              <div class="condition-value" :class="groundClass">
-                {{ groundCondition }}
-              </div>
-              <div class="condition-detail">Last rain: {{ lastRain }}</div>
+              <div class="condition-detail">{{ recommendationReason }}</div>
             </div>
           </div>
         </div>
@@ -219,7 +210,7 @@
       <div class="card">
         <div class="card-header">
           <h3>Mowing Zones</h3>
-          <button class="btn btn-sm btn-primary" @click="openZoneModal">➕ Add Zone</button>
+          <button class="btn btn-sm btn-primary" @click="goToMapEditor">Open Map Editor</button>
         </div>
         <div class="card-body">
           <div class="zones-grid">
@@ -258,8 +249,8 @@
                 <button class="btn btn-xs btn-success" @click.stop="mowZone(zone)">
                   🌱 Mow Now
                 </button>
-                <button class="btn btn-xs btn-secondary" @click.stop="editZone(zone)">
-                  ✏️ Edit
+                <button class="btn btn-xs btn-secondary" @click.stop="goToMapEditor">
+                  ✏️ Edit on Map
                 </button>
               </div>
             </div>
@@ -275,7 +266,10 @@
           <h3>Mowing Patterns</h3>
         </div>
         <div class="card-body">
-          <div class="patterns-grid">
+          <div v-if="patterns.length === 0" class="empty-state">
+            <p>Planning capabilities are unavailable.</p>
+          </div>
+          <div v-else class="patterns-grid">
             <div
               v-for="pattern in patterns"
               :key="pattern.id"
@@ -289,10 +283,7 @@
               <div class="pattern-info">
                 <h4>{{ pattern.name }}</h4>
                 <p>{{ pattern.description }}</p>
-                <div class="pattern-stats">
-                  <span>Efficiency: {{ pattern.efficiency }}%</span>
-                  <span>Coverage: {{ pattern.coverage }}%</span>
-                </div>
+                <div class="pattern-stats">Supported by the active planning runtime</div>
               </div>
             </div>
           </div>
@@ -332,27 +323,21 @@
             </select>
           </div>
 
-          <div class="form-group">
-            <label>Schedule Type</label>
-            <select v-model="scheduleForm.type" class="form-control">
-              <option value="once">One-time job</option>
-              <option value="recurring">Recurring schedule</option>
-            </select>
-          </div>
-
-          <div v-if="scheduleForm.type === 'once'" class="form-group">
-            <label>Start Time</label>
-            <input v-model="scheduleForm.startTime" type="datetime-local" class="form-control" />
-          </div>
-
-          <div v-if="scheduleForm.type === 'recurring'" class="recurring-options">
+          <div class="recurring-options">
             <div class="form-group">
               <label>Frequency</label>
               <select v-model="scheduleForm.frequency" class="form-control">
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
-                <option value="biweekly">Every 2 weeks</option>
-                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+
+            <div v-if="scheduleForm.frequency === 'weekly'" class="form-group">
+              <label>Day</label>
+              <select v-model.number="scheduleForm.dayOfWeek" class="form-control">
+                <option v-for="day in weekDays" :key="day.value" :value="day.value">
+                  {{ day.label }}
+                </option>
               </select>
             </div>
 
@@ -384,6 +369,7 @@
 
 <script setup lang="ts">
   import { ref, computed, onMounted, onUnmounted, type Ref } from 'vue'
+  import { useRouter } from 'vue-router'
   import { storeToRefs } from 'pinia'
   import { useApiService } from '@/services/api'
   import { useWebSocket } from '@/services/websocket'
@@ -407,20 +393,17 @@
     name: string
     enabled: boolean
     zones: unknown[]
-    schedule?: string | null
+    schedule?: string | Record<string, unknown> | null
     status: string
     priority: number
     created_at?: string | null
     last_run?: string | null
     pattern?: string | null
     pattern_params?: Record<string, unknown> | null
-    /** Pending backend support — not yet returned by the API. */
-    frequency?: string
-    /** Pending backend support — not yet returned by the API. */
-    next_run?: string
   }
 
   const api = useApiService()
+  const router = useRouter()
   const { connect, subscribe, unsubscribe } = useWebSocket()
   const preferences = usePreferencesStore()
   const planningStore = usePlanningStore()
@@ -446,71 +429,29 @@
   ]
 
   // Data — jobs, schedules, and zones come from the planning store
-  const { jobs } = storeToRefs(planningStore)
-  // Cast to DisplaySchedule[] so templates can access pending fields (frequency, next_run)
-  // without TS errors. Those fields are not yet returned by the API (show '—' in template).
+  const { jobs, capabilities } = storeToRefs(planningStore)
+  // Keep the persisted schedule union visible while generated API types are refreshed.
   const schedules = storeToRefs(planningStore).schedules as unknown as Ref<DisplaySchedule[]>
   // Cast to DisplayZone[] so templates can access optional UI fields (area_m2, cutting_height, etc.)
   // that may not be present in the API Zone schema.
   const zones = storeToRefs(planningStore).zones as unknown as Ref<DisplayZone[]>
 
-  const completedJobs = ref([
-    {
-      id: 3,
-      name: 'Full Property Mow',
-      completed_at: '2024-09-27T16:30:00',
-      actual_duration: 180,
-      area_covered: 450,
-    },
-    {
-      id: 4,
-      name: 'Front Lawn Touch-up',
-      completed_at: '2024-09-26T11:15:00',
-      actual_duration: 45,
-      area_covered: 150,
-    },
-  ])
+  const completedJobs = computed(() => jobs.value.filter((job) => job.status === 'completed'))
+  const patterns = computed(() => capabilities.value?.patterns ?? [])
 
-  const patterns = ref([
-    {
-      id: 'parallel',
-      name: 'Parallel Lines',
-      description: 'Straight parallel lines across the area',
-      efficiency: 95,
-      coverage: 98,
-    },
-    {
-      id: 'spiral',
-      name: 'Spiral',
-      description: 'Spiral pattern from outside to center',
-      efficiency: 85,
-      coverage: 95,
-    },
-    {
-      id: 'random',
-      name: 'Random',
-      description: 'Random movement pattern',
-      efficiency: 70,
-      coverage: 92,
-    },
-    {
-      id: 'edge',
-      name: 'Edge First',
-      description: 'Cut edges first, then fill interior',
-      efficiency: 90,
-      coverage: 99,
-    },
-  ])
-
-  const currentWeather = ref({
-    temperature_c: 22,
-    humidity_percent: 65,
-    condition: 'Partly Cloudy',
-  })
+  const currentWeather = ref<{
+    temperature_c: number | null
+    humidity_percent: number | null
+    condition: string | null
+    source: string
+    timestamp: string | null
+  } | null>(null)
 
   const temperatureUnit = computed(() => (unitSystem.value === 'imperial' ? '°F' : '°C'))
   const weatherTemperatureDisplay = computed(() => {
-    const raw = Number(currentWeather.value.temperature_c)
+    const value = currentWeather.value?.temperature_c
+    if (value === null || value === undefined) return '--'
+    const raw = Number(value)
     if (!Number.isFinite(raw)) {
       return '--'
     }
@@ -526,6 +467,7 @@
   const cuttingHeightUnit = computed(() => (unitSystem.value === 'imperial' ? 'in' : 'mm'))
 
   const formatArea = (value: unknown): string => {
+    if (value === null || value === undefined || value === '') return 'N/A'
     const numeric = typeof value === 'number' ? value : Number(value)
     if (!Number.isFinite(numeric)) {
       return 'N/A'
@@ -539,6 +481,7 @@
   }
 
   const formatCuttingHeight = (value: unknown): string => {
+    if (value === null || value === undefined || value === '') return 'N/A'
     const numeric = typeof value === 'number' ? value : Number(value)
     if (!Number.isFinite(numeric)) {
       return 'N/A'
@@ -558,46 +501,65 @@
     return formatter.format(numeric)
   }
 
-  const recommendation = ref({
-    advice: 'Proceed',
-    reason: 'Good weather conditions for mowing',
+  const humidityDisplay = computed(() =>
+    typeof currentWeather.value?.humidity_percent === 'number'
+      ? `${currentWeather.value.humidity_percent.toFixed(0)}%`
+      : '--'
+  )
+  const weatherSourceLabel = computed(() => currentWeather.value?.source || 'unavailable')
+
+  const recommendation = ref<{ advice: string; reasons: string[] } | null>(null)
+  const recommendationReason = computed(() => {
+    if (recommendation.value === null) return 'Weather planning advice unavailable'
+    const reasons = recommendation.value?.reasons ?? []
+    return reasons.length > 0 ? reasons.join(', ').replace(/-/g, ' ') : 'No blockers reported'
   })
 
   const scheduleForm = ref({
     name: '',
     zones: [],
     pattern: 'parallel',
-    type: 'once',
-    startTime: '',
     frequency: 'weekly',
     timeOfDay: '10:00',
+    dayOfWeek: 0,
   })
+  const weekDays = [
+    { value: 0, label: 'Monday' },
+    { value: 1, label: 'Tuesday' },
+    { value: 2, label: 'Wednesday' },
+    { value: 3, label: 'Thursday' },
+    { value: 4, label: 'Friday' },
+    { value: 5, label: 'Saturday' },
+    { value: 6, label: 'Sunday' },
+  ]
 
   // Computed
   const weatherClass = computed(() => {
-    const condition = currentWeather.value.condition?.toLowerCase()
+    const condition = currentWeather.value?.condition?.toLowerCase()
+    if (!condition) return 'condition-unknown'
     if (condition?.includes('rain') || condition?.includes('storm')) return 'condition-bad'
     if (condition?.includes('cloud') || condition?.includes('overcast')) return 'condition-warn'
     return 'condition-good'
   })
 
   const recommendationClass = computed(() => {
-    const advice = recommendation.value.advice?.toLowerCase()
+    const advice = recommendation.value?.advice?.toLowerCase()
     if (advice === 'proceed') return 'condition-good'
     if (advice === 'caution') return 'condition-warn'
     return 'condition-bad'
   })
 
-  const groundClass = computed(() => 'condition-good')
-  const groundCondition = computed(() => 'Dry')
-  const lastRain = computed(() => '2 days ago')
-
   // Methods
   async function startQuickMow() {
+    const targetZone = zones.value.find((zone) => !zone.exclusion_zone)
+    if (!targetZone) {
+      showStatus('Quick mow requires a configured mowing zone', false)
+      return
+    }
     try {
       const job = await planningStore.createJob({
-        name: 'Quick Mow',
-        zones: ['front_lawn'],
+        name: `Quick Mow - ${targetZone.name || targetZone.id}`,
+        zones: [targetZone.id],
         pattern: 'parallel',
         start_immediately: true,
       })
@@ -617,10 +579,9 @@
       name: '',
       zones: [],
       pattern: 'parallel',
-      type: 'once',
-      startTime: '',
       frequency: 'weekly',
       timeOfDay: '10:00',
+      dayOfWeek: 0,
     }
     showScheduleModal.value = true
   }
@@ -638,7 +599,19 @@
 
       const method = editingSchedule.value ? 'put' : 'post'
 
-      await api[method](endpoint, scheduleForm.value)
+      const schedule = {
+        start_time: scheduleForm.value.timeOfDay,
+        days_of_week:
+          scheduleForm.value.frequency === 'weekly' ? [scheduleForm.value.dayOfWeek] : [],
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+        enabled: true,
+      }
+      await api[method](endpoint, {
+        name: scheduleForm.value.name,
+        zones: scheduleForm.value.zones,
+        pattern: scheduleForm.value.pattern,
+        schedule,
+      })
 
       showStatus(editingSchedule.value ? 'Schedule updated!' : 'Schedule created!', true)
 
@@ -714,7 +687,23 @@
 
   function editSchedule(schedule: any) {
     editingSchedule.value = schedule
-    scheduleForm.value = { ...schedule }
+    let persisted = schedule.schedule
+    if (typeof persisted === 'string' && persisted.trim().startsWith('{')) {
+      try {
+        persisted = JSON.parse(persisted)
+      } catch {
+        persisted = null
+      }
+    }
+    const days = Array.isArray(persisted?.days_of_week) ? persisted.days_of_week : []
+    scheduleForm.value = {
+      name: String(schedule.name || ''),
+      zones: Array.isArray(schedule.zones) ? schedule.zones : [],
+      pattern: String(schedule.pattern || 'parallel'),
+      frequency: days.length > 0 ? 'weekly' : 'daily',
+      timeOfDay: typeof persisted?.start_time === 'string' ? persisted.start_time : '10:00',
+      dayOfWeek: typeof days[0] === 'number' ? days[0] : 0,
+    }
     showScheduleModal.value = true
   }
 
@@ -749,14 +738,8 @@
     }
   }
 
-  function openZoneModal() {
-    // Placeholder for zone creation modal
-    showStatus('Zone management coming soon', true)
-  }
-
-  function editZone(zone: DisplayZone) {
-    // Placeholder for zone editing
-    showStatus('Zone editing coming soon', true)
+  function goToMapEditor() {
+    void router.push('/maps')
   }
 
   function formatJobStatus(status: string): string {
@@ -771,14 +754,22 @@
     return statusMap[status as keyof typeof statusMap] || status
   }
 
-  function formatFrequency(frequency: string): string {
-    const freqMap = {
-      daily: 'Daily',
-      weekly: 'Weekly',
-      biweekly: 'Every 2 weeks',
-      monthly: 'Monthly',
+  function scheduleSummary(schedule: DisplaySchedule): string {
+    let raw = schedule.schedule
+    if (typeof raw === 'string' && raw.trim().startsWith('{')) {
+      try {
+        raw = JSON.parse(raw)
+      } catch {
+        return raw
+      }
     }
-    return freqMap[frequency as keyof typeof freqMap] || frequency
+    if (typeof raw === 'string') return raw || 'Not scheduled'
+    if (!raw || typeof raw !== 'object') return 'Not scheduled'
+    const time = typeof raw.start_time === 'string' ? raw.start_time : 'time unavailable'
+    const days = Array.isArray(raw.days_of_week) ? raw.days_of_week : []
+    if (days.length === 0) return `Daily at ${time}`
+    const labels = days.map((day) => weekDays.find((item) => item.value === day)?.label ?? day)
+    return `${labels.join(', ')} at ${time}`
   }
 
   function formatPriority(priority: string | number): string {
@@ -835,9 +826,11 @@
     // Subscribe to weather updates
     const weatherHandler = (data: any) => {
       currentWeather.value = {
-        temperature_c: data.temperature_c ?? currentWeather.value.temperature_c,
-        humidity_percent: data.humidity_percent || currentWeather.value.humidity_percent,
-        condition: data.condition || currentWeather.value.condition,
+        temperature_c: data.temperature_c ?? currentWeather.value?.temperature_c ?? null,
+        humidity_percent: data.humidity_percent ?? currentWeather.value?.humidity_percent ?? null,
+        condition: data.condition ?? currentWeather.value?.condition ?? null,
+        source: data.source ?? currentWeather.value?.source ?? 'telemetry.weather',
+        timestamp: data.timestamp ?? currentWeather.value?.timestamp ?? null,
       }
     }
     subscribe('telemetry.weather', weatherHandler)
@@ -846,6 +839,21 @@
     await refreshJobs()
     await refreshSchedules()
     await planningStore.fetchZones()
+    await planningStore.fetchCapabilities()
+    try {
+      const [weather, advice] = await Promise.all([
+        api.get('/api/v2/weather/current'),
+        api.get('/api/v2/weather/planning-advice'),
+      ])
+      currentWeather.value = weather.data
+      recommendation.value = {
+        advice: advice.data.advice,
+        reasons: Array.isArray(advice.data.reasons) ? advice.data.reasons : [],
+      }
+    } catch {
+      currentWeather.value = null
+      recommendation.value = null
+    }
   })
 
   onUnmounted(() => {

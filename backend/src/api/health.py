@@ -1,8 +1,18 @@
 from fastapi import APIRouter, Request
+from pydantic import BaseModel
 
+from ..core.build_info import get_build_info
 from ..core.health import HealthService
 
 router = APIRouter()
+
+
+class SystemInfoResponse(BaseModel):
+    version: str
+    commit_sha: str | None
+    short_sha: str | None
+    source: str
+    started_at: str
 
 
 def _robohat_health_provider() -> dict | None:
@@ -53,6 +63,13 @@ def _with_compatibility_aliases(report: dict) -> dict:
             "sensor_health": report.get("sensor_health", {}).get("status"),
         },
     }
+
+
+@router.get("/api/v2/system/info", response_model=SystemInfoResponse)
+def system_info() -> dict:
+    """Expose the exact backend build serving this request."""
+
+    return get_build_info()
 
 
 def health_root() -> dict:
