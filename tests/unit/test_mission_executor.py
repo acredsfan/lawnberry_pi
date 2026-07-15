@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 import pytest
 
 from backend.src.models import Position
-from backend.src.models.mission import MissionLifecycleStatus
+from backend.src.models.mission import MissionLegType, MissionLifecycleStatus
 
 # ---------------------------------------------------------------------------
 # Shared fakes
@@ -470,6 +470,57 @@ async def test_execute_mission_completes_when_all_waypoints_reached():
 
     # Both waypoints should have been reported as reached
     assert len(ms_reader.progress_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_dock_leg_requires_positive_charge_confirmation():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    loc = FakeLocalization(
+        position=Position(latitude=0.1, longitude=0.1, accuracy=0.03),
+        last_gps_fix=datetime.now(UTC),
+    )
+    gateway = FakeGateway()
+    executor = MissionExecutor(
+        localization=loc,
+        gateway=gateway,
+        docking_confirmed_provider=lambda: False,
+        docking_confirmation_timeout_seconds=0.0,
+    )
+    mission = _make_mission(
+        [{"lat": 0.1, "lon": 0.1, "leg_type": MissionLegType.DOCK, "speed": 20}]
+    )
+    reader = FakeMissionStatusReader(mission, _make_status(mission))
+
+    with pytest.raises(RuntimeError, match="DOCK_CONFIRMATION_TIMEOUT"):
+        await executor.execute_mission(mission, reader)
+
+    assert reader.progress_calls == []
+    assert gateway.blade_calls and all(call is False for call in gateway.blade_calls)
+
+
+@pytest.mark.asyncio
+async def test_dock_leg_completes_after_positive_charge_confirmation():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    loc = FakeLocalization(
+        position=Position(latitude=0.1, longitude=0.1, accuracy=0.03),
+        last_gps_fix=datetime.now(UTC),
+    )
+    executor = MissionExecutor(
+        localization=loc,
+        gateway=FakeGateway(),
+        docking_confirmed_provider=lambda: True,
+        docking_confirmation_timeout_seconds=0.0,
+    )
+    mission = _make_mission(
+        [{"lat": 0.1, "lon": 0.1, "leg_type": MissionLegType.DOCK, "speed": 20}]
+    )
+    reader = FakeMissionStatusReader(mission, _make_status(mission))
+
+    await executor.execute_mission(mission, reader)
+
+    assert reader.progress_calls == [(mission.id, 0)]
 
 
 @pytest.mark.asyncio

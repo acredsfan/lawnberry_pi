@@ -29,6 +29,7 @@ from ..models import (
     SensorData,
     Waypoint,
 )
+from ..models.mission import MissionLegType, MissionWaypoint
 from ..models.safety_limits import (
     BOOTSTRAP_SENSOR_POLL_INTERVAL_S,
     heading_bootstrap_stop_reserve_m,
@@ -41,7 +42,7 @@ from .operating_area_service import OperatingAreaError, load_operating_area_snap
 from .robohat_service import get_robohat_service
 
 if TYPE_CHECKING:
-    from ..models.mission import Mission, MissionWaypoint
+    from ..models.mission import Mission
     from ..protocols.mission import MissionStatusReader
 
 logger = logging.getLogger(__name__)
@@ -512,6 +513,7 @@ class NavigationService:
             gateway=self._gateway_adapter,
             encoder_rpm_provider=self._get_encoder_rpms,
             encoder_active_provider=self._get_encoder_active,
+            docking_confirmed_provider=self._cached_docking_confirmed,
             max_speed=self.max_speed,
             cruise_speed=self.cruise_speed,
             waypoint_tolerance=self.waypoint_tolerance,
@@ -520,6 +522,30 @@ class NavigationService:
             position_verification_timeout_seconds=self.position_verification_timeout_seconds,
             max_operational_cross_track_error_m=self.max_operational_cross_track_error_m,
         )
+
+    @staticmethod
+    def _cached_docking_confirmed() -> bool:
+        """Return cached charge truth; never initiate a sensor read from the control loop."""
+        if os.getenv("SIM_MODE", "0") == "1":
+            return True
+        try:
+            from ..core.state_manager import get_sensor_manager
+
+            manager = get_sensor_manager()
+            reading = getattr(getattr(manager, "power", None), "last_reading", None)
+            if reading is None:
+                return False
+            battery_current = getattr(reading, "battery_current", None)
+            solar_power = getattr(reading, "solar_power", None)
+            return bool(
+                battery_current is not None
+                and float(battery_current) > 0.05
+                and solar_power is not None
+                and float(solar_power) > 0.5
+            )
+        except Exception:
+            logger.debug("Cached dock/charge confirmation unavailable", exc_info=True)
+            return False
 
     _instance: NavigationService | None = None
 
@@ -2543,37 +2569,55 @@ class NavigationService:
         logger.critical("Emergency stop activated")
         return emergency_ok
 
+    def build_return_home_waypoints(self) -> list[MissionWaypoint]:
+        """Build a safe blade-off route for canonical MissionService execution."""
+        current = self.navigation_state.current_position
+        home = self.navigation_state.home_position
+        if current is None:
+            raise ValueError("RETURN_HOME_POSITION_UNAVAILABLE: current position is unknown")
+        if home is None:
+            raise ValueError("RETURN_HOME_NOT_CONFIGURED: home position is unknown")
+        boundaries = self.navigation_state.safety_boundaries
+        if not boundaries or len(boundaries[0]) < 3:
+            raise ValueError("RETURN_HOME_SAFE_AREA_UNAVAILABLE: a valid boundary is required")
+
+        planned = self.path_planner.return_to_base(
+            current=current,
+            home=home,
+            boundary=boundaries[0],
+            obstacles=self.navigation_state.no_go_zones or None,
+        )
+        if not planned:
+            raise ValueError("RETURN_HOME_NO_SAFE_ROUTE: path planner found no safe route")
+
+        mission_waypoints: list[MissionWaypoint] = []
+        for index, waypoint in enumerate(planned):
+            target_speed = waypoint.target_speed if waypoint.target_speed is not None else 0.3
+            speed_pct = round(
+                max(0.0, min(1.0, target_speed / max(0.01, self.max_speed))) * 100
+            )
+            leg_type = (
+                MissionLegType.DOCK if index == len(planned) - 1 else MissionLegType.TRANSIT
+            )
+            mission_waypoints.append(
+                MissionWaypoint(
+                    lat=waypoint.position.latitude,
+                    lon=waypoint.position.longitude,
+                    blade_on=False,
+                    leg_type=leg_type,
+                    speed=speed_pct,
+                    arrival_threshold_m=waypoint.tolerance,
+                )
+            )
+        return mission_waypoints
+
     async def return_home(self) -> bool:
-        """Navigate back to home position"""
-        if not self.navigation_state.home_position:
-            logger.error("No home position set")
-            return False
+        """Reject the obsolete non-mission execution path.
 
-        # Plan path (with avoidance and boundary constraints if available)
-        if self.navigation_state.current_position:
-            boundaries = None
-            if self.navigation_state.safety_boundaries:
-                # Use the outer boundary (first polygon) if provided
-                boundaries = self.navigation_state.safety_boundaries[0]
-            obstacles = (
-                self.navigation_state.no_go_zones if self.navigation_state.no_go_zones else None
-            )
-
-            waypoints = self.path_planner.return_to_base(
-                current=self.navigation_state.current_position,
-                home=self.navigation_state.home_position,
-                boundary=boundaries,
-                obstacles=obstacles,
-            )
-
-            self.navigation_state.planned_path = waypoints
-            self.navigation_state.current_waypoint_index = 0
-            self.navigation_state.navigation_mode = NavigationMode.RETURN_HOME
-            self.navigation_state.path_status = PathStatus.EXECUTING
-
-            logger.info("Returning to home position")
-            return True
-
+        Callers must use ``MissionService.start_return_home`` so lifecycle,
+        gateway authorization, blade state, and terminal truth share one owner.
+        """
+        logger.error("Direct NavigationService.return_home is disabled; use MissionService")
         return False
 
     def set_home_position(self, position: Position):

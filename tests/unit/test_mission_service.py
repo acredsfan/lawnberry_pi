@@ -5,7 +5,7 @@ import pytest
 
 from backend.src.api.rest import _safety_state
 from backend.src.models import NavigationMode, Position
-from backend.src.models.mission import MissionLifecycleStatus, MissionWaypoint
+from backend.src.models.mission import MissionLegType, MissionLifecycleStatus, MissionWaypoint
 from backend.src.services.mission_service import (
     MissionConflictError,
     MissionService,
@@ -63,6 +63,25 @@ class DummyNavigationService:
         self.emergency_calls += 1
         self.navigation_state.navigation_mode = NavigationMode.EMERGENCY_STOP
         return True
+
+
+def test_legacy_blade_flag_defaults_off_without_leg_semantics():
+    waypoint = MissionWaypoint(lat=0.1, lon=0.1, blade_on=True)
+
+    assert waypoint.leg_type == MissionLegType.TRANSIT
+    assert waypoint.blade_on is False
+    assert waypoint.blade_permitted is False
+
+
+def test_blade_is_permitted_only_on_explicit_mow_leg():
+    waypoint = MissionWaypoint(
+        lat=0.1,
+        lon=0.1,
+        blade_on=True,
+        leg_type=MissionLegType.MOW,
+    )
+
+    assert waypoint.blade_permitted is True
 
 
 @pytest.mark.asyncio
@@ -222,11 +241,58 @@ async def test_blade_off_diagnostic_rejects_blade_on_waypoints():
     service = MissionService(nav)
     mission = await service.create_mission(
         "Blade-on mission",
-        [MissionWaypoint(lat=0.1, lon=0.1, blade_on=True, speed=50)],
+        [
+            MissionWaypoint(
+                lat=0.1,
+                lon=0.1,
+                blade_on=True,
+                leg_type=MissionLegType.MOW,
+                speed=50,
+            )
+        ],
     )
 
     with pytest.raises(MissionStateError, match="Blade-off diagnostic mode"):
         await service.start_mission(mission.id, blade_off_diagnostic=True)
+
+
+@pytest.mark.asyncio
+async def test_start_return_home_creates_blade_off_dock_mission():
+    nav = DummyNavigationService()
+    nav.build_return_home_waypoints = lambda: [
+        MissionWaypoint(
+            lat=0.1,
+            lon=0.1,
+            leg_type=MissionLegType.DOCK,
+            blade_on=False,
+        )
+    ]
+    service = MissionService(nav)
+
+    mission = await service.start_return_home()
+
+    assert mission.id in service.missions
+    assert mission.waypoints[-1].leg_type == MissionLegType.DOCK
+    assert all(not waypoint.blade_permitted for waypoint in mission.waypoints)
+
+
+@pytest.mark.asyncio
+async def test_start_return_home_removes_rejected_mission(monkeypatch):
+    nav = DummyNavigationService()
+    nav.build_return_home_waypoints = lambda: [
+        MissionWaypoint(lat=0.1, lon=0.1, leg_type=MissionLegType.DOCK)
+    ]
+    service = MissionService(nav)
+
+    async def reject_start(*args, **kwargs):
+        raise MissionStateError("admission rejected")
+
+    monkeypatch.setattr(service, "start_mission", reject_start)
+
+    with pytest.raises(MissionStateError, match="admission rejected"):
+        await service.start_return_home()
+
+    assert service.missions == {}
 
 
 @pytest.mark.asyncio

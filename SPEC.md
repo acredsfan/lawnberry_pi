@@ -29,6 +29,9 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | I.api | Backend REST | FastAPI :8081 `/api/v2/*` |
 | I.ws | Backend WebSocket | `ws[s]://<origin>/api/v2/ws/telemetry` + `/api/v2/ws/control` |
 | I.wdog | WiFi watchdog | `/opt/wifi-watchdog`, config `/etc/wifi-watchdog/watchdog.yml` |
+| I.ops | Pi runtime | systemd units, install scripts, build SHA, service health |
+| I.perception | Perception | camera frame-ID results, typed detections, semantic route costs |
+| I.power | Energy | battery/SOC truth, mission reserve, return/dock decisions |
 
 ---
 
@@ -78,6 +81,19 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | V40 | Position-derived GPS course-over-ground must accumulate displacement from a stable unique live-sample baseline until the configured motion threshold is reached; duplicate polls and sub-threshold low-speed frames must not consume that baseline, a qualified displacement or an explicit localization reset may advance it, and the blade-off bootstrap's COG speed floor must admit the reference mower's measured crawl while displacement, unique-frame, and straightness gates continue to reject stationary drift |
 | V41 | The documented `JobsService` compatibility execution path for mower jobs must dispatch through the canonical `MissionService` and retain the linked mission identity; `last_run` may advance only after `MissionService` accepts the start, while `COMPLETED`, `completed_at`, 100% progress, and success text may be recorded only after that same mission reaches `COMPLETED`; blocked, rejected, failed, aborted, cancelled, or unsupported execution must remain an explicit non-success and must never advance through synthetic timed steps |
 | V42 | The standalone camera-stream service must remain the sole live camera-device owner and expose frames over shared IPC; automatic camera AI processing in that owner must invoke an injected inference service with the exact frame bytes and frame ID, sample at a bounded cadence within the single latest-frame consumer, run CPU inference work off the event loop, and enforce a bounded frame-delivery wait with at most one tracked inference still in flight so no stale backlog or concurrent worker accumulation occurs; `processed_for_ai=true` is permitted only after a timely successful result whose annotations derive from that result, while disabled, skipped, unavailable, failed, timed-out, late, or frame-mismatched inference must remain truthfully unprocessed with no hardcoded or dummy detections; live hardware-init fallback and missing IPC topology metadata must report a fail-closed simulated/non-hardware state through the real client and API; camera AI results remain informational only unless a separate safety/navigation contract explicitly promotes them |
+| V43 | Return-to-base must be a canonical blade-off mission through `MissionService`, `MissionExecutor`, and `MotorCommandGateway`; no safe route must fail closed, and success requires terminal arrival plus dock/charge confirmation |
+| V44 | Blade intent belongs to traversed path legs, not destination arrival; `TRANSIT`, `TURN`, `WAIT`, and `DOCK` legs are blade-off, ambiguous legacy input defaults blade-off, and blade-on is allowed only on validated `MOW` legs |
+| V45 | Live mission admission must consume one canonical snapshot containing qualification, runtime/controller, fresh RTK pose, heading, operating area/path, obstacle, weather, mission conflict, and energy reserve state; missing wiring or evaluation errors fail closed |
+| V46 | GPS degradation must be one mission-owned state machine with fresh-sample loss detection, bounded hold/dead-reckoning policy, gateway-enforced caps, hysteretic recovery, alerts, and terminal stop/return behavior |
+| V47 | ToF hardware must have one continuous timestamped acquisition owner; safety and telemetry consume immutable samples, and readiness must enforce per-sensor freshness plus bounded timeout/failure rate without competing I2C reads |
+| V48 | Operator UI may report start/pause/resume/cancel/unlock success only after authoritative server acceptance and reconciled state; HTTP errors, unsupported methods, stale data, and local-only mutations remain explicit non-success |
+| V49 | Coverage planning must erode free space by footprint, uncertainty, and configured clearance; every mow row and blade-off connector must stay inside that same geometry, and preview/admission must use identical margins and declared capabilities |
+| V50 | Obstacle response must stop first, classify transient/persistent evidence, bound wait, update a local cost map, and safely replan or escalate; AI may alter semantic cost but cannot bypass geometric, ToF, or gateway safety |
+| V51 | Production perception must use a real configured detector runtime with typed frame-ID/timestamped results, model provenance, latency/freshness, truthful unavailable state, and no fabricated datasets/training/export; UI and route costs consume only current validated results |
+| V52 | One battery-state/energy service must own source provenance, freshness, SOC, reserve, history, and mission forecasts; mission start and runtime preserve return reserve, low energy initiates canonical return before hard stop, and INA3221 channel mapping matches verified hardware spec |
+| V53 | Scheduled job occurrences must be durable and idempotent; multi-zone jobs own ordered child missions and blade-off inter-zone transit, terminal truth aggregates from those missions, and failed admission cannot create retrying orphan missions |
+| V54 | Runtime/UI truth must expose deployed build SHA and sample age/source; missing numeric telemetry stays unknown, inert services cannot report healthy work, and unsupported features are hidden or explicitly unavailable |
+| V55 | Critical autonomy, GPS-loss, power, perception, and operator-control flows must have non-placeholder blocking tests; OpenAPI operation IDs stay unique, generated schema stays current, and repository lint is clean |
 
 ---
 
@@ -122,6 +138,18 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T35 | x | Preserve low-speed GPS displacement across unique frames so the bounded boundary-verification bootstrap can acquire COG before exhausting its travel reserve | V39, V40 |
 | T36 | x | Route documented `JobsService` compatibility execution through `MissionService`, retain linked mission identity, project terminal truth, and add accepted-start, terminal-state, unsupported, and non-success regression coverage | V41, I.api |
 | T37 | x | Wire exact-frame inference into the standalone camera owner, keep live FastAPI access on shared IPC, and enforce bounded sampling/single-flight delivery, off-event-loop CPU work, truthful annotations and owner topology, no dummy detections, informational-only isolation, and regression coverage | V42, I.api |
+| T38 | x | Build canonical fail-closed return-home and blade-safe typed path legs | V43, V44, I.api |
+| T39 | . | Build footprint-safe coverage, connectors, capabilities, obstacle cost map, and bounded replan | V49, V50, I.api |
+| T40 | . | Build canonical admission snapshot and GPS degradation state machine | V45, V46, I.api, I.ws |
+| T41 | . | Build single-owner timestamped ToF acquisition and failure-rate readiness | V47, I.api, I.ws |
+| T42 | . | Make mission/manual operator mutations server-authoritative and fail-closed | V48, I.api, I.fe |
+| T43 | . | Build durable idempotent multi-zone job occurrences and truthful planning controls | V48, V53, I.api, I.fe |
+| T44 | . | Build canonical battery/SOC/energy reserve, return policy, history, and hardware mapping | V43, V45, V52, I.api, I.power |
+| T45 | . | Build real detector runtime, typed perception stream, semantic costs, and truthful AI console | V50, V51, I.api, I.ws, I.fe, I.perception |
+| T46 | . | Make telemetry, planning, readiness, power, connection, and build UI truthful | V48, V54, I.fe, I.api, I.ws |
+| T47 | . | Remove green-but-inert services and unsupported API/ops success paths | V54, I.ops, I.api |
+| T48 | . | Replace critical placeholder tests, run frontend tests in CI, fix OpenAPI IDs, and clean lint | V55, I.api, I.fe, I.ops |
+| T49 | . | Update OpenAPI, hardware/runtime docs, structure overview, and qualification handoff | V43–V55, I.api, I.ops |
 
 ---
 
@@ -174,3 +202,19 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | B43 | 2026-07-14 | Position-derived COG advanced its comparison baseline on every unique GPS frame even when each low-speed step was below the 0.15 m derivation threshold, and its 0.10 m/s speed floor exceeded the reference mower's observed roughly 0.08 m/s crawl; valid displacement therefore never became a heading sample and the boundary bootstrap exhausted its bounded travel reserve | V40, T35 |
 | B44 | 2026-07-14 | A legacy `JobsService` compatibility executor retained a parallel ten-step timer that could report completion and success without a linked mower mission; the first replacement also started the scheduler before admission dependencies were injected and left accepted dispatch recording behind blocking WebSocket delivery | V41, T36 |
 | B45 | 2026-07-14 | `CameraStreamService` marked frames AI-processed and emitted hardcoded simulation grass while real inference existed only on separate on-demand endpoints; the first attempted bridge injected a different in-process FastAPI singleton instead of the deployed standalone camera owner, `PowerManager` plus overrideable systemd mode settings could still create or control that competing owner, and hardware-init fallback was lost at the IPC boundary so simulated frames appeared to come from live hardware | V42, T37 |
+| B46 | 2026-07-15 | `return_home` selected `RETURN_HOME` while execution advanced only `AUTO`; failed A* fell back to direct travel and no dock result was consumed | V43, T38 |
+| B47 | 2026-07-15 | Planner copied one blade flag to all waypoints and executor applied destination intent before travel, allowing blade-on staging/connectors | V44, T38 |
+| B48 | 2026-07-15 | Coverage concatenated disjoint intervals through unsafe space and preview used zero margin while admission used 0.25 m | V49, T39 |
+| B49 | 2026-07-15 | ToF obstacles had dummy coordinates and caused repeated command rejection/abort without wait, map, or replan | V50, T39 |
+| B50 | 2026-07-15 | Readiness omitted canonical mission facts and unexpected preflight wiring errors continued live admission | V45, T40 |
+| B51 | 2026-07-15 | GPS-loss settings persisted UI policy while canonical mission/gateway execution used no degradation state machine | V46, T40 |
+| B52 | 2026-07-15 | Fast safety read serialized two ToF measurements behind shared I2C contention inside a shorter aggregate timeout | V47, T41 |
+| B53 | 2026-07-15 | Mission pause/resume swallowed API failure and caller always displayed success | V48, T42 |
+| B54 | 2026-07-15 | Manual-control UI locally unlocked on unsupported/error responses without a server-issued hardware session | V48, T42 |
+| B55 | 2026-07-15 | Quick Mow persisted `pending`; planning start/pause/resume changed browser state without canonical job/mission action | V48, V53, T43 |
+| B56 | 2026-07-15 | Multi-zone scheduler ran only `zones[0]`; failed start left persisted idle missions and retried same occurrence every 30 s | V53, T43 |
+| B57 | 2026-07-15 | Charge monitor was test-only, SOC algorithms disagreed, mission admission had no return reserve, and tracked INA channel mapping contradicted runtime | V52, T44 |
+| B58 | 2026-07-15 | AI used one red-color heuristic, results lacked canonical perception consumers, and UI/API advertised fabricated training/export data | V50, V51, T45 |
+| B59 | 2026-07-15 | UI converted missing power to zero, showed fabricated weather/history/patterns, and lacked live build/freshness truth | V48, V54, T46 |
+| B60 | 2026-07-15 | Enabled sensor systemd unit only slept forever while backend owned sensors, producing green-but-inert service health | V54, T47 |
+| B61 | 2026-07-15 | Critical autonomous/GPS/UI tests were skipped placeholders, frontend CI skipped tests, OpenAPI IDs collided, and full Ruff had 136 errors | V55, T48 |

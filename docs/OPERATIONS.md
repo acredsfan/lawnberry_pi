@@ -189,6 +189,7 @@ progress must never be treated as mission evidence.
 - POST http://127.0.0.1:8081/api/v2/control/drive
 - POST http://127.0.0.1:8081/api/v2/control/blade
 - POST http://127.0.0.1:8081/api/v2/control/emergency-stop
+- POST http://127.0.0.1:8081/api/v2/control/return-home → create a canonical blade-off mission; response includes `mission_id`
 - POST http://127.0.0.1:8081/api/v2/control/emergency_clear → clear E-stop with confirmation
 - GET http://127.0.0.1:8081/api/v2/hardware/robohat → RoboHAT status
 - GET http://127.0.0.1:8081/api/v2/autonomy/readiness → blade/platform/pin readiness report
@@ -197,6 +198,11 @@ progress must never be treated as mission evidence.
 - GET http://127.0.0.1:8081/api/v2/camera/status → camera activity + FPS snapshot
 - GET http://127.0.0.1:8081/api/v2/camera/frame → latest raw JPEG snapshot
 - GET http://127.0.0.1:8081/api/v2/camera/stream.mjpeg → live MJPEG stream
+
+Return-home requires current pose, configured home, a valid operating boundary, and a safe planned route. It runs through
+`MissionService` and `MissionExecutor`; the endpoint never switches a navigation mode as a substitute for execution. Every
+return leg is blade-off, and reaching the dock coordinate is not terminal until cached charging truth confirms docking.
+If route planning, admission, or dock confirmation fails, the mission remains a non-success and the mower stays stopped.
 
 On live hardware, `lawnberry-camera.service` is the only process that opens the camera. It publishes status, exact frames,
 and automatic AI annotations over `/run/lawnberry/camera.sock`; the FastAPI camera and latest-inference endpoints consume

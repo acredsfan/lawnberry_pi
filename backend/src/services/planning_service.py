@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from backend.src.models import Position
-from backend.src.models.mission import MissionWaypoint
+from backend.src.models.mission import MissionLegType, MissionWaypoint
 from backend.src.nav.coverage_planner import plan_coverage
 from backend.src.services.operating_area_service import load_operating_area_snapshot
 
@@ -93,7 +93,7 @@ class PlanningService:
               - ``spacing_m``   (float, default 0.35) — scanline spacing in metres.
               - ``angle_deg``   (float, default 0.0)  — scanline bearing.
               - ``speed_ms``    (float, default 0.5)  — travel speed m/s for duration estimate.
-              - ``blade_on``    (bool, default True)  — set on every waypoint.
+              - ``blade_on``    (bool, default True)  — set only on declared mow legs.
               - ``speed_pct``   (int,  default 50)    — waypoint speed 0-100 %.
 
         Returns
@@ -179,10 +179,21 @@ class PlanningService:
             logger.debug("PlanningService: operating-area validation unavailable", exc_info=True)
 
         # Convert path points to MissionWaypoint objects
-        waypoints: list[MissionWaypoint] = [
-            MissionWaypoint(lat=lat, lon=lon, blade_on=blade_on, speed=speed_pct)
-            for lat, lon in path_points
-        ]
+        waypoints: list[MissionWaypoint] = []
+        for index, (lat, lon) in enumerate(path_points):
+            # Travel from the mower's current position to the first coverage
+            # point is staging transit. Coverage row/connectors are refined by
+            # the coverage planner, but ambiguous input always starts blade-off.
+            leg_type = MissionLegType.TRANSIT if index == 0 else MissionLegType.MOW
+            waypoints.append(
+                MissionWaypoint(
+                    lat=lat,
+                    lon=lon,
+                    blade_on=blade_on and leg_type == MissionLegType.MOW,
+                    leg_type=leg_type,
+                    speed=speed_pct,
+                )
+            )
 
         # Estimate duration
         est_duration_s = (length_m / speed_ms) if speed_ms > 0 else 0.0

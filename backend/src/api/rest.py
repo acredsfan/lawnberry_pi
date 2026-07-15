@@ -1783,8 +1783,9 @@ async def control_stop_navigation():
 
 @router.post("/control/return-home")
 async def control_return_home(runtime: RuntimeContext = Depends(get_runtime)):
-    """Start a return-to-home navigation sequence when home and position are available."""
+    """Create the canonical blade-off return mission and return its authoritative identity."""
     from ..services.navigation_service import NavigationService
+    from ..services.mission_service import MissionError
 
     nav_service = NavigationService.get_instance()
     if runtime.command_gateway.is_emergency_active():
@@ -1793,17 +1794,20 @@ async def control_return_home(runtime: RuntimeContext = Depends(get_runtime)):
             status_label="emergency_stop_active",
             detail="Return-home is blocked while emergency stop is active.",
         )
-    accepted = await nav_service.return_home()
-    if not accepted:
+    try:
+        mission = await runtime.mission_service.start_return_home()
+    except MissionError as exc:
         return _navigation_error_response(
             nav_service,
             status_label="return_home_unavailable",
-            detail="Return-to-home is unavailable until home and current position are configured.",
+            detail=str(exc),
         )
 
     return {
         "ok": True,
         "status": "returning_home",
+        "mission_id": mission.id,
+        "mission_status": "running",
         **_control_navigation_snapshot(nav_service),
     }
 

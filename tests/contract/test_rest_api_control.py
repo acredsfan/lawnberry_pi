@@ -3,6 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -253,6 +254,12 @@ async def test_control_navigation_endpoints_surface_runtime_state(monkeypatch):
 
     fake_nav = _FakeNavService()
     monkeypatch.setattr(NavigationService, "get_instance", classmethod(lambda cls, weather=None: fake_nav))
+    from backend.src.core.runtime import get_runtime
+
+    runtime = app.dependency_overrides[get_runtime]()
+    runtime.mission_service.start_return_home = AsyncMock(
+        return_value=SimpleNamespace(id="return-home-mission")
+    )
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
@@ -274,7 +281,8 @@ async def test_control_navigation_endpoints_surface_runtime_state(monkeypatch):
         return_home = await client.post("/api/v2/control/return-home", json={})
         assert return_home.status_code == 200, return_home.text
         assert return_home.json()["status"] == "returning_home"
-        assert return_home.json()["mode"] == "return_home"
+        assert return_home.json()["mission_id"] == "return-home-mission"
+        runtime.mission_service.start_return_home.assert_awaited_once_with()
 
         stop = await client.post("/api/v2/control/stop", json={})
         assert stop.status_code == 200, stop.text

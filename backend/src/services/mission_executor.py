@@ -7,6 +7,7 @@ hardware.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import math
 import time
@@ -53,6 +54,7 @@ class MissionExecutor:
         max_waypoint_fix_age_seconds: GPS staleness threshold (default 2.0).
         max_waypoint_accuracy_m: GPS accuracy floor in metres (default 5.0).
         position_verification_timeout_seconds: Abort timeout (default 30.0).
+        docking_confirmed_provider: Cached dock/charge truth provider used only after a dock leg.
     """
 
     def __init__(
@@ -62,6 +64,8 @@ class MissionExecutor:
         gateway: Any,
         encoder_rpm_provider: Any = None,
         encoder_active_provider: Any = None,
+        docking_confirmed_provider: Any = None,
+        docking_confirmation_timeout_seconds: float = 30.0,
         max_speed: float = 0.8,
         cruise_speed: float = 0.5,
         waypoint_tolerance: float = 1.0,
@@ -81,6 +85,10 @@ class MissionExecutor:
         self.max_operational_cross_track_error_m = max_operational_cross_track_error_m
         self._encoder_rpm_provider = encoder_rpm_provider
         self._encoder_active_provider = encoder_active_provider
+        self._docking_confirmed_provider = docking_confirmed_provider
+        self.docking_confirmation_timeout_seconds = max(
+            0.0, float(docking_confirmation_timeout_seconds)
+        )
         import os
         _boost_disabled = os.environ.get("LAWNBERRY_DISABLE_TRACTION_BOOST", "").strip() == "1"
         if _boost_disabled:
@@ -294,6 +302,30 @@ class MissionExecutor:
             if raise_on_unconfirmed_blade_off:
                 raise RuntimeError(f"Blade-off command unconfirmed during {reason}")
         return bool(stop_confirmed and blade_off_confirmed)
+
+    async def _docking_is_confirmed(self) -> bool:
+        """Read the injected, cached charging/dock signal without touching hardware."""
+        provider = self._docking_confirmed_provider
+        if provider is None:
+            return False
+        try:
+            result = provider()
+            if inspect.isawaitable(result):
+                result = await result
+            return bool(result)
+        except Exception:
+            logger.exception("Dock confirmation provider failed")
+            return False
+
+    async def _wait_for_dock_confirmation(self) -> None:
+        """Require a bounded positive dock/charge signal before return-home completes."""
+        deadline = time.monotonic() + self.docking_confirmation_timeout_seconds
+        while True:
+            if await self._docking_is_confirmed():
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError("DOCK_CONFIRMATION_TIMEOUT: charging/dock signal not confirmed")
+            await asyncio.sleep(0.25)
 
     # ------------------------------------------------------------------
     # Waypoint pursuit loop (Task 6)
@@ -1382,7 +1414,9 @@ class MissionExecutor:
                     return
 
                 current_wp = mission.waypoints[self.current_waypoint_index]
-                if not await self._set_blade(bool(current_wp.blade_on), reason="waypoint blade intent"):
+                if not await self._set_blade(
+                    bool(current_wp.blade_permitted), reason="traversed leg blade intent"
+                ):
                     await self._enter_safety_hold(reason="blade command failure")
                     raise RuntimeError("Failed to deliver mission blade command")
                 waypoint_reached = await self.go_to_waypoint(
@@ -1400,6 +1434,9 @@ class MissionExecutor:
                         return
                 else:
                     _prev_wp_pos = Position(latitude=current_wp.lat, longitude=current_wp.lon)
+                    if getattr(current_wp.leg_type, "value", current_wp.leg_type) == "dock":
+                        await self._enter_safety_hold(reason="dock arrival confirmation")
+                        await self._wait_for_dock_confirmation()
                     await mission_service.update_waypoint_progress(
                         mission.id, self.current_waypoint_index
                     )

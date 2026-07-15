@@ -82,13 +82,12 @@ class PathPlanner:
         obstacles: Iterable[Sequence[Position]] | None = None,
     ) -> list[Waypoint]:
         if boundary is None or len(boundary) < 3:
-            # Direct path fallback
-            return [Waypoint(position=home, target_speed=0.5, action="dock")]
+            return []
         path = PathPlanner.find_path(
             current, home, boundary, obstacles=obstacles, grid_resolution_m=0.3
         )
         if not path:
-            return [Waypoint(position=home, target_speed=0.5, action="dock")]
+            return []
         # Ensure final docking action
         path[-1].action = "dock"
         if path[-1].target_speed is None:

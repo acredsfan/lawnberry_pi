@@ -13,14 +13,29 @@ class MissionLifecycleStatus(str, Enum):
     FAILED = "failed"
 
 
+class MissionLegType(str, Enum):
+    """Safety semantics for travel into a mission waypoint."""
+
+    TRANSIT = "transit"
+    MOW = "mow"
+    TURN = "turn"
+    WAIT = "wait"
+    DOCK = "dock"
+
+
 class MissionWaypoint(BaseModel):
-    """A single waypoint in a mission."""
+    """A waypoint whose leg type describes travel into the waypoint."""
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     lat: float = Field(..., description="Latitude of the waypoint.")
     lon: float = Field(..., description="Longitude of the waypoint.")
     blade_on: bool = Field(
-        default=False, description="Whether the blade is active for this waypoint."
+        default=False,
+        description="Requested blade state while traversing this leg; valid only for mow legs.",
+    )
+    leg_type: MissionLegType = Field(
+        default=MissionLegType.TRANSIT,
+        description="Safety semantics for the path leg ending at this waypoint.",
     )
     speed: int = Field(
         default=50, ge=0, le=100, description="Mower speed at this waypoint (0-100%)."
@@ -46,6 +61,27 @@ class MissionWaypoint(BaseModel):
         if not (-180.0 <= value <= 180.0):
             raise ValueError("lon must be between -180 and 180")
         return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_ambiguous_legacy_blade_off(cls, value):
+        """Legacy blade flags lacked leg semantics, so preserve safety by disabling them."""
+        if isinstance(value, dict) and "leg_type" not in value and value.get("blade_on"):
+            normalized = dict(value)
+            normalized["blade_on"] = False
+            return normalized
+        return value
+
+    @model_validator(mode="after")
+    def _blade_only_on_mow_legs(self) -> "MissionWaypoint":
+        if self.blade_on and self.leg_type != MissionLegType.MOW:
+            raise ValueError("blade_on=true is allowed only for leg_type='mow'")
+        return self
+
+    @property
+    def blade_permitted(self) -> bool:
+        """Return the fail-closed blade command for this traversed leg."""
+        return self.leg_type == MissionLegType.MOW and self.blade_on
 
 
 class Mission(BaseModel):

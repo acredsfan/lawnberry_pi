@@ -555,6 +555,30 @@ class MissionService:
         self._persist_mission_status(mission.id)
         return mission
 
+    async def start_return_home(self) -> Mission:
+        """Atomically create and start the canonical blade-off return-home mission."""
+        if any(
+            status.status in {MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED}
+            for status in self.mission_statuses.values()
+        ):
+            raise MissionConflictError("Cannot return home while another mission is active.")
+
+        await self._refresh_nav_boundaries()
+        try:
+            waypoints = self.nav_service.build_return_home_waypoints()
+        except ValueError as exc:
+            raise MissionValidationError(str(exc)) from exc
+
+        mission = await self.create_mission("Return to home", waypoints)
+        try:
+            await self.start_mission(mission.id, blade_off_diagnostic=True)
+        except Exception:
+            # Failed admission must not leave an idle mission that can be mistaken
+            # for an accepted return or repeatedly retried by a scheduler.
+            await self.delete_mission(mission.id)
+            raise
+        return mission
+
     async def start_mission(
         self,
         mission_id: str,
