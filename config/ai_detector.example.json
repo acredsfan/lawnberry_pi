@@ -1,0 +1,27 @@
+{
+  "model_name": "lawnberry-obstacle-detector",
+  "model_path": "../models/lawnberry-obstacle-detector.onnx",
+  "model_format": "onnx",
+  "runtime": "opencv_dnn",
+  "version": "1.0",
+  "task": "obstacle_detection",
+  "input_width": 640,
+  "input_height": 640,
+  "class_labels": ["person", "animal", "vehicle", "obstacle"],
+  "output_format": "yolov8",
+  "camera_horizontal_fov_degrees": 62.0,
+  "class_height_m": {
+    "person": 1.7,
+    "animal": 0.5,
+    "vehicle": 1.5,
+    "obstacle": 0.5
+  },
+  "semantic_cost_multipliers": {
+    "person": 3.0,
+    "animal": 2.5,
+    "vehicle": 3.0,
+    "obstacle": 1.5
+  },
+  "nms_threshold": 0.4,
+  "max_result_age_seconds": 2.0
+}

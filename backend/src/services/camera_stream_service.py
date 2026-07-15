@@ -72,6 +72,7 @@ class AIFrameProcessor(Protocol):
         image_bytes: bytes,
         *,
         frame_id: str,
+        source_frame_timestamp: datetime | None = None,
     ) -> Awaitable[InferenceResult | None]: ...
 
 
@@ -108,6 +109,7 @@ class CameraStreamService:
         # single latest-frame consumer; no task is created per frame.
         self._ai_processor: AIFrameProcessor | None = None
         self._ai_inference_task: asyncio.Task[InferenceResult | None] | None = None
+        self._latest_ai_result: InferenceResult | None = None
         self._last_ai_inference_monotonic: float | None = None
         self._last_ai_warning_monotonic = float("-inf")
         self._monotonic: Callable[[], float] = time.monotonic
@@ -441,6 +443,21 @@ class CameraStreamService:
                 return {"status": "success", "data": frame.model_dump(mode="json")}
             else:
                 return {"status": "error", "error": "No frame available"}
+
+        elif command == "get_perception":
+            return {
+                "status": "success",
+                "data": self._latest_ai_result.model_dump(mode="json")
+                if self._latest_ai_result is not None
+                else None,
+            }
+
+        elif command == "set_ai_enabled":
+            self.set_ai_enabled(bool(message.get("enabled", False)))
+            return {
+                "status": "success",
+                "data": {"ai_processing_enabled": self.stream.ai_processing_enabled},
+            }
 
         elif command == "configure":
             config_data = message.get("configuration", {})
@@ -974,6 +991,7 @@ class CameraStreamService:
             processor(
                 frame_bytes,
                 frame_id=frame.metadata.frame_id,
+                source_frame_timestamp=frame.metadata.timestamp,
             ),
             name=f"camera-ai-{frame.metadata.frame_id}",
         )
@@ -1006,11 +1024,21 @@ class CameraStreamService:
 
         if result is None:
             return
+        if not self.stream.ai_processing_enabled:
+            # PowerManager may disable inference while an off-loop worker is
+            # finishing. Do not publish that late result after the power gate.
+            return
         if getattr(result, "input_frame_id", None) != frame.metadata.frame_id:
             self._warn_ai_processing(
                 "AI result frame mismatch: expected %s, received %s",
                 frame.metadata.frame_id,
                 getattr(result, "input_frame_id", None),
+            )
+            return
+        if getattr(result, "source_frame_timestamp", None) != frame.metadata.timestamp:
+            self._warn_ai_processing(
+                "AI result timestamp mismatch for frame %s",
+                frame.metadata.frame_id,
             )
             return
 
@@ -1023,6 +1051,7 @@ class CameraStreamService:
 
         # A completed inference with zero detections is still a truthful
         # processed result. Skips, failures, and provenance mismatches stay false.
+        self._latest_ai_result = result
         frame.processed_for_ai = True
 
     def _discard_late_ai_result(
@@ -1053,7 +1082,9 @@ class CameraStreamService:
                     "bbox": [bbox.x, bbox.y, bbox.width, bbox.height],
                     "distance_estimate_m": detected.distance_estimate,
                     "relative_bearing_degrees": detected.relative_bearing,
+                    "angular_width_degrees": detected.angular_width_degrees,
                     "tracking_id": detected.tracking_id,
+                    "semantic_cost_multiplier": detected.semantic_cost_multiplier,
                 }
             )
         return {
@@ -1061,6 +1092,13 @@ class CameraStreamService:
             "inference_id": result.inference_id,
             "model_name": result.model_name,
             "model_version": result.model_version,
+            "model_runtime": result.model_runtime,
+            "model_sha256": result.model_sha256,
+            "timestamp": result.timestamp.isoformat(),
+            "source_frame_timestamp": result.source_frame_timestamp.isoformat()
+            if result.source_frame_timestamp is not None
+            else None,
+            "input_frame_id": result.input_frame_id,
             "processing_time_ms": result.total_time_ms,
             "objects": objects,
         }
@@ -1236,6 +1274,13 @@ class CameraStreamService:
                 min(float(timeout_seconds), 5.0),
             )
         self._last_ai_inference_monotonic = None
+        self._latest_ai_result = None
+
+    def set_ai_enabled(self, enabled: bool) -> None:
+        """Apply the camera-owner AI power gate without changing capture state."""
+        self.stream.ai_processing_enabled = bool(enabled)
+        if not enabled:
+            self._latest_ai_result = None
 
     def remove_frame_callback(self, callback: Callable[[CameraFrame], None]):
         """Remove frame callback."""
@@ -1316,6 +1361,7 @@ class CameraStreamService:
         self.frame_queue = None
         self.loop = None
         self._last_ai_inference_monotonic = None
+        self._latest_ai_result = None
 
         logger.info("Camera service shutdown complete")
 

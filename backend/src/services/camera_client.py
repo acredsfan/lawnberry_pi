@@ -13,6 +13,7 @@ import os
 from contextlib import suppress
 from typing import Any
 
+from ..models.ai_processing import InferenceResult
 from ..models.camera_stream import CameraFrame, CameraStream, StreamStatistics
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,18 @@ class CameraClient:
         if payload is None:
             return None
         return CameraFrame.model_validate(payload)
+
+    async def get_latest_perception(self) -> InferenceResult | None:
+        """Fetch the camera owner's latest full typed inference result."""
+        payload = await self._request("get_perception")
+        if payload is None:
+            return None
+        return InferenceResult.model_validate(payload)
+
+    async def set_ai_enabled(self, enabled: bool) -> None:
+        """Set inference power state in the canonical camera-owner process."""
+        await self._request("set_ai_enabled", enabled=bool(enabled))
+        self.stream.ai_processing_enabled = bool(enabled)
 
     async def start_streaming(self) -> bool:
         """Ask the canonical owner to start capture."""

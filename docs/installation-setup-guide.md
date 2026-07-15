@@ -433,7 +433,7 @@ After completing the basic setup:
 1. **Configure Remote Access** - Set up secure remote connectivity
 2. **Set Up Maps Integration** - Configure mapping providers
 3. **Enable Advanced Authentication** - Add multi-factor security
-4. **Configure AI Training** - Set up machine learning features
+4. **Configure AI Perception** - Install a qualified ONNX detector using `docs/perception-runtime.md`
 5. **Create Mowing Zones** - Define cutting areas and patterns
 6. **Schedule Automated Jobs** - Set up recurring mowing schedules
 

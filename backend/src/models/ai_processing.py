@@ -73,9 +73,20 @@ class DetectedObject(BaseModel):
     bounding_box: BoundingBox
 
     # Additional properties
-    distance_estimate: float | None = None  # meters
-    relative_bearing: float | None = None  # degrees from camera center
+    distance_estimate: float | None = Field(default=None, gt=0.0, le=100.0)  # meters
+    relative_bearing: float | None = Field(default=None, ge=-180.0, le=180.0)
+    angular_width_degrees: float | None = Field(
+        default=None,
+        gt=0.0,
+        le=179.0,
+        description="Detector box width projected through the configured camera FOV.",
+    )
     tracking_id: int | None = None  # For object tracking across frames
+    semantic_cost_multiplier: float = Field(
+        default=1.0,
+        ge=1.0,
+        description="Route-cost inflation only; never reduces geometric or ToF safety.",
+    )
 
     @field_validator("confidence")
     def validate_confidence(cls, v):
@@ -87,15 +98,16 @@ class DetectedObject(BaseModel):
 class InferenceResult(BaseModel):
     """Results from AI model inference"""
 
-    inference_id: str
+    inference_id: str = Field(min_length=1)
     task: InferenceTask
-    model_name: str
+    model_name: str = Field(min_length=1)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Input information
-    input_frame_id: str
-    input_width: int
-    input_height: int
+    input_frame_id: str = Field(min_length=1)
+    input_width: int = Field(gt=0)
+    input_height: int = Field(gt=0)
+    source_frame_timestamp: datetime | None = None
 
     # Detection results
     detected_objects: list[DetectedObject] = Field(default_factory=list)
@@ -108,14 +120,29 @@ class InferenceResult(BaseModel):
     segmentation_mask: str | None = None  # Base64 encoded mask
 
     # Performance metrics
-    inference_time_ms: float = 0.0
-    preprocessing_time_ms: float = 0.0
-    postprocessing_time_ms: float = 0.0
-    total_time_ms: float = 0.0
+    inference_time_ms: float = Field(default=0.0, ge=0.0)
+    preprocessing_time_ms: float = Field(default=0.0, ge=0.0)
+    postprocessing_time_ms: float = Field(default=0.0, ge=0.0)
+    total_time_ms: float = Field(default=0.0, ge=0.0)
 
     # Model information
     model_version: str = "1.0"
-    confidence_threshold: float = 0.5
+    model_runtime: str = Field(default="unknown", min_length=1)
+    model_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class PerceptionSnapshot(BaseModel):
+    """Freshness-qualified canonical perception result for API/WS consumers."""
+
+    available: bool
+    fresh: bool
+    reason_code: str | None = None
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    result_age_seconds: float | None = None
+    max_result_age_seconds: float
+    route_cost_obstacle_count: int = 0
+    result: InferenceResult | None = None
 
 
 class ModelInfo(BaseModel):
@@ -195,13 +222,13 @@ class AIProcessing(BaseModel):
 
     # Processing queue and performance
     queue_size: int = 0
-    max_queue_size: int = 10
-    processing_fps: float = 0.0
-    target_fps: float = 5.0
+    max_queue_size: int = Field(default=10, gt=0)
+    processing_fps: float = Field(default=0.0, ge=0.0)
+    target_fps: float = Field(default=5.0, gt=0.0)
 
     # Recent inference results
     recent_results: list[InferenceResult] = Field(default_factory=list)
-    max_recent_results: int = 100
+    max_recent_results: int = Field(default=100, gt=0)
 
     # Statistics
     total_inferences: int = 0
@@ -210,14 +237,9 @@ class AIProcessing(BaseModel):
     average_inference_time_ms: float = 0.0
 
     # Configuration
-    confidence_threshold: float = 0.5
-    nms_threshold: float = 0.4  # Non-maximum suppression
-    max_detections: int = 50
-
-    # Training and data collection
-    training_mode_enabled: bool = False
-    auto_collect_training_data: bool = False
-    training_data_count: int = 0
+    confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    nms_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
+    max_detections: int = Field(default=50, gt=0)
 
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -258,23 +280,6 @@ class AIProcessing(BaseModel):
             ) / n
         else:
             self.failed_inferences += 1
-
-    def load_model(self, model_info: ModelInfo) -> bool:
-        """Load an AI model"""
-        try:
-            model_info.status = ModelStatus.LOADING
-            model_info.load_time = datetime.now(UTC)
-
-            # Model loading logic would go here
-            # For now, just mark as loaded
-            model_info.status = ModelStatus.LOADED
-            self.active_models[model_info.model_name] = model_info
-
-            return True
-        except Exception as e:
-            model_info.status = ModelStatus.ERROR
-            model_info.error_message = str(e)
-            return False
 
     def get_inference_performance(self) -> dict[str, float]:
         """Get current inference performance metrics"""

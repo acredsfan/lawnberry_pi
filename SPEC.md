@@ -145,7 +145,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T42 | x | Make mission/manual operator mutations server-authoritative and fail-closed | V48, I.api, I.fe |
 | T43 | x | Build durable idempotent multi-zone job occurrences and truthful planning controls | V48, V53, I.api, I.fe |
 | T44 | x | Build canonical battery/SOC/energy reserve, return policy, history, and hardware mapping | V43, V45, V52, I.api, I.power |
-| T45 | . | Build real detector runtime, typed perception stream, semantic costs, and truthful AI console | V50, V51, I.api, I.ws, I.fe, I.perception |
+| T45 | x | Build real detector runtime, typed perception stream, semantic costs, and truthful AI console | V50, V51, I.api, I.ws, I.fe, I.perception |
 | T46 | . | Make telemetry, planning, readiness, power, connection, and build UI truthful | V48, V54, I.fe, I.api, I.ws |
 | T47 | . | Remove green-but-inert services and unsupported API/ops success paths | V54, I.ops, I.api |
 | T48 | . | Replace critical placeholder tests, run frontend tests in CI, fix OpenAPI IDs, and clean lint | V55, I.api, I.fe, I.ops |

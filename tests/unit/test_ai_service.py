@@ -1,11 +1,13 @@
 import asyncio
-import json
 import threading
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from backend.src.models import InferenceTask
 from backend.src.services.ai_service import (
@@ -13,38 +15,55 @@ from backend.src.services.ai_service import (
     AINoFrameAvailableError,
     AIService,
 )
+from backend.src.services.detector_runtime import DetectorManifest, RuntimeDetection
 
 
-def _write_test_model(path):
-    path.write_text(
-        json.dumps(
-            {
-                "model_name": "test-color-detector",
-                "model_format": "custom",
-                "version": "1.0",
-                "task": "obstacle_detection",
-                "input_width": 128,
-                "input_height": 128,
-                "class_labels": ["obstacle"],
-                "rules": [
-                    {
-                        "class_name": "obstacle",
-                        "min_rgb": [180, 0, 0],
-                        "max_rgb": [255, 120, 120],
-                        "min_area_ratio": 0.01,
-                        "max_components": 4,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+class FakeDetectorRuntime:
+    def __init__(self, model_path: Path):
+        self.manifest = DetectorManifest(
+            model_name="test-onnx-detector",
+            model_path=str(model_path),
+            input_width=128,
+            input_height=128,
+            class_labels=["obstacle"],
+            class_height_m={"obstacle": 0.5},
+            semantic_cost_multipliers={"obstacle": 1.5},
+        )
+        self.model_path = model_path
+        self.model_sha256 = "a" * 64
+        self.ready = False
+        self.last_error = None
+
+    def initialize(self) -> None:
+        self.ready = True
+
+    def load_metadata(self) -> None:
+        return None
+
+    def infer(self, _rgb_image, _confidence_threshold):
+        return [
+            RuntimeDetection(
+                class_name="obstacle",
+                confidence=0.9,
+                x=0.25,
+                y=0.25,
+                width=0.5,
+                height=0.5,
+            )
+        ]
+
+
+def _service(tmp_path, *, confidence_threshold: float = 0.5) -> AIService:
+    model_path = tmp_path / "detector.onnx"
+    return AIService(
+        model_path=str(tmp_path / "ai-detector.json"),
+        confidence_threshold=confidence_threshold,
+        detector_runtime=FakeDetectorRuntime(model_path),
     )
 
 
 def _make_test_image_bytes() -> bytes:
     image = Image.new("RGB", (256, 256), (20, 160, 20))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((70, 70, 180, 180), fill=(220, 20, 20))
 
     from io import BytesIO
 
@@ -70,9 +89,7 @@ async def test_initialize_reports_missing_model_gracefully(tmp_path):
 
 @pytest.mark.asyncio
 async def test_infer_image_bytes_returns_detected_objects_and_updates_stats(tmp_path):
-    model_path = tmp_path / "ai-model.json"
-    _write_test_model(model_path)
-    service = AIService(model_path=str(model_path), confidence_threshold=0.2)
+    service = _service(tmp_path, confidence_threshold=0.2)
     await service.initialize()
 
     result = await service.infer_image_bytes(
@@ -81,10 +98,13 @@ async def test_infer_image_bytes_returns_detected_objects_and_updates_stats(tmp_
         frame_id="unit-test-frame",
     )
 
-    assert result.model_name == "test-color-detector"
+    assert result.model_name == "test-onnx-detector"
     assert result.input_frame_id == "unit-test-frame"
     assert len(result.detected_objects) >= 1
     assert result.detected_objects[0].class_name == "obstacle"
+    assert result.model_runtime == "opencv_dnn"
+    assert result.model_sha256 == "a" * 64
+    assert result.detected_objects[0].semantic_cost_multiplier == 1.5
     assert service.ai_processing.total_inferences == 1
     assert service.ai_processing.successful_inferences == 1
     assert service.ai_processing.processing_fps > 0
@@ -92,9 +112,7 @@ async def test_infer_image_bytes_returns_detected_objects_and_updates_stats(tmp_
 
 @pytest.mark.asyncio
 async def test_infer_latest_frame_uses_camera_frame(tmp_path):
-    model_path = tmp_path / "ai-model.json"
-    _write_test_model(model_path)
-    service = AIService(model_path=str(model_path), confidence_threshold=0.2)
+    service = _service(tmp_path, confidence_threshold=0.2)
     await service.initialize()
 
     frame = SimpleNamespace(
@@ -114,9 +132,7 @@ async def test_infer_latest_frame_uses_camera_frame(tmp_path):
 
 @pytest.mark.asyncio
 async def test_infer_latest_frame_fails_cleanly_when_no_frame(tmp_path):
-    model_path = tmp_path / "ai-model.json"
-    _write_test_model(model_path)
-    service = AIService(model_path=str(model_path))
+    service = _service(tmp_path)
     await service.initialize()
 
     async def fake_get_current_frame():
@@ -130,9 +146,7 @@ async def test_infer_latest_frame_fails_cleanly_when_no_frame(tmp_path):
 
 @pytest.mark.asyncio
 async def test_infer_latest_frame_requires_injected_provider(tmp_path):
-    model_path = tmp_path / "ai-model.json"
-    _write_test_model(model_path)
-    service = AIService(model_path=str(model_path))
+    service = _service(tmp_path)
     await service.initialize()
 
     with pytest.raises(AINoFrameAvailableError, match="provider"):
@@ -141,9 +155,7 @@ async def test_infer_latest_frame_requires_injected_provider(tmp_path):
 
 @pytest.mark.asyncio
 async def test_camera_inference_returns_none_when_ai_is_disabled(tmp_path):
-    model_path = tmp_path / "ai-model.json"
-    _write_test_model(model_path)
-    service = AIService(model_path=str(model_path))
+    service = _service(tmp_path)
     await service.initialize()
     service.set_enabled(False)
 
@@ -157,10 +169,52 @@ async def test_camera_inference_returns_none_when_ai_is_disabled(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_power_gate_cannot_override_operator_hard_disable(tmp_path, monkeypatch):
+    monkeypatch.setenv("AI_INFERENCE_ENABLED", "0")
+    service = _service(tmp_path)
+
+    await service.initialize()
+    service.set_enabled(True)
+
+    status = await service.get_ai_status()
+    assert status["configured_enabled"] is False
+    assert status["system_enabled"] is False
+    assert status["model_ready"] is False
+
+
+@pytest.mark.asyncio
+async def test_external_camera_result_requires_exact_model_and_source_frame(tmp_path):
+    local = _service(tmp_path)
+    await local.initialize()
+    source_timestamp = datetime.now(UTC)
+    result = await local.infer_camera_frame(
+        _make_test_image_bytes(),
+        frame_id="camera-frame-provenance",
+        source_frame_timestamp=source_timestamp,
+    )
+    assert result is not None
+
+    external = _service(tmp_path)
+    await external.initialize(metadata_only=True)
+    consumer = AsyncMock(return_value=1)
+    external.set_result_consumer(consumer)
+
+    assert await external.ingest_external_result(result) is True
+    assert await external.ingest_external_result(result) is False
+    consumer.assert_awaited_once_with(result)
+
+    without_source = result.model_copy(
+        update={
+            "inference_id": "missing-source",
+            "source_frame_timestamp": None,
+        }
+    )
+    assert await external.ingest_external_result(without_source) is False
+
+
+@pytest.mark.asyncio
 async def test_inference_runs_off_loop_and_serializes_concurrent_callers(tmp_path, monkeypatch):
-    model_path = tmp_path / "ai-model.json"
-    _write_test_model(model_path)
-    service = AIService(model_path=str(model_path), confidence_threshold=0.2)
+    service = _service(tmp_path, confidence_threshold=0.2)
     await service.initialize()
 
     original = service._infer_image_bytes_sync
@@ -200,9 +254,7 @@ async def test_inference_runs_off_loop_and_serializes_concurrent_callers(tmp_pat
 @pytest.mark.asyncio
 async def test_cancelled_inference_keeps_lock_until_worker_exits(tmp_path, monkeypatch):
     """Cancelling an awaiter must not let another worker overlap its live thread."""
-    model_path = tmp_path / "ai-model.json"
-    _write_test_model(model_path)
-    service = AIService(model_path=str(model_path), confidence_threshold=0.2)
+    service = _service(tmp_path, confidence_threshold=0.2)
     await service.initialize()
 
     original = service._infer_image_bytes_sync

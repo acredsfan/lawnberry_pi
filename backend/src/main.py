@@ -183,20 +183,56 @@ async def lifespan(app: FastAPI):
     ai_service = get_ai_service()
     try:
         ai_service.set_camera_frame_provider(camera_service.get_current_frame)
-        await ai_service.initialize()
+        _embedded_camera_owner = callable(getattr(camera_service, "set_ai_processor", None))
+        await ai_service.initialize(metadata_only=not _embedded_camera_owner)
+        nav_service.configure_perception_source(ai_service.get_detector_provenance())
+
+        async def _consume_perception_result(result):
+            route_cost_count = ai_service.get_perception_snapshot().route_cost_obstacle_count
+            if result.source_frame_timestamp is not None:
+                route_cost_count = nav_service.apply_perception_result(result)
+            snapshot = ai_service.get_perception_snapshot()
+            snapshot.route_cost_obstacle_count = route_cost_count
+            await websocket_hub.broadcast_to_topic(
+                "perception.results",
+                snapshot.model_dump(mode="json"),
+            )
+            return route_cost_count
+
+        ai_service.set_result_consumer(_consume_perception_result)
         # SIM/CI embeds the simulated camera owner. Live hardware uses the
         # standalone systemd owner, which injects its own AI processor.
-        if hasattr(camera_service, "set_ai_processor"):
+        if _embedded_camera_owner:
             camera_service.set_ai_processor(ai_service.infer_camera_frame)
     except Exception:
         _log.exception("AI service initialization failed")
     try:
-        if await camera_service.initialize():
+        _camera_ready = await camera_service.initialize()
+        if _camera_ready:
             await camera_service.start_streaming()
         else:
             _log.error("Camera service owner did not become ready during startup")
     except Exception:
         _log.exception("Camera service initialization failed")
+        _camera_ready = False
+    if _camera_ready and callable(getattr(camera_service, "get_latest_perception", None)):
+
+        async def _camera_perception_ipc_loop() -> None:
+            while True:
+                try:
+                    result = await camera_service.get_latest_perception()
+                    if result is not None:
+                        await ai_service.ingest_external_result(result)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    _log.debug("Camera perception IPC poll failed", exc_info=True)
+                await asyncio.sleep(0.5)
+
+        app.state.perception_ipc_task = asyncio.create_task(
+            _camera_perception_ipc_loop(),
+            name="camera-perception-ipc",
+        )
     await websocket_hub.start_telemetry_loop()
 
     # Build the typed RuntimeContext once all services are up. This is
@@ -503,6 +539,12 @@ async def lifespan(app: FastAPI):
         app.state.watchdog_heartbeat_task.cancel()
         try:
             await app.state.watchdog_heartbeat_task
+        except asyncio.CancelledError:
+            pass
+    if getattr(app.state, "perception_ipc_task", None):
+        app.state.perception_ipc_task.cancel()
+        try:
+            await app.state.perception_ipc_task
         except asyncio.CancelledError:
             pass
     if getattr(app.state, "watchdog", None):

@@ -158,6 +158,8 @@ config/hardware.json
 config/network.json
 config/system.json
 config/default.json
+config/ai_detector.json
+models/*.onnx
 
 # =============================================================
 # Temporary files

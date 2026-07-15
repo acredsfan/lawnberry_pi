@@ -63,6 +63,9 @@ class Obstacle(BaseModel):
     confidence: float = 1.0  # 0.0-1.0
     obstacle_type: str | None = None  # "static", "dynamic", "unknown"
     detection_source: str  # "tof", "camera", "gps", "user"
+    semantic_class: str | None = None
+    cost_multiplier: float = Field(default=1.0, ge=1.0)
+    source_frame_id: str | None = None
     first_detected: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_seen: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

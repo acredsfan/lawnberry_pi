@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from backend.src.models.sensor_data import GpsReading
+from backend.src.services import ai_service as ai_service_module
 from backend.src.services import camera_runtime as camera_runtime_module
 from backend.src.services import power_manager as power_manager_module
 from backend.src.services.power_manager import PowerManager
@@ -98,3 +99,20 @@ async def test_camera_power_cycle_uses_runtime_owner(monkeypatch):
     camera.start_streaming.assert_awaited_once_with()
     assert manager._camera_paused_by_pm is False
     assert manager._camera_idle_since is None
+
+
+@pytest.mark.asyncio
+async def test_ai_power_gate_reaches_local_state_and_camera_owner(monkeypatch):
+    local_calls: list[bool] = []
+    local_ai = SimpleNamespace(set_enabled=lambda enabled: local_calls.append(enabled))
+    camera = SimpleNamespace(set_ai_enabled=AsyncMock())
+    monkeypatch.setattr(ai_service_module, "get_ai_service", lambda: local_ai)
+    monkeypatch.setattr(camera_runtime_module, "camera_service", camera)
+    manager = PowerManager()
+
+    await manager._soft_disable_ai()
+    await manager._reenable_ai_if_disabled()
+
+    assert local_calls == [False, True]
+    assert camera.set_ai_enabled.await_args_list[0].args == (False,)
+    assert camera.set_ai_enabled.await_args_list[1].args == (True,)

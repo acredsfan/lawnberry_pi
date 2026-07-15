@@ -209,12 +209,12 @@ return leg is blade-off, and reaching the dock coordinate is not terminal until 
 If route planning, admission, or dock confirmation fails, the mission remains a non-success and the mower stays stopped.
 
 On live hardware, `lawnberry-camera.service` is the only process that opens the camera. It publishes status, exact frames,
-and automatic AI annotations over `/run/lawnberry/camera.sock`; the FastAPI camera and latest-inference endpoints consume
+and automatic AI results over `/run/lawnberry/camera.sock`; the FastAPI camera and perception endpoints consume
 that IPC owner through `CameraClient`. The backend unit waits for the camera unit and must not fall back to opening the
 device itself. `SIM_MODE=1` may embed the simulated owner for offline tests only. The camera and backend units both load
 `/home/pi/lawnberry/.env`; their `ExecStart` contract then pins `SIM_MODE=0` and the shared
 `/run/lawnberry/camera.sock`, so stale `.env` values cannot create a second embedded production owner. Idle power management
-uses the same runtime-selected owner and therefore pauses/resumes the standalone service over IPC.
+uses the same runtime-selected owner and therefore pauses/resumes capture and gates camera-owner inference over IPC.
 If hardware initialization fails and that owner falls back to generated frames, IPC and the camera status API explicitly
 report `sim_mode=true` and `hardware_available=false`; those frames must not appear to come from confirmed hardware.
 
@@ -419,14 +419,15 @@ Rollback:
 
 ## AI
 - GET http://127.0.0.1:8081/api/v2/ai/status
-- GET http://127.0.0.1:8081/api/v2/ai/datasets
-- POST http://127.0.0.1:8081/api/v2/ai/datasets/{datasetId}/export
+- GET http://127.0.0.1:8081/api/v2/ai/perception/latest
 - POST http://127.0.0.1:8081/api/v2/ai/inference → infer an uploaded image
 - POST http://127.0.0.1:8081/api/v2/ai/inference/latest → infer the latest available camera frame
 - GET http://127.0.0.1:8081/api/v2/ai/results/recent
 
-The current inference contract is a configured local JSON rule definition executed on the CPU. It does not claim a trained
-neural model or active Coral/Hailo acceleration. Automatic camera processing passes sampled exact frame bytes and frame ID
+The production inference contract is a configured ONNX detector executed by OpenCV DNN on the CPU. The repository does not
+bundle or claim a trained model, dataset, training job, export pipeline, or active Coral/Hailo acceleration. See
+`docs/perception-runtime.md` for artifact/configuration steps. Automatic camera processing passes sampled exact frame bytes,
+frame ID, and source timestamp
 to the standalone owner's injected processor at a bounded cadence within the single latest-frame consumer. It does not
 create a task per frame or queue stale inference work, and CPU inference runs off the event loop.
 `AI_CAMERA_INFERENCE_FPS` controls sampling and
@@ -437,9 +438,11 @@ only tracked inference until it exits; its late result is discarded and no repla
 Disabled, skipped, unavailable, failed, timed-out, late, or frame-mismatched work remains unprocessed, and simulation must
 not inject hardcoded detections.
 
-Camera AI results are informational only. They do not set navigation obstacle state, authorize motion, or replace the ToF,
-localization, operating-area, qualification, and `MotorCommandGateway` safety paths. Any future promotion into mower safety
-requires its own freshness, failure, validation, and physical-qualification contract.
+Fresh results from the exact configured model may create short-lived semantic entries in the route-planning cost map. A
+semantic multiplier can only increase obstacle clearance; it cannot create or clear the active obstacle safety interlock,
+authorize motion, or replace ToF, localization, operating-area, qualification, and `MotorCommandGateway` checks. Stale,
+unproven, non-camera, or mismatched-model results are rejected. This route-cost use is not a claim that the detector is
+physically qualified for unattended mowing.
 
 ## Settings
 - GET/PUT http://127.0.0.1:8081/api/v2/settings → settings profile management

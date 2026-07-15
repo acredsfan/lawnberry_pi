@@ -14,6 +14,7 @@ from .ai_processing import (
     ModelFormat,
     ModelInfo,
     ModelStatus,
+    PerceptionSnapshot,
 )
 from .camera_stream import (
     CameraCapabilities,
@@ -260,6 +261,7 @@ __all__ = [
     # AI Processing
     "AIProcessing",
     "InferenceResult",
+    "PerceptionSnapshot",
     "DetectedObject",
     "ModelInfo",
     "AcceleratorStatus",

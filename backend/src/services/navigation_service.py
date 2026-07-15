@@ -21,6 +21,7 @@ from ..fusion.ekf import PoseFilter
 from ..fusion.enu_frame import ENUFrame
 from ..fusion.pose2d import Pose2D
 from ..models import (
+    InferenceResult,
     NavigationMode,
     NavigationState,
     Obstacle,
@@ -72,6 +73,7 @@ class ObstacleDetector:
         self._cost_map: dict[str, Obstacle] = {}
         self._last_seen_monotonic: dict[str, float] = {}
         self._active_ids: set[str] = set()
+        self.semantic_persistence_seconds = 2.0
 
     @property
     def has_active_obstacle(self) -> bool:
@@ -139,13 +141,89 @@ class ObstacleDetector:
         expired = [
             obstacle_id
             for obstacle_id, seen_at in self._last_seen_monotonic.items()
-            if now - seen_at > self.persistence_seconds
+            if now - seen_at
+            > (
+                self.semantic_persistence_seconds
+                if self._cost_map.get(obstacle_id) is not None
+                and self._cost_map[obstacle_id].detection_source == "camera_ai"
+                else self.persistence_seconds
+            )
         ]
         for obstacle_id in expired:
             self._last_seen_monotonic.pop(obstacle_id, None)
             self._cost_map.pop(obstacle_id, None)
         self.detected_obstacles = list(self._cost_map.values())
         return self.detected_obstacles
+
+    def update_semantic_obstacles(
+        self,
+        result: InferenceResult,
+        *,
+        origin_position: Position,
+        heading_deg: float,
+    ) -> int:
+        """Add fresh AI detections as route costs without creating safety interlocks."""
+        now_mono = time.monotonic()
+        now = datetime.now(UTC)
+        observed_ids: set[str] = set()
+        for detection in result.detected_objects:
+            distance = detection.distance_estimate
+            bearing_offset = detection.relative_bearing
+            if (
+                distance is None
+                or bearing_offset is None
+                or detection.confidence < result.confidence_threshold
+            ):
+                continue
+            bearing = math.radians(float(heading_deg) + float(bearing_offset))
+            latitude, longitude = offset_lat_lon(
+                origin_position.latitude,
+                origin_position.longitude,
+                north_m=math.cos(bearing) * float(distance),
+                east_m=math.sin(bearing) * float(distance),
+            )
+            identity = (
+                str(detection.tracking_id)
+                if detection.tracking_id is not None
+                else str(round(float(bearing_offset) / 10.0))
+            )
+            obstacle_id = f"ai:{detection.class_name}:{identity}"
+            observed_ids.add(obstacle_id)
+            previous = self._cost_map.get(obstacle_id)
+            angular_width = math.radians(
+                detection.angular_width_degrees
+                or detection.bounding_box.width * 62.0
+            )
+            estimated_width = max(0.15, float(distance) * angular_width)
+            self._cost_map[obstacle_id] = Obstacle(
+                id=obstacle_id,
+                position=Position(latitude=latitude, longitude=longitude),
+                range_m=float(distance),
+                bearing_offset_deg=float(bearing_offset),
+                size_x=estimated_width,
+                size_y=estimated_width,
+                confidence=detection.confidence,
+                obstacle_type="semantic_cost",
+                detection_source="camera_ai",
+                semantic_class=detection.class_name,
+                cost_multiplier=max(1.0, detection.semantic_cost_multiplier),
+                source_frame_id=result.input_frame_id,
+                first_detected=previous.first_detected if previous is not None else now,
+                last_seen=now,
+            )
+            self._last_seen_monotonic[obstacle_id] = now_mono
+
+        for obstacle_id, obstacle in list(self._cost_map.items()):
+            if obstacle.detection_source != "camera_ai" or obstacle_id in observed_ids:
+                continue
+            seen_at = self._last_seen_monotonic.get(obstacle_id, 0.0)
+            if now_mono - seen_at > self.semantic_persistence_seconds:
+                self._last_seen_monotonic.pop(obstacle_id, None)
+                self._cost_map.pop(obstacle_id, None)
+        self.detected_obstacles = list(self._cost_map.values())
+        return sum(
+            obstacle.detection_source == "camera_ai" for obstacle in self.detected_obstacles
+        )
 
     def is_path_clear(self, current_pos: Position, target_pos: Position) -> bool:
         """Check if path to target is clear of obstacles"""
@@ -488,6 +566,11 @@ class NavigationService:
             self.obstacle_avoidance_distance,
             self._safety_limits,
         )
+        self._perception_model_name: str | None = None
+        self._perception_model_version: str | None = None
+        self._perception_runtime: str | None = None
+        self._perception_model_sha256: str | None = None
+        self._perception_max_age_seconds = 2.0
 
         # State tracking
         self.total_distance = 0.0
@@ -630,7 +713,8 @@ class NavigationService:
             if obstacle.position is None:
                 continue
             center = obstacle.position
-            radius_m = 0.08
+            base_radius_m = max(0.08, float(obstacle.size_x or 0.16) / 2.0)
+            radius_m = base_radius_m * max(1.0, float(obstacle.cost_multiplier))
 
             def corner(
                 north_m: float,
@@ -788,6 +872,78 @@ class NavigationService:
     def attach_energy_service(self, energy_service: Any) -> None:
         """Route mission energy decisions through the canonical cached owner."""
         self._mission_executor.set_energy_policy_provider(energy_service.runtime_policy)
+
+    def configure_perception_source(
+        self,
+        provenance: dict[str, str | float] | None,
+    ) -> bool:
+        """Bind semantic route costs to one validated detector artifact."""
+        self._perception_model_name = None
+        self._perception_model_version = None
+        self._perception_runtime = None
+        self._perception_model_sha256 = None
+        if provenance is None:
+            return False
+        digest = str(provenance.get("model_sha256", "")).lower()
+        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+            logger.warning("Rejected invalid configured perception provenance")
+            return False
+        try:
+            max_age = float(provenance["max_result_age_seconds"])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if max_age <= 0.0:
+            return False
+        self._perception_model_name = str(provenance.get("model_name", "")) or None
+        self._perception_model_version = str(provenance.get("model_version", "")) or None
+        self._perception_runtime = str(provenance.get("model_runtime", "")) or None
+        self._perception_model_sha256 = digest
+        self._perception_max_age_seconds = max_age
+        return all(
+            (
+                self._perception_model_name,
+                self._perception_model_version,
+                self._perception_runtime,
+            )
+        )
+
+    def apply_perception_result(self, result: InferenceResult) -> int:
+        """Accept only fresh, model-provenance-bound AI results for route costs."""
+        timestamp = result.source_frame_timestamp
+        if timestamp is None:
+            logger.warning("Rejected perception result without a source-frame timestamp")
+            return 0
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=UTC)
+        age_seconds = (datetime.now(UTC) - timestamp).total_seconds()
+        expected_name = getattr(self, "_perception_model_name", None)
+        expected_version = getattr(self, "_perception_model_version", None)
+        expected_runtime = getattr(self, "_perception_runtime", None)
+        expected_digest = getattr(self, "_perception_model_sha256", None)
+        max_age = float(getattr(self, "_perception_max_age_seconds", 2.0))
+        if (
+            age_seconds < 0
+            or age_seconds > max_age
+            or not expected_digest
+            or result.model_name != expected_name
+            or result.model_version != expected_version
+            or result.model_runtime != expected_runtime
+            or result.model_sha256 != expected_digest
+            or not result.input_frame_id
+        ):
+            logger.warning("Rejected stale or unproven perception result")
+            return 0
+        position = self.navigation_state.current_position
+        heading = self.navigation_state.heading
+        if position is None or heading is None:
+            return 0
+        count = self.obstacle_detector.update_semantic_obstacles(
+            result,
+            origin_position=position,
+            heading_deg=float(heading),
+        )
+        self.navigation_state.obstacle_map = list(self.obstacle_detector.detected_obstacles)
+        return count
 
     def apply_safety_limits(self, limits: Any) -> None:
         """Hot-reload navigation-owned safety thresholds from the canonical model."""

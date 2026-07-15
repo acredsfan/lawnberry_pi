@@ -12,6 +12,7 @@ from PIL import Image
 import backend.src.services.camera_stream_service as camera_module
 from backend.src.services.ai_service import AIService
 from backend.src.services.camera_stream_service import CameraStreamService
+from backend.src.services.detector_runtime import DetectorManifest, RuntimeDetection
 
 
 def test_live_camera_socket_path_defaults_to_shared_runtime_directory(monkeypatch):
@@ -93,6 +94,24 @@ async def test_ipc_status_and_frame_responses_are_json_serializable():
     json.dumps(status_response)
     json.dumps(frame_response)
     assert "current_frame" not in status_response["data"]
+
+
+@pytest.mark.asyncio
+async def test_camera_owner_applies_ai_power_gate_and_clears_cached_result():
+    service = CameraStreamService(sim_mode=True)
+    service._latest_ai_result = SimpleNamespace()
+
+    disabled = await service._handle_client_message(
+        {"command": "set_ai_enabled", "enabled": False}
+    )
+
+    assert disabled["data"]["ai_processing_enabled"] is False
+    assert service._latest_ai_result is None
+
+    enabled = await service._handle_client_message(
+        {"command": "set_ai_enabled", "enabled": True}
+    )
+    assert enabled["data"]["ai_processing_enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -244,6 +263,10 @@ async def test_v42_camera_ai_uses_canonical_inference_result():
         task="obstacle_detection",
         model_name="test-detector",
         model_version="1.0",
+        model_runtime="opencv_dnn",
+        model_sha256="a" * 64,
+        timestamp=datetime.now(UTC),
+        source_frame_timestamp=frame.metadata.timestamp,
         total_time_ms=12.5,
         detected_objects=[
             SimpleNamespace(
@@ -253,7 +276,9 @@ async def test_v42_camera_ai_uses_canonical_inference_result():
                 bounding_box=SimpleNamespace(x=0.1, y=0.2, width=0.3, height=0.4),
                 distance_estimate=None,
                 relative_bearing=None,
+                angular_width_degrees=18.6,
                 tracking_id=None,
+                semantic_cost_multiplier=1.5,
             )
         ],
     )
@@ -269,6 +294,11 @@ async def test_v42_camera_ai_uses_canonical_inference_result():
             "inference_id": "inference-1",
             "model_name": "test-detector",
             "model_version": "1.0",
+            "model_runtime": "opencv_dnn",
+            "model_sha256": "a" * 64,
+            "timestamp": result.timestamp.isoformat(),
+            "source_frame_timestamp": frame.metadata.timestamp.isoformat(),
+            "input_frame_id": frame.metadata.frame_id,
             "processing_time_ms": 12.5,
             "objects": [
                 {
@@ -278,7 +308,9 @@ async def test_v42_camera_ai_uses_canonical_inference_result():
                     "bbox": [0.1, 0.2, 0.3, 0.4],
                     "distance_estimate_m": None,
                     "relative_bearing_degrees": None,
+                    "angular_width_degrees": 18.6,
                     "tracking_id": None,
+                    "semantic_cost_multiplier": 1.5,
                 }
             ],
         }
@@ -286,6 +318,7 @@ async def test_v42_camera_ai_uses_canonical_inference_result():
     processor.assert_awaited_once_with(
         b"jpeg-bytes",
         frame_id=frame.metadata.frame_id,
+        source_frame_timestamp=frame.metadata.timestamp,
     )
 
 
@@ -330,6 +363,24 @@ async def test_v42_camera_ai_rejects_mismatched_frame_provenance():
 
 
 @pytest.mark.asyncio
+async def test_camera_ai_rejects_mismatched_source_timestamp():
+    service = CameraStreamService(sim_mode=True)
+    frame = service._create_frame_object(b"jpeg-bytes", (640, 480))
+    processor = AsyncMock(
+        return_value=SimpleNamespace(
+            input_frame_id=frame.metadata.frame_id,
+            source_frame_timestamp=datetime.now(UTC),
+        )
+    )
+    service.set_ai_processor(processor)
+
+    await service._process_frame_for_ai(frame)
+
+    assert frame.processed_for_ai is False
+    assert frame.ai_annotations == []
+
+
+@pytest.mark.asyncio
 async def test_v42_zero_detections_is_a_truthful_processed_result():
     service = CameraStreamService(sim_mode=True)
     frame = service._create_frame_object(b"jpeg-bytes", (640, 480))
@@ -340,6 +391,10 @@ async def test_v42_zero_detections_is_a_truthful_processed_result():
             task="obstacle_detection",
             model_name="test-detector",
             model_version="1.0",
+            model_runtime="opencv_dnn",
+            model_sha256="a" * 64,
+            timestamp=datetime.now(UTC),
+            source_frame_timestamp=frame.metadata.timestamp,
             total_time_ms=4.0,
             detected_objects=[],
         )
@@ -357,7 +412,12 @@ async def test_v42_timed_out_inference_stays_single_flight_and_does_not_mark_fra
     service = CameraStreamService(sim_mode=True)
     release = asyncio.Event()
 
-    async def slow_processor(image_bytes: bytes, *, frame_id: str):
+    async def slow_processor(
+        image_bytes: bytes,
+        *,
+        frame_id: str,
+        source_frame_timestamp=None,
+    ):
         await release.wait()
         return SimpleNamespace(input_frame_id=frame_id)
 
@@ -400,35 +460,34 @@ async def test_v42_real_ai_service_annotates_without_motion_authority(
     monkeypatch.setattr(MotorCommandGateway, "dispatch_drive", dispatch_drive)
     monkeypatch.setattr(MotorCommandGateway, "dispatch_blade", dispatch_blade)
     safety_before = dict(get_safety_state())
-    model_path = tmp_path / "ai-model.json"
-    model_path.write_text(
-        json.dumps(
-            {
-                "model_name": "camera-test-detector",
-                "model_format": "custom",
-                "version": "1.0",
-                "task": "obstacle_detection",
-                "input_width": 64,
-                "input_height": 64,
-                "class_labels": ["obstacle"],
-                "rules": [
-                    {
-                        "class_name": "obstacle",
-                        "min_rgb": [180, 0, 0],
-                        "max_rgb": [255, 120, 120],
-                        "min_area_ratio": 0.01,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    class CameraTestRuntime:
+        manifest = DetectorManifest(
+            model_name="camera-test-detector",
+            model_path=str(tmp_path / "camera.onnx"),
+            input_width=64,
+            input_height=64,
+            class_labels=["obstacle"],
+        )
+        model_path = tmp_path / "camera.onnx"
+        model_sha256 = "c" * 64
+        ready = False
+        last_error = None
+
+        def initialize(self):
+            self.ready = True
+
+        def infer(self, _rgb, _threshold):
+            return [RuntimeDetection("obstacle", 0.9, 0.25, 0.25, 0.5, 0.5)]
     pixels = np.full((64, 64, 3), [20, 160, 20], dtype=np.uint8)
     pixels[16:48, 16:48] = [220, 20, 20]
     image_buffer = io.BytesIO()
     Image.fromarray(pixels, mode="RGB").save(image_buffer, format="JPEG")
 
-    ai_service = AIService(model_path=str(model_path), confidence_threshold=0.2)
+    ai_service = AIService(
+        model_path=str(tmp_path / "ai-detector.json"),
+        confidence_threshold=0.2,
+        detector_runtime=CameraTestRuntime(),
+    )
     await ai_service.initialize()
     service = CameraStreamService(sim_mode=True)
     service.set_ai_processor(ai_service.infer_camera_frame, timeout_seconds=1.0)
@@ -481,7 +540,13 @@ async def test_standalone_main_wires_ai_before_streaming(monkeypatch):
             order.append("ai.initialize")
             return True
 
-        async def infer_camera_frame(self, image_bytes: bytes, *, frame_id: str):
+        async def infer_camera_frame(
+            self,
+            image_bytes: bytes,
+            *,
+            frame_id: str,
+            source_frame_timestamp=None,
+        ):
             return None
 
     class FakeCameraOwner:

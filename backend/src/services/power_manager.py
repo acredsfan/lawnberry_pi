@@ -341,28 +341,40 @@ class PowerManager:
     async def _soft_disable_ai(self) -> None:
         if self._ai_soft_disabled:
             return
-        try:
-            from .ai_service import get_ai_service
-            svc = get_ai_service()
-            if hasattr(svc, "set_enabled"):
-                svc.set_enabled(False)
-                self._ai_soft_disabled = True
-                logger.info("PowerManager: AI inference soft-disabled (idle+dark)")
-        except Exception:
-            pass
+        if await self._set_ai_enabled(False):
+            self._ai_soft_disabled = True
+            logger.info("PowerManager: AI inference soft-disabled (idle+dark)")
 
     async def _reenable_ai_if_disabled(self) -> None:
         if not self._ai_soft_disabled:
             return
+        if await self._set_ai_enabled(True):
+            self._ai_soft_disabled = False
+            logger.info("PowerManager: AI inference re-enabled")
+
+    async def _set_ai_enabled(self, enabled: bool) -> bool:
+        """Apply the power gate to both API state and the live camera owner."""
+        updated = False
         try:
             from .ai_service import get_ai_service
-            svc = get_ai_service()
-            if hasattr(svc, "set_enabled"):
-                svc.set_enabled(True)
-                self._ai_soft_disabled = False
-                logger.info("PowerManager: AI inference re-enabled")
+
+            service = get_ai_service()
+            service.set_enabled(enabled)
+            updated = True
         except Exception:
-            pass
+            logger.debug("PowerManager: local AI gate update failed", exc_info=True)
+        try:
+            from .camera_runtime import camera_service
+
+            setter = getattr(camera_service, "set_ai_enabled", None)
+            if callable(setter):
+                outcome = setter(enabled)
+                if asyncio.iscoroutine(outcome):
+                    await outcome
+                updated = True
+        except Exception:
+            logger.debug("PowerManager: camera-owner AI gate update failed", exc_info=True)
+        return updated
 
     # ------------------------------------------------------------------
     # Public: external trigger to wake GPS immediately

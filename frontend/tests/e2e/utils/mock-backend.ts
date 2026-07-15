@@ -152,17 +152,44 @@ export class MockBackend {
     camera: { active: true, mode: 'rtsp', fps: 20, client_count: 1 },
   }
 
-  private trainingDataset = {
-    totals: {
-      images: 1247,
-      labeled: 892,
-      dataset_bytes: 245.7 * 1024 * 1024,
-      accuracy: 94.2,
+  private aiStatus = {
+    initialized: true,
+    system_enabled: true,
+    model_ready: true,
+    active_model_name: 'lawnberry-obstacle-detector',
+    runtime: 'opencv_dnn',
+    execution_owner: 'backend',
+    model_sha256: 'a'.repeat(64),
+    last_error: null,
+  }
+
+  private perceptionSnapshot: any = {
+    available: true,
+    fresh: true,
+    reason_code: null,
+    result_age_seconds: 0.2,
+    max_result_age_seconds: 2,
+    route_cost_obstacle_count: 1,
+    result: {
+      inference_id: 'inference-1',
+      input_frame_id: 'frame-1',
+      timestamp: new Date().toISOString(),
+      detected_objects: [
+        {
+          object_id: 'object-1',
+          class_name: 'person',
+          confidence: 0.96,
+          distance_estimate: 2.1,
+          relative_bearing: -4.5,
+          semantic_cost_multiplier: 3,
+        },
+      ],
+      total_time_ms: 42.5,
+      model_name: 'lawnberry-obstacle-detector',
+      model_version: '1.0',
+      model_runtime: 'opencv_dnn',
+      model_sha256: 'a'.repeat(64),
     },
-    categories: [
-      { name: 'grass', count: 456, labeled: 398 },
-      { name: 'obstacles', count: 234, labeled: 187 },
-    ],
   }
 
   public readonly emergencyCalls: any[] = []
@@ -171,7 +198,7 @@ export class MockBackend {
 
   public lastSavedConfiguration: any = null
 
-  public readonly trainingRequests: any[] = []
+  public readonly inferenceRequests: any[] = []
 
   private applyMapEnvelope(env: any) {
     const zones = Array.isArray(env?.zones) ? env.zones : []
@@ -186,7 +213,10 @@ export class MockBackend {
           // Drop duplicated closing coordinate if present
           if (index === arr.length - 1 && arr.length > 1) {
             const first = arr[0]
-            return !(Math.abs(first.latitude - point.latitude) < 1e-12 && Math.abs(first.longitude - point.longitude) < 1e-12)
+            return !(
+              Math.abs(first.latitude - point.latitude) < 1e-12 &&
+              Math.abs(first.longitude - point.longitude) < 1e-12
+            )
           }
           return true
         })
@@ -257,8 +287,12 @@ export class MockBackend {
     this.mapConfiguration = { ...this.mapConfiguration, ...partial }
   }
 
-  setTrainingDataset(summary: any) {
-    this.trainingDataset = { ...this.trainingDataset, ...summary }
+  setAIStatus(status: any) {
+    this.aiStatus = { ...this.aiStatus, ...status }
+  }
+
+  setPerceptionSnapshot(snapshot: any) {
+    this.perceptionSnapshot = { ...this.perceptionSnapshot, ...snapshot }
   }
 
   setMapSettings(partial: Partial<(typeof this.settingsState)['maps']>) {
@@ -266,84 +300,91 @@ export class MockBackend {
   }
 
   async attach(page: Page) {
-    await page.addInitScript((script) => {
-      class FakeWebSocket {
-        public onopen: ((event: any) => void) | null = null
-        public onmessage: ((event: { data: string }) => void) | null = null
-        public onclose: ((event: any) => void) | null = null
-        public onerror: ((event: any) => void) | null = null
-        public readyState = 0
-        private readonly recordedMessages: string[] = []
-	public readonly url: string
-        private pendingMessages: Array<{ topic?: string; payload: string; delay: number }>
+    await page.addInitScript(
+      (script) => {
+        class FakeWebSocket {
+          public onopen: ((event: any) => void) | null = null
+          public onmessage: ((event: { data: string }) => void) | null = null
+          public onclose: ((event: any) => void) | null = null
+          public onerror: ((event: any) => void) | null = null
+          public readyState = 0
+          private readonly recordedMessages: string[] = []
+          public readonly url: string
+          private pendingMessages: Array<{ topic?: string; payload: string; delay: number }>
 
-        constructor(url: string) {
-          this.url = url
-          this.pendingMessages = []
-          const registry = (window as any).__FAKE_WEBSOCKETS__ || []
-          registry.push(this)
-          ;(window as any).__FAKE_WEBSOCKETS__ = registry
-          setTimeout(() => {
-            this.readyState = 1
-            this.onopen?.({ target: this })
-            for (const entry of script.messages) {
-              const payload = JSON.stringify(entry.message)
-              const delay = entry.delayMs ?? 0
-              const topic = (entry.message as any)?.topic
-              const event = (entry.message as any)?.event
-              if (!topic || event === 'connection.established' || event === 'subscription.confirmed') {
-                this.dispatch(payload, delay)
-              } else {
-                this.pendingMessages.push({ topic, payload, delay })
-              }
-            }
-          }, script.handshakeDelayMs)
-        }
-
-        send(payload: string) {
-          this.recordedMessages.push(payload)
-          try {
-            const parsed = JSON.parse(payload)
-            if (parsed?.type === 'ping') {
-              setTimeout(() => {
-                this.onmessage?.({ data: JSON.stringify({ event: 'pong' }) })
-              }, 10)
-            }
-            if (parsed?.type === 'subscribe') {
-              const topic = parsed.topic
-              const remaining: Array<{ topic?: string; payload: string; delay: number }> = []
-              for (const entry of this.pendingMessages) {
-                if (!topic || entry.topic === topic) {
-                  this.dispatch(entry.payload, entry.delay)
+          constructor(url: string) {
+            this.url = url
+            this.pendingMessages = []
+            const registry = (window as any).__FAKE_WEBSOCKETS__ || []
+            registry.push(this)
+            ;(window as any).__FAKE_WEBSOCKETS__ = registry
+            setTimeout(() => {
+              this.readyState = 1
+              this.onopen?.({ target: this })
+              for (const entry of script.messages) {
+                const payload = JSON.stringify(entry.message)
+                const delay = entry.delayMs ?? 0
+                const topic = (entry.message as any)?.topic
+                const event = (entry.message as any)?.event
+                if (
+                  !topic ||
+                  event === 'connection.established' ||
+                  event === 'subscription.confirmed'
+                ) {
+                  this.dispatch(payload, delay)
                 } else {
-                  remaining.push(entry)
+                  this.pendingMessages.push({ topic, payload, delay })
                 }
               }
-              this.pendingMessages = remaining
+            }, script.handshakeDelayMs)
+          }
+
+          send(payload: string) {
+            this.recordedMessages.push(payload)
+            try {
+              const parsed = JSON.parse(payload)
+              if (parsed?.type === 'ping') {
+                setTimeout(() => {
+                  this.onmessage?.({ data: JSON.stringify({ event: 'pong' }) })
+                }, 10)
+              }
+              if (parsed?.type === 'subscribe') {
+                const topic = parsed.topic
+                const remaining: Array<{ topic?: string; payload: string; delay: number }> = []
+                for (const entry of this.pendingMessages) {
+                  if (!topic || entry.topic === topic) {
+                    this.dispatch(entry.payload, entry.delay)
+                  } else {
+                    remaining.push(entry)
+                  }
+                }
+                this.pendingMessages = remaining
+              }
+            } catch (error) {
+              console.warn('FakeWebSocket failed to parse payload', error)
             }
-          } catch (error) {
-            console.warn('FakeWebSocket failed to parse payload', error)
+          }
+
+          close() {
+            this.readyState = 3
+            this.onclose?.({})
+          }
+
+          get sentMessages() {
+            return this.recordedMessages
+          }
+
+          private dispatch(payload: string, delay: number) {
+            setTimeout(() => {
+              this.onmessage?.({ data: payload })
+            }, delay)
           }
         }
 
-        close() {
-          this.readyState = 3
-          this.onclose?.({})
-        }
-
-        get sentMessages() {
-          return this.recordedMessages
-        }
-
-        private dispatch(payload: string, delay: number) {
-          setTimeout(() => {
-            this.onmessage?.({ data: payload })
-          }, delay)
-        }
-      }
-
-      (window as any).WebSocket = FakeWebSocket
-    }, { messages: this.wsScript, handshakeDelayMs: 25 })
+        ;(window as any).WebSocket = FakeWebSocket
+      },
+      { messages: this.wsScript, handshakeDelayMs: 25 }
+    )
 
     await page.route('**/api/**', (route, request) => this.handleRequest(route, request))
   }
@@ -509,13 +550,21 @@ export class MockBackend {
       })
     }
 
-    if (method === 'GET' && pathname === '/api/v2/training/dataset') {
-      return respond(200, this.trainingDataset)
+    if (method === 'GET' && pathname === '/api/v2/ai/status') {
+      return respond(200, this.aiStatus)
     }
 
-    if (method === 'POST' && pathname === '/api/v2/training/start') {
-      this.trainingRequests.push({ type: 'start', payload: body })
-      return respond(200, { ok: true, job_id: `train-${Date.now()}` })
+    if (method === 'GET' && pathname === '/api/v2/ai/perception/latest') {
+      return respond(200, this.perceptionSnapshot)
+    }
+
+    if (method === 'GET' && pathname === '/api/v2/ai/results/recent') {
+      return respond(200, this.perceptionSnapshot.result ? [this.perceptionSnapshot.result] : [])
+    }
+
+    if (method === 'POST' && pathname === '/api/v2/ai/inference/latest') {
+      this.inferenceRequests.push({ type: 'latest', payload: body })
+      return respond(200, this.perceptionSnapshot.result)
     }
 
     if (pathname === '/api/v2/map/configuration' && method === 'GET') {
@@ -536,7 +585,10 @@ export class MockBackend {
             name: poly?.name ?? `Zone ${idx + 1}`,
             zone_type: 'mow',
             polygon: Array.isArray(poly?.points)
-              ? poly.points.map((pt: any) => ({ latitude: pt?.lat ?? pt?.latitude, longitude: pt?.lon ?? pt?.longitude }))
+              ? poly.points.map((pt: any) => ({
+                  latitude: pt?.lat ?? pt?.latitude,
+                  longitude: pt?.lon ?? pt?.longitude,
+                }))
               : [],
           }))
         : this.mapConfiguration.mowing_zones

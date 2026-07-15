@@ -31,12 +31,14 @@ function getOrCreateClientId(): string {
   return randomId
 }
 
-const PRIMARY_API_BASE = typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_API_BASE_URL
-  ? (import.meta as any).env.VITE_API_BASE_URL
-  : '/api/v2'
-const FALLBACK_API_BASE = typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_API_FALLBACK_BASE
-  ? (import.meta as any).env.VITE_API_FALLBACK_BASE
-  : '/api'
+const PRIMARY_API_BASE =
+  typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_API_BASE_URL
+    ? (import.meta as any).env.VITE_API_BASE_URL
+    : '/api/v2'
+const FALLBACK_API_BASE =
+  typeof import.meta !== 'undefined' && (import.meta as any)?.env?.VITE_API_FALLBACK_BASE
+    ? (import.meta as any).env.VITE_API_FALLBACK_BASE
+    : '/api'
 const clientId = getOrCreateClientId()
 
 // Create axios instance with base configuration
@@ -68,7 +70,7 @@ apiClient.interceptors.response.use(
       try {
         const response = await authApi.refresh()
         localStorage.setItem('auth_token', response.access_token)
-        
+
         // Retry original request
         const originalRequest = error.config
         originalRequest.headers.Authorization = `Bearer ${response.access_token}`
@@ -106,7 +108,9 @@ export const authApi = {
       return response.data
     } catch (error: any) {
       if (shouldAttemptFallback(error)) {
-        const response = await apiClient.post('/auth/login', credentials, { baseURL: FALLBACK_API_BASE })
+        const response = await apiClient.post('/auth/login', credentials, {
+          baseURL: FALLBACK_API_BASE,
+        })
         return response.data
       }
       throw error
@@ -128,7 +132,9 @@ export const authApi = {
       return response.data
     } catch (error: any) {
       if (!shouldAttemptFallback(error)) throw error
-      const response = await apiClient.post('/auth/refresh', undefined, { baseURL: FALLBACK_API_BASE })
+      const response = await apiClient.post('/auth/refresh', undefined, {
+        baseURL: FALLBACK_API_BASE,
+      })
       return response.data
     }
   },
@@ -145,7 +151,7 @@ export const authApi = {
   },
 }
 
-// System API endpoints  
+// System API endpoints
 export const systemApi = {
   getStatus: async () => {
     const response = await apiClient.get('/dashboard/status')
@@ -291,7 +297,7 @@ export const telemetryApi = {
     const params = new URLSearchParams()
     if (startTime) params.append('start_time', startTime)
     if (endTime) params.append('end_time', endTime)
-    
+
     const response = await apiClient.get(`/telemetry/history?${params}`)
     return response.data
   },
@@ -301,9 +307,9 @@ export const telemetryApi = {
     params.append('format', format)
     if (startTime) params.append('start_time', startTime)
     if (endTime) params.append('end_time', endTime)
-    
+
     const response = await apiClient.get(`/telemetry/export?${params}`, {
-      responseType: 'blob'
+      responseType: 'blob',
     })
     return response.data
   },
@@ -316,30 +322,18 @@ export const aiApi = {
     return response.data
   },
 
-  startTraining: async (trainingConfig: any) => {
-    const response = await apiClient.post('/ai/training/start', trainingConfig)
+  getLatestPerception: async () => {
+    const response = await apiClient.get('/ai/perception/latest')
     return response.data
   },
 
-  stopTraining: async () => {
-    const response = await apiClient.post('/ai/training/stop')
+  getRecentResults: async (limit = 10) => {
+    const response = await apiClient.get('/ai/results/recent', { params: { limit } })
     return response.data
   },
 
-  getTrainingStatus: async () => {
-    const response = await apiClient.get('/ai/training/status')
-    return response.data
-  },
-
-  uploadTrainingData: async (file: File) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    
-    const response = await apiClient.post('/ai/training/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
-    })
+  inferLatestFrame: async () => {
+    const response = await apiClient.post('/ai/inference/latest')
     return response.data
   },
 }
@@ -356,7 +350,7 @@ export const maintenanceApi = {
         const response = await apiClient.post(
           '/maintenance/imu/calibrate',
           {},
-          { baseURL: FALLBACK_API_BASE, timeout: 30000 },
+          { baseURL: FALLBACK_API_BASE, timeout: 30000 }
         )
         return response.data
       }
@@ -375,7 +369,9 @@ export const maintenanceApi = {
       return response.data
     } catch (error: any) {
       if (shouldAttemptFallback(error)) {
-        const response = await apiClient.get('/maintenance/imu/calibrate', { baseURL: FALLBACK_API_BASE })
+        const response = await apiClient.get('/maintenance/imu/calibrate', {
+          baseURL: FALLBACK_API_BASE,
+        })
         return response.data
       }
       if (error?.response?.status === 404) {
