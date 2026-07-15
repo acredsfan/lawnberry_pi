@@ -1,14 +1,14 @@
 """Test Cloudflare Access authentication bypass in login flow."""
 
 import pytest
-from backend.src.models.auth_security_config import SecurityLevel, AuthSecurityConfig
+
+from backend.src.models.auth_security_config import AuthSecurityConfig, SecurityLevel
 
 
 @pytest.mark.asyncio
 async def test_cloudflare_bypass_skips_login_when_valid_headers_present(test_client, monkeypatch):
     """Test that valid Cloudflare Access headers skip the login screen."""
     # Create a mock Cloudflare-enabled security config
-    from backend.src.api import routers
     cf_config = AuthSecurityConfig(security_level=SecurityLevel.TUNNEL_AUTH)
     cf_config.tunnel_auth_enabled = True
     

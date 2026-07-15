@@ -5,8 +5,10 @@ Run: SIM_MODE=1 uv run pytest tests/unit/test_settings_repository.py -v
 """
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from backend.src.repositories.settings_repository import SettingsRepository
 
 

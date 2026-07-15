@@ -8,7 +8,8 @@ from pathlib import Path
 
 def test_hil_probe_generates_csv_and_ranges():
     # Run the probe for a very short time in SIM mode and parse CSV
-    import subprocess, sys
+    import subprocess
+    import sys
 
     out_fd, out_path = tempfile.mkstemp(prefix="hil_", suffix=".csv")
     os.close(out_fd)

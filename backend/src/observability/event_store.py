@@ -6,7 +6,7 @@ import logging
 from dataclasses import asdict
 from typing import Any
 
-from .events import DomainEvent, PersistenceMode, SUMMARY_MODE_EVENTS
+from .events import SUMMARY_MODE_EVENTS, DomainEvent, PersistenceMode
 
 logger = logging.getLogger(__name__)
 

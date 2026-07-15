@@ -11,8 +11,8 @@ import logging
 import sqlite3
 import threading
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
 from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)

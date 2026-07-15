@@ -1,9 +1,8 @@
 """Test custom password configuration in login flow."""
 
-import pytest
-import json
 import re
-from backend.src.models.auth_security_config import SecurityLevel
+
+import pytest
 
 
 def _extract_token_from_login_response(login_response):

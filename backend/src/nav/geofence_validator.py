@@ -15,7 +15,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from shapely.geometry import Polygon  # type: ignore
 
 from ..models import Geofence, LatLng
-from .geoutils import latlon_to_enu, enu_to_latlon
+from .geoutils import enu_to_latlon, latlon_to_enu
 
 
 @dataclass(frozen=True)

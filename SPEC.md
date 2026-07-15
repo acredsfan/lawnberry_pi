@@ -94,6 +94,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | V53 | Scheduled job occurrences must be durable and idempotent; multi-zone jobs own ordered child missions and blade-off inter-zone transit, terminal truth aggregates from those missions, and failed admission cannot create retrying orphan missions |
 | V54 | Runtime/UI truth must expose deployed build SHA and sample age/source; missing numeric telemetry stays unknown, inert services cannot report healthy work, and unsupported features are hidden or explicitly unavailable |
 | V55 | Critical autonomy, GPS-loss, power, perception, and operator-control flows must have non-placeholder blocking tests; OpenAPI operation IDs stay unique, generated schema stays current, and repository lint is clean |
+| V56 | Response sanitization must preserve intentional signed-token fields on authentication exchange routes while continuing to redact unrelated secrets; issued tokens must work for unlock and refresh |
 
 ---
 
@@ -148,7 +149,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T45 | x | Build real detector runtime, typed perception stream, semantic costs, and truthful AI console | V50, V51, I.api, I.ws, I.fe, I.perception |
 | T46 | x | Make telemetry, planning, readiness, power, connection, and build UI truthful | V48, V54, I.fe, I.api, I.ws |
 | T47 | x | Remove green-but-inert services and unsupported API/ops success paths | V54, I.ops, I.api |
-| T48 | . | Replace critical placeholder tests, run frontend tests in CI, fix OpenAPI IDs, and clean lint | V55, I.api, I.fe, I.ops |
+| T48 | x | Replace critical placeholder tests, run frontend tests in CI, fix OpenAPI IDs, and clean lint | V55, V56, I.api, I.fe, I.ops |
 | T49 | . | Update OpenAPI, hardware/runtime docs, structure overview, and qualification handoff | V43–V55, I.api, I.ops |
 
 ---
@@ -218,3 +219,4 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | B59 | 2026-07-15 | UI converted missing power to zero, showed fabricated weather/history/patterns, and lacked live build/freshness truth | V48, V54, T46 |
 | B60 | 2026-07-15 | Enabled sensor systemd unit only slept forever while backend owned sensors, producing green-but-inert service health | V54, T47 |
 | B61 | 2026-07-15 | Critical autonomous/GPS/UI tests were skipped placeholders, frontend CI skipped tests, OpenAPI IDs collided, and full Ruff had 136 errors | V55, T48 |
+| B62 | 2026-07-15 | Global response sanitization replaced login and refresh tokens with redaction markers, breaking authenticated manual unlock and token refresh | V56, T48 |

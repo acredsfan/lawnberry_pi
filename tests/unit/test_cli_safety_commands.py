@@ -2,8 +2,8 @@ import pytest
 
 from backend.src.api.rest import _safety_state
 from backend.src.cli import safety_commands
-from backend.src.core.globals import _blade_state, _client_emergency
 from backend.src.control.command_gateway import MotorCommandGateway
+from backend.src.core.globals import _blade_state, _client_emergency
 from backend.src.core.runtime import RuntimeContext
 from backend.src.main import app as fastapi_app
 

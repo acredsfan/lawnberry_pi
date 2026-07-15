@@ -2,8 +2,8 @@ import pytest
 
 pytest.importorskip("shapely")
 
-from backend.src.nav.obstacle_avoidance import plan_path_astar, AStarConfig
 from backend.src.models import Position
+from backend.src.nav.obstacle_avoidance import AStarConfig, plan_path_astar
 
 
 def square(lat0=0.0, lon0=0.0, width_m=20.0):

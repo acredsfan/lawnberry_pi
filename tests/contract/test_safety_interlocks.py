@@ -1,5 +1,6 @@
 import pytest
 
+
 def test_interlock_blocks_motor_operations():
     try:
         from backend.src.safety.interlock_validator import InterlockActiveError, InterlockValidator

@@ -1,165 +1,131 @@
-"""Integration test for manual control gated by MFA authentication."""
+"""Manual motion authentication and fail-safe control contracts."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
 
+from backend.src.core.globals import _manual_control_sessions
+from backend.src.main import app
 
-def _drive_payload(session_id: str, linear: float, angular: float) -> dict:
-    return {
-        "session_id": session_id,
-        "vector": {"linear": linear, "angular": angular},
+
+def _drive_payload(session_id: str | None) -> dict:
+    payload = {
+        "vector": {"linear": 0.2, "angular": 0.0},
         "duration_ms": 250,
     }
+    if session_id is not None:
+        payload["session_id"] = session_id
+    return payload
+
+
+async def _login_and_unlock(client: httpx.AsyncClient) -> tuple[str, str]:
+    login = await client.post("/api/v2/auth/login", json={"credential": "operator123"})
+    assert login.status_code == 200, login.text
+    token = login.json()["token"]
+    unlock = await client.post(
+        "/api/v2/control/manual-unlock",
+        headers={"Authorization": f"Bearer {token}"},
+        json={},
+    )
+    assert unlock.status_code == 200, unlock.text
+    return token, unlock.json()["session_id"]
+
+
+@pytest.fixture(autouse=True)
+def _hardware_auth_boundary(monkeypatch):
+    monkeypatch.setenv("SIM_MODE", "0")
+    _manual_control_sessions.clear()
+    yield
+    _manual_control_sessions.clear()
 
 
 @pytest.mark.asyncio
-async def test_manual_control_requires_authentication():
-    """Test that manual control endpoints require valid authentication."""
-    from backend.src.main import app
-    
+async def test_manual_drive_rejects_missing_or_invalid_session() -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        
-        # Test drive control without auth - should fail
-        drive_command = _drive_payload("auth-required", 0.5, 0.2)
-        
-        # Current implementation may not enforce auth yet - this is TDD
-        response = await client.post("/api/v2/control/drive", json=drive_command)
-        
-        # When auth is properly implemented, this should be 401 Unauthorized
-        # For now, we document the expected behavior
-        if response.status_code == 200:
-            pytest.skip("Auth enforcement not yet implemented - TDD test")
-        else:
-            assert response.status_code in {401, 202}, "Should require authentication once enforced"
+        missing = await client.post("/api/v2/control/drive", json=_drive_payload(None))
+        invalid = await client.post(
+            "/api/v2/control/drive", json=_drive_payload("not-an-authorized-session")
+        )
+
+    assert missing.status_code in {400, 401}
+    assert invalid.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_manual_control_with_valid_mfa():
-    """Test that manual control works with valid MFA token."""
-    from backend.src.main import app
-    
+async def test_authenticated_manual_unlock_authorizes_drive() -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        
-        # First, authenticate with MFA
-        auth_payload = {"credential": "operator123"}
-        auth_response = await client.post("/api/v2/auth/login", json=auth_payload)
-        assert auth_response.status_code == 200
-        
-        auth_data = auth_response.json()
-        token = auth_data.get("access_token") or auth_data.get("token")
-        
-        # Use token for manual control
-        headers = {"Authorization": f"Bearer {token}"}
-        
-        drive_command = _drive_payload("valid-mfa", 0.3, -0.1)
-        
-        # This test currently passes because auth isn't enforced yet
-        # When implemented, this should verify proper auth flow
-        response = await client.post("/api/v2/control/drive", json=drive_command, headers=headers)
-        
-        # Should succeed with valid auth
-        assert response.status_code in [200, 202], "Should accept command with valid auth"
+        _token, session_id = await _login_and_unlock(client)
+        response = await client.post(
+            "/api/v2/control/drive", json=_drive_payload(session_id)
+        )
+
+    assert response.status_code == 202, response.text
+    assert response.json()["accepted"] is True
 
 
 @pytest.mark.asyncio
-async def test_blade_control_requires_mfa():
-    """Test that blade control specifically requires MFA authentication."""
-    from backend.src.main import app
-    
+async def test_blade_enable_requires_session_before_qualification() -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        
-        blade_command = {"active": True}
-        
-        # Test without auth - should fail when implemented
-        response = await client.post("/api/v2/control/blade", json=blade_command)
-        
-        if response.status_code == 200:
-            pytest.skip("Blade auth enforcement not yet implemented - TDD test")
-        if response.status_code == 409 and "qualification_required" in response.text:
-            pytest.skip("Qualification gate blocks blade enable before MFA enforcement")
-        else:
-            assert response.status_code == 401, "Blade control should require auth"
+        unauthenticated = await client.post(
+            "/api/v2/control/blade", json={"active": True}
+        )
+        _token, session_id = await _login_and_unlock(client)
+        authenticated = await client.post(
+            "/api/v2/control/blade",
+            json={"active": True, "session_id": session_id},
+        )
+
+    assert unauthenticated.status_code == 401
+    assert authenticated.status_code == 409
+    assert "qualification_required" in authenticated.text
 
 
 @pytest.mark.asyncio
-async def test_emergency_stop_always_accessible():
-    """Test that emergency stop is accessible even without full auth."""
-    from backend.src.main import app
-    
+async def test_blade_disable_and_emergency_stop_remain_fail_safe_without_auth() -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        
-        # Emergency stop should work without authentication for safety
-        response = await client.post("/api/v2/control/emergency-stop")
-        
-        # Should always succeed for safety reasons
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert "emergency_stop_active" in data
-        assert data["emergency_stop_active"] is True
+        blade_off = await client.post("/api/v2/control/blade", json={"active": False})
+        emergency = await client.post("/api/v2/control/emergency-stop")
+
+    assert blade_off.status_code == 200
+    assert emergency.status_code == 200
+    assert emergency.json()["emergency_stop_active"] is True
 
 
 @pytest.mark.asyncio
-async def test_mfa_token_expiration():
-    """Test that MFA tokens expire and require refresh."""
-    from backend.src.main import app
-    
+async def test_bearer_token_refresh_returns_a_new_valid_token() -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        
-        # Get a token
-        auth_payload = {"credential": "operator123"}
-        auth_response = await client.post("/api/v2/auth/login", json=auth_payload)
-        assert auth_response.status_code == 200
-        
-        auth_data = auth_response.json()
-        expires_in = auth_data.get("expires_in", 3600)
-        
-        # Verify token has reasonable expiration
-        assert expires_in > 0, "Token should have positive expiration"
-        assert expires_in <= 86400, "Token should not be valid for more than 24 hours"
-        
-        # Test refresh endpoint
-        refresh_response = await client.post("/api/v2/auth/refresh")
-        
-        if refresh_response.status_code == 200:
-            refresh_data = refresh_response.json()
-            assert "access_token" in refresh_data or "token" in refresh_data
-        else:
-            # Refresh not yet implemented
-            pytest.skip("Token refresh not yet implemented - TDD test")
+        token, _session_id = await _login_and_unlock(client)
+        refreshed = await client.post(
+            "/api/v2/auth/refresh",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["token"]
+    assert refreshed.json()["expires_in"] > 0
 
 
 @pytest.mark.asyncio
-async def test_concurrent_manual_control_sessions():
-    """Test behavior with multiple concurrent manual control sessions."""
-    from backend.src.main import app
-    
+async def test_expired_manual_session_is_rejected() -> None:
     transport = httpx.ASGITransport(app=app)
-    
-    # Create two client sessions
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client1:
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client2:
-            
-            # Both authenticate
-            auth_payload = {"credential": "operator123"}
-            
-            auth1 = await client1.post("/api/v2/auth/login", json=auth_payload)
-            auth2 = await client2.post("/api/v2/auth/login", json=auth_payload)
-            
-            assert auth1.status_code == 200
-            assert auth2.status_code == 200
-            
-            # Both try to send control commands simultaneously
-            drive_cmd = _drive_payload("concurrent-manual", 0.2, 0.0)
-            
-            response1 = await client1.post("/api/v2/control/drive", json=drive_cmd)
-            response2 = await client2.post("/api/v2/control/drive", json=drive_cmd)
-            
-            # Both should be accepted (or system should handle conflicts gracefully)
-            assert response1.status_code in [200, 202, 409]  # 409 = conflict
-            assert response2.status_code in [200, 202, 409]
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        _token, session_id = await _login_and_unlock(client)
+        entry = next(
+            entry
+            for entry in _manual_control_sessions.values()
+            if entry["session_id"] == session_id
+        )
+        entry["expires_at"] = datetime.now(UTC) - timedelta(seconds=1)
+        response = await client.post(
+            "/api/v2/control/drive", json=_drive_payload(session_id)
+        )
+
+    assert response.status_code == 401

@@ -16,7 +16,6 @@ import pytest
 
 from backend.src.repositories.map_repository import MapRepository
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

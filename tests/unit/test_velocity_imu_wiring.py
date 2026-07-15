@@ -1,6 +1,7 @@
 """Tests for velocity field IMU wiring."""
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 
 def _get_velocity(imu_gyro_x=0.1, imu_gyro_y=0.2):

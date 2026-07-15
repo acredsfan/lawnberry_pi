@@ -19,7 +19,7 @@ if TYPE_CHECKING:  # pragma: no cover - import only for type checking
     pass  # type: ignore
 
 from ..models import Position, Waypoint
-from .geoutils import latlon_to_enu, enu_to_latlon
+from .geoutils import enu_to_latlon, latlon_to_enu
 
 
 @dataclass(frozen=True)

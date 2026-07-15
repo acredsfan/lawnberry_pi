@@ -1,5 +1,4 @@
 """Tests for BUG-009: LAWN_BERRY_OPERATOR_CREDENTIAL must be required at startup."""
-import os
 import pytest
 
 

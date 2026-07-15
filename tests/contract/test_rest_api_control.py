@@ -109,31 +109,30 @@ async def test_get_encoder_status_endpoint_returns_robohat_encoder_fields():
         assert field in payload, f"Missing field {field}"
 
 
-@pytest.mark.xfail(reason="pre-existing on main: asserts 'OBSTACLE_DETECTED' but reads 'TELEMETRY_UNAVAILABLE' — interlock ordering issue; tracked for CI cleanup.")
 @pytest.mark.asyncio
 async def test_post_drive_command_blocks_when_obstacle_detected(monkeypatch):
     transport = httpx.ASGITransport(app=app)
     monkeypatch.setenv("SIM_MODE", "0")
 
-    async def fake_telemetry():
-        # Use a distance clearly below whatever the configured obstacle threshold is
-        from backend.src.core.config_loader import ConfigLoader
-        _, safety = ConfigLoader().get()
-        threshold_m = safety.tof_obstacle_distance_meters
-        obstacle_distance_mm = threshold_m * 1000 * 0.5  # half the threshold — definitely blocked
-        return {
-            "source": "hardware",
-            "timestamp": datetime.now(UTC).isoformat(),
-            "position": {
-                "latitude": 39.0,
-                "longitude": -84.0,
-                "accuracy": 0.2,
-            },
-            "tof": {
-                "left": {"distance_mm": obstacle_distance_mm},
-                "right": {"distance_mm": 500.0},
-            },
-        }
+    from backend.src.core.config_loader import ConfigLoader
+    from backend.src.core.runtime import get_runtime
+    from backend.src.core.state_manager import AppState
+
+    _, safety = ConfigLoader().get()
+    obstacle_distance_mm = safety.tof_obstacle_distance_meters * 1000 * 0.5
+    telemetry = {
+        "source": "hardware",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "position": {
+            "latitude": 39.0,
+            "longitude": -84.0,
+            "accuracy": 0.2,
+        },
+        "tof": {
+            "left": {"distance_mm": obstacle_distance_mm},
+            "right": {"distance_mm": 500.0},
+        },
+    }
 
     async def fake_send_motor_command(_left: float, _right: float) -> bool:
         raise AssertionError("drive command should not reach RoboHAT while obstacle interlock is active")
@@ -143,7 +142,9 @@ async def test_post_drive_command_blocks_when_obstacle_detected(monkeypatch):
         send_motor_command=fake_send_motor_command,
     )
 
-    monkeypatch.setattr(rest_api.websocket_hub, "_generate_telemetry", fake_telemetry)
+    runtime = app.dependency_overrides[get_runtime]()
+    runtime.command_gateway._robohat = fake_robohat
+    monkeypatch.setattr(AppState.get_instance(), "last_telemetry", telemetry)
     monkeypatch.setattr(robohat_module, "get_robohat_service", lambda: fake_robohat)
     monkeypatch.setattr(rest_api, "_resolve_manual_session", lambda _session_id: {"principal": "operator"})
 
@@ -175,7 +176,7 @@ async def test_post_blade_command_surfaces_lockout_reason():
 
         response = await client.post(
             "/api/v2/control/blade",
-            json={"active": True},
+            json={"active": True, "session_id": _session_id()},
         )
 
         # Emergency stop blocks blade engagement — 409 Conflict

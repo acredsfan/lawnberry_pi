@@ -95,16 +95,14 @@ def health_api_v2(request: Request = None) -> dict:
     return _service_for_request(request).evaluate()
 
 
-@router.get("/api/v2/health/liveness")
 def health_liveness() -> dict:
-    """Simple liveness probe for container orchestration."""
+    """Compatibility helper; the routed probe is owned by maintenance.py."""
 
     return {"status": "alive"}
 
 
-@router.get("/api/v2/health/readiness")
 def health_readiness(request: Request = None) -> dict:
-    """Readiness probe including subsystem rollup."""
+    """Compatibility helper for direct callers of the aggregate report."""
 
     report = _service_for_request(request).evaluate()
     return {

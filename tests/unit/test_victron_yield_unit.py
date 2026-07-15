@@ -1,6 +1,4 @@
 """Tests for Victron yield_today unit handling."""
-import pytest
-from unittest.mock import MagicMock
 
 
 def _make_driver(cfg=None):

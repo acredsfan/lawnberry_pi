@@ -36,11 +36,12 @@ def client_with_ticks():
     same singleton recorded in app.state.runtime.navigation. Ticks are run via
     asyncio so the async update_navigation_state coroutine is awaited correctly.
     """
-    from backend.src.main import app
-    from backend.src.core.runtime import get_runtime
-    from backend.src.core.observability import observability
-    from backend.src.models.sensor_data import GpsReading, SensorData
     from fastapi.testclient import TestClient
+
+    from backend.src.core.observability import observability
+    from backend.src.core.runtime import get_runtime
+    from backend.src.main import app
+    from backend.src.models.sensor_data import GpsReading, SensorData
 
     # Reset metrics so only ticks from this fixture appear in the budget check.
     observability.reset_events_for_testing()

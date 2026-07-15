@@ -9,14 +9,11 @@ Fix: use Response(status_code=304) which produces an empty body (b""), matching
 uvicorn's expectation for 304.
 """
 
-import hashlib
-import json
 
 import pytest
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from starlette.responses import Response
-
 
 # ---------------------------------------------------------------------------
 # Unit tests – verify the response objects directly

@@ -1,6 +1,7 @@
 """Tests for nav_heading fallback to IMU yaw."""
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 
 def _make_service():

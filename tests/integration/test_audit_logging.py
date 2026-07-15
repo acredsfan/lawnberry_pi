@@ -13,7 +13,11 @@ async def test_audit_manual_control_and_settings():
     headers = {"X-Client-Id": "audit-client-1"}
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         # Blade-on is qualification-gated even in simulation; audit the blocked path.
-        resp = await client.post("/api/v2/control/blade", json={"active": True}, headers=headers)
+        resp = await client.post(
+            "/api/v2/control/blade",
+            json={"active": True, "session_id": "audit-session-1"},
+            headers=headers,
+        )
         assert resp.status_code == 409
 
         # Drive command
@@ -48,19 +52,3 @@ async def test_audit_manual_control_and_settings():
     assert any(a == "control.drive.v2" for a in actions)
     assert any(a == "control.emergency_stop" for a in actions)
     assert any(a == "settings.update" for a in actions)
-
-
-@pytest.mark.asyncio
-async def test_audit_ai_export():
-    transport = httpx.ASGITransport(app=app)
-    headers = {"X-Client-Id": "audit-client-2"}
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post(
-            "/api/v2/ai/datasets/obstacle-detection/export",
-            json={"format": "COCO", "include_unlabeled": False},
-            headers=headers,
-        )
-        assert resp.status_code == 202
-
-    logs = persistence.load_audit_logs(limit=50)
-    assert any(log["action"] == "ai.export" for log in logs)

@@ -4,9 +4,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from backend.src.models.diagnostics_capture import (
+    CAPTURE_SCHEMA_VERSION,
     CaptureRecord,
     NavigationStateSnapshot,
-    CAPTURE_SCHEMA_VERSION,
 )
 from backend.src.models.navigation_state import NavigationMode, PathStatus, Position
 from backend.src.models.sensor_data import GpsReading, ImuReading, SensorData

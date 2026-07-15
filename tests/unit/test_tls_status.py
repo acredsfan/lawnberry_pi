@@ -15,15 +15,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from backend.src.core.tls_status import (
     _detect_le_cert_path,
     _detect_nginx_cert_path,
     _probe_cert_via_tls,
     get_tls_status,
 )
-
 
 # ---------------------------------------------------------------------------
 # _detect_le_cert_path – PermissionError must not propagate

@@ -5,9 +5,11 @@ Run: SIM_MODE=1 uv run pytest tests/unit/test_mission_repository.py -v
 """
 from __future__ import annotations
 
-import pytest
 from datetime import UTC, datetime
 from pathlib import Path
+
+import pytest
+
 from backend.src.repositories.mission_repository import MissionRepository
 
 

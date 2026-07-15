@@ -4,8 +4,10 @@
 All tests use tmp_path so real data/ is never touched.
 Run: SIM_MODE=1 uv run pytest tests/unit/test_map_repository.py -v
 """
-import pytest
 from pathlib import Path
+
+import pytest
+
 from backend.src.repositories.map_repository import MapRepository
 
 

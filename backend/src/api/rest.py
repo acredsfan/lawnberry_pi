@@ -1683,9 +1683,14 @@ async def control_blade_v2(
             },
         )
 
+    session_id = cmd.get("session_id")
+    if desired:
+        _resolve_manual_session(session_id)
+
     blade_cmd = BladeCommand(
         active=desired,
         source="manual",
+        session_id=session_id,
         motors_active=_legacy_motors_active,
     )
     outcome = await runtime.command_gateway.dispatch_blade(blade_cmd, request=request)

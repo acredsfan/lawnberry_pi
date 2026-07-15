@@ -1,10 +1,8 @@
 """Unit tests for PoseFilter (real EKF replacing SimpleEKF placeholder)."""
 from __future__ import annotations
 
-import math
 import time
 
-import numpy as np
 import pytest
 
 from backend.src.fusion.ekf import PoseFilter

@@ -9,15 +9,12 @@ import pytest
 RUN_PLACEHOLDER = os.getenv("RUN_PLACEHOLDER_INTEGRATION", "0") == "1"
 
 PLACEHOLDER_BASENAMES = {
-    "test_autonomous_operation.py",
     "test_edge_cases.py",
     "test_hardware_compliance.py",
     "test_migration_v1_to_v2.py",
-    "test_webui_experience.py",
     # Placeholders still pending implementation
     # Existing integration placeholders not yet implemented
     "test_acme_tls.py",
-    "test_gps_loss_policy.py",
     "test_map_cost_control.py",
 }
 

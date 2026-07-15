@@ -1,147 +1,121 @@
-"""Integration test for GPS loss policy: grace period then stop/alert."""
+"""Integration coverage for GPS degradation and final mission dispatch."""
 
-import httpx
+from __future__ import annotations
+
+from types import SimpleNamespace
+
 import pytest
 
-
-@pytest.mark.asyncio
-async def test_gps_loss_dead_reckoning_grace_period():
-    """Test that GPS loss triggers dead reckoning for ≤2 minutes."""
-    from backend.src.main import app
-    
-    # This test simulates GPS loss scenario
-    # In real implementation, this would involve:
-    # 1. Mocking GPS service to simulate signal loss
-    # 2. Verifying dead reckoning mode activates
-    # 3. Confirming reduced speed and stricter obstacle detection
-    # 4. Ensuring stop/alert after 2-minute grace period
-    
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        
-        # Check current navigation state
-        status_response = await client.get("/api/v2/dashboard/status")
-        assert status_response.status_code == 200
-        
-        status_data = status_response.json()
-        _initial_nav_state = status_data.get("navigation_state", "IDLE")
-        
-        # This test will initially fail as GPS loss handling isn't implemented
-        # When implemented, should test:
-        # 1. GPS signal loss detection
-        # 2. Transition to dead reckoning mode
-        # 3. Speed reduction (e.g., 30% of normal)
-        # 4. Enhanced obstacle avoidance
-        # 5. Time-based grace period tracking
-        
-        pytest.skip("GPS loss handling not yet implemented - TDD test")
+from backend.src.control.commands import CommandStatus, DriveOutcome
+from backend.src.nav.gps_degradation import (
+    GPSDegradationConfig,
+    GPSDegradationState,
+    GPSDegradationStateMachine,
+)
+from backend.src.services.navigation_service import _NavGatewayAdapter
 
 
-@pytest.mark.asyncio
-async def test_dead_reckoning_reduced_speed():
-    """Test that dead reckoning mode reduces speed for safety."""
-    # This test verifies FR-002 requirement:
-    # During GPS loss, speed should be capped (e.g., 30% of normal)
-    
-    # When implemented, this test should:
-    # 1. Simulate GPS loss
-    # 2. Send drive commands
-    # 3. Verify actual speed is reduced
-    # 4. Confirm speed cap is enforced
-    
-    pytest.fail("Dead reckoning speed reduction not yet implemented")
+def _policy() -> GPSDegradationStateMachine:
+    return GPSDegradationStateMachine(
+        GPSDegradationConfig(
+            max_accuracy_m=0.25,
+            max_fix_age_s=2.0,
+            hold_grace_s=2.0,
+            max_degraded_s=10.0,
+            recovery_samples=3,
+            degraded_speed_cap_mps=0.2,
+        )
+    )
 
 
-@pytest.mark.asyncio 
-async def test_dead_reckoning_stricter_obstacles():
-    """Test that dead reckoning uses stricter obstacle detection."""
-    # This test verifies that during GPS loss:
-    # 1. Obstacle detection thresholds are tightened
-    # 2. Response to obstacles is more conservative
-    # 3. Safety margins are increased
-    
-    pytest.fail("Enhanced obstacle detection during GPS loss not yet implemented")
+def _lost_update(policy: GPSDegradationStateMachine, now: float):
+    return policy.update(
+        position_available=False,
+        fix_age_s=None,
+        accuracy_m=None,
+        dead_reckoning_active=True,
+        now_monotonic=now,
+    )
+
+
+class _Gateway:
+    def __init__(self) -> None:
+        self.commands = []
+
+    async def dispatch_drive(self, command) -> DriveOutcome:
+        self.commands.append(command)
+        return DriveOutcome(
+            status=CommandStatus.ACCEPTED,
+            audit_id=f"gps-policy-{len(self.commands)}",
+            status_reason=None,
+            active_interlocks=[],
+            watchdog_latency_ms=1.0,
+        )
+
+
+def _navigation(policy: GPSDegradationStateMachine, gateway: _Gateway):
+    return SimpleNamespace(
+        gps_degradation=policy,
+        navigation_state=SimpleNamespace(target_velocity=0.0),
+        max_speed=1.0,
+        autonomous_command_ttl_ms=350,
+        _command_gateway=gateway,
+        _global_emergency_active=lambda: False,
+    )
 
 
 @pytest.mark.asyncio
-async def test_gps_loss_grace_period_timeout():
-    """Test that mower stops and alerts after 2-minute GPS loss."""
-    from backend.src.main import app
-    
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        
-        # This test should verify:
-        # 1. GPS loss detected
-        # 2. Dead reckoning starts with timer
-        # 3. After 120 seconds (2 minutes), mower stops
-        # 4. Alert is generated and sent via WebSocket
-        # 5. Navigation state changes to "GPS_LOST" or similar
-        
-        # For now, test the current telemetry structure
-        telemetry_response = await client.get("/api/v2/dashboard/telemetry")
-        assert telemetry_response.status_code == 200
-        
-        telemetry_data = telemetry_response.json()
-        position = telemetry_data.get("position", {})
-        
-        # Verify GPS mode field exists (will be used for loss detection)
-        assert "gps_mode" in position, "GPS mode field required for loss detection"
-        
-        # This will be implemented as part of GPS service
-        pytest.skip("GPS loss timeout handling not yet implemented - TDD test")
+async def test_gps_loss_holds_then_caps_dead_reckoning_motion() -> None:
+    policy = _policy()
+    gateway = _Gateway()
+    adapter = _NavGatewayAdapter(_navigation(policy, gateway))
+
+    held = _lost_update(policy, 100.0)
+    assert held.state is GPSDegradationState.HOLD
+    assert await adapter.dispatch_drive_speeds(0.8, 0.4) is False
+    assert gateway.commands == []
+
+    degraded = _lost_update(policy, 102.1)
+    assert degraded.state is GPSDegradationState.DEAD_RECKONING
+    assert await adapter.dispatch_drive_speeds(0.8, 0.4) is True
+    assert max(abs(gateway.commands[-1].left), abs(gateway.commands[-1].right)) == pytest.approx(
+        0.2
+    )
 
 
 @pytest.mark.asyncio
-async def test_gps_recovery_resumes_normal_operation():
-    """Test that GPS signal recovery resumes normal operation."""
-    # This test verifies that when GPS signal returns:
-    # 1. Dead reckoning mode exits
-    # 2. Normal speed limits are restored
-    # 3. Standard obstacle detection resumes
-    # 4. Position accuracy improves
-    # 5. Grace period timer resets
-    
-    pytest.fail("GPS recovery handling not yet implemented")
+async def test_gps_loss_budget_becomes_terminal_and_blocks_dispatch() -> None:
+    policy = _policy()
+    gateway = _Gateway()
+    adapter = _NavGatewayAdapter(_navigation(policy, gateway))
+    _lost_update(policy, 10.0)
+
+    terminal = _lost_update(policy, 20.1)
+
+    assert terminal.state is GPSDegradationState.TERMINAL
+    assert terminal.reason == "GPS_POSITION_UNAVAILABLE"
+    assert await adapter.dispatch_drive_speeds(0.2, 0.2) is False
+    assert gateway.commands == []
 
 
-@pytest.mark.asyncio
-async def test_manual_override_during_gps_loss():
-    """Test that manual control works during GPS loss."""
-    from backend.src.main import app
-    
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        
-        # Authenticate first
-        auth_payload = {"credential": "operator123"}
-        auth_response = await client.post("/api/v2/auth/login", json=auth_payload)
-        assert auth_response.status_code == 200
-        
-        # Manual control should still work during GPS loss
-        # (though with reduced speed limits for safety)
-        drive_command = {
-            "mode": "arcade",
-            "throttle": 0.5,  # This should be capped during GPS loss
-            "turn": 0.1
-        }
-        
-        response = await client.post("/api/v2/control/drive", json=drive_command)
-        
-        # Should accept command but may apply speed limiting
-        assert response.status_code in [200, 202]
-        
-        # When GPS loss handling is implemented, verify speed capping
-        # For now, just test that manual control endpoint works
-        
-        
-@pytest.mark.asyncio
-async def test_gps_loss_alert_generation():
-    """Test that GPS loss generates appropriate alerts."""
-    # This test should verify:
-    # 1. Alert is created when GPS loss detected
-    # 2. Alert severity is appropriate (WARNING initially, CRITICAL after timeout)
-    # 3. Alert is broadcast via WebSocket to connected clients
-    # 4. Alert persists until GPS recovered
-    
-    pytest.fail("GPS loss alert system not yet implemented")
+def test_gps_recovery_requires_hysteresis_before_nominal_motion() -> None:
+    policy = _policy()
+    _lost_update(policy, 100.0)
+    _lost_update(policy, 102.1)
+
+    states = [
+        policy.update(
+            position_available=True,
+            fix_age_s=0.1,
+            accuracy_m=0.03,
+            dead_reckoning_active=False,
+            now_monotonic=now,
+        ).state
+        for now in (103.0, 103.1, 103.2)
+    ]
+
+    assert states == [
+        GPSDegradationState.RECOVERING,
+        GPSDegradationState.RECOVERING,
+        GPSDegradationState.NOMINAL,
+    ]

@@ -34,14 +34,18 @@ SENSITIVE_KEYS: set[str] = {
 }
 
 
-def _redact(obj: Any) -> Any:
+def _redact(obj: Any, *, allowed_sensitive_keys: frozenset[str] = frozenset()) -> Any:
     if isinstance(obj, dict):
         return {
-            k: ("***REDACTED***" if k.lower() in SENSITIVE_KEYS else _redact(v))
+            k: (
+                "***REDACTED***"
+                if k.lower() in SENSITIVE_KEYS and k.lower() not in allowed_sensitive_keys
+                else _redact(v, allowed_sensitive_keys=allowed_sensitive_keys)
+            )
             for k, v in obj.items()
         }
     if isinstance(obj, list):
-        return [_redact(x) for x in obj]
+        return [_redact(x, allowed_sensitive_keys=allowed_sensitive_keys) for x in obj]
     return obj
 
 
@@ -64,6 +68,10 @@ class SanitizationMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._max = max(1024, int(max_process_bytes))
         self._skip_response_redaction = ("/api/v2/settings/maps",)
+        self._intentional_sensitive_response_keys = {
+            "/api/v2/auth/login": frozenset({"token", "access_token"}),
+            "/api/v2/auth/refresh": frozenset({"token", "access_token"}),
+        }
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
@@ -106,7 +114,12 @@ class SanitizationMiddleware(BaseHTTPMiddleware):
         if raw is not None and len(raw) <= self._max:
             try:
                 parsed = json.loads(raw.decode("utf-8") if raw else "null")
-                redacted = _redact(parsed)
+                redacted = _redact(
+                    parsed,
+                    allowed_sensitive_keys=self._intentional_sensitive_response_keys.get(
+                        request.url.path, frozenset()
+                    ),
+                )
                 headers = _strip_framing_headers(dict(response.headers))
                 # Build a fresh JSONResponse — init_headers recalculates
                 # Content-Length from the new body, preventing any mismatch.

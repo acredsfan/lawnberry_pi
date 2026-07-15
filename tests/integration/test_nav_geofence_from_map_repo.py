@@ -10,7 +10,6 @@ Tests:
 from __future__ import annotations
 
 import os
-import uuid
 from pathlib import Path
 
 import pytest
@@ -152,7 +151,6 @@ def test_load_boundaries_does_not_require_rest_api(map_repo, nav_service, monkey
     import sys
 
     # Block the rest module import to confirm it is not used.
-    original = sys.modules.get("backend.src.api.rest")
     # If not imported yet, block it; if already imported, ensure _zones_store is not read.
     monkeypatch.setitem(sys.modules, "backend.src.api.rest", None)  # type: ignore[arg-type]
 

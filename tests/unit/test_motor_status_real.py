@@ -1,12 +1,12 @@
 """Tests for motor_status reflecting real mission state."""
-import pytest
 from unittest.mock import MagicMock, patch
 
 
 def test_motor_status_not_hardcoded():
     """motor_status field must not be a hardcoded literal."""
-    from backend.src.services.telemetry_service import TelemetryService
     import inspect
+
+    from backend.src.services.telemetry_service import TelemetryService
     src = inspect.getsource(TelemetryService._format_telemetry)
     assert '"motor_status": "idle"' not in src, "motor_status must not be a hardcoded literal"
 
@@ -32,8 +32,8 @@ def test_motor_status_default_is_idle():
 
 def test_motor_status_maps_running_to_mowing():
     """Mission status 'running' maps to 'mowing' in the UI."""
-    from backend.src.services.telemetry_service import TelemetryService
     import backend.src.services.mission_service as ms_mod
+    from backend.src.services.telemetry_service import TelemetryService
     svc = TelemetryService()
 
     mock_mission = MagicMock()
@@ -51,8 +51,8 @@ def test_motor_status_maps_running_to_mowing():
 
 def test_motor_status_maps_completed_to_idle():
     """Mission status 'completed' maps to 'idle'."""
-    from backend.src.services.telemetry_service import TelemetryService
     import backend.src.services.mission_service as ms_mod
+    from backend.src.services.telemetry_service import TelemetryService
     svc = TelemetryService()
 
     mock_mission = MagicMock()
@@ -70,8 +70,8 @@ def test_motor_status_maps_completed_to_idle():
 
 def test_motor_status_emergency_stop_override():
     """Emergency stop in safety state returns 'emergency_stop' even without mission."""
-    from backend.src.services.telemetry_service import TelemetryService
     import backend.src.services.mission_service as ms_mod
+    from backend.src.services.telemetry_service import TelemetryService
     svc = TelemetryService()
 
     original = ms_mod._mission_service_instance

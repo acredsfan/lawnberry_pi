@@ -1,6 +1,6 @@
 """Tests: NavigationService emits PoseUpdated and HeadingAligned events."""
+
 import pytest
-from unittest.mock import MagicMock
 
 
 def _make_store():
@@ -13,9 +13,8 @@ def _make_store():
 @pytest.mark.asyncio
 async def test_pose_updated_event_emitted_after_gps_fix():
     """A PoseUpdated event is emitted after update_navigation_state processes a GPS fix."""
-    from backend.src.observability.events import PoseUpdated
-    from backend.src.services.navigation_service import NavigationService
     from backend.src.models import GpsReading, SensorData
+    from backend.src.services.navigation_service import NavigationService
 
     emitted = []
     store = _make_store()
@@ -38,9 +37,8 @@ async def test_pose_updated_event_emitted_after_gps_fix():
 @pytest.mark.asyncio
 async def test_heading_aligned_event_emitted_after_gps_cog_snap():
     """A HeadingAligned event is emitted when heading bootstrap completes."""
-    from backend.src.observability.events import HeadingAligned
-    from backend.src.services.navigation_service import NavigationService
     from backend.src.models import GpsReading, ImuReading, SensorData
+    from backend.src.services.navigation_service import NavigationService
 
     emitted = []
     store = _make_store()

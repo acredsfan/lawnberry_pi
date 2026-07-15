@@ -1,8 +1,7 @@
-import importlib
 import pytest
 
-from backend.src.nav.path_planner import PathPlanner
 from backend.src.models import Position
+from backend.src.nav.path_planner import PathPlanner
 
 
 def rect():

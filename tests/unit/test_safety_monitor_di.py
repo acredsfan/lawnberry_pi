@@ -1,6 +1,6 @@
 """Tests for ARCH-006: SafetyMonitor must not import from api.rest (circular dep)."""
 import importlib.util
-import sys
+
 import pytest
 
 
@@ -18,8 +18,9 @@ def test_safety_monitor_has_no_circular_import():
 async def test_safety_monitor_broadcasts_when_hub_injected():
     """SafetyMonitor broadcasts to injected hub."""
     from unittest.mock import AsyncMock, MagicMock
+
+    from backend.src.models.safety_interlock import InterlockState, InterlockType, SafetyInterlock
     from backend.src.safety.safety_monitor import SafetyMonitor
-    from backend.src.models.safety_interlock import SafetyInterlock, InterlockState, InterlockType
 
     hub = MagicMock()
     hub.broadcast_to_topic = AsyncMock()
@@ -41,8 +42,8 @@ async def test_safety_monitor_broadcasts_when_hub_injected():
 @pytest.mark.asyncio
 async def test_safety_monitor_no_broadcast_without_hub():
     """SafetyMonitor must not raise when no hub injected."""
+    from backend.src.models.safety_interlock import InterlockState, InterlockType, SafetyInterlock
     from backend.src.safety.safety_monitor import SafetyMonitor
-    from backend.src.models.safety_interlock import SafetyInterlock, InterlockState, InterlockType
 
     monitor = SafetyMonitor()  # no hub
     interlock = SafetyInterlock(
@@ -58,8 +59,9 @@ async def test_safety_monitor_no_broadcast_without_hub():
 async def test_safety_monitor_set_hub_after_construction():
     """set_websocket_hub() wires hub post-construction (for main.py lifespan pattern)."""
     from unittest.mock import AsyncMock, MagicMock
+
+    from backend.src.models.safety_interlock import InterlockState, InterlockType, SafetyInterlock
     from backend.src.safety.safety_monitor import SafetyMonitor
-    from backend.src.models.safety_interlock import SafetyInterlock, InterlockState, InterlockType
 
     hub = MagicMock()
     hub.broadcast_to_topic = AsyncMock()

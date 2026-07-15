@@ -1,7 +1,6 @@
 """Tests for SQLite WAL mode and thread safety in DatabasePersistence."""
-import sqlite3
-import tempfile
 import pathlib
+import tempfile
 
 
 def test_wal_mode_enabled_after_init():

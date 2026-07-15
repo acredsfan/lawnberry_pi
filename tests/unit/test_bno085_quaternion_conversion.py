@@ -8,7 +8,7 @@ which maps to (x, y, z, w) in standard quaternion notation.
 """
 
 import math
-import pytest
+
 from backend.src.drivers.sensors.bno085_driver import _quaternion_to_euler
 
 

@@ -225,8 +225,8 @@ def get_doc_contents(doc_path: str):
     try:
         docs_dir = _docs_root().resolve()
         candidate = (docs_dir / doc_path).resolve()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid documentation path")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid documentation path") from exc
 
     if docs_dir not in candidate.parents and candidate != docs_dir:
         raise HTTPException(status_code=400, detail="Invalid documentation path")

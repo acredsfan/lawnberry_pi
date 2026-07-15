@@ -9,8 +9,6 @@ method and that both paths return a NavigationState.
 """
 from __future__ import annotations
 
-import importlib
-import os
 from unittest.mock import AsyncMock, patch
 
 import pytest

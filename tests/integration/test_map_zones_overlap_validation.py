@@ -15,10 +15,10 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from backend.src.main import app
-from backend.src.core.runtime import RuntimeContext, get_runtime
 from backend.src.control.command_gateway import MotorCommandGateway
 from backend.src.core import globals as _g
+from backend.src.core.runtime import RuntimeContext, get_runtime
+from backend.src.main import app
 from backend.src.repositories.map_repository import MapRepository
 
 BASE_URL = "http://test"

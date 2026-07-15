@@ -55,6 +55,8 @@ def test_runtime_context_holds_all_required_fields():
         "persistence_mode",
         "jobs_service",
         "planning_service",
+        "weather_service",
+        "energy_service",
         "live_safety",
         "qualification_service",
     }

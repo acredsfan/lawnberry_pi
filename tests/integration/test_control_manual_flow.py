@@ -96,6 +96,7 @@ async def test_blade_control_enable_disable_with_safety_interlock():
         # Attempt to enable blade
         payload_enable = {
             "command": "blade_enable",
+            "session_id": "blade-control-test",
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         headers = {"Authorization": "Bearer test-token", "Content-Type": "application/json"}
@@ -284,6 +285,7 @@ async def test_control_safety_interlock_blade_requires_stopped_motors():
         # Step 2: Attempt blade enable while motors active - should be rejected
         payload_blade = {
             "command": "blade_enable",
+            "session_id": "emergency-override-test",
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         response_blade = await client.post(

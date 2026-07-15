@@ -2,8 +2,8 @@ import pytest
 
 pytest.importorskip("shapely")
 
-from backend.src.nav.coverage_patterns import CoverageConfig, generate_lawnmower
 from backend.src.models import Position
+from backend.src.nav.coverage_patterns import CoverageConfig, generate_lawnmower
 
 
 def rectangle(lat0=0.0, lon0=0.0, width_m=20.0, height_m=10.0):

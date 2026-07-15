@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import datetime
 import email.utils
-from typing import Callable
+from collections.abc import Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -50,7 +50,7 @@ _EXACT_DEPRECATED: dict[str, tuple[str, str]] = {
 def _http_date(iso_date: str) -> str:
     """Convert 'YYYY-MM-DD' to RFC 9110 IMF-fixdate (HTTP-date)."""
     d = datetime.datetime.strptime(iso_date, "%Y-%m-%d").replace(
-        tzinfo=datetime.timezone.utc
+        tzinfo=datetime.UTC
     )
     return email.utils.formatdate(d.timestamp(), usegmt=True)
 
@@ -73,9 +73,9 @@ class DeprecationMiddleware(BaseHTTPMiddleware):
         if path in _EXACT_DEPRECATED:
             sunset, link = _EXACT_DEPRECATED[path]
         else:
-            for prefix, (s, l) in _PREFIX_DEPRECATED.items():
+            for prefix, (sunset_value, successor_link) in _PREFIX_DEPRECATED.items():
                 if path.startswith(prefix):
-                    sunset, link = s, l
+                    sunset, link = sunset_value, successor_link
                     break
 
         if sunset is not None:

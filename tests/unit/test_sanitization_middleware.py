@@ -45,6 +45,26 @@ def test_sanitizes_sensitive_fields():
     assert data["ok"] is True
 
 
+def test_auth_exchange_preserves_issued_tokens_but_redacts_other_secrets():
+    app = FastAPI()
+    register_sanitization_middleware(app)
+
+    @app.post("/api/v2/auth/login")
+    def login():
+        return {
+            "token": "signed.jwt.token",
+            "access_token": "signed.jwt.token",
+            "password": "must-never-leak",
+        }
+
+    response = TestClient(app).post("/api/v2/auth/login")
+
+    assert response.status_code == 200
+    assert response.json()["token"] == "signed.jwt.token"
+    assert response.json()["access_token"] == "signed.jwt.token"
+    assert response.json()["password"] == "***REDACTED***"
+
+
 # ---------------------------------------------------------------------------
 # Content-Length correctness tests — these guard against the ASGI error
 # "Response content longer/shorter than Content-Length" that occurs when

@@ -2,15 +2,14 @@
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
 from backend.src.main import app
-from backend.src.api import rest as rest_api
 
 BASE_URL = "http://test"
 
@@ -57,7 +56,7 @@ async def test_manual_drive_respects_duration_ms():
     motor_commands = []
 
     async def mock_send_motor_command(left: float, right: float) -> bool:
-        motor_commands.append((left, right, datetime.now(timezone.utc)))
+        motor_commands.append((left, right, datetime.now(UTC)))
         return True
 
     fake_robohat = SimpleNamespace(
@@ -114,7 +113,7 @@ async def test_drive_timeout_task_cancellation_on_new_command():
     motor_commands = []
 
     async def mock_send_motor_command(left: float, right: float) -> bool:
-        motor_commands.append((left, right, datetime.now(timezone.utc)))
+        motor_commands.append((left, right, datetime.now(UTC)))
         return True
 
     fake_robohat = SimpleNamespace(
@@ -137,8 +136,6 @@ async def test_drive_timeout_task_cancellation_on_new_command():
                 },
             )
             assert response1.status_code == 202
-
-            first_command_time = motor_commands[0][2]
 
             await asyncio.sleep(0.05)
 
@@ -173,7 +170,7 @@ async def test_drive_duration_zero_clamps_to_500ms():
     motor_commands = []
 
     async def mock_send_motor_command(left: float, right: float) -> bool:
-        motor_commands.append((left, right, datetime.now(timezone.utc)))
+        motor_commands.append((left, right, datetime.now(UTC)))
         return True
 
     fake_robohat = SimpleNamespace(
@@ -248,4 +245,3 @@ async def test_drive_timeout_task_retained_on_gateway():
         await gw._drive_timeout_task
     except asyncio.CancelledError:
         pass
-

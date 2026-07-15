@@ -52,7 +52,7 @@ class Pose2D:
     encoder_timestamp_s: float | None = None
     filter_timestamp_s: float = field(default_factory=lambda: 0.0)
 
-    def distance_to(self, other: "Pose2D") -> float:
+    def distance_to(self, other: Pose2D) -> float:
         """Euclidean distance in metres between two poses."""
         return ((self.x_m - other.x_m) ** 2 + (self.y_m - other.y_m) ** 2) ** 0.5
 

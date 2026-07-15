@@ -12,8 +12,6 @@ import pytest_asyncio
 
 collect_ignore = [
     "unit/test_health_endpoints.py",
-    # Avoid module name collision with integration/test_auth_security_levels.py
-    "unit/test_auth_security_levels.py",
 ]
 
 
@@ -21,7 +19,6 @@ def pytest_ignore_collect(collection_path, config):  # pragma: no cover - hook s
     try:
         return (
             collection_path.match("tests/unit/test_health_endpoints.py")
-            or collection_path.match("tests/unit/test_auth_security_levels.py")
         )
     except AttributeError:
         return False

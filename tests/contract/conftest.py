@@ -1,6 +1,5 @@
 import os
 import os.path
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -34,13 +33,12 @@ def _ensure_runtime_for_contract_tests(tmp_path):
     is never built. This fixture provides a minimal runtime that covers emergency endpoint
     needs (command_gateway). Tests that need specific state should use dependency_overrides.
     """
-    from pathlib import Path
     from backend.src.control.command_gateway import MotorCommandGateway
     from backend.src.core import globals as _g
-    from backend.src.core.runtime import RuntimeContext, get_runtime
     from backend.src.core.persistence import PersistenceLayer
-    from backend.src.repositories.map_repository import MapRepository
+    from backend.src.core.runtime import RuntimeContext, get_runtime
     from backend.src.main import app
+    from backend.src.repositories.map_repository import MapRepository
 
     db_path = tmp_path / "lawnberry.db"
     _persistence = PersistenceLayer(db_path=str(db_path))

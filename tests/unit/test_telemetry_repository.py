@@ -4,9 +4,11 @@ Run: SIM_MODE=1 uv run pytest tests/unit/test_telemetry_repository.py -v
 """
 from __future__ import annotations
 
-import pytest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+import pytest
+
 from backend.src.repositories.telemetry_repository import TelemetryRepository
 
 

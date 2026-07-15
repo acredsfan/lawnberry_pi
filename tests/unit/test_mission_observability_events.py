@@ -1,9 +1,8 @@
 """Tests: MissionService emits MissionStateChanged and WaypointTargetChanged events."""
-import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from backend.src.models import NavigationMode
 from backend.src.models.mission import MissionWaypoint
@@ -37,9 +36,9 @@ class _DummyNav:
 
 
 def _make_service_with_store():
-    from backend.src.services.mission_service import MissionService
     from backend.src.observability.event_store import EventStore
     from backend.src.observability.events import PersistenceMode
+    from backend.src.services.mission_service import MissionService
 
     emitted = []
     store = EventStore(persistence=None, mode=PersistenceMode.FULL)

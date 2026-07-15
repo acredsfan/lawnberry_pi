@@ -1,9 +1,9 @@
 import json
 import os
+import shutil
 import sys
 import tempfile
-import shutil
-from datetime import datetime, timezone as dt_timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -63,7 +63,7 @@ def test_system_settings_endpoint_auto_sets_timezone(monkeypatch):
     from backend.src.api import rest
 
     monkeypatch.setattr(rest, "_system_settings", rest.SystemSettings())
-    monkeypatch.setattr(rest, "_settings_last_modified", datetime.now(dt_timezone.utc))
+    monkeypatch.setattr(rest, "_settings_last_modified", datetime.now(UTC))
     monkeypatch.setattr(
         rest,
         "detect_system_timezone",

@@ -10,7 +10,6 @@ import pytest
 from backend.src.models.job import Job, JobPriority, JobStatus, JobType, SchedulePattern
 from backend.src.services.jobs_service import JobsService
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

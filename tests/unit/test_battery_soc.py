@@ -1,5 +1,4 @@
 """Tests for voltage_current_to_soc tail-current heuristic."""
-import pytest
 from backend.src.utils.battery import voltage_current_to_soc, voltage_to_soc
 
 

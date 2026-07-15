@@ -9,7 +9,6 @@ import pytest
 from backend.src.nav.coverage_planner import plan_coverage
 from backend.src.nav.geoutils import haversine_m
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -51,7 +50,7 @@ class TestAngle0Unchanged:
         assert rows_default == rows_zero, "row counts should be identical"
         assert abs(len_default - len_zero) < 0.01, "path lengths should be identical"
         assert len(path_default) == len(path_zero), "path point count should be identical"
-        for a, b in zip(path_default, path_zero):
+        for a, b in zip(path_default, path_zero, strict=False):
             assert abs(a[0] - b[0]) < 1e-9, f"lat mismatch: {a} vs {b}"
             assert abs(a[1] - b[1]) < 1e-9, f"lon mismatch: {a} vs {b}"
 

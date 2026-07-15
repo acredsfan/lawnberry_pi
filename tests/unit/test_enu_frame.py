@@ -1,8 +1,8 @@
 """Unit tests for ENUFrame WGS84 ↔ ENU converter."""
 from __future__ import annotations
 
-import math
 import pytest
+
 from backend.src.fusion.enu_frame import ENUFrame
 
 

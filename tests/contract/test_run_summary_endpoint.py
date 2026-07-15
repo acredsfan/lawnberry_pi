@@ -9,9 +9,10 @@ os.environ.setdefault("SIM_MODE", "1")
 
 @pytest.fixture()
 def client():
-    from backend.src.main import app
-    from backend.src.core.runtime import get_runtime
     from fastapi.testclient import TestClient
+
+    from backend.src.core.runtime import get_runtime
+    from backend.src.main import app
 
     # Use the real lifespan runtime. Pre-register get_runtime so the contract
     # conftest's autouse mock (which sets event_store=None) does not override us.
@@ -34,8 +35,11 @@ def test_summary_returns_expected_shape(client):
     from backend.src.main import app
     from backend.src.observability.event_store import EventStore
     from backend.src.observability.events import (
-        PersistenceMode, MissionStateChanged, PoseUpdated,
-        MotionCommandIssued, SafetyGateBlocked,
+        MissionStateChanged,
+        MotionCommandIssued,
+        PersistenceMode,
+        PoseUpdated,
+        SafetyGateBlocked,
     )
 
     runtime = app.state.runtime

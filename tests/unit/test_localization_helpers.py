@@ -6,7 +6,6 @@ verify mathematical invariants only. Run with:
 """
 import pytest
 
-
 # --- heading_delta -----------------------------------------------------------
 
 def test_heading_delta_zero_when_same():

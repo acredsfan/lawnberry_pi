@@ -2,11 +2,12 @@
 
 import asyncio
 import math
-import pytest
 from unittest.mock import AsyncMock
 
-from backend.src.services.sensor_manager import PowerSensorInterface, SensorStatus
+import pytest
+
 from backend.src.models.sensor_data import PowerReading
+from backend.src.services.sensor_manager import PowerSensorInterface, SensorStatus
 
 
 def _make_psi(ina_driver=None, victron_driver=None, last_reading=None):

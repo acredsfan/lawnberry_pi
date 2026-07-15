@@ -1,8 +1,9 @@
 """Unit tests for diagnostics replay loader."""
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from backend.src.diagnostics.capture import TelemetryCapture
 from backend.src.diagnostics.replay import ReplayLoader, ReplayLoadError

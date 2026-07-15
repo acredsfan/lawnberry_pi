@@ -10,6 +10,12 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npm run type-check
+      - name: Run frontend unit and integration tests
+        working-directory: frontend
+        run: npm test
       - name: Build frontend
         working-directory: frontend
         run: npm run build

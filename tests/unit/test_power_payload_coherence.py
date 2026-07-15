@@ -1,5 +1,6 @@
 """Tests for solar field coherence guard in _merge_power_payload."""
 import pytest
+
 from backend.src.services.sensor_manager import PowerSensorInterface
 
 

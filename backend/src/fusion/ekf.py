@@ -34,8 +34,7 @@ import time
 
 import numpy as np
 
-from backend.src.fusion.pose2d import Pose2D, PoseQuality, STALE_THRESHOLD_S
-
+from backend.src.fusion.pose2d import STALE_THRESHOLD_S, Pose2D, PoseQuality
 
 # Default process noise (Q): tuned for a slow lawn mower.
 # Diagonal: [sigma_x^2, sigma_y^2, sigma_heading^2, sigma_v^2, sigma_omega^2]
@@ -212,7 +211,7 @@ class PoseFilter:
         innov_raw = ((heading_deg - self._heading_deg) + 180.0) % 360.0 - 180.0
         innov = np.array([innov_raw])
         S = _H_IMU @ self._P @ _H_IMU.T + R
-        mahl2 = float((innov @ np.linalg.solve(S, innov)))
+        mahl2 = float(innov @ np.linalg.solve(S, innov))
         if mahl2 > _GATE_IMU:
             return False  # outlier
 

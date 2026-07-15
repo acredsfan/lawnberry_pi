@@ -7,6 +7,7 @@ These tests ensure that:
 """
 import json
 import os
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -122,3 +123,30 @@ def test_v1_paths_are_deprecated(generated_schema):
                 f"Path {path} {method.upper()} is missing deprecated: true flag. "
                 f"Operation keys: {list(operation.keys())}"
             )
+
+
+def test_every_http_method_has_one_route_owner():
+    owners: Counter[tuple[str, str]] = Counter()
+    for route in app.routes:
+        path = getattr(route, "path", None)
+        for method in getattr(route, "methods", None) or ():
+            owners[(path, method)] += 1
+
+    duplicates = {key: count for key, count in owners.items() if count > 1}
+    assert duplicates == {}, f"Duplicate route owners: {duplicates}"
+
+
+def test_operation_ids_are_unique(generated_schema):
+    operation_ids = [
+        operation["operationId"]
+        for path_item in generated_schema["paths"].values()
+        for operation in path_item.values()
+        if isinstance(operation, dict) and "operationId" in operation
+    ]
+
+    duplicates = [
+        operation_id
+        for operation_id, count in Counter(operation_ids).items()
+        if count > 1
+    ]
+    assert duplicates == [], f"Duplicate OpenAPI operation IDs: {duplicates}"

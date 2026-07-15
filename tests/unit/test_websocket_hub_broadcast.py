@@ -1,7 +1,9 @@
 """Tests for websocket_hub broadcast_to_topic fan-out with timeout."""
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from backend.src.services.websocket_hub import WebSocketHub
 
 

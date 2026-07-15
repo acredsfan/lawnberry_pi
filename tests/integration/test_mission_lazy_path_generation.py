@@ -8,20 +8,19 @@ Tests verify that:
 """
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from backend.src.models.mission import MissionCreationRequest, MissionWaypoint
-from backend.src.repositories.mission_repository import MissionRepository
 from backend.src.repositories.map_repository import MapRepository
+from backend.src.repositories.mission_repository import MissionRepository
 from backend.src.services.mission_service import (
     MissionService,
     MissionValidationError,
 )
 from backend.src.services.planning_service import PlannedPath, PlanningService
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

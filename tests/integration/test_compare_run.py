@@ -14,8 +14,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "replay_navigation.py"
 FIXTURE = (
@@ -85,7 +83,8 @@ def test_compare_output_contains_no_divergence_message() -> None:
 
 def test_compare_json_report_flag() -> None:
     """--compare --report-json <path> writes a machine-readable divergence report."""
-    import tempfile, os
+    import os
+    import tempfile
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
         report_path = tf.name
     try:
