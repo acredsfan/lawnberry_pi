@@ -1,4 +1,5 @@
 import asyncio
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -46,7 +47,12 @@ def _runtime(*, blade_active: bool = False, target_velocity: float = 0.0, manage
 
 
 def _tof(side: str, distance: float = 1000.0) -> TofReading:
-    return TofReading(sensor_side=side, distance=distance)
+    return TofReading(
+        sensor_side=side,
+        distance=distance,
+        sample_id=1,
+        monotonic_received_s=time.monotonic(),
+    )
 
 
 @pytest.mark.asyncio

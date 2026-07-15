@@ -275,7 +275,9 @@ watch the mission status contract instead of assuming `running` alone means the 
 - Nonzero mission drive commands pass through `MotorCommandGateway`, which checks fresh RTK-grade localization, dead
   reckoning state, current footprint containment, ToF obstacle state, and a short predictive swept-motion envelope before
   dispatching motor output.
-- A dedicated live safety coordinator runs alongside mission execution. Its fast loop reads only IMU and ToF safety
+- A dedicated live safety coordinator runs alongside mission execution. A single continuous ToF acquisition owner is the
+  only code that reads both VL53L0X devices over I2C; the fast loop, telemetry, diagnostics, and navigation consume the
+  same immutable sample IDs/timestamps. Its fast loop reads only cached ToF plus live IMU safety
   samples so tilt and near-field obstacle stops do not wait for GPS, Victron/power, environmental, camera, persistence,
   HTTP, or WebSocket work. Slow battery/temperature samples are evaluated separately and still fail closed on critical
   thresholds.
@@ -318,7 +320,8 @@ watch the mission status contract instead of assuming `running` alone means the 
   motion if PWM renewal stops. Firmware also turns blade output off if blade command renewal stops.
 - `GET /api/v2/control/status` reflects the navigation mode/path state, while
   `GET /api/v2/missions/{mission_id}/status` is the authoritative mission lifecycle/detail surface.
-- `GET /api/v2/autonomy/readiness` also checks that the live safety loop is running and has fresh fast IMU/ToF samples
+- `GET /api/v2/autonomy/readiness` also checks that the live safety loop and single ToF owner are running, each IMU/ToF
+  sample is fresh, and each ToF side has at least five bounded-window acquisitions with no more than 25% failures
   before reporting blade-enabled autonomy ready. It also requires current qualification evidence for blade-capable starts.
 - `GET /api/v2/autonomy/qualification` evaluates the latest retained evidence against the current commit SHA, sanitized
   hardware-config hash, safety-limits hash, runtime identity hash, and RoboHAT firmware version. Missing, stale, mismatched,

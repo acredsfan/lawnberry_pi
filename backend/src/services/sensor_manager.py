@@ -7,6 +7,7 @@ import asyncio
 import logging
 import math
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from datetime import date as _date
@@ -249,6 +250,21 @@ class ToFSensorInterface:
         self.left_reading: TofReading | None = None
         self.right_reading: TofReading | None = None
         self.status = SensorStatus.OFFLINE
+        self._owner_task: asyncio.Task | None = None
+        self._owner_stopping = False
+        self._sample_id = 0
+        self._outcomes: dict[str, deque[bool]] = {
+            "left": deque(maxlen=20),
+            "right": deque(maxlen=20),
+        }
+        self._last_sample_monotonic_s: dict[str, float | None] = {
+            "left": None,
+            "right": None,
+        }
+        cfg = tof_config or {}
+        timing_budget_s = max(0.0, float(cfg.get("timing_budget_us") or 33000) / 1_000_000.0)
+        self._sample_timeout_s = max(0.08, timing_budget_s + 0.05)
+        self._poll_interval_s = max(0.01, min(0.05, timing_budget_s / 2.0))
         try:
             from ..drivers.sensors.vl53l0x_driver import VL53L0XDriver  # type: ignore
 
@@ -309,6 +325,12 @@ class ToFSensorInterface:
                 )
                 if left_ok and right_ok:
                     self.status = SensorStatus.ONLINE
+                    await self._acquire_pair_once()
+                    self._owner_stopping = False
+                    self._owner_task = asyncio.create_task(
+                        self._acquisition_loop(),
+                        name="tof_acquisition_owner",
+                    )
                     return True
                 self.status = SensorStatus.ERROR
                 logger.warning(
@@ -332,44 +354,99 @@ class ToFSensorInterface:
             return False
 
     async def read_tof_sensors(self) -> tuple[TofReading | None, TofReading | None]:
-        """Read both ToF sensors"""
-        if self.status != SensorStatus.ONLINE:
-            return None, None
+        """Return immutable owner-produced samples without touching I2C."""
+        left = self.left_reading.model_copy(deep=True) if self.left_reading else None
+        right = self.right_reading.model_copy(deep=True) if self.right_reading else None
+        return left, right
 
+    async def _acquisition_loop(self) -> None:
+        """Continuously acquire both sensors as the sole I2C-reading owner."""
+        while not self._owner_stopping:
+            try:
+                await self._acquire_pair_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("ToF acquisition owner failed: %s", exc)
+            await asyncio.sleep(self._poll_interval_s)
+
+    async def _acquire_pair_once(self) -> None:
+        if self._left is None or self._right is None:
+            return
+        async with self.coordinator.acquire_i2c("vl53l0x_owner"):
+            await self._acquire_sensor("left", self._left)
+            await self._acquire_sensor("right", self._right)
+
+    async def _acquire_sensor(self, side: str, driver: Any) -> None:
+        started = time.monotonic()
         try:
-            if self._left is not None and self._right is not None:
-                # Coordinate I2C access across sensors
-                async with self.coordinator.acquire_i2c("vl53l0x_pair"):
-                    dl = await self._left.read_distance_mm()
-                    dr = await self._right.read_distance_mm()
-                # Defense-in-depth: filter VL53L0X invalid/no-target sentinels
-                # in case the driver layer didn't catch a wrapped raw value.
-                if isinstance(dl, int) and (dl <= 0 or dl >= 8000):
-                    dl = None
-                if isinstance(dr, int) and (dr <= 0 or dr >= 8000):
-                    dr = None
-                left_reading = TofReading(
-                    distance=float(dl) if dl is not None else None,
-                    signal_strength=None,
-                    range_status="valid" if dl is not None else "no_target",
-                    sensor_side="left",
-                )
-                right_reading = TofReading(
-                    distance=float(dr) if dr is not None else None,
-                    signal_strength=None,
-                    range_status="valid" if dr is not None else "no_target",
-                    sensor_side="right",
-                )
-                self.left_reading = left_reading
-                self.right_reading = right_reading
-                return left_reading, right_reading
-            else:
-                return self.left_reading, self.right_reading
+            distance = await driver.read_distance_mm()
+            elapsed = time.monotonic() - started
+            valid_distance = isinstance(distance, int) and 0 < distance < 8000
+            successful = bool(
+                valid_distance
+                and int(getattr(driver, "_fail_count", 0) or 0) == 0
+                and elapsed <= self._sample_timeout_s
+            )
+        except Exception as exc:
+            logger.warning("ToF %s acquisition failed: %s", side, exc)
+            distance = None
+            successful = False
 
-        except Exception as e:
-            logger.error(f"ToF reading failed: {e}")
-            self.status = SensorStatus.ERROR
-            return None, None
+        self._outcomes[side].append(successful)
+        if not successful:
+            return
+        now_mono = time.monotonic()
+        self._sample_id += 1
+        reading = TofReading(
+            distance=float(distance),
+            signal_strength=None,
+            range_status="valid",
+            sensor_side=side,
+            sample_id=self._sample_id,
+            monotonic_received_s=now_mono,
+            cached=False,
+        )
+        self._last_sample_monotonic_s[side] = now_mono
+        if side == "left":
+            self.left_reading = reading
+        else:
+            self.right_reading = reading
+
+    def health_snapshot(self) -> dict[str, Any]:
+        now = time.monotonic()
+
+        def side_payload(side: str, reading: TofReading | None, driver: Any) -> dict[str, Any]:
+            outcomes = self._outcomes[side]
+            failures = sum(1 for ok in outcomes if not ok)
+            sample_time = self._last_sample_monotonic_s[side]
+            return {
+                "sample_id": reading.sample_id if reading else None,
+                "sample_age_s": None if sample_time is None else max(0.0, now - sample_time),
+                "window_samples": len(outcomes),
+                "failure_rate": failures / len(outcomes) if outcomes else None,
+                "last_error": getattr(driver, "_last_error", None),
+            }
+
+        return {
+            "owner_running": bool(self._owner_task and not self._owner_task.done()),
+            "left": side_payload("left", self.left_reading, self._left),
+            "right": side_payload("right", self.right_reading, self._right),
+        }
+
+    async def shutdown(self) -> None:
+        self._owner_stopping = True
+        if self._owner_task and not self._owner_task.done():
+            self._owner_task.cancel()
+            try:
+                await self._owner_task
+            except asyncio.CancelledError:
+                pass
+        self._owner_task = None
+        for driver in (self._left, self._right):
+            if driver is not None:
+                await driver.stop()
+        self.status = SensorStatus.OFFLINE
 
 
 class EnvironmentalSensorInterface:
@@ -1115,7 +1192,7 @@ class SensorManager:
     async def shutdown(self):
         """Shutdown sensor manager"""
         logger.info("Shutting down sensor manager")
-        # Sensor shutdown logic would go here
+        await self.tof.shutdown()
         self.initialized = False
 
     async def generate_telemetry_streams(self) -> list[HardwareTelemetryStream]:

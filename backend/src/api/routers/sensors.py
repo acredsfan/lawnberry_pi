@@ -1,6 +1,5 @@
 import logging
 import os
-import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -63,6 +62,10 @@ class ToFProbe(BaseModel):
     last_distance_mm: int | None = None
     last_read_age_s: float | None = None
     last_error: str | None = None
+    sample_id: int | None = None
+    owner_running: bool = False
+    acquisition_window_samples: int = 0
+    acquisition_failure_rate: float | None = None
 
 
 class ToFStatusResponse(BaseModel):
@@ -230,7 +233,10 @@ async def get_tof_status() -> ToFStatusResponse:
         tof = getattr(sm, "tof", None)
         left = getattr(tof, "_left", None)
         right = getattr(tof, "_right", None)
+        health = tof.health_snapshot() if callable(getattr(tof, "health_snapshot", None)) else {}
+        owner_running = bool(health.get("owner_running"))
         if left is not None:
+            left_health = health.get("left", {})
             left_probe = ToFProbe(
                 sensor_side="left",
                 backend=getattr(left, "_driver_backend", None),
@@ -241,12 +247,15 @@ async def get_tof_status() -> ToFStatusResponse:
                 initialized=getattr(left, "initialized", None),
                 running=getattr(left, "running", None),
                 last_distance_mm=getattr(left, "_last_distance_mm", None),
-                last_read_age_s=(time.time() - getattr(left, "_last_read_ts", time.time()))
-                if getattr(left, "_last_read_ts", None)
-                else None,
-                last_error=getattr(left, "_last_error", None),
+                last_read_age_s=left_health.get("sample_age_s"),
+                last_error=left_health.get("last_error"),
+                sample_id=left_health.get("sample_id"),
+                owner_running=owner_running,
+                acquisition_window_samples=int(left_health.get("window_samples") or 0),
+                acquisition_failure_rate=left_health.get("failure_rate"),
             )
         if right is not None:
+            right_health = health.get("right", {})
             right_probe = ToFProbe(
                 sensor_side="right",
                 backend=getattr(right, "_driver_backend", None),
@@ -257,10 +266,12 @@ async def get_tof_status() -> ToFStatusResponse:
                 initialized=getattr(right, "initialized", None),
                 running=getattr(right, "running", None),
                 last_distance_mm=getattr(right, "_last_distance_mm", None),
-                last_read_age_s=(time.time() - getattr(right, "_last_read_ts", time.time()))
-                if getattr(right, "_last_read_ts", None)
-                else None,
-                last_error=getattr(right, "_last_error", None),
+                last_read_age_s=right_health.get("sample_age_s"),
+                last_error=right_health.get("last_error"),
+                sample_id=right_health.get("sample_id"),
+                owner_running=owner_running,
+                acquisition_window_samples=int(right_health.get("window_samples") or 0),
+                acquisition_failure_rate=right_health.get("failure_rate"),
             )
     except Exception:
         pass

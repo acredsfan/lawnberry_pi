@@ -34,9 +34,16 @@ class FakeGateway:
 
 
 class FakeLiveSafety:
-    def __init__(self, *, running: bool = True, sample_age_s: float = 0.1):
+    def __init__(
+        self,
+        *,
+        running: bool = True,
+        sample_age_s: float = 0.1,
+        tof_owner_running: bool = True,
+    ):
         self.running = running
         self.sample_age_s = sample_age_s
+        self.tof_owner_running = tof_owner_running
 
     def status_dict(self) -> dict:
         return {
@@ -45,6 +52,11 @@ class FakeLiveSafety:
             "imu_sample_age_s": self.sample_age_s,
             "tof_left_sample_age_s": self.sample_age_s,
             "tof_right_sample_age_s": self.sample_age_s,
+            "tof_acquisition_owner_running": self.tof_owner_running,
+            "tof_left_failure_rate": 0.0,
+            "tof_right_failure_rate": 0.0,
+            "tof_left_window_samples": 10,
+            "tof_right_window_samples": 10,
             "faults": [],
         }
 
@@ -285,6 +297,33 @@ async def test_readiness_blocks_stale_live_safety_sample(monkeypatch):
 
     assert not report.ready
     assert "LIVE_SAFETY_LOOP_HEALTHY" in report.blocking_reason_codes
+
+
+@pytest.mark.asyncio
+async def test_readiness_blocks_missing_tof_acquisition_owner(monkeypatch):
+    monkeypatch.setenv("LAWNBERRY_PLATFORM_MODEL", "Raspberry Pi 5 Model B Rev 1.0")
+    hardware = HardwareConfig.model_validate(
+        {
+            "imu_type": "bno085-uart",
+            "blade_controller": "ibt-4",
+            "blade": {
+                "controller": "ibt-4",
+                "allow_autonomous": True,
+                "pins": {"in1": 24, "in2": 25},
+            },
+        }
+    )
+
+    report = await AutonomyReadinessService(
+        Runtime(
+            hardware,
+            safety_state={},
+            live_safety=FakeLiveSafety(tof_owner_running=False),
+        )
+    ).evaluate()
+
+    assert not report.ready
+    assert "TOF_ACQUISITION_OWNER_HEALTHY" in report.blocking_reason_codes
 
 
 @pytest.mark.asyncio

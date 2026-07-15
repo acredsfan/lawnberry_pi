@@ -311,6 +311,40 @@ class AutonomyReadinessService:
                             )
                         )
 
+                owner_running = bool(status.get("tof_acquisition_owner_running"))
+                checks.append(
+                    ReadinessCheck(
+                        code="TOF_ACQUISITION_OWNER_HEALTHY",
+                        ok=owner_running,
+                        severity="info" if owner_running else "blocker",
+                        message=(
+                            "Single ToF acquisition owner is running."
+                            if owner_running
+                            else "Single ToF acquisition owner is not running."
+                        ),
+                    )
+                )
+                for side in ("left", "right"):
+                    failure_rate = status.get(f"tof_{side}_failure_rate")
+                    window_samples = int(status.get(f"tof_{side}_window_samples") or 0)
+                    healthy = bool(
+                        failure_rate is not None
+                        and window_samples >= 5
+                        and float(failure_rate) <= 0.25
+                    )
+                    checks.append(
+                        ReadinessCheck(
+                            code=f"TOF_{side.upper()}_ACQUISITION_RELIABLE",
+                            ok=healthy,
+                            severity="info" if healthy else "blocker",
+                            message=(
+                                f"ToF {side} acquisition failure rate is within limits."
+                                if healthy
+                                else f"ToF {side} acquisition lacks five samples or exceeds 25% failures."
+                            ),
+                        )
+                    )
+
         snapshot: dict[str, Any] = {}
         if mission is not None:
             snapshot = await self._evaluate_mission_snapshot(checks, mission)

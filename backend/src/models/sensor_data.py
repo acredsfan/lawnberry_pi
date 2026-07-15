@@ -103,6 +103,11 @@ class TofReading(BaseModel):
     range_status: str | None = None  # "valid", "wrap_around", "signal_fail", etc.
     sensor_side: str  # "left" or "right"
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    sample_id: int | None = None
+    monotonic_received_s: float | None = None
+    cached: bool = False
+
+    model_config = ConfigDict(frozen=True)
 
 
 class EnvironmentalReading(BaseModel):

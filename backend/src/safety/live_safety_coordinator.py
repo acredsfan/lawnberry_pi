@@ -32,6 +32,11 @@ class LiveSafetyStatus:
     last_tof_right_sample_monotonic_s: float | None = None
     last_power_sample_monotonic_s: float | None = None
     last_environment_sample_monotonic_s: float | None = None
+    tof_acquisition_owner_running: bool = False
+    tof_left_failure_rate: float | None = None
+    tof_right_failure_rate: float | None = None
+    tof_left_window_samples: int = 0
+    tof_right_window_samples: int = 0
     active_faults: set[str] = field(default_factory=set)
     last_fault_reason: str | None = None
 
@@ -50,6 +55,11 @@ class LiveSafetyStatus:
             "tof_right_sample_age_s": _age(self.last_tof_right_sample_monotonic_s),
             "power_sample_age_s": _age(self.last_power_sample_monotonic_s),
             "environment_sample_age_s": _age(self.last_environment_sample_monotonic_s),
+            "tof_acquisition_owner_running": self.tof_acquisition_owner_running,
+            "tof_left_failure_rate": self.tof_left_failure_rate,
+            "tof_right_failure_rate": self.tof_right_failure_rate,
+            "tof_left_window_samples": self.tof_left_window_samples,
+            "tof_right_window_samples": self.tof_right_window_samples,
             "active_faults": sorted(self.active_faults),
             "last_fault_reason": self.last_fault_reason,
         }
@@ -107,6 +117,23 @@ class LiveSafetyCoordinator:
                         sample = await read_fast()
                     else:
                         sample = await manager.read_all_sensors()
+                    tof = getattr(manager, "tof", None)
+                    health_fn = getattr(tof, "health_snapshot", None)
+                    if callable(health_fn):
+                        health = health_fn()
+                        left_health = health.get("left", {})
+                        right_health = health.get("right", {})
+                        self._status.tof_acquisition_owner_running = bool(
+                            health.get("owner_running")
+                        )
+                        self._status.tof_left_failure_rate = left_health.get("failure_rate")
+                        self._status.tof_right_failure_rate = right_health.get("failure_rate")
+                        self._status.tof_left_window_samples = int(
+                            left_health.get("window_samples") or 0
+                        )
+                        self._status.tof_right_window_samples = int(
+                            right_health.get("window_samples") or 0
+                        )
                     await self.evaluate_fast_sample(sample)
                 self._status.last_fast_tick_monotonic_s = time.monotonic()
             except asyncio.CancelledError:
@@ -179,10 +206,12 @@ class LiveSafetyCoordinator:
 
         tof_left = sample.tof_left
         tof_right = sample.tof_right
-        if tof_left is not None:
-            self._status.last_tof_left_sample_monotonic_s = now_mono
-        if tof_right is not None:
-            self._status.last_tof_right_sample_monotonic_s = now_mono
+        left_received_mono = getattr(tof_left, "monotonic_received_s", None)
+        right_received_mono = getattr(tof_right, "monotonic_received_s", None)
+        if isinstance(left_received_mono, (int, float)):
+            self._status.last_tof_left_sample_monotonic_s = float(left_received_mono)
+        if isinstance(right_received_mono, (int, float)):
+            self._status.last_tof_right_sample_monotonic_s = float(right_received_mono)
 
         actuator_active = self._actuator_active()
         stale_timeout_s = float(getattr(limits, "obstacle_stale_sample_timeout_s", 0.25))

@@ -141,7 +141,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T38 | x | Build canonical fail-closed return-home and blade-safe typed path legs | V43, V44, I.api |
 | T39 | x | Build footprint-safe coverage, connectors, capabilities, obstacle cost map, and bounded replan | V49, V50, I.api |
 | T40 | x | Build canonical admission snapshot and GPS degradation state machine | V45, V46, I.api, I.ws |
-| T41 | . | Build single-owner timestamped ToF acquisition and failure-rate readiness | V47, I.api, I.ws |
+| T41 | x | Build single-owner timestamped ToF acquisition and failure-rate readiness | V47, I.api, I.ws |
 | T42 | . | Make mission/manual operator mutations server-authoritative and fail-closed | V48, I.api, I.fe |
 | T43 | . | Build durable idempotent multi-zone job occurrences and truthful planning controls | V48, V53, I.api, I.fe |
 | T44 | . | Build canonical battery/SOC/energy reserve, return policy, history, and hardware mapping | V43, V45, V52, I.api, I.power |

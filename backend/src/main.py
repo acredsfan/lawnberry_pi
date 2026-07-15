@@ -496,6 +496,12 @@ async def lifespan(app: FastAPI):
     set_safety_event_handler(None)
     await websocket_hub.stop_telemetry_loop()
     try:
+        sensor_manager = AppState.get_instance().sensor_manager
+        if sensor_manager is not None:
+            await sensor_manager.shutdown()
+    except Exception:
+        _log.exception("SensorManager shutdown failed")
+    try:
         await _jobs_service_singleton.shutdown()
         _log.info("JobsService scheduler and active jobs stopped")
     except Exception:
