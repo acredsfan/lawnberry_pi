@@ -311,8 +311,9 @@ class PowerManager:
 
     async def _pause_camera(self) -> None:
         try:
-            from .camera_stream_service import camera_service
-            if camera_service.capture_active:
+            from .camera_runtime import camera_service
+
+            if camera_service.stream.is_active:
                 await camera_service.stop_streaming()
                 self._camera_paused_by_pm = True
                 logger.info("PowerManager: camera capture paused (idle)")
@@ -323,8 +324,9 @@ class PowerManager:
         if not self._camera_paused_by_pm:
             return
         try:
-            from .camera_stream_service import camera_service
-            if not camera_service.capture_active:
+            from .camera_runtime import camera_service
+
+            if not camera_service.stream.is_active:
                 await camera_service.start_streaming()
                 self._camera_paused_by_pm = False
                 self._camera_idle_since = None

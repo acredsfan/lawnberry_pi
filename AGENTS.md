@@ -62,7 +62,10 @@ Use the semble MCP tools (`mcp__semble__search`, `mcp__semble__find_related`) fo
 ## Development Commands
 
 - Backend dev server: `SIM_MODE=1 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081`
-- Hardware backend server: `SIM_MODE=0 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081`
+- Hardware services (recommended): `sudo systemctl start lawnberry-camera.service lawnberry-backend.service`
+- Manual hardware camera owner (terminal 1): `SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/tmp/lawnberry-camera.sock python -m backend.src.services.camera_stream_service`
+- Manual hardware backend (terminal 2): `SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/tmp/lawnberry-camera.sock python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081`
+- Never run the manual camera owner while `lawnberry-camera.service` is active; live hardware must have exactly one process opening the camera.
 - Backend tests: `SIM_MODE=1 python -m pytest tests/unit/ -x -q -m "not hardware"`
 - Broader backend tests: `SIM_MODE=1 python -m pytest tests/ -x -q -m "not hardware"`
 - Backend lint: `python -m ruff check backend/src tests`

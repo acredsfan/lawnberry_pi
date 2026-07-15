@@ -22,16 +22,25 @@ The LawnBerry Pi v2 system is operational for development, simulation, and super
 cd backend
 SIM_MODE=1 python -m uvicorn src.main:app --host 0.0.0.0 --port 8081 --reload
 
-# Backend (Terminal 1, on-device / hardware mode)
-cd backend
-SIM_MODE=0 python -m uvicorn src.main:app --host 0.0.0.0 --port 8081 --reload
+# Camera owner (Terminal 1, manual on-device / hardware mode)
+cd /home/pi/lawnberry
+SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/tmp/lawnberry-camera.sock \
+  python -m backend.src.services.camera_stream_service
 
-# Frontend (Terminal 2)  
+# Backend (Terminal 2, manual on-device / hardware mode)
+cd /home/pi/lawnberry
+SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/tmp/lawnberry-camera.sock \
+  python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+
+# Frontend (next terminal)
 cd frontend
 npm run dev -- --host 0.0.0.0 --port 3000
 ```
 
 These are the local development defaults. On-device/systemd deployments use the same backend/frontend ports (`8081` and `3000`), while Playwright preview-based E2E runs use port `4173`.
+For normal on-device operation, prefer
+`sudo systemctl start lawnberry-camera.service lawnberry-backend.service`. Never run the manual camera owner while the
+camera service is active; the live device must have exactly one owner.
 
 Important: if you do **not** set `SIM_MODE`, the backend currently behaves like hardware mode and will attempt device
 initialization. On a non-Pi machine this usually degrades gracefully, but it is noisier than running pure simulation.

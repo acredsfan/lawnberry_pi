@@ -1,17 +1,26 @@
 import asyncio
 import zoneinfo
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from ..core.observability import observability
 from ..core.state_manager import get_safety_state
-from ..models.job import Job, JobPriority, JobStatus, JobType
+from ..models.job import Job, JobPriority, JobProgress, JobStatus, JobType
+from ..models.mission import Mission, MissionLifecycleStatus, MissionStatus
 
 if TYPE_CHECKING:
     from .mission_service import MissionService
     from .websocket_hub import WebSocketHub
 
 logger = observability.get_logger(__name__)
+
+
+class _JobAdmissionBlocked(RuntimeError):
+    """A job could not be admitted to the canonical mission path."""
+
+
+_MISSION_JOB_TYPES = {JobType.SCHEDULED_MOW, JobType.MANUAL_MOW}
 
 
 class JobsService:
@@ -23,6 +32,9 @@ class JobsService:
         self.scheduler_running = False
         self._scheduler_task: asyncio.Task | None = None
         self._running_tasks: set[asyncio.Task] = set()
+        self._job_tasks: dict[str, asyncio.Task] = {}
+        self._job_control_tasks: dict[str, asyncio.Task[bool]] = {}
+        self._mission_admission_lock = asyncio.Lock()
         self._mission_service: MissionService | None = None
         self._websocket_hub: WebSocketHub | None = None
         self._qualification_service: Any | None = None
@@ -95,66 +107,296 @@ class JobsService:
         return job
 
     def delete_job(self, job_id: str) -> bool:
-        """Delete a job."""
-        if job_id in self.jobs:
-            job = self.jobs[job_id]
-            if job.status == JobStatus.RUNNING:
-                # Cancel running job first
-                self.cancel_job(job_id)
+        """Schedule deletion for legacy synchronous callers."""
+        job = self.jobs.get(job_id)
+        if job is None:
+            return False
+        if job.status == JobStatus.FAILED:
+            # Failed mission-stop evidence must remain inspectable. The normal
+            # retention cleanup can remove it after the diagnostic window.
+            return False
+        if job.status not in {JobStatus.RUNNING, JobStatus.PAUSED}:
             del self.jobs[job_id]
             return True
-        return False
+        if job.status in {JobStatus.RUNNING, JobStatus.PAUSED}:
+            if job.mission_id and self._mission_service is None:
+                return False
+            if not job.mission_id and job_id not in self._job_tasks:
+                return False
+        return self._schedule_control_task(
+            job_id,
+            "delete",
+            lambda: self.delete_job_async(job_id),
+        )
+
+    async def delete_job_async(self, job_id: str) -> bool:
+        """Delete a job after confirming any active mission is safely stopped."""
+        job = self.jobs.get(job_id)
+        if job is None:
+            return False
+        if job.status == JobStatus.FAILED:
+            return False
+        if job.status in (JobStatus.RUNNING, JobStatus.PAUSED):
+            await self.cancel_job_async(job_id)
+            if job.status in {
+                JobStatus.RUNNING,
+                JobStatus.PAUSED,
+                JobStatus.FAILED,
+            }:
+                return False
+            if job.status not in {JobStatus.CANCELLED, JobStatus.COMPLETED}:
+                return False
+        if self.jobs.get(job_id) is not job:
+            return False
+        del self.jobs[job_id]
+        return True
 
     def start_job(self, job_id: str) -> bool:
         """Start executing a job."""
         job = self.jobs.get(job_id)
         if not job or job.status != JobStatus.PENDING:
             return False
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return False
 
         job.status = JobStatus.RUNNING
         job.started_at = datetime.now(UTC)
+        job.completed_at = None
+        job.mission_id = None
+        job.progress = JobProgress()
+        job.result_message = None
+        job.error_message = None
 
-        task = asyncio.create_task(self._execute_job(job))
+        task = loop.create_task(self._execute_job(job), name=f"job-execute:{job.id}")
         self._running_tasks.add(task)
+        self._job_tasks[job.id] = task
         task.add_done_callback(self._running_tasks.discard)
-        task.add_done_callback(self._on_job_task_done)
+        task.add_done_callback(
+            lambda done, job_id=job.id: self._on_job_task_done(job_id, done)
+        )
         return True
 
-    def _on_job_task_done(self, task: asyncio.Task) -> None:
+    def _on_job_task_done(self, job_id: str, task: asyncio.Task) -> None:
         """Log any unhandled exception from a job task."""
+        if self._job_tasks.get(job_id) is task:
+            self._job_tasks.pop(job_id, None)
         if task.cancelled():
             return
         exc = task.exception()
         if exc is not None:
             logger.error("Unhandled exception in job task: %s", exc, exc_info=exc)
 
-    def pause_job(self, job_id: str) -> bool:
-        """Pause a running job."""
-        job = self.jobs.get(job_id)
-        if not job or job.status != JobStatus.RUNNING:
+    def _schedule_control_task(
+        self,
+        job_id: str,
+        operation: str,
+        coroutine_factory: Callable[[], Coroutine[Any, Any, bool]],
+    ) -> bool:
+        """Schedule one compatibility operation without returning a truthy no-op."""
+        if job_id in self._job_control_tasks:
+            return False
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
             return False
 
-        job.status = JobStatus.PAUSED
+        coroutine = coroutine_factory()
+        try:
+            task = loop.create_task(coroutine, name=f"job-{operation}:{job_id}")
+        except Exception:
+            coroutine.close()
+            logger.exception("Could not schedule %s for job %s", operation, job_id)
+            return False
+
+        self._job_control_tasks[job_id] = task
+        self._running_tasks.add(task)
+        task.add_done_callback(self._running_tasks.discard)
+        task.add_done_callback(
+            lambda done, target=job_id, action=operation: self._on_control_task_done(
+                target,
+                action,
+                done,
+            )
+        )
         return True
+
+    def _on_control_task_done(
+        self,
+        job_id: str,
+        operation: str,
+        task: asyncio.Task[bool],
+    ) -> None:
+        if self._job_control_tasks.get(job_id) is task:
+            self._job_control_tasks.pop(job_id, None)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                "Unhandled exception in job %s operation: %s",
+                operation,
+                exc,
+                exc_info=exc,
+            )
+
+    def pause_job(self, job_id: str) -> bool:
+        """Schedule a linked mission pause for legacy synchronous callers."""
+        job = self.jobs.get(job_id)
+        if (
+            job is None
+            or job.status != JobStatus.RUNNING
+            or not job.mission_id
+            or self._mission_service is None
+        ):
+            return False
+        return self._schedule_control_task(
+            job_id,
+            "pause",
+            lambda: self.pause_job_async(job_id),
+        )
+
+    async def pause_job_async(self, job_id: str) -> bool:
+        """Pause a running job through its linked MissionService mission."""
+        job = self.jobs.get(job_id)
+        if (
+            not job
+            or job.status != JobStatus.RUNNING
+            or not job.mission_id
+            or self._mission_service is None
+        ):
+            return False
+
+        try:
+            await self._mission_service.pause_mission(job.mission_id)
+            mission_status = await self._mission_service.get_mission_status(job.mission_id)
+        except Exception as exc:
+            job.error_message = f"Pause failed: {exc}"
+            logger.error("Job %s pause failed: %s", job.id, exc, exc_info=True)
+            return False
+
+        status = self._mission_status_value(mission_status)
+        if status == MissionLifecycleStatus.PAUSED:
+            job.status = JobStatus.PAUSED
+            job.error_message = None
+            return True
+        if status in {MissionLifecycleStatus.FAILED, MissionLifecycleStatus.ABORTED}:
+            self._project_terminal_status(job, mission_status)
+        return False
 
     def resume_job(self, job_id: str) -> bool:
-        """Resume a paused job."""
+        """Schedule a linked mission resume for legacy synchronous callers."""
         job = self.jobs.get(job_id)
-        if not job or job.status != JobStatus.PAUSED:
+        if (
+            job is None
+            or job.status != JobStatus.PAUSED
+            or not job.mission_id
+            or self._mission_service is None
+        ):
+            return False
+        return self._schedule_control_task(
+            job_id,
+            "resume",
+            lambda: self.resume_job_async(job_id),
+        )
+
+    async def resume_job_async(self, job_id: str) -> bool:
+        """Resume a paused job through its linked MissionService mission."""
+        job = self.jobs.get(job_id)
+        if (
+            not job
+            or job.status != JobStatus.PAUSED
+            or not job.mission_id
+            or self._mission_service is None
+        ):
             return False
 
-        job.status = JobStatus.RUNNING
-        return True
+        try:
+            await self._mission_service.resume_mission(job.mission_id)
+            mission_status = await self._mission_service.get_mission_status(job.mission_id)
+        except Exception as exc:
+            job.error_message = f"Resume failed: {exc}"
+            logger.error("Job %s resume failed: %s", job.id, exc, exc_info=True)
+            return False
+
+        if self._mission_status_value(mission_status) == MissionLifecycleStatus.RUNNING:
+            job.status = JobStatus.RUNNING
+            job.error_message = None
+            return True
+        return False
 
     def cancel_job(self, job_id: str) -> bool:
-        """Cancel a job."""
+        """Schedule cancellation for legacy synchronous callers."""
         job = self.jobs.get(job_id)
-        if not job or job.status in [JobStatus.COMPLETED, JobStatus.CANCELLED]:
+        if job is None or job.status in {
+            JobStatus.COMPLETED,
+            JobStatus.CANCELLED,
+            JobStatus.FAILED,
+        }:
+            return False
+        if job.status == JobStatus.PENDING:
+            self._finalize_cancelled(job, "Job cancelled before mission start")
+            return True
+        if job.status in {JobStatus.RUNNING, JobStatus.PAUSED}:
+            if job.mission_id and self._mission_service is None:
+                return False
+            if not job.mission_id and job_id not in self._job_tasks:
+                return False
+        return self._schedule_control_task(
+            job_id,
+            "cancel",
+            lambda: self.cancel_job_async(job_id),
+        )
+
+    async def cancel_job_async(self, job_id: str) -> bool:
+        """Cancel a job and confirm its linked mission reaches a terminal state."""
+        job = self.jobs.get(job_id)
+        if not job or job.status in {
+            JobStatus.COMPLETED,
+            JobStatus.CANCELLED,
+            JobStatus.FAILED,
+        }:
             return False
 
-        job.status = JobStatus.CANCELLED
-        job.completed_at = datetime.now(UTC)
-        return True
+        if job.status == JobStatus.PENDING:
+            self._finalize_cancelled(job, "Job cancelled before mission start")
+            return True
+
+        task = self._job_tasks.get(job_id)
+        if task is None:
+            if job.mission_id and self._mission_service is not None:
+                try:
+                    mission_status = await self._abort_linked_mission(job)
+                except Exception as exc:
+                    self._finalize_failed(job, f"Mission cancellation failed: {exc}")
+                    return False
+                if mission_status is not None:
+                    self._project_terminal_status(job, mission_status)
+                    return job.status == JobStatus.CANCELLED
+            self._finalize_failed(job, "Cancellation could not confirm mission state")
+            return False
+
+        if job.mission_id is None:
+            # A task cancelled before its coroutine first runs cannot execute a
+            # cancellation handler, so record the truthful no-mission outcome now.
+            self._finalize_cancelled(job, "Job cancelled before mission start")
+        else:
+            job.result_message = "Cancellation requested; awaiting confirmed mission stop"
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+        if job.status in {JobStatus.RUNNING, JobStatus.PAUSED}:
+            try:
+                mission_status = await self._abort_linked_mission(job)
+            except Exception as exc:
+                self._finalize_failed(job, f"Mission cancellation failed: {exc}")
+                return False
+            if mission_status is not None:
+                self._project_terminal_status(job, mission_status)
+            else:
+                self._finalize_failed(job, "Cancellation could not confirm mission state")
+        return job.status == JobStatus.CANCELLED
 
     def get_next_scheduled_jobs(self, limit: int = 10) -> list[Job]:
         """Get next jobs scheduled to run."""
@@ -192,13 +434,25 @@ class JobsService:
             self._scheduler_task = None
 
     async def shutdown(self) -> None:
-        """Cancel all running job tasks and stop the scheduler."""
+        """Stop scheduling and safely cancel all active in-memory jobs."""
         await self.stop_scheduler()
-        for task in list(self._running_tasks):
-            task.cancel()
+        if self._job_control_tasks:
+            await asyncio.gather(*list(self._job_control_tasks.values()), return_exceptions=True)
+        active_job_ids = [
+            job.id
+            for job in self.jobs.values()
+            if job.status in {JobStatus.RUNNING, JobStatus.PAUSED}
+        ]
+        if active_job_ids:
+            await asyncio.gather(
+                *(self.cancel_job_async(job_id) for job_id in active_job_ids),
+                return_exceptions=True,
+            )
         if self._running_tasks:
             await asyncio.gather(*self._running_tasks, return_exceptions=True)
         self._running_tasks.clear()
+        self._job_tasks.clear()
+        self._job_control_tasks.clear()
 
     async def _scheduler_loop(self):
         """Main scheduler loop."""
@@ -443,160 +697,111 @@ class JobsService:
         for job_id in jobs_to_remove:
             del self.jobs[job_id]
 
-    async def _dispatch_scheduled_job(
+    async def _admit_job_mission(
         self,
-        job: dict[str, Any],
         *,
-        due_occurrence: datetime | None = None,
-    ) -> None:
-        """Create and start a mission when a planning-job fires.
-
-        ``job`` is a planning-job dict as returned by
-        ``persistence.load_planning_jobs()`` (fields: id, name, zones, pattern,
-        pattern_params, …).
-
-        Skip conditions:
-          - MissionService not wired  → RuntimeError (programming error)
-          - Emergency stop active     → log and skip
-          - Another mission RUNNING   → log and skip
-          - No zones configured       → log warning and skip
-
-        After a successful create+start the job's ``last_run`` is updated and
-        persisted.  Errors from ``start_mission`` and WS broadcast are caught
-        so the scheduler loop remains stable.
-        """
+        job_id: str,
+        job_name: str,
+        zones: list[str],
+        pattern: str,
+        pattern_params: dict[str, Any],
+        mission_name: str,
+        on_mission_created: Callable[[str], None] | None = None,
+    ) -> Mission:
+        """Apply the canonical job gates, then create and start one mission."""
         if self._mission_service is None:
             raise RuntimeError(
                 "JobsService: MissionService is not wired. "
                 "Call set_mission_service() before dispatching scheduled jobs."
             )
 
-        job_id = job.get("id", "<unknown>")
-        job_name = job.get("name", "<unnamed>")
+        async with self._mission_admission_lock:
+            if get_safety_state().get("emergency_stop_active", False):
+                raise _JobAdmissionBlocked("emergency stop is active")
 
-        # --- Safety guard ---
-        safety = get_safety_state()
-        if safety.get("emergency_stop_active", False):
-            logger.warning(
-                "Scheduled job %r (%s) skipped: emergency stop is active.",
-                job_name,
-                job_id,
-            )
-            return
+            if self._qualification_service is None:
+                raise _JobAdmissionBlocked("qualification service is unavailable")
+            try:
+                self._qualification_service.assert_current()
+            except Exception as exc:
+                evaluation = getattr(exc, "evaluation", None)
+                reason_codes = getattr(evaluation, "reason_codes", None) or [
+                    "QUALIFICATION_EVIDENCE_MISSING"
+                ]
+                reason = ", ".join(str(code) for code in reason_codes)
+                raise _JobAdmissionBlocked(
+                    f"qualification evidence blocked start ({reason})"
+                ) from exc
 
-        if self._qualification_service is None:
-            logger.warning(
-                "Scheduled job %r (%s) skipped: qualification service is unavailable.",
-                job_name,
-                job_id,
-            )
-            return
-        try:
-            self._qualification_service.assert_current()
-        except Exception as exc:
-            evaluation = getattr(exc, "evaluation", None)
-            reason_codes = getattr(evaluation, "reason_codes", None) or [
-                "QUALIFICATION_EVIDENCE_MISSING"
-            ]
-            logger.warning(
-                "Scheduled job %r (%s) skipped: qualification evidence blocked start (%s).",
-                job_name,
-                job_id,
-                ", ".join(str(code) for code in reason_codes),
-            )
-            return
+            try:
+                missions = await self._mission_service.list_missions()
+            except Exception as exc:
+                raise _JobAdmissionBlocked(f"could not list missions: {exc}") from exc
 
-        # --- Conflict guard: skip if any mission is already RUNNING ---
-        try:
-            missions = await self._mission_service.list_missions()
-        except Exception as exc:
-            logger.error(
-                "Scheduled job %r (%s): could not list missions — skip. Error: %s",
-                job_name,
-                job_id,
-                exc,
-            )
-            return
-
-        mission_statuses = getattr(self._mission_service, "mission_statuses", {})
-        for mission in missions:
-            status = mission_statuses.get(mission.id)
-            if status is not None:
-                from ..models.mission import MissionLifecycleStatus
-                if status.status == MissionLifecycleStatus.RUNNING:
-                    logger.info(
-                        "Scheduled job %r (%s) skipped: mission %s is already RUNNING.",
-                        job_name,
-                        job_id,
-                        mission.id,
+            mission_statuses = getattr(self._mission_service, "mission_statuses", {})
+            for existing_mission in missions:
+                status = mission_statuses.get(existing_mission.id)
+                if status is None:
+                    continue
+                status_value = self._mission_status_value(status)
+                if status_value in {
+                    MissionLifecycleStatus.RUNNING,
+                    MissionLifecycleStatus.PAUSED,
+                }:
+                    raise _JobAdmissionBlocked(
+                        f"mission {existing_mission.id} is already {status_value.value}"
                     )
-                    return
 
-        # --- Zone guard ---
-        zones: list[str] = job.get("zones") or []
-        if not zones:
-            logger.warning(
-                "Scheduled job %r (%s) skipped: no zones configured.",
-                job_name,
-                job_id,
-            )
-            return
+            if not zones:
+                raise _JobAdmissionBlocked("no zones configured")
+            if len(zones) > 1:
+                logger.info(
+                    "Job %s has %d zones; dispatching for zones[0]=%s only"
+                    " (multi-zone queuing not yet implemented)",
+                    job_id,
+                    len(zones),
+                    zones[0],
+                )
 
-        if len(zones) > 1:
-            logger.info(
-                "Job %s has %d zones; dispatching for zones[0]=%s only"
-                " (multi-zone queuing not yet implemented)",
-                job.get("id"),
-                len(zones),
-                zones[0],
-            )
+            try:
+                mission = await self._mission_service.create_mission(
+                    name=mission_name,
+                    zone_id=zones[0],
+                    pattern=pattern,
+                    pattern_params=pattern_params,
+                )
+            except Exception as exc:
+                raise _JobAdmissionBlocked(f"create_mission failed: {exc}") from exc
 
-        zone_id = zones[0]
-        pattern = job.get("pattern", "parallel")
-        pattern_params: dict = job.get("pattern_params") or {}
+            if on_mission_created is not None:
+                on_mission_created(mission.id)
 
-        # --- Create mission ---
-        try:
-            mission = await self._mission_service.create_mission(
-                name=f"Scheduled: {job_name}",
-                zone_id=zone_id,
-                pattern=pattern,
-                pattern_params=pattern_params,
-            )
-        except Exception as exc:
-            logger.error(
-                "Scheduled job %r (%s): create_mission failed: %s",
-                job_name,
-                job_id,
-                exc,
-                exc_info=True,
-            )
-            return
+            try:
+                await self._mission_service.start_mission(mission.id)
+            except Exception as exc:
+                raise _JobAdmissionBlocked(
+                    f"start_mission({mission.id}) failed: {exc}"
+                ) from exc
 
-        # --- Start mission ---
-        mission_started = False
-        try:
-            await self._mission_service.start_mission(mission.id)
-            mission_started = True
-        except Exception as exc:
-            logger.error(
-                "Scheduled job %r (%s): start_mission(%s) failed: %s",
-                job_name,
-                job_id,
-                mission.id,
-                exc,
-                exc_info=True,
-            )
+        return mission
 
-        # --- Best-effort WS broadcast (only on successful start) ---
-        if mission_started and self._websocket_hub is not None:
+    async def _broadcast_job_started(
+        self,
+        *,
+        job_id: str,
+        job_name: str,
+        mission_id: str,
+        zone_id: str,
+    ) -> None:
+        """Broadcast an accepted start without owning any authoritative state."""
+        if self._websocket_hub is not None:
             try:
                 await self._websocket_hub.broadcast_to_topic(
                     "planning.schedule.fired",
                     {
                         "job_id": job_id,
                         "job_name": job_name,
-                        "mission_id": mission.id,
+                        "mission_id": mission_id,
                         "zone_id": zone_id,
                         "fired_at": datetime.now(UTC).isoformat(),
                     },
@@ -609,20 +814,32 @@ class JobsService:
                     exc,
                 )
 
-        if not mission_started:
-            logger.warning(
-                "Scheduled job %r (%s) did not start mission %s; last_run not updated.",
-                job_name,
-                job_id,
-                mission.id,
+    async def _dispatch_scheduled_job(
+        self,
+        job: dict[str, Any],
+        *,
+        due_occurrence: datetime | None = None,
+    ) -> Mission | None:
+        """Create and start a mission when a persistence-backed job fires."""
+        job_id = job.get("id", "<unknown>")
+        job_name = job.get("name", "<unnamed>")
+        try:
+            mission = await self._admit_job_mission(
+                job_id=job_id,
+                job_name=job_name,
+                zones=list(job.get("zones") or []),
+                pattern=job.get("pattern", "parallel"),
+                pattern_params=dict(job.get("pattern_params") or {}),
+                mission_name=f"Scheduled: {job_name}",
             )
-            return
+        except _JobAdmissionBlocked as exc:
+            logger.warning("Scheduled job %r (%s) skipped: %s.", job_name, job_id, exc)
+            return None
 
-        # --- Update last_run and persist ---
         job["last_run"] = (due_occurrence or datetime.now(UTC)).isoformat()
-        job["last_successful_run"] = job["last_run"]
         try:
             from ..core.persistence import persistence
+
             persistence.save_planning_job(job)
         except Exception as exc:
             logger.warning(
@@ -638,42 +855,163 @@ class JobsService:
             job_id,
             mission.id,
         )
+        await self._broadcast_job_started(
+            job_id=job_id,
+            job_name=job_name,
+            mission_id=mission.id,
+            zone_id=list(job.get("zones") or [""])[0],
+        )
+        return mission
 
-    async def _execute_job(self, job: Job):
-        """Execute a job (placeholder implementation)."""
+    async def _execute_job(self, job: Job) -> None:
+        """Execute an in-memory job through the canonical MissionService lifecycle."""
         try:
-            # Initialize progress
-            if not job.progress:
-                from ..models.job import JobProgress
+            job_type = job.job_type if isinstance(job.job_type, JobType) else JobType(job.job_type)
+            if job_type not in _MISSION_JOB_TYPES:
+                raise _JobAdmissionBlocked(
+                    f"job type {job_type.value!r} has no MissionService executor"
+                )
 
-                job.progress = JobProgress()
+            mission = await self._admit_job_mission(
+                job_id=job.id,
+                job_name=job.name,
+                zones=job.zones,
+                pattern=job.cutting_pattern,
+                pattern_params=dict(job.parameters),
+                mission_name=f"Job: {job.name}",
+                on_mission_created=lambda mission_id: setattr(job, "mission_id", mission_id),
+            )
+            job.last_run = datetime.now(UTC)
+            job.execution_logs.append(f"Mission {mission.id} accepted")
+            job.result_message = f"Mission {mission.id} running"
 
-            # Simulate job execution
-            for i in range(10):
-                if job.status != JobStatus.RUNNING:
-                    break
+            await self._broadcast_job_started(
+                job_id=job.id,
+                job_name=job.name,
+                mission_id=mission.id,
+                zone_id=job.zones[0],
+            )
 
-                # Update progress
-                job.progress.percentage_complete = (i + 1) * 10
-                job.progress.runtime_minutes = (i + 1) * 0.5
+            wait_for_terminal = self._mission_service.wait_for_terminal_state(mission.id)
+            if job.timeout_minutes and job.timeout_minutes > 0:
+                async with asyncio.timeout(job.timeout_minutes * 60):
+                    mission_status = await wait_for_terminal
+            else:
+                mission_status = await wait_for_terminal
+            self._project_terminal_status(job, mission_status)
+        except TimeoutError:
+            detail = f"Mission exceeded job timeout of {job.timeout_minutes} minutes"
+            try:
+                mission_status = await self._abort_linked_mission(job)
+            except Exception as abort_exc:
+                self._finalize_failed(
+                    job,
+                    f"{detail}; mission stop could not be confirmed: {abort_exc}",
+                )
+            else:
+                if mission_status is not None and mission_status.detail:
+                    detail = f"{detail}: {mission_status.detail}"
+                self._finalize_failed(job, detail)
+        except asyncio.CancelledError:
+            try:
+                mission_status = await asyncio.shield(self._abort_linked_mission(job))
+                if mission_status is None or self._mission_status_value(
+                    mission_status
+                ) == MissionLifecycleStatus.IDLE:
+                    self._finalize_cancelled(job, "Job cancelled before mission start")
+                else:
+                    self._project_terminal_status(job, mission_status)
+            except Exception as exc:
+                self._finalize_failed(job, f"Mission cancellation failed: {exc}")
+        except Exception as exc:
+            try:
+                mission_status = await self._abort_linked_mission(job)
+            except Exception as abort_exc:
+                self._finalize_failed(job, f"{exc}; mission cleanup failed: {abort_exc}")
+            else:
+                detail = str(exc)
+                if (
+                    mission_status is not None
+                    and self._mission_status_value(mission_status)
+                    == MissionLifecycleStatus.FAILED
+                    and mission_status.detail
+                ):
+                    detail = f"{detail}; {mission_status.detail}"
+                self._finalize_failed(job, detail)
+        finally:
+            self._update_job_runtime(job)
 
-                # Add execution log
-                job.execution_logs.append(f"Step {i + 1}/10 completed")
+    async def _abort_linked_mission(self, job: Job) -> MissionStatus | None:
+        if self._mission_service is None or not job.mission_id:
+            return None
+        mission_status = await self._mission_service.get_mission_status(job.mission_id)
+        status = self._mission_status_value(mission_status)
+        if status in {MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED}:
+            await self._mission_service.abort_mission(job.mission_id)
+            mission_status = await self._mission_service.get_mission_status(job.mission_id)
+        return mission_status
 
-                await asyncio.sleep(1)  # Simulate work
+    @staticmethod
+    def _mission_status_value(status: MissionStatus) -> MissionLifecycleStatus:
+        value = status.status
+        return value if isinstance(value, MissionLifecycleStatus) else MissionLifecycleStatus(value)
 
-            # Complete the job
-            if job.status == JobStatus.RUNNING:
-                job.status = JobStatus.COMPLETED
-                job.completed_at = datetime.now(UTC)
-                job.last_run = job.completed_at
-                job.result_message = "Job completed successfully"
+    def _project_terminal_status(self, job: Job, mission_status: MissionStatus) -> None:
+        status = self._mission_status_value(mission_status)
+        if job.progress is None:
+            job.progress = JobProgress()
+        job.progress.percentage_complete = mission_status.completion_percentage
+        job.progress.current_zone = job.zones[0] if job.zones else None
 
-        except Exception as e:
-            job.status = JobStatus.FAILED
-            job.completed_at = datetime.now(UTC)
-            job.error_message = str(e)
-            job.execution_logs.append(f"Job failed: {e}")
+        if status == MissionLifecycleStatus.COMPLETED:
+            job.status = JobStatus.COMPLETED
+            job.progress.percentage_complete = 100.0
+            if job.zones:
+                job.progress.zones_completed = [job.zones[0]]
+            job.result_message = f"Mission {mission_status.mission_id} completed successfully"
+            job.error_message = None
+        elif status == MissionLifecycleStatus.ABORTED:
+            self._finalize_cancelled(
+                job,
+                mission_status.detail or f"Mission {mission_status.mission_id} aborted",
+            )
+            return
+        elif status == MissionLifecycleStatus.FAILED:
+            self._finalize_failed(
+                job,
+                mission_status.detail or f"Mission {mission_status.mission_id} failed",
+            )
+            return
+        else:
+            self._finalize_failed(job, f"Mission ended in unexpected state {status.value}")
+            return
+
+        job.completed_at = datetime.now(UTC)
+        job.execution_logs.append(job.result_message)
+        self._update_job_runtime(job)
+
+    def _finalize_cancelled(self, job: Job, detail: str) -> None:
+        job.status = JobStatus.CANCELLED
+        job.completed_at = datetime.now(UTC)
+        job.result_message = detail
+        job.error_message = None
+        job.execution_logs.append(detail)
+        self._update_job_runtime(job)
+
+    def _finalize_failed(self, job: Job, detail: str) -> None:
+        job.status = JobStatus.FAILED
+        job.completed_at = datetime.now(UTC)
+        job.result_message = None
+        job.error_message = detail
+        job.execution_logs.append(f"Job failed: {detail}")
+        self._update_job_runtime(job)
+
+    @staticmethod
+    def _update_job_runtime(job: Job) -> None:
+        if job.progress is None or job.started_at is None:
+            return
+        end = job.completed_at or datetime.now(UTC)
+        job.progress.runtime_minutes = max(0.0, (end - job.started_at).total_seconds() / 60.0)
 
 
 # Global instance

@@ -1,8 +1,8 @@
 [Unit]
 Description=LawnBerry Pi v2 Backend API Service
 Documentation=https://github.com/acredsfan/lawnberry_pi
-After=network-online.target
-Wants=network-online.target
+After=network-online.target lawnberry-camera.service
+Wants=network-online.target lawnberry-camera.service
 Requires=lawnberry-database.service
 
 [Service]
@@ -15,6 +15,7 @@ Environment=LAWNBERRY_ENV=production
 Environment=LAWNBERRY_CONFIG_DIR=/home/pi/lawnberry/config
 Environment=LAWNBERRY_LOG_DIR=/home/pi/lawnberry/logs
 Environment=LAWNBERRY_DATA_DIR=/home/pi/lawnberry/data
+Environment=LAWNBERRY_CAMERA_SOCKET=/run/lawnberry/camera.sock
 Environment=SIM_MODE=0
 Environment=PYTHONUNBUFFERED=1
 # Load runtime secrets and configuration (e.g., NTRIP_*) from .env if present
@@ -25,7 +26,9 @@ EnvironmentFile=-/home/pi/lawnberry/.env
 ExecStartPre=-+/usr/bin/systemctl restart bluetooth.service
 
 # Main service command
-ExecStart=/home/pi/lawnberry/.venv/bin/uvicorn backend.src.main:app --host 0.0.0.0 --port 8081 --workers 1
+# Pin the live topology after EnvironmentFile expansion. Otherwise a stale
+# SIM_MODE or socket value in .env can create an embedded competing owner.
+ExecStart=/usr/bin/env SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/run/lawnberry/camera.sock /home/pi/lawnberry/.venv/bin/uvicorn backend.src.main:app --host 0.0.0.0 --port 8081 --workers 1
 
 # Health checks and monitoring
 ExecReload=/bin/kill -HUP $MAINPID

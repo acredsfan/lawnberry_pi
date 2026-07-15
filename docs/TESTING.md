@@ -39,8 +39,24 @@ SIM_MODE=1 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
 Use hardware mode only when validating on the Raspberry Pi or attached bench hardware:
 
 ```bash
-SIM_MODE=0 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+sudo systemctl start lawnberry-camera.service lawnberry-backend.service
 ```
+
+For a manual bench session, first run the standalone owner from the repository root in terminal 1:
+
+```bash
+SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/tmp/lawnberry-camera.sock \
+  python -m backend.src.services.camera_stream_service
+```
+
+Then run the backend against that exact socket in terminal 2:
+
+```bash
+SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/tmp/lawnberry-camera.sock \
+  python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+```
+
+Never run the manual owner while `lawnberry-camera.service` is active.
 
 Important behavior note:
 
@@ -241,6 +257,55 @@ These slices prove software behavior only. Physical qualification still needs th
 wheels-raised, outdoor blade-off, then limited blade-on sequence before any field-readiness claim. Simulation evidence is
 never accepted as physical qualification evidence by the backend gate.
 
+## 3e) Job execution and camera AI contract slice
+
+For changes to `JobsService` mission dispatch/lifecycle projection or automatic camera inference:
+
+```bash
+tmpdir=$(mktemp -d)
+SIM_MODE=1 \
+LAWNBERRY_SKIP_HW_INIT=1 \
+LAWN_DATA_DIR="$tmpdir" \
+DB_PATH="$tmpdir/lawnberry.db" \
+LAWN_SETTINGS_DIR="$tmpdir/config" \
+python -m pytest \
+  tests/unit/test_jobs_service_execution.py \
+  tests/unit/test_job_state_machine.py \
+  tests/unit/test_mission_service.py \
+  tests/unit/test_mission_ws_push.py \
+  tests/unit/test_power_manager_gps.py \
+  tests/unit/test_camera_client.py \
+  tests/unit/test_camera_systemd_contract.py \
+  tests/unit/test_camera_stream_service.py \
+  tests/unit/test_ai_service.py \
+  tests/unit/test_camera_router_contract.py \
+  tests/integration/test_scheduled_mission_dispatch.py \
+  tests/integration/test_jobs_service_lifecycle.py \
+  tests/contract/test_jobs.py \
+  tests/contract/test_rest_api_planning.py \
+  tests/test_ai_api.py \
+  -o addopts='' -q -m "not hardware"
+```
+
+V41 coverage must prove that every documented mower-job compatibility start dispatches through `MissionService`, retains
+the linked mission ID, advances `last_run` only after an accepted start, and records completion/success only after the linked
+mission reaches `COMPLETED`. Blocked, rejected, failed, aborted, cancelled, and unsupported paths must remain non-successful;
+tests must not sleep through or assert synthetic timed progress.
+
+V42 coverage must prove exact frame bytes/ID reach the injected processor, successful annotations derive from its result, a
+successful zero-object result is still truthfully processed, and disabled/skipped/unavailable/failed/timed-out/late or
+frame-mismatched inference leaves `processed_for_ai=false` with no dummy detections. Use a fake clock and a controlled slow
+processor to prove bounded sampling, bounded frame-delivery wait, late-result discard, and one tracked in-flight worker with
+no stale backlog; prove CPU-bound inference runs off the event loop and concurrent inference callers remain serialized.
+Tests must also prove camera AI results do not mutate navigation/safety state or invoke `MotorCommandGateway`.
+
+These are deterministic software contracts. They prove neither trained-model accuracy nor Coral/Hailo execution, and they
+do not qualify camera detections for mower safety. On-Pi camera/model latency, CPU/memory load, dropped-frame behavior, and
+known-target/no-target accuracy require separate observational evidence before any broader claim.
+The IPC/router contract test also forces live camera initialization to fail and verifies the standalone owner's simulation
+fallback remains visible as `sim_mode=true` and `hardware_available=false`, including fail-closed handling of older status
+payloads that omit those fields.
+
 Update one of the following to satisfy the guard:
 - `docs/**`
 - `spec/**`
@@ -252,7 +317,7 @@ Update one of the following to satisfy the guard:
 Run the backend and call the hardware self-test endpoint:
 
 ```bash
-SIM_MODE=0 uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+sudo systemctl start lawnberry-camera.service lawnberry-backend.service
 # Then from another shell on the Pi:
 curl http://localhost:8081/api/v2/system/selftest | jq
 ```

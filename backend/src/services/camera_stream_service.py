@@ -12,14 +12,15 @@ import signal
 import stat
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from ..core.observability import observability
+from ..models.ai_processing import InferenceResult
 from ..models.camera_stream import (
     CameraFrame,
     CameraMode,
@@ -63,6 +64,17 @@ except Exception as exc:
     )
 
 
+class AIFrameProcessor(Protocol):
+    """Callable contract for exact-frame AI inference."""
+
+    def __call__(
+        self,
+        image_bytes: bytes,
+        *,
+        frame_id: str,
+    ) -> Awaitable[InferenceResult | None]: ...
+
+
 class CameraStreamService:
     """
     Camera stream service with IPC support for multi-process architecture.
@@ -73,15 +85,43 @@ class CameraStreamService:
         self.sim_mode = sim_mode or os.getenv("SIM_MODE", "0") == "1"
         self.stream = CameraStream()
         self.clients: set[asyncio.StreamWriter] = set()
-        self.socket_path = "/tmp/lawnberry-camera.sock"
+        configured_socket = os.getenv("LAWNBERRY_CAMERA_SOCKET")
+        self.socket_path = configured_socket or (
+            "/tmp/lawnberry-camera.sock"
+            if self.sim_mode
+            else "/run/lawnberry/camera.sock"
+        )
+        self.stream.service_endpoint = f"unix://{self.socket_path}"
+        self._frame_clients: set[asyncio.StreamWriter] = set()
         self.frame_callbacks: list[Callable[[CameraFrame], None]] = []
 
         # Threading for camera capture
         self.capture_thread: threading.Thread | None = None
         self.capture_active = False
         self.frame_queue: asyncio.Queue[CameraFrame] | None = None
+        self._frame_processing_task: asyncio.Task[None] | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self._last_queue_warning = 0.0
+
+        # AI is injected from lifespan to keep camera ownership independent of
+        # AIService and avoid a service import cycle. Sampling runs inside the
+        # single latest-frame consumer; no task is created per frame.
+        self._ai_processor: AIFrameProcessor | None = None
+        self._ai_inference_task: asyncio.Task[InferenceResult | None] | None = None
+        self._last_ai_inference_monotonic: float | None = None
+        self._last_ai_warning_monotonic = float("-inf")
+        self._monotonic: Callable[[], float] = time.monotonic
+        try:
+            ai_fps = float(os.getenv("AI_CAMERA_INFERENCE_FPS", "1.0"))
+        except (TypeError, ValueError):
+            ai_fps = 1.0
+        self._ai_inference_fps = max(0.1, min(ai_fps, 5.0))
+        self._ai_inference_interval_seconds = 1.0 / self._ai_inference_fps
+        try:
+            ai_timeout = float(os.getenv("AI_CAMERA_INFERENCE_TIMEOUT_SECONDS", "0.5"))
+        except (TypeError, ValueError):
+            ai_timeout = 0.5
+        self._ai_inference_timeout_seconds = max(0.05, min(ai_timeout, 5.0))
 
         # IPC server
         self.ipc_server: asyncio.Server | None = None
@@ -90,6 +130,7 @@ class CameraStreamService:
         # Camera backend
         self.camera = None
         self.executor = ThreadPoolExecutor(max_workers=2)
+        self._executor_shutdown = False
         self.hardware_available = False
 
         # Frame storage
@@ -108,6 +149,9 @@ class CameraStreamService:
         try:
             logger.info(f"Initializing camera service (SIM_MODE={self.sim_mode})")
             self.loop = asyncio.get_running_loop()
+            if self._executor_shutdown:
+                self.executor = ThreadPoolExecutor(max_workers=2)
+                self._executor_shutdown = False
 
             # Initialize camera backend
             if not self.sim_mode:
@@ -297,6 +341,7 @@ class CameraStreamService:
     async def _setup_ipc_server(self):
         """Set up Unix socket IPC server."""
         try:
+            Path(self.socket_path).parent.mkdir(parents=True, exist_ok=True)
             # Clean up existing socket
             if os.path.exists(self.socket_path):
                 os.unlink(self.socket_path)
@@ -328,18 +373,26 @@ class CameraStreamService:
         try:
             while True:
                 # Read client message
-                data = await reader.read(1024)
+                data = await reader.readline()
                 if not data:
                     break
 
                 try:
                     message = json.loads(data.decode())
+                    if message.get("command") == "unsubscribe_frames":
+                        self._frame_clients.discard(writer)
                     response = await self._handle_client_message(message)
 
                     # Send response
                     response_data = json.dumps(response).encode() + b"\n"
                     writer.write(response_data)
                     await writer.drain()
+                    if message.get("command") == "subscribe_frames" and response.get(
+                        "status"
+                    ) == "success":
+                        # Subscribe only after the acknowledgement is flushed,
+                        # so a frame can never precede the command response.
+                        self._frame_clients.add(writer)
 
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid JSON from client: {data}")
@@ -351,6 +404,7 @@ class CameraStreamService:
         except Exception as e:
             logger.error(f"Client connection error: {e}")
         finally:
+            self._frame_clients.discard(writer)
             self.clients.discard(writer)
             self.stream.client_count = len(self.clients)
             writer.close()
@@ -362,12 +416,29 @@ class CameraStreamService:
         command = message.get("command")
 
         if command == "get_status":
-            return {"status": "success", "data": self.stream.model_dump()}
+            status_payload = self.stream.model_dump(
+                mode="json",
+                exclude={"current_frame"},
+            )
+            # Service ownership state is not part of CameraStream itself, but
+            # consumers must receive it with every status snapshot. In
+            # particular, a live-mode owner that falls back after hardware
+            # initialization fails must never look like a hardware camera.
+            status_payload.update(
+                {
+                    "sim_mode": self.sim_mode,
+                    "hardware_available": self.hardware_available,
+                }
+            )
+            return {
+                "status": "success",
+                "data": status_payload,
+            }
 
         elif command == "get_frame":
             frame = await self.get_current_frame()
             if frame:
-                return {"status": "success", "data": frame.model_dump()}
+                return {"status": "success", "data": frame.model_dump(mode="json")}
             else:
                 return {"status": "error", "error": "No frame available"}
 
@@ -389,6 +460,12 @@ class CameraStreamService:
         elif command == "stop_streaming":
             await self.stop_streaming()
             return {"status": "success", "message": "Streaming stopped"}
+
+        elif command == "subscribe_frames":
+            return {"status": "success", "message": "Frame subscription enabled"}
+
+        elif command == "unsubscribe_frames":
+            return {"status": "success", "message": "Frame subscription disabled"}
 
         else:
             return {"status": "error", "error": f"Unknown command: {command}"}
@@ -414,15 +491,26 @@ class CameraStreamService:
 
             # Single-slot queue: always deliver the freshest frame with no buffering lag.
             self._enqueue_timeout = 0.5
-            self.frame_queue = asyncio.Queue(maxsize=1)
+            if self.frame_queue is None:
+                self.frame_queue = asyncio.Queue(maxsize=1)
+            else:
+                while not self.frame_queue.empty():
+                    try:
+                        self.frame_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
 
             # Start capture thread
             self.capture_active = True
             self.capture_thread = threading.Thread(target=self._capture_frames_thread, daemon=True)
             self.capture_thread.start()
 
-            # Start frame processing task
-            asyncio.create_task(self._process_frames())
+            # Keep exactly one consumer across stop/start cycles.
+            if self._frame_processing_task is None or self._frame_processing_task.done():
+                self._frame_processing_task = asyncio.create_task(
+                    self._process_frames(),
+                    name="camera-frame-processing",
+                )
 
             self.stream.is_active = True
             self.stream.mode = CameraMode.STREAMING
@@ -443,7 +531,8 @@ class CameraStreamService:
         self.capture_active = False
 
         if self.capture_thread and self.capture_thread.is_alive():
-            self.capture_thread.join(timeout=5.0)
+            await asyncio.to_thread(self.capture_thread.join, 5.0)
+        self.capture_thread = None
 
         self.stream.is_active = False
         self.stream.mode = CameraMode.OFFLINE
@@ -854,30 +943,138 @@ class CameraStreamService:
             logger.error(f"Single frame processing error: {e}")
 
     async def _process_frame_for_ai(self, frame: CameraFrame):
-        """Process frame for AI analysis (placeholder)."""
+        """Run bounded inference for this exact frame when the cadence is due."""
+        frame.processed_for_ai = False
+        frame.ai_annotations = []
+
+        processor = self._ai_processor
+        if not self.stream.ai_processing_enabled or processor is None:
+            return
+        # A timed-out to_thread worker cannot be force-cancelled. Keep its
+        # shielded task tracked and skip new samples until it really finishes.
+        if self._ai_inference_task is not None:
+            return
+
+        now = self._monotonic()
+        if (
+            self._last_ai_inference_monotonic is not None
+            and now - self._last_ai_inference_monotonic
+            < self._ai_inference_interval_seconds
+        ):
+            return
+
+        frame_bytes = frame.get_frame_data()
+        if not frame_bytes:
+            return
+
+        # Count attempts, including failures/unavailable results, so a broken
+        # model cannot turn the camera loop into an unbounded retry loop.
+        self._last_ai_inference_monotonic = now
+        inference_task = asyncio.create_task(
+            processor(
+                frame_bytes,
+                frame_id=frame.metadata.frame_id,
+            ),
+            name=f"camera-ai-{frame.metadata.frame_id}",
+        )
+        self._ai_inference_task = inference_task
         try:
-            # This would integrate with AI processing service
-            # For now, just mark as processed
-            frame.processed_for_ai = True
+            result = await asyncio.wait_for(
+                asyncio.shield(inference_task),
+                timeout=self._ai_inference_timeout_seconds,
+            )
+        except TimeoutError:
+            self._warn_ai_processing(
+                "AI processing timed out after %.3fs for frame %s",
+                self._ai_inference_timeout_seconds,
+                frame.metadata.frame_id,
+            )
+            inference_task.add_done_callback(self._discard_late_ai_result)
+            return
+        except asyncio.CancelledError:
+            inference_task.cancel()
+            if self._ai_inference_task is inference_task:
+                self._ai_inference_task = None
+            raise
+        except Exception as exc:
+            if self._ai_inference_task is inference_task:
+                self._ai_inference_task = None
+            self._warn_ai_processing("AI processing error: %s", exc)
+            return
+        if self._ai_inference_task is inference_task:
+            self._ai_inference_task = None
 
-            # Add dummy AI annotations in simulation mode
-            if self.sim_mode:
-                frame.ai_annotations = [
-                    {
-                        "type": "object_detection",
-                        "objects": [
-                            {"class": "grass", "confidence": 0.95, "bbox": [0, 0, 100, 100]}
-                        ],
-                        "processing_time_ms": 15.5,
-                    }
-                ]
+        if result is None:
+            return
+        if getattr(result, "input_frame_id", None) != frame.metadata.frame_id:
+            self._warn_ai_processing(
+                "AI result frame mismatch: expected %s, received %s",
+                frame.metadata.frame_id,
+                getattr(result, "input_frame_id", None),
+            )
+            return
 
-        except Exception as e:
-            logger.warning(f"AI processing error: {e}")
+        try:
+            frame.ai_annotations = [self._annotation_from_ai_result(result)]
+        except Exception as exc:
+            self._warn_ai_processing("Invalid AI inference result: %s", exc)
+            frame.ai_annotations = []
+            return
+
+        # A completed inference with zero detections is still a truthful
+        # processed result. Skips, failures, and provenance mismatches stay false.
+        frame.processed_for_ai = True
+
+    def _discard_late_ai_result(
+        self,
+        task: asyncio.Task[InferenceResult | None],
+    ) -> None:
+        """Consume a timed-out result without attaching it to a newer frame."""
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            self._warn_ai_processing("Timed-out AI processing later failed: %s", exc)
+        finally:
+            if self._ai_inference_task is task:
+                self._ai_inference_task = None
+
+    def _annotation_from_ai_result(self, result: InferenceResult) -> dict[str, Any]:
+        task = getattr(result.task, "value", result.task)
+        objects = []
+        for detected in result.detected_objects:
+            bbox = detected.bounding_box
+            objects.append(
+                {
+                    "id": detected.object_id,
+                    "class": detected.class_name,
+                    "confidence": detected.confidence,
+                    "bbox": [bbox.x, bbox.y, bbox.width, bbox.height],
+                    "distance_estimate_m": detected.distance_estimate,
+                    "relative_bearing_degrees": detected.relative_bearing,
+                    "tracking_id": detected.tracking_id,
+                }
+            )
+        return {
+            "type": task,
+            "inference_id": result.inference_id,
+            "model_name": result.model_name,
+            "model_version": result.model_version,
+            "processing_time_ms": result.total_time_ms,
+            "objects": objects,
+        }
+
+    def _warn_ai_processing(self, message: str, *args: Any) -> None:
+        now = self._monotonic()
+        if now - self._last_ai_warning_monotonic < 5.0:
+            return
+        self._last_ai_warning_monotonic = now
+        logger.warning(message, *args)
 
     async def _broadcast_frame_to_clients(self, frame: CameraFrame):
         """Broadcast frame to connected clients."""
-        if not self.clients:
+        if not self._frame_clients:
             return
 
         try:
@@ -888,7 +1085,7 @@ class CameraStreamService:
             # Send to all clients
             disconnected_clients = set()
 
-            for client in list(self.clients):
+            for client in list(self._frame_clients):
                 try:
                     client.write(message_data)
                     await asyncio.wait_for(client.drain(), timeout=self._client_drain_timeout)
@@ -906,8 +1103,15 @@ class CameraStreamService:
 
             # Clean up disconnected clients
             for client in disconnected_clients:
+                self._frame_clients.discard(client)
                 self.clients.discard(client)
                 self.stream.client_count = len(self.clients)
+                client.close()
+            if disconnected_clients:
+                await asyncio.gather(
+                    *(client.wait_closed() for client in disconnected_clients),
+                    return_exceptions=True,
+                )
 
         except Exception as e:
             logger.error(f"Frame broadcast error: {e}")
@@ -1014,6 +1218,25 @@ class CameraStreamService:
         """Add callback for frame processing."""
         self.frame_callbacks.append(callback)
 
+    def set_ai_processor(
+        self,
+        processor: AIFrameProcessor | None,
+        *,
+        max_fps: float | None = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        """Inject exact-frame inference without coupling camera to AIService."""
+        self._ai_processor = processor
+        if max_fps is not None:
+            self._ai_inference_fps = max(0.1, min(float(max_fps), 5.0))
+            self._ai_inference_interval_seconds = 1.0 / self._ai_inference_fps
+        if timeout_seconds is not None:
+            self._ai_inference_timeout_seconds = max(
+                0.05,
+                min(float(timeout_seconds), 5.0),
+            )
+        self._last_ai_inference_monotonic = None
+
     def remove_frame_callback(self, callback: Callable[[CameraFrame], None]):
         """Remove frame callback."""
         if callback in self.frame_callbacks:
@@ -1037,6 +1260,18 @@ class CameraStreamService:
         # Stop streaming
         await self.stop_streaming()
 
+        if self._frame_processing_task is not None:
+            try:
+                await self._frame_processing_task
+            except asyncio.CancelledError:
+                pass
+            self._frame_processing_task = None
+
+        if self._ai_inference_task is not None:
+            self._ai_inference_task.cancel()
+            await asyncio.gather(self._ai_inference_task, return_exceptions=True)
+            self._ai_inference_task = None
+
         # Close camera
         if not self.sim_mode and self.camera:
             try:
@@ -1052,19 +1287,58 @@ class CameraStreamService:
         if self.ipc_server:
             self.ipc_server.close()
             await self.ipc_server.wait_closed()
+            self.ipc_server = None
+
+        client_writers = list(self.clients)
+        for writer in client_writers:
+            writer.close()
+        if client_writers:
+            await asyncio.gather(
+                *(writer.wait_closed() for writer in client_writers),
+                return_exceptions=True,
+            )
+        self.clients.clear()
+        self._frame_clients.clear()
+        self.stream.client_count = 0
 
         # Clean up socket
         if os.path.exists(self.socket_path):
             os.unlink(self.socket_path)
 
         # Shutdown executor
-        self.executor.shutdown(wait=True)
+        if not self._executor_shutdown:
+            await asyncio.to_thread(self.executor.shutdown, wait=True)
+            self._executor_shutdown = True
+
+        # asyncio.Queue and the cached loop belong to the loop that initialized
+        # this owner. Full shutdown must discard them before a later service
+        # reinitialize (including tests and supervised in-process restarts).
+        self.frame_queue = None
+        self.loop = None
+        self._last_ai_inference_monotonic = None
 
         logger.info("Camera service shutdown complete")
 
 
 # Global camera service instance
 camera_service = CameraStreamService()
+
+
+def _get_ai_service():
+    """Resolve AI lazily so importing the camera owner stays lightweight."""
+    from .ai_service import get_ai_service
+
+    return get_ai_service()
+
+
+async def _configure_camera_ai() -> None:
+    """Wire exact-frame and latest-frame AI paths to this camera owner."""
+    ai_service = _get_ai_service()
+    ai_service.set_camera_frame_provider(camera_service.get_current_frame)
+    initialized = await ai_service.initialize()
+    if not initialized:
+        raise RuntimeError("AI service initialization returned false")
+    camera_service.set_ai_processor(ai_service.infer_camera_frame)
 
 
 async def main():
@@ -1078,22 +1352,31 @@ async def main():
 
     def signal_handler(sig):
         logger.info(f"Received signal {sig}, shutting down...")
-        loop.create_task(camera_service.shutdown())
+        camera_service.running = False
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, signal_handler, sig)
 
     try:
-        # Initialize and start camera service
-        if await camera_service.initialize():
-            await camera_service.start_streaming()
-
-            # Keep service running
-            while camera_service.running:
-                await asyncio.sleep(1)
-        else:
+        if not await camera_service.initialize():
             logger.error("Failed to initialize camera service")
             return 1
+
+        # AI is optional for camera availability: wire it before capture so no
+        # frame can be marked processed by an uninitialized processor, but keep
+        # streaming when model setup is unavailable.
+        try:
+            await _configure_camera_ai()
+        except Exception:
+            logger.exception("AI setup failed; continuing camera stream without inference")
+
+        if not await camera_service.start_streaming():
+            logger.error("Failed to start camera streaming")
+            return 1
+
+        # Keep service running
+        while camera_service.running:
+            await asyncio.sleep(1)
 
     except Exception as e:
         logger.error(f"Camera service error: {e}")

@@ -60,11 +60,27 @@ Expected behavior:
 
 ### On-device Raspberry Pi validation
 
-Use hardware mode:
+Use the paired hardware services. The camera service is the sole live camera-device owner; the backend consumes its Unix
+socket and does not open the device itself:
 
 ```bash
-SIM_MODE=0 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+sudo systemctl start lawnberry-camera.service lawnberry-backend.service
 ```
+
+For an interactive bench run without systemd, use two terminals from the repository root. Both commands must name the
+same user-owned socket:
+
+```bash
+# Terminal 1: sole camera owner
+SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/tmp/lawnberry-camera.sock \
+  python -m backend.src.services.camera_stream_service
+
+# Terminal 2: backend IPC client
+SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/tmp/lawnberry-camera.sock \
+  python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+```
+
+Do not run the manual owner while `lawnberry-camera.service` is active.
 
 Use this when:
 
@@ -118,7 +134,7 @@ npm run dev -- --host 0.0.0.0 --port 3000
 ### On-device hardware self-test
 
 ```bash
-SIM_MODE=0 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+sudo systemctl start lawnberry-camera.service lawnberry-backend.service
 curl http://localhost:8081/api/v2/system/selftest | jq
 ```
 
@@ -133,6 +149,7 @@ curl http://localhost:8081/api/v2/system/selftest | jq
 ### Hardware mode checks
 
 - confirm you launched with `SIM_MODE=0`
+- confirm exactly one camera owner is active and the backend uses the same socket
 - confirm `uv run python scripts/manage_hardware_config.py validate` succeeds
 - inspect `journalctl` or backend logs for device initialization messages
 - verify self-test, RoboHAT status, and sensor health endpoints

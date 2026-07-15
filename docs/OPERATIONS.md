@@ -60,11 +60,26 @@ Recommended commands:
 # Laptop / CI / simulation-safe local dev
 SIM_MODE=1 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
 
-# Raspberry Pi / hardware validation
-SIM_MODE=0 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+# Raspberry Pi / hardware validation (starts the sole camera owner first)
+sudo systemctl start lawnberry-camera.service lawnberry-backend.service
 ```
 
 If you want a clean local-development experience without serial/GPIO warnings, always set `SIM_MODE=1` explicitly.
+For an interactive hardware bench session without systemd, run the camera owner and backend from the repository root in
+separate terminals with the same user-owned socket:
+
+```bash
+# Terminal 1
+SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/tmp/lawnberry-camera.sock \
+  python -m backend.src.services.camera_stream_service
+
+# Terminal 2
+SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/tmp/lawnberry-camera.sock \
+  python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+```
+
+Do not start this manual camera owner while `lawnberry-camera.service` is active. Stop the manual owner when the bench
+session ends; live hardware must have exactly one process opening the camera.
 
 ## Hardware configuration
 
@@ -162,6 +177,14 @@ If you protect the public hostname with Cloudflare Access, HTTP-01 issuance will
 - GET http://127.0.0.1:8081/api/v2/nav/coverage-plan?config_id=default&spacing_m=0.6 → generated coverage preview polyline
 - GET/POST/DELETE http://127.0.0.1:8081/api/v2/planning/jobs
 
+Scheduled and compatibility mower-job starts have one execution owner: `JobsService` dispatches through
+`MissionService`. For an in-memory compatibility `Job`, `mission_id` retains the linked identity and completion is projected
+from that mission. For a persistence-backed schedule, `last_run` means only that `MissionService` accepted a dispatch; the
+mission record remains authoritative afterward. A compatibility job may report `COMPLETED`, 100% progress, or success only
+after its linked mission reaches `COMPLETED`. Qualification blocks, E-stop, conflicts, missing zones, rejected starts,
+mission failure/abort/cancel, and unsupported job types remain explicit non-success outcomes. Elapsed time or synthetic
+progress must never be treated as mission evidence.
+
 ## Control
 - POST http://127.0.0.1:8081/api/v2/control/drive
 - POST http://127.0.0.1:8081/api/v2/control/blade
@@ -174,6 +197,16 @@ If you protect the public hostname with Cloudflare Access, HTTP-01 issuance will
 - GET http://127.0.0.1:8081/api/v2/camera/status → camera activity + FPS snapshot
 - GET http://127.0.0.1:8081/api/v2/camera/frame → latest raw JPEG snapshot
 - GET http://127.0.0.1:8081/api/v2/camera/stream.mjpeg → live MJPEG stream
+
+On live hardware, `lawnberry-camera.service` is the only process that opens the camera. It publishes status, exact frames,
+and automatic AI annotations over `/run/lawnberry/camera.sock`; the FastAPI camera and latest-inference endpoints consume
+that IPC owner through `CameraClient`. The backend unit waits for the camera unit and must not fall back to opening the
+device itself. `SIM_MODE=1` may embed the simulated owner for offline tests only. The camera and backend units both load
+`/home/pi/lawnberry/.env`; their `ExecStart` contract then pins `SIM_MODE=0` and the shared
+`/run/lawnberry/camera.sock`, so stale `.env` values cannot create a second embedded production owner. Idle power management
+uses the same runtime-selected owner and therefore pauses/resumes the standalone service over IPC.
+If hardware initialization fails and that owner falls back to generated frames, IPC and the camera status API explicitly
+report `sim_mode=true` and `hardware_available=false`; those frames must not appear to come from confirmed hardware.
 
 The Web UI now exposes a virtual joystick for manual drive control. Drag in any direction to stream drive vectors (linear/forward on the Y axis, angular/turn rate on the X axis). The slider underneath scales max velocity (10–100%). Releasing the joystick or pressing **Stop Motors** immediately sends a zero-vector command and clears the motion queue; the backend rate limiter has dedicated bursts for these endpoints to prevent inadvertent HTTP 429 responses during manual driving sessions.
 
@@ -310,7 +343,7 @@ key redaction, not logged or copied into the record.
 Run only the non-destructive stages until Aaron is ready for a supervised physical stage:
 
 ```bash
-SIM_MODE=0 python -m uvicorn backend.src.main:app --host 0.0.0.0 --port 8081
+sudo systemctl start lawnberry-camera.service lawnberry-backend.service
 python scripts/run_autonomy_qualification.py --base-url http://127.0.0.1:8081 --output -
 ```
 
@@ -367,8 +400,28 @@ Rollback:
 4. Re-run the non-destructive qualification stages before any blade-off motion, then repeat the staged physical checklist.
 
 ## AI
+- GET http://127.0.0.1:8081/api/v2/ai/status
 - GET http://127.0.0.1:8081/api/v2/ai/datasets
 - POST http://127.0.0.1:8081/api/v2/ai/datasets/{datasetId}/export
+- POST http://127.0.0.1:8081/api/v2/ai/inference → infer an uploaded image
+- POST http://127.0.0.1:8081/api/v2/ai/inference/latest → infer the latest available camera frame
+- GET http://127.0.0.1:8081/api/v2/ai/results/recent
+
+The current inference contract is a configured local JSON rule definition executed on the CPU. It does not claim a trained
+neural model or active Coral/Hailo acceleration. Automatic camera processing passes sampled exact frame bytes and frame ID
+to the standalone owner's injected processor at a bounded cadence within the single latest-frame consumer. It does not
+create a task per frame or queue stale inference work, and CPU inference runs off the event loop.
+`AI_CAMERA_INFERENCE_FPS` controls sampling and
+`AI_CAMERA_INFERENCE_TIMEOUT_SECONDS` bounds how long a selected frame waits before delivery. A timed-out worker remains the
+only tracked inference until it exits; its late result is discarded and no replacement worker is queued concurrently.
+
+`processed_for_ai=true` means inference succeeded for that exact frame, including a valid result with zero detected objects.
+Disabled, skipped, unavailable, failed, timed-out, late, or frame-mismatched work remains unprocessed, and simulation must
+not inject hardcoded detections.
+
+Camera AI results are informational only. They do not set navigation obstacle state, authorize motion, or replace the ToF,
+localization, operating-area, qualification, and `MotorCommandGateway` safety paths. Any future promotion into mower safety
+requires its own freshness, failure, validation, and physical-qualification contract.
 
 ## Settings
 - GET/PUT http://127.0.0.1:8081/api/v2/settings → settings profile management

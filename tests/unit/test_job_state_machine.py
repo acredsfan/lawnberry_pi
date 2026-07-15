@@ -68,37 +68,64 @@ def test_job_state_machine_fail_records_reason():
     assert job.error_message == "low battery"
 
 
-@pytest.mark.asyncio
-async def test_job_task_exception_logged(caplog):
-    """Exceptions from _execute_job must be logged, not silently discarded."""
-    import logging
-    import asyncio
-    from backend.src.services.jobs_service import JobsService, JobStatus
-    from backend.src.models.job import Job, JobType, JobPriority
-    from datetime import datetime, timezone
+def test_v41_jobs_service_preserves_synchronous_compatibility_adapters():
+    """V41: legacy bool methods remain sync and expose explicit async operations."""
+    import inspect
 
-    svc = JobsService()
+    from backend.src.services.jobs_service import JobsService
+
+    service = JobsService()
+
+    assert not inspect.iscoroutinefunction(service.start_job)
+    assert not inspect.iscoroutinefunction(service.delete_job)
+    assert not inspect.iscoroutinefunction(service.pause_job)
+    assert not inspect.iscoroutinefunction(service.resume_job)
+    assert not inspect.iscoroutinefunction(service.cancel_job)
+    assert inspect.iscoroutinefunction(service.delete_job_async)
+    assert inspect.iscoroutinefunction(service.pause_job_async)
+    assert inspect.iscoroutinefunction(service.resume_job_async)
+    assert inspect.iscoroutinefunction(service.cancel_job_async)
+
+
+def test_v41_sync_adapters_keep_safe_immediate_operations_without_a_loop():
+    """Safe legacy operations remain immediate; mission starts still need a loop."""
+    from backend.src.models.job import JobStatus, JobType
+    from backend.src.services.jobs_service import JobsService
+
+    service = JobsService()
+    start_job = service.create_job("start", job_type=JobType.SCHEDULED_MOW, zones=["zone"])
+    cancel_job = service.create_job("cancel", job_type=JobType.SCHEDULED_MOW, zones=["zone"])
+    delete_job = service.create_job("delete", job_type=JobType.SCHEDULED_MOW, zones=["zone"])
+
+    assert service.start_job(start_job.id) is False
+    assert start_job.status == JobStatus.PENDING
+    assert service.cancel_job(cancel_job.id) is True
+    assert cancel_job.status == JobStatus.CANCELLED
+    assert service.delete_job(delete_job.id) is True
+    assert service.get_job(delete_job.id) is None
+
+
+@pytest.mark.asyncio
+async def test_job_task_exception_is_logged(caplog):
+    """Unexpected wrapper failures remain observable through the done callback."""
+    import asyncio
+    import logging
+
+    from backend.src.models.job import JobType
+    from backend.src.services.jobs_service import JobsService
+
+    service = JobsService()
 
     async def _raise(_job):
         raise ValueError("test job failure")
 
-    svc._execute_job = _raise  # monkey-patch to force unhandled exception
-
-    job = Job(
-        id="j1",
-        name="bad",
-        job_type=JobType.SCHEDULED_MOW,
-        status=JobStatus.PENDING,
-        priority=JobPriority.NORMAL,
-        zones=[],
-        created_at=datetime.now(timezone.utc),
-    )
-    svc.jobs["j1"] = job
+    service._execute_job = _raise  # type: ignore[method-assign]
+    job = service.create_job("bad", job_type=JobType.SCHEDULED_MOW, zones=["zone"])
 
     with caplog.at_level(logging.ERROR, logger="backend.src.services.jobs_service"):
-        svc.start_job("j1")
-        await asyncio.sleep(0.2)
+        assert service.start_job(job.id) is True
+        task = service._job_tasks[job.id]
+        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0)
 
-    all_messages = " ".join(r.message for r in caplog.records)
-    assert "test job failure" in all_messages or "Unhandled" in all_messages, \
-        f"Expected error log for failed job task; caplog: {all_messages}"
+    assert "test job failure" in " ".join(record.message for record in caplog.records)

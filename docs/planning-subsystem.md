@@ -59,7 +59,7 @@ Key fields:
 | `pattern` | string | Coverage pattern (`"parallel"`) |
 | `pattern_params` | dict | Pattern-specific parameters (see below) |
 | `enabled` | bool | Whether the scheduler will fire this job |
-| `last_run` | ISO-8601 string | Timestamp of last successful dispatch |
+| `last_run` | ISO-8601 string | Timestamp when `MissionService` last accepted the linked mission start; not proof of mission completion |
 
 Timezone semantics: `_calculate_next_run` (in `JobsService`) builds a
 `datetime` for the next fire time in the job's local timezone using
@@ -125,7 +125,13 @@ app lifespan (T1).  Runs an async scheduler loop that:
    to create a mission with a *planning intent* (no waypoints yet).
 3. Calls `MissionService.start_mission(mission_id)` to trigger lazy waypoint
    generation and dispatch to the navigation stack.
-4. Updates `last_run` in SQLite after a successful dispatch.
+4. Emits the linked mission ID in the dispatch event/log and updates `last_run`
+   in SQLite only after `MissionService` accepts the start. The planning row does
+   not claim mission completion; the mission record is authoritative afterward.
+
+The in-memory compatibility `Job` path uses the same admission flow, retains its
+`mission_id`, and projects terminal truth from that mission. It must not run a
+parallel timed executor or infer success from elapsed time.
 
 Multi-zone jobs: only `zones[0]` is used as the target zone.  Multi-zone
 parallel dispatch is out of scope.
@@ -193,7 +199,7 @@ NavigationService.set_planned_path(waypoints)
 | Class | File | Role |
 |---|---|---|
 | `PlanningService` | `services/planning_service.py` | Coverage path generation |
-| `JobsService` | `services/jobs_service.py` | Scheduler loop + mission dispatch |
+| `JobsService` | `services/jobs_service.py` | Scheduler/compatibility adapter + linked mission-state projection |
 | `MissionService` | `services/mission_service.py` | Mission lifecycle + lazy waypoints |
 | `MapRepository` | `core/map_repository.py` | SQLite zone persistence |
 
@@ -207,5 +213,5 @@ NavigationService.set_planned_path(waypoints)
 | `tests/unit/test_planning_service.py` | PlanningService: known-zone paths, missing-zone 404, unimplemented patterns |
 | `tests/unit/test_jobs_schedule_timezone.py` | Timezone-aware `_calculate_next_run`, DST, invalid tz rejection |
 | `tests/integration/test_planning_jobs_persistence.py` | Jobs survive simulated app restart (SQLite) |
-| `tests/integration/test_scheduled_mission_dispatch.py` | JobsService fires create + start; emergency-stop skip; last_run update |
+| `tests/integration/test_scheduled_mission_dispatch.py` | JobsService fires create + start; emits mission identity; emergency-stop skip; accepted-start `last_run` update |
 | `tests/integration/test_planning_e2e.py` | End-to-end: zone → schedule → mission with planning intent |

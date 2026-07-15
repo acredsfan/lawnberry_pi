@@ -92,6 +92,7 @@ class Job(BaseModel):
     # Execution state
     status: JobStatus = JobStatus.PENDING
     progress: JobProgress | None = None
+    mission_id: str | None = None
 
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

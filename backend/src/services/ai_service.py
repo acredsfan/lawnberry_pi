@@ -9,12 +9,14 @@ preserved for status reporting but does not block CPU inference.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
 import os
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -35,7 +37,6 @@ from ..models import (
     ModelInfo,
     ModelStatus,
 )
-from .camera_stream_service import camera_service
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,9 @@ class AINoFrameAvailableError(AIServiceError):
     """Raised when latest-frame inference is requested without a camera frame."""
 
 
+CameraFrameProvider = Callable[[], Awaitable[Any | None]]
+
+
 class AIService:
     """AI processing service"""
 
@@ -71,6 +75,7 @@ class AIService:
         model_path: str | None = None,
         confidence_threshold: float | None = None,
         max_detections: int | None = None,
+        camera_frame_provider: CameraFrameProvider | None = None,
     ):
         env_confidence = self._read_float_env("AI_CONFIDENCE_THRESHOLD", 0.5)
         env_max_detections = self._read_int_env("AI_MAX_DETECTIONS", 10)
@@ -88,6 +93,12 @@ class AIService:
         )
         self.model_definition: dict[str, Any] | None = None
         self.active_model_name: str | None = None
+        self._camera_frame_provider = camera_frame_provider
+        # Serialize all inference sources (API and sampled camera frames). The
+        # image work itself runs in a worker thread so it cannot stall the
+        # backend event loop.
+        self._inference_lock = asyncio.Lock()
+        self._inference_tasks: set[asyncio.Task[InferenceResult]] = set()
 
     async def initialize(self) -> bool:
         """Initialize AI service"""
@@ -181,14 +192,90 @@ class AIService:
         if not image_bytes:
             raise AIInferenceInputError("Image payload is empty")
 
-        await self._ensure_model_ready(task)
-        assert self.model_definition is not None  # Narrowed by _ensure_model_ready
-
-        threshold = (
-            confidence_threshold
-            if confidence_threshold is not None
-            else self.ai_processing.confidence_threshold
+        worker_started = asyncio.Event()
+        inference_task = asyncio.create_task(
+            self._infer_image_bytes_serialized(
+                image_bytes,
+                task=task,
+                frame_id=frame_id,
+                confidence_threshold=confidence_threshold,
+                worker_started=worker_started,
+            ),
+            name=f"ai-inference-{frame_id or 'upload'}",
         )
+        # The event loop otherwise holds only a weak reference to detached
+        # tasks. Retain the worker until its to_thread call has really exited.
+        self._inference_tasks.add(inference_task)
+        inference_task.add_done_callback(self._inference_tasks.discard)
+        try:
+            return await asyncio.shield(inference_task)
+        except asyncio.CancelledError:
+            # A queued request can be discarded safely. Once the worker has
+            # started, leave its task alive so the serialization lock remains
+            # held until the underlying thread actually exits.
+            if not worker_started.is_set():
+                inference_task.cancel()
+            inference_task.add_done_callback(self._consume_detached_inference)
+            raise
+
+    async def _infer_image_bytes_serialized(
+        self,
+        image_bytes: bytes,
+        *,
+        task: InferenceTask,
+        frame_id: str | None,
+        confidence_threshold: float | None,
+        worker_started: asyncio.Event,
+    ) -> InferenceResult:
+        """Serialize inference while preserving the lock across caller cancellation."""
+        async with self._inference_lock:
+            await self._ensure_model_ready(task)
+            threshold = (
+                confidence_threshold
+                if confidence_threshold is not None
+                else self.ai_processing.confidence_threshold
+            )
+            worker_started.set()
+            try:
+                result = await asyncio.to_thread(
+                    self._infer_image_bytes_sync,
+                    image_bytes,
+                    task=task,
+                    frame_id=frame_id,
+                    confidence_threshold=threshold,
+                )
+            except Exception as exc:
+                self.ai_processing.failed_inferences += 1
+                self.last_error = str(exc)
+                raise
+
+            # Keep shared runtime state mutations on the event-loop thread.
+            self.ai_processing.add_inference_result(result)
+            self._update_runtime_statistics(result.total_time_ms)
+            return result
+
+    @staticmethod
+    def _consume_detached_inference(task: asyncio.Task[InferenceResult]) -> None:
+        """Consume a cancellation-detached worker result or exception."""
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            # The normal inference path already records last_error and failure
+            # counters. This callback only prevents an unhandled-task warning.
+            pass
+
+    def _infer_image_bytes_sync(
+        self,
+        image_bytes: bytes,
+        *,
+        task: InferenceTask,
+        frame_id: str | None,
+        confidence_threshold: float,
+    ) -> InferenceResult:
+        """Decode and infer one image in a worker thread."""
+        assert self.model_definition is not None  # Ensured before dispatching the worker.
         started = time.perf_counter()
 
         try:
@@ -206,7 +293,7 @@ class AIService:
             raise AIInferenceInputError(f"Unable to decode image payload: {exc}") from exc
 
         inference_start = time.perf_counter()
-        detected_objects = self._run_custom_inference(rgb, threshold)
+        detected_objects = self._run_custom_inference(rgb, confidence_threshold)
         inference_time_ms = (time.perf_counter() - inference_start) * 1000.0
 
         postprocess_start = time.perf_counter()
@@ -214,7 +301,7 @@ class AIService:
         postprocessing_time_ms = (time.perf_counter() - postprocess_start) * 1000.0
         total_time_ms = (time.perf_counter() - started) * 1000.0
 
-        result = InferenceResult(
+        return InferenceResult(
             inference_id=str(uuid.uuid4()),
             task=task,
             model_name=self.active_model_name or self.model_definition["model_name"],
@@ -227,12 +314,31 @@ class AIService:
             postprocessing_time_ms=postprocessing_time_ms,
             total_time_ms=total_time_ms,
             model_version=str(self.model_definition.get("version", "1.0")),
-            confidence_threshold=threshold,
+            confidence_threshold=confidence_threshold,
         )
 
-        self.ai_processing.add_inference_result(result)
-        self._update_runtime_statistics(total_time_ms)
-        return result
+    async def infer_camera_frame(
+        self,
+        image_bytes: bytes,
+        *,
+        frame_id: str,
+    ) -> InferenceResult | None:
+        """Best-effort sampled-camera inference with explicit unavailable semantics."""
+        if not self.initialized:
+            await self.initialize()
+        if (
+            not self.ai_processing.system_enabled
+            or self.active_model_name is None
+            or self.model_definition is None
+        ):
+            return None
+
+        try:
+            return await self.infer_image_bytes(image_bytes, frame_id=frame_id)
+        except AIModelNotReadyError:
+            # PowerManager may disable inference between the readiness check
+            # above and lock acquisition. That is an expected sampled-frame skip.
+            return None
 
     async def infer_latest_frame(
         self,
@@ -241,7 +347,11 @@ class AIService:
         confidence_threshold: float | None = None,
     ) -> InferenceResult:
         """Run inference on the latest available camera frame."""
-        frame = await camera_service.get_current_frame()
+        provider = self._camera_frame_provider
+        if provider is None:
+            raise AINoFrameAvailableError("No camera frame provider is configured")
+
+        frame = await provider()
         if frame is None:
             raise AINoFrameAvailableError("No camera frame available for inference")
 
@@ -267,6 +377,13 @@ class AIService:
             frame_id=getattr(frame.metadata, "frame_id", None),
             confidence_threshold=confidence_threshold,
         )
+
+    def set_camera_frame_provider(
+        self,
+        provider: CameraFrameProvider | None,
+    ) -> None:
+        """Inject the asynchronous latest-frame owner used by API inference."""
+        self._camera_frame_provider = provider
 
     async def get_recent_results(self, limit: int = 10) -> list[InferenceResult]:
         """Return recent inference results, newest first."""

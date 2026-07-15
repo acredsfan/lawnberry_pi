@@ -30,7 +30,7 @@ python -m pytest tests/ -x -q -m "not hardware"
 # Lint
 ruff check backend/src
 
-# Restart backend — NOTE: startup takes ~90 seconds (camera/AI init). Wait for health.
+# Restart backend and its PartOf camera owner. Wait for health.
 sudo systemctl restart lawnberry-backend
 # Poll until the API responds (up to 2 min):
 for i in $(seq 1 24); do sleep 5; curl -sf http://localhost:8081/api/v2/status && echo "UP" && break; echo "waiting... ($((i*5))s)"; done
@@ -397,7 +397,7 @@ Motor control code runs during systemd service startup (navigation service initi
    ```bash
    python -m pytest tests/unit/test_robohat_service.py tests/unit/test_navigation_service.py -xvs -m "not hardware"
    ```
-2. If tests pass, restart backend and poll until healthy — **startup takes ~90 seconds** (camera + AI service init):
+2. If tests pass, restart backend and its `PartOf=` standalone camera owner, then poll until healthy:
    ```bash
    sudo systemctl restart lawnberry-backend
    for i in $(seq 1 24); do sleep 5; curl -sf http://localhost:8081/api/v2/status && echo "UP" && break; echo "waiting... ($((i*5))s)"; done

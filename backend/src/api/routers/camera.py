@@ -5,7 +5,7 @@ import time
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
-from ...services.camera_stream_service import camera_service
+from ...services.camera_runtime import camera_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,6 +30,9 @@ async def get_camera_status():
                 )
             ),
             "sim_mode": camera_service.sim_mode,
+            "hardware_available": bool(
+                getattr(camera_service, "hardware_available", False)
+            ),
             "client_count": client_count,
             "last_frame_time": last_frame_time.isoformat()
             if hasattr(last_frame_time, "isoformat")
@@ -52,6 +55,7 @@ async def get_camera_status():
             "active": False,
             "mode": "offline",
             "sim_mode": True,
+            "hardware_available": False,
             "client_count": 0,
             "last_frame_time": None,
             "statistics": {},
@@ -79,7 +83,7 @@ async def stop_camera(payload: dict | None = None):
     """Stop camera streaming."""
     try:
         if camera_service.stream.is_active:
-            camera_service.stop_streaming()
+            await camera_service.stop_streaming()
         return {"status": "stopped", "streaming": camera_service.stream.is_active}
     except Exception as e:
         logger.error(f"Failed to stop camera: {e}")

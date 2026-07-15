@@ -5,6 +5,7 @@ import datetime
 import json
 import logging
 import os
+from collections.abc import Coroutine
 from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends
@@ -25,6 +26,12 @@ from ..services.navigation_service import NavigationService
 from ..services.planning_service import get_planning_service
 
 logger = logging.getLogger(__name__)
+
+_TERMINAL_MISSION_STATUSES = {
+    MissionLifecycleStatus.COMPLETED,
+    MissionLifecycleStatus.ABORTED,
+    MissionLifecycleStatus.FAILED,
+}
 
 
 def _is_emergency_active() -> bool:
@@ -78,6 +85,8 @@ class MissionService:
         self.missions: dict[str, Mission] = {}
         self.mission_statuses: dict[str, MissionStatus] = {}
         self.mission_tasks: dict[str, asyncio.Task] = {}
+        self._mission_terminal_events: dict[str, asyncio.Event] = {}
+        self._background_tasks: set[asyncio.Task[None]] = set()
         # Planning intents for lazy waypoint generation: mission_id → intent dict
         self._planning_intents: dict[str, dict] = {}
 
@@ -190,27 +199,66 @@ class MissionService:
 
         self._persist_mission_status(mission_id)
 
-    async def _broadcast_status(self, mission_id: str, detail: str = "") -> None:
-        """Emit mission.status event over WebSocket to all subscribers."""
+    def _status_payload(self, mission_id: str, detail: str = "") -> dict[str, Any] | None:
+        """Snapshot a status event before later lifecycle transitions can change it."""
         if self._websocket_hub is None:
-            return
+            return None
         status = self.mission_statuses.get(mission_id)
         if status is None:
+            return None
+        return {
+            "mission_id": mission_id,
+            "status": status.status.value if hasattr(status.status, "value") else status.status,
+            "progress_pct": status.completion_percentage,
+            "detail": detail,
+        }
+
+    async def _send_status_payload(self, payload: dict[str, Any]) -> None:
+        """Best-effort delivery of an already snapshotted mission status."""
+        if self._websocket_hub is None:
             return
         try:
             await self._websocket_hub.broadcast_to_topic(
                 "mission.status",
-                {
-                    "mission_id": mission_id,
-                    "status": status.status.value
-                    if hasattr(status.status, "value")
-                    else status.status,
-                    "progress_pct": status.completion_percentage,
-                    "detail": detail,
-                },
+                payload,
             )
         except Exception as exc:
             logger.warning("Failed to broadcast mission status: %s", exc)
+
+    async def _broadcast_status(self, mission_id: str, detail: str = "") -> None:
+        """Emit mission.status event over WebSocket to all subscribers."""
+        payload = self._status_payload(mission_id, detail)
+        if payload is not None:
+            await self._send_status_payload(payload)
+
+    def _spawn_background(
+        self,
+        coroutine: Coroutine[Any, Any, None],
+        *,
+        name: str,
+    ) -> None:
+        """Retain a best-effort notification task until it finishes."""
+        task = asyncio.create_task(coroutine, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._consume_background_result)
+
+    @staticmethod
+    def _consume_background_result(task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("Mission background notification failed")
+
+    def _queue_status_broadcast(self, mission_id: str, detail: str = "") -> None:
+        payload = self._status_payload(mission_id, detail)
+        if payload is not None:
+            self._spawn_background(
+                self._send_status_payload(payload),
+                name=f"mission-status:{mission_id}",
+            )
 
     async def _broadcast_diagnostics(self, mission_id: str) -> None:
         """Emit mission.diagnostics payload over WebSocket."""
@@ -365,6 +413,7 @@ class MissionService:
         self.missions = recovered_missions
         self.mission_statuses = {}
         self.mission_tasks = {}
+        self._mission_terminal_events = {}
         self._planning_intents = recovered_intents
 
         active_like_states = {
@@ -501,6 +550,7 @@ class MissionService:
         self.mission_statuses[mission.id] = self._build_status(
             mission.id, MissionLifecycleStatus.IDLE
         )
+        self._mission_terminal_events[mission.id] = asyncio.Event()
         self._persist_mission(mission, planning_intent=planning_intent)
         self._persist_mission_status(mission.id)
         return mission
@@ -611,6 +661,7 @@ class MissionService:
                 require_boundary=self._live_autonomy_requires_boundary(),
             )
 
+        self._mission_terminal_events.setdefault(mission_id, asyncio.Event()).clear()
         self.mission_statuses[mission_id] = self._build_status(
             mission.id,
             MissionLifecycleStatus.RUNNING,
@@ -618,6 +669,11 @@ class MissionService:
         )
 
         self._obs_run_id = self._new_run_id()
+        # Wire navigation before its task can run and emit events.
+        if hasattr(self.nav_service, "set_event_store") and self._event_store is not None:
+            self.nav_service.set_event_store(
+                self._event_store, self._obs_run_id, mission_id
+            )
         if reuse_heading_alignment:
             task = asyncio.create_task(
                 self.nav_service.execute_mission(
@@ -633,8 +689,6 @@ class MissionService:
 
         # Monitor task completion
         task.add_done_callback(self._mission_completed_callback(mission_id))
-        await self._broadcast_status(mission_id, "Mission started")
-        await self._broadcast_diagnostics(mission_id)
         from ..observability.events import MissionStateChanged
         self._emit_event(MissionStateChanged(
             run_id=self._obs_run_id,
@@ -643,11 +697,14 @@ class MissionService:
             new_state="running",
             detail="Mission started",
         ))
-        # Wire navigation service to the same run.
-        if hasattr(self.nav_service, "set_event_store") and self._event_store is not None:
-            self.nav_service.set_event_store(
-                self._event_store, self._obs_run_id, mission_id
-            )
+        # RUNNING is persisted and the navigation task is owned before any
+        # best-effort telemetry. Callers can now record accepted dispatches
+        # without a WebSocket stall/crash window.
+        self._queue_status_broadcast(mission_id, "Mission started")
+        self._spawn_background(
+            self._broadcast_diagnostics(mission_id),
+            name=f"mission-diagnostics:{mission_id}",
+        )
 
     def _mission_completed_callback(self, mission_id: str):
         def callback(task: asyncio.Task):
@@ -662,6 +719,7 @@ class MissionService:
                     status.completion_percentage = 100
                     status.detail = None
                     self._persist_mission_status(mission_id)
+                    self._signal_terminal_state(mission_id)
                     asyncio.ensure_future(
                         self._broadcast_status(mission_id, "Mission completed")
                     )
@@ -672,6 +730,7 @@ class MissionService:
                 status.status = MissionLifecycleStatus.ABORTED
                 status.detail = "Mission execution cancelled"
                 self._persist_mission_status(mission_id)
+                self._signal_terminal_state(mission_id)
                 asyncio.ensure_future(
                     self._broadcast_status(mission_id, getattr(status, "detail", "") or "")
                 )
@@ -682,6 +741,7 @@ class MissionService:
                 status.status = MissionLifecycleStatus.FAILED
                 status.detail = str(e)
                 self._persist_mission_status(mission_id)
+                self._signal_terminal_state(mission_id)
                 asyncio.ensure_future(
                     self._broadcast_status(mission_id, getattr(status, "detail", "") or "")
                 )
@@ -724,6 +784,7 @@ class MissionService:
                 else "Pause requested but neither stop nor emergency stop could be confirmed"
             )
             self._persist_mission_status(mission_id)
+            self._signal_terminal_state(mission_id)
             await self._broadcast_status(mission_id, status.detail)
             return
 
@@ -785,6 +846,7 @@ class MissionService:
         else:
             task = active_task
 
+        self._mission_terminal_events.setdefault(mission_id, asyncio.Event()).clear()
         status.status = MissionLifecycleStatus.RUNNING
         status.detail = None
         status.current_waypoint_index = self._clamp_waypoint_index(
@@ -822,6 +884,13 @@ class MissionService:
                     "Mission abort requested, but stop and emergency stop could not be confirmed"
                 )
 
+        # Establish the authoritative terminal state before cancelling the
+        # execution task.  The task callback therefore cannot publish a
+        # transient ABORTED state when stop/emergency delivery actually failed.
+        status.status = final_status
+        status.detail = detail
+        self._persist_mission_status(mission_id)
+
         if task and not task.done():
             task.cancel()
             try:
@@ -836,9 +905,7 @@ class MissionService:
                 )
 
         self.mission_tasks.pop(mission_id, None)
-        status.status = final_status
-        status.detail = detail
-        self._persist_mission_status(mission_id)
+        self._signal_terminal_state(mission_id)
         await self._broadcast_status(mission_id, detail)
         await self._broadcast_diagnostics(mission_id)
         from ..observability.events import MissionStateChanged
@@ -880,6 +947,28 @@ class MissionService:
 
         self._persist_mission_status(mission_id)
         return status
+
+    async def wait_for_terminal_state(self, mission_id: str) -> MissionStatus:
+        """Wait for a mission's authoritative terminal state.
+
+        Waiting on this public API never awaits or cancels the private
+        navigation task.  Cancelling a waiter therefore cannot bypass
+        :meth:`abort_mission` and its confirmed-stop escalation path.
+        """
+        self._require_mission(mission_id)
+        status = self._require_status(mission_id)
+        if status.status in _TERMINAL_MISSION_STATUSES:
+            return await self.get_mission_status(mission_id)
+        if status.status == MissionLifecycleStatus.IDLE:
+            raise MissionStateError("Mission has not started.")
+
+        event = self._mission_terminal_events.setdefault(mission_id, asyncio.Event())
+        # Close the status-check/event-creation race with the done callback.
+        status = self._require_status(mission_id)
+        if status.status in _TERMINAL_MISSION_STATUSES:
+            event.set()
+        await event.wait()
+        return await self.get_mission_status(mission_id)
 
     async def list_missions(self) -> list[Mission]:
         return list(self.missions.values())
@@ -961,6 +1050,7 @@ class MissionService:
                 self.missions.pop(mid, None)
                 self.mission_statuses.pop(mid, None)
                 self.mission_tasks.pop(mid, None)
+                self._mission_terminal_events.pop(mid, None)
                 if self._websocket_hub is not None:
                     try:
                         await self._websocket_hub.broadcast_to_topic(
@@ -994,6 +1084,7 @@ class MissionService:
         self.missions.pop(mission_id, None)
         self.mission_statuses.pop(mission_id, None)
         self.mission_tasks.pop(mission_id, None)
+        self._mission_terminal_events.pop(mission_id, None)
         if self._websocket_hub is not None:
             try:
                 await self._websocket_hub.broadcast_to_topic(
@@ -1014,6 +1105,12 @@ class MissionService:
         if status is None:
             raise MissionNotFoundError("Mission not found.")
         return status
+
+    def _signal_terminal_state(self, mission_id: str) -> None:
+        status = self.mission_statuses.get(mission_id)
+        if status is None or status.status not in _TERMINAL_MISSION_STATUSES:
+            return
+        self._mission_terminal_events.setdefault(mission_id, asyncio.Event()).set()
 
     def _build_status(
         self,

@@ -8,9 +8,15 @@ PartOf=lawnberry-backend.service
 Type=simple
 User=pi
 Group=video
-WorkingDirectory=/apps/lawnberry-pi
+WorkingDirectory=/home/pi/lawnberry
+EnvironmentFile=-/home/pi/lawnberry/.env
 Environment=SIM_MODE=0
-ExecStart=/bin/bash -lc "PY='./.venv/bin/python'; if [ ! -x \"$PY\" ]; then PY='python3'; fi; cd /apps/lawnberry-pi && \"$PY\" -m backend.src.services.camera_stream_service"
+Environment=LAWNBERRY_CAMERA_SOCKET=/run/lawnberry/camera.sock
+RuntimeDirectory=lawnberry
+RuntimeDirectoryMode=0755
+# ExecStart-level assignments override EnvironmentFile values so production
+# cannot accidentally embed a simulated camera owner or split socket paths.
+ExecStart=/usr/bin/env SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/run/lawnberry/camera.sock /home/pi/lawnberry/.venv/bin/python -m backend.src.services.camera_stream_service
 Restart=always
 RestartSec=5
 KillSignal=SIGTERM
@@ -24,7 +30,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
 ProtectSystem=strict
-ReadWritePaths=/apps/lawnberry-pi /var/lib/lawnberry /tmp
+ReadWritePaths=/home/pi/lawnberry /var/lib/lawnberry /run/lawnberry
 
 # Logging
 StandardOutput=journal

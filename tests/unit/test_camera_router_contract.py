@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +8,7 @@ class _DummyFrame:
     def __init__(self, raw_bytes: bytes):
         self._raw_bytes = raw_bytes
         self.data = "this-should-not-be-served-directly"
-        self.metadata = SimpleNamespace(timestamp=datetime.now(timezone.utc))
+        self.metadata = SimpleNamespace(timestamp=datetime.now(UTC))
 
     def get_frame_data(self) -> bytes:
         return self._raw_bytes
@@ -18,13 +18,15 @@ class _DummyCameraService:
     def __init__(self, raw_bytes: bytes):
         self.running = True
         self.sim_mode = False
+        self.hardware_available = True
         self.stream = SimpleNamespace(
-            last_frame_time=datetime.now(timezone.utc),
+            last_frame_time=datetime.now(UTC),
             mode=SimpleNamespace(value="streaming"),
             client_count=1,
             is_active=True,
         )
         self._frame = _DummyFrame(raw_bytes)
+        self.stop_calls = 0
 
     async def get_stream_statistics(self):
         return SimpleNamespace(
@@ -42,6 +44,10 @@ class _DummyCameraService:
 
     async def start_streaming(self):
         return True
+
+    async def stop_streaming(self):
+        self.stop_calls += 1
+        self.stream.is_active = False
 
 
 @pytest.mark.asyncio
@@ -71,3 +77,59 @@ async def test_camera_status_reports_current_fps(test_client, monkeypatch):
     assert payload["fps"] == pytest.approx(14.5)
     assert payload["statistics"]["fps"] == pytest.approx(14.5)
     assert payload["statistics"]["average_fps"] == pytest.approx(13.2)
+    assert payload["sim_mode"] is False
+    assert payload["hardware_available"] is True
+
+
+@pytest.mark.asyncio
+async def test_camera_status_exposes_owner_hardware_fallback(test_client, monkeypatch, tmp_path):
+    from backend.src.api.routers import camera as camera_router
+    from backend.src.services.camera_client import CameraClient
+    from backend.src.services.camera_stream_service import CameraStreamService
+
+    monkeypatch.setenv("SIM_MODE", "0")
+    owner = CameraStreamService(sim_mode=False)
+    owner.socket_path = str(tmp_path / "fallback-camera.sock")
+
+    async def reject_hardware() -> bool:
+        owner.hardware_available = False
+        return False
+
+    monkeypatch.setattr(owner, "_initialize_camera", reject_hardware)
+    client = CameraClient(
+        owner.socket_path,
+        request_timeout_seconds=1.0,
+        startup_timeout_seconds=0.0,
+    )
+
+    try:
+        assert await owner.initialize() is True
+        assert owner.sim_mode is True
+        assert await client.initialize() is True
+        monkeypatch.setattr(camera_router, "camera_service", client)
+
+        response = await test_client.get("/api/v2/camera/status")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["sim_mode"] is True
+        assert payload["hardware_available"] is False
+        assert client.sim_mode is True
+        assert client.hardware_available is False
+    finally:
+        await client.shutdown()
+        await owner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_camera_stop_endpoint_awaits_service_stop(test_client, monkeypatch):
+    from backend.src.api.routers import camera as camera_router
+
+    service = _DummyCameraService(b"\xff\xd8\xff\xd9")
+    monkeypatch.setattr(camera_router, "camera_service", service)
+
+    response = await test_client.post("/api/v2/camera/stop")
+
+    assert response.status_code == 200
+    assert response.json()["streaming"] is False
+    assert service.stop_calls == 1

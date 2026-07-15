@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from backend.src.models.sensor_data import GpsReading
+from backend.src.services import camera_runtime as camera_runtime_module
 from backend.src.services import power_manager as power_manager_module
 from backend.src.services.power_manager import PowerManager
 
@@ -74,3 +75,26 @@ def test_motion_detection_uses_current_gps_speed_field():
     manager._sensor_manager = _manager(driver, speed=0.2)
 
     assert manager._is_moving() is True
+
+
+@pytest.mark.asyncio
+async def test_camera_power_cycle_uses_runtime_owner(monkeypatch):
+    camera = SimpleNamespace(
+        stream=SimpleNamespace(is_active=True),
+        stop_streaming=AsyncMock(),
+        start_streaming=AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(camera_runtime_module, "camera_service", camera)
+    manager = PowerManager()
+
+    await manager._pause_camera()
+
+    camera.stop_streaming.assert_awaited_once_with()
+    assert manager._camera_paused_by_pm is True
+
+    camera.stream.is_active = False
+    await manager._resume_camera_if_paused()
+
+    camera.start_streaming.assert_awaited_once_with()
+    assert manager._camera_paused_by_pm is False
+    assert manager._camera_idle_since is None

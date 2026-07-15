@@ -49,7 +49,7 @@ from .safety.safety_monitor import get_safety_monitor
 from .safety.safety_triggers import set_safety_event_handler
 from .safety.safety_validator import validate_on_start
 from .services.ai_service import get_ai_service
-from .services.camera_stream_service import camera_service
+from .services.camera_runtime import camera_service
 from .services.jobs_service import jobs_service as _jobs_service_singleton
 from .services.mission_service import get_mission_service
 from .services.navigation_service import NavigationService
@@ -182,21 +182,23 @@ async def lifespan(app: FastAPI):
         _log.error("Mission recovery timed out after 30 s; continuing startup")
     except Exception:
         _log.exception("Mission recovery failed during startup")
-    # Start the job scheduler (module-level singleton; idempotent if already running).
+    ai_service = get_ai_service()
     try:
-        await _jobs_service_singleton.start_scheduler()
-        _log.info("JobsService scheduler started")
-    except Exception:
-        _log.exception("JobsService scheduler startup failed")
-    try:
-        await camera_service.initialize()
-        await camera_service.start_streaming()
-    except Exception:
-        pass
-    try:
-        await get_ai_service().initialize()
+        ai_service.set_camera_frame_provider(camera_service.get_current_frame)
+        await ai_service.initialize()
+        # SIM/CI embeds the simulated camera owner. Live hardware uses the
+        # standalone systemd owner, which injects its own AI processor.
+        if hasattr(camera_service, "set_ai_processor"):
+            camera_service.set_ai_processor(ai_service.infer_camera_frame)
     except Exception:
         _log.exception("AI service initialization failed")
+    try:
+        if await camera_service.initialize():
+            await camera_service.start_streaming()
+        else:
+            _log.error("Camera service owner did not become ready during startup")
+    except Exception:
+        _log.exception("Camera service initialization failed")
     await websocket_hub.start_telemetry_loop()
 
     # Build the typed RuntimeContext once all services are up. This is
@@ -399,6 +401,14 @@ async def lifespan(app: FastAPI):
     _jobs_service_singleton.set_mission_service(mission_service)
     _jobs_service_singleton.set_websocket_hub(websocket_hub)
     _log.info("JobsService: MissionService and WebSocketHub wired for scheduled dispatch")
+    # Start only after every admission dependency is injected. Starting above
+    # this point creates a race where the first due job can fail or be skipped
+    # while camera/AI startup yields control to the scheduler task.
+    try:
+        await _jobs_service_singleton.start_scheduler()
+        _log.info("JobsService scheduler started")
+    except Exception:
+        _log.exception("JobsService scheduler startup failed")
 
     # Attach EventStore to services that emit events.
     if hasattr(app.state.runtime.mission_service, "set_event_store"):
@@ -486,8 +496,8 @@ async def lifespan(app: FastAPI):
         await app.state.gps_deg_monitor.stop()
     await websocket_hub.stop_telemetry_loop()
     try:
-        await _jobs_service_singleton.stop_scheduler()
-        _log.info("JobsService scheduler stopped")
+        await _jobs_service_singleton.shutdown()
+        _log.info("JobsService scheduler and active jobs stopped")
     except Exception:
         _log.exception("JobsService scheduler shutdown failed")
     try:

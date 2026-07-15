@@ -1,8 +1,8 @@
 """Tests for ARCH-007: MissionService WebSocket push on lifecycle transitions."""
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from backend.src.models.mission import MissionWaypoint
 
@@ -12,6 +12,7 @@ class _DummyNav:
 
     def __init__(self):
         from types import SimpleNamespace
+
         from backend.src.models import NavigationMode
 
         self.navigation_state = SimpleNamespace(
@@ -48,6 +49,7 @@ async def test_mission_start_broadcasts_status_event():
     svc = MissionService(navigation_service=_DummyNav(), websocket_hub=mock_hub)
     mission = await svc.create_mission("Test Mission", _WAYPOINTS)
     await svc.start_mission(mission.id)
+    await asyncio.sleep(0)
 
     mock_hub.broadcast_to_topic.assert_called()
     call_topics = [c.args[0] for c in mock_hub.broadcast_to_topic.call_args_list]
@@ -65,7 +67,9 @@ async def test_mission_abort_broadcasts_status_event():
     svc = MissionService(navigation_service=_DummyNav(), websocket_hub=mock_hub)
     mission = await svc.create_mission("Test Mission", _WAYPOINTS)
     await svc.start_mission(mission.id)
+    await asyncio.sleep(0)
     await svc.abort_mission(mission.id)
+    await asyncio.sleep(0)
 
     topics = [c.args[0] for c in mock_hub.broadcast_to_topic.call_args_list]
     assert topics.count("mission.status") >= 2  # one for start, one for abort
@@ -98,6 +102,7 @@ async def test_mission_completed_callback_broadcasts_aborted():
     svc = MissionService(navigation_service=_SlowNav(), websocket_hub=hub)
     mission = await svc.create_mission("Test Mission", _WAYPOINTS)
     await svc.start_mission(mission.id)
+    await asyncio.sleep(0)
     hub.reset_mock()  # clear the "Mission started" broadcast; isolate abort/callback calls
 
     await svc.abort_mission(mission.id)
@@ -106,6 +111,36 @@ async def test_mission_completed_callback_broadcasts_aborted():
     await asyncio.sleep(0)
 
     assert hub.broadcast_to_topic.called
+
+
+@pytest.mark.asyncio
+async def test_mission_start_acceptance_does_not_wait_for_websocket_delivery():
+    """Persisted RUNNING state is the admission boundary, not telemetry delivery."""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _BlockingHub:
+        async def broadcast_to_topic(self, _topic, _payload):
+            entered.set()
+            await release.wait()
+
+    class _SlowNav(_DummyNav):
+        async def execute_mission(self, mission, mission_service=None):
+            await asyncio.sleep(60)
+
+    from backend.src.models.mission import MissionLifecycleStatus
+    from backend.src.services.mission_service import MissionService
+
+    svc = MissionService(navigation_service=_SlowNav(), websocket_hub=_BlockingHub())
+    mission = await svc.create_mission("Accepted", _WAYPOINTS)
+
+    await asyncio.wait_for(svc.start_mission(mission.id), timeout=0.1)
+
+    assert svc.mission_statuses[mission.id].status == MissionLifecycleStatus.RUNNING
+    await asyncio.wait_for(entered.wait(), timeout=0.1)
+
+    release.set()
+    await svc.abort_mission(mission.id)
 
 
 @pytest.mark.asyncio
@@ -141,9 +176,9 @@ async def test_mission_completed_callback_broadcasts_failed():
 @pytest.mark.asyncio
 async def test_mission_diagnostics_broadcast_on_start():
     """MissionService broadcasts mission.diagnostics on start when event_store is attached."""
-    from backend.src.services.mission_service import MissionService
     from backend.src.observability.event_store import EventStore
     from backend.src.observability.events import PersistenceMode
+    from backend.src.services.mission_service import MissionService
 
     ws_hub = MagicMock()
     ws_hub.broadcast_to_topic = AsyncMock()
@@ -158,9 +193,8 @@ async def test_mission_diagnostics_broadcast_on_start():
 
     mission = await svc.create_mission("D", [MissionWaypoint(lat=37.0, lon=-122.0)])
     await svc.start_mission(mission.id)
+    await asyncio.sleep(0)
 
     calls = ws_hub.broadcast_to_topic.call_args_list
     topics = [call.args[0] for call in calls]
     assert "mission.diagnostics" in topics
-
-

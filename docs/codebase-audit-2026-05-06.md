@@ -69,13 +69,22 @@ Zones POSTed to `/api/v1/map/zones` land in `rest_v1._zones_store`; zones read b
 
 ### Minor
 
-**10. `jobs_service._execute_job` is a fake simulation loop**  
-`backend/src/services/jobs_service.py:261`  
-Scheduled jobs produce fake 10-step progress and mark themselves complete without running any mission logic.
+**10. `jobs_service._execute_job` was a fake simulation loop (superseded)**
 
-**11. `camera_stream_service._process_frame_for_ai` is a placeholder**  
-`backend/src/services/camera_stream_service.py:837`  
-Returns dummy AI annotations in sim mode.
+Historical location: `backend/src/services/jobs_service.py:261`
+
+At audit time, scheduled jobs produced fake 10-step progress and marked themselves complete without running mission logic.
+The current recurrence contract is `SPEC.md` V41/B44/T36: mower-job execution must delegate to `MissionService`, retain the
+linked mission identity, and derive completion from that mission rather than elapsed time.
+
+**11. `camera_stream_service._process_frame_for_ai` was a placeholder (superseded)**
+
+Historical location: `backend/src/services/camera_stream_service.py:837`
+
+At audit time, automatic processing returned dummy AI annotations in simulation. The current recurrence contract is
+`SPEC.md` V42/B45/T37: sampled exact-frame inference must use the injected processor in the single latest-frame consumer,
+run CPU work off the event loop, remain truthful on failure or skip, emit no dummy detections, and stay informational unless
+a separate safety contract promotes it.
 
 **12. `PlanningView.vue` uses hardcoded mock jobs data**  
 `frontend/src/views/PlanningView.vue:443–479`  
