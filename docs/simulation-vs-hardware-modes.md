@@ -56,7 +56,8 @@ Expected behavior:
 
 - no real GPIO / serial hardware access
 - cleaner logs
-- simulated telemetry and device behavior
+- simulated telemetry and device behavior, explicitly labeled `source=simulated`
+- no physical autonomy-qualification credit; simulation evidence cannot unlock blade-enabled autonomy
 
 ### On-device Raspberry Pi validation
 
@@ -109,8 +110,15 @@ These are different states.
 - hardware initialization is attempted
 - some devices may fail and log warnings
 - the backend may still continue running in a partially simulated / partially unavailable state
+- dashboard, telemetry, camera, AI, power, and weather surfaces must report their actual source, freshness, and
+  availability; missing measurements remain null/unknown instead of healthy-looking zeroes
 
 This hybrid behavior is useful for resilience testing, but it can confuse people if it is mistaken for full simulation.
+
+Use `GET /api/v2/system/info` to identify the exact serving build. Use
+`GET /api/v2/dashboard/status`, `GET /api/v2/dashboard/telemetry`, `GET /api/v2/camera/status`, and
+`GET /api/v2/power/state` to inspect source/freshness. An endpoint answering successfully does not prove attached
+hardware, and `hardware_available=false` or `source=unavailable` must be treated as unavailable evidence.
 
 ## Common workflows
 

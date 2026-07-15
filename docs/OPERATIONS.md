@@ -163,11 +163,16 @@ Practical note: a self-signed certificate is still untrusted by default, but wit
 If you protect the public hostname with Cloudflare Access, HTTP-01 issuance will fail unless `/.well-known/acme-challenge/*` is excluded from the Access policy. Otherwise use DNS-01 with `CLOUDFLARE_API_TOKEN`.
 
 ## Health & Status
-- GET http://127.0.0.1:8081/health → { status: "healthy" }
-- GET http://127.0.0.1:8081/api/v2/dashboard/status → system status
-- GET http://127.0.0.1:8081/api/v2/dashboard/telemetry → telemetry snapshot
+- GET http://127.0.0.1:8081/health → aggregate compatibility health; inspect `overall_status` and subsystem detail
+- GET http://127.0.0.1:8081/api/v2/system/info → exact serving commit, build source, version, and process start time
+- GET http://127.0.0.1:8081/api/v2/dashboard/status → system state with source, sample age, freshness, and nullable unknowns
+- GET http://127.0.0.1:8081/api/v2/dashboard/telemetry → telemetry snapshot with source/freshness metadata
 - GET http://127.0.0.1:8081/api/v2/telemetry/stream → telemetry stream
 - GET http://127.0.0.1:8081/api/v2/telemetry/export → export telemetry data
+
+An HTTP 200 means the endpoint answered, not that physical hardware is present. `source=simulated` is test data,
+`source=unavailable` is not a measurement, and stale or null fields must remain unknown in the UI. Compare the
+`commit_sha` from `/api/v2/system/info` with the intended deployed commit before accepting qualification evidence.
 
 ## Map & Planning
 - GET/POST http://127.0.0.1:8081/api/v2/map/zones
@@ -176,6 +181,7 @@ If you protect the public hostname with Cloudflare Access, HTTP-01 issuance will
 - POST http://127.0.0.1:8081/api/v2/map/provider-fallback → trigger provider fallback
 - GET http://127.0.0.1:8081/api/v2/nav/coverage-plan?config_id=default&spacing_m=0.6 → generated coverage preview polyline
 - GET/POST/DELETE http://127.0.0.1:8081/api/v2/planning/jobs
+- GET http://127.0.0.1:8081/api/v2/planning/capabilities → only patterns and route-safety features implemented by this build
 - POST http://127.0.0.1:8081/api/v2/planning/jobs/{job_id}/start|pause|resume|cancel
 
 Scheduled and compatibility mower-job starts have one execution owner: `JobsService` dispatches through
@@ -451,6 +457,11 @@ physically qualified for unattended mowing.
 
 ## Systemd
 See systemd/*.service and systemd/install_services.sh for installation. Backend service listens on port 8081.
+
+Sensor acquisition is owned by the backend's shared `SensorManager`; there is no independent
+`lawnberry-sensors.service`. Running `sudo bash systemd/install_services.sh` disables and removes that historical
+sleep-only unit during an upgrade. A green status from an old installed copy is not sensor-health evidence. Use the
+dashboard and sensor endpoints above, then inspect backend logs for the canonical owner.
 
 Certificate renewal units:
 - `lawnberry-cert-renewal.service` — on-demand renewal/validation + nginx reload + fallback

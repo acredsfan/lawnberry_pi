@@ -1,6 +1,6 @@
 # LawnBerry API Endpoint Inventory
 
-Last updated: 2026-05-01  
+Last updated: 2026-07-15
 Status labels: `canonical` | `compatibility` | `deprecated` | `debug-only`
 
 Canonical surface is `/api/v2/*`. All new frontend code must use canonical endpoints only.
@@ -22,8 +22,6 @@ Canonical surface is `/api/v2/*`. All new frontend code must use canonical endpo
 | GET  | `/api/v2/control/status` | `canonical` | `api/rest.py` | |
 | GET  | `/api/v2/control/manual-unlock/status` | `canonical` | `api/routers/auth.py` | |
 | POST | `/api/v2/control/manual-unlock` | `canonical` | `api/routers/auth.py` | |
-| POST | `/api/v2/control/diagnose/stiffness` | `canonical` | `api/rest.py` | |
-| POST | `/api/v2/control/diagnose/heading-validation` | `canonical` | `api/rest.py` | |
 
 ## Missions
 
@@ -71,6 +69,7 @@ Canonical surface is `/api/v2/*`. All new frontend code must use canonical endpo
 | POST | `/api/v2/planning/jobs` | `canonical` | `api/rest.py` | Create a scheduled mowing job |
 | GET  | `/api/v2/planning/jobs/{id}` | `canonical` | `api/rest.py` | Fetch single job (404 if not found) |
 | DELETE | `/api/v2/planning/jobs/{id}` | `canonical` | `api/rest.py` | Delete a job (204) |
+| GET | `/api/v2/planning/capabilities` | `canonical` | `api/routers/planning.py` | Reports only coverage patterns and safety features implemented by this build |
 
 ## Schedules
 
@@ -173,6 +172,7 @@ All mutations on either surface are immediately visible through the other.
 | Method | Path | Label | Router file | Notes |
 |---|---|---|---|---|
 | GET  | `/api/v2/system/selftest` | `canonical` | `api/routers/maintenance.py` | |
+| GET  | `/api/v2/system/info` | `canonical` | `api/health.py` | Exact serving build SHA, source, version, and process start time |
 | GET  | `/api/v2/health/liveness` | `canonical` | `api/routers/maintenance.py` | Preferred health probe path |
 | GET  | `/api/v2/health/readiness` | `canonical` | `api/routers/maintenance.py` | Preferred health probe path |
 | GET  | `/api/v2/system/timezone` | `canonical` | `api/routers/maintenance.py` | |
@@ -183,11 +183,11 @@ All mutations on either surface are immediately visible through the other.
 | GET  | `/healthz` | `compatibility` | `api/health.py` | Kubernetes alias; keep alive; add deprecation header pointing to /api/v2/health/liveness |
 | GET  | `/metrics` | `canonical` | `api/metrics.py` | Prometheus scrape endpoint; not a user-facing path |
 
-## Motors (direct PWM — internal)
+## Motors (mix preview — internal)
 
 | Method | Path | Label | Router file | Notes |
 |---|---|---|---|---|
-| POST | `/api/v2/motors/drive` | `canonical` | `api/motors.py` | Dry-run arcade mix; no gateway wiring yet; internal use |
+| POST | `/api/v2/motors/drive` | `debug-only` | `api/motors.py` | Arithmetic dry-run only; does not actuate hardware or authorize motion |
 
 ## Other
 
@@ -195,6 +195,9 @@ All mutations on either surface are immediately visible through the other.
 |---|---|---|---|---|
 | GET  | `/api/v2/fusion/state` | `canonical` | `api/fusion.py` | |
 | GET  | `/api/v2/hardware/robohat` | `canonical` | `api/rest.py` | |
+| GET  | `/api/v2/dashboard/status` | `canonical` | `api/routers/sensors.py` | Truthful state with source, freshness, and nullable unknown values |
+| GET  | `/api/v2/dashboard/telemetry` | `canonical` | `api/routers/telemetry.py` | Canonical telemetry snapshot with sample metadata |
+| GET  | `/api/v2/power/state` | `canonical` | `api/routers/power.py` | Canonical battery source, freshness, SOC, energy, and reserve state |
 | GET  | `/api/v2/weather/current` | `canonical` | `api/routers/weather.py` | |
 | GET  | `/api/v2/weather/planning` | `canonical` | `api/routers/weather.py` | |
 | GET  | `/api/v2/weather/planning-advice` | `canonical` | `api/routers/weather.py` | |

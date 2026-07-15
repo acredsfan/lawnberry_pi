@@ -3,6 +3,10 @@
 This document records the current software gates for supervised autonomous mowing.
 It is not a substitute for field validation with the blade physically disabled.
 
+Software tests and simulation can prove fail-closed behavior, API contracts, and state-machine logic. They do not mark
+the mower physically qualified. Blade-enabled operation requires current immutable qualification evidence bound to the
+exact deployed clean commit, sanitized hardware/limits/runtime hashes, and RoboHAT firmware version.
+
 ## Software Gates
 
 - `GET /api/v2/autonomy/readiness` returns platform, pin-allocation, blade-controller,
@@ -53,7 +57,8 @@ Run these only on Raspberry Pi OS with the mower secured.
 3. Verify configured backend controls only the expected output pins.
 4. Verify blade TTL, pause, abort, E-stop, backend shutdown, serial disconnect, and firmware reset
    all leave output off.
-5. Confirm physical E-stop cuts blade power independently of software.
+5. Confirm the configured independent intervention control removes hazardous actuator power. Test a dedicated E-stop
+   only when one is installed; the reference mower uses its verified master cutoff.
 
 ### Phase 4: Sensors, Blade Disabled
 
@@ -62,3 +67,15 @@ Run these only on Raspberry Pi OS with the mower secured.
 3. Disconnect each ToF sensor and verify autonomy blocks or stops.
 4. Interrupt GPS updates while leaving the last coordinate visible; verify autonomy blocks on stale sample.
 5. Simulate low and critical battery thresholds with a safe test source.
+
+## Qualification completion and invalidation
+
+Collect non-destructive evidence first with `scripts/run_autonomy_qualification.py`. Hazardous stages are
+operator-confirmed and artifact-backed one at a time; the runner never energizes them automatically. Complete at least
+the wheels-raised drive/lease, intervention, obstacle, blade-circuit, and controlled blade-off field stages required by
+the current API evaluation before considering unattended mowing.
+
+Any code checkout change, dirty deployed tree, hardware-config or safety-limit change, runtime identity change, firmware
+change, failed cleanup, interrupted stage, or expired record invalidates qualification. Recheck
+`GET /api/v2/system/info`, `/api/v2/autonomy/readiness`, and `/api/v2/autonomy/qualification` after deployment and before
+every physical sequence. See `docs/OPERATIONS.md` for exact record and rollback commands.

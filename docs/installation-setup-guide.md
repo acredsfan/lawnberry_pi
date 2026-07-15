@@ -226,14 +226,19 @@ Normal setup and update operations preserve an existing `config/hardware.yaml` b
 
 ### 2. Test Installation
 ```bash
-# Enable and start services
-sudo systemctl enable --now lawnberry-backend lawnberry-health lawnberry-sensors
+# Install/upgrade the tracked units, then start the runtime owners.
+# The installer also disables and removes the retired lawnberry-sensors unit;
+# SensorManager runs inside the backend and is the sole sensor owner.
+sudo bash systemd/install_services.sh
+sudo systemctl start lawnberry-database lawnberry-camera lawnberry-backend \
+  lawnberry-health lawnberry-frontend
 
 # Check service status
 sudo systemctl status lawnberry-backend
 
 # Test API (port 8081)
 curl http://localhost:8081/health
+curl http://localhost:8081/api/v2/system/info
 
 # Access web interface (if running frontend)
 # Open browser to http://<pi-ip>:3000

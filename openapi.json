@@ -461,32 +461,23 @@
         "title": "ControlResponseV2",
         "type": "object"
       },
-      "DatasetExportRequest": {
-        "properties": {
-          "format": {
-            "title": "Format",
-            "type": "string"
-          },
-          "include_unlabeled": {
-            "default": false,
-            "title": "Include Unlabeled",
-            "type": "boolean"
-          },
-          "min_confidence": {
-            "default": 0.5,
-            "title": "Min Confidence",
-            "type": "number"
-          }
-        },
-        "required": [
-          "format"
-        ],
-        "title": "DatasetExportRequest",
-        "type": "object"
-      },
       "DetectedObject": {
         "description": "Detected object with classification",
         "properties": {
+          "angular_width_degrees": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 179.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Detector box width projected through the configured camera FOV.",
+            "title": "Angular Width Degrees"
+          },
           "bounding_box": {
             "$ref": "#/components/schemas/BoundingBox"
           },
@@ -501,6 +492,8 @@
           "distance_estimate": {
             "anyOf": [
               {
+                "exclusiveMinimum": 0.0,
+                "maximum": 100.0,
                 "type": "number"
               },
               {
@@ -516,6 +509,8 @@
           "relative_bearing": {
             "anyOf": [
               {
+                "maximum": 180.0,
+                "minimum": -180.0,
                 "type": "number"
               },
               {
@@ -523,6 +518,13 @@
               }
             ],
             "title": "Relative Bearing"
+          },
+          "semantic_cost_multiplier": {
+            "default": 1.0,
+            "description": "Route-cost inflation only; never reduces geometric or ToF safety.",
+            "minimum": 1.0,
+            "title": "Semantic Cost Multiplier",
+            "type": "number"
           },
           "tracking_id": {
             "anyOf": [
@@ -587,6 +589,182 @@
           }
         },
         "title": "EmergencyClearRequest",
+        "type": "object"
+      },
+      "EnergyState": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "battery_current": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Current"
+          },
+          "battery_power": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Power"
+          },
+          "capacity_wh": {
+            "title": "Capacity Wh",
+            "type": "number"
+          },
+          "charging_confirmed": {
+            "default": false,
+            "title": "Charging Confirmed",
+            "type": "boolean"
+          },
+          "critical_soc_percent": {
+            "title": "Critical Soc Percent",
+            "type": "number"
+          },
+          "fresh": {
+            "title": "Fresh",
+            "type": "boolean"
+          },
+          "load_power": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load Power"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "remaining_wh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Wh"
+          },
+          "return_reserve_percent": {
+            "title": "Return Reserve Percent",
+            "type": "number"
+          },
+          "return_reserve_wh": {
+            "title": "Return Reserve Wh",
+            "type": "number"
+          },
+          "sample_age_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Age Seconds"
+          },
+          "sampled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sampled At"
+          },
+          "soc_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Soc Percent"
+          },
+          "solar_current": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solar Current"
+          },
+          "solar_power": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solar Power"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "voltage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voltage"
+          }
+        },
+        "required": [
+          "available",
+          "fresh",
+          "capacity_wh",
+          "return_reserve_percent",
+          "return_reserve_wh",
+          "critical_soc_percent"
+        ],
+        "title": "EnergyState",
         "type": "object"
       },
       "EnvSummary": {
@@ -1116,6 +1294,8 @@
           },
           "confidence_threshold": {
             "default": 0.5,
+            "maximum": 1.0,
+            "minimum": 0.0,
             "title": "Confidence Threshold",
             "type": "number"
           },
@@ -1127,29 +1307,53 @@
             "type": "array"
           },
           "inference_id": {
+            "minLength": 1,
             "title": "Inference Id",
             "type": "string"
           },
           "inference_time_ms": {
             "default": 0.0,
+            "minimum": 0.0,
             "title": "Inference Time Ms",
             "type": "number"
           },
           "input_frame_id": {
+            "minLength": 1,
             "title": "Input Frame Id",
             "type": "string"
           },
           "input_height": {
+            "exclusiveMinimum": 0.0,
             "title": "Input Height",
             "type": "integer"
           },
           "input_width": {
+            "exclusiveMinimum": 0.0,
             "title": "Input Width",
             "type": "integer"
           },
           "model_name": {
+            "minLength": 1,
             "title": "Model Name",
             "type": "string"
+          },
+          "model_runtime": {
+            "default": "unknown",
+            "minLength": 1,
+            "title": "Model Runtime",
+            "type": "string"
+          },
+          "model_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Sha256"
           },
           "model_version": {
             "default": "1.0",
@@ -1158,11 +1362,13 @@
           },
           "postprocessing_time_ms": {
             "default": 0.0,
+            "minimum": 0.0,
             "title": "Postprocessing Time Ms",
             "type": "number"
           },
           "preprocessing_time_ms": {
             "default": 0.0,
+            "minimum": 0.0,
             "title": "Preprocessing Time Ms",
             "type": "number"
           },
@@ -1177,6 +1383,18 @@
             ],
             "title": "Segmentation Mask"
           },
+          "source_frame_timestamp": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Frame Timestamp"
+          },
           "task": {
             "$ref": "#/components/schemas/InferenceTask"
           },
@@ -1187,6 +1405,7 @@
           },
           "total_time_ms": {
             "default": 0.0,
+            "minimum": 0.0,
             "title": "Total Time Ms",
             "type": "number"
           }
@@ -1607,6 +1826,18 @@
         "title": "MissionCreationRequest",
         "type": "object"
       },
+      "MissionLegType": {
+        "description": "Safety semantics for travel into a mission waypoint.",
+        "enum": [
+          "transit",
+          "mow",
+          "turn",
+          "wait",
+          "dock"
+        ],
+        "title": "MissionLegType",
+        "type": "string"
+      },
       "MissionLifecycleStatus": {
         "enum": [
           "idle",
@@ -1703,7 +1934,7 @@
         "type": "object"
       },
       "MissionWaypoint": {
-        "description": "A single waypoint in a mission.",
+        "description": "A waypoint whose leg type describes travel into the waypoint.",
         "properties": {
           "arrival_threshold_m": {
             "anyOf": [
@@ -1719,7 +1950,7 @@
           },
           "blade_on": {
             "default": false,
-            "description": "Whether the blade is active for this waypoint.",
+            "description": "Requested blade state while traversing this leg; valid only for mow legs.",
             "title": "Blade On",
             "type": "boolean"
           },
@@ -1731,6 +1962,11 @@
             "description": "Latitude of the waypoint.",
             "title": "Lat",
             "type": "number"
+          },
+          "leg_type": {
+            "$ref": "#/components/schemas/MissionLegType",
+            "default": "transit",
+            "description": "Safety semantics for the path leg ending at this waypoint."
           },
           "lon": {
             "description": "Longitude of the waypoint.",
@@ -1768,22 +2004,56 @@
       "MowerStatus": {
         "properties": {
           "battery_percentage": {
-            "default": 0,
-            "title": "Battery Percentage",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Percentage"
           },
           "blade_active": {
             "default": false,
             "title": "Blade Active",
             "type": "boolean"
           },
-          "last_updated": {
+          "build_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Sha"
+          },
+          "fresh": {
+            "default": false,
+            "title": "Fresh",
+            "type": "boolean"
+          },
+          "generated_at": {
             "format": "date-time",
-            "title": "Last Updated",
+            "title": "Generated At",
             "type": "string"
           },
+          "last_updated": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated"
+          },
           "navigation_state": {
-            "default": "IDLE",
+            "default": "UNKNOWN",
             "title": "Navigation State",
             "type": "string"
           },
@@ -1797,20 +2067,67 @@
               }
             ]
           },
+          "power_fresh": {
+            "default": false,
+            "title": "Power Fresh",
+            "type": "boolean"
+          },
           "power_mode": {
-            "default": "NORMAL",
+            "default": "UNKNOWN",
             "title": "Power Mode",
             "type": "string"
           },
+          "power_sample_age_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power Sample Age Seconds"
+          },
+          "power_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power Source"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
           "safety_status": {
-            "$ref": "#/components/schemas/SafetyStatus",
-            "default": {
-              "blade_safety_ok": true,
-              "emergency_stop_active": false,
-              "obstacle_detected": false,
-              "safety_interlocks": [],
-              "tilt_detected": false
-            }
+            "$ref": "#/components/schemas/backend__src__api__routers__sensors__SafetyStatus"
+          },
+          "sample_age_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Age Seconds"
+          },
+          "source": {
+            "default": "unavailable",
+            "title": "Source",
+            "type": "string"
           }
         },
         "title": "MowerStatus",
@@ -1826,8 +2143,116 @@
         "title": "NavigationMode",
         "type": "string"
       },
+      "PerceptionSnapshot": {
+        "description": "Freshness-qualified canonical perception result for API/WS consumers.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "fresh": {
+            "title": "Fresh",
+            "type": "boolean"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "max_result_age_seconds": {
+            "title": "Max Result Age Seconds",
+            "type": "number"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InferenceResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result_age_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Age Seconds"
+          },
+          "route_cost_obstacle_count": {
+            "default": 0,
+            "title": "Route Cost Obstacle Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "available",
+          "fresh",
+          "max_result_age_seconds"
+        ],
+        "title": "PerceptionSnapshot",
+        "type": "object"
+      },
+      "PlanningCapabilitiesResponse": {
+        "properties": {
+          "blade_safe_connectors": {
+            "title": "Blade Safe Connectors",
+            "type": "boolean"
+          },
+          "dynamic_obstacle_replan": {
+            "title": "Dynamic Obstacle Replan",
+            "type": "boolean"
+          },
+          "footprint_clearance": {
+            "title": "Footprint Clearance",
+            "type": "boolean"
+          },
+          "patterns": {
+            "items": {
+              "$ref": "#/components/schemas/PlanningPatternCapability"
+            },
+            "title": "Patterns",
+            "type": "array"
+          }
+        },
+        "required": [
+          "patterns",
+          "blade_safe_connectors",
+          "footprint_clearance",
+          "dynamic_obstacle_replan"
+        ],
+        "title": "PlanningCapabilitiesResponse",
+        "type": "object"
+      },
       "PlanningJobResponse": {
         "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
           "created_at": {
             "anyOf": [
               {
@@ -1844,6 +2269,17 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -1859,9 +2295,39 @@
             ],
             "title": "Last Run"
           },
+          "mission_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mission Id"
+          },
+          "mission_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Mission Ids",
+            "type": "array"
+          },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "occurrence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurrence"
           },
           "pattern": {
             "anyOf": [
@@ -1891,7 +2357,27 @@
             "title": "Priority",
             "type": "integer"
           },
+          "progress_percentage": {
+            "default": 0.0,
+            "title": "Progress Percentage",
+            "type": "number"
+          },
           "schedule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule"
+          },
+          "started_at": {
             "anyOf": [
               {
                 "type": "string"
@@ -1900,7 +2386,7 @@
                 "type": "null"
               }
             ],
-            "title": "Schedule"
+            "title": "Started At"
           },
           "status": {
             "default": "pending",
@@ -1908,9 +2394,15 @@
             "type": "string"
           },
           "zones": {
-            "default": [],
             "items": {},
             "title": "Zones",
+            "type": "array"
+          },
+          "zones_completed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Zones Completed",
             "type": "array"
           }
         },
@@ -1919,6 +2411,29 @@
           "name"
         ],
         "title": "PlanningJobResponse",
+        "type": "object"
+      },
+      "PlanningPatternCapability": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "title": "PlanningPatternCapability",
         "type": "object"
       },
       "Point": {
@@ -2178,40 +2693,6 @@
         "title": "RunSummary",
         "type": "object"
       },
-      "SafetyStatus": {
-        "properties": {
-          "blade_safety_ok": {
-            "default": true,
-            "title": "Blade Safety Ok",
-            "type": "boolean"
-          },
-          "emergency_stop_active": {
-            "default": false,
-            "title": "Emergency Stop Active",
-            "type": "boolean"
-          },
-          "obstacle_detected": {
-            "default": false,
-            "title": "Obstacle Detected",
-            "type": "boolean"
-          },
-          "safety_interlocks": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Safety Interlocks",
-            "type": "array"
-          },
-          "tilt_detected": {
-            "default": false,
-            "title": "Tilt Detected",
-            "type": "boolean"
-          }
-        },
-        "title": "SafetyStatus",
-        "type": "object"
-      },
       "SensorHealthResponse": {
         "properties": {
           "components": {
@@ -2451,6 +2932,53 @@
         "title": "StationaryRtkAverageResponse",
         "type": "object"
       },
+      "SystemInfoResponse": {
+        "properties": {
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "short_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Sha"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "commit_sha",
+          "short_sha",
+          "source",
+          "started_at"
+        ],
+        "title": "SystemInfoResponse",
+        "type": "object"
+      },
       "SystemStatus": {
         "properties": {
           "battery_percentage": {
@@ -2480,7 +3008,7 @@
             "type": "string"
           },
           "safety_status": {
-            "$ref": "#/components/schemas/SafetyStatus",
+            "$ref": "#/components/schemas/backend__src__api__rest_v1__SafetyStatus",
             "default": {
               "blade_safety_ok": true,
               "emergency_stop_active": false,
@@ -2531,6 +3059,22 @@
       },
       "ToFProbe": {
         "properties": {
+          "acquisition_failure_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Failure Rate"
+          },
+          "acquisition_window_samples": {
+            "default": 0,
+            "title": "Acquisition Window Samples",
+            "type": "integer"
+          },
           "backend": {
             "anyOf": [
               {
@@ -2608,6 +3152,11 @@
             ],
             "title": "Last Read Age S"
           },
+          "owner_running": {
+            "default": false,
+            "title": "Owner Running",
+            "type": "boolean"
+          },
           "running": {
             "anyOf": [
               {
@@ -2618,6 +3167,17 @@
               }
             ],
             "title": "Running"
+          },
+          "sample_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Id"
           },
           "sensor_side": {
             "title": "Sensor Side",
@@ -2996,6 +3556,40 @@
         "title": "AuthResponse",
         "type": "object"
       },
+      "backend__src__api__rest_v1__SafetyStatus": {
+        "properties": {
+          "blade_safety_ok": {
+            "default": true,
+            "title": "Blade Safety Ok",
+            "type": "boolean"
+          },
+          "emergency_stop_active": {
+            "default": false,
+            "title": "Emergency Stop Active",
+            "type": "boolean"
+          },
+          "obstacle_detected": {
+            "default": false,
+            "title": "Obstacle Detected",
+            "type": "boolean"
+          },
+          "safety_interlocks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Safety Interlocks",
+            "type": "array"
+          },
+          "tilt_detected": {
+            "default": false,
+            "title": "Tilt Detected",
+            "type": "boolean"
+          }
+        },
+        "title": "SafetyStatus",
+        "type": "object"
+      },
       "backend__src__api__rest_v1__Zone": {
         "properties": {
           "exclusion_zone": {
@@ -3074,6 +3668,57 @@
           "expires_at"
         ],
         "title": "AuthResponse",
+        "type": "object"
+      },
+      "backend__src__api__routers__sensors__SafetyStatus": {
+        "properties": {
+          "blade_safety_ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blade Safety Ok"
+          },
+          "emergency_stop_active": {
+            "default": false,
+            "title": "Emergency Stop Active",
+            "type": "boolean"
+          },
+          "obstacle_detected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Obstacle Detected"
+          },
+          "safety_interlocks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Safety Interlocks",
+            "type": "array"
+          },
+          "tilt_detected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tilt Detected"
+          }
+        },
+        "title": "SafetyStatus",
         "type": "object"
       }
     }
@@ -3295,71 +3940,6 @@
         "summary": "Get Status"
       }
     },
-    "/api/v2/ai/datasets": {
-      "get": {
-        "description": "Return the currently known AI datasets for operator/export workflows.",
-        "operationId": "list_ai_datasets_api_v2_ai_datasets_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List Ai Datasets"
-      }
-    },
-    "/api/v2/ai/datasets/{dataset_id}/export": {
-      "post": {
-        "description": "Start a lightweight dataset export job for the requested dataset.",
-        "operationId": "export_ai_dataset_api_v2_ai_datasets__dataset_id__export_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset_id",
-            "required": true,
-            "schema": {
-              "title": "Dataset Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DatasetExportRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Export Ai Dataset"
-      }
-    },
     "/api/v2/ai/inference": {
       "post": {
         "description": "Run AI inference against an uploaded image.",
@@ -3490,6 +4070,25 @@
           }
         },
         "summary": "Run Latest Frame Inference"
+      }
+    },
+    "/api/v2/ai/perception/latest": {
+      "get": {
+        "description": "Return the latest provenance- and freshness-qualified perception result.",
+        "operationId": "get_latest_perception_api_v2_ai_perception_latest_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerceptionSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Latest Perception"
       }
     },
     "/api/v2/ai/results/recent": {
@@ -4355,84 +4954,6 @@
         "summary": "Control Blade V2"
       }
     },
-    "/api/v2/control/diagnose/heading-validation": {
-      "post": {
-        "description": "Validate heading by comparing GPS Course-Over-Ground vs IMU yaw.\n\nPOST /api/v2/control/diagnose/heading-validation\nBody: {\n    \"session_id\": \"<session>\",\n    \"distance_m\": 5.0,       # Drive forward this far\n    \"samples\": 10            # Collect this many GPS/IMU samples\n}\n\nReturns:\n{\n    \"ok\": true,\n    \"heading_source\": \"gps|imu|conflict\",\n    \"gps_cog\": 45.2,\n    \"imu_yaw\": 45.5,\n    \"difference\": 0.3,\n    \"confidence\": 0.95,\n    \"recommendation\": \"GPS source is reliable\" | \"IMU appears inverted\" | \"Conflict detected\"\n}",
-        "operationId": "diagnose_heading_validation_api_v2_control_diagnose_heading_validation_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Cmd",
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Diagnose Heading Validation"
-      }
-    },
-    "/api/v2/control/diagnose/stiffness": {
-      "post": {
-        "description": "Start progressive stiffness detection test (slowly increase turn effort until stuck).\n\nPOST /api/v2/control/diagnose/stiffness\nBody: {\n    \"session_id\": \"<session>\",\n    \"direction\": \"left|right\",\n    \"initial_effort\": 0.1,  # Start at 10% effort, optional\n    \"step\": 0.05,            # Increase by 5% each iteration, optional\n    \"max_effort\": 1.0        # Stop at 100%, optional\n}\n\nReturns:\n{\n    \"ok\": true,\n    \"test_active\": true,\n    \"current_effort\": 0.10,\n    \"heading\": 45.2,\n    \"heading_delta\": 0.0,  # degrees changed since last step\n    \"status\": \"testing|stuck|completed\"\n}",
-        "operationId": "diagnose_stiffness_progressive_api_v2_control_diagnose_stiffness_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Cmd",
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Diagnose Stiffness Progressive"
-      }
-    },
     "/api/v2/control/drive": {
       "post": {
         "description": "Execute drive command with safety checks and audit logging",
@@ -4706,7 +5227,7 @@
     },
     "/api/v2/control/return-home": {
       "post": {
-        "description": "Start a return-to-home navigation sequence when home and position are available.",
+        "description": "Create the canonical blade-off return mission and return its authoritative identity.",
         "operationId": "control_return_home_api_v2_control_return_home_post",
         "responses": {
           "200": {
@@ -4794,6 +5315,7 @@
     },
     "/api/v2/dashboard/status": {
       "get": {
+        "description": "Return a read-only snapshot without inventing missing mower state.",
         "operationId": "dashboard_status_api_v2_dashboard_status_get",
         "responses": {
           "200": {
@@ -5195,17 +5717,13 @@
     },
     "/api/v2/health/liveness": {
       "get": {
-        "description": "Simple liveness probe for container orchestration.",
+        "description": "Basic liveness for systemd: process is up and serving requests.",
         "operationId": "health_liveness_api_v2_health_liveness_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Health Liveness Api V2 Health Liveness Get",
-                  "type": "object"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
@@ -5216,17 +5734,13 @@
     },
     "/api/v2/health/readiness": {
       "get": {
-        "description": "Readiness probe including subsystem rollup.",
+        "description": "Readiness: verify core dependencies are reachable (DB, app state).",
         "operationId": "health_readiness_api_v2_health_readiness_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Health Readiness Api V2 Health Readiness Get",
-                  "type": "object"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
@@ -5934,7 +6448,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MissionStatus"
+                }
               }
             },
             "description": "Successful Response"
@@ -5972,7 +6488,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MissionStatus"
+                }
               }
             },
             "description": "Successful Response"
@@ -6010,7 +6528,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MissionStatus"
+                }
               }
             },
             "description": "Successful Response"
@@ -6060,7 +6580,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/MissionStatus"
+                }
               }
             },
             "description": "Successful Response"
@@ -6496,6 +7018,28 @@
         ]
       }
     },
+    "/api/v2/planning/capabilities": {
+      "get": {
+        "description": "Report the coverage features actually implemented by this build.",
+        "operationId": "get_planning_capabilities_api_v2_planning_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanningCapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Planning Capabilities",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
     "/api/v2/planning/jobs": {
       "get": {
         "operationId": "list_planning_jobs_api_v2_planning_jobs_get",
@@ -6503,7 +7047,13 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlanningJobResponse"
+                  },
+                  "title": "Response List Planning Jobs Api V2 Planning Jobs Get",
+                  "type": "array"
+                }
               }
             },
             "description": "Successful Response"
@@ -6526,10 +7076,12 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PlanningJobResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -6583,6 +7135,162 @@
           }
         },
         "summary": "Delete Planning Job"
+      }
+    },
+    "/api/v2/planning/jobs/{job_id}/cancel": {
+      "post": {
+        "operationId": "cancel_planning_job_api_v2_planning_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanningJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Planning Job"
+      }
+    },
+    "/api/v2/planning/jobs/{job_id}/pause": {
+      "post": {
+        "operationId": "pause_planning_job_api_v2_planning_jobs__job_id__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanningJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pause Planning Job"
+      }
+    },
+    "/api/v2/planning/jobs/{job_id}/resume": {
+      "post": {
+        "operationId": "resume_planning_job_api_v2_planning_jobs__job_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanningJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume Planning Job"
+      }
+    },
+    "/api/v2/planning/jobs/{job_id}/start": {
+      "post": {
+        "operationId": "start_planning_job_api_v2_planning_jobs__job_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanningJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Planning Job"
       }
     },
     "/api/v2/power/activity-tags": {
@@ -6750,6 +7458,28 @@
           }
         },
         "summary": "Get Power History Raw",
+        "tags": [
+          "power"
+        ]
+      }
+    },
+    "/api/v2/power/state": {
+      "get": {
+        "description": "Return canonical cached energy state with source and freshness truth.",
+        "operationId": "get_power_state_api_v2_power_state_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnergyState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Power State",
         "tags": [
           "power"
         ]
@@ -7637,6 +8367,25 @@
           }
         },
         "summary": "Get Status V2"
+      }
+    },
+    "/api/v2/system/info": {
+      "get": {
+        "description": "Expose the exact backend build serving this request.",
+        "operationId": "system_info_api_v2_system_info_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemInfoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "System Info"
       }
     },
     "/api/v2/system/selftest": {

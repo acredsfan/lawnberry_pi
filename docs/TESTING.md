@@ -12,10 +12,10 @@ python3 -m venv .venv
 pip install -e .
 ```
 
-Run the full test suite:
+Run the safe backend unit suite from the locked project environment:
 
 ```bash
-SIM_MODE=1 pytest -q
+SIM_MODE=1 uv run pytest tests/unit/ -q -m "not hardware"
 ```
 
 Storage isolation note:
@@ -26,7 +26,8 @@ Storage isolation note:
 
 - Contract tests validate the FastAPI REST + WebSocket API.
 - Integration tests include backups/migration and more.
-- Placeholder integration tests (future work) are skipped by default.
+- Critical autonomy, GPS-loss, power, perception, authentication, and OpenAPI contracts are executable tests; they must
+  not be replaced by unconditional skips or placeholder assertions.
 
 ## 1a) Simulation mode vs hardware mode
 
@@ -66,26 +67,59 @@ Important behavior note:
 
 See `docs/simulation-vs-hardware-modes.md` for the full explanation.
 
-Run placeholder integration tests explicitly:
-
-```bash
-RUN_PLACEHOLDER_INTEGRATION=1 pytest -q tests/integration
-```
-
-## 2) Frontend tests and lint (optional)
+## 2) Frontend tests, type checking, lint, and build
 
 From `frontend/`:
 
 ```bash
 npm ci
 npm run lint
+npm run type-check
 npm run test
 npm run build
 ```
 
+The `webui-build` pull-request workflow runs `npm ci`, type checking, the complete Vitest suite, and the production
+build. A green bundle alone is not sufficient because it can miss browser-state and truthful-fallback regressions.
+
+## 2a) Critical autonomy/runtime regression slice
+
+Use isolated state and the locked Python environment:
+
+```bash
+tmpdir=$(mktemp -d)
+SIM_MODE=1 \
+LAWNBERRY_SKIP_HW_INIT=1 \
+LAWN_DATA_DIR="$tmpdir/data" \
+DB_PATH="$tmpdir/lawnberry.db" \
+LAWN_SETTINGS_DIR="$tmpdir/settings" \
+uv run pytest -o addopts='' -q -m "not hardware" \
+  tests/integration/test_autonomous_operation.py \
+  tests/integration/test_gps_loss_policy.py \
+  tests/integration/test_manual_control_auth.py \
+  tests/contract/test_openapi_schema.py \
+  tests/unit/test_energy_service.py \
+  tests/unit/test_detector_runtime.py \
+  tests/unit/test_build_info.py \
+  tests/unit/test_dashboard_status_truth.py \
+  tests/unit/test_sanitization_middleware.py \
+  tests/unit/test_systemd_sensor_retirement.py
+```
+
+Regenerate and compare the public contract after route/model changes:
+
+```bash
+SIM_MODE=1 LAWNBERRY_SKIP_HW_INIT=1 \
+  uv run python scripts/generate_openapi.py openapi.generated.json
+diff -u openapi.json openapi.generated.json
+
+cd frontend
+npm run generate-types
+```
+
 All frontend dependencies are compatible with ARM64.
 
-## 2a) Dependency security audits
+## 2b) Dependency security audits
 
 The `dep-audit` pull-request workflow is blocking. It audits only third-party Python requirements
 and the committed npm lockfile; known vulnerabilities must be upgraded or explicitly reviewed,
@@ -352,4 +386,5 @@ The reference mower has no dedicated physical E-stop. Aaron has repeatedly verif
 
 - Ensure you’re on Raspberry Pi OS (64-bit) Bookworm.
 - Avoid non-ARM64 dependencies. If needed, propose a Pi-compatible alternative first.
-- If placeholder tests fail intentionally, run them only when implementing the corresponding features.
+- Use `uv run` for repository verification so the result uses the locked dependency set rather than a drifting system
+  interpreter. An unconditional skip in a critical contract is a missing test, not a passing result.

@@ -150,7 +150,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T46 | x | Make telemetry, planning, readiness, power, connection, and build UI truthful | V48, V54, I.fe, I.api, I.ws |
 | T47 | x | Remove green-but-inert services and unsupported API/ops success paths | V54, I.ops, I.api |
 | T48 | x | Replace critical placeholder tests, run frontend tests in CI, fix OpenAPI IDs, and clean lint | V55, V56, I.api, I.fe, I.ops |
-| T49 | . | Update OpenAPI, hardware/runtime docs, structure overview, and qualification handoff | V43–V55, I.api, I.ops |
+| T49 | x | Update OpenAPI, hardware/runtime docs, structure overview, and qualification handoff | V43–V56, I.api, I.ops |
 
 ---
 

@@ -142,7 +142,7 @@ These are safe but require manual judgment:
 `scripts/restore.sh` vs `scripts/restore_system.sh` — same situation.
 
 ### One-Off Diagnostic Scripts
-`scripts/test_latency.py`, `scripts/test_websocket_load.py`, `scripts/test_motor_diagnostics.sh`, `scripts/test_performance_degradation.py` — not harmful but not part of the standard test suite. Consider moving to `scripts/diagnostics/`.
+`scripts/test_latency.py`, `scripts/test_websocket_load.py`, and `scripts/test_performance_degradation.py` — not harmful but not part of the standard test suite. Consider moving to `scripts/diagnostics/`. The former direct-motion `scripts/test_motor_diagnostics.sh` was retired in July 2026 when diagnostics were moved behind canonical gateway and qualification paths.
 
 ### Stale Architecture References
 `README.md:64` — hardcoded IP `192.168.50.215:3000` should be replaced with a generic placeholder.  
