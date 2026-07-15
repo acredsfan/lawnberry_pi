@@ -54,19 +54,34 @@ logger = logging.getLogger(__name__)
 class ObstacleDetector:
     """Obstacle detection and avoidance"""
 
-    def __init__(self, safety_distance: float = 0.2, limits: Any | None = None):
+    def __init__(
+        self,
+        safety_distance: float = 0.2,
+        limits: Any | None = None,
+        persistence_seconds: float = 30.0,
+    ):
         self.safety_distance = safety_distance
         self.limits = limits
         self.detected_obstacles: list[Obstacle] = []
+        self.persistence_seconds = max(0.0, float(persistence_seconds))
+        self._cost_map: dict[str, Obstacle] = {}
+        self._last_seen_monotonic: dict[str, float] = {}
+        self._active_ids: set[str] = set()
+
+    @property
+    def has_active_obstacle(self) -> bool:
+        return bool(self._active_ids)
 
     def update_obstacles_from_sensors(
         self,
         sensor_data: SensorData,
         commanded_speed_mps: float | None = None,
+        origin_position: Position | None = None,
+        heading_deg: float | None = None,
     ) -> list[Obstacle]:
-        """Update obstacle list from sensor data"""
-        obstacles = []
-        obstacle_id_counter = 0
+        """Update active detections and retain a bounded spatial cost map."""
+        now = time.monotonic()
+        active: list[Obstacle] = []
         speed = (
             commanded_speed_mps
             if commanded_speed_mps is not None
@@ -78,37 +93,54 @@ class ObstacleDetector:
             threshold_m = max(0.0, float(self.safety_distance))
         threshold_mm = threshold_m * 1000.0
 
-        # ToF sensor obstacles
+        def observe(sensor_id: str, distance_mm: float, bearing_offset_deg: float) -> None:
+            if not (0.0 < distance_mm <= threshold_mm):
+                return
+            distance_m = distance_mm / 1000.0
+            position = None
+            if origin_position is not None and heading_deg is not None:
+                bearing = math.radians(float(heading_deg) + bearing_offset_deg)
+                latitude, longitude = offset_lat_lon(
+                    origin_position.latitude,
+                    origin_position.longitude,
+                    north_m=math.cos(bearing) * distance_m,
+                    east_m=math.sin(bearing) * distance_m,
+                )
+                position = Position(latitude=latitude, longitude=longitude)
+            previous = self._cost_map.get(sensor_id)
+            first_detected = previous.first_detected if previous is not None else datetime.now(UTC)
+            age_s = max(0.0, (datetime.now(UTC) - first_detected).total_seconds())
+            obstacle = Obstacle(
+                id=sensor_id,
+                position=position,
+                range_m=distance_m,
+                bearing_offset_deg=bearing_offset_deg,
+                confidence=0.9,
+                obstacle_type="persistent" if age_s >= 2.0 else "transient",
+                detection_source="tof",
+                first_detected=first_detected,
+                last_seen=datetime.now(UTC),
+            )
+            active.append(obstacle)
+            self._cost_map[sensor_id] = obstacle
+            self._last_seen_monotonic[sensor_id] = now
+
         if sensor_data.tof_left and sensor_data.tof_left.distance is not None:
-            left_distance = float(sensor_data.tof_left.distance)
-            if 0.0 < left_distance <= threshold_mm:
-                obstacles.append(
-                    Obstacle(
-                        id=f"tof_left_{obstacle_id_counter}",
-                        position=Position(latitude=0, longitude=0),  # Relative position
-                        confidence=0.8,
-                        obstacle_type="static",
-                        detection_source="tof",
-                    )
-                )
-                obstacle_id_counter += 1
-
+            observe("tof_left", float(sensor_data.tof_left.distance), -20.0)
         if sensor_data.tof_right and sensor_data.tof_right.distance is not None:
-            right_distance = float(sensor_data.tof_right.distance)
-            if 0.0 < right_distance <= threshold_mm:
-                obstacles.append(
-                    Obstacle(
-                        id=f"tof_right_{obstacle_id_counter}",
-                        position=Position(latitude=0, longitude=0),  # Relative position
-                        confidence=0.8,
-                        obstacle_type="static",
-                        detection_source="tof",
-                    )
-                )
-                obstacle_id_counter += 1
+            observe("tof_right", float(sensor_data.tof_right.distance), 20.0)
 
-        self.detected_obstacles = obstacles
-        return obstacles
+        self._active_ids = {obstacle.id for obstacle in active}
+        expired = [
+            obstacle_id
+            for obstacle_id, seen_at in self._last_seen_monotonic.items()
+            if now - seen_at > self.persistence_seconds
+        ]
+        for obstacle_id in expired:
+            self._last_seen_monotonic.pop(obstacle_id, None)
+            self._cost_map.pop(obstacle_id, None)
+        self.detected_obstacles = list(self._cost_map.values())
+        return self.detected_obstacles
 
     def is_path_clear(self, current_pos: Position, target_pos: Position) -> bool:
         """Check if path to target is clear of obstacles"""
@@ -220,6 +252,14 @@ class _NavStateLocalizationAdapter:
     def accuracy_m(self) -> float | None:
         position = self.current_position
         return float(position.accuracy) if position and position.accuracy is not None else None
+
+    @property
+    def obstacle_avoidance_active(self) -> bool:
+        return bool(self._nav.navigation_state.obstacle_avoidance_active)
+
+    @property
+    def obstacle_map(self) -> list[Obstacle]:
+        return list(self._nav.navigation_state.obstacle_map)
 
     @property
     def state(self) -> _NavStateLocalizationAdapter:
@@ -514,6 +554,8 @@ class NavigationService:
             encoder_rpm_provider=self._get_encoder_rpms,
             encoder_active_provider=self._get_encoder_active,
             docking_confirmed_provider=self._cached_docking_confirmed,
+            obstacle_active_provider=lambda: self.navigation_state.obstacle_avoidance_active,
+            obstacle_replan_provider=self._plan_obstacle_detour,
             max_speed=self.max_speed,
             cruise_speed=self.cruise_speed,
             waypoint_tolerance=self.waypoint_tolerance,
@@ -546,6 +588,64 @@ class NavigationService:
         except Exception:
             logger.debug("Cached dock/charge confirmation unavailable", exc_info=True)
             return False
+
+    def _plan_obstacle_detour(
+        self,
+        current: Position,
+        goal: Position,
+    ) -> list[Position]:
+        """Plan against the retained spatial obstacle cost map after a stop/wait cycle."""
+        snapshot = self.get_operating_area_snapshot()
+        if not snapshot.valid:
+            return []
+        obstacle_polygons: list[list[Position]] = []
+        for obstacle in self.navigation_state.obstacle_map:
+            if obstacle.position is None:
+                continue
+            center = obstacle.position
+            radius_m = 0.08
+
+            def corner(
+                north_m: float,
+                east_m: float,
+                center_position: Position = center,
+            ) -> Position:
+                latitude, longitude = offset_lat_lon(
+                    center_position.latitude,
+                    center_position.longitude,
+                    north_m=north_m,
+                    east_m=east_m,
+                )
+                return Position(latitude=latitude, longitude=longitude)
+
+            obstacle_polygons.append(
+                [
+                    corner(north, east)
+                    for north, east in (
+                        (-radius_m, -radius_m),
+                        (-radius_m, radius_m),
+                        (radius_m, radius_m),
+                        (radius_m, -radius_m),
+                    )
+                ]
+            )
+        if not obstacle_polygons:
+            return []
+        route = self.path_planner.find_path(
+            current,
+            goal,
+            snapshot.safe_boundary,
+            obstacles=obstacle_polygons,
+            grid_resolution_m=0.25,
+            safety_margin_m=0.10,
+            boundary_margin_m=self.coverage_endpoint_clearance_m,
+        )
+        positions = [waypoint.position for waypoint in route]
+        if not positions or not snapshot.path_is_safe(
+            positions, self.coverage_endpoint_clearance_m
+        ):
+            return []
+        return positions
 
     _instance: NavigationService | None = None
 
@@ -1922,11 +2022,15 @@ class NavigationService:
         obstacles = self.obstacle_detector.update_obstacles_from_sensors(
             sensor_data,
             commanded_speed_mps=self.navigation_state.target_velocity,
+            origin_position=current_position,
+            heading_deg=self.navigation_state.heading,
         )
         self.navigation_state.obstacle_map = obstacles
 
         # Check if obstacle avoidance is needed
-        self.navigation_state.obstacle_avoidance_active = len(obstacles) > 0
+        self.navigation_state.obstacle_avoidance_active = (
+            self.obstacle_detector.has_active_obstacle
+        )
 
         # Update path execution if in auto mode
         if self.navigation_state.navigation_mode == NavigationMode.AUTO:

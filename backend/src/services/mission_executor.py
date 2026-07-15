@@ -66,6 +66,10 @@ class MissionExecutor:
         encoder_active_provider: Any = None,
         docking_confirmed_provider: Any = None,
         docking_confirmation_timeout_seconds: float = 30.0,
+        obstacle_active_provider: Any = None,
+        obstacle_replan_provider: Any = None,
+        obstacle_wait_timeout_seconds: float = 5.0,
+        max_obstacle_replans_per_leg: int = 2,
         max_speed: float = 0.8,
         cruise_speed: float = 0.5,
         waypoint_tolerance: float = 1.0,
@@ -89,6 +93,10 @@ class MissionExecutor:
         self.docking_confirmation_timeout_seconds = max(
             0.0, float(docking_confirmation_timeout_seconds)
         )
+        self._obstacle_active_provider = obstacle_active_provider
+        self._obstacle_replan_provider = obstacle_replan_provider
+        self.obstacle_wait_timeout_seconds = max(0.0, float(obstacle_wait_timeout_seconds))
+        self.max_obstacle_replans_per_leg = max(0, int(max_obstacle_replans_per_leg))
         import os
         _boost_disabled = os.environ.get("LAWNBERRY_DISABLE_TRACTION_BOOST", "").strip() == "1"
         if _boost_disabled:
@@ -327,6 +335,37 @@ class MissionExecutor:
                 raise RuntimeError("DOCK_CONFIRMATION_TIMEOUT: charging/dock signal not confirmed")
             await asyncio.sleep(0.25)
 
+    async def _obstacle_is_active(self) -> bool:
+        provider = self._obstacle_active_provider
+        if provider is None:
+            return False
+        try:
+            result = provider()
+            if inspect.isawaitable(result):
+                result = await result
+            return bool(result)
+        except Exception:
+            logger.exception("Obstacle state provider failed")
+            return True
+
+    async def _request_obstacle_replan(
+        self,
+        current: Position,
+        goal: Position,
+    ) -> list[Position]:
+        provider = self._obstacle_replan_provider
+        if provider is None:
+            return []
+        try:
+            if inspect.iscoroutinefunction(provider):
+                result = await provider(current, goal)
+            else:
+                result = await asyncio.to_thread(provider, current, goal)
+            return [position for position in result if isinstance(position, Position)]
+        except Exception:
+            logger.exception("Obstacle replan provider failed")
+            return []
+
     # ------------------------------------------------------------------
     # Waypoint pursuit loop (Task 6)
     # ------------------------------------------------------------------
@@ -350,7 +389,12 @@ class MissionExecutor:
                 path-tracker. When None, the mower's position at first valid GPS
                 tick is used as the leg-start anchor.
         """
-        target_pos = Position(latitude=waypoint.lat, longitude=waypoint.lon)
+        final_target_pos = Position(latitude=waypoint.lat, longitude=waypoint.lon)
+        target_pos = final_target_pos
+        dynamic_targets: list[Position] = [final_target_pos]
+        obstacle_hold_started: float | None = None
+        obstacle_was_seen = False
+        obstacle_replans = 0
         logger.info(
             "MissionExecutor: navigating to waypoint (%.6f, %.6f)",
             target_pos.latitude,
@@ -520,6 +564,50 @@ class MissionExecutor:
             _pos_hold_start = None
             _pos_hold_log_last = -5.0
 
+            if await self._obstacle_is_active():
+                if obstacle_hold_started is None:
+                    obstacle_hold_started = time.monotonic()
+                    obstacle_was_seen = True
+                    await self._enter_safety_hold(reason="obstacle stop and classify")
+                if time.monotonic() - obstacle_hold_started >= self.obstacle_wait_timeout_seconds:
+                    await self._enter_safety_hold(reason="persistent obstacle timeout")
+                    raise RuntimeError(
+                        "PERSISTENT_OBSTACLE: obstacle did not clear within bounded wait"
+                    )
+                await asyncio.sleep(0.1)
+                continue
+
+            if obstacle_was_seen:
+                if obstacle_replans >= self.max_obstacle_replans_per_leg:
+                    raise RuntimeError("OBSTACLE_REPLAN_LIMIT: bounded replan budget exhausted")
+                replanned = await self._request_obstacle_replan(
+                    current_position, final_target_pos
+                )
+                replanned = [
+                    position
+                    for position in replanned
+                    if planner.calculate_distance(current_position, position) >= 0.02
+                ]
+                if not replanned:
+                    raise RuntimeError("OBSTACLE_NO_SAFE_ROUTE: retained cost map blocks this leg")
+                if planner.calculate_distance(replanned[-1], final_target_pos) >= 0.02:
+                    replanned.append(final_target_pos)
+                dynamic_targets = replanned
+                target_pos = dynamic_targets[0]
+                obstacle_replans += 1
+                obstacle_was_seen = False
+                obstacle_hold_started = None
+                _path_a_lat = current_position.latitude
+                _path_a_lon = current_position.longitude
+                _path_bearing = None
+                _heading_ema = None
+                logger.info(
+                    "Obstacle cleared; following %d blade-off detour points (replan %d/%d)",
+                    len(dynamic_targets),
+                    obstacle_replans,
+                    self.max_obstacle_replans_per_leg,
+                )
+
             distance_to_target = planner.calculate_distance(current_position, target_pos)
 
             if waypoint.arrival_threshold_m is not None:
@@ -537,8 +625,8 @@ class MissionExecutor:
             if distance_to_target <= _effective_tol:
                 logger.info(
                     "MissionExecutor: waypoint reached (%.6f, %.6f)",
-                    waypoint.lat,
-                    waypoint.lon,
+                    target_pos.latitude,
+                    target_pos.longitude,
                 )
                 stop_confirmed = await self._deliver_stop_command(reason="waypoint arrival")
                 if not stop_confirmed:
@@ -546,6 +634,14 @@ class MissionExecutor:
                 if not await self._set_blade(False, reason="waypoint arrival"):
                     await self._trigger_emergency(reason="blade_off_unconfirmed:waypoint arrival")
                     raise RuntimeError("Failed to confirm blade off at waypoint")
+                if len(dynamic_targets) > 1:
+                    dynamic_targets.pop(0)
+                    target_pos = dynamic_targets[0]
+                    _path_a_lat = current_position.latitude
+                    _path_a_lon = current_position.longitude
+                    _path_bearing = None
+                    _heading_ema = None
+                    continue
                 return True
 
             # --- Stanley path anchor: capture leg-start on first valid GPS tick ---
@@ -580,6 +676,14 @@ class MissionExecutor:
                             reason="blade_off_unconfirmed:waypoint overshoot arrival"
                         )
                         raise RuntimeError("Failed to confirm blade off after waypoint overshoot")
+                    if len(dynamic_targets) > 1:
+                        dynamic_targets.pop(0)
+                        target_pos = dynamic_targets[0]
+                        _path_a_lat = current_position.latitude
+                        _path_a_lon = current_position.longitude
+                        _path_bearing = None
+                        _heading_ema = None
+                        continue
                     return True
                 if _along_track_m > _segment_len_m + _effective_tol:
                     await self._enter_safety_hold(reason="waypoint overshoot excessive CTE")

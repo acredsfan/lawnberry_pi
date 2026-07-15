@@ -10,7 +10,6 @@ from ..core.robot_state_manager import get_robot_state_manager
 from ..core.runtime import RuntimeContext, get_runtime
 from ..models.geofence import Geofence, LatLng
 from ..models.robot_state import NavigationMode
-from ..nav.coverage_planner import plan_coverage
 from ..nav.geoutils import haversine_m, point_in_polygon
 
 
@@ -205,12 +204,23 @@ async def get_coverage_plan(
         if len(ring) >= 3:
             exclusion_polys.append(ring)
 
-    path, row_count, length_m = plan_coverage(
-        boundary_polys[0],
-        exclusion_polys=exclusion_polys,
-        spacing_m=spacing_m,
-    )
-    coordinates = [[lng, lat] for lat, lng in path]
+    boundary_zone = next(zone for zone in zones if zone.get("zone_kind") == "boundary")
+    planning_service = getattr(runtime, "planning_service", None)
+    if planning_service is None:
+        from ..services.planning_service import PlanningService
+
+        planning_service = PlanningService()
+        planning_service.set_map_repository(repo)
+    try:
+        planned = await planning_service.plan_path_for_zone(
+            zone_id=str(boundary_zone["id"]),
+            pattern="parallel",
+            params={"spacing_m": spacing_m, "endpoint_clearance_m": 0.25},
+        )
+    except (KeyError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"Coverage plan is unsafe: {exc}") from exc
+
+    coordinates = [[waypoint.lon, waypoint.lat] for waypoint in planned.waypoints]
     return {
         "plan": {
             "type": "Feature",
@@ -221,8 +231,11 @@ async def get_coverage_plan(
             "properties": {
                 "config_id": config_id,
                 "spacing_m": spacing_m,
-                "row_count": row_count,
-                "length_m": round(length_m, 3),
+                "clearance_m": planned.clearance_m,
+                "row_count": planned.row_count,
+                "length_m": round(planned.length_m, 3),
+                "capabilities": planned.capabilities,
+                "leg_types": [waypoint.leg_type.value for waypoint in planned.waypoints],
             },
         },
     }

@@ -17,11 +17,20 @@ converting back to lat/lng.
 """
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from .geoutils import enu_to_latlon, haversine_m, latlon_to_enu, rotate_enu
 
 LatLng = tuple[float, float]
 Interval = tuple[float, float]
+
+
+@dataclass(frozen=True)
+class CoverageSegment:
+    """One blade-on scanline segment; connectors are planned separately."""
+
+    start: LatLng
+    end: LatLng
 
 
 def _horizontal_intersections(polygon: Iterable[LatLng], y: float) -> list[float]:
@@ -277,3 +286,107 @@ def plan_coverage(
         geo_path.append((lat, lon))
 
     return (geo_path, row_count, length_m)
+
+
+def plan_coverage_segments(
+    boundary: list[LatLng],
+    exclusion_polys: list[list[LatLng]] | None = None,
+    *,
+    spacing_m: float = 0.6,
+    angle_deg: float = 0.0,
+    clearance_m: float = 0.0,
+    max_rows: int = 2000,
+) -> tuple[list[CoverageSegment], int, float]:
+    """Return footprint-eroded mow segments without inventing unsafe connectors.
+
+    The free-space polygon is projected to metres, eroded by ``clearance_m``
+    (which also expands holes), and then scan-converted. Each returned segment
+    is independently safe for mowing; callers must plan blade-off connectors.
+    """
+    if len(boundary) < 3:
+        return [], 0, 0.0
+
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+
+    origin_lat, origin_lon = _polygon_centroid_latlon(boundary)
+
+    def to_rotated(poly: list[LatLng]) -> list[tuple[float, float]]:
+        converted: list[tuple[float, float]] = []
+        for lat, lon in poly:
+            east_m, north_m = latlon_to_enu(lat, lon, origin_lat, origin_lon)
+            rotated_east, rotated_north = rotate_enu(east_m, north_m, -angle_deg)
+            converted.append((rotated_north, rotated_east))
+        return converted
+
+    outer = Polygon(to_rotated(boundary))
+    if not outer.is_valid:
+        outer = outer.buffer(0)
+    holes = []
+    for exclusion in exclusion_polys or []:
+        if len(exclusion) < 3:
+            continue
+        polygon = Polygon(to_rotated(exclusion))
+        if not polygon.is_valid:
+            polygon = polygon.buffer(0)
+        if not polygon.is_empty:
+            holes.append(polygon)
+    free_space = outer.difference(unary_union(holes)) if holes else outer
+    if clearance_m > 0:
+        free_space = free_space.buffer(-float(clearance_m), join_style=2)
+    if free_space.is_empty:
+        return [], 0, 0.0
+
+    if isinstance(free_space, Polygon):
+        polygons = [free_space]
+    else:
+        polygons = [
+            geometry
+            for geometry in getattr(free_space, "geoms", ())
+            if isinstance(geometry, Polygon) and not geometry.is_empty
+        ]
+    if not polygons:
+        return [], 0, 0.0
+    raw_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    row_count = 0
+    direction_forward = True
+    spacing = spacing_m if spacing_m > 0 else 0.6
+
+    for polygon in sorted(polygons, key=lambda item: (-item.area, item.bounds)):
+        exterior = [(float(x), float(y)) for x, y in polygon.exterior.coords[:-1]]
+        interiors = [
+            [(float(x), float(y)) for x, y in ring.coords[:-1]]
+            for ring in polygon.interiors
+        ]
+        ys = [point[0] for point in exterior]
+        y = min(ys)
+        y_max = max(ys)
+        while y <= y_max + 1e-9 and row_count < max_rows:
+            source = _intervals_from_intersections(_horizontal_intersections(exterior, y))
+            hole_intervals = [
+                _intervals_from_intersections(_horizontal_intersections(interior, y))
+                for interior in interiors
+            ]
+            intervals = _subtract_intervals(source, hole_intervals) if hole_intervals else source
+            ordered = intervals if direction_forward else list(reversed(intervals))
+            for start_x, end_x in ordered:
+                if direction_forward:
+                    raw_segments.append(((y, start_x), (y, end_x)))
+                else:
+                    raw_segments.append(((y, end_x), (y, start_x)))
+            if intervals:
+                direction_forward = not direction_forward
+            row_count += 1
+            y += spacing
+
+    def to_latlng(point: tuple[float, float]) -> LatLng:
+        north_rotated, east_rotated = point
+        east_m, north_m = rotate_enu(east_rotated, north_rotated, angle_deg)
+        return enu_to_latlon(east_m, north_m, origin_lat, origin_lon)
+
+    segments = [CoverageSegment(start=to_latlng(a), end=to_latlng(b)) for a, b in raw_segments]
+    mow_length_m = sum(
+        haversine_m(segment.start[0], segment.start[1], segment.end[0], segment.end[1])
+        for segment in segments
+    )
+    return segments, row_count, mow_length_m

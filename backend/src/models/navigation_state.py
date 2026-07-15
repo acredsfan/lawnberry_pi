@@ -55,7 +55,9 @@ class Obstacle(BaseModel):
     """Detected obstacle information"""
 
     id: str
-    position: Position
+    position: Position | None = None
+    range_m: float | None = None
+    bearing_offset_deg: float | None = None
     size_x: float | None = None  # meters
     size_y: float | None = None  # meters
     confidence: float = 1.0  # 0.0-1.0

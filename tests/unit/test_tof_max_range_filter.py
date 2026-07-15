@@ -21,6 +21,7 @@ from backend.src.drivers.sensors.vl53l0x_driver import (
     TOF_SENSOR_MIN_VALID_MM,
     VL53L0XDriver,
 )
+from backend.src.models import Position
 from backend.src.models.sensor_data import SensorData, TofReading
 from backend.src.services.navigation_service import ObstacleDetector
 
@@ -229,3 +230,28 @@ def test_exact_threshold_boundary_is_obstacle():
     detector = ObstacleDetector(safety_distance=0.2)  # threshold = 200 mm
     obstacles = detector.update_obstacles_from_sensors(_sensor_data(200.0, 1000.0))
     assert len(obstacles) == 1
+
+
+def test_obstacle_detector_projects_tof_evidence_and_retains_cost_map():
+    detector = ObstacleDetector(safety_distance=0.2, persistence_seconds=30.0)
+    origin = Position(latitude=40.0, longitude=-75.0)
+
+    active = detector.update_obstacles_from_sensors(
+        _sensor_data(150.0, None),
+        origin_position=origin,
+        heading_deg=0.0,
+    )
+
+    assert detector.has_active_obstacle is True
+    assert active[0].position is not None
+    assert (active[0].position.latitude, active[0].position.longitude) != (0.0, 0.0)
+    assert active[0].range_m == pytest.approx(0.15)
+
+    retained = detector.update_obstacles_from_sensors(
+        _sensor_data(None, None),
+        origin_position=origin,
+        heading_deg=0.0,
+    )
+
+    assert detector.has_active_obstacle is False
+    assert [obstacle.id for obstacle in retained] == ["tof_left"]

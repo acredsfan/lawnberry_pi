@@ -78,23 +78,23 @@ async def plan_path_for_zone(
     self,
     zone_id: str,
     pattern: str,    # "parallel" | raises NotImplementedError for spiral/random
-    params: dict,    # spacing_m, angle_deg, speed_ms, blade_on, speed_pct
+    params: dict,    # spacing_m, angle_deg, speed_ms, blade_on, speed_pct, endpoint_clearance_m
 ) -> PlannedPath
 ```
 
-`PlannedPath` contains `waypoints: list[MissionWaypoint]`, `length_m`, and
-`est_duration_s`.
+`PlannedPath` contains typed `waypoints: list[MissionWaypoint]`, `length_m`,
+`est_duration_s`, `row_count`, `clearance_m`, and declared `capabilities`.
 
-Internally calls `plan_coverage()` from `backend/src/nav/coverage_planner.py`
-which implements an arbitrary-angle boustrophedon (serpentine) algorithm without
-Shapely.
+Internally calls `plan_coverage_segments()` from `backend/src/nav/coverage_planner.py`.
+The planner projects geometry to metres, subtracts exclusions, erodes free space
+by the configured clearance, and emits independent arbitrary-angle mow segments.
 
-When an operating-area snapshot is available, generated coverage points are
-validated as connected segments before a mission is accepted. If a direct
-connector would leave free space or cross an exclusion, planning fails instead
-of silently creating an unsafe transit. The waypoint `blade_on` flag remains a
-compatibility field and represents the requested blade state for motion into
-that waypoint until an explicit leg/action model is added.
+`PlanningService` joins those segments only with blade-off `TURN` legs. It uses
+a direct connector when the swept footprint is safe and otherwise uses bounded
+A* within the same operating-area snapshot. If no footprint-safe connector
+exists, planning fails. Preview and admission therefore share the 0.25 m default
+margin, typed leg semantics, and declared capabilities; ambiguous legacy blade
+flags remain blade-off.
 
 **Patterns:**
 
@@ -172,12 +172,12 @@ MissionService.start_mission()
   ── PlanningService.plan_path_for_zone(zone_id, pattern, params) ──
         │
         ▼
-plan_coverage(boundary_polygon, exclusions, spacing_m, angle_deg)
-  ── returns list[LatLng] path points ──
+plan_coverage_segments(boundary_polygon, exclusions, spacing, angle, clearance)
+  ── returns independent footprint-safe mow segments ──
         │
         ▼
-NavigationService.set_planned_path(waypoints)
-  ── mower begins following path ──
+PlanningService direct/A* connector planning
+  ── emits TRANSIT/TURN blade-off legs and MOW blade-on legs ──
 ```
 
 ---
@@ -186,9 +186,6 @@ NavigationService.set_planned_path(waypoints)
 
 - **Spiral / random patterns:** `PlanningService` validates and raises
   `NotImplementedError`; the mission API returns 501.
-- **Shapely-based lawnmower:** The `plan_coverage_shapely` path exists in
-  `coverage_planner.py` but is xfailed in the test suite (Shapely 2.x
-  `__slots__` incompatibility).
 - **Multi-zone jobs:** `JobsService._dispatch_scheduled_job` uses `zones[0]`
   only.  Parallel dispatch across multiple zones requires a future task.
 

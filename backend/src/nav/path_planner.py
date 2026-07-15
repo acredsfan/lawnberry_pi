@@ -69,8 +69,14 @@ class PathPlanner:
         *,
         obstacles: Iterable[Sequence[Position]] | None = None,
         grid_resolution_m: float = 0.25,
+        safety_margin_m: float = 0.1,
+        boundary_margin_m: float = 0.0,
     ) -> list[Waypoint]:
-        cfg = AStarConfig(grid_resolution_m=grid_resolution_m)
+        cfg = AStarConfig(
+            grid_resolution_m=grid_resolution_m,
+            safety_margin_m=safety_margin_m,
+            boundary_margin_m=boundary_margin_m,
+        )
         return plan_path_astar(start, goal, boundary, obstacles=obstacles, config=cfg)
 
     # Return-to-base helper

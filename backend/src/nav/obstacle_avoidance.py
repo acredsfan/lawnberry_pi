@@ -18,13 +18,14 @@ if TYPE_CHECKING:  # pragma: no cover
     from shapely.geometry import Polygon  # type: ignore
 
 from ..models import Position, Waypoint
-from .geoutils import latlon_to_enu, enu_to_latlon
+from .geoutils import enu_to_latlon, latlon_to_enu
 
 
 @dataclass(frozen=True)
 class AStarConfig:
     grid_resolution_m: float = 0.25
     safety_margin_m: float = 0.1  # Inflate obstacles by this margin
+    boundary_margin_m: float = 0.0  # Erode driveable area by mower/uncertainty radius
     max_expansions: int = 20000
 
 
@@ -79,6 +80,7 @@ def plan_path_astar(
     obstacles: Iterable[Sequence[Position]] | None = None,
     config: AStarConfig | None = None,
 ) -> list[Waypoint]:
+    from shapely.geometry import LineString
     from shapely.geometry import Point as SPoint  # type: ignore
     from shapely.prepared import prep  # type: ignore
 
@@ -87,6 +89,10 @@ def plan_path_astar(
     olon = start.longitude
 
     area = _poly_from_positions(boundary, olat, olon)
+    if cfg.boundary_margin_m > 0:
+        area = area.buffer(-cfg.boundary_margin_m, join_style=2)
+        if area.is_empty:
+            return []
     inflated_obs = _obstacles_union(obstacles, olat, olon, cfg.safety_margin_m)
     if inflated_obs is not None:
         free = area.difference(inflated_obs)
@@ -98,6 +104,8 @@ def plan_path_astar(
 
     sx, sy = _to_xy(start.latitude, start.longitude, olat, olon)
     gx, gy = _to_xy(goal.latitude, goal.longitude, olat, olon)
+    if not area.covers(SPoint(sx, sy)) or not area.covers(SPoint(gx, gy)):
+        return []
 
     step = cfg.grid_resolution_m
 
@@ -116,7 +124,7 @@ def plan_path_astar(
         res: list[tuple[float, float]] = []
         for dx, dy in dirs:
             x2, y2 = nx + dx, ny + dy
-            if prepared_area.contains(SPoint(x2, y2)):
+            if prepared_area.covers(SPoint(x2, y2)):
                 res.append((x2, y2))
         return res
 
@@ -138,7 +146,9 @@ def plan_path_astar(
             continue
         closed.add((cx, cy))
         visited += 1
-        if hypot(cx - gx, cy - gy) <= step:
+        if hypot(cx - gx, cy - gy) <= step and area.covers(
+            LineString([(cx, cy), (gx, gy)])
+        ):
             # reconstruct
             path: list[tuple[float, float]] = [(cx, cy)]
             while (cx, cy) in parent:
@@ -150,6 +160,8 @@ def plan_path_astar(
             for x, y in path:
                 lat, lon = _to_ll(x, y, olat, olon)
                 wps.append(Waypoint(position=Position(latitude=lat, longitude=lon)))
+            if not wps or wps[-1].position != goal:
+                wps.append(Waypoint(position=goal))
             return wps
         for nx, ny in nbrs(cx, cy):
             tentative = g[(cx, cy)] + hypot(nx - cx, ny - cy)

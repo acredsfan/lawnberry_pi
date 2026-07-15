@@ -139,7 +139,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T36 | x | Route documented `JobsService` compatibility execution through `MissionService`, retain linked mission identity, project terminal truth, and add accepted-start, terminal-state, unsupported, and non-success regression coverage | V41, I.api |
 | T37 | x | Wire exact-frame inference into the standalone camera owner, keep live FastAPI access on shared IPC, and enforce bounded sampling/single-flight delivery, off-event-loop CPU work, truthful annotations and owner topology, no dummy detections, informational-only isolation, and regression coverage | V42, I.api |
 | T38 | x | Build canonical fail-closed return-home and blade-safe typed path legs | V43, V44, I.api |
-| T39 | . | Build footprint-safe coverage, connectors, capabilities, obstacle cost map, and bounded replan | V49, V50, I.api |
+| T39 | x | Build footprint-safe coverage, connectors, capabilities, obstacle cost map, and bounded replan | V49, V50, I.api |
 | T40 | . | Build canonical admission snapshot and GPS degradation state machine | V45, V46, I.api, I.ws |
 | T41 | . | Build single-owner timestamped ToF acquisition and failure-rate readiness | V47, I.api, I.ws |
 | T42 | . | Make mission/manual operator mutations server-authoritative and fail-closed | V48, I.api, I.fe |

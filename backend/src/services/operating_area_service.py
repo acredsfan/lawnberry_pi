@@ -204,6 +204,7 @@ def load_operating_area_snapshot(
     map_repository: Any | None = None,
     selected_mow_zone_id: str | None = None,
     allow_zone_fallback: bool = False,
+    prefer_zone_fallback: bool = False,
 ) -> OperatingAreaSnapshot:
     confirmed_payload = _read_json(MOWING_BOUNDARY_CONFIRMED)
     safe_payload = _read_json(MOWING_BOUNDARY_SAFE)
@@ -211,7 +212,7 @@ def load_operating_area_snapshot(
     exclusions = [_positions_from_polygon(zone.get("polygon", [])) for zone in zones if _zone_kind(zone) == "exclusion"]
     exclusions = [poly for poly in exclusions if len(poly) >= 3]
 
-    if safe_payload is not None:
+    if safe_payload is not None and not prefer_zone_fallback:
         safe_points = _positions_from_polygon(safe_payload.get("coordinates", []))
         validity = _validate_safe_payload(safe_payload, safe_points, confirmed_payload)
         return _build_snapshot(

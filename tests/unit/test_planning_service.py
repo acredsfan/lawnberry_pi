@@ -5,12 +5,15 @@ Run: SIM_MODE=1 pytest tests/unit/test_planning_service.py -v --tb=short
 """
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
 
-from backend.src.services.planning_service import PlanningService
-from backend.src.nav.geoutils import point_in_polygon
+import pytest
 
+from backend.src.models import Position
+from backend.src.models.mission import MissionLegType
+from backend.src.nav.geoutils import point_in_polygon
+from backend.src.services.operating_area_service import load_operating_area_snapshot
+from backend.src.services.planning_service import PlanningService
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -126,6 +129,21 @@ async def test_plan_path_for_zone_skips_exclusion_zones() -> None:
         assert not _strictly_inside_exclusion(wp.lat, wp.lon, EXCLUSION_ZONE["polygon"]), (
             f"Waypoint ({wp.lat}, {wp.lon}) falls strictly inside exclusion zone"
         )
+    snapshot = load_operating_area_snapshot(
+        map_repository=repo,
+        selected_mow_zone_id="boundary-1",
+        allow_zone_fallback=True,
+        prefer_zone_fallback=True,
+    )
+    positions = [Position(latitude=wp.lat, longitude=wp.lon) for wp in result.waypoints]
+    assert snapshot.path_is_safe(positions, result.clearance_m)
+    assert any(wp.leg_type == MissionLegType.TURN for wp in result.waypoints)
+    assert all(
+        not wp.blade_on
+        for wp in result.waypoints
+        if wp.leg_type != MissionLegType.MOW
+    )
+    assert result.capabilities["blade_safe_connectors"] is True
 
 
 @pytest.mark.asyncio

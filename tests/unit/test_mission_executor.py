@@ -524,6 +524,66 @@ async def test_dock_leg_completes_after_positive_charge_confirmation():
 
 
 @pytest.mark.asyncio
+async def test_persistent_obstacle_stops_and_fails_closed():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    gateway = FakeGateway()
+    executor = MissionExecutor(
+        localization=FakeLocalization(
+            position=Position(latitude=0.0, longitude=0.0, accuracy=0.03),
+            last_gps_fix=datetime.now(UTC),
+        ),
+        gateway=gateway,
+        obstacle_active_provider=lambda: True,
+        obstacle_wait_timeout_seconds=0.0,
+    )
+    mission = _make_mission(
+        [{"lat": 0.0, "lon": 0.00001, "arrival_threshold_m": 2.0}]
+    )
+    reader = FakeMissionStatusReader(mission, _make_status(mission))
+
+    with pytest.raises(RuntimeError, match="PERSISTENT_OBSTACLE"):
+        await executor.go_to_waypoint(mission, mission.waypoints[0], reader)
+
+    assert (0.0, 0.0) in gateway.drive_calls
+    assert gateway.blade_calls and all(call is False for call in gateway.blade_calls)
+
+
+@pytest.mark.asyncio
+async def test_cleared_obstacle_uses_bounded_blade_off_replan():
+    from backend.src.services.mission_executor import MissionExecutor
+
+    active_states = iter([True, False])
+    replans: list[tuple[Position, Position]] = []
+
+    def replan(current: Position, goal: Position) -> list[Position]:
+        replans.append((current, goal))
+        return [goal]
+
+    gateway = FakeGateway()
+    executor = MissionExecutor(
+        localization=FakeLocalization(
+            position=Position(latitude=0.0, longitude=0.0, accuracy=0.03),
+            last_gps_fix=datetime.now(UTC),
+        ),
+        gateway=gateway,
+        obstacle_active_provider=lambda: next(active_states, False),
+        obstacle_replan_provider=replan,
+        obstacle_wait_timeout_seconds=1.0,
+    )
+    mission = _make_mission(
+        [{"lat": 0.0, "lon": 0.00001, "arrival_threshold_m": 2.0}]
+    )
+    reader = FakeMissionStatusReader(mission, _make_status(mission))
+
+    reached = await executor.go_to_waypoint(mission, mission.waypoints[0], reader)
+
+    assert reached is True
+    assert len(replans) == 1
+    assert gateway.blade_calls and all(call is False for call in gateway.blade_calls)
+
+
+@pytest.mark.asyncio
 async def test_execute_mission_waits_while_paused():
     from backend.src.models.mission import MissionStatus
     from backend.src.services.mission_executor import MissionExecutor

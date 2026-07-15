@@ -101,6 +101,9 @@ async def test_get_coverage_plan_returns_linestring_for_saved_boundary(map_repo:
         assert len(geometry.get("coordinates", [])) >= 2
         assert properties.get("config_id") == "coverage-test"
         assert properties.get("row_count", 0) > 0
+        assert properties.get("clearance_m") == pytest.approx(0.25)
+        assert properties.get("capabilities", {}).get("blade_safe_connectors") is True
+        assert "transit" in properties.get("leg_types", [])
 
 
 @pytest.mark.asyncio
