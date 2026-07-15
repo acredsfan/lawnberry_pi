@@ -28,7 +28,7 @@ ExecStartPre=-+/usr/bin/systemctl restart bluetooth.service
 # Main service command
 # Pin the live topology after EnvironmentFile expansion. Otherwise a stale
 # SIM_MODE or socket value in .env can create an embedded competing owner.
-ExecStart=/usr/bin/env SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/run/lawnberry/camera.sock /home/pi/lawnberry/.venv/bin/uvicorn backend.src.main:app --host 0.0.0.0 --port 8081 --workers 1
+ExecStart=/usr/bin/env SIM_MODE=0 LAWNBERRY_CAMERA_SOCKET=/run/lawnberry/camera.sock /home/pi/lawnberry/.venv/bin/uvicorn backend.src.main:app --host 0.0.0.0 --port 8081 --workers 1 --no-proxy-headers
 
 # Health checks and monitoring
 ExecReload=/bin/kill -HUP $MAINPID

@@ -2,6 +2,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -266,6 +267,50 @@ def test_sensor_status_rollup_with_plain_strings(tmp_path: Path):
 
     assert payload["status"] == "healthy"
     assert payload["components"]["gps"]["status"] == "online"
+
+
+def test_online_but_uncalibrated_imu_degrades_sensor_health(tmp_path: Path):
+    service = _make_service(tmp_path)
+
+    payload = service._sensor_status_to_payload(
+        {
+            "initialized": True,
+            "gps_status": SensorStatus.ONLINE,
+            "imu_status": SensorStatus.ONLINE,
+            "imu_calibration": "uncalibrated",
+            "tof_status": SensorStatus.ONLINE,
+        }
+    )
+
+    assert payload["status"] == "degraded"
+    assert payload["components"]["imu"] == {
+        "status": "online",
+        "health": "degraded",
+        "calibration_status": "uncalibrated",
+    }
+
+
+@pytest.mark.asyncio
+async def test_sensor_manager_exposes_last_imu_calibration_state():
+    from backend.src.services.sensor_manager import SensorManager
+
+    manager = SensorManager.__new__(SensorManager)
+    manager.initialized = True
+    manager.gps = SimpleNamespace(status=SensorStatus.ONLINE, gps_mode="f9p_usb")
+    manager.imu = SimpleNamespace(
+        status=SensorStatus.ONLINE,
+        last_reading=SimpleNamespace(calibration_status="uncalibrated"),
+    )
+    manager.tof = SimpleNamespace(status=SensorStatus.ONLINE)
+    manager.environmental = SimpleNamespace(status=SensorStatus.ONLINE)
+    manager.power = SimpleNamespace(status=SensorStatus.ONLINE)
+    manager.coordinator = SimpleNamespace(_active_sensors={"imu"})
+    manager.validation_enabled = True
+
+    status = await manager.get_sensor_status()
+
+    assert status["imu_status"] is SensorStatus.ONLINE
+    assert status["imu_calibration"] == "uncalibrated"
 
 
 @pytest.mark.asyncio

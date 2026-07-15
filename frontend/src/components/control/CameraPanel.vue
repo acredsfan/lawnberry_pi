@@ -30,7 +30,7 @@
         <span v-if="cameraStreamUnavailable" class="camera-meta-warning">Primary MJPEG stream unavailable</span>
         <span>FPS: {{ formatFps(cameraInfo.fps) }}</span>
         <span>Last frame: {{ formatTimestamp(cameraLastFrame) }}</span>
-        <span>Clients: {{ cameraInfo.client_count ?? '0' }}</span>
+        <span>IPC clients: {{ cameraInfo.client_count ?? '0' }}</span>
       </div>
     </div>
   </div>

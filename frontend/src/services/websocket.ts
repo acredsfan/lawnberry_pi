@@ -25,6 +25,18 @@ export class WebSocketService {
   private urlCandidates: string[]
   private urlIndex = 0
 
+  private authenticationProtocols(): string[] {
+    const protocols = [this.url.includes('/control') ? 'control.v1' : 'telemetry.v1']
+    try {
+      const token = window.localStorage.getItem('auth_token')
+      if (token) protocols.push(`lawnberry.jwt.${token}`)
+    } catch {
+      // localStorage unavailable; the backend will reject production traffic
+      // without another verified proof.
+    }
+    return protocols
+  }
+
   constructor(private url: string) {
     // Build fallback candidates:
     // - primary (e.g., /api/v2/ws/telemetry)
@@ -39,8 +51,8 @@ export class WebSocketService {
       } else if (path === '/api/v2/ws') {
         altPath = '/ws'
       }
-      const primary = `${u.protocol}//${u.host}${path}`
-      const alt = `${u.protocol}//${u.host}${altPath}`
+      const primary = `${u.protocol}//${u.host}${path}${u.search}`
+      const alt = `${u.protocol}//${u.host}${altPath}${u.search}`
       this.urlCandidates = [primary]
       if (alt !== primary) this.urlCandidates.push(alt)
     } catch {
@@ -80,7 +92,8 @@ export class WebSocketService {
       const tryConnect = () => {
         const target = this.urlCandidates[this.urlIndex] || this.urlCandidates[0]
         try {
-          this.ws = new WebSocket(target)
+          const protocols = this.authenticationProtocols()
+          this.ws = new WebSocket(target, protocols)
         
           this.ws.onopen = () => {
             console.log('WebSocket connected:', target)
@@ -417,20 +430,9 @@ const _wsServiceMap: Partial<Record<'telemetry' | 'control', WebSocketService>> 
 function _buildWsUrl(type: 'telemetry' | 'control'): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
-  let wsUrl = type === 'telemetry'
+  return type === 'telemetry'
     ? `${protocol}//${host}/api/v2/ws/telemetry`
     : `${protocol}//${host}/api/v2/ws/control`
-  try {
-    const token = localStorage.getItem('auth_token')
-    if (token) {
-      const url = new URL(wsUrl)
-      url.searchParams.set('access_token', token)
-      wsUrl = url.toString()
-    }
-  } catch {
-    // ignore
-  }
-  return wsUrl
 }
 
 // Factory for telemetry or control WebSocket — returns a shared singleton per type.

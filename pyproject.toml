@@ -17,7 +17,7 @@ dependencies = [
     "websockets>=12.0",
     "python-multipart>=0.0.31",
     "PyYAML>=6.0.1",
-    "pyjwt>=2.13.0",
+    "pyjwt[crypto]>=2.13.0",
     "passlib[bcrypt]>=1.7.4",
     "pyotp>=2.8.0",
     "structlog>=23.1.0",
@@ -43,6 +43,8 @@ dependencies = [
 # Optional extras for hardware backends (install with: pip install .[hardware])
 [project.optional-dependencies]
 hardware = [
+    # OpenCV 4.11 imports the validated detector graph; Pi OS 4.6 rejects its FP16 constants.
+    "opencv-python-headless>=4.11.0.86,<4.12",
     # Adafruit Blinka + CircuitPython VL53L0X for ToF (preferred on Pi)
     "adafruit-blinka>=8.8.0",
     "adafruit-circuitpython-bno08x>=1.3.2",

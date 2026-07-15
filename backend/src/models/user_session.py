@@ -38,6 +38,7 @@ class AuthenticationMethod(str, Enum):
     SHARED_CREDENTIAL = "shared_credential"  # Single operator credential
     TOKEN = "token"  # JWT token
     API_KEY = "api_key"  # API key authentication
+    CLOUDFLARE_ACCESS = "cloudflare_access"  # Verified upstream Access assertion
 
 
 class ConnectionType(str, Enum):
@@ -227,6 +228,9 @@ class UserSession(BaseModel):
     backup_code_used: bool = False
     oauth_provider: str | None = None
     tunnel_authenticated: bool = False
+    # Absolute expiry of a verified upstream identity (for example a
+    # Cloudflare Access assertion). Local sessions leave this unset.
+    upstream_identity_expires_at: datetime | None = None
 
     # User preferences
     preferences: UserPreferences = Field(default_factory=UserPreferences)

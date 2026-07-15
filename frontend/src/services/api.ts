@@ -66,6 +66,7 @@ class ApiService {
       async (error) => {
         if (error.response?.status === 401 && !error.config?._retried) {
           const authStore = useAuthStore()
+          if (!authStore.token) return Promise.reject(error)
           // Attempt a single token refresh before giving up. This handles the
           // case where the backend restarted and the session was reconstructed
           // but the old token needs re-validation.
@@ -79,7 +80,7 @@ class ApiService {
           } catch {
             // refresh failed — fall through to logout
           }
-          await authStore.logout()
+          authStore.clearSession()
         }
         return Promise.reject(error)
       }

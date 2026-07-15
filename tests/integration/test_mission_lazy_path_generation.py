@@ -48,6 +48,8 @@ def nav_service_mock() -> MagicMock:
     nav = MagicMock()
     nav.navigation_state = MagicMock()
     nav.navigation_state.safety_boundaries = []  # no geofence → skip validation
+    nav.navigation_state.planned_path = []
+    nav.navigation_state.current_waypoint_index = 0
     nav.execute_mission = AsyncMock()
     return nav
 

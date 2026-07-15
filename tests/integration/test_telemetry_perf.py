@@ -37,6 +37,11 @@ class TestTelemetryPerformance:
     @pytest.mark.asyncio
     async def test_telemetry_generation_performance(self, mock_websocket_hub):
         """Test telemetry data generation performance."""
+        # Initialize lazy navigation/config singletons outside the steady-state
+        # generation benchmark. Cold startup is covered by lifecycle tests and
+        # otherwise makes this 20 ms hot-path ceiling scheduler-load dependent.
+        warmup = await mock_websocket_hub._generate_telemetry()
+        assert isinstance(warmup, dict)
         generation_times = []
         
         # Generate telemetry data multiple times and measure

@@ -187,21 +187,28 @@ async def test_mission_service_schedules_canonical_return_after_energy_diversion
     )
     service._mission_terminal_events[mission.id] = asyncio.Event()
     monkeypatch.setattr(service, "_persist_mission_status", lambda _mission_id: None)
-    scheduled: list[str] = []
+    energy_return_started = asyncio.Event()
 
-    def capture_background(coroutine, *, name: str) -> None:
-        scheduled.append(name)
-        coroutine.close()
+    async def capture_energy_return(source_mission_id: str) -> None:
+        assert source_mission_id == mission.id
+        energy_return_started.set()
 
-    monkeypatch.setattr(service, "_spawn_background", capture_background)
+    monkeypatch.setattr(
+        service,
+        "_start_energy_return_after_terminal",
+        capture_energy_return,
+    )
 
-    class _FailedTask:
-        @staticmethod
-        def result() -> None:
-            raise EnergyReturnRequired("ENERGY_RETURN_RESERVE_REACHED")
+    async def fail_for_energy_return() -> None:
+        raise EnergyReturnRequired("ENERGY_RETURN_RESERVE_REACHED")
 
-    service._mission_completed_callback(mission.id)(_FailedTask())
-    await asyncio.sleep(0)
+    task = asyncio.create_task(fail_for_energy_return())
+    service.mission_tasks[mission.id] = task
+    task.add_done_callback(service._mission_completed_callback(mission.id))
+
+    await asyncio.wait_for(service._mission_terminal_events[mission.id].wait(), timeout=1.0)
+    await asyncio.wait_for(energy_return_started.wait(), timeout=1.0)
 
     assert service.mission_statuses[mission.id].status == MissionLifecycleStatus.FAILED
-    assert scheduled == [f"energy-return:{mission.id}"]
+    assert service.mission_statuses[mission.id].detail == "ENERGY_RETURN_RESERVE_REACHED"
+    assert mission.id not in service.mission_tasks

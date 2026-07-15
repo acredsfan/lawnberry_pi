@@ -15,6 +15,15 @@ class FakeTime:
         return self.value
 
 
+def test_only_local_credential_exchange_uses_middleware_login_quota():
+    middleware = SecurityMiddleware(FastAPI())
+
+    assert middleware._is_protected_path("/api/v2/auth/login") is True
+    assert middleware._is_protected_path("/api/v2/auth/cloudflare") is False
+    assert middleware._is_protected_path("/api/v2/auth/refresh") is False
+    assert middleware._is_protected_path("/api/v2/auth/profile") is False
+
+
 @pytest.mark.asyncio
 async def test_successful_requests_do_not_consume_attempt_quota(monkeypatch):
     app = FastAPI()

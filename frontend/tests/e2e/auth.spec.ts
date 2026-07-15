@@ -12,8 +12,7 @@ test.describe('Authentication flow', () => {
 
     await launchApp(page, backend, '/login', { auth: false })
 
-    await page.getByLabel('Username').fill('admin')
-    await page.getByLabel('Password').fill('admin')
+    await page.getByLabel('Operator credential').fill('operator-test-credential')
     await page.getByRole('button', { name: 'Sign In' }).click()
 
     await expect(page).toHaveURL('/')
@@ -21,5 +20,14 @@ test.describe('Authentication flow', () => {
 
     const token = await page.evaluate(() => window.localStorage.getItem('auth_token'))
     expect(token).toBe('test-token')
+  })
+
+  test('does not advertise a known default password', async ({ page }) => {
+    const backend = new MockBackend()
+
+    await launchApp(page, backend, '/login', { auth: false })
+
+    await expect(page.getByText('LawnBerry has no default password.')).toBeVisible()
+    await expect(page.getByText(/admin \/ admin/i)).toHaveCount(0)
   })
 })

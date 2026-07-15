@@ -4,6 +4,17 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
+# Load .env before importing application modules whose singletons read runtime
+# configuration during import (notably Cloudflare Access verification).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"), override=False)
+except Exception:
+    # Systemd supplies EnvironmentFile directly; development can continue when
+    # python-dotenv is unavailable.
+    pass
+
 from fastapi import FastAPI
 
 from .api.ai import router as ai_router
@@ -49,7 +60,7 @@ from .safety.safety_monitor import get_safety_monitor
 from .safety.safety_triggers import set_safety_event_handler
 from .safety.safety_validator import validate_on_start
 from .services.ai_service import get_ai_service
-from .services.camera_runtime import camera_service
+from .services.camera_runtime import camera_service, sync_external_ai_owner_state
 from .services.jobs_service import jobs_service as _jobs_service_singleton
 from .services.mission_service import get_mission_service
 from .services.navigation_service import NavigationService
@@ -57,16 +68,6 @@ from .services.power_history_service import init_power_history_service
 from .services.power_manager import init_power_manager
 from .services.robohat_service import initialize_robohat_service, shutdown_robohat_service
 from .services.websocket_hub import websocket_hub
-
-# Load .env early so secrets like NTRIP_* are available under systemd
-try:
-    from dotenv import load_dotenv
-
-    # Load from project root working directory
-    load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"), override=False)
-except Exception:
-    # Safe to continue without .env
-    pass
 
 _log = logging.getLogger(__name__)
 
@@ -182,6 +183,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         _log.exception("Navigation and mission service initialization failed during startup")
     ai_service = get_ai_service()
+    _embedded_camera_owner = False
     try:
         ai_service.set_camera_frame_provider(camera_service.get_current_frame)
         _embedded_camera_owner = callable(getattr(camera_service, "set_ai_processor", None))
@@ -209,6 +211,8 @@ async def lifespan(app: FastAPI):
         _log.exception("AI service initialization failed")
     try:
         _camera_ready = await camera_service.initialize()
+        if not _embedded_camera_owner:
+            await sync_external_ai_owner_state(ai_service)
         if _camera_ready:
             await camera_service.start_streaming()
         else:
@@ -221,6 +225,8 @@ async def lifespan(app: FastAPI):
         async def _camera_perception_ipc_loop() -> None:
             while True:
                 try:
+                    if not await sync_external_ai_owner_state(ai_service):
+                        raise RuntimeError("Camera owner IPC unavailable")
                     result = await camera_service.get_latest_perception()
                     if result is not None:
                         await ai_service.ingest_external_result(result)
@@ -454,15 +460,6 @@ async def lifespan(app: FastAPI):
     _jobs_service_singleton.set_mission_service(mission_service)
     _jobs_service_singleton.set_websocket_hub(websocket_hub)
     _log.info("JobsService: MissionService and WebSocketHub wired for scheduled dispatch")
-    # Start only after every admission dependency is injected. Starting above
-    # this point creates a race where the first due job can fail or be skipped
-    # while camera/AI startup yields control to the scheduler task.
-    try:
-        await _jobs_service_singleton.start_scheduler()
-        _log.info("JobsService scheduler started")
-    except Exception:
-        _log.exception("JobsService scheduler startup failed")
-
     # Attach EventStore to services that emit events.
     if hasattr(app.state.runtime.mission_service, "set_event_store"):
         app.state.runtime.mission_service.set_event_store(event_store)
@@ -511,19 +508,42 @@ async def lifespan(app: FastAPI):
     # Start Power History logging and Power Manager.
     # These are initialised here (after persistence is ready and _db_path is known)
     # and stored on app.state so the shutdown block can tear them down cleanly.
+    app.state.power_history_service = None
+    app.state.power_manager = None
+    power_manager_ready = False
     try:
         _power_history_svc = init_power_history_service(persistence, _energy_service)
+        app.state.power_history_service = _power_history_svc
         await _power_history_svc.start()
         _power_manager = init_power_manager(_power_history_svc)
-        await _power_manager.start()
-        app.state.power_history_service = _power_history_svc
         app.state.power_manager = _power_manager
+        await _power_manager.start()
+        power_manager_ready = True
         _log.info("PowerHistoryService and PowerManager started")
     except Exception:
         _log.exception("Power management services failed to start (non-fatal)")
 
+    # A scheduled mission can require an immediate camera/AI wake. Activate the
+    # scheduler only after every admission dependency, including PowerManager,
+    # is running; otherwise a due occurrence can be durably consumed at boot.
+    if power_manager_ready:
+        try:
+            await _jobs_service_singleton.start_scheduler()
+            _log.info("JobsService scheduler started")
+        except Exception:
+            _log.exception("JobsService scheduler startup failed")
+    else:
+        _log.error("JobsService scheduler remains stopped: PowerManager unavailable")
+
     yield
     # Shutdown
+    # Stop mission dispatch and active jobs before tearing down their live
+    # safety, power, sensor, camera, and motor dependencies.
+    try:
+        await _jobs_service_singleton.shutdown()
+        _log.info("JobsService scheduler and active jobs stopped")
+    except Exception:
+        _log.exception("JobsService scheduler shutdown failed")
     try:
         if getattr(app.state, "live_safety", None):
             await app.state.live_safety.stop()
@@ -558,11 +578,6 @@ async def lifespan(app: FastAPI):
             await sensor_manager.shutdown()
     except Exception:
         _log.exception("SensorManager shutdown failed")
-    try:
-        await _jobs_service_singleton.shutdown()
-        _log.info("JobsService scheduler and active jobs stopped")
-    except Exception:
-        _log.exception("JobsService scheduler shutdown failed")
     try:
         await camera_service.shutdown()
     except Exception:

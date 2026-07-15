@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import suppress
 
 import pytest
 
@@ -51,7 +52,13 @@ async def test_camera_client_consumes_owner_status_and_annotated_frame(tmp_path)
                     status_payload.update(
                         {
                             "sim_mode": False,
+                            "requested_sim_mode": False,
+                            "hardware_fallback_active": False,
                             "hardware_available": True,
+                            "ai_model_loaded": True,
+                            "ai_runtime_ready": True,
+                            "ai_runtime_error": None,
+                            "ai_model_sha256": "a" * 64,
                         }
                     )
                     response = {
@@ -82,6 +89,8 @@ async def test_camera_client_consumes_owner_status_and_annotated_frame(tmp_path)
                     response = {"status": "success", "message": "stopped"}
                 else:
                     response = {"status": "error", "error": "unsupported"}
+                response["request_id"] = request.get("request_id")
+                response["command"] = command
                 writer.write(json.dumps(response).encode() + b"\n")
                 await writer.drain()
         finally:
@@ -100,6 +109,10 @@ async def test_camera_client_consumes_owner_status_and_annotated_frame(tmp_path)
         assert client.stream.is_active is True
         assert client.sim_mode is False
         assert client.hardware_available is True
+        assert client.ai_model_loaded is True
+        assert client.ai_runtime_ready is True
+        assert client.ai_model_sha256 == "a" * 64
+        assert client.has_recent_activity(30.0) is False
 
         received = await client.get_current_frame()
         assert received is not None
@@ -107,6 +120,7 @@ async def test_camera_client_consumes_owner_status_and_annotated_frame(tmp_path)
         assert received.get_frame_data() == b"jpeg"
         assert received.processed_for_ai is True
         assert received.ai_annotations[0]["objects"][0]["class"] == "obstacle"
+        assert client.has_recent_activity(30.0) is True
 
         received_perception = await client.get_latest_perception()
         assert received_perception is not None
@@ -157,11 +171,13 @@ async def test_camera_client_fails_closed_when_owner_omits_topology(tmp_path):
 
     async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
-            await reader.readline()
+            request = json.loads(await reader.readline())
             writer.write(
                 json.dumps(
                     {
                         "status": "success",
+                        "request_id": request.get("request_id"),
+                        "command": request.get("command"),
                         "data": stream.model_dump(mode="json"),
                     }
                 ).encode()
@@ -183,6 +199,84 @@ async def test_camera_client_fails_closed_when_owner_omits_topology(tmp_path):
         assert client.sim_mode is True
         assert client.hardware_available is False
     finally:
+        await client.shutdown()
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_camera_request_discards_late_ipc_response(tmp_path):
+    socket_path = tmp_path / "camera.sock"
+    stream = CameraStream(is_active=True)
+    status_payload = stream.model_dump(mode="json")
+    status_payload.update({"sim_mode": False, "hardware_available": True})
+    frame = CameraFrame(
+        metadata=FrameMetadata(
+            frame_id="cancelled-frame",
+            width=32,
+            height=24,
+            size_bytes=4,
+        )
+    )
+    frame.set_frame_data(b"jpeg")
+    request_seen = asyncio.Event()
+    release_response = asyncio.Event()
+    connection_count = 0
+    delayed_once = False
+
+    async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        nonlocal connection_count, delayed_once
+        connection_count += 1
+        try:
+            while raw := await reader.readline():
+                request = json.loads(raw)
+                command = request["command"]
+                if command == "get_frame" and not delayed_once:
+                    delayed_once = True
+                    request_seen.set()
+                    await release_response.wait()
+                    data = frame.model_dump(mode="json")
+                elif command == "get_status":
+                    data = status_payload
+                else:
+                    data = None
+                response = {
+                    "status": "success",
+                    "request_id": request.get("request_id"),
+                    "command": command,
+                    "data": data,
+                }
+                writer.write(json.dumps(response).encode() + b"\n")
+                await writer.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            writer.close()
+            with suppress(BrokenPipeError, ConnectionResetError):
+                await writer.wait_closed()
+
+    server = await asyncio.start_unix_server(handle_client, path=str(socket_path))
+    client = CameraClient(
+        str(socket_path),
+        request_timeout_seconds=1.0,
+        startup_timeout_seconds=0.0,
+    )
+    try:
+        pending = asyncio.create_task(client.get_current_frame())
+        await asyncio.wait_for(request_seen.wait(), timeout=1.0)
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+
+        release_response.set()
+        await asyncio.sleep(0.05)
+        status = await client.get_camera_status()
+
+        assert status["is_active"] is True
+        assert client.hardware_available is True
+        assert connection_count >= 2
+    finally:
+        release_response.set()
         await client.shutdown()
         server.close()
         await server.wait_closed()

@@ -10,11 +10,13 @@ AuthService implementation where possible.
 """
 
 import hashlib
+import json
 import logging
 import os
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import bcrypt
@@ -22,6 +24,7 @@ import jwt
 import pyotp
 
 from ..core.context import get_correlation_id
+from ..core.globals import _manual_control_sessions
 from ..core.secrets_manager import SecretsManager
 from ..models import (
     AuthenticationMethod,
@@ -36,6 +39,10 @@ from ..models.auth_security_config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class AuthStatePersistenceError(RuntimeError):
+    """Raised when durable authentication revocation state cannot be committed."""
 
 
 @dataclass
@@ -119,11 +126,28 @@ class JWTManager:
         return self.secret_key
 
     def create_token(
-        self, *, session_id: str, user_id: str, role: UserRole
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        role: UserRole,
+        username: str | None = None,
+        authentication_method: AuthenticationMethod | str | None = None,
+        security_level: SecurityLevel | int | None = None,
+        expires_at_cap: datetime | None = None,
+        upstream_identity_expires_at: datetime | None = None,
     ) -> tuple[str, datetime]:
         """Create a signed JWT token for the supplied session."""
         now = datetime.now(UTC)
         expires_at = now + timedelta(hours=self.token_expiry_hours)
+        if expires_at_cap is not None:
+            cap = expires_at_cap
+            if cap.tzinfo is None:
+                cap = cap.replace(tzinfo=UTC)
+            cap = datetime.fromtimestamp(int(cap.timestamp()), tz=UTC)
+            expires_at = min(expires_at, cap)
+        if expires_at <= now:
+            raise AuthenticationError("Authentication proof has expired")
         payload = {
             "sub": user_id,
             "sid": session_id,
@@ -132,6 +156,18 @@ class JWTManager:
             "exp": int(expires_at.timestamp()),
             "iss": "lawnberry-pi-v2",
         }
+        if username:
+            payload["username"] = username
+        if authentication_method is not None:
+            payload["am"] = getattr(
+                authentication_method,
+                "value",
+                str(authentication_method),
+            )
+        if security_level is not None:
+            payload["security_level"] = int(security_level)
+        if upstream_identity_expires_at is not None:
+            payload["upstream_exp"] = int(upstream_identity_expires_at.timestamp())
         token = jwt.encode(payload, self._require_secret(), algorithm=self.algorithm)
         return token, expires_at
 
@@ -216,7 +252,12 @@ class RateLimiter:
 class AuthService:
     """Main authentication service"""
 
-    def __init__(self, operator_credential: str = ""):  # ignored — env var required in non-SIM_MODE
+    def __init__(
+        self,
+        operator_credential: str = "",  # ignored — env var required in non-SIM_MODE
+        *,
+        revocation_path: str | Path | None = None,
+    ) -> None:
         # Managers
         self.password_manager = PasswordManager()
         self.jwt_manager = JWTManager()
@@ -240,11 +281,16 @@ class AuthService:
         # Configuration (for custom passwords, TOTP, etc.)
         self.config = AuthSecurityConfig()
         
-        # Failed login attempt tracking (for password rate limiting)
-        self._failed_attempts: dict[str, int] = {}
-        
-        # Invalidated session IDs
-        self._invalidated_session_ids: set[str] = set()
+        # Revoked session IDs remain denied until their last JWT can no longer
+        # be valid. Persisting this compact registry prevents a backend restart
+        # from resurrecting a logged-out or evicted signed session.
+        data_dir = Path(os.getenv("LAWN_DATA_DIR", "data"))
+        self._revocation_path = Path(revocation_path) if revocation_path else (
+            data_dir / "auth_session_revocations.json"
+        )
+        self._invalidated_session_ids: dict[str, datetime] = {}
+        self._revocation_store_healthy = False
+        self._load_session_revocations()
 
         # Other settings
         self.session_timeout_hours = 8
@@ -252,12 +298,173 @@ class AuthService:
         self.audit_logging_enabled = True
         # _simulation_mode is set above (before credential check — do not duplicate)
 
+    @property
+    def revocation_store_healthy(self) -> bool:
+        """Whether session revocation state is readable and durably writable."""
+        return self._revocation_store_healthy
+
+    def _load_session_revocations(self) -> None:
+        loaded: dict[str, datetime] = {}
+        try:
+            payload = json.loads(self._revocation_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or payload.get("version") != 1:
+                raise ValueError("unsupported auth revocation registry format")
+            raw_sessions = payload.get("sessions")
+            if not isinstance(raw_sessions, dict):
+                raise ValueError("auth revocation registry sessions must be an object")
+            now = datetime.now(UTC)
+            for session_id, raw_expiry in raw_sessions.items():
+                if not isinstance(session_id, str) or not isinstance(raw_expiry, str):
+                    raise ValueError("auth revocation registry entry has an invalid type")
+                try:
+                    expiry = datetime.fromisoformat(raw_expiry)
+                except ValueError as exc:
+                    raise ValueError("auth revocation registry expiry is invalid") from exc
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=UTC)
+                if expiry > now:
+                    loaded[session_id] = expiry
+        except FileNotFoundError:
+            loaded = {}
+        except (OSError, ValueError, TypeError) as exc:
+            logger.error("Unable to load auth session revocations; authentication disabled: %s", exc)
+            self._revocation_store_healthy = False
+            return
+
+        self._invalidated_session_ids = loaded
+        try:
+            # A successful read is insufficient: logout is only trustworthy if
+            # this process can also fsync an atomic replacement at startup.
+            self._save_session_revocations(loaded)
+        except AuthStatePersistenceError:
+            self._revocation_store_healthy = False
+            return
+        self._revocation_store_healthy = True
+
+    def _save_session_revocations(
+        self,
+        sessions: dict[str, datetime] | None = None,
+    ) -> None:
+        temporary: Path | None = None
+        try:
+            self._revocation_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self._revocation_path.with_name(
+                f".{self._revocation_path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+            )
+            snapshot = self._invalidated_session_ids if sessions is None else sessions
+            payload = {
+                "version": 1,
+                "sessions": {
+                    session_id: expiry.isoformat()
+                    for session_id, expiry in sorted(snapshot.items())
+                },
+            }
+            serialized = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+            file_descriptor = os.open(
+                temporary,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+            with os.fdopen(file_descriptor, "wb") as handle:
+                handle.write(serialized)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self._revocation_path)
+            temporary = None
+            directory_descriptor = os.open(
+                self._revocation_path.parent,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            )
+            try:
+                os.fsync(directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
+        except OSError as exc:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            logger.error("Unable to persist auth session revocations: %s", exc)
+            raise AuthStatePersistenceError(
+                "Unable to durably persist authentication revocation state"
+            ) from exc
+
+    def _require_revocation_store(self) -> None:
+        if not self._revocation_store_healthy:
+            raise AuthenticationError(
+                "Authentication session state unavailable",
+                status_code=503,
+            )
+
+    def _prune_session_revocations(self, *, persist: bool = False) -> None:
+        now = datetime.now(UTC)
+        expired = [
+            session_id
+            for session_id, expiry in self._invalidated_session_ids.items()
+            if expiry <= now
+        ]
+        if not expired:
+            return
+        candidate = dict(self._invalidated_session_ids)
+        for session_id in expired:
+            candidate.pop(session_id, None)
+        if persist:
+            try:
+                self._save_session_revocations(candidate)
+            except AuthStatePersistenceError:
+                self._revocation_store_healthy = False
+                raise
+        self._invalidated_session_ids = candidate
+
+    def _revocation_high_water(self, expires_at: datetime) -> datetime:
+        """Cover every same-SID token that could have been issued before now."""
+        known_expiry = (
+            expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=UTC)
+        )
+        try:
+            lifetime_hours = max(
+                0.0,
+                float(self.jwt_manager.token_expiry_hours),
+                float(self.session_timeout_hours),
+            )
+        except (TypeError, ValueError):
+            lifetime_hours = 8.0
+        return max(
+            known_expiry,
+            datetime.now(UTC) + timedelta(hours=lifetime_hours),
+        )
+
+    def _revoke_session_id(self, session_id: str, expires_at: datetime) -> None:
+        expiry = self._revocation_high_water(expires_at)
+        if expiry <= datetime.now(UTC):
+            return
+        candidate = dict(self._invalidated_session_ids)
+        current = self._invalidated_session_ids.get(session_id)
+        if current is None or expiry > current:
+            candidate[session_id] = expiry
+        if current is not None and current >= expiry and self._revocation_store_healthy:
+            return
+        try:
+            self._save_session_revocations(candidate)
+        except AuthStatePersistenceError:
+            # Deny all token-backed authorization in this process. A subsequent
+            # restart rechecks both readability and atomic writability before it
+            # accepts any signed session.
+            self._invalidated_session_ids = candidate
+            self._revocation_store_healthy = False
+            raise
+        self._invalidated_session_ids = candidate
+        self._revocation_store_healthy = True
+
     def _hash_credential(self, credential: str) -> str:
         """Hash the operator credential"""
         return self.password_manager.hash_password(credential)
 
     def _client_key(self, client_identifier: str | None, client_ip: str | None) -> str:
-        if client_identifier:
+        # Browser-provided IDs are useful for isolated SIM/CI tests, but they
+        # are attacker-controlled and cannot be the production lockout key.
+        if self._simulation_mode and client_identifier:
             return client_identifier
         if client_ip:
             return f"ip:{client_ip}"
@@ -269,16 +476,48 @@ class AuthService:
         return self.password_manager.verify_password(credential, self.operator_credential_hash)
 
     def _issue_token_for_session(self, session: UserSession) -> AuthResult:
+        self._require_revocation_store()
+        upstream_expiry = session.upstream_identity_expires_at
         token, expires_at = self.jwt_manager.create_token(
             session_id=session.session_id,
             user_id=session.user_id,
             role=session.security_context.role,
+            username=session.username,
+            authentication_method=session.security_context.authentication_method,
+            security_level=session.security_level,
+            expires_at_cap=upstream_expiry,
+            upstream_identity_expires_at=upstream_expiry,
         )
         session.security_context.token_expires_at = expires_at
+        session.expires_at = min(session.expires_at, expires_at)
         return AuthResult(session=session, token=token, expires_at=expires_at)
 
-    def refresh_session_token(self, session: UserSession) -> AuthResult:
+    def refresh_session_token(
+        self,
+        session: UserSession,
+        *,
+        cloudflare_principal: str | None = None,
+        cloudflare_expires_at: datetime | None = None,
+    ) -> AuthResult:
+        self._require_revocation_store()
+        method = getattr(
+            session.security_context.authentication_method,
+            "value",
+            session.security_context.authentication_method,
+        )
+        if method == AuthenticationMethod.CLOUDFLARE_ACCESS.value:
+            normalized_principal = (cloudflare_principal or "").strip()
+            if normalized_principal != session.username:
+                raise AuthenticationError("Cloudflare Access identity does not match session")
+            if cloudflare_expires_at is None or cloudflare_expires_at <= datetime.now(UTC):
+                raise AuthenticationError("Cloudflare Access assertion missing or expired")
+            session.upstream_identity_expires_at = cloudflare_expires_at
         session.extend_session(self.session_timeout_hours)
+        if session.upstream_identity_expires_at is not None:
+            session.expires_at = min(
+                session.expires_at,
+                session.upstream_identity_expires_at,
+            )
         return self._issue_token_for_session(session)
 
     async def authenticate(
@@ -291,6 +530,7 @@ class AuthService:
     ) -> AuthResult:
         """Authenticate with shared operator credential."""
 
+        self._require_revocation_store()
         key = self._client_key(client_identifier, client_ip)
         self.rate_limiter.assert_not_locked(key)
 
@@ -333,9 +573,13 @@ class AuthService:
         session.security_context.authentication_method = AuthenticationMethod.SHARED_CREDENTIAL
         session.security_context.credential_hash = self.operator_credential_hash
 
-        result = self._issue_token_for_session(session)
-
         self.active_sessions[session.session_id] = session
+        try:
+            await self._enforce_session_limit(session.username)
+        except Exception:
+            self.active_sessions.pop(session.session_id, None)
+            raise
+        result = self._issue_token_for_session(session)
         self.rate_limiter.reset(key)
 
         if self.audit_logging_enabled:
@@ -357,14 +601,98 @@ class AuthService:
 
         return result
 
+    async def authenticate_cloudflare(
+        self,
+        principal: str,
+        *,
+        assertion_expires_at: datetime,
+        client_ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> AuthResult:
+        """Create a LawnBerry session for an already-verified Access identity."""
+        self._require_revocation_store()
+        normalized_principal = principal.strip()
+        if not normalized_principal:
+            raise AuthenticationError("Cloudflare Access signed identity is missing")
+        if assertion_expires_at.tzinfo is None:
+            assertion_expires_at = assertion_expires_at.replace(tzinfo=UTC)
+        if assertion_expires_at <= datetime.now(UTC):
+            raise AuthenticationError("Cloudflare Access assertion expired")
+
+        await self.cleanup_expired_sessions()
+        for existing in self.active_sessions.values():
+            method = existing.security_context.authentication_method
+            method_value = getattr(method, "value", method)
+            if (
+                existing.username == normalized_principal
+                and method_value == AuthenticationMethod.CLOUDFLARE_ACCESS.value
+                and existing.status != SessionStatus.TERMINATED
+                and not existing.is_expired()
+            ):
+                existing.client_ip = client_ip
+                existing.user_agent = user_agent
+                existing.update_activity(
+                    "login",
+                    method="cloudflare_access_reuse",
+                    ip_address=client_ip,
+                    user_agent=user_agent,
+                )
+                return self.refresh_session_token(
+                    existing,
+                    cloudflare_principal=normalized_principal,
+                    cloudflare_expires_at=assertion_expires_at,
+                )
+
+        session = UserSession.create_operator_session(client_ip, user_agent)
+        session.username = normalized_principal
+        session.security_level = SecurityLevel.TUNNEL_AUTH
+        session.security_context.authentication_method = (
+            AuthenticationMethod.CLOUDFLARE_ACCESS
+        )
+        session.upstream_identity_expires_at = assertion_expires_at
+        session.expires_at = min(session.expires_at, assertion_expires_at)
+        self.active_sessions[session.session_id] = session
+        try:
+            await self._enforce_session_limit(normalized_principal)
+        except Exception:
+            self.active_sessions.pop(session.session_id, None)
+            raise
+        result = self._issue_token_for_session(session)
+        if self.audit_logging_enabled:
+            session.update_activity(
+                "login",
+                method="cloudflare_access",
+                ip_address=client_ip,
+                user_agent=user_agent,
+            )
+        logger.info(
+            "auth.cloudflare.success",
+            extra={
+                "correlation_id": get_correlation_id(),
+                "session_id": session.session_id,
+                "client_ip": client_ip,
+            },
+        )
+        return result
+
     async def verify_token(self, token: str) -> UserSession | None:
         """Verify JWT token and return session"""
+        if not self._revocation_store_healthy:
+            logger.error("Rejected JWT because durable revocation state is unavailable")
+            return None
         payload = self.jwt_manager.verify_token(token)
         if not payload:
             return None
 
         session_id = payload.get("sid")
         if not session_id:
+            return None
+        self._prune_session_revocations()
+        if session_id in self._invalidated_session_ids:
+            logger.warning(
+                "Rejected revoked JWT session",
+                extra={"correlation_id": get_correlation_id(), "session_id": session_id},
+            )
             return None
 
         session = self.active_sessions.get(session_id)
@@ -395,11 +723,40 @@ class AuthService:
                 return None
             session = UserSession(
                 session_id=session_id,
+                user_id=str(payload.get("sub") or "operator"),
+                username=str(payload.get("username") or payload.get("sub") or "operator"),
                 expires_at=expires_at,
                 status=SessionStatus.ACTIVE,
             )
-            session.security_context.authentication_method = AuthenticationMethod.SHARED_CREDENTIAL
-            session.security_context.credential_hash = self.operator_credential_hash
+            try:
+                session.security_context.role = UserRole(
+                    payload.get("role", UserRole.OPERATOR.value)
+                )
+                session.security_context.authentication_method = AuthenticationMethod(
+                    payload.get("am", AuthenticationMethod.SHARED_CREDENTIAL.value)
+                )
+                session.security_level = SecurityLevel(
+                    payload.get("security_level", SecurityLevel.PASSWORD.value)
+                )
+            except (TypeError, ValueError):
+                return None
+            if (
+                session.security_context.authentication_method
+                == AuthenticationMethod.SHARED_CREDENTIAL
+            ):
+                session.security_context.credential_hash = self.operator_credential_hash
+            if (
+                session.security_context.authentication_method
+                == AuthenticationMethod.CLOUDFLARE_ACCESS
+            ):
+                upstream_exp = payload.get("upstream_exp")
+                if not isinstance(upstream_exp, (int, float)):
+                    return None
+                upstream_expires_at = datetime.fromtimestamp(upstream_exp, tz=UTC)
+                if upstream_expires_at <= datetime.now(UTC):
+                    return None
+                session.upstream_identity_expires_at = upstream_expires_at
+                session.expires_at = min(session.expires_at, upstream_expires_at)
             self.active_sessions[session_id] = session
             logger.info(
                 "auth.session.restored",
@@ -412,6 +769,8 @@ class AuthService:
 
     async def verify_session(self, session_id: str) -> UserSession | None:
         """Verify session by ID"""
+        if not self.is_session_authorized(session_id):
+            return None
         if session_id not in self.active_sessions:
             return None
 
@@ -428,12 +787,39 @@ class AuthService:
 
         return session
 
+    def is_session_authorized(self, session_id: str) -> bool:
+        """Return whether a live auth session may still authorize dependent grants."""
+        if not self._revocation_store_healthy:
+            return False
+        self._prune_session_revocations()
+        if session_id in self._invalidated_session_ids:
+            return False
+        session = self.active_sessions.get(session_id)
+        if session is None or session.status == SessionStatus.TERMINATED:
+            return False
+        return not session.is_expired()
+
+    @staticmethod
+    def _remove_bound_manual_sessions(session_id: str) -> int:
+        removed = 0
+        for seed, entry in list(_manual_control_sessions.items()):
+            if entry.get("auth_session_id") != session_id:
+                continue
+            _manual_control_sessions.pop(seed, None)
+            removed += 1
+        return removed
+
     async def terminate_session(self, session_id: str, reason: str = "user_logout") -> bool:
         """Terminate a session"""
         if session_id not in self.active_sessions:
-            return False
+            revoked = session_id in self._invalidated_session_ids
+            if revoked and self._revocation_store_healthy:
+                self._remove_bound_manual_sessions(session_id)
+            return revoked
 
         session = self.active_sessions[session_id]
+        token_expiry = session.security_context.token_expires_at or session.expires_at
+        self._revoke_session_id(session_id, token_expiry)
         session.terminate(reason)
 
         # Audit log
@@ -442,8 +828,14 @@ class AuthService:
 
         # Remove from active sessions
         del self.active_sessions[session_id]
+        removed_manual_sessions = self._remove_bound_manual_sessions(session_id)
 
-        logger.info(f"Session {session_id} terminated: {reason}")
+        logger.info(
+            "Session %s terminated: %s (dependent manual sessions removed=%d)",
+            session_id,
+            reason,
+            removed_manual_sessions,
+        )
         return True
 
     async def extend_session(self, session_id: str, hours: int = 8) -> bool:
@@ -453,9 +845,14 @@ class AuthService:
 
         session = self.active_sessions[session_id]
         session.extend_session(hours)
+        if session.upstream_identity_expires_at is not None:
+            session.expires_at = min(
+                session.expires_at,
+                session.upstream_identity_expires_at,
+            )
 
         # Update JWT expiration
-        session.security_context.token_expires_at = datetime.now(UTC) + timedelta(hours=hours)
+        session.security_context.token_expires_at = session.expires_at
 
         logger.info(f"Session {session_id} extended by {hours} hours")
         return True
@@ -515,6 +912,24 @@ class AuthService:
         if expired_sessions:
             logger.info(f"Cleaned up {len(expired_sessions)} expired sessions")
 
+    async def _enforce_session_limit(self, username: str) -> None:
+        """Remove oldest sessions beyond the configured per-principal limit."""
+        try:
+            max_sessions = max(1, int(self.config.max_concurrent_sessions))
+        except (TypeError, ValueError):
+            max_sessions = 1
+        sessions = sorted(
+            (
+                session
+                for session in self.active_sessions.values()
+                if session.username == username
+                and session.status != SessionStatus.TERMINATED
+            ),
+            key=lambda session: session.created_at,
+        )
+        for stale in sessions[:-max_sessions]:
+            await self.terminate_session(stale.session_id, "concurrent_session_limit")
+
     async def get_active_sessions(self) -> dict[str, dict[str, Any]]:
         """Get information about active sessions"""
         sessions_info = {}
@@ -568,6 +983,7 @@ class AuthService:
         return True
 
     async def create_session(self, username: str, level: SecurityLevel) -> UserSession:
+        self._require_revocation_store()
         session = UserSession.create_operator_session(client_ip=None, user_agent=None)
         # attach a simple security context
         session.security_context.role = UserRole.OPERATOR
@@ -580,23 +996,38 @@ class AuthService:
             max_sessions = int(self.config.max_concurrent_sessions)
         except Exception:
             max_sessions = 1
-        if max_sessions > 0:
-            # Count active sessions for this user
-            user_sessions = [s for s in self.active_sessions.values() if s.username == username and s.status != SessionStatus.TERMINATED]
-            if len(user_sessions) > max_sessions:
-                # invalidate oldest sessions beyond limit
-                user_sessions_sorted = sorted(user_sessions, key=lambda s: s.created_at)
-                overflow_count = len(user_sessions_sorted) - max_sessions
-                for i in range(overflow_count):
-                    old_session = user_sessions_sorted[i]
-                    old_session.status = SessionStatus.TERMINATED
+        try:
+            if max_sessions > 0:
+                # Count active sessions for this user
+                user_sessions = [
+                    existing
+                    for existing in self.active_sessions.values()
+                    if existing.username == username
+                    and existing.status != SessionStatus.TERMINATED
+                ]
+                if len(user_sessions) > max_sessions:
+                    user_sessions_sorted = sorted(user_sessions, key=lambda item: item.created_at)
+                    overflow_count = len(user_sessions_sorted) - max_sessions
+                    for old_session in user_sessions_sorted[:overflow_count]:
+                        await self.terminate_session(
+                            old_session.session_id,
+                            "concurrent_session_limit",
+                        )
+        except Exception:
+            self.active_sessions.pop(session.session_id, None)
+            raise
         return session
 
-    async def authenticate_password(self, username: str, password: str) -> UserSession:
-        # Rate limiting check
-        attempts = self._failed_attempts.get(username, 0)
-        if attempts >= 5:
-            raise AuthenticationError("Too many attempts")
+    async def authenticate_password(
+        self,
+        username: str,
+        password: str,
+        *,
+        client_ip: str | None = None,
+    ) -> UserSession:
+        self._require_revocation_store()
+        key = f"password:{self._client_key(None, client_ip) if client_ip else username}"
+        self.rate_limiter.assert_not_locked(key)
         # Verify password with bcrypt if hash present
         if not self.config.password_hash:
             raise AuthenticationError("Invalid credentials")
@@ -604,10 +1035,13 @@ class AuthService:
             bcrypt.checkpw(password.encode("utf-8"), self.config.password_hash.encode("utf-8"))
         )
         if not ok:
-            self._failed_attempts[username] = attempts + 1
-            raise AuthenticationError("Invalid credentials")
+            retry_after = self.rate_limiter.record_failure(key)
+            raise AuthenticationError(
+                "Invalid credentials",
+                retry_after=retry_after,
+            )
         # success
-        self._failed_attempts[username] = 0
+        self.rate_limiter.reset(key)
         session = await self.create_session(username, SecurityLevel.PASSWORD)
         # For now, skip security event logging as it requires additional infrastructure
         return session

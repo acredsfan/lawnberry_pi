@@ -70,6 +70,7 @@ class SanitizationMiddleware(BaseHTTPMiddleware):
         self._skip_response_redaction = ("/api/v2/settings/maps",)
         self._intentional_sensitive_response_keys = {
             "/api/v2/auth/login": frozenset({"token", "access_token"}),
+            "/api/v2/auth/cloudflare": frozenset({"token", "access_token"}),
             "/api/v2/auth/refresh": frozenset({"token", "access_token"}),
         }
 

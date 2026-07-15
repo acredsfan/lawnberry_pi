@@ -186,7 +186,8 @@ An HTTP 200 means the endpoint answered, not that physical hardware is present. 
 
 Scheduled and compatibility mower-job starts have one execution owner: `JobsService` dispatches through
 `MissionService`. For an in-memory compatibility `Job`, `mission_id` retains the linked identity and completion is projected
-from that mission. Persistence-backed schedules atomically claim one occurrence per scheduled instant. Multi-zone jobs run
+from that mission. A missing `MissionService` dependency is a startup wiring failure and aborts before any scheduled
+occurrence is claimed. Persistence-backed schedules atomically claim one occurrence per scheduled instant. Multi-zone jobs run
 one ordered child mission per zone; the first path leg and every inter-zone approach are blade-off transit. `last_run` means
 only that `MissionService` accepted the first child. The occurrence exposes `mission_ids`, `zones_completed`, progress, and
 terminal detail, and restart recovery reconciles the active child before any later zone is admitted. A job may report
@@ -194,6 +195,10 @@ terminal detail, and restart recovery reconciles the active child before any lat
 rejected starts, mission failure/abort/cancel, and unsupported job types remain explicit non-success outcomes. A blocked
 occurrence is durable and is not retried every scheduler poll; a rejected start deletes the idle mission record. Elapsed
 time, browser-local mutation, or synthetic progress must never be treated as mission evidence.
+
+All persisted mission-definition mutations share the mower-wide lifecycle lock. Create, update, single/bulk delete,
+return-home creation, and start/resume/pause/abort cannot interleave between admission checks and navigation-task
+ownership; an active mission is skipped or rejected instead of being changed or removed underneath motion.
 
 ## Control
 - POST http://127.0.0.1:8081/api/v2/control/drive
@@ -221,6 +226,11 @@ device itself. `SIM_MODE=1` may embed the simulated owner for offline tests only
 `/home/pi/lawnberry/.env`; their `ExecStart` contract then pins `SIM_MODE=0` and the shared
 `/run/lawnberry/camera.sock`, so stale `.env` values cannot create a second embedded production owner. Idle power management
 uses the same runtime-selected owner and therefore pauses/resumes capture and gates camera-owner inference over IPC.
+Opening either the Control MJPEG route or snapshot route registers viewer demand through `PowerManager`, starts capture,
+and issues an immediate AI-owner enable attempt; streaming does not wait for a detector result, while inference readiness
+becomes true only after a timely exact-frame result. After the final viewer/mission demand expires, capture and inference
+share one 30-second idle boundary. Day/night policy uses wrap-normalized solar right ascension and civil twilight rather
+than wall-clock guesses, so daylight inference is not accidentally power-paused.
 If hardware initialization fails and that owner falls back to generated frames, IPC and the camera status API explicitly
 report `sim_mode=true` and `hardware_available=false`; those frames must not appear to come from confirmed hardware.
 
@@ -231,6 +241,8 @@ Operational notes:
 - The RoboHAT status endpoint now treats the firmware's `rc=disable` acknowledgement as controller-ready instead of leaving the UI stuck on a stale handshake-pending warning.
 - Older RoboHAT CircuitPython builds may take about three seconds to begin responding after the USB serial port opens and may emit heartbeat lines like `[RC] steer=...` instead of the newer `get_rc_status` payload. Treat that as compatible firmware, not a missing board.
 - Camera snapshot and MJPEG endpoints now emit raw JPEG bytes; if the live feed regresses again, verify intermediate proxies are not recompressing or buffering `/api/v2/camera/stream.mjpeg`.
+- The UI's `IPC clients` count is the number of local camera-owner socket clients, not a browser-viewer count. Snapshot
+  fallback remains active after its own image load and stops only after the primary MJPEG source actually recovers.
 
 ## Manual drive safety gating
 
@@ -299,6 +311,9 @@ watch the mission status contract instead of assuming `running` alone means the 
   `MissionStatus`; HTTP errors and mismatched responses are reconciled from the status endpoint and remain visible as
   failures. Manual control never creates a browser-only unlock session: the backend must return `authorized=true` and a
   server-issued session ID, including in Cloudflare Access mode.
+- Mission lifecycle mutations are serialized across the single mower. Admission rechecks task/status conflicts while
+  holding the lifecycle lock, rejects a second running/paused mission, and creates exactly one tracked navigation task;
+  concurrent requests cannot overwrite task ownership.
 - Mission-start heading alignment is an explicit bootstrap step: the mower drives straight, polls the shared sensor manager,
   derives GPS course-over-ground from receiver course or actual coordinate deltas, then snaps the relative BNO085 yaw to
   that GPS movement vector before trusting IMU heading for waypoint turns.
@@ -338,6 +353,8 @@ watch the mission status contract instead of assuming `running` alone means the 
 - `GET /api/v2/autonomy/readiness` also checks that the live safety loop and single ToF owner are running, each IMU/ToF
   sample is fresh, and each ToF side has at least five bounded-window acquisitions with no more than 25% failures
   before reporting blade-enabled autonomy ready. It also requires current qualification evidence for blade-capable starts.
+- `GET /api/v2/health` keeps IMU transport and calibration truth distinct: an online BNO085 that reports
+  `uncalibrated` is degraded and remains unusable for autonomous heading until valid calibration evidence returns.
 - `GET /api/v2/autonomy/qualification` evaluates the latest retained evidence against the current commit SHA, sanitized
   hardware-config hash, safety-limits hash, runtime identity hash, and RoboHAT firmware version. Missing, stale, mismatched,
   interrupted, failed, simulation, dirty-tree, or incomplete evidence returns explicit `QUALIFICATION_*` blocker codes.
@@ -426,19 +443,36 @@ Rollback:
 ## AI
 - GET http://127.0.0.1:8081/api/v2/ai/status
 - GET http://127.0.0.1:8081/api/v2/ai/perception/latest
-- POST http://127.0.0.1:8081/api/v2/ai/inference → infer an uploaded image
-- POST http://127.0.0.1:8081/api/v2/ai/inference/latest → infer the latest available camera frame
+- POST http://127.0.0.1:8081/api/v2/ai/inference → embedded SIM/CI uploaded-image diagnostic
+- POST http://127.0.0.1:8081/api/v2/ai/inference/latest → embedded SIM/CI latest-frame diagnostic
 - GET http://127.0.0.1:8081/api/v2/ai/results/recent
 
 The production inference contract is a configured ONNX detector executed by OpenCV DNN on the CPU. The repository does not
-bundle or claim a trained model, dataset, training job, export pipeline, or active Coral/Hailo acceleration. See
-`docs/perception-runtime.md` for artifact/configuration steps. Automatic camera processing passes sampled exact frame bytes,
+bundle a model binary, dataset, training job, export pipeline, or active Coral/Hailo acceleration. The tracked manifest
+template and pinned baseline-model provisioning steps are in `docs/perception-runtime.md`; the ignored runtime manifest and
+model must both be present before `model_ready=true`. Automatic camera processing passes sampled exact frame bytes,
 frame ID, and source timestamp
 to the standalone owner's injected processor at a bounded cadence within the single latest-frame consumer. It does not
 create a task per frame or queue stale inference work, and CPU inference runs off the event loop.
 `AI_CAMERA_INFERENCE_FPS` controls sampling and
-`AI_CAMERA_INFERENCE_TIMEOUT_SECONDS` bounds how long a selected frame waits before delivery. A timed-out worker remains the
-only tracked inference until it exits; its late result is discarded and no replacement worker is queued concurrently.
+`AI_CAMERA_INFERENCE_TIMEOUT_SECONDS` defaults to 3 seconds for the measured Pi 5
+YOLOv5n CPU range (~1.0-1.95 seconds). Inference runs outside frame delivery, so
+Control streaming continues while the selected frame is processed. A timed-out
+worker remains the only tracked inference until it exits; its late result is
+discarded and no replacement worker is queued concurrently. The baseline manifest
+uses a 5-second source-frame freshness bound, leaving a bounded 2-second margin for
+IPC polling and consumers after the owner deadline.
+`ai_model_loaded=true` reports artifact/runtime initialization only;
+`ai_runtime_ready=true` additionally requires a successful automatic exact-frame
+result inside the deadline and freshness window. Timeout, runtime/provenance
+failure, capture stop, or staleness clears operational readiness, and mission
+startup waits boundedly for it to recover before navigation dispatch.
+
+In hardware mode, `lawnberry-camera.service` owns both camera capture and automatic sampled inference. FastAPI validates
+matching detector metadata, ingests the owner's typed results over camera IPC, and exposes them through
+`GET /api/v2/ai/perception/latest` and the status/recent-result surfaces. The two `POST /api/v2/ai/inference...` routes are
+embedded-backend diagnostics for `SIM_MODE=1` and CI; they return `503` in hardware mode rather than loading a second model
+or forwarding an uploaded image to the camera owner.
 
 `processed_for_ai=true` means inference succeeded for that exact frame, including a valid result with zero detected objects.
 Disabled, skipped, unavailable, failed, timed-out, late, or frame-mismatched work remains unprocessed, and simulation must

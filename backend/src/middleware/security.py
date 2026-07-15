@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from ..core.client_identity import client_ip
 from ..core.context import set_correlation_id
 
 
@@ -40,7 +41,10 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         self._max_attempts = max(1, rate_limit_max_attempts)
         self._lockout_failures = max(1, lockout_failures)
         self._lockout_seconds = max(1, lockout_seconds)
-        self._protected_prefixes = tuple(protected_prefixes or ("/api/v2/auth", "/api/v1/auth"))
+        self._protected_prefixes = tuple(
+            protected_prefixes
+            or ("/api/v2/auth/login", "/api/v1/auth/login")
+        )
 
         self._attempts: dict[str, deque[float]] = {}
         self._failures: dict[str, int] = {}
@@ -97,31 +101,22 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         return uuid.uuid4().hex
 
     def _client_identifier(self, request: Request) -> str:
-        header_client = request.headers.get("X-Client-Id")
-        if header_client:
-            return header_client
         if os.getenv("SIM_MODE", "0") == "1":
+            header_client = request.headers.get("X-Client-Id")
+            if header_client:
+                return header_client
             return f"sim:{uuid.uuid4().hex}"
-        
-        # Check for real IP through proxy headers (Cloudflare tunnel, reverse proxies)
-        # Order: CF-Connecting-IP (Cloudflare) > X-Forwarded-For > direct client IP
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            # X-Forwarded-For can be a comma-separated list; take the first (original client)
-            client_ip = forwarded_for.split(",")[0].strip()
-            return f"ip:{client_ip}"
-        
-        cf_connecting_ip = request.headers.get("CF-Connecting-IP")
-        if cf_connecting_ip:
-            return f"ip:{cf_connecting_ip}"
-        
-        client = request.client
-        if client:
-            return f"ip:{client.host}"
+
+        # Only the local frontend's canonical address hop is trusted; generic
+        # browser-controlled forwarding headers remain ignored.
+        address = client_ip(request)
+        if address:
+            return f"ip:{address}"
         return f"anon:{uuid.uuid4().hex}"
 
     def _is_protected_path(self, path: str) -> bool:
-        return any(path.startswith(prefix) for prefix in self._protected_prefixes)
+        normalized = path.rstrip("/")
+        return any(normalized == candidate.rstrip("/") for candidate in self._protected_prefixes)
 
     async def _preprocess_rate_limit(self, client_token: str) -> Response | None:
         now = time.time()

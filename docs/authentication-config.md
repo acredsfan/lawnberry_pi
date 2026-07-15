@@ -19,7 +19,7 @@ This guide covers setting up and configuring the multi-level authentication syst
 
 LawnBerry Pi v2 features a configurable authentication system with four security levels:
 
-1. **Password**: Basic username/password authentication
+1. **Password**: Explicit deployment credential or configured username/password
 2. **TOTP**: Password + Time-based One-Time Password (2FA)
 3. **Google OAuth**: Google account authentication with domain restrictions
 4. **Tunnel Auth**: Cloudflare tunnel authentication (highest security)
@@ -40,7 +40,7 @@ Each level provides increasing security and may disable lower-level authenticati
 
 **Use Case**: Basic home networks, initial setup
 **Security**: Basic protection against unauthorized access
-**Requirements**: Username and password only
+**Requirements**: The deployment credential, or a configured username/password
 
 ### Level 2: TOTP Two-Factor Authentication
 
@@ -62,16 +62,17 @@ Each level provides increasing security and may disable lower-level authenticati
 
 ## Password Authentication
 
-Basic username/password authentication suitable for initial setup and secure local networks.
+Local authentication suitable for initial setup and secure local networks. A fresh
+installation has no public default username/password pair. The login screen first
+accepts `LAWN_BERRY_OPERATOR_CREDENTIAL`; an authenticated operator may then
+configure a custom username/password.
 
 ### Initial Setup
 
 ```bash
-# Set initial admin password during first setup
-lawnberry-pi config auth --level password --set-password
-
-# Or use interactive setup
-lawnberry-pi config auth --setup-wizard
+# Set a unique operator credential in the protected service environment.
+# Do not commit the value to the repository.
+LAWN_BERRY_OPERATOR_CREDENTIAL=<long-unique-operator-credential>
 ```
 
 ### Configuration Options
@@ -119,8 +120,7 @@ Content-Type: application/json
 
 {
   "username": "admin",
-  "password": "new_secure_password_12345",
-  "password_confirm": "new_secure_password_12345"
+  "password": "new_secure_password_12345"
 }
 ```
 
@@ -128,8 +128,7 @@ Content-Type: application/json
 
 - **Authentication**: Caller must have a valid authenticated session (Bearer token)
 - **Username**: Desired login username (typically `admin` or your preferred username)
-- **Password**: New password (must match `password_confirm`)
-- **Password Confirm**: Verification field (must match `password`)
+- **Password**: New password (minimum six characters; use a much longer unique value)
 
 #### Response
 
@@ -159,13 +158,12 @@ Content-Type: application/json
 #### Example Usage
 
 ```bash
-# Step 1: Authenticate with default credentials to get a session token
+# Step 1: Authenticate with the explicitly configured operator credential
 SESSION=$(curl -s -X POST http://localhost:8081/api/v2/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "username": "admin",
-    "password": "default_admin_password"
-  }' | jq -r '.token')
+    "credential": "<operator-credential>"
+  }' | jq -r '.access_token')
 
 # Step 2: Configure a new custom password
 curl -X POST http://localhost:8081/api/v2/auth/configure/password \
@@ -173,8 +171,7 @@ curl -X POST http://localhost:8081/api/v2/auth/configure/password \
   -H "Content-Type: application/json" \
   -d '{
     "username": "admin",
-    "password": "MyNewSecure@123",
-    "password_confirm": "MyNewSecure@123"
+    "password": "MyNewSecure@123"
   }'
 
 # Step 3: Use the new credentials for subsequent logins
@@ -191,7 +188,7 @@ curl -X POST http://localhost:8081/api/v2/auth/login \
 1. **Session Persistence**: The new password is stored in `data/settings.json` and persists across service restarts
 2. **Global Availability**: Once configured, the password works from any client accessing the LawnBerry API
 3. **Backward Compatibility**: Existing Cloudflare Access and OAuth authentication methods continue to work
-4. **Default Credentials**: If using default credentials, change them as soon as possible via this endpoint
+4. **No Default Credentials**: `admin/admin` is rejected unless an operator deliberately configures that weak value
 5. **Security**: Passwords are hashed using bcrypt before storage; plain text passwords are never logged
 
 ### Example Configuration
@@ -364,7 +361,7 @@ lawnberry-pi auth verify-google-user --email user@domain.com
 security_level: google_oauth
 google_auth_config:
   client_id: "123456789.googleusercontent.com"
-  client_secret: "encrypted_secret"
+  # Inject client_secret from the protected service environment.
   allowed_domains:
     - "company.com"
     - "yourdomain.com"
@@ -384,38 +381,39 @@ The highest security level using Cloudflare Access for zero-trust authentication
 2. **Cloudflare Tunnel**: Configured and running
 3. **Cloudflare Access**: Access subscription (free tier available)
 
-### Automatic Login Bypass
+### Automatic Session Bootstrap
 
-When Cloudflare Access is enabled (`security_level: tunnel_auth`), the login endpoint automatically bypasses the local login screen if valid Cloudflare Access headers are present:
+After Cloudflare Access authenticates the browser, the frontend exchanges the
+edge-provided assertion at a dedicated endpoint. Local credentials are never
+submitted and the local login rate limiter is not involved:
 
 ```
 Request Flow:
 1. User accesses https://lawnberry.yourdomain.com
 2. Cloudflare Access intercepts and authenticates the user
-3. Request reaches /api/v2/auth/login with Cloudflare headers:
-   - CF-Access-Jwt-Assertion: <JWT token>
-   - CF-Access-Authenticated-User-Email: <user email>
-4. Backend recognizes valid Cloudflare authentication
-5. Session is created without requiring local credentials
-6. User is logged in automatically
+3. The route guard calls POST /api/v2/auth/cloudflare
+4. Cloudflare attaches CF-Access-Jwt-Assertion at the edge
+5. LawnBerry verifies RS256 signature, issuer, audience, expiry, and key ID
+6. Signed email/sub becomes the LawnBerry session principal
+7. The requested page opens without the local login screen
 
 This eliminates double authentication (Cloudflare + app login).
 ```
 
-### How Login Bypass Works
+### How Session Bootstrap Works
 
-The login endpoint checks for two conditions to bypass the local login screen:
+`POST /api/v2/auth/cloudflare` is intentionally separate from
+`POST /api/v2/auth/login`:
 
-1. **Security Level Check**: `security_level == SecurityLevel.TUNNEL_AUTH`
-2. **Cloudflare Headers Present**: Valid `CF-Access-Jwt-Assertion` and `CF-Access-Authenticated-User-Email` headers
-
-When both conditions are met, the backend:
-- Extracts the user identity from Cloudflare headers
-- Creates an authenticated session using `authenticate_tunnel()`
-- Returns a session token
-- User is logged in to the app
-
-If Cloudflare headers are invalid or not present, the endpoint falls back to local authentication (username/password).
+- the configured team domain pins the HTTPS issuer and JWKS endpoint;
+- the configured Access application AUD pins the intended application;
+- only RS256 assertions with a known rotating Cloudflare key are accepted;
+- identity comes from signed `email` or `sub` claims, never the unsigned
+  `CF-Access-Authenticated-User-Email` forwarding header;
+- a missing, expired, forged, wrong-issuer, or wrong-audience assertion fails
+  closed and never falls back to password authentication;
+- the frontend tries bootstrap once per navigation session. Refresh requests
+  are single-flight and never recursively retry auth endpoints.
 
 ### Why This Matters
 
@@ -425,7 +423,7 @@ If Cloudflare headers are invalid or not present, the endpoint falls back to loc
 - Must authenticate again with local credentials
 - Results in poor UX and confusion
 
-**With this bypass**:
+**With this bootstrap**:
 - Users authenticate once with Cloudflare Access
 - Seamlessly access the app
 - No local login screen when already authenticated upstream
@@ -433,13 +431,10 @@ If Cloudflare headers are invalid or not present, the endpoint falls back to loc
 
 ### Preserving Local Authentication
 
-When `security_level` is **not** `TUNNEL_AUTH` (e.g., `PASSWORD`, `TOTP`, `GOOGLE_OAUTH`):
-- Login screen is always shown
-- Local authentication is required
-- Cloudflare headers are ignored
-- Standard `username/password` login works as normal
-
-This preserves backward compatibility for non-Cloudflare deployments and development environments.
+Direct/local access without a valid Cloudflare assertion still uses the normal
+login screen and `POST /api/v2/auth/login`. Raw Cloudflare-looking headers on
+that endpoint are ignored, preserving local authentication without creating an
+unsigned bypass.
 
 ### Cloudflare Access Setup
 
@@ -468,41 +463,32 @@ This preserves backward compatibility for non-Cloudflare deployments and develop
 
 ### LawnBerry Configuration
 
-```bash
-# Enable Cloudflare tunnel authentication
-lawnberry-pi config auth --level tunnel \
-    --tunnel-provider cloudflare \
-    --required-headers "CF-Access-Authenticated-User-Email" \
-    --verify-jwt-signature
+Set both values in the backend environment file. The team domain is the bare
+`<team>.cloudflareaccess.com` hostname; the AUD is copied from the Access
+self-hosted application's overview:
 
-# Configure session settings for tunnel auth
-lawnberry-pi config auth --tunnel-session-timeout 120  # 2 hours
+```bash
+CLOUDFLARE_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com
+CLOUDFLARE_ACCESS_AUD=<64-character-application-aud>
 ```
 
 ### Header Validation
 
-Cloudflare provides authentication headers that LawnBerry validates:
-
-```bash
-# Configure required headers
-lawnberry-pi config auth --tunnel-required-headers \
-    "CF-Access-Authenticated-User-Email" \
-    "CF-Ray" \
-    "CF-Visitor"
-
-# Optional: Configure user mapping
-lawnberry-pi config auth --tunnel-user-header "CF-Access-Authenticated-User-Email"
-```
+Cloudflare provides the `CF-Access-Jwt-Assertion`. LawnBerry fetches the team's
+public JWKS from `/cdn-cgi/access/certs` with a bounded cache and refreshes it
+when a key ID rotates. Other forwarding headers are not authentication proof.
 
 ### Testing Tunnel Authentication
 
-```bash
-# Test tunnel authentication
-lawnberry-pi auth test-tunnel --simulate-headers
+Use an authenticated browser and inspect the Network panel. The protected-page
+navigation should show one successful `POST /api/v2/auth/cloudflare` followed
+by `GET /api/v2/auth/profile`; it must not send `POST /api/v2/auth/login`.
 
-# Verify Access policy
-curl -H "CF-Access-Authenticated-User-Email: user@domain.com" \
-     https://lawnberry.yourdomain.com/api/v1/auth/verify
+An unauthenticated local probe proves the endpoint fails closed:
+
+```bash
+curl -i -X POST http://127.0.0.1:8081/api/v2/auth/cloudflare
+# HTTP/1.1 401 Unauthorized
 ```
 
 ## Session Management
@@ -526,6 +512,25 @@ lawnberry-pi config auth --remember-me-duration 30  # 30 days
 ```
 
 ### Session Security
+
+Logout, credential changes, and concurrent-session eviction revoke the signed
+session ID through a conservative high-water that covers every same-SID JWT
+which could have been issued before termination. This remains true when an older
+token is the first sibling restored after restart. The compact revocation
+registry is stored with owner-only permissions under
+`LAWN_DATA_DIR/auth_session_revocations.json`, so restarting the backend cannot
+resurrect a revoked token. Expired entries are removed automatically. Each
+update is written to an owner-only temporary file, fsynced, atomically replaced,
+and followed by a directory fsync. If the registry cannot be read or durably
+replaced, token-backed authentication fails closed; `POST /api/v2/auth/logout`
+returns `503` instead of claiming the session ended.
+
+Manual-control grants created from a LawnBerry bearer token or verified
+Cloudflare assertion are dependent on the canonical authentication session.
+Logout, credential rotation, expiry, or concurrent-session eviction immediately
+invalidates those dependent grants. A separately verified password or TOTP
+manual grant remains independent and expires on its configured manual-session
+timeout.
 
 ```bash
 # Enable secure session features
@@ -575,6 +580,18 @@ lawnberry-pi config auth --password-history 12  # Remember last 12 passwords
 ```
 
 ### Rate Limiting
+
+The global limiter keeps separate token buckets for each client and matched
+endpoint policy. In particular, the stricter Cloudflare bootstrap allowance
+cannot consume or resize that client's ordinary API allowance.
+
+Uvicorn ignores generic proxy headers. The local frontend removes any inbound
+`Forwarded`, `X-Forwarded-For`, `X-Real-IP`, and `X-LawnBerry-Client-IP` values,
+then creates one internal client-IP header. It accepts `CF-Connecting-IP` or
+`X-Real-IP` only when the immediate frontend peer is loopback (local cloudflared
+or nginx); direct LAN peers are identified by their socket address. The backend trusts the
+internal header only from its loopback frontend peer. This preserves per-client
+quotas without letting a browser choose another operator's lockout identity.
 
 ```bash
 # Configure authentication rate limits
@@ -661,19 +678,18 @@ If only some references are updated:
 
 #### Cloudflare Access Integration
 
-The login endpoint has two authentication paths:
+The authentication paths are deliberately disjoint:
 
-1. **Cloudflare Bypass** (when `security_level == TUNNEL_AUTH`):
-   - Checks for `CF-Access-Jwt-Assertion` header
-   - If valid, calls `authenticate_tunnel()` and skips local password check
-   - Returns session token without login screen
+1. `POST /api/v2/auth/cloudflare` verifies the Access assertion and creates a
+   session without receiving local credentials.
+2. `POST /api/v2/auth/login` accepts the explicit shared credential or an
+   operator-configured username/password and ignores Cloudflare forwarding headers.
+3. A Cloudflare-backed LawnBerry JWT never outlives the verified Access assertion.
+   `POST /api/v2/auth/refresh` requires a fresh verified assertion for the same
+   signed principal; missing, expired, or mismatched assertions fail with 401.
 
-2. **Local Authentication** (all other security levels):
-   - Requires username and password in request body
-   - Validates via `authenticate_password()`
-   - Returns session token on success
-
-**Important**: The security level check comes FIRST. If it's not `TUNNEL_AUTH`, Cloudflare headers are ignored entirely, even if present.
+An invalid assertion cannot reach the local password path, so it cannot consume
+password-attempt budget or be reinterpreted as a weaker credential.
 
 ### Common Pitfalls and How to Avoid Them
 
@@ -701,20 +717,20 @@ The login endpoint has two authentication paths:
 - Search for `_security_settings` and `config.password_hash` in your code
 - If you modify either one, update all three
 
-#### Pitfall 3: Cloudflare Bypass Not Working
+#### Pitfall 3: Cloudflare Bootstrap Not Working
 
 **Symptom**: Cloudflare-authenticated users still see the app login screen
 
-**Root Cause**: 
-- Security level is not set to `TUNNEL_AUTH`
-- OR Cloudflare headers are not being passed through the request
-- OR JWT verification is failing
+**Root Cause**:
+- the team domain or application AUD is absent/mismatched;
+- the Access policy does not protect `/api/v2/auth/cloudflare`; or
+- assertion verification cannot fetch or match the rotating JWKS.
 
 **Prevention**:
-- Verify `security_level == SecurityLevel.TUNNEL_AUTH` in application configuration
-- Check that nginx/proxy is forwarding Cloudflare headers (not stripping them)
-- Verify `CF-Access-Jwt-Assertion` header is present in the request
-- Test with: `curl -H "CF-Access-Authenticated-User-Email: test@example.com" http://localhost:8081/api/v2/auth/login`
+- configure the exact team domain and application AUD in the backend service environment;
+- ensure the frontend and `/api/v2/auth/cloudflare` share the protected hostname;
+- check backend logs for a verification-key or audience/issuer failure;
+- never test by inventing `CF-Access-Authenticated-User-Email`; it is not trusted.
 
 #### Pitfall 4: Test Failures After Refactoring Auth Code
 
@@ -892,7 +908,7 @@ getent hosts lawnberry.yourdomain.com
 curl -sS https://lawnberry.yourdomain.com/ | head -c 200
 curl -sS -X POST https://lawnberry.yourdomain.com/api/v2/auth/login \
     -H 'Content-Type: application/json' \
-    -d '{"username":"admin","password":"admin"}'
+    -d '{"credential":"<operator-credential>"}'
 ```
 
 Notes:
@@ -901,10 +917,14 @@ Notes:
 
 4. **WebSocket 401 Unauthorized (remote access)**:
 
-When accessing the UI through a tunnel/proxy, browsers cannot set custom headers on WebSocket upgrades. The backend now supports passing the session token via query params. Ensure:
+When accessing the UI through a tunnel/proxy, browsers cannot set an
+`Authorization` header on WebSocket upgrades. LawnBerry sends the signed local
+JWT in a `Sec-WebSocket-Protocol` value instead, which the frontend proxy
+forwards without placing credentials in access-log URLs. Ensure:
 
 - You are logged in to the UI (a valid token is stored in localStorage).
-- The frontend will automatically append `?access_token=<token>` to the telemetry/control WS URLs.
+- The frontend opens clean telemetry/control URLs and adds a `lawnberry.jwt.*`
+  authentication subprotocol automatically.
 - If using Cloudflare Access, the `CF-Access-Jwt-Assertion` header is accepted for WS authorization when Access policy already authenticated the user.
 
 If you still see WS failures, live telemetry will fall back to REST polling. Check the browser console network tab for 401/403 responses on `/api/v2/ws/telemetry` or `/ws/telemetry` and adjust Access policies accordingly.
@@ -913,55 +933,30 @@ If you still see WS failures, live telemetry will fall back to REST polling. Che
 
 **Problem**: After entering credentials, the app redirects back to the login screen and shows "Too many attempts" rate limiting.
 
-**Root Cause**: This typically indicates that the username/password path is not correctly mapping to the operator credential, or Cloudflare headers are being validated incorrectly.
+**Root Cause**: A Cloudflare-authenticated browser should not enter the local
+password path. Repeated login/refresh retries can consume the shared password
+limiter and hide the original bootstrap failure behind a 429.
 
 **Solution**:
 
-1. **Check Operator Credential Configuration**:
+1. **Verify the bootstrap endpoint**:
    ```bash
-   # Verify LAWN_BERRY_OPERATOR_CREDENTIAL is set
-   echo $LAWN_BERRY_OPERATOR_CREDENTIAL
-   
-   # If empty, set it
-   export LAWN_BERRY_OPERATOR_CREDENTIAL="yourpassword"
-   sudo systemctl restart lawnberry-backend
+   curl -i -X POST http://127.0.0.1:8081/api/v2/auth/cloudflare
+   # A local request without an edge assertion must return 401, never 429.
    ```
 
-2. **Verify Authentication Endpoint**:
+2. **Check the browser Network panel**: protected navigation should issue one
+   `/api/v2/auth/cloudflare` request. It must not recurse through `/auth/refresh`
+   or submit `/auth/login` after Cloudflare already authenticated the browser.
+
+3. **Check service configuration without printing values**:
    ```bash
-   # Test login endpoint directly (should succeed)
-   curl -X POST http://localhost:8081/api/v2/auth/login \
-     -H "Content-Type: application/json" \
-     -d '{"username":"admin","password":"admin"}'
-   
-   # Should return 200 with access_token
+   test -n "${CLOUDFLARE_ACCESS_TEAM_DOMAIN:-}" && echo team-domain-configured
+   test -n "${CLOUDFLARE_ACCESS_AUD:-}" && echo audience-configured
    ```
 
-3. **Check Frontend API Configuration**:
-   ```bash
-   # Verify frontend is sending username/password (not credential field)
-   # Check browser console Network tab for login request
-   # POST body should be: {"username":"admin","password":"admin"}
-   ```
-
-4. **Reset Rate Limiting** (if locked out):
-   ```bash
-   # Rate limiting resets after 30 seconds
-   # Or restart backend to clear in-memory rate limit state
-   sudo systemctl restart lawnberry-backend
-   ```
-
-5. **For Cloudflare Users - Verify Headers**:
-   ```bash
-   # If behind Cloudflare, test that headers are passed through
-   curl -X POST https://lawnberry.yourdomain.com/api/v2/auth/login \
-     -H "CF-Access-Jwt-Assertion: $(cat token.jwt)" \
-     -H "CF-Access-Authenticated-User-Email: user@example.com" \
-     -H "Content-Type: application/json" \
-     -d '{}' \  # Empty body - Cloudflare auth should handle it
-   
-   # Should return 200 with access_token
-   ```
+4. **Restart only after configuration changes**:
+   `sudo systemctl restart lawnberry-backend.service`.
 
 6. **Missing or Mismatched Credentials in Browser**:
 
@@ -974,8 +969,9 @@ If you still see WS failures, live telemetry will fall back to REST polling. Che
    **Solution**:
 
    1. **Verify Credentials Match**:
-      - Default admin credentials: `username=admin`, `password=admin`
-      - Credentials must match `LAWN_BERRY_OPERATOR_CREDENTIAL` environment variable
+      - LawnBerry has no default username/password pair
+      - The Operator credential field must match `LAWN_BERRY_OPERATOR_CREDENTIAL`,
+        or the custom username/password must match the explicitly configured hash
       - Test with curl first to isolate frontend issues
 
    2. **Check Frontend Storage**:
@@ -1020,7 +1016,7 @@ lawnberry-pi config auth --validate
 sudo systemctl stop lawnberry-backend
 sudo lawnberry-pi auth emergency-access --enable
 
-# This creates temporary password: "emergency123"
+# The command prints a one-time temporary credential to the local console.
 # Login and reconfigure authentication
 sudo systemctl start lawnberry-backend
 ```

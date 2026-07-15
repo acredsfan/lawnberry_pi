@@ -17,10 +17,11 @@ def build_request(headers=None, client_host="127.0.0.1"):
     return Request(scope)
 
 
-def test_require_bearer_auth_allows_loopback_without_header():
+def test_require_bearer_auth_rejects_loopback_without_header():
     request = build_request()
-    # Should not raise for loopback clients even without token
-    rest._require_bearer_auth(request)
+    with pytest.raises(rest.HTTPException) as exc:
+        rest._require_bearer_auth(request)
+    assert exc.value.status_code == 401
 
 
 def test_require_bearer_auth_rejects_public_client_without_header():
@@ -44,6 +45,7 @@ def test_handshake_allows_missing_subprotocol_header():
             "upgrade": "websocket",
             "sec-websocket-version": "13",
             "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+            "authorization": "Bearer test-token",
         },
     )
     assert response.status_code == 101
@@ -59,6 +61,7 @@ def test_legacy_handshake_works_without_subprotocol_header():
             "upgrade": "websocket",
             "sec-websocket-version": "13",
             "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+            "authorization": "Bearer test-token",
         },
     )
     assert response.status_code == 101

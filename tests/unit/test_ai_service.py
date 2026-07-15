@@ -73,6 +73,27 @@ def _make_test_image_bytes() -> bytes:
 
 
 @pytest.mark.asyncio
+async def test_ai_status_route_refreshes_external_owner_before_serializing(monkeypatch):
+    from backend.src.api import ai as ai_api
+
+    refreshed = False
+
+    async def sync_owner(_service):
+        nonlocal refreshed
+        refreshed = True
+        return True
+
+    class _StatusService:
+        async def get_ai_status(self):
+            assert refreshed is True
+            return {"model_ready": True}
+
+    monkeypatch.setattr(ai_api, "sync_external_ai_owner_state", sync_owner)
+
+    assert await ai_api.get_ai_status(_StatusService()) == {"model_ready": True}
+
+
+@pytest.mark.asyncio
 async def test_initialize_reports_missing_model_gracefully(tmp_path):
     service = AIService(model_path=str(tmp_path / "missing-model.json"))
 
@@ -196,6 +217,21 @@ async def test_external_camera_result_requires_exact_model_and_source_frame(tmp_
 
     external = _service(tmp_path)
     await external.initialize(metadata_only=True)
+    assert (await external.get_ai_status())["model_ready"] is False
+    external.set_external_owner_state(
+        sim_mode=False,
+        hardware_available=True,
+        ai_runtime_ready=True,
+        model_sha256="b" * 64,
+    )
+    assert (await external.get_ai_status())["model_ready"] is False
+    external.set_external_owner_state(
+        sim_mode=False,
+        hardware_available=True,
+        ai_runtime_ready=True,
+        model_sha256="a" * 64,
+    )
+    assert (await external.get_ai_status())["model_ready"] is True
     consumer = AsyncMock(return_value=1)
     external.set_result_consumer(consumer)
 
@@ -210,6 +246,54 @@ async def test_external_camera_result_requires_exact_model_and_source_frame(tmp_
         }
     )
     assert await external.ingest_external_result(without_source) is False
+
+
+@pytest.mark.asyncio
+async def test_external_camera_result_fails_closed_for_fallback_or_unready_owner(tmp_path):
+    local = _service(tmp_path)
+    await local.initialize()
+    result = await local.infer_camera_frame(
+        _make_test_image_bytes(),
+        frame_id="hardware-frame",
+        source_frame_timestamp=datetime.now(UTC),
+    )
+    assert result is not None
+
+    external = _service(tmp_path)
+    await external.initialize(metadata_only=True)
+    external.set_external_owner_state(
+        sim_mode=True,
+        hardware_available=False,
+        ai_runtime_ready=True,
+        model_sha256="a" * 64,
+        error="camera fallback",
+    )
+
+    assert await external.ingest_external_result(result) is False
+    fallback = external.get_perception_snapshot()
+    assert fallback.available is False
+    assert fallback.fresh is False
+    assert fallback.reason_code == "CAMERA_HARDWARE_UNAVAILABLE"
+
+    external.set_external_owner_state(
+        sim_mode=False,
+        hardware_available=True,
+        ai_runtime_ready=False,
+        model_sha256="a" * 64,
+        error="ONNX initialization failed",
+    )
+    assert (await external.get_ai_status())["model_ready"] is False
+    assert external.get_perception_snapshot().reason_code == (
+        "CAMERA_DETECTOR_RUNTIME_UNAVAILABLE"
+    )
+
+
+def test_detector_freshness_default_has_bounded_owner_delivery_margin(tmp_path):
+    service = _service(tmp_path)
+    manifest = service._detector_runtime.manifest
+
+    assert manifest.max_result_age_seconds == pytest.approx(5.0)
+    assert manifest.max_result_age_seconds - 3.0 == pytest.approx(2.0)
 
 
 @pytest.mark.asyncio

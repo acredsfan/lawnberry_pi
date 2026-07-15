@@ -114,8 +114,10 @@ async def test_running_mission_recovers_as_paused_after_restart(mission_repo):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+    await asyncio.wait_for(service._mission_terminal_events[mission.id].wait(), timeout=1.0)
 
-    # Ensure DB still shows RUNNING after cancellation (simulate crash).
+    # The live callback is now fully drained. Forge the durable RUNNING record
+    # that a process crash would have left without an opportunity to finalize.
     mission_repo.save_execution_state(
         {
             "mission_id": mission.id,

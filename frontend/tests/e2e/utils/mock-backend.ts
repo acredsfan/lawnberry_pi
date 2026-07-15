@@ -405,7 +405,7 @@ export class MockBackend {
 
     // Authentication
     if (method === 'POST' && pathname === '/api/v2/auth/login') {
-      if (body?.username === 'admin' && body?.password === 'admin') {
+      if (body?.credential === 'operator-test-credential') {
         return respond(200, {
           access_token: 'test-token',
           expires_in: 3600,

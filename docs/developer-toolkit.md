@@ -137,7 +137,8 @@ This is the current startup and runtime contract after the port cleanup pass.
 ### Where those values come from
 
 - `systemd/lawnberry-backend.service` runs Uvicorn on **`8081`**
-- `systemd/lawnberry-frontend.service` runs the frontend on **`3000`**
+- `systemd/lawnberry-frontend.service` runs the built frontend from
+  **`/home/pi/lawnberry/frontend`** on **`3000`**
 - `frontend/server.mjs` proxies backend traffic to **`http://127.0.0.1:8081`**
 - `frontend/vite.config.ts` runs Vite on **`3000`** and now proxies `/api` to **`8081`**
 - `frontend/playwright.config.ts` intentionally uses preview port **`4173`**

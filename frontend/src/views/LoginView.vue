@@ -8,7 +8,22 @@
       </div>
       
       <form class="login-form" @submit.prevent="handleLogin">
-        <div class="form-group">
+        <div v-if="!useCustomPassword" class="form-group">
+          <label class="form-label" for="credential">Operator credential</label>
+          <input
+            id="credential"
+            v-model="credential"
+            type="password"
+            class="form-control"
+            :class="{ error: errors.credential }"
+            autocomplete="current-password"
+            required
+            :disabled="isLoading"
+          >
+          <div v-if="errors.credential" class="form-error">{{ errors.credential }}</div>
+        </div>
+
+        <div v-if="useCustomPassword" class="form-group">
           <label class="form-label" for="username">Username</label>
           <input
             id="username"
@@ -22,7 +37,7 @@
           <div v-if="errors.username" class="form-error">{{ errors.username }}</div>
         </div>
         
-        <div class="form-group">
+        <div v-if="useCustomPassword" class="form-group">
           <label class="form-label" for="password">Password</label>
           <input
             id="password"
@@ -49,11 +64,20 @@
           <span v-if="isLoading" class="spinner" aria-hidden="true" />
           {{ isLoading ? 'Signing In...' : 'Sign In' }}
         </button>
+
+        <button
+          type="button"
+          class="btn btn-link w-100"
+          :disabled="isLoading"
+          @click="toggleLoginMode"
+        >
+          {{ useCustomPassword ? 'Use operator credential' : 'Use configured username and password' }}
+        </button>
       </form>
       
       <div class="login-footer">
         <p class="text-muted text-center">
-          Default credentials: admin / admin
+          Use the credential configured during deployment. LawnBerry has no default password.
         </p>
       </div>
     </div>
@@ -73,30 +97,46 @@ const authStore = useAuthStore()
 
 const isLoading = ref(false)
 const authError = ref('')
+const useCustomPassword = ref(false)
+const credential = ref('')
 
-const credentials = reactive<LoginCredentials>({
+const credentials = reactive({
   username: '',
   password: ''
 })
 
 const errors = reactive({
+  credential: '',
   username: '',
   password: ''
 })
 
 const validateForm = () => {
+  errors.credential = ''
   errors.username = ''
   errors.password = ''
-  
-  if (!credentials.username.trim()) {
-    errors.username = 'Username is required'
+
+  if (useCustomPassword.value) {
+    if (!credentials.username.trim()) {
+      errors.username = 'Username is required'
+    }
+
+    if (!credentials.password) {
+      errors['password'] = 'Password is required'
+    }
+  } else if (!credential.value) {
+    errors.credential = 'Operator credential is required'
   }
-  
-  if (!credentials.password) {
-    errors.password = 'Password is required'
-  }
-  
-  return !errors.username && !errors.password
+
+  return !errors.credential && !errors.username && !errors.password
+}
+
+const toggleLoginMode = () => {
+  useCustomPassword.value = !useCustomPassword.value
+  authError.value = ''
+  errors.credential = ''
+  errors.username = ''
+  errors.password = ''
 }
 
 const handleLogin = async () => {
@@ -109,7 +149,10 @@ const handleLogin = async () => {
   try {
     isLoading.value = true
     
-    const success = await authStore.login(credentials)
+    const payload: LoginCredentials = useCustomPassword.value
+      ? { ...credentials }
+      : { credential: credential.value }
+    const success = await authStore.login(payload)
     
     if (success) {
       router.push('/')

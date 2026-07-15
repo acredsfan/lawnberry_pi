@@ -1239,11 +1239,13 @@ class SensorManager:
 
     async def get_sensor_status(self) -> dict[str, Any]:
         """Get status of all sensors"""
+        imu_reading = getattr(self.imu, "last_reading", None)
         return {
             "initialized": self.initialized,
             "gps_status": self.gps.status,
             "gps_mode": self.gps.gps_mode,
             "imu_status": self.imu.status,
+            "imu_calibration": getattr(imu_reading, "calibration_status", None),
             "tof_status": self.tof.status,
             "environmental_status": self.environmental.status,
             "power_status": self.power.status,

@@ -527,7 +527,7 @@ lawnberry-pi security status --check-all
       3) Idle timeout/heartbeats:
           - Cloudflare can idle-close long-lived WS. The frontend sends application pings every 25s; set Cloudflare idle timeout ≥ 60s.
       4) Authentication for WS:
-          - The backend now accepts an `access_token` query param on the WS URL. Make sure you are logged in via the UI; the browser will attach your token automatically.
+          - Make sure you are logged in via the UI. The browser sends the signed LawnBerry JWT as a `lawnberry.jwt.*` WebSocket subprotocol; it is never placed in the URL.
           - If you enforce Cloudflare Access, the backend also accepts the `CF-Access-Jwt-Assertion` on WS upgrades.
       5) Alternate path:
           - Both `/api/v2/ws/telemetry` and legacy `/ws/telemetry` are supported. If one path is blocked by a rule, try the other.

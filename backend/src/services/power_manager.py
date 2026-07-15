@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -49,29 +50,60 @@ VICTRON_RATE_NIGHT_S: float = 60.0      # BLE refresh interval at night
 # Solar elevation helper (no external dependencies)
 # ------------------------------------------------------------------
 
+def _solar_coordinates(dt_utc: datetime) -> tuple[float, float, float]:
+    """Return mean longitude, ecliptic longitude, and obliquity in radians."""
+    jd = (
+        dt_utc.toordinal()
+        + 1721425.5
+        + (dt_utc.hour + dt_utc.minute / 60.0 + dt_utc.second / 3600.0) / 24.0
+    )
+    n = jd - 2451545.0
+    mean_longitude = math.radians((280.46 + 0.9856474 * n) % 360)
+    mean_anomaly = math.radians((357.528 + 0.9856003 * n) % 360)
+    ecliptic_longitude = (
+        mean_longitude
+        + math.radians(1.915) * math.sin(mean_anomaly)
+        + math.radians(0.02) * math.sin(2 * mean_anomaly)
+    )
+    obliquity = math.radians(23.439 - 0.0000004 * n)
+    return mean_longitude, ecliptic_longitude, obliquity
+
+
+def _equation_of_time_from_coordinates(
+    mean_longitude: float,
+    ecliptic_longitude: float,
+    obliquity: float,
+) -> float:
+    """Return equation of time in minutes, normalized across angle wrap."""
+    right_ascension = math.atan2(
+        math.cos(obliquity) * math.sin(ecliptic_longitude),
+        math.cos(ecliptic_longitude),
+    )
+    equation_angle = mean_longitude - 0.0057183 - right_ascension
+    equation_angle = (equation_angle + math.pi) % (2 * math.pi) - math.pi
+    return 4 * math.degrees(equation_angle)
+
+
+def _equation_of_time_minutes(dt_utc: datetime) -> float:
+    """Return the solar equation of time in physically bounded minutes."""
+    return _equation_of_time_from_coordinates(*_solar_coordinates(dt_utc))
+
+
 def _solar_elevation(lat_deg: float, lon_deg: float, dt_utc: datetime) -> float:
     """Return approximate solar elevation in degrees for *dt_utc* at *lat/lon*.
 
     Uses a compact NOAA-derived algorithm accurate to ±0.5° for |lat| < 66°.
     """
     lat = math.radians(lat_deg)
-    # Julian day number
-    jd = (
-        dt_utc.toordinal()
-        + 1721425.5
-        + (dt_utc.hour + dt_utc.minute / 60.0 + dt_utc.second / 3600.0) / 24.0
-    )
-    n = jd - 2451545.0                  # days since J2000.0
-    L = math.radians((280.46 + 0.9856474 * n) % 360)    # mean longitude
-    g = math.radians((357.528 + 0.9856003 * n) % 360)   # mean anomaly
-    lam = L + math.radians(1.915) * math.sin(g) + math.radians(0.02) * math.sin(2 * g)
-    eps = math.radians(23.439 - 0.0000004 * n)          # obliquity
-    sin_dec = math.sin(eps) * math.sin(lam)
+    mean_longitude, ecliptic_longitude, obliquity = _solar_coordinates(dt_utc)
+    sin_dec = math.sin(obliquity) * math.sin(ecliptic_longitude)
     cos_dec = math.cos(math.asin(sin_dec))
     # Equation of time (minutes) — simplified
-    eot_minutes = 4 * math.degrees(L - 0.0057183 - lam + math.atan2(
-        math.cos(eps) * math.sin(lam), math.cos(lam)
-    ))
+    eot_minutes = _equation_of_time_from_coordinates(
+        mean_longitude,
+        ecliptic_longitude,
+        obliquity,
+    )
     solar_noon_h = 12.0 - lon_deg / 15.0 - eot_minutes / 60.0
     hour = dt_utc.hour + dt_utc.minute / 60.0 + dt_utc.second / 3600.0
     hour_angle = math.radians(15.0 * (hour - solar_noon_h))
@@ -109,6 +141,18 @@ class PowerManager:
         self._camera_idle_since: float | None = None
         self._ai_soft_disabled = False
         self._is_day = True
+        try:
+            inference_deadline = float(
+                os.getenv("AI_CAMERA_INFERENCE_TIMEOUT_SECONDS", "3.0")
+            )
+        except (TypeError, ValueError):
+            inference_deadline = 3.0
+        # Capture scheduling and IPC need a small margin beyond the owner-side
+        # inference deadline, while mission admission must remain bounded.
+        self._mission_ai_wake_timeout_seconds = max(
+            0.5,
+            min(inference_deadline + 1.0, 11.0),
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -132,7 +176,7 @@ class PowerManager:
         # Resume everything before shutdown
         await self._resume_gps_if_suspended()
         await self._resume_camera_if_paused()
-        await self._reenable_ai_if_disabled()
+        await self._reenable_ai_if_disabled(force=True)
         logger.info("PowerManager stopped")
 
     # ------------------------------------------------------------------
@@ -171,22 +215,37 @@ class PowerManager:
         await self._set_victron_rate(dark)
 
         # -- Camera management --
-        if mission_active:
-            # Always ensure camera is running during a mission
-            if self._camera_paused_by_pm:
-                await self._resume_camera_if_paused()
+        # Mission execution and fresh operator/inference frame demand are
+        # capture leases. Idle power saving begins only after both are absent.
+        camera_activity_age = self._camera_activity_age_seconds()
+        camera_demand_active = (
+            camera_activity_age is not None
+            and camera_activity_age <= CAMERA_IDLE_TIMEOUT_S
+        ) or (
+            camera_activity_age is None and self._camera_has_recent_demand()
+        )
+        if mission_active or camera_demand_active:
+            await self._ensure_camera_running()
             self._camera_idle_since = None
+        elif camera_activity_age is not None:
+            # The activity age already includes the entire idle timeout. Do not
+            # add a second timeout after its lease expires.
+            if camera_activity_age >= CAMERA_IDLE_TIMEOUT_S:
+                await self._pause_camera()
         else:
             # Start idle countdown
             if self._camera_idle_since is None:
                 self._camera_idle_since = now
-            elif now - self._camera_idle_since >= CAMERA_IDLE_TIMEOUT_S and not self._camera_paused_by_pm:
+            elif now - self._camera_idle_since >= CAMERA_IDLE_TIMEOUT_S:
                 await self._pause_camera()
 
         # -- AI inference --
-        if mission_active:
-            await self._reenable_ai_if_disabled()
-        elif dark and not moving and not mission_active:
+        ai_needed = mission_active or camera_demand_active or moving or not dark
+        if ai_needed:
+            # Mission execution reasserts the canonical owner gate every tick,
+            # so a camera-service restart cannot silently lose AI readiness.
+            await self._reenable_ai_if_disabled(force=mission_active)
+        else:
             await self._soft_disable_ai()
 
     # ------------------------------------------------------------------
@@ -260,6 +319,27 @@ class PowerManager:
             pass
         return False
 
+    def _camera_has_recent_demand(self) -> bool:
+        try:
+            from .camera_runtime import camera_service
+
+            checker = getattr(camera_service, "has_recent_activity", None)
+            return bool(callable(checker) and checker(CAMERA_IDLE_TIMEOUT_S))
+        except Exception:
+            return False
+
+    def _camera_activity_age_seconds(self) -> float | None:
+        try:
+            from .camera_runtime import camera_service
+
+            getter = getattr(camera_service, "activity_age_seconds", None)
+            if not callable(getter):
+                return None
+            age = getter()
+            return max(0.0, float(age)) if age is not None else None
+        except Exception:
+            return None
+
     # ------------------------------------------------------------------
     # GPS control
     # ------------------------------------------------------------------
@@ -309,58 +389,98 @@ class PowerManager:
     # Camera control
     # ------------------------------------------------------------------
 
-    async def _pause_camera(self) -> None:
+    async def _refresh_camera_status(self) -> bool:
+        """Refresh remote owner truth; embedded SIM state is already canonical."""
+        from .camera_runtime import camera_service
+
+        status_getter = getattr(camera_service, "get_camera_status", None)
+        if not callable(status_getter):
+            return True
+        try:
+            outcome = status_getter()
+            if asyncio.iscoroutine(outcome):
+                await outcome
+            return True
+        except Exception:
+            logger.exception("PowerManager: failed to refresh camera owner status")
+            return False
+
+    async def _pause_camera(self) -> bool:
         try:
             from .camera_runtime import camera_service
 
+            if not await self._refresh_camera_status():
+                return False
             if camera_service.stream.is_active:
                 await camera_service.stop_streaming()
-                self._camera_paused_by_pm = True
                 logger.info("PowerManager: camera capture paused (idle)")
+            self._camera_paused_by_pm = True
+            return True
         except Exception:
             logger.exception("PowerManager: failed to pause camera")
+            return False
 
     async def _resume_camera_if_paused(self) -> None:
         if not self._camera_paused_by_pm:
             return
+        await self._ensure_camera_running()
+
+    async def _ensure_camera_running(self) -> bool:
+        """Idempotently restore capture for a mission or active viewer."""
         try:
             from .camera_runtime import camera_service
 
-            if not camera_service.stream.is_active:
-                await camera_service.start_streaming()
+            if not await self._refresh_camera_status():
+                return False
+            if camera_service.stream.is_active:
                 self._camera_paused_by_pm = False
                 self._camera_idle_since = None
-                logger.info("PowerManager: camera capture resumed")
+                return True
+            started = await camera_service.start_streaming()
+            if not started and not camera_service.stream.is_active:
+                logger.error("PowerManager: camera owner rejected capture restart")
+                return False
+            self._camera_paused_by_pm = False
+            self._camera_idle_since = None
+            logger.info("PowerManager: camera capture resumed")
+            return True
         except Exception:
             logger.exception("PowerManager: failed to resume camera")
+            return False
 
     # ------------------------------------------------------------------
     # AI inference
     # ------------------------------------------------------------------
 
     async def _soft_disable_ai(self) -> None:
-        if self._ai_soft_disabled:
-            return
+        # Track the desired low-power state even if one owner is temporarily
+        # unreachable, then retry both acknowledgements on every dark-idle tick.
+        self._ai_soft_disabled = True
         if await self._set_ai_enabled(False):
-            self._ai_soft_disabled = True
             logger.info("PowerManager: AI inference soft-disabled (idle+dark)")
 
-    async def _reenable_ai_if_disabled(self) -> None:
-        if not self._ai_soft_disabled:
-            return
+    async def _reenable_ai_if_disabled(self, *, force: bool = False) -> bool:
+        if not self._ai_soft_disabled and not force:
+            return True
         if await self._set_ai_enabled(True):
             self._ai_soft_disabled = False
             logger.info("PowerManager: AI inference re-enabled")
+            return True
+        return False
 
     async def _set_ai_enabled(self, enabled: bool) -> bool:
         """Apply the power gate to both API state and the live camera owner."""
-        updated = False
+        local_updated = False
+        owner_updated = False
+        service = None
         try:
             from .ai_service import get_ai_service
 
             service = get_ai_service()
             service.set_enabled(enabled)
-            updated = True
+            local_updated = not enabled or bool(
+                getattr(getattr(service, "ai_processing", None), "system_enabled", True)
+            )
         except Exception:
             logger.debug("PowerManager: local AI gate update failed", exc_info=True)
         try:
@@ -371,21 +491,92 @@ class PowerManager:
                 outcome = setter(enabled)
                 if asyncio.iscoroutine(outcome):
                     await outcome
-                updated = True
+                owner_updated = True
+                if enabled:
+                    status_fresh = await self._refresh_camera_status()
+                    owner_state_setter = getattr(service, "set_external_owner_state", None)
+                    if status_fresh and callable(owner_state_setter):
+                        owner_state_setter(
+                            sim_mode=bool(getattr(camera_service, "sim_mode", True)),
+                            hardware_available=bool(
+                                getattr(camera_service, "hardware_available", False)
+                            ),
+                            ai_runtime_ready=bool(
+                                getattr(camera_service, "ai_runtime_ready", False)
+                            ),
+                            model_sha256=getattr(camera_service, "ai_model_sha256", None),
+                            error=getattr(camera_service, "ai_runtime_error", None),
+                        )
+                    owner_updated = bool(
+                        status_fresh
+                        and getattr(camera_service, "ai_runtime_ready", True)
+                        and not getattr(camera_service, "hardware_fallback_active", False)
+                        and (
+                            getattr(camera_service, "requested_sim_mode", True)
+                            or getattr(camera_service, "hardware_available", True)
+                        )
+                    )
+                    status_getter = getattr(service, "get_ai_status", None)
+                    if owner_updated and callable(status_getter):
+                        ai_status = status_getter()
+                        if asyncio.iscoroutine(ai_status):
+                            ai_status = await ai_status
+                        if isinstance(ai_status, dict):
+                            local_updated = local_updated and bool(
+                                ai_status.get("system_enabled", False)
+                            )
+                            owner_updated = owner_updated and bool(
+                                ai_status.get("model_ready", False)
+                            )
         except Exception:
             logger.debug("PowerManager: camera-owner AI gate update failed", exc_info=True)
-        return updated
+        # Hardware inference is owned by the camera process, while the local
+        # AIService owns API truth. A transition is complete only when both
+        # owners acknowledge it; otherwise keep retrying on subsequent ticks.
+        return local_updated and owner_updated
 
     # ------------------------------------------------------------------
     # Public: external trigger to wake GPS immediately
     # (called by mission executor at mission start)
     # ------------------------------------------------------------------
 
+    async def wake_for_viewer(self) -> bool:
+        """Wake capture and issue one immediate AI-owner enable attempt.
+
+        Unlike mission admission this does not wait for a fresh inference result;
+        the Control response stays responsive while the existing retry loop
+        continues until the exact-frame detector proves readiness.
+        """
+        try:
+            from .camera_runtime import camera_service
+
+            recorder = getattr(camera_service, "record_activity", None)
+            if callable(recorder):
+                recorder()
+        except Exception:
+            logger.debug("PowerManager: failed to record viewer demand", exc_info=True)
+        camera_ready = await self._ensure_camera_running()
+        if camera_ready:
+            await self._reenable_ai_if_disabled(force=True)
+        return camera_ready
+
     async def wake_for_mission(self) -> None:
-        """Immediately resume all suspended subsystems for mission start."""
+        """Synchronously establish camera and AI readiness for mission start."""
         await self._resume_gps_if_suspended()
-        await self._resume_camera_if_paused()
-        await self._reenable_ai_if_disabled()
+        camera_ready = await self._ensure_camera_running()
+        ai_ready = False
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._mission_ai_wake_timeout_seconds
+        while camera_ready:
+            ai_ready = await self._reenable_ai_if_disabled(force=True)
+            if ai_ready or loop.time() >= deadline:
+                break
+            await asyncio.sleep(min(0.1, max(0.0, deadline - loop.time())))
+        if not camera_ready or not ai_ready:
+            raise RuntimeError(
+                "Mission power wake failed: "
+                f"camera_ready={camera_ready} ai_owner_acknowledged={ai_ready}"
+            )
         self._camera_idle_since = None
         logger.info("PowerManager: woken for mission start")
 

@@ -151,6 +151,19 @@ def test_scheduler_starts_only_after_all_admission_dependencies_are_wired():
     assert source.index("_jobs_service_singleton.set_qualification_service") < scheduler_start
     assert source.index("_jobs_service_singleton.set_mission_service") < scheduler_start
     assert source.index("_jobs_service_singleton.set_websocket_hub") < scheduler_start
+    assert source.index("await _power_manager.start()") < scheduler_start
+    assert source.index("if power_manager_ready:") < scheduler_start
+
+
+def test_scheduler_stops_before_power_and_motion_dependencies():
+    """Shutdown must quiesce due jobs while mission dependencies still exist."""
+    source = Path("backend/src/main.py").read_text(encoding="utf-8")
+    scheduler_stop = source.index("await _jobs_service_singleton.shutdown()")
+
+    assert scheduler_stop < source.index("await app.state.live_safety.stop()")
+    assert scheduler_stop < source.index("await app.state.power_manager.stop()")
+    assert scheduler_stop < source.index("await sensor_manager.shutdown()")
+    assert scheduler_stop < source.index("await camera_service.shutdown()")
 
 
 def _make_service(

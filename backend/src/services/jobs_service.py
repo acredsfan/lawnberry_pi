@@ -1293,6 +1293,14 @@ class JobsService:
         due_occurrence: datetime | None = None,
     ) -> Mission | None:
         """Create and start a mission when a persistence-backed job fires."""
+        if self._mission_service is None:
+            # Missing canonical mission ownership is a startup wiring defect,
+            # not a skippable occurrence. Fail before claiming/persisting the
+            # occurrence so a corrected runtime can dispatch it exactly once.
+            raise RuntimeError(
+                "JobsService: MissionService is not wired. "
+                "Call set_mission_service() before dispatching scheduled jobs."
+            )
         job_id = job.get("id", "<unknown>")
         job_name = job.get("name", "<unnamed>")
         try:

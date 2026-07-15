@@ -315,6 +315,25 @@ class HealthService:
             }
             overall = _merge_status(overall, component_level)
 
+        imu_calibration_value = status.get("imu_calibration")
+        if imu_calibration_value is not None and "imu" in components:
+            imu_calibration = str(imu_calibration_value).strip().lower() or "unknown"
+            if imu_calibration in {"fully_calibrated", "calibrated", "rvc_active"}:
+                calibration_level = HealthLevel.HEALTHY
+            elif imu_calibration in {"error", "fault", "failed"}:
+                calibration_level = HealthLevel.CRITICAL
+            else:
+                # An online transport does not make its heading trustworthy.
+                # Navigation already rejects uncalibrated data; health must not
+                # contradict that fail-closed decision.
+                calibration_level = HealthLevel.DEGRADED
+            imu_component = components["imu"]
+            current_level = self._map_sensor_status_to_health(imu_component["status"])
+            imu_level = _merge_status(current_level, calibration_level)
+            imu_component["calibration_status"] = imu_calibration
+            imu_component["health"] = imu_level.value
+            overall = _merge_status(overall, imu_level)
+
         if not components:
             overall = HealthLevel.UNKNOWN
             detail = "No sensor components reported status"

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url'
 import compression from 'compression'
 import morgan from 'morgan'
 import { createProxyMiddleware } from 'http-proxy-middleware'
+import { isIP } from 'node:net'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -28,6 +29,35 @@ function shouldCompress(req, res) {
 app.use(morgan('combined'))
 app.use(compression({ filter: shouldCompress }))
 
+function normalizeIp(value) {
+  const candidate = String(value || '').trim().replace(/^::ffff:/, '')
+  return isIP(candidate) ? candidate : null
+}
+
+function isLoopback(value) {
+  const normalized = normalizeIp(value)
+  return normalized === '127.0.0.1' || normalized === '::1'
+}
+
+// The frontend is the only production HTTP hop to Uvicorn. Replace all
+// browser-controlled forwarding identity with one canonical address. A
+// Cloudflare client address is accepted only when the immediate TCP peer is
+// loopback (the local cloudflared process); direct LAN callers use their socket
+// address even if they spoof Cloudflare or forwarding headers.
+app.use((req, _res, next) => {
+  const peerIp = normalizeIp(req.socket.remoteAddress)
+  const cloudflareIp = normalizeIp(req.headers['cf-connecting-ip'])
+  const reverseProxyIp = normalizeIp(req.headers['x-real-ip'])
+  delete req.headers['x-forwarded-for']
+  delete req.headers['forwarded']
+  delete req.headers['x-real-ip']
+  delete req.headers['x-lawnberry-client-ip']
+  const trustedUpstreamIp = cloudflareIp || reverseProxyIp
+  const clientIp = isLoopback(peerIp) && trustedUpstreamIp ? trustedUpstreamIp : peerIp
+  if (clientIp) req.headers['x-lawnberry-client-ip'] = clientIp
+  next()
+})
+
 // Serve branding assets (e.g., LawnBerryPi_Pin.png) so they are available to the UI
 const brandingDir = path.resolve(__dirname, '../branding')
 app.use('/branding', express.static(brandingDir, { maxAge: '30d' }))
@@ -38,15 +68,19 @@ app.get('/LawnBerryPi_Pin.png', (_req, res) => {
 
 // IMPORTANT: Register more specific proxies BEFORE generic ones to avoid mismatches
 
-// Proxy WebSocket for /api/v2/ws/telemetry as-is (frontend connects here by default)
-app.use(
-  '/api/v2/ws/telemetry',
-  createProxyMiddleware({
-    target: BACKEND_URL,
-    changeOrigin: true,
-    ws: true,
-  })
-)
+// Proxy authenticated WebSocket channels as-is. The browser sends its signed
+// LawnBerry JWT in Sec-WebSocket-Protocol, which http-proxy-middleware forwards
+// without putting credentials in the URL or access log.
+for (const channel of ['telemetry', 'control']) {
+  app.use(
+    `/api/v2/ws/${channel}`,
+    createProxyMiddleware({
+      target: BACKEND_URL,
+      changeOrigin: true,
+      ws: true,
+    })
+  )
+}
 
 // Direct /api/v2 passthrough (must be before generic '/api')
 app.use('/api/v2', (req, _res, next) => {

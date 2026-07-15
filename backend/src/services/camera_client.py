@@ -10,6 +10,8 @@ import asyncio
 import json
 import logging
 import os
+import time
+import uuid
 from contextlib import suppress
 from typing import Any
 
@@ -58,11 +60,18 @@ class CameraClient:
         # Treat an owner that has not yet reported its topology as unavailable,
         # never as confirmed live hardware.
         self.sim_mode = True
+        self.requested_sim_mode = False
+        self.hardware_fallback_active = False
         self.hardware_available = False
+        self.ai_model_loaded = False
+        self.ai_runtime_ready = False
+        self.ai_runtime_error: str | None = "Camera owner has not reported AI readiness"
+        self.ai_model_sha256: str | None = None
         self.initialized = False
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._request_lock = asyncio.Lock()
+        self._last_activity_monotonic: float | None = None
 
     async def initialize(self) -> bool:
         """Wait briefly for the systemd owner and load its current state."""
@@ -99,6 +108,7 @@ class CameraClient:
 
     async def get_current_frame(self) -> CameraFrame | None:
         """Fetch the latest frame, including exact-frame AI annotations."""
+        self.record_activity()
         try:
             payload = await self._request("get_frame")
         except CameraClientError as exc:
@@ -123,6 +133,7 @@ class CameraClient:
 
     async def start_streaming(self) -> bool:
         """Ask the canonical owner to start capture."""
+        self.record_activity()
         await self._request("start_streaming")
         self.stream.is_active = True
         self.running = True
@@ -133,6 +144,25 @@ class CameraClient:
         """Ask the canonical owner to stop capture."""
         await self._request("stop_streaming")
         self.stream.is_active = False
+        self._last_activity_monotonic = None
+
+    def record_activity(self) -> None:
+        """Record recent frame demand for the backend power policy."""
+        self._last_activity_monotonic = time.monotonic()
+
+    def has_recent_activity(self, timeout_seconds: float) -> bool:
+        """Return whether a frame consumer has requested data recently."""
+        if self._last_activity_monotonic is None:
+            return False
+        return time.monotonic() - self._last_activity_monotonic <= max(
+            0.0, float(timeout_seconds)
+        )
+
+    def activity_age_seconds(self) -> float | None:
+        """Return monotonic seconds since frame demand, if any."""
+        if self._last_activity_monotonic is None:
+            return None
+        return max(0.0, time.monotonic() - self._last_activity_monotonic)
 
     async def update_configuration(self, config_data: dict[str, Any]) -> bool:
         """Apply camera configuration through the owner process."""
@@ -154,19 +184,48 @@ class CameraClient:
         if not isinstance(payload, dict):
             raise CameraClientError("Camera owner returned an invalid status payload")
         reported_sim_mode = payload.get("sim_mode")
+        reported_requested_sim_mode = payload.get("requested_sim_mode")
+        reported_hardware_fallback = payload.get("hardware_fallback_active")
         reported_hardware = payload.get("hardware_available")
+        reported_ai_model_loaded = payload.get("ai_model_loaded")
+        reported_ai_ready = payload.get("ai_runtime_ready")
+        reported_ai_error = payload.get("ai_runtime_error")
+        reported_model_sha256 = payload.get("ai_model_sha256")
         # Missing/malformed metadata can occur during a rolling upgrade. Fail
         # closed so an old owner cannot be presented as confirmed hardware.
         self.sim_mode = reported_sim_mode if isinstance(reported_sim_mode, bool) else True
+        self.requested_sim_mode = (
+            reported_requested_sim_mode
+            if isinstance(reported_requested_sim_mode, bool)
+            else False
+        )
+        self.hardware_fallback_active = (
+            reported_hardware_fallback
+            if isinstance(reported_hardware_fallback, bool)
+            else True
+        )
         self.hardware_available = (
             reported_hardware if isinstance(reported_hardware, bool) else False
+        )
+        self.ai_model_loaded = (
+            reported_ai_model_loaded
+            if isinstance(reported_ai_model_loaded, bool)
+            else False
+        )
+        self.ai_runtime_ready = reported_ai_ready if isinstance(reported_ai_ready, bool) else False
+        self.ai_runtime_error = (
+            reported_ai_error if isinstance(reported_ai_error, str) else None
+        )
+        self.ai_model_sha256 = (
+            reported_model_sha256 if isinstance(reported_model_sha256, str) else None
         )
         self.stream = CameraStream.model_validate(payload)
         self.camera_stream = self.stream
         self.running = True
 
     async def _request(self, command: str, **payload: Any) -> Any:
-        message = {"command": command, **payload}
+        request_id = uuid.uuid4().hex
+        message = {"command": command, "request_id": request_id, **payload}
         async with self._request_lock:
             for attempt in range(2):
                 try:
@@ -185,11 +244,26 @@ class CameraClient:
                     if not raw:
                         raise CameraClientError("Camera owner closed the IPC connection")
                     response = json.loads(raw.decode("utf-8"))
+                    if not isinstance(response, dict):
+                        raise CameraClientError("Camera owner returned an invalid IPC response")
+                    if (
+                        response.get("request_id") != request_id
+                        or response.get("command") != command
+                    ):
+                        raise CameraClientError(
+                            f"Camera owner returned a mismatched IPC response for {command}"
+                        )
                     if response.get("status") != "success":
                         raise CameraClientError(
                             str(response.get("error") or response.get("message") or command)
                         )
                     return response.get("data")
+                except asyncio.CancelledError:
+                    # Once a command is written, its response may still arrive.
+                    # Retire this stream before releasing the shared request lock
+                    # so the next command cannot consume that late response.
+                    await asyncio.shield(self._close_connection())
+                    raise
                 except (OSError, TimeoutError, json.JSONDecodeError, CameraClientError):
                     await self._close_connection()
                     if attempt == 1:

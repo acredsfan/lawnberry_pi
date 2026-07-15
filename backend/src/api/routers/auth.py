@@ -14,10 +14,20 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, status
 from pydantic import BaseModel, Field
 
 from ...core import globals as global_state
+from ...core.client_identity import client_ip
 from ...core.globals import _manual_control_sessions
 from ...models.auth_security_config import AuthSecurityConfig, SecurityLevel
-from ...models.user_session import UserSession
-from ...services.auth_service import AuthenticationError, primary_auth_service
+from ...models.user_session import AuthenticationMethod, UserSession
+from ...services.auth_service import (
+    AuthenticationError,
+    AuthStatePersistenceError,
+    primary_auth_service,
+)
+from ...services.cloudflare_access_service import (
+    CloudflareAccessError,
+    VerifiedCloudflareIdentity,
+    cloudflare_access_verifier,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -64,7 +74,8 @@ class ManualUnlockStatusResponse(BaseModel):
 
 
 class AuthLoginRequest(BaseModel):
-    # Support both shared-credential and username/password payloads
+    # Shared credential is the initial/local login. Username/password is only
+    # available after an operator explicitly configures a custom password.
     credential: str | None = None
     username: str | None = None
     password: str | None = None
@@ -125,19 +136,19 @@ def _manual_session_expiry(
     default_minutes: int | None = None, token_payload: dict[str, Any] | None = None
 ) -> datetime:
     now = datetime.now(UTC)
-    if token_payload and isinstance(token_payload.get("exp"), (int, float)):
-        try:
-            exp = datetime.fromtimestamp(float(token_payload["exp"]), tz=UTC)
-            if exp > now:
-                return exp
-        except Exception:
-            pass
     minutes = default_minutes or 60
     try:
         minutes = int(minutes)
     except Exception:
         minutes = 60
-    return now + timedelta(minutes=max(1, minutes))
+    local_expiry = now + timedelta(minutes=max(1, minutes))
+    if token_payload and isinstance(token_payload.get("exp"), (int, float)):
+        try:
+            token_expiry = datetime.fromtimestamp(float(token_payload["exp"]), tz=UTC)
+            return min(local_expiry, token_expiry)
+        except (OverflowError, OSError, ValueError):
+            pass
+    return local_expiry
 
 
 def _manual_session_key(seed: str) -> str:
@@ -145,7 +156,14 @@ def _manual_session_key(seed: str) -> str:
     return f"manual-{digest[:16]}"
 
 
-def _store_manual_session(seed: str, expires_at: datetime, principal: str | None) -> dict[str, Any]:
+def _store_manual_session(
+    seed: str,
+    expires_at: datetime,
+    principal: str | None,
+    *,
+    auth_session_id: str | None = None,
+    auth_source: str | None = None,
+) -> dict[str, Any]:
     # Garbage collect expired sessions first
     now = datetime.now(UTC)
     for key in list(_manual_control_sessions.keys()):
@@ -157,6 +175,10 @@ def _store_manual_session(seed: str, expires_at: datetime, principal: str | None
         entry["expires_at"] = expires_at
         if principal:
             entry["principal"] = principal
+        if auth_session_id:
+            entry["auth_session_id"] = auth_session_id
+        if auth_source:
+            entry["auth_source"] = auth_source
         return entry
 
     session_id = _manual_session_key(seed)
@@ -164,6 +186,8 @@ def _store_manual_session(seed: str, expires_at: datetime, principal: str | None
         "session_id": session_id,
         "expires_at": expires_at,
         "principal": principal,
+        "auth_session_id": auth_session_id,
+        "auth_source": auth_source,
     }
     _manual_control_sessions[seed] = entry
     return entry
@@ -176,6 +200,7 @@ def _resolve_manual_session(session_id: str | None) -> dict[str, Any]:
 
     now = datetime.now(UTC)
     matched_entry: dict[str, Any] | None = None
+    matched_seed: str | None = None
     expired: list[str] = []
     for seed, entry in _manual_control_sessions.items():
         expires_at: datetime = entry.get("expires_at", now)
@@ -184,6 +209,7 @@ def _resolve_manual_session(session_id: str | None) -> dict[str, Any]:
             continue
         if entry.get("session_id") == token:
             matched_entry = entry
+            matched_seed = seed
             break
 
     for seed in expired:
@@ -200,6 +226,15 @@ def _resolve_manual_session(session_id: str | None) -> dict[str, Any]:
             return matched_entry
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED, detail="Manual control session invalid or expired"
+        )
+
+    auth_session_id = str(matched_entry.get("auth_session_id") or "").strip()
+    if auth_session_id and not primary_auth_service.is_session_authorized(auth_session_id):
+        if matched_seed is not None:
+            _manual_control_sessions.pop(matched_seed, None)
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="Manual control authentication session ended",
         )
 
     return matched_entry
@@ -278,27 +313,14 @@ def _verify_totp_code(code: str | None) -> tuple[bool, bool]:
     return True, False
 
 
-def _extract_cloudflare_identity(
-    request: Request,
-) -> tuple[str | None, dict[str, Any], str | None]:
+def _extract_cloudflare_assertion(request: Request | WebSocket) -> str | None:
     token = request.headers.get("CF-Access-Jwt-Assertion") or request.headers.get(
         "cf-access-jwt-assertion"
     )
-    if not token:
+    if not token and isinstance(request, Request):
         token = request.cookies.get("CF_Authorization")
-    payload = _decode_jwt_payload(token) if token else {}
-    email = (
-        request.headers.get("CF-Access-Authenticated-User-Email")
-        or request.headers.get("cf-access-authenticated-user-email")
-        or payload.get("email")
-        or payload.get("sub")
-    )
-    if email:
-        try:
-            email = str(email)
-        except Exception:
-            email = None
-    return token, payload, email
+    normalized = str(token or "").strip()
+    return normalized or None
 
 
 def _client_identifier(request: Request) -> str | None:
@@ -317,10 +339,7 @@ def _client_identifier(request: Request) -> str | None:
 
 
 def _client_ip(request: Request) -> str | None:
-    client = request.client
-    if client and getattr(client, "host", None):
-        return str(client.host)
-    return None
+    return client_ip(request)
 
 
 def _extract_bearer_token(auth_header: str | None) -> str | None:
@@ -332,10 +351,79 @@ def _extract_bearer_token(auth_header: str | None) -> str | None:
     return token.strip() or None
 
 
+def _store_bearer_manual_session(
+    bearer_token: str,
+    session: UserSession,
+    timeout_minutes: int,
+) -> dict[str, Any]:
+    auth_session_id = str(getattr(session, "session_id", "") or "").strip()
+    if not auth_session_id:
+        raise AuthenticationError("Bearer authentication session is missing")
+    payload = _decode_jwt_payload(bearer_token)
+    expires_at = min(
+        _manual_session_expiry(timeout_minutes, payload),
+        session.expires_at,
+    )
+    seed = f"bearer:{hashlib.sha256(bearer_token.encode('utf-8')).hexdigest()}"
+    return _store_manual_session(
+        seed,
+        expires_at,
+        session.username,
+        auth_session_id=auth_session_id,
+        auth_source="bearer_token",
+    )
+
+
+async def _store_cloudflare_manual_session(
+    request: Request,
+    assertion: str,
+    identity: VerifiedCloudflareIdentity,
+    timeout_minutes: int,
+) -> dict[str, Any]:
+    auth_result = await primary_auth_service.authenticate_cloudflare(
+        identity.principal,
+        assertion_expires_at=identity.expires_at,
+        client_ip=_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+    )
+    expires_at = min(
+        _manual_session_expiry(timeout_minutes, identity.claims),
+        auth_result.session.expires_at,
+    )
+    seed = f"cloudflare:{hashlib.sha256(assertion.encode('utf-8')).hexdigest()}"
+    return _store_manual_session(
+        seed,
+        expires_at,
+        identity.principal,
+        auth_session_id=auth_result.session.session_id,
+        auth_source="cloudflare_access",
+    )
+
+
+_WEBSOCKET_AUTH_PROTOCOL_PREFIX = "lawnberry.jwt."
+
+
+def _extract_websocket_subprotocol_token(websocket: WebSocket) -> str | None:
+    """Extract a browser WebSocket JWT without placing it in the request URL."""
+    raw_protocols = websocket.headers.get("Sec-WebSocket-Protocol", "")
+    for candidate in raw_protocols.split(","):
+        protocol = candidate.strip()
+        if protocol.startswith(_WEBSOCKET_AUTH_PROTOCOL_PREFIX):
+            token = protocol.removeprefix(_WEBSOCKET_AUTH_PROTOCOL_PREFIX).strip()
+            if token and len(token) <= 16384:
+                return token
+    return None
+
+
 async def _require_session(request: Request) -> UserSession:
     token = _extract_bearer_token(request.headers.get("Authorization"))
     if not token:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    if not primary_auth_service.revocation_store_healthy:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication session state unavailable",
+        )
     session = await primary_auth_service.verify_token(token)
     if not session:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -347,23 +435,18 @@ async def _authorize_websocket(websocket: WebSocket) -> UserSession:
 
     Priority:
     1) Authorization: Bearer <token>
-    2) Query param: access_token/token/auth_token
+    2) Browser WebSocket subprotocol carrying the signed LawnBerry JWT
     3) Cloudflare Access assertion headers (when present)
-    4) Local development (localhost/127.0.0.1) and SIM_MODE
+    4) Explicit SIM_MODE test/development sessions
     """
     # 1) Standard Bearer header
     token = _extract_bearer_token(websocket.headers.get("Authorization"))
 
-    # 2) Query param fallbacks used by browsers that cannot set custom headers in WS
+    # 2) Browser WebSocket API cannot set Authorization headers. A subprotocol
+    # carries the signed token through the upgrade without leaking it into URL
+    # access logs or browser history.
     if not token:
-        try:
-            qp = getattr(websocket, "query_params", None)
-            if qp is not None:
-                getter = getattr(qp, "get", None)
-                if callable(getter):
-                    token = getter("access_token") or getter("token") or getter("auth_token")
-        except Exception:
-            token = None
+        token = _extract_websocket_subprotocol_token(websocket)
 
     if token:
         session = await primary_auth_service.verify_token(token)
@@ -371,42 +454,31 @@ async def _authorize_websocket(websocket: WebSocket) -> UserSession:
             raise HTTPException(status_code=401, detail="Unauthorized")
         return session
 
-    # 3) Cloudflare Access: trust Access assertion when Zero Trust policy already enforced at edge
-    try:
-        cf_assert = websocket.headers.get("CF-Access-Jwt-Assertion") or websocket.headers.get(
-            "cf-access-jwt-assertion"
-        )
-    except Exception:
-        cf_assert = None
+    # 3) Cloudflare Access assertion, verified against the pinned team and app.
+    cf_assert = _extract_cloudflare_assertion(websocket)
     if cf_assert:
-        # Create an operator session bound to the connecting IP as a best-effort identity
-        client = websocket.client
-        client_ip = (
-            (client[0] if isinstance(client, (list, tuple)) else getattr(client, "host", None))
-            if client is not None
-            else None
-        )
-        return UserSession.create_operator_session(
-            client_ip=str(client_ip) if client_ip else None,
+        remote_ip = client_ip(websocket)
+        try:
+            identity = await cloudflare_access_verifier.verify(cf_assert)
+        except CloudflareAccessError as exc:
+            logger.warning("Cloudflare Access WebSocket verification failed: %s", exc)
+            raise HTTPException(status_code=401, detail="Unauthorized") from exc
+        result = await primary_auth_service.authenticate_cloudflare(
+            identity.principal,
+            assertion_expires_at=identity.expires_at,
+            client_ip=remote_ip,
             user_agent=websocket.headers.get("User-Agent"),
         )
+        return result.session
 
-    # 4) Local dev and SIM_MODE safe path
-    client = websocket.client
-    if client is not None:
-        host = (
-            client[0] if isinstance(client, (list, tuple)) else getattr(client, "host", None)
-        ) or ""
-    else:
-        host = websocket.headers.get("host", "")
-    host_lower = str(host).lower()
-    if (
-        host_lower.startswith("127.")
-        or host_lower in {"::1", "localhost", "testserver", "testclient"}
-        or os.getenv("SIM_MODE", "0") == "1"
-    ):
+    # 4) Only explicit simulation mode may create a proofless development
+    # session. Production proxy traffic is loopback by design and must never be
+    # treated as authenticated merely because of its source address.
+    if os.getenv("SIM_MODE", "0") == "1":
+        host = client_ip(websocket)
         session = UserSession.create_operator_session(
-            client_ip=host_lower or None, user_agent=websocket.headers.get("User-Agent")
+            client_ip=str(host) if host else None,
+            user_agent=websocket.headers.get("User-Agent"),
         )
         return session
 
@@ -418,41 +490,8 @@ async def _authorize_websocket(websocket: WebSocket) -> UserSession:
 
 @router.post("/auth/login", response_model=AuthResponse)
 async def auth_login(payload: AuthLoginRequest, request: Request):
-    # 1) Check if user is authenticated via Cloudflare Access (upstream auth)
-    # This allows us to skip the local login screen when already authenticated
-    security_settings = _current_security_settings()
-    if security_settings.security_level == SecurityLevel.TUNNEL_AUTH:
-        cf_token, cf_payload, cf_principal = _extract_cloudflare_identity(request)
-        if cf_token and cf_principal:
-            # User is already authenticated by Cloudflare Access
-            # Create a session for them without requiring local credentials
-            try:
-                # Use Cloudflare tunnel authentication path
-                session = await primary_auth_service.authenticate_tunnel(
-                    {"CF-Access-Jwt-Assertion": cf_token, "CF-Access-Authenticated-User-Email": cf_principal}
-                )
-                # Issue token for the session
-                result = primary_auth_service._issue_token_for_session(session)
-                
-                user = UserOut(
-                    id=session.user_id,
-                    username=session.username,
-                    role=session.security_context.role.value,
-                    created_at=session.created_at,
-                )
-                expires_in = max(0, int((result.expires_at - datetime.now(UTC)).total_seconds()))
-                return AuthResponse(
-                    access_token=result.token,
-                    token=result.token,
-                    expires_in=expires_in,
-                    expires_at=result.expires_at,
-                    user=user,
-                )
-            except Exception as exc:
-                logger.warning(f"Cloudflare Access authentication failed: {exc}")
-                # Fall through to local auth if Cloudflare auth fails
-
-    # 2) Handle local authentication (credential or username/password)
+    # Local authentication only. Cloudflare Access has a separate fail-closed
+    # exchange so an invalid upstream assertion can never downgrade to password.
     credential = payload.credential
     if credential is None and payload.username is not None and payload.password is not None:
         # username/password path
@@ -464,7 +503,8 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
             try:
                 session = await primary_auth_service.authenticate_password(
                     payload.username,
-                    payload.password
+                    payload.password,
+                    client_ip=_client_ip(request),
                 )
                 user = UserOut(
                     id=session.user_id,
@@ -485,20 +525,13 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
             except AuthenticationError as exc:
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
         else:
-            # No custom password - fall back to admin/admin mapping
-            if payload.username == "admin" and payload.password == "admin":
-                credential = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL")
-                if not credential:
-                    raise HTTPException(
-                        status_code=401,
-                        detail="LAWN_BERRY_OPERATOR_CREDENTIAL is required",
-                    )
-            else:
-                # Unsupported username/password combination
-                raise HTTPException(
-                    status_code=401,
-                    detail="Invalid credentials",
-                )
+            # No custom password exists. Never translate a known username and
+            # password pair into the configured operator secret; callers must
+            # submit that secret explicitly through the credential field.
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid credentials",
+            )
 
     client_identifier = _client_identifier(request)
 
@@ -530,10 +563,104 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
     )
 
 
+@router.post("/auth/cloudflare", response_model=AuthResponse)
+async def auth_cloudflare(request: Request):
+    """Exchange a verified Cloudflare Access identity for a LawnBerry JWT."""
+    token = _extract_cloudflare_assertion(request)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Cloudflare Access assertion missing",
+        )
+    try:
+        identity = await cloudflare_access_verifier.verify(token)
+    except CloudflareAccessError as exc:
+        logger.warning("Cloudflare Access exchange failed: %s", exc)
+        unavailable = "not configured" in str(exc) or "keys unavailable" in str(exc)
+        raise HTTPException(
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if unavailable
+                else status.HTTP_401_UNAUTHORIZED
+            ),
+            detail=(
+                "Cloudflare Access verification unavailable"
+                if unavailable
+                else "Cloudflare Access assertion invalid"
+            ),
+        ) from exc
+
+    try:
+        result = await primary_auth_service.authenticate_cloudflare(
+            identity.principal,
+            assertion_expires_at=identity.expires_at,
+            client_ip=_client_ip(request),
+            user_agent=request.headers.get("User-Agent"),
+        )
+    except AuthenticationError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+            headers=exc.headers,
+        ) from exc
+    session = result.session
+    return AuthResponse(
+        access_token=result.token,
+        token=result.token,
+        expires_in=max(0, int((result.expires_at - datetime.now(UTC)).total_seconds())),
+        expires_at=result.expires_at,
+        user=UserOut(
+            id=session.user_id,
+            username=session.username,
+            role=session.security_context.role.value,
+            created_at=session.created_at,
+        ),
+    )
+
+
 @router.post("/auth/refresh", response_model=RefreshResponse)
 async def auth_refresh(request: Request):
     session = await _require_session(request)
-    result = primary_auth_service.refresh_session_token(session)
+    method = getattr(
+        session.security_context.authentication_method,
+        "value",
+        session.security_context.authentication_method,
+    )
+    if method == AuthenticationMethod.CLOUDFLARE_ACCESS.value:
+        assertion = _extract_cloudflare_assertion(request)
+        if not assertion:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Cloudflare Access assertion required for refresh",
+            )
+        try:
+            identity = await cloudflare_access_verifier.verify(assertion)
+            result = primary_auth_service.refresh_session_token(
+                session,
+                cloudflare_principal=identity.principal,
+                cloudflare_expires_at=identity.expires_at,
+            )
+        except CloudflareAccessError as exc:
+            logger.warning("Cloudflare Access refresh failed: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Cloudflare Access refresh authorization invalid",
+            ) from exc
+        except AuthenticationError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=exc.detail,
+                headers=exc.headers,
+            ) from exc
+    else:
+        try:
+            result = primary_auth_service.refresh_session_token(session)
+        except AuthenticationError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=exc.detail,
+                headers=exc.headers,
+            ) from exc
     expires_in = max(0, int((result.expires_at - datetime.now(UTC)).total_seconds()))
     return RefreshResponse(
         access_token=result.token,
@@ -546,7 +673,21 @@ async def auth_refresh(request: Request):
 @router.post("/auth/logout")
 async def auth_logout(request: Request):
     session = await _require_session(request)
-    await primary_auth_service.terminate_session(session.session_id, "user_logout")
+    try:
+        terminated = await primary_auth_service.terminate_session(
+            session.session_id,
+            "user_logout",
+        )
+    except AuthStatePersistenceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to durably revoke authentication session",
+        ) from exc
+    if not terminated:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication session termination was not committed",
+        )
     return {"ok": True}
 
 
@@ -621,11 +762,11 @@ async def manual_unlock_status(request: Request):
             if session:
                 security_settings = _current_security_settings()
                 timeout_minutes = getattr(security_settings, "session_timeout_minutes", 60)
-                payload = _decode_jwt_payload(bearer_token)
-                expires_at = _manual_session_expiry(timeout_minutes, payload)
-                principal = getattr(session, "username", "authenticated_user")
-                seed = f"bearer:{hashlib.sha256(bearer_token.encode('utf-8')).hexdigest()}"
-                session_entry = _store_manual_session(seed, expires_at, principal)
+                session_entry = _store_bearer_manual_session(
+                    bearer_token,
+                    session,
+                    timeout_minutes,
+                )
                 return ManualUnlockStatusResponse(
                     authorized=True,
                     session_id=session_entry["session_id"],
@@ -635,16 +776,33 @@ async def manual_unlock_status(request: Request):
         except Exception as exc:
             logger.warning(f"Unable to restore manual control session from bearer token: {exc}")
 
-    token, payload, principal = _extract_cloudflare_identity(request)
+    token = _extract_cloudflare_assertion(request)
     if not token:
         return ManualUnlockStatusResponse(
             authorized=False,
             reason="manual_control_session_unavailable",
         )
 
+    try:
+        identity = await cloudflare_access_verifier.verify(token)
+    except CloudflareAccessError:
+        return ManualUnlockStatusResponse(
+            authorized=False,
+            reason="cloudflare_access_invalid",
+        )
     timeout_minutes = getattr(_current_security_settings(), "session_timeout_minutes", 60)
-    expires_at = _manual_session_expiry(timeout_minutes, payload)
-    session_entry = _store_manual_session(token, expires_at, principal)
+    try:
+        session_entry = await _store_cloudflare_manual_session(
+            request,
+            token,
+            identity,
+            timeout_minutes,
+        )
+    except AuthenticationError:
+        return ManualUnlockStatusResponse(
+            authorized=False,
+            reason="authentication_session_unavailable",
+        )
     return ManualUnlockStatusResponse(
         authorized=True,
         session_id=session_entry["session_id"],
@@ -665,16 +823,15 @@ async def manual_unlock(request: Request, body: ManualUnlockRequest):
         try:
             session = await primary_auth_service.verify_token(bearer_token)
             if session:
-                # Create manual control session based on existing auth
                 timeout_minutes = getattr(
                     _current_security_settings(), "session_timeout_minutes", 60
                 )
-                expires_at = _manual_session_expiry(timeout_minutes)
-
-                # Use the bearer token as the seed for manual session
-                principal = getattr(session, "username", "authenticated_user")
-                seed = f"bearer:{hashlib.sha256(bearer_token.encode('utf-8')).hexdigest()}"
-                session_entry = _store_manual_session(seed, expires_at, principal)
+                session_entry = _store_bearer_manual_session(
+                    bearer_token,
+                    session,
+                    timeout_minutes,
+                )
+                principal = session_entry.get("principal")
 
                 logger.info(
                     "manual_control.unlock",
@@ -704,16 +861,35 @@ async def manual_unlock(request: Request, body: ManualUnlockRequest):
         else:
             method = "password"
     if method in {"cloudflare", "cloudflare_tunnel_auth", "tunnel"}:
-        token, payload, principal = _extract_cloudflare_identity(request)
+        token = _extract_cloudflare_assertion(request)
         if not token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Cloudflare Access token missing",
             )
 
+        try:
+            identity = await cloudflare_access_verifier.verify(token)
+        except CloudflareAccessError as exc:
+            logger.warning("Cloudflare manual unlock verification failed: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Cloudflare Access assertion invalid",
+            ) from exc
         timeout_minutes = getattr(_current_security_settings(), "session_timeout_minutes", 60)
-        expires_at = _manual_session_expiry(timeout_minutes, payload)
-        session_entry = _store_manual_session(token, expires_at, principal)
+        try:
+            session_entry = await _store_cloudflare_manual_session(
+                request,
+                token,
+                identity,
+                timeout_minutes,
+            )
+        except AuthenticationError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=exc.detail,
+                headers=exc.headers,
+            ) from exc
         return ManualUnlockResponse(
             authorized=True,
             session_id=session_entry["session_id"],

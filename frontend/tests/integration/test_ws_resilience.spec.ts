@@ -13,7 +13,7 @@ class MockWebSocket {
   onclose: (() => void) | null = null
   onerror: ((event: Event) => void) | null = null
 
-  constructor(public url: string) {
+  constructor(public url: string, public protocols?: string | string[]) {
     MockWebSocket.instances.push(this)
   }
 
@@ -38,6 +38,7 @@ describe('WebSocketService resilience', () => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
     MockWebSocket.instances = []
+    localStorage.clear()
   })
 
   it('reconnects with capped backoff and resubscribes through the native WebSocket path', async () => {
@@ -75,5 +76,21 @@ describe('WebSocketService resilience', () => {
       { type: 'subscribe', topic: 'telemetry/updates' },
       { type: 'set_cadence', cadence_hz: 5 },
     ])
+  })
+
+  it('carries the JWT in a WebSocket subprotocol instead of the URL', async () => {
+    localStorage.setItem('auth_token', 'signed.jwt.token')
+    vi.stubGlobal('WebSocket', MockWebSocket)
+
+    const { WebSocketService } = await vi.importActual<typeof import('../../src/services/websocket')>(
+      '../../src/services/websocket'
+    )
+    const service = new WebSocketService('ws://localhost/api/v2/ws/telemetry')
+    void service.connect()
+
+    const socket = MockWebSocket.instances[0]
+    expect(socket.url).toBe('ws://localhost/api/v2/ws/telemetry')
+    expect(socket.url).not.toContain('signed.jwt.token')
+    expect(socket.protocols).toEqual(['telemetry.v1', 'lawnberry.jwt.signed.jwt.token'])
   })
 })

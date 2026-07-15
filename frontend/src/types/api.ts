@@ -33,7 +33,7 @@ export interface paths {
         /**
          * Auth Login
          * @deprecated
-         * @description Start login flow (MFA compatible).
+         * @description Start the deprecated shared-credential login flow.
          */
         post: operations["auth_login_api_v1_auth_login_post"];
         delete?: never;
@@ -126,7 +126,11 @@ export interface paths {
         put?: never;
         /**
          * Run Uploaded Inference
-         * @description Run AI inference against an uploaded image.
+         * @description Run uploaded-image inference in the embedded SIM/CI runtime.
+         *
+         *     Hardware mode keeps inference in the standalone camera owner, so this
+         *     diagnostic route returns 503 instead of starting a competing backend
+         *     inference path. Read `/api/v2/ai/perception/latest` for hardware results.
          */
         post: operations["run_uploaded_inference_api_v2_ai_inference_post"];
         delete?: never;
@@ -146,7 +150,11 @@ export interface paths {
         put?: never;
         /**
          * Run Latest Frame Inference
-         * @description Run AI inference against the latest camera frame.
+         * @description Run latest-frame inference in the embedded SIM/CI runtime.
+         *
+         *     Hardware mode performs automatic sampled inference in the standalone
+         *     camera owner, so this diagnostic route returns 503. Read
+         *     `/api/v2/ai/perception/latest` for the latest hardware result.
          */
         post: operations["run_latest_frame_inference_api_v2_ai_inference_latest_post"];
         delete?: never;
@@ -204,11 +212,31 @@ export interface paths {
         };
         /**
          * Get Ai Status
-         * @description Return AI runtime and model status.
+         * @description Return AI runtime, model readiness, and the process that owns inference.
          */
         get: operations["get_ai_status_api_v2_ai_status_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/auth/cloudflare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Auth Cloudflare
+         * @description Exchange a verified Cloudflare Access identity for a LawnBerry JWT.
+         */
+        post: operations["auth_cloudflare_api_v2_auth_cloudflare_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4627,6 +4655,26 @@ export interface operations {
             };
         };
     };
+    auth_cloudflare_api_v2_auth_cloudflare_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["backend__src__api__routers__auth__AuthResponse"];
+                };
+            };
+        };
+    };
     configure_password_api_v2_auth_configure_password_post: {
         parameters: {
             query?: never;
@@ -5272,7 +5320,6 @@ export interface operations {
         parameters: {
             query?: {
                 client?: string | null;
-                session_id?: string | null;
                 ts?: string | null;
             };
             header?: never;

@@ -98,19 +98,6 @@ def _require_bearer_auth(request: Request) -> None:
     if token:
         return
 
-    host = request.headers.get("host") or ""
-    if not host:
-        client = request.client
-        host = client.host if client is not None else ""
-    host_lower = str(host).split(":", 1)[0].lower()
-    if host_lower.startswith("127.") or host_lower in {
-        "::1",
-        "localhost",
-        "testserver",
-        "testclient",
-    }:
-        return
-
     logger.warning(
         "Rejected WebSocket handshake without bearer token",
         extra={"correlation_id": request.headers.get("X-Correlation-ID")},

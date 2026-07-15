@@ -78,13 +78,19 @@ class MissionService:
         navigation_service: NavigationService | None = None,
         websocket_hub: WebSocketHub | None = None,
         mission_repository=None,
+        power_manager=None,
     ):
         self.nav_service = navigation_service  # type: ignore[assignment]
         self._websocket_hub = websocket_hub
         self._mission_repo = mission_repository
+        self._power_manager = power_manager
         self.missions: dict[str, Mission] = {}
         self.mission_statuses: dict[str, MissionStatus] = {}
         self.mission_tasks: dict[str, asyncio.Task] = {}
+        # One mower has one canonical lifecycle transition at a time. Holding
+        # this lock across admission awaits prevents concurrent starts from
+        # both reaching navigation before either publishes RUNNING state.
+        self._lifecycle_lock = asyncio.Lock()
         self._mission_terminal_events: dict[str, asyncio.Event] = {}
         self._background_tasks: set[asyncio.Task[None]] = set()
         # Planning intents for lazy waypoint generation: mission_id → intent dict
@@ -138,7 +144,11 @@ class MissionService:
         clamped_index = self._clamp_waypoint_index(mission, status.current_waypoint_index)
         status.current_waypoint_index = clamped_index
         status.total_waypoints = len(mission.waypoints)
-        status.completion_percentage = self._calculate_completion_percentage(mission, clamped_index)
+        status.completion_percentage = (
+            100.0
+            if status.status == MissionLifecycleStatus.COMPLETED
+            else self._calculate_completion_percentage(mission, clamped_index)
+        )
 
         if self._mission_repo is not None:
             self._mission_repo.save_execution_state(
@@ -509,6 +519,24 @@ class MissionService:
         pattern: str | None = None,
         pattern_params: dict | None = None,
     ) -> Mission:
+        async with self._lifecycle_lock:
+            return await self._create_mission_unlocked(
+                name,
+                waypoints,
+                zone_id=zone_id,
+                pattern=pattern,
+                pattern_params=pattern_params,
+            )
+
+    async def _create_mission_unlocked(
+        self,
+        name: str,
+        waypoints: list[MissionWaypoint] | None = None,
+        *,
+        zone_id: str | None = None,
+        pattern: str | None = None,
+        pattern_params: dict | None = None,
+    ) -> Mission:
         clean_name = (name or "").strip()
         if not clean_name:
             raise MissionValidationError("Mission name cannot be empty.")
@@ -557,6 +585,10 @@ class MissionService:
 
     async def start_return_home(self) -> Mission:
         """Atomically create and start the canonical blade-off return-home mission."""
+        async with self._lifecycle_lock:
+            return await self._start_return_home_unlocked()
+
+    async def _start_return_home_unlocked(self) -> Mission:
         if any(
             status.status in {MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED}
             for status in self.mission_statuses.values()
@@ -569,17 +601,65 @@ class MissionService:
         except ValueError as exc:
             raise MissionValidationError(str(exc)) from exc
 
-        mission = await self.create_mission("Return to home", waypoints)
+        mission = await self._create_mission_unlocked("Return to home", waypoints)
         try:
-            await self.start_mission(mission.id, blade_off_diagnostic=True)
+            await self._start_mission_unlocked(mission.id, blade_off_diagnostic=True)
         except Exception:
             # Failed admission must not leave an idle mission that can be mistaken
             # for an accepted return or repeatedly retried by a scheduler.
-            await self.delete_mission(mission.id)
+            await self._delete_mission_unlocked(mission.id)
             raise
         return mission
 
+    async def _wake_power_for_motion(self) -> None:
+        """Establish camera/AI power gates before navigation can dispatch motion."""
+        from .power_manager import get_power_manager
+
+        # Unit/CI mission services do not own runtime power state unless a test
+        # injects it explicitly. Hardware always resolves the initialized
+        # process singleton.
+        if os.getenv("SIM_MODE", "0") == "1" and self._power_manager is None:
+            return
+        manager = self._power_manager or get_power_manager()
+        if manager is None:
+            if os.getenv("SIM_MODE", "0") != "1":
+                raise MissionStateError(
+                    "Cannot start mission: POWER_MANAGER_UNAVAILABLE"
+                )
+            return
+        try:
+            await manager.wake_for_mission()
+        except Exception as exc:
+            logger.exception("Mission power wake failed closed")
+            raise MissionStateError(
+                "Cannot start mission: CAMERA_AI_POWER_WAKE_FAILED"
+            ) from exc
+
+    def _assert_no_other_active_mission(self, mission_id: str) -> None:
+        for other_id, other_status in self.mission_statuses.items():
+            if other_id != mission_id and other_status.status in {
+                MissionLifecycleStatus.RUNNING,
+                MissionLifecycleStatus.PAUSED,
+            }:
+                raise MissionConflictError(
+                    f"Mission {other_id} is already active; only one mission may own motion."
+                )
+
     async def start_mission(
+        self,
+        mission_id: str,
+        *,
+        blade_off_diagnostic: bool = False,
+        reuse_heading_alignment: bool = False,
+    ):
+        async with self._lifecycle_lock:
+            return await self._start_mission_unlocked(
+                mission_id,
+                blade_off_diagnostic=blade_off_diagnostic,
+                reuse_heading_alignment=reuse_heading_alignment,
+            )
+
+    async def _start_mission_unlocked(
         self,
         mission_id: str,
         *,
@@ -595,6 +675,7 @@ class MissionService:
 
         mission = self._require_mission(mission_id)
         status = self._require_status(mission_id)
+        self._assert_no_other_active_mission(mission_id)
         if blade_off_diagnostic and any(bool(wp.blade_on) for wp in mission.waypoints):
             raise MissionStateError(
                 "Blade-off diagnostic mode requires every waypoint to have blade_on=false."
@@ -617,8 +698,11 @@ class MissionService:
                 )
 
         existing_task = self.mission_tasks.get(mission_id)
-        if existing_task and not existing_task.done():
-            raise MissionConflictError("Mission is already active.")
+        if existing_task is not None:
+            if not existing_task.done():
+                raise MissionConflictError("Mission is already active.")
+            self._finalize_mission_task_unlocked(mission_id, existing_task)
+            status = self._require_status(mission_id)
         if status.status == MissionLifecycleStatus.PAUSED:
             raise MissionStateError("Mission is paused. Use resume instead of start.")
 
@@ -693,6 +777,10 @@ class MissionService:
                     "Autonomy readiness failed: PREFLIGHT_EVALUATION_FAILED"
                 ) from exc
 
+        # Capture and camera-owner inference must be acknowledged before the
+        # navigation task exists and can reach MotorCommandGateway.
+        await self._wake_power_for_motion()
+
         self._mission_terminal_events.setdefault(mission_id, asyncio.Event()).clear()
         self.mission_statuses[mission_id] = self._build_status(
             mission.id,
@@ -757,65 +845,98 @@ class MissionService:
 
     def _mission_completed_callback(self, mission_id: str):
         def callback(task: asyncio.Task):
-            try:
-                task.result()
-                status = self.mission_statuses.get(mission_id)
-                if status and status.status == MissionLifecycleStatus.RUNNING:
-                    status.status = MissionLifecycleStatus.COMPLETED
-                    status.current_waypoint_index = (
-                        max(0, status.total_waypoints - 1) if status.total_waypoints else 0
-                    )
-                    status.completion_percentage = 100
-                    status.detail = None
-                    self._persist_mission_status(mission_id)
-                    self._signal_terminal_state(mission_id)
-                    asyncio.ensure_future(
-                        self._broadcast_status(mission_id, "Mission completed")
-                    )
-            except asyncio.CancelledError:
-                status = self.mission_statuses.get(mission_id)
-                if status is None or status.status != MissionLifecycleStatus.RUNNING:
-                    return  # already handled by abort_mission or another terminal path
-                status.status = MissionLifecycleStatus.ABORTED
-                status.detail = "Mission execution cancelled"
-                self._persist_mission_status(mission_id)
-                self._signal_terminal_state(mission_id)
-                asyncio.ensure_future(
-                    self._broadcast_status(mission_id, getattr(status, "detail", "") or "")
-                )
-            except Exception as e:
-                status = self.mission_statuses.get(mission_id)
-                if status is None or status.status != MissionLifecycleStatus.RUNNING:
-                    return  # already handled
-                status.status = MissionLifecycleStatus.FAILED
-                status.detail = str(e)
-                self._persist_mission_status(mission_id)
-                self._signal_terminal_state(mission_id)
-                asyncio.ensure_future(
-                    self._broadcast_status(mission_id, getattr(status, "detail", "") or "")
-                )
-                from .energy_service import EnergyReturnRequired
-
-                mission = self.missions.get(mission_id)
-                if isinstance(e, EnergyReturnRequired) and mission is not None:
-                    is_return = str(mission.name).strip().lower() == "return to home"
-                    if not is_return:
-                        self._spawn_background(
-                            self._start_energy_return_after_terminal(mission_id),
-                            name=f"energy-return:{mission_id}",
-                        )
-                logger.exception("Mission %s failed", mission_id)
-            finally:
-                self.mission_tasks.pop(mission_id, None)
+            self._spawn_background(
+                self._finalize_mission_task(mission_id, task),
+                name=f"mission-finalize:{mission_id}",
+            )
 
         return callback
 
+    async def _finalize_mission_task(
+        self,
+        mission_id: str,
+        task: asyncio.Task,
+    ) -> None:
+        async with self._lifecycle_lock:
+            self._finalize_mission_task_unlocked(mission_id, task)
+
+    def _finalize_mission_task_unlocked(
+        self,
+        mission_id: str,
+        task: asyncio.Task,
+    ) -> None:
+        """Publish terminal truth for exactly the task still owned by this mission."""
+        cancelled = task.cancelled()
+        failure: Exception | None = None
+        if not cancelled:
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                cancelled = True
+            except Exception as exc:
+                failure = exc
+
+        if self.mission_tasks.get(mission_id) is not task:
+            return
+
+        status = self.mission_statuses.get(mission_id)
+        if status is None or status.status not in {
+            MissionLifecycleStatus.RUNNING,
+            MissionLifecycleStatus.PAUSED,
+        }:
+            self.mission_tasks.pop(mission_id, None)
+            return
+
+        detail = ""
+        if cancelled:
+            status.status = MissionLifecycleStatus.ABORTED
+            status.detail = "Mission execution cancelled"
+            detail = status.detail
+        elif failure is not None:
+            status.status = MissionLifecycleStatus.FAILED
+            status.detail = str(failure)
+            detail = status.detail
+            from .energy_service import EnergyReturnRequired
+
+            mission = self.missions.get(mission_id)
+            if isinstance(failure, EnergyReturnRequired) and mission is not None:
+                is_return = str(mission.name).strip().lower() == "return to home"
+                if not is_return:
+                    self._spawn_background(
+                        self._start_energy_return_after_terminal(mission_id),
+                        name=f"energy-return:{mission_id}",
+                    )
+            logger.error(
+                "Mission %s failed",
+                mission_id,
+                exc_info=(type(failure), failure, failure.__traceback__),
+            )
+        else:
+            status.status = MissionLifecycleStatus.COMPLETED
+            status.current_waypoint_index = (
+                max(0, status.total_waypoints - 1) if status.total_waypoints else 0
+            )
+            status.completion_percentage = 100
+            status.detail = None
+            detail = "Mission completed"
+
+        self._persist_mission_status(mission_id)
+        self._signal_terminal_state(mission_id)
+        self._queue_status_broadcast(mission_id, detail)
+        if self.mission_tasks.get(mission_id) is task:
+            self.mission_tasks.pop(mission_id, None)
+
     async def pause_mission(self, mission_id: str):
+        async with self._lifecycle_lock:
+            return await self._pause_mission_unlocked(mission_id)
+
+    async def _pause_mission_unlocked(self, mission_id: str):
         status = self._require_status(mission_id)
         if status.status != MissionLifecycleStatus.RUNNING:
             raise MissionStateError("Mission is not running.")
         if mission_id not in self.mission_tasks or self.mission_tasks[mission_id].done():
             raise MissionConflictError("Mission execution task is not active.")
+        task = self.mission_tasks[mission_id]
 
         stop_confirmed = False
         delay = 0.1
@@ -847,6 +968,10 @@ class MissionService:
             await self._broadcast_status(mission_id, status.detail)
             return await self.get_mission_status(mission_id)
 
+        if task.done():
+            self._finalize_mission_task_unlocked(mission_id, task)
+            return await self.get_mission_status(mission_id)
+
         status.status = MissionLifecycleStatus.PAUSED
         status.detail = None
         status.current_waypoint_index = self._clamp_waypoint_index(
@@ -857,6 +982,9 @@ class MissionService:
         self._persist_mission_status(mission_id)
         await self._broadcast_status(mission_id, "Mission paused")
         await self._broadcast_diagnostics(mission_id)
+        if task.done():
+            self._finalize_mission_task_unlocked(mission_id, task)
+            return await self.get_mission_status(mission_id)
         from ..observability.events import MissionStateChanged
         self._emit_event(MissionStateChanged(
             run_id=self._obs_run_id,
@@ -868,6 +996,10 @@ class MissionService:
         return await self.get_mission_status(mission_id)
 
     async def resume_mission(self, mission_id: str):
+        async with self._lifecycle_lock:
+            return await self._resume_mission_unlocked(mission_id)
+
+    async def _resume_mission_unlocked(self, mission_id: str):
         import os
 
         from .robohat_service import get_robohat_service
@@ -889,6 +1021,7 @@ class MissionService:
 
         mission = self._require_mission(mission_id)
         status = self._require_status(mission_id)
+        self._assert_no_other_active_mission(mission_id)
         if status.status != MissionLifecycleStatus.PAUSED:
             raise MissionStateError("Mission is not paused.")
 
@@ -898,7 +1031,15 @@ class MissionService:
             require_boundary=self._live_autonomy_requires_boundary(),
         )
 
+        await self._wake_power_for_motion()
+
         active_task = self.mission_tasks.get(mission_id)
+        if active_task is not None and active_task.done():
+            self._finalize_mission_task_unlocked(mission_id, active_task)
+            status = self._require_status(mission_id)
+            if status.status != MissionLifecycleStatus.PAUSED:
+                raise MissionStateError("Mission execution ended before resume completed.")
+            active_task = None
         if active_task is None or active_task.done():
             task = asyncio.create_task(self.nav_service.execute_mission(mission, self))
             self.mission_tasks[mission_id] = task
@@ -928,6 +1069,10 @@ class MissionService:
         return await self.get_mission_status(mission_id)
 
     async def abort_mission(self, mission_id: str):
+        async with self._lifecycle_lock:
+            return await self._abort_mission_unlocked(mission_id)
+
+    async def _abort_mission_unlocked(self, mission_id: str):
         self._require_mission(mission_id)
         status = self._require_status(mission_id)
         final_status = MissionLifecycleStatus.ABORTED
@@ -1042,6 +1187,20 @@ class MissionService:
         name: str | None = None,
         waypoints: list[MissionWaypoint] | None = None,
     ) -> Mission:
+        async with self._lifecycle_lock:
+            return await self._update_mission_unlocked(
+                mission_id,
+                name=name,
+                waypoints=waypoints,
+            )
+
+    async def _update_mission_unlocked(
+        self,
+        mission_id: str,
+        *,
+        name: str | None = None,
+        waypoints: list[MissionWaypoint] | None = None,
+    ) -> Mission:
         mission = self._require_mission(mission_id)
         status = self._require_status(mission_id)
         if status.status in (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED):
@@ -1081,6 +1240,10 @@ class MissionService:
         where each skipped item is {"id": str, "name": str, "reason": str}.
         Running and paused missions are skipped (not deleted); all others are deleted.
         """
+        async with self._lifecycle_lock:
+            return await self._delete_all_missions_unlocked()
+
+    async def _delete_all_missions_unlocked(self) -> dict:
         to_delete: list[str] = []
         skipped: list[dict] = []
         for mid, st in list(self.mission_statuses.items()):
@@ -1124,6 +1287,10 @@ class MissionService:
         return {"deleted": len(to_delete), "skipped": skipped}
 
     async def delete_mission(self, mission_id: str) -> None:
+        async with self._lifecycle_lock:
+            await self._delete_mission_unlocked(mission_id)
+
+    async def _delete_mission_unlocked(self, mission_id: str) -> None:
         self._require_mission(mission_id)
         status = self._require_status(mission_id)
         if status.status in (MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED):

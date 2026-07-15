@@ -1,6 +1,10 @@
 import axios from 'axios'
-import type { AxiosInstance } from 'axios'
+import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios'
 import type { AuthResponse, RefreshResponse, LoginCredentials, User } from '@/types/auth'
+import {
+  clearAuthenticatedSession,
+  refreshAuthenticatedSession,
+} from '@/services/authSessionCoordinator'
 
 const CLIENT_ID_STORAGE_KEY = 'lawnberry-client-id'
 const CLIENT_ID_GLOBAL_KEY = '__LAWN_CLIENT_ID__'
@@ -40,6 +44,13 @@ const FALLBACK_API_BASE =
     ? (import.meta as any).env.VITE_API_FALLBACK_BASE
     : '/api'
 const clientId = getOrCreateClientId()
+type RetriableRequest = InternalAxiosRequestConfig & { _authRetry?: boolean }
+
+export function isAuthExchangeRequest(url?: string): boolean {
+  if (!url) return false
+  const pathname = new URL(url, 'http://lawnberry.local').pathname
+  return /\/auth\/(login|cloudflare|refresh|logout)$/.test(pathname)
+}
 
 // Create axios instance with base configuration
 const apiClient: AxiosInstance = axios.create({
@@ -65,24 +76,29 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      // Token expired, try to refresh
-      try {
-        const response = await authApi.refresh()
-        localStorage.setItem('auth_token', response.access_token)
+    if (error.response?.status !== 401) throw error
 
-        // Retry original request
-        const originalRequest = error.config
-        originalRequest.headers.Authorization = `Bearer ${response.access_token}`
-        return apiClient(originalRequest)
-      } catch (refreshError) {
-        // Refresh failed, redirect to login
-        localStorage.removeItem('auth_token')
-        window.location.href = '/login'
-        throw refreshError
-      }
+    const originalRequest = error.config as RetriableRequest | undefined
+    const currentToken = localStorage.getItem('auth_token')
+    if (
+      !originalRequest
+      || !currentToken
+      || originalRequest._authRetry
+      || isAuthExchangeRequest(originalRequest.url)
+    ) {
+      throw error
     }
-    throw error
+
+    originalRequest._authRetry = true
+    try {
+      const refreshedToken = await refreshAuthenticatedSession()
+      if (!refreshedToken) throw error
+      originalRequest.headers.Authorization = `Bearer ${refreshedToken}`
+      return apiClient(originalRequest)
+    } catch (refreshError) {
+      clearAuthenticatedSession()
+      throw refreshError
+    }
   }
 )
 
@@ -102,6 +118,11 @@ function shouldAttemptFallback(error: any): boolean {
 
 // Auth API endpoints
 export const authApi = {
+  bootstrapCloudflare: async (): Promise<AuthResponse> => {
+    const response = await apiClient.post('/auth/cloudflare')
+    return response.data
+  },
+
   login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
     try {
       const response = await apiClient.post('/auth/login', credentials)

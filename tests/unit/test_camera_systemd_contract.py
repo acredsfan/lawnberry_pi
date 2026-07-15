@@ -23,11 +23,23 @@ def test_camera_unit_uses_canonical_pi_paths_env_and_shared_socket():
     assert "/apps/lawnberry-pi" not in unit
 
     backend_unit = Path("systemd/lawnberry-backend.service").read_text(encoding="utf-8")
+    assert "After=network-online.target lawnberry-camera.service" in backend_unit
+    assert "Wants=network-online.target lawnberry-camera.service" in backend_unit
+    assert "PartOf=lawnberry-backend.service" in unit
     assert (
         "ExecStart=/usr/bin/env SIM_MODE=0 "
         "LAWNBERRY_CAMERA_SOCKET=/run/lawnberry/camera.sock "
         "/home/pi/lawnberry/.venv/bin/uvicorn"
     ) in backend_unit
+
+
+def test_frontend_unit_uses_the_canonical_workspace_tree():
+    unit = Path("systemd/lawnberry-frontend.service").read_text(encoding="utf-8")
+
+    assert "WorkingDirectory=/home/pi/lawnberry/frontend" in unit
+    assert "ExecStart=/usr/bin/node /home/pi/lawnberry/frontend/server.mjs" in unit
+    assert "ReadWritePaths=/home/pi/lawnberry/frontend" in unit
+    assert "/apps/lawnberry-pi" not in unit
 
 
 def test_live_camera_runtime_imports_client_without_embedded_owner():

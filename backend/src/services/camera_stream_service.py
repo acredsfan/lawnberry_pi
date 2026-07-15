@@ -83,7 +83,9 @@ class CameraStreamService:
     """
 
     def __init__(self, sim_mode: bool = False):
-        self.sim_mode = sim_mode or os.getenv("SIM_MODE", "0") == "1"
+        self.requested_sim_mode = sim_mode or os.getenv("SIM_MODE", "0") == "1"
+        self.sim_mode = self.requested_sim_mode
+        self.hardware_fallback_active = False
         self.stream = CameraStream()
         self.clients: set[asyncio.StreamWriter] = set()
         configured_socket = os.getenv("LAWNBERRY_CAMERA_SOCKET")
@@ -109,7 +111,14 @@ class CameraStreamService:
         # single latest-frame consumer; no task is created per frame.
         self._ai_processor: AIFrameProcessor | None = None
         self._ai_inference_task: asyncio.Task[InferenceResult | None] | None = None
+        self._ai_inference_monitor_task: asyncio.Task[None] | None = None
         self._latest_ai_result: InferenceResult | None = None
+        self.ai_model_loaded = False
+        self.ai_runtime_ready = False
+        self.ai_runtime_error: str | None = "AI runtime has not been initialized"
+        self.ai_model_sha256: str | None = None
+        self._ai_runtime_max_result_age_seconds = 5.0
+        self._last_successful_ai_monotonic: float | None = None
         self._last_ai_inference_monotonic: float | None = None
         self._last_ai_warning_monotonic = float("-inf")
         self._monotonic: Callable[[], float] = time.monotonic
@@ -120,10 +129,10 @@ class CameraStreamService:
         self._ai_inference_fps = max(0.1, min(ai_fps, 5.0))
         self._ai_inference_interval_seconds = 1.0 / self._ai_inference_fps
         try:
-            ai_timeout = float(os.getenv("AI_CAMERA_INFERENCE_TIMEOUT_SECONDS", "0.5"))
+            ai_timeout = float(os.getenv("AI_CAMERA_INFERENCE_TIMEOUT_SECONDS", "3.0"))
         except (TypeError, ValueError):
-            ai_timeout = 0.5
-        self._ai_inference_timeout_seconds = max(0.05, min(ai_timeout, 5.0))
+            ai_timeout = 3.0
+        self._ai_inference_timeout_seconds = max(0.05, min(ai_timeout, 10.0))
 
         # IPC server
         self.ipc_server: asyncio.Server | None = None
@@ -145,6 +154,7 @@ class CameraStreamService:
             timeout_raw = 0.25
         self._client_drain_timeout = max(0.05, min(timeout_raw, 5.0))
         self._enqueue_timeout = 1.0
+        self._last_activity_monotonic: float | None = None
 
     async def initialize(self) -> bool:
         """Initialize camera service and IPC."""
@@ -159,8 +169,17 @@ class CameraStreamService:
             if not self.sim_mode:
                 success = await self._initialize_camera()
                 if not success:
-                    logger.warning("Camera initialization failed; enabling simulation fallback")
+                    logger.warning(
+                        "Camera initialization failed; enabling visible simulation fallback "
+                        "with perception disabled"
+                    )
                     self.sim_mode = True
+                    self.hardware_fallback_active = True
+                    self.stream.ai_processing_enabled = False
+                    self.set_ai_model_status(
+                        loaded=False,
+                        error="Camera hardware unavailable; fallback frames cannot produce perception",
+                    )
                     self.stream.capabilities.sensor_type = "Simulated Camera"
 
             # Set up IPC socket
@@ -210,8 +229,9 @@ class CameraStreamService:
                     self.camera = Picamera2()
 
                     # Configure camera.
-                    # BGR888 delivers data in OpenCV-native BGR byte order so no
-                    # colour-space conversion is needed before cv2.imencode.
+                    # Picamera2 names this stream format BGR888, but
+                    # capture_array("main") exposes the bytes in RGB channel
+                    # order. The encode path must therefore declare RGB.
                     config = self.camera.create_video_configuration(
                         main={
                             "format": "BGR888",
@@ -353,8 +373,9 @@ class CameraStreamService:
                 self._handle_client_connection, path=self.socket_path
             )
 
-            # Set socket permissions
-            os.chmod(self.socket_path, 0o666)
+            # Backend and camera owner both run as the dedicated ``pi`` user.
+            # Do not let unrelated local users stop capture or disable AI.
+            os.chmod(self.socket_path, 0o600)
 
             logger.info(f"IPC server listening on {self.socket_path}")
 
@@ -384,6 +405,10 @@ class CameraStreamService:
                     if message.get("command") == "unsubscribe_frames":
                         self._frame_clients.discard(writer)
                     response = await self._handle_client_message(message)
+                    request_id = message.get("request_id")
+                    if request_id is not None:
+                        response["request_id"] = request_id
+                        response["command"] = message.get("command")
 
                     # Send response
                     response_data = json.dumps(response).encode() + b"\n"
@@ -429,7 +454,13 @@ class CameraStreamService:
             status_payload.update(
                 {
                     "sim_mode": self.sim_mode,
+                    "requested_sim_mode": self.requested_sim_mode,
+                    "hardware_fallback_active": self.hardware_fallback_active,
                     "hardware_available": self.hardware_available,
+                    "ai_model_loaded": self.ai_model_loaded,
+                    "ai_runtime_ready": self.is_ai_runtime_ready(),
+                    "ai_runtime_error": self.ai_runtime_error,
+                    "ai_model_sha256": self.ai_model_sha256,
                 }
             )
             return {
@@ -447,9 +478,11 @@ class CameraStreamService:
         elif command == "get_perception":
             return {
                 "status": "success",
-                "data": self._latest_ai_result.model_dump(mode="json")
-                if self._latest_ai_result is not None
-                else None,
+                "data": (
+                    self._latest_ai_result.model_dump(mode="json")
+                    if self._perception_source_usable() and self._latest_ai_result is not None
+                    else None
+                ),
             }
 
         elif command == "set_ai_enabled":
@@ -489,6 +522,7 @@ class CameraStreamService:
 
     async def start_streaming(self) -> bool:
         """Start camera streaming."""
+        self.record_activity()
         try:
             if (not self.sim_mode) and (not self.hardware_available):
                 logger.warning(
@@ -553,8 +587,13 @@ class CameraStreamService:
 
         self.stream.is_active = False
         self.stream.mode = CameraMode.OFFLINE
+        self.set_ai_runtime_operational(
+            False,
+            error="Camera streaming is stopped; automatic inference is unavailable",
+        )
 
         logger.info("Camera streaming stopped")
+        self._last_activity_monotonic = None
 
     def _capture_frames_thread(self):
         """Camera capture thread (runs in separate thread)."""
@@ -960,15 +999,20 @@ class CameraStreamService:
             logger.error(f"Single frame processing error: {e}")
 
     async def _process_frame_for_ai(self, frame: CameraFrame):
-        """Run bounded inference for this exact frame when the cadence is due."""
+        """Schedule bounded exact-frame inference without delaying frame delivery."""
         frame.processed_for_ai = False
         frame.ai_annotations = []
 
         processor = self._ai_processor
-        if not self.stream.ai_processing_enabled or processor is None:
+        if (
+            not self.stream.ai_processing_enabled
+            or processor is None
+            or not self._inference_source_usable()
+        ):
             return
-        # A timed-out to_thread worker cannot be force-cancelled. Keep its
-        # shielded task tracked and skip new samples until it really finishes.
+        # Keep exactly one off-loop inference alive. The monitor owns the
+        # deadline and result validation; this frame-consumer returns
+        # immediately so MJPEG/control delivery is independent of DNN latency.
         if self._ai_inference_task is not None:
             return
 
@@ -996,39 +1040,75 @@ class CameraStreamService:
             name=f"camera-ai-{frame.metadata.frame_id}",
         )
         self._ai_inference_task = inference_task
+        self._ai_inference_monitor_task = asyncio.create_task(
+            self._monitor_ai_inference(inference_task, frame),
+            name=f"camera-ai-monitor-{frame.metadata.frame_id}",
+        )
+
+    async def _monitor_ai_inference(
+        self,
+        inference_task: asyncio.Task[InferenceResult | None],
+        frame: CameraFrame,
+    ) -> None:
+        """Accept one timely exact-frame result and bound an overrun single flight."""
         try:
             result = await asyncio.wait_for(
                 asyncio.shield(inference_task),
                 timeout=self._ai_inference_timeout_seconds,
             )
         except TimeoutError:
+            self.set_ai_runtime_operational(
+                False,
+                error=(
+                    "Automatic AI inference exceeded the bounded "
+                    f"{self._ai_inference_timeout_seconds:.3f}s deadline"
+                ),
+            )
             self._warn_ai_processing(
                 "AI processing timed out after %.3fs for frame %s",
                 self._ai_inference_timeout_seconds,
                 frame.metadata.frame_id,
             )
-            inference_task.add_done_callback(self._discard_late_ai_result)
+            # A running to_thread worker cannot be force-cancelled. Retain this
+            # single flight until it exits, but discard its over-deadline result.
+            try:
+                await inference_task
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._warn_ai_processing("Timed-out AI processing later failed: %s", exc)
             return
         except asyncio.CancelledError:
             inference_task.cancel()
-            if self._ai_inference_task is inference_task:
-                self._ai_inference_task = None
             raise
         except Exception as exc:
-            if self._ai_inference_task is inference_task:
-                self._ai_inference_task = None
+            self.set_ai_runtime_operational(
+                False,
+                error=f"Automatic AI inference failed: {exc}",
+            )
             self._warn_ai_processing("AI processing error: %s", exc)
             return
-        if self._ai_inference_task is inference_task:
-            self._ai_inference_task = None
+        finally:
+            if self._ai_inference_task is inference_task:
+                self._ai_inference_task = None
+            if self._ai_inference_monitor_task is asyncio.current_task():
+                self._ai_inference_monitor_task = None
 
         if result is None:
+            self.set_ai_runtime_operational(
+                False,
+                error="Automatic AI inference returned no result",
+            )
             return
-        if not self.stream.ai_processing_enabled:
-            # PowerManager may disable inference while an off-loop worker is
-            # finishing. Do not publish that late result after the power gate.
+        if not self.stream.ai_processing_enabled or not self._inference_source_usable():
+            # PowerManager or hardware truth may change while the worker is
+            # finishing. Never publish after either gate closes.
             return
         if getattr(result, "input_frame_id", None) != frame.metadata.frame_id:
+            self.set_ai_runtime_operational(
+                False,
+                error="Automatic AI inference returned mismatched frame provenance",
+            )
             self._warn_ai_processing(
                 "AI result frame mismatch: expected %s, received %s",
                 frame.metadata.frame_id,
@@ -1036,6 +1116,10 @@ class CameraStreamService:
             )
             return
         if getattr(result, "source_frame_timestamp", None) != frame.metadata.timestamp:
+            self.set_ai_runtime_operational(
+                False,
+                error="Automatic AI inference returned mismatched timestamp provenance",
+            )
             self._warn_ai_processing(
                 "AI result timestamp mismatch for frame %s",
                 frame.metadata.frame_id,
@@ -1045,29 +1129,19 @@ class CameraStreamService:
         try:
             frame.ai_annotations = [self._annotation_from_ai_result(result)]
         except Exception as exc:
+            self.set_ai_runtime_operational(
+                False,
+                error=f"Automatic AI inference returned an invalid result: {exc}",
+            )
             self._warn_ai_processing("Invalid AI inference result: %s", exc)
             frame.ai_annotations = []
             return
 
         # A completed inference with zero detections is still a truthful
         # processed result. Skips, failures, and provenance mismatches stay false.
+        self.set_ai_runtime_operational(True)
         self._latest_ai_result = result
         frame.processed_for_ai = True
-
-    def _discard_late_ai_result(
-        self,
-        task: asyncio.Task[InferenceResult | None],
-    ) -> None:
-        """Consume a timed-out result without attaching it to a newer frame."""
-        try:
-            task.result()
-        except asyncio.CancelledError:
-            pass
-        except Exception as exc:
-            self._warn_ai_processing("Timed-out AI processing later failed: %s", exc)
-        finally:
-            if self._ai_inference_task is task:
-                self._ai_inference_task = None
 
     def _annotation_from_ai_result(self, result: InferenceResult) -> dict[str, Any]:
         task = getattr(result.task, "value", result.task)
@@ -1178,7 +1252,25 @@ class CameraStreamService:
 
     async def get_current_frame(self) -> CameraFrame | None:
         """Get the most recent frame."""
+        self.record_activity()
         return self.stream.current_frame
+
+    def record_activity(self) -> None:
+        """Record frame demand so idle power policy cannot interrupt a viewer."""
+        self._last_activity_monotonic = self._monotonic()
+
+    def has_recent_activity(self, timeout_seconds: float) -> bool:
+        if self._last_activity_monotonic is None:
+            return False
+        return self._monotonic() - self._last_activity_monotonic <= max(
+            0.0, float(timeout_seconds)
+        )
+
+    def activity_age_seconds(self) -> float | None:
+        """Return monotonic seconds since frame demand, if any."""
+        if self._last_activity_monotonic is None:
+            return None
+        return max(0.0, self._monotonic() - self._last_activity_monotonic)
 
     async def update_configuration(self, config_data: dict[str, Any]) -> bool:
         """Update camera configuration."""
@@ -1271,16 +1363,93 @@ class CameraStreamService:
         if timeout_seconds is not None:
             self._ai_inference_timeout_seconds = max(
                 0.05,
-                min(float(timeout_seconds), 5.0),
+                min(float(timeout_seconds), 10.0),
             )
         self._last_ai_inference_monotonic = None
         self._latest_ai_result = None
 
+    def set_ai_model_status(
+        self,
+        *,
+        loaded: bool,
+        error: str | None = None,
+        model_sha256: str | None = None,
+        max_result_age_seconds: float | None = None,
+    ) -> None:
+        """Record detector-load state without claiming operational inference."""
+        self.ai_model_loaded = bool(loaded) and not self.hardware_fallback_active
+        self.ai_model_sha256 = model_sha256
+        if max_result_age_seconds is not None:
+            self._ai_runtime_max_result_age_seconds = max(
+                0.1,
+                float(max_result_age_seconds),
+            )
+        self.set_ai_runtime_operational(
+            False,
+            error=(
+                "Waiting for a timely automatic inference result"
+                if self.ai_model_loaded
+                else (error or "AI runtime unavailable")
+            ),
+        )
+
+    def set_ai_runtime_operational(
+        self,
+        ready: bool,
+        *,
+        error: str | None = None,
+    ) -> None:
+        """Promote only proven timely automatic inference to operational."""
+        self.ai_runtime_ready = bool(
+            ready and self.ai_model_loaded and self._topology_supports_perception()
+        )
+        if self.ai_runtime_ready:
+            self._last_successful_ai_monotonic = self._monotonic()
+            self.ai_runtime_error = None
+        else:
+            self._last_successful_ai_monotonic = None
+            self.ai_runtime_error = error or "Automatic AI inference is unavailable"
+            self._latest_ai_result = None
+
+    def is_ai_runtime_ready(self) -> bool:
+        """Return operational readiness, expiring it with result freshness."""
+        if not self.ai_runtime_ready or self._last_successful_ai_monotonic is None:
+            return False
+        age = self._monotonic() - self._last_successful_ai_monotonic
+        if age > self._ai_runtime_max_result_age_seconds:
+            self.set_ai_runtime_operational(
+                False,
+                error="Automatic AI inference has not produced a fresh result",
+            )
+            return False
+        return True
+
+    def _topology_supports_perception(self) -> bool:
+        return self.requested_sim_mode or (
+            self.hardware_available and not self.hardware_fallback_active
+        )
+
+    def _inference_source_usable(self) -> bool:
+        """Return whether automatic inference may attempt to prove readiness."""
+        return bool(self.ai_model_loaded and self._topology_supports_perception())
+
+    def _perception_source_usable(self) -> bool:
+        """Return whether frames can truthfully represent the requested topology."""
+        return bool(self.is_ai_runtime_ready() and self._topology_supports_perception())
+
     def set_ai_enabled(self, enabled: bool) -> None:
         """Apply the camera-owner AI power gate without changing capture state."""
+        was_enabled = self.stream.ai_processing_enabled
         self.stream.ai_processing_enabled = bool(enabled)
         if not enabled:
-            self._latest_ai_result = None
+            self.set_ai_runtime_operational(
+                False,
+                error="AI processing is disabled by the power policy",
+            )
+        elif not was_enabled:
+            # Immediately sample after power wake rather than carrying forward
+            # an old cadence timestamp from before suspension.
+            self._last_ai_inference_monotonic = None
 
     def remove_frame_callback(self, callback: Callable[[CameraFrame], None]):
         """Remove frame callback."""
@@ -1312,10 +1481,17 @@ class CameraStreamService:
                 pass
             self._frame_processing_task = None
 
-        if self._ai_inference_task is not None:
-            self._ai_inference_task.cancel()
-            await asyncio.gather(self._ai_inference_task, return_exceptions=True)
-            self._ai_inference_task = None
+        ai_tasks = [
+            task
+            for task in (self._ai_inference_monitor_task, self._ai_inference_task)
+            if task is not None
+        ]
+        for task in ai_tasks:
+            task.cancel()
+        if ai_tasks:
+            await asyncio.gather(*ai_tasks, return_exceptions=True)
+        self._ai_inference_monitor_task = None
+        self._ai_inference_task = None
 
         # Close camera
         if not self.sim_mode and self.camera:
@@ -1379,11 +1555,39 @@ def _get_ai_service():
 
 async def _configure_camera_ai() -> None:
     """Wire exact-frame and latest-frame AI paths to this camera owner."""
+    if camera_service.hardware_fallback_active:
+        camera_service.set_ai_model_status(
+            loaded=False,
+            error="Camera hardware unavailable; fallback frames cannot produce perception",
+        )
+        raise RuntimeError("AI inference disabled for hardware camera fallback")
     ai_service = _get_ai_service()
     ai_service.set_camera_frame_provider(camera_service.get_current_frame)
     initialized = await ai_service.initialize()
     if not initialized:
+        camera_service.set_ai_model_status(
+            loaded=False,
+            error="AI service initialization returned false",
+        )
         raise RuntimeError("AI service initialization returned false")
+    status = await ai_service.get_ai_status()
+    error = status.get("last_error")
+    model_sha256 = status.get("model_sha256")
+    ready = bool(
+        status.get("model_ready")
+        and isinstance(model_sha256, str)
+        and len(model_sha256) == 64
+    )
+    camera_service.set_ai_model_status(
+        loaded=ready,
+        error=str(error) if error else None,
+        model_sha256=str(model_sha256) if model_sha256 else None,
+        max_result_age_seconds=status.get("max_result_age_seconds"),
+    )
+    if not ready:
+        raise RuntimeError(
+            str(error or "Configured detector runtime or model digest is unavailable")
+        )
     camera_service.set_ai_processor(ai_service.infer_camera_frame)
 
 
@@ -1413,7 +1617,8 @@ async def main():
         # streaming when model setup is unavailable.
         try:
             await _configure_camera_ai()
-        except Exception:
+        except Exception as exc:
+            camera_service.set_ai_model_status(loaded=False, error=str(exc))
             logger.exception("AI setup failed; continuing camera stream without inference")
 
         if not await camera_service.start_streaming():

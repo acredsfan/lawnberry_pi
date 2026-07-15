@@ -1,7 +1,15 @@
+import inspect
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+
+from backend.src.api.routers import camera as camera_router
+
+
+def test_mjpeg_route_does_not_accept_manual_control_session_in_query() -> None:
+    assert "session_id" not in inspect.signature(camera_router.stream_mjpeg).parameters
 
 
 class _DummyFrame:
@@ -27,6 +35,7 @@ class _DummyCameraService:
         )
         self._frame = _DummyFrame(raw_bytes)
         self.stop_calls = 0
+        self.start_calls = 0
 
     async def get_stream_statistics(self):
         return SimpleNamespace(
@@ -43,6 +52,8 @@ class _DummyCameraService:
         return True
 
     async def start_streaming(self):
+        self.start_calls += 1
+        self.stream.is_active = True
         return True
 
     async def stop_streaming(self):
@@ -56,12 +67,43 @@ async def test_camera_frame_endpoint_returns_raw_jpeg_bytes(test_client, monkeyp
 
     raw_bytes = b"\xff\xd8\xff\xe0mock-jpeg-data\xff\xd9"
     monkeypatch.setattr(camera_router, "camera_service", _DummyCameraService(raw_bytes))
+    monkeypatch.setattr(camera_router, "get_power_manager", lambda: None)
 
     response = await test_client.get("/api/v2/camera/frame")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/jpeg")
     assert response.content == raw_bytes
+
+
+@pytest.mark.asyncio
+async def test_camera_frame_endpoint_resumes_capture_for_active_viewer(test_client, monkeypatch):
+    from backend.src.api.routers import camera as camera_router
+
+    service = _DummyCameraService(b"\xff\xd8\xff\xd9")
+    service.stream.is_active = False
+    monkeypatch.setattr(camera_router, "camera_service", service)
+    monkeypatch.setattr(camera_router, "get_power_manager", lambda: None)
+
+    response = await test_client.get("/api/v2/camera/frame")
+
+    assert response.status_code == 200
+    assert service.start_calls == 1
+    assert service.stream.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_camera_viewer_wakes_capture_and_ai_through_power_manager(monkeypatch):
+    power_manager = SimpleNamespace(wake_for_viewer=AsyncMock(return_value=True))
+    service = _DummyCameraService(b"\xff\xd8\xff\xd9")
+    service.stream.is_active = False
+    monkeypatch.setattr(camera_router, "camera_service", service)
+    monkeypatch.setattr(camera_router, "get_power_manager", lambda: power_manager)
+
+    await camera_router._wake_camera_for_viewer()
+
+    power_manager.wake_for_viewer.assert_awaited_once_with()
+    assert service.start_calls == 0
 
 
 @pytest.mark.asyncio

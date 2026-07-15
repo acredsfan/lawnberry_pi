@@ -6,9 +6,29 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from ...services.camera_runtime import camera_service
+from ...services.power_manager import get_power_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _wake_camera_for_viewer() -> None:
+    """Start camera demand through the power owner so AI wakes with video."""
+    power_manager = get_power_manager()
+    if power_manager is not None:
+        if await power_manager.wake_for_viewer():
+            return
+        raise RuntimeError("Camera owner did not acknowledge viewer wake")
+
+    # Startup/SIM fallback before PowerManager exists. Hardware lifespan starts
+    # the scheduler only after PowerManager, so this path cannot admit motion.
+    recorder = getattr(camera_service, "record_activity", None)
+    if callable(recorder):
+        recorder()
+    if not camera_service.running:
+        await camera_service.initialize()
+    if not getattr(camera_service.stream, "is_active", False):
+        await camera_service.start_streaming()
 
 
 @router.get("/camera/status")
@@ -30,9 +50,23 @@ async def get_camera_status():
                 )
             ),
             "sim_mode": camera_service.sim_mode,
+            "requested_sim_mode": bool(
+                getattr(camera_service, "requested_sim_mode", camera_service.sim_mode)
+            ),
+            "hardware_fallback_active": bool(
+                getattr(camera_service, "hardware_fallback_active", False)
+            ),
             "hardware_available": bool(
                 getattr(camera_service, "hardware_available", False)
             ),
+            "ai_model_loaded": bool(
+                getattr(camera_service, "ai_model_loaded", False)
+            ),
+            "ai_runtime_ready": bool(
+                getattr(camera_service, "ai_runtime_ready", False)
+            ),
+            "ai_runtime_error": getattr(camera_service, "ai_runtime_error", None),
+            "ai_model_sha256": getattr(camera_service, "ai_model_sha256", None),
             "client_count": client_count,
             "last_frame_time": last_frame_time.isoformat()
             if hasattr(last_frame_time, "isoformat")
@@ -55,7 +89,13 @@ async def get_camera_status():
             "active": False,
             "mode": "offline",
             "sim_mode": True,
+            "requested_sim_mode": False,
+            "hardware_fallback_active": True,
             "hardware_available": False,
+            "ai_model_loaded": False,
+            "ai_runtime_ready": False,
+            "ai_runtime_error": "Camera owner unavailable",
+            "ai_model_sha256": None,
             "client_count": 0,
             "last_frame_time": None,
             "statistics": {},
@@ -94,6 +134,7 @@ async def stop_camera(payload: dict | None = None):
 async def get_current_frame():
     """Get the most recent camera frame as JPEG."""
     try:
+        await _wake_camera_for_viewer()
         frame = await camera_service.get_current_frame()
         if frame is None:
             raise HTTPException(status_code=404, detail="No frame available")
@@ -126,7 +167,6 @@ _MJPEG_INTERVAL = 1.0 / _MJPEG_TARGET_FPS
 async def stream_mjpeg(
     request: Request,
     client: str | None = Query(None),
-    session_id: str | None = Query(None),
     ts: str | None = Query(None),
 ):
     """Stream camera frames as Motion JPEG."""
@@ -169,10 +209,7 @@ async def stream_mjpeg(
                 await asyncio.sleep(0)
 
     try:
-        if not camera_service.running:
-            await camera_service.initialize()
-        if not getattr(camera_service.stream, "is_active", False):
-            await camera_service.start_streaming()
+        await _wake_camera_for_viewer()
         return StreamingResponse(
             generate_mjpeg(),
             media_type="multipart/x-mixed-replace; boundary=frame",

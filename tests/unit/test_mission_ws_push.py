@@ -145,32 +145,34 @@ async def test_mission_start_acceptance_does_not_wait_for_websocket_delivery():
 
 @pytest.mark.asyncio
 async def test_mission_completed_callback_broadcasts_failed():
-    """Done callback Exception branch schedules a _broadcast_status via ensure_future."""
+    """A navigation failure eventually publishes canonical FAILED status."""
     from backend.src.services.mission_service import MissionService
 
-    hub = MagicMock()
-    hub.broadcast_to_topic = AsyncMock()
+    failed_broadcast = asyncio.Event()
+    payloads = []
+
+    class _RecordingHub:
+        async def broadcast_to_topic(self, topic, payload):
+            payloads.append((topic, payload))
+            if topic == "mission.status" and payload.get("status") == "failed":
+                failed_broadcast.set()
 
     class _FailingNav(_DummyNav):
         async def execute_mission(self, mission, mission_service=None):
             raise RuntimeError("nav blew up")
 
-    svc = MissionService(navigation_service=_FailingNav(), websocket_hub=hub)
+    svc = MissionService(navigation_service=_FailingNav(), websocket_hub=_RecordingHub())
     mission = await svc.create_mission("Test Mission", _WAYPOINTS)
 
-    # start_mission broadcasts "Mission started" (call #1) then returns.
-    # AsyncMock does not yield, so the failing nav-task hasn't run yet.
     await svc.start_mission(mission.id)
+    await asyncio.wait_for(failed_broadcast.wait(), timeout=1.0)
 
-    # Three sleep(0) iterations are needed:
-    #   sleep #1: nav-task runs → raises RuntimeError → done-callback call_soon'd
-    #   sleep #2: done-callback runs → asyncio.ensure_future(_broadcast_status) scheduled
-    #   sleep #3: ensure_future task runs → hub.broadcast_to_topic called (call #2)
-    for _ in range(3):
-        await asyncio.sleep(0)
-
-    # 1 call from start_mission + 1 from exception-branch ensure_future
-    assert hub.broadcast_to_topic.call_count >= 2
+    assert any(
+        topic == "mission.status"
+        and payload.get("status") == "failed"
+        and payload.get("detail") == "nav blew up"
+        for topic, payload in payloads
+    )
 
 
 @pytest.mark.asyncio

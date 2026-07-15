@@ -20,8 +20,8 @@ Canonical surface is `/api/v2/*`. All new frontend code must use canonical endpo
 | POST | `/api/v2/control/stop` | `canonical` | `api/rest.py` | |
 | POST | `/api/v2/control/return-home` | `canonical` | `api/rest.py` | |
 | GET  | `/api/v2/control/status` | `canonical` | `api/rest.py` | |
-| GET  | `/api/v2/control/manual-unlock/status` | `canonical` | `api/routers/auth.py` | |
-| POST | `/api/v2/control/manual-unlock` | `canonical` | `api/routers/auth.py` | |
+| GET  | `/api/v2/control/manual-unlock/status` | `canonical` | `api/routers/auth.py` | Bearer/Cloudflare grants remain bound to the canonical auth session |
+| POST | `/api/v2/control/manual-unlock` | `canonical` | `api/routers/auth.py` | Password/TOTP grants retain their independent configured timeout |
 
 ## Missions
 
@@ -152,8 +152,9 @@ All mutations on either surface are immediately visible through the other.
 | Method | Path | Label | Router file | Notes |
 |---|---|---|---|---|
 | POST | `/api/v2/auth/login` | `canonical` | `api/routers/auth.py` | |
+| POST | `/api/v2/auth/cloudflare` | `canonical` | `api/routers/auth.py` | Exchanges a verified Cloudflare Access assertion for a LawnBerry session; never falls back to password auth |
 | POST | `/api/v2/auth/refresh` | `canonical` | `api/routers/auth.py` | |
-| POST | `/api/v2/auth/logout` | `canonical` | `api/routers/auth.py` | |
+| POST | `/api/v2/auth/logout` | `canonical` | `api/routers/auth.py` | Returns 503 unless revocation was durably committed |
 | POST | `/api/v2/auth/configure/password` | `canonical` | `api/routers/auth.py` | |
 | GET  | `/api/v2/auth/profile` | `canonical` | `api/routers/auth.py` | |
 

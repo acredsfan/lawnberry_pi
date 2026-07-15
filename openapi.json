@@ -3749,7 +3749,7 @@
     "/api/v1/auth/login": {
       "post": {
         "deprecated": true,
-        "description": "Start login flow (MFA compatible).",
+        "description": "Start the deprecated shared-credential login flow.",
         "operationId": "auth_login_api_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -3942,7 +3942,7 @@
     },
     "/api/v2/ai/inference": {
       "post": {
-        "description": "Run AI inference against an uploaded image.",
+        "description": "Run uploaded-image inference in the embedded SIM/CI runtime.\n\nHardware mode keeps inference in the standalone camera owner, so this\ndiagnostic route returns 503 instead of starting a competing backend\ninference path. Read `/api/v2/ai/perception/latest` for hardware results.",
         "operationId": "run_uploaded_inference_api_v2_ai_inference_post",
         "parameters": [
           {
@@ -4016,7 +4016,7 @@
     },
     "/api/v2/ai/inference/latest": {
       "post": {
-        "description": "Run AI inference against the latest camera frame.",
+        "description": "Run latest-frame inference in the embedded SIM/CI runtime.\n\nHardware mode performs automatic sampled inference in the standalone\ncamera owner, so this diagnostic route returns 503. Read\n`/api/v2/ai/perception/latest` for the latest hardware result.",
         "operationId": "run_latest_frame_inference_api_v2_ai_inference_latest_post",
         "parameters": [
           {
@@ -4140,7 +4140,7 @@
     },
     "/api/v2/ai/status": {
       "get": {
-        "description": "Return AI runtime and model status.",
+        "description": "Return AI runtime, model readiness, and the process that owns inference.",
         "operationId": "get_ai_status_api_v2_ai_status_get",
         "responses": {
           "200": {
@@ -4153,6 +4153,25 @@
           }
         },
         "summary": "Get Ai Status"
+      }
+    },
+    "/api/v2/auth/cloudflare": {
+      "post": {
+        "description": "Exchange a verified Cloudflare Access identity for a LawnBerry JWT.",
+        "operationId": "auth_cloudflare_api_v2_auth_cloudflare_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/backend__src__api__routers__auth__AuthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Cloudflare"
       }
     },
     "/api/v2/auth/configure/password": {
@@ -4857,22 +4876,6 @@
                 }
               ],
               "title": "Client"
-            }
-          },
-          {
-            "in": "query",
-            "name": "session_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Session Id"
             }
           },
           {

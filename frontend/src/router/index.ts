@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
@@ -73,39 +74,45 @@ const router = createRouter({
   ]
 })
 
-// Navigation guard for authentication
-router.beforeEach(async (to, from, next) => {
-  try { (window as any).__TopProgress?.start() } catch {}
-  const authStore = useAuthStore()
-  
-  // Check if route requires authentication
-  if (to.meta.requiresAuth) {
-    // If not authenticated, check if we have a valid token
+type AuthGuardStore = Pick<
+  ReturnType<typeof useAuthStore>,
+  'isAuthenticated' | 'token' | 'validateSession' | 'bootstrapCloudflare' | 'clearSession'
+>
+
+export function createAuthNavigationGuard(
+  resolveAuthStore: () => AuthGuardStore = useAuthStore,
+) {
+  let cloudflareBootstrapAttempted = false
+
+  return async (to: RouteLocationNormalized) => {
+    const authStore = resolveAuthStore()
+
     if (!authStore.isAuthenticated && authStore.token) {
-      try {
-        // Validate the stored token
-        await authStore.validateSession()
-      } catch (error) {
-        console.warn('Token validation failed:', error)
-        // Token is invalid, clear it and redirect to login
-        await authStore.logout()
-      }
+      await authStore.validateSession()
     }
-    
-    // If still not authenticated, redirect to login
-    if (!authStore.isAuthenticated) {
-      next('/login')
-      return
+
+    if (!authStore.isAuthenticated && !cloudflareBootstrapAttempted) {
+      cloudflareBootstrapAttempted = true
+      await authStore.bootstrapCloudflare()
     }
+
+    if (to.name === 'Login' && authStore.isAuthenticated) {
+      return { path: '/' }
+    }
+
+    if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+      return { path: '/login', query: { redirect: to.fullPath } }
+    }
+
+    return true
   }
-  
-  // If trying to access login while authenticated, redirect to dashboard
-  if (to.name === 'Login' && authStore.isAuthenticated) {
-    next('/')
-    return
-  }
-  
-  next()
+}
+
+const authNavigationGuard = createAuthNavigationGuard()
+
+router.beforeEach(async (to, _from) => {
+  try { (window as any).__TopProgress?.start() } catch {}
+  return authNavigationGuard(to)
 })
 
 router.afterEach(() => {

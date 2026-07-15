@@ -51,19 +51,15 @@ async def test_auth_login_missing_credential(test_client):
 
 
 @pytest.mark.asyncio
-async def test_auth_login_username_password_fallback(test_client):
-    """Test login with username/password format (MFA compatibility)."""
+async def test_auth_login_rejects_known_default_username_password(test_client):
+    """Deprecated v1 must never translate admin/admin into the operator secret."""
     payload = {
         "username": "admin",
         "password": "admin"
     }
     
     response = await test_client.post("/api/v1/auth/login", json=payload)
-    assert response.status_code == 200
-    
-    data = response.json()
-    assert "access_token" in data
-    assert "user" in data
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio

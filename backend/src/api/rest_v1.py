@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from ..core.client_identity import client_ip
 from ..core.runtime import RuntimeContext, get_runtime
 from ..services.auth_service import AuthenticationError, primary_auth_service
 
@@ -106,19 +107,17 @@ def get_status():
 
 @router.post("/auth/login", response_model=AuthResponse, deprecated=True)
 async def auth_login(payload: AuthLoginRequest, request: Request):
-    """Start login flow (MFA compatible)."""
+    """Start the deprecated shared-credential login flow."""
     expected_secret = os.getenv("LAWN_BERRY_OPERATOR_CREDENTIAL")
     if not expected_secret:
         raise HTTPException(status_code=503, detail="Operator credential not configured")
 
     credential = payload.credential
-    if credential is None and payload.username and payload.password:
-        # username/password path: map admin/admin to LAWN_BERRY_OPERATOR_CREDENTIAL
-        if payload.username == "admin" and payload.password == "admin":
-            credential = expected_secret
-        else:
-            # Reject unsupported username/password combinations
-            raise HTTPException(status_code=401, detail="Authentication failed")
+    if credential is None and (payload.username is not None or payload.password is not None):
+        # The v1 username/password compatibility path used to translate the
+        # public admin/admin pair into the configured operator secret. That was
+        # an authentication bypass; v1 now requires the explicit credential.
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
     if credential != expected_secret:
         raise HTTPException(status_code=401, detail="Authentication failed")
@@ -127,7 +126,7 @@ async def auth_login(payload: AuthLoginRequest, request: Request):
         result = await _auth_service.authenticate(
             credential or "",
             client_identifier=request.headers.get("X-Client-Id"),
-            client_ip=request.client.host if request.client else None,
+            client_ip=client_ip(request),
             user_agent=request.headers.get("User-Agent"),
         )
     except AuthenticationError as exc:
@@ -235,7 +234,7 @@ def create_job(job_data: dict, runtime: RuntimeContext = Depends(get_runtime)):
     else:
         db_jobs = []
 
-    # Find max integer suffix from jobs with IDs like 'job-XXX'
+    # Find max integer suffix from jobs with IDs like 'job-NNN'
     max_idx = 0
     for j in db_jobs:
         jid = j.get("id", "")

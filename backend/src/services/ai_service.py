@@ -95,6 +95,11 @@ class AIService:
         self.active_model_name: str | None = None
         self._detector_runtime = detector_runtime
         self._external_owner = False
+        self._external_owner_sim_mode = True
+        self._external_owner_hardware_available = False
+        self._external_owner_ai_runtime_ready = False
+        self._external_owner_model_sha256: str | None = None
+        self._external_owner_error: str | None = None
         self._camera_frame_provider = camera_frame_provider
         self._result_consumer: PerceptionResultConsumer | None = None
         self._route_cost_obstacle_count = 0
@@ -173,14 +178,22 @@ class AIService:
             "fallback_accelerator": self.ai_processing.fallback_accelerator,
             "processing_fps": self.ai_processing.processing_fps,
             "configured_model_path": str(self.model_path),
-            "model_ready": bool(
-                runtime is not None
-                and (runtime.ready or (self._external_owner and bool(runtime.model_sha256)))
-            ),
+            "model_ready": self._model_ready(),
             "execution_owner": "camera_ipc" if self._external_owner else "backend",
+            "owner_sim_mode": self._external_owner_sim_mode if self._external_owner else None,
+            "owner_hardware_available": (
+                self._external_owner_hardware_available if self._external_owner else None
+            ),
+            "owner_ai_runtime_ready": (
+                self._external_owner_ai_runtime_ready if self._external_owner else None
+            ),
+            "owner_ai_runtime_error": self._external_owner_error if self._external_owner else None,
             "active_model_name": self.active_model_name,
             "runtime": runtime.manifest.runtime if runtime is not None else None,
             "model_sha256": runtime.model_sha256 if runtime is not None else None,
+            "max_result_age_seconds": (
+                runtime.manifest.max_result_age_seconds if runtime is not None else None
+            ),
             "model_artifact_path": str(runtime.model_path) if runtime is not None else None,
             "active_models": {
                 name: model.model_dump(mode="json")
@@ -462,6 +475,22 @@ class AIService:
         """Inject the asynchronous latest-frame owner used by API inference."""
         self._camera_frame_provider = provider
 
+    def set_external_owner_state(
+        self,
+        *,
+        sim_mode: bool,
+        hardware_available: bool,
+        ai_runtime_ready: bool,
+        model_sha256: str | None,
+        error: str | None = None,
+    ) -> None:
+        """Record the live camera owner's topology and detector readiness."""
+        self._external_owner_sim_mode = bool(sim_mode)
+        self._external_owner_hardware_available = bool(hardware_available)
+        self._external_owner_ai_runtime_ready = bool(ai_runtime_ready)
+        self._external_owner_model_sha256 = model_sha256
+        self._external_owner_error = error
+
     async def get_recent_results(self, limit: int = 10) -> list[InferenceResult]:
         """Return recent inference results, newest first."""
         bounded_limit = max(1, min(limit, 50))
@@ -487,7 +516,13 @@ class AIService:
     async def ingest_external_result(self, result: InferenceResult) -> bool:
         """Validate one camera-owner result before exposing it to API/WS/navigation."""
         runtime = self._detector_runtime
-        if runtime is None or not self._external_owner or not runtime.model_sha256:
+        if (
+            runtime is None
+            or not self._external_owner
+            or not runtime.model_sha256
+            or not self._model_ready()
+        ):
+            logger.warning("Rejected perception result from an unavailable camera owner")
             return False
         timestamp = result.timestamp
         if timestamp.tzinfo is None:
@@ -531,15 +566,20 @@ class AIService:
     def get_perception_snapshot(self) -> PerceptionSnapshot:
         runtime = self._detector_runtime
         max_age = runtime.manifest.max_result_age_seconds if runtime is not None else 2.0
-        runtime_available = bool(
-            runtime is not None
-            and (runtime.ready or (self._external_owner and bool(runtime.model_sha256)))
-        )
+        runtime_available = self._model_ready()
         if not runtime_available:
+            reason_code = "DETECTOR_RUNTIME_UNAVAILABLE"
+            if self._external_owner and (
+                self._external_owner_sim_mode
+                or not self._external_owner_hardware_available
+            ):
+                reason_code = "CAMERA_HARDWARE_UNAVAILABLE"
+            elif self._external_owner and not self._external_owner_ai_runtime_ready:
+                reason_code = "CAMERA_DETECTOR_RUNTIME_UNAVAILABLE"
             return PerceptionSnapshot(
                 available=False,
                 fresh=False,
-                reason_code="DETECTOR_RUNTIME_UNAVAILABLE",
+                reason_code=reason_code,
                 max_result_age_seconds=max_age,
             )
         if not self.ai_processing.recent_results:
@@ -588,6 +628,20 @@ class AIService:
             "model_sha256": runtime.model_sha256,
             "max_result_age_seconds": manifest.max_result_age_seconds,
         }
+
+    def _model_ready(self) -> bool:
+        runtime = self._detector_runtime
+        if runtime is None:
+            return False
+        if not self._external_owner:
+            return bool(runtime.ready)
+        return bool(
+            runtime.model_sha256
+            and not self._external_owner_sim_mode
+            and self._external_owner_hardware_available
+            and self._external_owner_ai_runtime_ready
+            and self._external_owner_model_sha256 == runtime.model_sha256
+        )
 
     async def _ensure_model_ready(self, task: InferenceTask) -> None:
         if not self.initialized:

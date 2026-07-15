@@ -22,6 +22,8 @@ from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
+from ..core.client_identity import client_ip
+
 
 @dataclass
 class Bucket:
@@ -56,10 +58,15 @@ class GlobalRateLimiter(BaseHTTPMiddleware):
         client_key = self._client_key(request)
         rate, burst = self._rate, self._burst
         override = self._match_override(path)
+        policy_key = "default"
         if override is not None:
-            rate, burst = override
+            policy_key, rate, burst = override
 
-        allowed, retry_after = await self._consume_token(client_key, rate, burst)
+        # A strict endpoint override is a distinct policy, not a mutation of a
+        # client's global bucket. Otherwise one Cloudflare bootstrap request
+        # can shrink the same bucket used by every ordinary API route.
+        bucket_key = f"{client_key}|policy:{policy_key}"
+        allowed, retry_after = await self._consume_token(bucket_key, rate, burst)
         if not allowed:
             return JSONResponse(
                 status_code=429,
@@ -71,20 +78,23 @@ class GlobalRateLimiter(BaseHTTPMiddleware):
     def _is_exempt(self, path: str) -> bool:
         return any(path.startswith(p) for p in self._exempt)
 
-    def _match_override(self, path: str) -> tuple[float, int] | None:
-        for prefix, rate, burst in self._overrides:
-            if path.startswith(prefix):
-                return (max(0.1, float(rate)), max(1, int(burst)))
-        return None
+    def _match_override(self, path: str) -> tuple[str, float, int] | None:
+        matches = [override for override in self._overrides if path.startswith(override[0])]
+        if not matches:
+            return None
+        prefix, rate, burst = max(matches, key=lambda override: len(override[0]))
+        return (prefix, max(0.1, float(rate)), max(1, int(burst)))
 
     def _client_key(self, request: Request) -> str:
-        # Prefer explicit client id, fall back to remote IP
-        client_id = request.headers.get("X-Client-Id")
-        if client_id:
-            return f"id:{client_id}"
-        client = request.client
-        if client:
-            return f"ip:{client.host}"
+        # Browser client IDs are useful for isolated SIM/CI traffic but are
+        # attacker-controlled and cannot key production quotas.
+        if os.getenv("SIM_MODE", "0") == "1":
+            client_id = request.headers.get("X-Client-Id")
+            if client_id:
+                return f"id:{client_id}"
+        address = client_ip(request)
+        if address:
+            return f"ip:{address}"
         return "anon"
 
     async def _consume_token(self, key: str, rate: float, burst: int) -> tuple[bool, int]:
@@ -167,6 +177,11 @@ def register_global_rate_limiter(app: FastAPI) -> None:
     for prefix, rate_override, burst_override in camera_overrides:
         if not any(existing_prefix == prefix for existing_prefix, *_ in overrides):
             overrides.append((prefix, rate_override, burst_override))
+
+    if not any(prefix == "/api/v2/auth/cloudflare" for prefix, *_ in overrides):
+        # Bootstrap normally runs once per browser session. Keep enough burst
+        # for recovery while bounding signature/JWKS work at the origin.
+        overrides.append(("/api/v2/auth/cloudflare", 1.0, 6))
 
     app.add_middleware(
         GlobalRateLimiter,

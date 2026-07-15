@@ -38,7 +38,9 @@ class DetectorManifest(BaseModel):
     class_height_m: dict[str, float] = Field(default_factory=dict)
     semantic_cost_multipliers: dict[str, float] = Field(default_factory=dict)
     nms_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
-    max_result_age_seconds: float = Field(default=2.0, gt=0.0)
+    # The Pi 5 CPU baseline is qualified for a 3 s owner deadline. Preserve a
+    # bounded 2 s delivery/use margin for IPC polling and route-cost ingestion.
+    max_result_age_seconds: float = Field(default=5.0, gt=0.0)
 
     @field_validator("class_labels")
     @classmethod
@@ -154,38 +156,64 @@ def parse_detector_output(
 
     width = float(manifest.input_width)
     height = float(manifest.input_height)
-    candidates: list[tuple[np.ndarray, float, int]] = []
-    for row in array:
-        if manifest.output_format == "xyxy":
-            x1, y1, x2, y2, confidence, class_value = row[:6]
-            class_id = int(class_value)
-        else:
-            center_x, center_y, box_width, box_height = row[:4]
-            if manifest.output_format == "yolov5":
-                class_scores = row[5 : 5 + class_count]
-                class_id = int(np.argmax(class_scores))
-                confidence = float(row[4]) * float(class_scores[class_id])
-            else:
-                class_scores = row[4 : 4 + class_count]
-                class_id = int(np.argmax(class_scores))
-                confidence = float(class_scores[class_id])
-            x1 = center_x - box_width / 2.0
-            y1 = center_y - box_height / 2.0
-            x2 = center_x + box_width / 2.0
-            y2 = center_y + box_height / 2.0
 
-        confidence = float(confidence)
-        if confidence < confidence_threshold or not 0 <= class_id < class_count:
-            continue
-        box = np.asarray([x1, y1, x2, y2], dtype=np.float32)
-        if float(np.max(np.abs(box))) <= 1.5:
-            box[[0, 2]] *= width
-            box[[1, 3]] *= height
-        box[0::2] = np.clip(box[0::2], 0.0, width)
-        box[1::2] = np.clip(box[1::2], 0.0, height)
-        if box[2] <= box[0] or box[3] <= box[1]:
-            continue
-        candidates.append((box, confidence, class_id))
+    # A YOLOv5 640x640 export emits 25,200 rows. Keep the confidence and
+    # geometry reduction in NumPy so Raspberry Pi CPU time is spent in the DNN
+    # forward pass rather than a Python loop over almost entirely rejected rows.
+    if manifest.output_format == "xyxy":
+        boxes = array[:, :4].copy()
+        confidences = array[:, 4]
+        class_ids = array[:, 5].astype(np.int64, copy=False)
+    else:
+        centers = array[:, :4]
+        score_offset = 5 if manifest.output_format == "yolov5" else 4
+        class_scores = array[:, score_offset : score_offset + class_count]
+        class_ids = np.argmax(class_scores, axis=1)
+        best_class_scores = class_scores[np.arange(class_scores.shape[0]), class_ids]
+        confidences = (
+            array[:, 4] * best_class_scores
+            if manifest.output_format == "yolov5"
+            else best_class_scores
+        )
+        half_sizes = centers[:, 2:4] / 2.0
+        boxes = np.concatenate(
+            (centers[:, 0:2] - half_sizes, centers[:, 0:2] + half_sizes),
+            axis=1,
+        )
+
+    valid = (
+        np.isfinite(confidences)
+        & np.isfinite(boxes).all(axis=1)
+        & (confidences >= confidence_threshold)
+        & (class_ids >= 0)
+        & (class_ids < class_count)
+    )
+    boxes = boxes[valid].astype(np.float32, copy=True)
+    confidences = confidences[valid].astype(np.float32, copy=False)
+    class_ids = class_ids[valid].astype(np.int64, copy=False)
+
+    if boxes.size:
+        normalized = np.max(np.abs(boxes), axis=1) <= 1.5
+        boxes[normalized, 0] *= width
+        boxes[normalized, 2] *= width
+        boxes[normalized, 1] *= height
+        boxes[normalized, 3] *= height
+        boxes[:, 0::2] = np.clip(boxes[:, 0::2], 0.0, width)
+        boxes[:, 1::2] = np.clip(boxes[:, 1::2], 0.0, height)
+        valid_geometry = (boxes[:, 2] > boxes[:, 0]) & (boxes[:, 3] > boxes[:, 1])
+        boxes = boxes[valid_geometry]
+        confidences = confidences[valid_geometry]
+        class_ids = class_ids[valid_geometry]
+
+    candidates = [
+        (box, float(confidence), int(class_id))
+        for box, confidence, class_id in zip(
+            boxes,
+            confidences,
+            class_ids,
+            strict=True,
+        )
+    ]
 
     detections: list[RuntimeDetection] = []
     for index in _nms(candidates, nms_threshold):
@@ -228,7 +256,7 @@ class OpenCVDnnDetectorRuntime:
             import cv2
         except ImportError as exc:
             raise DetectorRuntimeError(
-                "OpenCV DNN runtime unavailable; install Raspberry Pi OS python3-opencv"
+                "OpenCV DNN runtime unavailable; run 'uv sync --extra hardware'"
             ) from exc
         try:
             self._network = cv2.dnn.readNetFromONNX(str(self.model_path))

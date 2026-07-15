@@ -21,7 +21,7 @@ const cameraStreamClientId = (() => {
   return `client-${Math.random().toString(36).slice(2)}`
 })()
 
-export function useCameraFeed(getSessionId: () => string | null) {
+export function useCameraFeed(_getSessionId: () => string | null) {
   const api = useApiService()
 
   const cameraInfo = ref<CameraStatusSummary>({ active: false, mode: 'offline', fps: null, client_count: null })
@@ -38,13 +38,9 @@ export function useCameraFeed(getSessionId: () => string | null) {
   let cameraFrameTimer: number | undefined
   let cameraStatusTimer: number | undefined
   let cameraRetryTimer: number | undefined
-  let cameraReconnectTimer: number | undefined
   let cameraStartRequested = false
-
-  // Reconnect the MJPEG stream periodically so the TCP write buffer never
-  // accumulates more than ~RECONNECT_INTERVAL_MS worth of stale frames.
-  // The browser opens a fresh connection with an empty buffer each time.
-  const STREAM_RECONNECT_INTERVAL_MS = 4_000
+  let snapshotFallbackActive = false
+  let lifecycleEpoch = 0
 
   const cameraIsStreaming = computed(() => Boolean(cameraStreamUrl.value))
   const cameraDisplaySource = computed(() => cameraStreamUrl.value ?? cameraFrameUrl.value)
@@ -63,18 +59,10 @@ export function useCameraFeed(getSessionId: () => string | null) {
     if (cameraRetryTimer) { window.clearTimeout(cameraRetryTimer); cameraRetryTimer = undefined }
   }
 
-  function clearStreamReconnectTimer() {
-    if (cameraReconnectTimer) { window.clearTimeout(cameraReconnectTimer); cameraReconnectTimer = undefined }
-  }
-
-  function scheduleStreamReconnect() {
-    clearStreamReconnectTimer()
-    cameraReconnectTimer = window.setTimeout(() => {
-      cameraReconnectTimer = undefined
-      if (cameraStreamUrl.value && !cameraStreamUnavailable.value) {
-        refreshCameraStream(true)
-      }
-    }, STREAM_RECONNECT_INTERVAL_MS)
+  function stopSnapshotFallback() {
+    snapshotFallbackActive = false
+    clearSnapshotTimer()
+    applyCameraFrameUrl(null)
   }
 
   function applyCameraFrameUrl(nextUrl: string | null, { revokeExisting = true } = {}) {
@@ -89,8 +77,6 @@ export function useCameraFeed(getSessionId: () => string | null) {
     if (cameraStreamUnavailable.value) return null
     const params = new URLSearchParams()
     params.set('client', cameraStreamClientId)
-    const sid = getSessionId()
-    if (sid) params.set('session_id', sid)
     if (forceRefresh) params.set('ts', Date.now().toString(36))
     return `/api/v2/camera/stream.mjpeg?${params.toString()}`
   }
@@ -105,9 +91,9 @@ export function useCameraFeed(getSessionId: () => string | null) {
 
   function startSnapshotFallback(message?: string) {
     cameraStreamUrl.value = null
-    clearStreamReconnectTimer()
     if (message) cameraStatusMessage.value = message
     clearSnapshotTimer()
+    snapshotFallbackActive = true
     void fetchCameraFrame()
     cameraFrameTimer = window.setInterval(fetchCameraFrame, 2000)
   }
@@ -121,10 +107,13 @@ export function useCameraFeed(getSessionId: () => string | null) {
   async function attemptCameraStreamRecovery() {
     clearCameraRetryTimer()
     if (!cameraStreamUnavailable.value) return
+    const recoveryEpoch = lifecycleEpoch
     try {
-      const streaming = await ensureCameraStreaming()
+      const streaming = await ensureCameraStreaming(recoveryEpoch)
+      if (recoveryEpoch !== lifecycleEpoch) return
       if (streaming) {
         cameraStreamUnavailable.value = false
+        stopSnapshotFallback()
         refreshCameraStream(true, true)
         return
       }
@@ -134,11 +123,18 @@ export function useCameraFeed(getSessionId: () => string | null) {
 
   function handleCameraStreamLoad() {
     cameraError.value = null
+    if (snapshotFallbackActive || !cameraStreamUrl.value) {
+      // The shared <img> also emits load for snapshot object URLs. A fallback
+      // frame proves only that snapshot polling works; it must not tear down
+      // its own URL/timer or claim that MJPEG recovered.
+      cameraStatusMessage.value = 'Snapshots...'
+      return
+    }
     cameraStatusMessage.value = 'Streaming...'
     cameraStreamFailureCount.value = 0
     cameraStreamUnavailable.value = false
     clearCameraRetryTimer()
-    scheduleStreamReconnect()
+    stopSnapshotFallback()
   }
 
   function handleCameraStreamError() {
@@ -172,9 +168,10 @@ export function useCameraFeed(getSessionId: () => string | null) {
     }
   }
 
-  async function fetchCameraStatus() {
+  async function fetchCameraStatus(expectedEpoch?: number) {
     try {
       const response = await api.get('/api/v2/camera/status')
+      if (expectedEpoch !== undefined && expectedEpoch !== lifecycleEpoch) return null
       const data = normalizeCameraStatusPayload(response.data)
       if (data) {
         cameraInfo.value = {
@@ -193,23 +190,32 @@ export function useCameraFeed(getSessionId: () => string | null) {
         cameraError.value = null
         return data
       }
-    } catch { cameraError.value = 'Unable to reach camera service' }
+    } catch {
+      if (expectedEpoch === undefined || expectedEpoch === lifecycleEpoch) {
+        cameraError.value = 'Unable to reach camera service'
+      }
+    }
     return null
   }
 
-  async function ensureCameraStreaming() {
-    const status = await fetchCameraStatus()
+  async function ensureCameraStreaming(expectedEpoch = lifecycleEpoch) {
+    const status = await fetchCameraStatus(expectedEpoch)
+    if (expectedEpoch !== lifecycleEpoch) return false
     if (status?.active) return true
     if (cameraStartRequested) return cameraInfo.value.active
     cameraStartRequested = true
     try {
       await api.post('/api/v2/camera/start')
+      if (expectedEpoch !== lifecycleEpoch) return false
     } catch {
-      cameraError.value = 'Failed to start camera stream'
+      if (expectedEpoch === lifecycleEpoch) cameraError.value = 'Failed to start camera stream'
     } finally {
-      await fetchCameraStatus()
-      cameraStartRequested = false
+      if (expectedEpoch === lifecycleEpoch) {
+        await fetchCameraStatus(expectedEpoch)
+        cameraStartRequested = false
+      }
     }
+    if (expectedEpoch !== lifecycleEpoch) return false
     return cameraInfo.value.active
   }
 
@@ -222,7 +228,7 @@ export function useCameraFeed(getSessionId: () => string | null) {
         headers: { 'Cache-Control': 'no-cache', 'X-Client-Id': cameraStreamClientId },
       })
       const contentType = String(response.headers?.['content-type'] || response.data?.type || '')
-      if (response.data instanceof Blob && contentType.startsWith('image/')) {
+      if (snapshotFallbackActive && response.data instanceof Blob && contentType.startsWith('image/')) {
         if (cameraFrameObjectUrl) { URL.revokeObjectURL(cameraFrameObjectUrl); cameraFrameObjectUrl = null }
         const objectUrl = URL.createObjectURL(response.data)
         cameraFrameObjectUrl = objectUrl
@@ -250,13 +256,15 @@ export function useCameraFeed(getSessionId: () => string | null) {
 
   async function startCameraFeed(forceReconnect = false) {
     if (!forceReconnect && (cameraIsStreaming.value || cameraFrameTimer || cameraStatusTimer)) return
+    const startEpoch = ++lifecycleEpoch
     if (cameraStatusTimer) { window.clearInterval(cameraStatusTimer); cameraStatusTimer = undefined }
-    clearSnapshotTimer()
+    stopSnapshotFallback()
     resetCameraState()
-    const streaming = await ensureCameraStreaming()
+    const streaming = await ensureCameraStreaming(startEpoch)
+    if (startEpoch !== lifecycleEpoch) return
     if (streaming && !cameraStreamUnavailable.value) {
       refreshCameraStream(true, true)
-      clearSnapshotTimer()
+      stopSnapshotFallback()
     } else {
       cameraStreamUnavailable.value = true
       startSnapshotFallback(cameraError.value || 'Camera warming up...')
@@ -266,9 +274,9 @@ export function useCameraFeed(getSessionId: () => string | null) {
   }
 
   function stopCameraFeed() {
-    clearSnapshotTimer()
+    lifecycleEpoch += 1
+    stopSnapshotFallback()
     clearCameraRetryTimer()
-    clearStreamReconnectTimer()
     if (cameraStatusTimer) { window.clearInterval(cameraStatusTimer); cameraStatusTimer = undefined }
     cameraStartRequested = false
     cameraFetchInFlight.value = false

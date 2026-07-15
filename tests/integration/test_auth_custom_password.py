@@ -39,11 +39,8 @@ async def test_configure_custom_password_requires_auth(test_client):
 @pytest.mark.asyncio
 async def test_configure_custom_password_success(test_client):
     """Test that authenticated users can configure a custom password."""
-    # First, login with admin/admin to get a session and token
-    login_payload = {
-        "username": "admin",
-        "password": "admin"
-    }
+    # First, login with the explicit shared operator credential.
+    login_payload = {"credential": "operator123"}
     login_response = await test_client.post("/api/v2/auth/login", json=login_payload)
     assert login_response.status_code == 200
     
@@ -69,11 +66,8 @@ async def test_configure_custom_password_success(test_client):
 @pytest.mark.asyncio
 async def test_login_with_custom_password_after_configuration(test_client):
     """Test that after configuring a custom password, you can login with it."""
-    # First, login with admin/admin
-    login_payload = {
-        "username": "admin",
-        "password": "admin"
-    }
+    # First, login with the explicit shared operator credential.
+    login_payload = {"credential": "operator123"}
     login_response = await test_client.post("/api/v2/auth/login", json=login_payload)
     assert login_response.status_code == 200
     
@@ -108,11 +102,8 @@ async def test_login_with_custom_password_after_configuration(test_client):
 @pytest.mark.asyncio
 async def test_invalid_custom_password_fails(test_client):
     """Test that invalid custom password is rejected."""
-    # First, login with admin/admin
-    login_payload = {
-        "username": "admin",
-        "password": "admin"
-    }
+    # First, login with the explicit shared operator credential.
+    login_payload = {"credential": "operator123"}
     login_response = await test_client.post("/api/v2/auth/login", json=login_payload)
     assert login_response.status_code == 200
     
@@ -144,11 +135,8 @@ async def test_invalid_custom_password_fails(test_client):
 @pytest.mark.asyncio
 async def test_password_configuration_validation(test_client):
     """Test that password configuration validates input."""
-    # First, login with admin/admin
-    login_payload = {
-        "username": "admin",
-        "password": "admin"
-    }
+    # First, login with the explicit shared operator credential.
+    login_payload = {"credential": "operator123"}
     login_response = await test_client.post("/api/v2/auth/login", json=login_payload)
     assert login_response.status_code == 200
     
@@ -175,17 +163,14 @@ async def test_password_configuration_validation(test_client):
 
 
 @pytest.mark.asyncio
-async def test_admin_admin_still_works_without_custom_password(test_client):
-    """Test that admin/admin login still works when no custom password is configured."""
-    # Don't configure any custom password, admin/admin should work
+async def test_admin_admin_is_rejected_without_custom_password(test_client):
+    """A known default pair must not substitute the deployment credential."""
     login_payload = {
         "username": "admin",
         "password": "admin"
     }
     login_response = await test_client.post("/api/v2/auth/login", json=login_payload)
-    assert login_response.status_code == 200
-    login_data = login_response.json()
-    assert "access_token" in login_data
+    assert login_response.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -197,5 +182,4 @@ async def test_other_usernames_rejected_without_custom_password(test_client):
     }
     login_response = await test_client.post("/api/v2/auth/login", json=login_payload)
     assert login_response.status_code == 401
-
 

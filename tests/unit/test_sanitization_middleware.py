@@ -1,4 +1,5 @@
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -45,11 +46,12 @@ def test_sanitizes_sensitive_fields():
     assert data["ok"] is True
 
 
-def test_auth_exchange_preserves_issued_tokens_but_redacts_other_secrets():
+@pytest.mark.parametrize("path", ["/api/v2/auth/login", "/api/v2/auth/cloudflare"])
+def test_auth_exchange_preserves_issued_tokens_but_redacts_other_secrets(path):
     app = FastAPI()
     register_sanitization_middleware(app)
 
-    @app.post("/api/v2/auth/login")
+    @app.post(path)
     def login():
         return {
             "token": "signed.jwt.token",
@@ -57,7 +59,7 @@ def test_auth_exchange_preserves_issued_tokens_but_redacts_other_secrets():
             "password": "must-never-leak",
         }
 
-    response = TestClient(app).post("/api/v2/auth/login")
+    response = TestClient(app).post(path)
 
     assert response.status_code == 200
     assert response.json()["token"] == "signed.jwt.token"

@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import stat
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -13,6 +14,21 @@ import backend.src.services.camera_stream_service as camera_module
 from backend.src.services.ai_service import AIService
 from backend.src.services.camera_stream_service import CameraStreamService
 from backend.src.services.detector_runtime import DetectorManifest, RuntimeDetection
+
+
+async def _wait_for_ai_monitor(service: CameraStreamService) -> None:
+    monitor = service._ai_inference_monitor_task
+    if monitor is not None:
+        await asyncio.wait_for(asyncio.shield(monitor), timeout=2.0)
+
+
+def _configure_test_ai(service: CameraStreamService, processor, **options) -> None:
+    service.set_ai_model_status(
+        loaded=True,
+        model_sha256="a" * 64,
+        max_result_age_seconds=5.0,
+    )
+    service.set_ai_processor(processor, **options)
 
 
 def test_live_camera_socket_path_defaults_to_shared_runtime_directory(monkeypatch):
@@ -42,6 +58,20 @@ def test_camera_socket_path_honors_environment(monkeypatch, tmp_path):
 
     assert service.socket_path == str(socket_path)
     assert service.stream.service_endpoint == f"unix://{socket_path}"
+
+
+@pytest.mark.asyncio
+async def test_camera_owner_socket_is_not_world_accessible(tmp_path):
+    service = CameraStreamService(sim_mode=True)
+    service.socket_path = str(tmp_path / "camera.sock")
+    await service._setup_ipc_server()
+    try:
+        mode = stat.S_IMODE((tmp_path / "camera.sock").stat().st_mode)
+        assert mode == 0o600
+    finally:
+        assert service.ipc_server is not None
+        service.ipc_server.close()
+        await service.ipc_server.wait_closed()
 
 
 @pytest.mark.asyncio
@@ -252,6 +282,29 @@ def test_picamera2_uses_full_sensor_crop_for_full_fov(monkeypatch):
     assert service.camera.controls[-1]["ScalerCrop"] == (0, 0, 4056, 3040)
 
 
+def test_picamera_capture_declares_array_rgb_order(monkeypatch):
+    class FakeCamera:
+        def capture_array(self, _stream):
+            return np.asarray([[[10, 40, 180]]], dtype=np.uint8)
+
+    monkeypatch.setattr(camera_module, "PICAMERA_AVAILABLE", True)
+    monkeypatch.setattr(camera_module, "Picamera2", FakeCamera)
+    service = CameraStreamService(sim_mode=False)
+    service.camera = FakeCamera()
+    encoded = b"encoded"
+    observed: dict[str, object] = {}
+
+    def record_encode(frame, *, color_space=None):
+        observed["frame"] = frame
+        observed["color_space"] = color_space
+        return encoded
+
+    monkeypatch.setattr(service, "_encode_numpy_frame_to_jpeg", record_encode)
+
+    assert service._capture_real_frame() == (encoded, (1, 1))
+    assert observed["color_space"] == "RGB"
+
+
 @pytest.mark.asyncio
 async def test_v42_camera_ai_uses_canonical_inference_result():
     """V42: a frame is marked processed only after AIService returns a result."""
@@ -283,9 +336,14 @@ async def test_v42_camera_ai_uses_canonical_inference_result():
         ],
     )
     processor = AsyncMock(return_value=result)
-    service.set_ai_processor(processor, max_fps=5.0)
+    _configure_test_ai(service, processor, max_fps=5.0)
+    before_inference = await service._handle_client_message({"command": "get_status"})
+
+    assert before_inference["data"]["ai_model_loaded"] is True
+    assert before_inference["data"]["ai_runtime_ready"] is False
 
     await service._process_frame_for_ai(frame)
+    await _wait_for_ai_monitor(service)
 
     assert frame.processed_for_ai is True
     assert frame.ai_annotations == [
@@ -320,6 +378,16 @@ async def test_v42_camera_ai_uses_canonical_inference_result():
         frame_id=frame.metadata.frame_id,
         source_frame_timestamp=frame.metadata.timestamp,
     )
+    after_inference = await service._handle_client_message({"command": "get_status"})
+    assert after_inference["data"]["ai_runtime_ready"] is True
+
+    assert service._last_successful_ai_monotonic is not None
+    service._last_successful_ai_monotonic -= 5.1
+    stale = await service._handle_client_message({"command": "get_status"})
+    perception = await service._handle_client_message({"command": "get_perception"})
+    assert stale["data"]["ai_runtime_ready"] is False
+    assert "fresh result" in stale["data"]["ai_runtime_error"]
+    assert perception["data"] is None
 
 
 @pytest.mark.asyncio
@@ -327,16 +395,19 @@ async def test_v42_camera_ai_never_fakes_success_and_respects_cadence():
     """V42: skipped or failed inference leaves the frame explicitly unprocessed."""
     service = CameraStreamService(sim_mode=True)
     processor = AsyncMock(side_effect=RuntimeError("model unavailable"))
-    service.set_ai_processor(processor, max_fps=5.0)
+    _configure_test_ai(service, processor, max_fps=5.0)
     failed_frame = service._create_frame_object(b"failed", (640, 480))
 
     await service._process_frame_for_ai(failed_frame)
+    await _wait_for_ai_monitor(service)
 
     assert failed_frame.processed_for_ai is False
     assert failed_frame.ai_annotations == []
+    assert service.ai_runtime_ready is False
+    assert "model unavailable" in service.ai_runtime_error
 
     processor = AsyncMock(return_value=SimpleNamespace())
-    service.set_ai_processor(processor, max_fps=5.0)
+    _configure_test_ai(service, processor, max_fps=5.0)
     service._last_ai_inference_monotonic = service._monotonic()
     skipped_frame = service._create_frame_object(b"skipped", (640, 480))
 
@@ -353,10 +424,11 @@ async def test_v42_camera_ai_rejects_mismatched_frame_provenance():
     processor = AsyncMock(
         return_value=SimpleNamespace(input_frame_id="different-frame")
     )
-    service.set_ai_processor(processor)
+    _configure_test_ai(service, processor)
     frame = service._create_frame_object(b"jpeg-bytes", (640, 480))
 
     await service._process_frame_for_ai(frame)
+    await _wait_for_ai_monitor(service)
 
     assert frame.processed_for_ai is False
     assert frame.ai_annotations == []
@@ -372,9 +444,10 @@ async def test_camera_ai_rejects_mismatched_source_timestamp():
             source_frame_timestamp=datetime.now(UTC),
         )
     )
-    service.set_ai_processor(processor)
+    _configure_test_ai(service, processor)
 
     await service._process_frame_for_ai(frame)
+    await _wait_for_ai_monitor(service)
 
     assert frame.processed_for_ai is False
     assert frame.ai_annotations == []
@@ -399,9 +472,10 @@ async def test_v42_zero_detections_is_a_truthful_processed_result():
             detected_objects=[],
         )
     )
-    service.set_ai_processor(processor)
+    _configure_test_ai(service, processor)
 
     await service._process_frame_for_ai(frame)
+    await _wait_for_ai_monitor(service)
 
     assert frame.processed_for_ai is True
     assert frame.ai_annotations[0]["objects"] == []
@@ -422,14 +496,24 @@ async def test_v42_timed_out_inference_stays_single_flight_and_does_not_mark_fra
         return SimpleNamespace(input_frame_id=frame_id)
 
     processor = AsyncMock(side_effect=slow_processor)
-    service.set_ai_processor(processor, max_fps=5.0, timeout_seconds=0.05)
+    _configure_test_ai(
+        service,
+        processor,
+        max_fps=5.0,
+        timeout_seconds=0.05,
+    )
     timed_out_frame = service._create_frame_object(b"first", (640, 480))
     service._broadcast_frame_to_clients = AsyncMock()
 
     await service._process_single_frame(timed_out_frame)
+    monitor = service._ai_inference_monitor_task
+    assert monitor is not None
+    await asyncio.sleep(0.06)
 
     assert timed_out_frame.processed_for_ai is False
     assert timed_out_frame.ai_annotations == []
+    assert service.ai_runtime_ready is False
+    assert "deadline" in service.ai_runtime_error
     assert service._ai_inference_task is not None
     service._broadcast_frame_to_clients.assert_awaited_once_with(timed_out_frame)
 
@@ -442,9 +526,128 @@ async def test_v42_timed_out_inference_stays_single_flight_and_does_not_mark_fra
     assert next_frame.processed_for_ai is False
 
     release.set()
-    await asyncio.wait_for(service._ai_inference_task, timeout=1.0)
-    await asyncio.sleep(0)
+    await asyncio.wait_for(monitor, timeout=1.0)
     assert service._ai_inference_task is None
+    assert service._ai_inference_monitor_task is None
+
+
+@pytest.mark.asyncio
+async def test_default_pi_deadline_accepts_old_timeout_late_result_without_blocking_stream(
+    monkeypatch,
+):
+    monkeypatch.delenv("AI_CAMERA_INFERENCE_TIMEOUT_SECONDS", raising=False)
+    service = CameraStreamService(sim_mode=True)
+    assert service._ai_inference_timeout_seconds == pytest.approx(3.0)
+    frame = service._create_frame_object(b"slow-but-qualified", (640, 480))
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def measured_pi_processor(
+        _image_bytes: bytes,
+        *,
+        frame_id: str,
+        source_frame_timestamp=None,
+    ):
+        started.set()
+        await release.wait()
+        return SimpleNamespace(
+            inference_id="measured-pi-result",
+            input_frame_id=frame_id,
+            task="obstacle_detection",
+            model_name="test-detector",
+            model_version="1.0",
+            model_runtime="opencv_dnn",
+            model_sha256="a" * 64,
+            timestamp=datetime.now(UTC),
+            source_frame_timestamp=source_frame_timestamp,
+            total_time_ms=600.0,
+            detected_objects=[],
+        )
+
+    _configure_test_ai(service, measured_pi_processor)
+    service._broadcast_frame_to_clients = AsyncMock()
+    loop = asyncio.get_running_loop()
+    before = loop.time()
+
+    await service._process_single_frame(frame)
+
+    # Inference is deliberately slower than the removed 0.5 s deadline, but
+    # selected-frame delivery remains independent of that work.
+    assert loop.time() - before < 0.1
+    service._broadcast_frame_to_clients.assert_awaited_once_with(frame)
+    await asyncio.wait_for(started.wait(), timeout=0.2)
+    await asyncio.sleep(0.55)
+    assert frame.processed_for_ai is False
+    assert service._ai_inference_task is not None
+
+    release.set()
+    await _wait_for_ai_monitor(service)
+
+    assert frame.processed_for_ai is True
+    assert service._latest_ai_result.input_frame_id == frame.metadata.frame_id
+
+
+@pytest.mark.asyncio
+async def test_hardware_init_fallback_never_runs_or_publishes_synthetic_perception(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("SIM_MODE", "0")
+    service = CameraStreamService(sim_mode=False)
+    service.socket_path = str(tmp_path / "hardware-fallback.sock")
+    service.stream.service_endpoint = f"unix://{service.socket_path}"
+    monkeypatch.setattr(service, "_initialize_camera", AsyncMock(return_value=False))
+    processor = AsyncMock()
+
+    try:
+        assert await service.initialize() is True
+        _configure_test_ai(service, processor)
+        frame = service._create_frame_object(b"synthetic", (640, 480))
+
+        await service._process_frame_for_ai(frame)
+        perception = await service._handle_client_message({"command": "get_perception"})
+        status = await service._handle_client_message({"command": "get_status"})
+
+        processor.assert_not_awaited()
+        assert frame.processed_for_ai is False
+        assert perception["data"] is None
+        assert status["data"]["requested_sim_mode"] is False
+        assert status["data"]["sim_mode"] is True
+        assert status["data"]["hardware_fallback_active"] is True
+        assert status["data"]["hardware_available"] is False
+        assert status["data"]["ai_runtime_ready"] is False
+    finally:
+        await service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_camera_owner_reports_detector_initialization_failure(monkeypatch):
+    service = CameraStreamService(sim_mode=True)
+
+    class UnavailableAI:
+        def set_camera_frame_provider(self, _provider):
+            return None
+
+        async def initialize(self):
+            return True
+
+        async def get_ai_status(self):
+            return {
+                "model_ready": False,
+                "model_sha256": "b" * 64,
+                "last_error": "ONNX load failed",
+            }
+
+    monkeypatch.setattr(camera_module, "camera_service", service)
+    monkeypatch.setattr(camera_module, "_get_ai_service", lambda: UnavailableAI())
+
+    with pytest.raises(RuntimeError, match="ONNX load failed"):
+        await camera_module._configure_camera_ai()
+
+    status = await service._handle_client_message({"command": "get_status"})
+    assert status["data"]["ai_runtime_ready"] is False
+    assert status["data"]["ai_runtime_error"] == "ONNX load failed"
+    assert status["data"]["ai_model_sha256"] == "b" * 64
 
 
 @pytest.mark.asyncio
@@ -490,10 +693,15 @@ async def test_v42_real_ai_service_annotates_without_motion_authority(
     )
     await ai_service.initialize()
     service = CameraStreamService(sim_mode=True)
-    service.set_ai_processor(ai_service.infer_camera_frame, timeout_seconds=1.0)
+    _configure_test_ai(
+        service,
+        ai_service.infer_camera_frame,
+        timeout_seconds=1.0,
+    )
     frame = service._create_frame_object(image_buffer.getvalue(), (64, 64))
 
     await service._process_frame_for_ai(frame)
+    await _wait_for_ai_monitor(service)
 
     assert frame.processed_for_ai is True
     assert frame.ai_annotations[0]["model_name"] == "camera-test-detector"
@@ -540,6 +748,14 @@ async def test_standalone_main_wires_ai_before_streaming(monkeypatch):
             order.append("ai.initialize")
             return True
 
+        async def get_ai_status(self):
+            return {
+                "model_ready": True,
+                "model_sha256": "a" * 64,
+                "max_result_age_seconds": 5.0,
+                "last_error": None,
+            }
+
         async def infer_camera_frame(
             self,
             image_bytes: bytes,
@@ -554,6 +770,9 @@ async def test_standalone_main_wires_ai_before_streaming(monkeypatch):
             self.running = False
             self.ai_processor = None
             self.shutdown_calls = 0
+            self.hardware_fallback_active = False
+            self.ai_model_loaded = False
+            self.ai_runtime_ready = False
 
         async def initialize(self):
             order.append("camera.initialize")
@@ -563,6 +782,16 @@ async def test_standalone_main_wires_ai_before_streaming(monkeypatch):
         def set_ai_processor(self, processor):
             order.append("camera.ai_processor")
             self.ai_processor = processor
+
+        def set_ai_model_status(
+            self,
+            *,
+            loaded,
+            error=None,
+            model_sha256=None,
+            max_result_age_seconds=None,
+        ):
+            self.ai_model_loaded = loaded
 
         async def start_streaming(self):
             order.append("camera.start")
@@ -611,6 +840,8 @@ async def test_standalone_main_streams_when_ai_setup_fails(monkeypatch):
         def __init__(self):
             self.running = False
             self.start_calls = 0
+            self.hardware_fallback_active = False
+            self.ai_runtime_error = None
 
         async def initialize(self):
             self.running = True
@@ -618,6 +849,16 @@ async def test_standalone_main_streams_when_ai_setup_fails(monkeypatch):
 
         def set_ai_processor(self, processor):
             raise AssertionError("failed AI must not be injected")
+
+        def set_ai_model_status(
+            self,
+            *,
+            loaded,
+            error=None,
+            model_sha256=None,
+            max_result_age_seconds=None,
+        ):
+            self.ai_runtime_error = error
 
         async def start_streaming(self):
             self.start_calls += 1

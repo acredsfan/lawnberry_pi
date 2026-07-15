@@ -1,70 +1,154 @@
-"""Test Cloudflare Access authentication bypass in login flow."""
+"""Cloudflare Access to LawnBerry session exchange contracts."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 
-from backend.src.models.auth_security_config import AuthSecurityConfig, SecurityLevel
+from backend.src.services.cloudflare_access_service import (
+    CloudflareAccessError,
+    VerifiedCloudflareIdentity,
+)
 
 
 @pytest.mark.asyncio
-async def test_cloudflare_bypass_skips_login_when_valid_headers_present(test_client, monkeypatch):
-    """Test that valid Cloudflare Access headers skip the login screen."""
-    # Create a mock Cloudflare-enabled security config
-    cf_config = AuthSecurityConfig(security_level=SecurityLevel.TUNNEL_AUTH)
-    cf_config.tunnel_auth_enabled = True
-    
-    # Mock _current_security_settings to return our Cloudflare config
-    async def mock_current_security_settings():
-        return cf_config
-    
-    # Patch the _current_security_settings call in auth router
-    original_settings = None
-    try:
-        # Store original and replace
-        import backend.src.api.routers.auth as auth_router
-        if hasattr(auth_router, '_current_security_settings'):
-            original_settings = auth_router._current_security_settings
-            auth_router._current_security_settings = lambda: cf_config
-        
-        # No credentials provided - normally would be rejected
-        payload = {}
-        
-        # But with valid Cloudflare headers, should bypass login
-        headers = {
-            "CF-Access-Jwt-Assertion": "dummy-token",
-            "CF-Access-Authenticated-User-Email": "user@example.com"
-        }
-        
-        response = await test_client.post("/api/v2/auth/login", json=payload, headers=headers)
-        
-        # Should succeed and return session token (or gracefully fail if tunnel auth not configured)
-        # The key is that it should NOT reject immediately for empty credentials
-        assert response.status_code in [200, 401]  # 401 is OK if tunnel auth not properly configured
-    finally:
-        # Restore original
-        if original_settings is not None:
-            auth_router._current_security_settings = original_settings
+async def test_verified_cloudflare_exchange_issues_working_local_session(test_client, monkeypatch):
+    import backend.src.api.routers.auth as auth_router
 
+    expiry = int((datetime.now(UTC) + timedelta(minutes=5)).timestamp())
+    verifier = AsyncMock()
+    verifier.verify.return_value = VerifiedCloudflareIdentity(
+        principal="operator@example.com",
+        expires_at=datetime.fromtimestamp(expiry, tz=UTC),
+        claims={"sub": "cf-user", "email": "operator@example.com", "exp": expiry},
+    )
+    monkeypatch.setattr(auth_router, "cloudflare_access_verifier", verifier)
 
-@pytest.mark.asyncio
-async def test_login_requires_credentials_when_cloudflare_disabled(test_client):
-    """Test that normal login flow requires credentials when Cloudflare is disabled."""
-    payload = {}
-    
-    # No Cloudflare headers, no credentials - should be rejected
-    response = await test_client.post("/api/v2/auth/login", json=payload)
-    assert response.status_code == 401
+    response = await test_client.post(
+        "/api/v2/auth/cloudflare",
+        headers={
+            "CF-Access-Jwt-Assertion": "signed-access-token",
+            # An unsigned forwarding header must not override the signed claim.
+            "CF-Access-Authenticated-User-Email": "attacker@example.com",
+        },
+    )
 
-
-@pytest.mark.asyncio
-async def test_local_login_still_works_without_cloudflare(test_client):
-    """Test that local admin/admin login still works when Cloudflare is not enabled."""
-    payload = {
-        "username": "admin",
-        "password": "admin"
-    }
-    
-    response = await test_client.post("/api/v2/auth/login", json=payload)
     assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert "user" in data
+    body = response.json()
+    assert body["access_token"] not in {"", "[REDACTED]"}
+    assert body["user"]["username"] == "operator@example.com"
+    verifier.verify.assert_awaited_once_with("signed-access-token")
+
+    profile = await test_client.get(
+        "/api/v2/auth/profile",
+        headers={"Authorization": f"Bearer {body['access_token']}"},
+    )
+    assert profile.status_code == 200
+    assert profile.json()["username"] == "operator@example.com"
+
+
+@pytest.mark.asyncio
+async def test_invalid_cloudflare_assertion_never_falls_through_to_local_login(
+    test_client, monkeypatch
+):
+    import backend.src.api.routers.auth as auth_router
+
+    verifier = AsyncMock()
+    verifier.verify.side_effect = CloudflareAccessError("Cloudflare Access signature invalid")
+    monkeypatch.setattr(auth_router, "cloudflare_access_verifier", verifier)
+
+    response = await test_client.post(
+        "/api/v2/auth/cloudflare",
+        headers={"CF-Access-Jwt-Assertion": "forged-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Cloudflare Access assertion invalid"
+    assert auth_router.primary_auth_service.rate_limiter.locked_clients() == []
+
+
+@pytest.mark.asyncio
+async def test_login_endpoint_does_not_trust_unverified_cloudflare_headers(test_client):
+    response = await test_client.post(
+        "/api/v2/auth/login",
+        json={},
+        headers={
+            "CF-Access-Jwt-Assertion": "unsigned-token",
+            "CF-Access-Authenticated-User-Email": "attacker@example.com",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid credentials"
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_exchange_requires_an_assertion_without_consuming_password_quota(
+    test_client,
+):
+    response = await test_client.post("/api/v2/auth/cloudflare")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Cloudflare Access assertion missing"
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_refresh_requires_fresh_matching_assertion(test_client, monkeypatch):
+    import backend.src.api.routers.auth as auth_router
+
+    principal = "operator@example.com"
+    initial_expiry = datetime.now(UTC) + timedelta(minutes=10)
+    verifier = AsyncMock()
+    verifier.verify.return_value = VerifiedCloudflareIdentity(
+        principal=principal,
+        expires_at=initial_expiry,
+        claims={"email": principal, "exp": int(initial_expiry.timestamp())},
+    )
+    monkeypatch.setattr(auth_router, "cloudflare_access_verifier", verifier)
+
+    bootstrap = await test_client.post(
+        "/api/v2/auth/cloudflare",
+        headers={"CF-Access-Jwt-Assertion": "initial-assertion"},
+    )
+    assert bootstrap.status_code == 200
+    token = bootstrap.json()["access_token"]
+
+    missing = await test_client.post(
+        "/api/v2/auth/refresh",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert missing.status_code == 401
+    assert missing.json()["detail"] == "Cloudflare Access assertion required for refresh"
+
+    mismatch_expiry = datetime.now(UTC) + timedelta(minutes=20)
+    verifier.verify.return_value = VerifiedCloudflareIdentity(
+        principal="different@example.com",
+        expires_at=mismatch_expiry,
+        claims={"email": "different@example.com", "exp": int(mismatch_expiry.timestamp())},
+    )
+    mismatch = await test_client.post(
+        "/api/v2/auth/refresh",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "CF-Access-Jwt-Assertion": "mismatched-assertion",
+        },
+    )
+    assert mismatch.status_code == 401
+
+    refreshed_expiry = datetime.now(UTC) + timedelta(minutes=30)
+    verifier.verify.return_value = VerifiedCloudflareIdentity(
+        principal=principal,
+        expires_at=refreshed_expiry,
+        claims={"email": principal, "exp": int(refreshed_expiry.timestamp())},
+    )
+    refreshed = await test_client.post(
+        "/api/v2/auth/refresh",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "CF-Access-Jwt-Assertion": "refreshed-assertion",
+        },
+    )
+    assert refreshed.status_code == 200
+    assert datetime.fromisoformat(refreshed.json()["expires_at"]) <= refreshed_expiry
