@@ -1,10 +1,11 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.src.api.mission import router as mission_router
 from backend.src.core.runtime import RuntimeContext, get_runtime
-from backend.src.main import app
 from backend.src.models.mission import Mission, MissionLifecycleStatus, MissionStatus
 from backend.src.services.mission_service import (
     MissionConflictError,
@@ -20,10 +21,34 @@ from backend.src.services.mission_service import (
 def mock_mission_service():
     service = MissionService(navigation_service=AsyncMock())
     service.create_mission = AsyncMock()
-    service.start_mission = AsyncMock()
-    service.pause_mission = AsyncMock()
-    service.resume_mission = AsyncMock()
-    service.abort_mission = AsyncMock()
+    service.start_mission = AsyncMock(
+        return_value=MissionStatus(
+            mission_id="test_mission",
+            status=MissionLifecycleStatus.RUNNING,
+            total_waypoints=1,
+        )
+    )
+    service.pause_mission = AsyncMock(
+        return_value=MissionStatus(
+            mission_id="test_mission",
+            status=MissionLifecycleStatus.PAUSED,
+            total_waypoints=1,
+        )
+    )
+    service.resume_mission = AsyncMock(
+        return_value=MissionStatus(
+            mission_id="test_mission",
+            status=MissionLifecycleStatus.RUNNING,
+            total_waypoints=1,
+        )
+    )
+    service.abort_mission = AsyncMock(
+        return_value=MissionStatus(
+            mission_id="test_mission",
+            status=MissionLifecycleStatus.ABORTED,
+            total_waypoints=1,
+        )
+    )
     service.get_mission_status = AsyncMock()
     service.list_missions = AsyncMock()
     return service
@@ -42,10 +67,12 @@ def client(mock_mission_service):
         websocket_hub=MagicMock(),
         persistence=MagicMock(),
     )
-    app.dependency_overrides[get_runtime] = lambda: fake_runtime
-    with TestClient(app) as c:
+    test_app = FastAPI()
+    test_app.include_router(mission_router)
+    test_app.dependency_overrides[get_runtime] = lambda: fake_runtime
+    with TestClient(test_app) as c:
         yield c
-    app.dependency_overrides.clear()
+    test_app.dependency_overrides.clear()
 
 def test_create_mission(client, mock_mission_service):
     waypoints = [{"lat": 1.0, "lon": 1.0, "blade_on": True, "speed": 80}]
@@ -75,7 +102,7 @@ def test_start_mission_blade_off_diagnostic(client, mock_mission_service):
     )
 
     assert response.status_code == 200
-    assert response.json()["blade_off_diagnostic"] is True
+    assert response.json()["status"] == "running"
     mock_mission_service.start_mission.assert_called_once_with(
         "test_mission",
         blade_off_diagnostic=True,
@@ -97,6 +124,20 @@ def test_abort_mission(client, mock_mission_service):
     response = client.post("/api/v2/missions/test_mission/abort", json={})
     assert response.status_code == 200
     mock_mission_service.abort_mission.assert_called_once_with("test_mission")
+
+
+def test_pause_mission_rejects_unconfirmed_transition(client, mock_mission_service):
+    mock_mission_service.pause_mission.return_value = MissionStatus(
+        mission_id="test_mission",
+        status=MissionLifecycleStatus.FAILED,
+        detail="Controller stop was not confirmed",
+        total_waypoints=1,
+    )
+
+    response = client.post("/api/v2/missions/test_mission/pause", json={})
+
+    assert response.status_code == 409
+    assert "Controller stop was not confirmed" in response.json()["detail"]
 
 
 def test_get_mission_status(client, mock_mission_service):
@@ -224,13 +265,15 @@ def test_mission_endpoints_resolve_via_runtime_dependency():
         persistence=MagicMock(),
     )
 
-    app.dependency_overrides[get_runtime] = lambda: fake_runtime
+    test_app = FastAPI()
+    test_app.include_router(mission_router)
+    test_app.dependency_overrides[get_runtime] = lambda: fake_runtime
     try:
-        with TestClient(app) as client:
+        with TestClient(test_app) as client:
             # /api/v2/missions/list is the list-missions endpoint.
             response = client.get("/api/v2/missions/list")
             assert response.status_code == 200, (
                 f"status={response.status_code} body={response.text}"
             )
     finally:
-        app.dependency_overrides.clear()
+        test_app.dependency_overrides.clear()

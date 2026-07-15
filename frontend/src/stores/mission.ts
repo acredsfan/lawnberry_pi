@@ -1,99 +1,137 @@
-import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
-import apiService from '@/services/api';
-import { useWebSocket } from '@/services/websocket';
+import { defineStore } from 'pinia'
+import { computed, ref } from 'vue'
+import apiService from '@/services/api'
+import { useWebSocket } from '@/services/websocket'
 
 export interface Waypoint {
-  id: string;
-  lat: number;
-  lon: number;
-  blade_on: boolean;
-  speed: number;
+  id: string
+  lat: number
+  lon: number
+  blade_on: boolean
+  speed: number
 }
 
 export interface Mission {
-  id: string;
-  name: string;
-  waypoints: Waypoint[];
-  created_at: string;
+  id: string
+  name: string
+  waypoints: Waypoint[]
+  created_at: string
 }
 
-export type MissionLifecycleStatus = 'idle' | 'running' | 'paused' | 'completed' | 'aborted' | 'failed';
+export type MissionLifecycleStatus =
+  | 'idle'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'aborted'
+  | 'failed'
 
 export interface MissionStatusResponse {
-  mission_id: string;
-  status: MissionLifecycleStatus;
-  current_waypoint_index: number | null;
-  completion_percentage: number;
-  total_waypoints: number;
-  detail?: string | null;
+  mission_id: string
+  status: MissionLifecycleStatus
+  current_waypoint_index: number | null
+  completion_percentage: number
+  total_waypoints: number
+  detail?: string | null
 }
 
 export interface StartMissionOptions {
-  bladeOffDiagnostic?: boolean;
+  bladeOffDiagnostic?: boolean
 }
 
 function extractMissionErrorMessage(error: unknown, fallback: string): string {
-  const message = (error as {
-    response?: {
-      data?: {
-        detail?: string;
-        message?: string;
-      };
-    };
-    message?: string;
-  })?.response?.data?.detail
-    || (error as {
-      response?: {
-        data?: {
-          detail?: string;
-          message?: string;
-        };
-      };
-      message?: string;
-    })?.response?.data?.message
-    || (error as { message?: string })?.message;
+  const message =
+    (
+      error as {
+        response?: {
+          data?: {
+            detail?: string
+            message?: string
+          }
+        }
+        message?: string
+      }
+    )?.response?.data?.detail ||
+    (
+      error as {
+        response?: {
+          data?: {
+            detail?: string
+            message?: string
+          }
+        }
+        message?: string
+      }
+    )?.response?.data?.message ||
+    (error as { message?: string })?.message
 
-  return String(message || fallback);
+  return String(message || fallback)
 }
 
-const CURRENT_MISSION_ID_KEY = 'lawnberry:currentMissionId';
+const CURRENT_MISSION_ID_KEY = 'lawnberry:currentMissionId'
 
 export const useMissionStore = defineStore('mission', () => {
-  const waypoints = ref<Waypoint[]>([]);
-  const defaultSpeed = ref(75);
-  const currentMission = ref<Mission | null>(null);
-  const missionStatus = ref<MissionLifecycleStatus>('idle');
-  const progress = ref(0);
-  const currentWaypointIndex = ref<number | null>(null);
-  const totalWaypoints = ref(0);
-  const statusDetail = ref<string | null>(null);
-  const pathTrace = ref<[number, number][]>([]);
-  const missions = ref<Mission[]>([]);
-  const missionsLoading = ref(false);
-  const missionsError = ref<string | null>(null);
+  const waypoints = ref<Waypoint[]>([])
+  const defaultSpeed = ref(75)
+  const currentMission = ref<Mission | null>(null)
+  const missionStatus = ref<MissionLifecycleStatus>('idle')
+  const progress = ref(0)
+  const currentWaypointIndex = ref<number | null>(null)
+  const totalWaypoints = ref(0)
+  const statusDetail = ref<string | null>(null)
+  const pathTrace = ref<[number, number][]>([])
+  const missions = ref<Mission[]>([])
+  const missionsLoading = ref(false)
+  const missionsError = ref<string | null>(null)
   const isRecoveredPause = computed(() => {
-    return missionStatus.value === 'paused' && /recover/i.test(statusDetail.value ?? '');
-  });
-  let statusPollInterval: ReturnType<typeof setInterval> | null = null;
+    return missionStatus.value === 'paused' && /recover/i.test(statusDetail.value ?? '')
+  })
+  let statusPollInterval: ReturnType<typeof setInterval> | null = null
 
   const _persistCurrentMissionId = (id: string | null) => {
     if (id) {
-      localStorage.setItem(CURRENT_MISSION_ID_KEY, id);
+      localStorage.setItem(CURRENT_MISSION_ID_KEY, id)
     } else {
-      localStorage.removeItem(CURRENT_MISSION_ID_KEY);
+      localStorage.removeItem(CURRENT_MISSION_ID_KEY)
     }
-  };
+  }
 
-  const { subscribe, unsubscribe } = useWebSocket();
+  const { subscribe, unsubscribe } = useWebSocket()
 
   const applyMissionStatus = (status: MissionStatusResponse) => {
-    missionStatus.value = status.status;
-    progress.value = status.completion_percentage;
-    currentWaypointIndex.value = status.current_waypoint_index;
-    totalWaypoints.value = status.total_waypoints;
-    statusDetail.value = status.detail ?? null;
-  };
+    missionStatus.value = status.status
+    progress.value = status.completion_percentage
+    currentWaypointIndex.value = status.current_waypoint_index
+    totalWaypoints.value = status.total_waypoints
+    statusDetail.value = status.detail ?? null
+  }
+
+  const reconcileMissionStatus = async (missionId: string): Promise<void> => {
+    try {
+      const response = await apiService.get<MissionStatusResponse>(
+        `/api/v2/missions/${missionId}/status`
+      )
+      applyMissionStatus(response.data)
+    } catch {
+      // Keep the last authoritative state when reconciliation is unavailable.
+    }
+  }
+
+  const requireCurrentMission = (): Mission => {
+    if (!currentMission.value) {
+      throw new Error('No mission is selected.')
+    }
+    return currentMission.value
+  }
+
+  const requireTransitionStatus = (
+    status: MissionStatusResponse,
+    expected: MissionLifecycleStatus
+  ): void => {
+    if (!status || status.status !== expected) {
+      throw new Error(status?.detail || `Server did not confirm mission state '${expected}'.`)
+    }
+  }
 
   const addWaypoint = (lat: number, lon: number) => {
     const newWaypoint: Waypoint = {
@@ -102,355 +140,373 @@ export const useMissionStore = defineStore('mission', () => {
       lon,
       blade_on: false,
       speed: defaultSpeed.value,
-    };
-    waypoints.value.push(newWaypoint);
-  };
+    }
+    waypoints.value.push(newWaypoint)
+  }
 
   const applySpeedToAll = (speed: number) => {
-    waypoints.value = waypoints.value.map(wp => ({ ...wp, speed }));
-  };
+    waypoints.value = waypoints.value.map((wp) => ({ ...wp, speed }))
+  }
 
   const removeWaypoint = (id: string) => {
-    waypoints.value = waypoints.value.filter(wp => wp.id !== id);
-  };
+    waypoints.value = waypoints.value.filter((wp) => wp.id !== id)
+  }
 
   const updateWaypoint = (updatedWaypoint: Waypoint) => {
-    const index = waypoints.value.findIndex(wp => wp.id === updatedWaypoint.id);
+    const index = waypoints.value.findIndex((wp) => wp.id === updatedWaypoint.id)
     if (index !== -1) {
-      waypoints.value[index] = updatedWaypoint;
+      waypoints.value[index] = updatedWaypoint
     }
-  };
+  }
 
   const reorderWaypoints = (newOrder: Waypoint[]) => {
-    waypoints.value = newOrder;
-  };
+    waypoints.value = newOrder
+  }
 
   const removeLastWaypoint = () => {
     if (waypoints.value.length > 0) {
-      waypoints.value = waypoints.value.slice(0, -1);
+      waypoints.value = waypoints.value.slice(0, -1)
     }
-  };
+  }
 
   const clearWaypoints = () => {
-    waypoints.value = [];
-  };
+    waypoints.value = []
+  }
 
   const appendTracePoint = (lat: number, lon: number) => {
-    if (missionStatus.value !== 'running') return;
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-    const last = pathTrace.value[pathTrace.value.length - 1];
-    if (last && Math.abs(last[0] - lat) < 1e-6 && Math.abs(last[1] - lon) < 1e-6) return;
-    pathTrace.value.push([lat, lon]);
-    if (pathTrace.value.length > 5000) pathTrace.value.shift();
-  };
+    if (missionStatus.value !== 'running') return
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return
+    const last = pathTrace.value[pathTrace.value.length - 1]
+    if (last && Math.abs(last[0] - lat) < 1e-6 && Math.abs(last[1] - lon) < 1e-6) return
+    pathTrace.value.push([lat, lon])
+    if (pathTrace.value.length > 5000) pathTrace.value.shift()
+  }
 
   const clearTrace = () => {
-    pathTrace.value = [];
-  };
+    pathTrace.value = []
+  }
 
   const _setCurrentMission = (mission: Mission) => {
-    currentMission.value = mission;
-    _persistCurrentMissionId(mission.id);
-  };
+    currentMission.value = mission
+    _persistCurrentMissionId(mission.id)
+  }
 
   const selectMission = async (mission: Mission) => {
-    _setCurrentMission(mission);
-    waypoints.value = [...mission.waypoints];
+    _setCurrentMission(mission)
+    waypoints.value = [...mission.waypoints]
     try {
-      const response = await apiService.get<MissionStatusResponse>(`/api/v2/missions/${mission.id}/status`);
-      applyMissionStatus(response.data);
+      const response = await apiService.get<MissionStatusResponse>(
+        `/api/v2/missions/${mission.id}/status`
+      )
+      applyMissionStatus(response.data)
     } catch {
-      missionStatus.value = 'idle';
+      missionStatus.value = 'idle'
     }
-  };
+  }
 
   const fetchMissions = async () => {
-    missionsLoading.value = true;
-    missionsError.value = null;
+    missionsLoading.value = true
+    missionsError.value = null
     try {
-      const response = await apiService.get<Mission[]>('/api/v2/missions/list');
-      missions.value = response.data;
+      const response = await apiService.get<Mission[]>('/api/v2/missions/list')
+      missions.value = response.data
     } catch (error) {
-      missionsError.value = extractMissionErrorMessage(error, 'Failed to load missions.');
+      missionsError.value = extractMissionErrorMessage(error, 'Failed to load missions.')
     } finally {
-      missionsLoading.value = false;
+      missionsLoading.value = false
     }
-  };
+  }
 
-  const updateMissionById = async (id: string, payload: { name?: string; waypoints?: Waypoint[] }) => {
+  const updateMissionById = async (
+    id: string,
+    payload: { name?: string; waypoints?: Waypoint[] }
+  ) => {
     try {
-      const response = await apiService.patch<Mission>(`/api/v2/missions/${id}`, payload);
-      const updated = response.data;
-      const idx = missions.value.findIndex(m => m.id === id);
+      const response = await apiService.patch<Mission>(`/api/v2/missions/${id}`, payload)
+      const updated = response.data
+      const idx = missions.value.findIndex((m) => m.id === id)
       if (idx !== -1) {
-        missions.value[idx] = updated;
+        missions.value[idx] = updated
       }
       if (currentMission.value?.id === id) {
-        currentMission.value = updated;
+        currentMission.value = updated
         if (payload.waypoints !== undefined) {
-          waypoints.value = [...updated.waypoints];
+          waypoints.value = [...updated.waypoints]
         }
       }
-      return updated;
+      return updated
     } catch (error) {
-      const msg = extractMissionErrorMessage(error, 'Unable to update mission.');
-      statusDetail.value = msg;
-      throw error;
+      const msg = extractMissionErrorMessage(error, 'Unable to update mission.')
+      statusDetail.value = msg
+      throw error
     }
-  };
+  }
 
   const deleteMissionById = async (id: string) => {
     try {
-      await apiService.delete(`/api/v2/missions/${id}`);
-      missions.value = missions.value.filter(m => m.id !== id);
+      await apiService.delete(`/api/v2/missions/${id}`)
+      missions.value = missions.value.filter((m) => m.id !== id)
       if (currentMission.value?.id === id) {
-        currentMission.value = null;
-        waypoints.value = [];
-        _persistCurrentMissionId(null);
-        stopStatusPolling();
-        missionStatus.value = 'idle';
+        currentMission.value = null
+        waypoints.value = []
+        _persistCurrentMissionId(null)
+        stopStatusPolling()
+        missionStatus.value = 'idle'
       }
     } catch (error) {
-      const msg = extractMissionErrorMessage(error, 'Unable to delete mission.');
-      statusDetail.value = msg;
-      throw error;
+      const msg = extractMissionErrorMessage(error, 'Unable to delete mission.')
+      statusDetail.value = msg
+      throw error
     }
-  };
+  }
 
-  const deleteAllMissions = async (): Promise<{deleted: number; skipped: Array<{id: string; name: string; reason: string}>}> => {
+  const deleteAllMissions = async (): Promise<{
+    deleted: number
+    skipped: Array<{ id: string; name: string; reason: string }>
+  }> => {
     try {
-      const result = await apiService.delete('/api/v2/missions');
-      const data = result?.data ?? result;
-      const skippedIds = new Set((data?.skipped ?? []).map((s: any) => s.id));
-      missions.value = missions.value.filter(m => skippedIds.has(m.id));
+      const result = await apiService.delete('/api/v2/missions')
+      const data = result?.data ?? result
+      const skippedIds = new Set((data?.skipped ?? []).map((s: any) => s.id))
+      missions.value = missions.value.filter((m) => skippedIds.has(m.id))
       if (currentMission.value && !skippedIds.has(currentMission.value.id)) {
-        currentMission.value = null;
-        waypoints.value = [];
-        _persistCurrentMissionId(null);
-        stopStatusPolling();
-        missionStatus.value = 'idle';
+        currentMission.value = null
+        waypoints.value = []
+        _persistCurrentMissionId(null)
+        stopStatusPolling()
+        missionStatus.value = 'idle'
       }
-      return data;
+      return data
     } catch (error) {
-      const msg = extractMissionErrorMessage(error, 'Unable to delete all missions.');
-      statusDetail.value = msg;
-      throw error;
+      const msg = extractMissionErrorMessage(error, 'Unable to delete all missions.')
+      statusDetail.value = msg
+      throw error
     }
-  };
+  }
 
   const handleMissionDeletedWsEvent = async (data: any) => {
-    const payload = data?.data ?? data;
-    const mission_id = payload?.mission_id;
-    if (!mission_id) return;
-    missions.value = missions.value.filter(m => m.id !== mission_id);
+    const payload = data?.data ?? data
+    const mission_id = payload?.mission_id
+    if (!mission_id) return
+    missions.value = missions.value.filter((m) => m.id !== mission_id)
     if (currentMission.value?.id === mission_id) {
-      currentMission.value = null;
-      waypoints.value = [];
-      _persistCurrentMissionId(null);
-      stopStatusPolling();
-      missionStatus.value = 'idle';
+      currentMission.value = null
+      waypoints.value = []
+      _persistCurrentMissionId(null)
+      stopStatusPolling()
+      missionStatus.value = 'idle'
     }
-  };
+  }
 
   const handleMissionUpdatedWsEvent = async (data: any) => {
-    const payload = data?.data ?? data;
-    const mission_id = payload?.mission_id;
-    if (!mission_id) return;
+    const payload = data?.data ?? data
+    const mission_id = payload?.mission_id
+    if (!mission_id) return
     try {
-      const response = await apiService.get<Mission>(`/api/v2/missions/${mission_id}`);
-      const updated = response.data;
-      const idx = missions.value.findIndex(m => m.id === mission_id);
+      const response = await apiService.get<Mission>(`/api/v2/missions/${mission_id}`)
+      const updated = response.data
+      const idx = missions.value.findIndex((m) => m.id === mission_id)
       if (idx !== -1) {
-        missions.value[idx] = updated;
+        missions.value[idx] = updated
       }
       if (currentMission.value?.id === mission_id) {
-        currentMission.value = updated;
+        currentMission.value = updated
       }
     } catch {
       // Mission may have been deleted before we fetched it — ignore
     }
-  };
+  }
 
   const init = async () => {
     // Always register cross-client WS listeners, regardless of saved mission state
-    subscribe('mission.deleted', handleMissionDeletedWsEvent);
-    subscribe('mission.updated', handleMissionUpdatedWsEvent);
+    subscribe('mission.deleted', handleMissionDeletedWsEvent)
+    subscribe('mission.updated', handleMissionUpdatedWsEvent)
 
     // Pre-populate missions[] so isSavedMission is correct on cold-start / page refresh
-    void fetchMissions(); // non-blocking; errors surface via missionsError ref
+    void fetchMissions() // non-blocking; errors surface via missionsError ref
 
-    const savedId = localStorage.getItem(CURRENT_MISSION_ID_KEY);
-    if (!savedId) return;
+    const savedId = localStorage.getItem(CURRENT_MISSION_ID_KEY)
+    if (!savedId) return
     try {
-      const missionRes = await apiService.get<Mission>(`/api/v2/missions/${savedId}`);
-      const statusRes = await apiService.get<MissionStatusResponse>(`/api/v2/missions/${savedId}/status`);
-      currentMission.value = missionRes.data;
-      waypoints.value = [...missionRes.data.waypoints];
-      applyMissionStatus(statusRes.data);
+      const missionRes = await apiService.get<Mission>(`/api/v2/missions/${savedId}`)
+      const statusRes = await apiService.get<MissionStatusResponse>(
+        `/api/v2/missions/${savedId}/status`
+      )
+      currentMission.value = missionRes.data
+      waypoints.value = [...missionRes.data.waypoints]
+      applyMissionStatus(statusRes.data)
       if (statusRes.data.status === 'running' || statusRes.data.status === 'paused') {
-        startStatusPolling();
+        startStatusPolling()
       }
     } catch {
-      localStorage.removeItem(CURRENT_MISSION_ID_KEY);
+      localStorage.removeItem(CURRENT_MISSION_ID_KEY)
     }
-  };
+  }
 
   const createMission = async (name: string) => {
     try {
       const response = await apiService.post<Mission>('/api/v2/missions/create', {
         name,
         waypoints: waypoints.value,
-      });
-      _setCurrentMission(response.data);
-      missionStatus.value = 'idle';
-      progress.value = 0;
-      currentWaypointIndex.value = 0;
-      totalWaypoints.value = response.data.waypoints.length;
-      statusDetail.value = null;
-      return response.data;
+      })
+      _setCurrentMission(response.data)
+      missionStatus.value = 'idle'
+      progress.value = 0
+      currentWaypointIndex.value = 0
+      totalWaypoints.value = response.data.waypoints.length
+      statusDetail.value = null
+      return response.data
     } catch (error) {
-      console.error('Error creating mission:', error);
-      statusDetail.value = extractMissionErrorMessage(error, 'Unable to create mission.');
-      throw error;
+      console.error('Error creating mission:', error)
+      statusDetail.value = extractMissionErrorMessage(error, 'Unable to create mission.')
+      throw error
     }
-  };
+  }
 
   const startCurrentMission = async (options: StartMissionOptions = {}) => {
-    if (!currentMission.value) return;
+    const mission = requireCurrentMission()
     try {
-      const query = options.bladeOffDiagnostic ? '?blade_off_diagnostic=true' : '';
-      await apiService.post(`/api/v2/missions/${currentMission.value.id}/start${query}`, {});
-      clearTrace();
-      missionStatus.value = 'running';
-      statusDetail.value = null;
-      startStatusPolling();
+      const query = options.bladeOffDiagnostic ? '?blade_off_diagnostic=true' : ''
+      const response = await apiService.post<MissionStatusResponse>(
+        `/api/v2/missions/${mission.id}/start${query}`,
+        {}
+      )
+      requireTransitionStatus(response.data, 'running')
+      applyMissionStatus(response.data)
+      clearTrace()
+      startStatusPolling()
     } catch (error) {
-      console.error('Error starting mission:', error);
-      statusDetail.value = extractMissionErrorMessage(error, 'Unable to start mission.');
-      throw error;
+      console.error('Error starting mission:', error)
+      await reconcileMissionStatus(mission.id)
+      statusDetail.value = extractMissionErrorMessage(error, 'Unable to start mission.')
+      throw error
     }
-  };
+  }
 
-  /**
-   * Pauses the current mission.
-   * On API failure, sets statusDetail to an error message but does NOT throw —
-   * callers should watch statusDetail rather than catching rejections.
-   * (Contrast with startCurrentMission / abortCurrentMission which do throw.)
-   */
   const pauseCurrentMission = async (): Promise<void> => {
-    if (!currentMission.value) return;
+    const mission = requireCurrentMission()
     try {
-      await apiService.post(`/api/v2/missions/${currentMission.value.id}/pause`, {});
+      const response = await apiService.post<MissionStatusResponse>(
+        `/api/v2/missions/${mission.id}/pause`,
+        {}
+      )
+      requireTransitionStatus(response.data, 'paused')
+      applyMissionStatus(response.data)
+      stopStatusPolling()
     } catch (error) {
-      console.error('Error pausing mission:', error);
-      statusDetail.value = 'Failed to pause mission';
-      return; // missionStatus is NOT changed — error surfaced via statusDetail
+      console.error('Error pausing mission:', error)
+      await reconcileMissionStatus(mission.id)
+      statusDetail.value = extractMissionErrorMessage(error, 'Failed to pause mission.')
+      throw error
     }
-    // Only reached when the API call succeeded:
-    missionStatus.value = 'paused';
-    statusDetail.value = 'Paused by operator';
-    stopStatusPolling();
-  };
+  }
 
-  /**
-   * Resumes the current mission after a pause.
-   * On API failure, sets statusDetail to an error message but does NOT throw —
-   * callers should watch statusDetail rather than catching rejections.
-   * (Contrast with startCurrentMission / abortCurrentMission which do throw.)
-   */
   const resumeCurrentMission = async (): Promise<void> => {
-    if (!currentMission.value) return;
+    const mission = requireCurrentMission()
     try {
-      await apiService.post(`/api/v2/missions/${currentMission.value.id}/resume`, {});
+      const response = await apiService.post<MissionStatusResponse>(
+        `/api/v2/missions/${mission.id}/resume`,
+        {}
+      )
+      requireTransitionStatus(response.data, 'running')
+      applyMissionStatus(response.data)
+      startStatusPolling()
     } catch (error) {
-      console.error('Error resuming mission:', error);
-      statusDetail.value = 'Failed to resume mission';
-      return; // missionStatus is NOT changed — error surfaced via statusDetail
+      console.error('Error resuming mission:', error)
+      await reconcileMissionStatus(mission.id)
+      statusDetail.value = extractMissionErrorMessage(error, 'Failed to resume mission.')
+      throw error
     }
-    // Only reached when the API call succeeded:
-    missionStatus.value = 'running';
-    statusDetail.value = null;
-    startStatusPolling();
-  };
+  }
 
   const abortCurrentMission = async () => {
-    if (!currentMission.value) return;
+    const mission = requireCurrentMission()
     try {
-      await apiService.post(`/api/v2/missions/${currentMission.value.id}/abort`, {});
-      missionStatus.value = 'aborted';
-      statusDetail.value = 'Mission aborted by operator';
-      stopStatusPolling();
-      currentMission.value = null;
-      _persistCurrentMissionId(null);
+      const response = await apiService.post<MissionStatusResponse>(
+        `/api/v2/missions/${mission.id}/abort`,
+        {}
+      )
+      requireTransitionStatus(response.data, 'aborted')
+      applyMissionStatus(response.data)
+      stopStatusPolling()
+      currentMission.value = null
+      _persistCurrentMissionId(null)
     } catch (error) {
-      console.error('Error aborting mission:', error);
-      statusDetail.value = extractMissionErrorMessage(error, 'Unable to abort mission.');
-      throw error;
+      console.error('Error aborting mission:', error)
+      await reconcileMissionStatus(mission.id)
+      statusDetail.value = extractMissionErrorMessage(error, 'Unable to abort mission.')
+      throw error
     }
-  };
+  }
 
   const pollMissionStatus = async () => {
-    if (!currentMission.value) return;
+    if (!currentMission.value) return
     try {
-      const response = await apiService.get<MissionStatusResponse>(`/api/v2/missions/${currentMission.value.id}/status`);
-      const status = response.data;
-      applyMissionStatus(status);
-      if (status.status === 'completed' || status.status === 'aborted' || status.status === 'failed') {
-        stopStatusPolling();
+      const response = await apiService.get<MissionStatusResponse>(
+        `/api/v2/missions/${currentMission.value.id}/status`
+      )
+      const status = response.data
+      applyMissionStatus(status)
+      if (
+        status.status === 'completed' ||
+        status.status === 'aborted' ||
+        status.status === 'failed'
+      ) {
+        stopStatusPolling()
       }
     } catch (error) {
-      console.error('Error polling mission status:', error);
+      console.error('Error polling mission status:', error)
     }
-  };
+  }
 
   const startStatusPolling = () => {
-    if (statusPollInterval) return;
+    if (statusPollInterval) return
     // Subscribe to real-time WebSocket push events for this mission
-    subscribe('mission.status', handleMissionStatusWsEvent);
-    subscribe('telemetry.navigation', handleTelemetryNavWsEvent);
+    subscribe('mission.status', handleMissionStatusWsEvent)
+    subscribe('telemetry.navigation', handleTelemetryNavWsEvent)
     // 30 s reconciliation fallback poll (replaces the previous 2 s poll)
-    statusPollInterval = setInterval(pollMissionStatus, 30000);
-  };
+    statusPollInterval = setInterval(pollMissionStatus, 30000)
+  }
 
   const stopStatusPolling = () => {
     if (statusPollInterval) {
-      clearInterval(statusPollInterval);
-      statusPollInterval = null;
+      clearInterval(statusPollInterval)
+      statusPollInterval = null
     }
-    unsubscribe('mission.status', handleMissionStatusWsEvent);
-    unsubscribe('telemetry.navigation', handleTelemetryNavWsEvent);
-  };
+    unsubscribe('mission.status', handleMissionStatusWsEvent)
+    unsubscribe('telemetry.navigation', handleTelemetryNavWsEvent)
+  }
 
   const handleTelemetryNavWsEvent = (data: any) => {
-    const payload = data?.data ?? data;
-    const lat = payload?.position?.latitude;
-    const lon = payload?.position?.longitude;
+    const payload = data?.data ?? data
+    const lat = payload?.position?.latitude
+    const lon = payload?.position?.longitude
     if (lat != null && lon != null) {
-      appendTracePoint(lat, lon);
+      appendTracePoint(lat, lon)
     }
-  };
+  }
 
   const handleMissionStatusWsEvent = (data: any) => {
     // Guard: only process events for the currently tracked mission
-    if (!currentMission.value) return;
-    const payload = data?.data ?? data;
-    if (payload?.mission_id && payload.mission_id !== currentMission.value.id) return;
+    if (!currentMission.value) return
+    const payload = data?.data ?? data
+    if (payload?.mission_id && payload.mission_id !== currentMission.value.id) return
 
     if (payload?.status) {
-      missionStatus.value = payload.status as MissionLifecycleStatus;
+      missionStatus.value = payload.status as MissionLifecycleStatus
     }
     if (payload?.progress_pct !== undefined) {
-      progress.value = payload.progress_pct;
+      progress.value = payload.progress_pct
     }
     if (payload?.detail !== undefined) {
-      statusDetail.value = payload.detail ?? null;
+      statusDetail.value = payload.detail ?? null
     }
 
-    const terminal: MissionLifecycleStatus[] = ['completed', 'aborted', 'failed'];
+    const terminal: MissionLifecycleStatus[] = ['completed', 'aborted', 'failed']
     if (terminal.includes(missionStatus.value)) {
-      stopStatusPolling();
+      stopStatusPolling()
     }
-  };
+  }
 
   return {
     waypoints,
@@ -487,5 +543,5 @@ export const useMissionStore = defineStore('mission', () => {
     updateMissionById,
     deleteMissionById,
     deleteAllMissions,
-  };
-});
+  }
+})

@@ -16,7 +16,10 @@ vi.mock('@/stores/toast', () => ({
 function mountWithComposable() {
   let result: ReturnType<typeof useControlSession>
   const Wrapper = defineComponent({
-    setup() { result = useControlSession(); return {} },
+    setup() {
+      result = useControlSession()
+      return {}
+    },
     template: '<div />',
   })
   const wrapper = mount(Wrapper)
@@ -37,7 +40,7 @@ describe('useControlSession', () => {
 
   it('unlocks after successful authenticate', async () => {
     mockGet.mockResolvedValue({ data: { security_level: 'password', session_timeout_minutes: 15 } })
-    mockPost.mockResolvedValue({ data: { session_id: 'abc', expires_at: null } })
+    mockPost.mockResolvedValue({ data: { authorized: true, session_id: 'abc', expires_at: null } })
     const { getResult } = mountWithComposable()
     const r = getResult()
     await r.loadSecurityConfig()
@@ -48,7 +51,7 @@ describe('useControlSession', () => {
   })
 
   it('lockControl clears session and resets form', async () => {
-    mockPost.mockResolvedValue({ data: { session_id: 'xyz' } })
+    mockPost.mockResolvedValue({ data: { authorized: true, session_id: 'xyz' } })
     const { getResult } = mountWithComposable()
     const r = getResult()
     r.authForm.credential = 'secret'
@@ -60,7 +63,13 @@ describe('useControlSession', () => {
   })
 
   it('session countdown fires via interval', async () => {
-    mockPost.mockResolvedValue({ data: { session_id: 'abc', expires_at: new Date(Date.now() + 60000).toISOString() } })
+    mockPost.mockResolvedValue({
+      data: {
+        authorized: true,
+        session_id: 'abc',
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      },
+    })
     const { getResult } = mountWithComposable()
     const r = getResult()
     r.authForm.credential = 'x'
@@ -75,5 +84,43 @@ describe('useControlSession', () => {
     const { wrapper } = mountWithComposable()
     // Should not throw; timer cleanup is internal
     expect(() => wrapper.unmount()).not.toThrow()
+  })
+
+  it('stays locked when the unlock endpoint is unsupported', async () => {
+    mockPost.mockRejectedValue({ response: { status: 501, data: { detail: 'unsupported' } } })
+    const { getResult } = mountWithComposable()
+    const r = getResult()
+    r.authForm.credential = 'x'
+
+    await r.authenticateControl()
+
+    expect(r.isControlUnlocked.value).toBe(false)
+    expect(r.session.value).toBeNull()
+    expect(r.authError.value).toBe('unsupported')
+  })
+
+  it('rejects a malformed success response without server authorization', async () => {
+    mockPost.mockResolvedValue({ data: { session_id: 'local-looking-id' } })
+    const { getResult } = mountWithComposable()
+    const r = getResult()
+    r.authForm.credential = 'x'
+
+    await r.authenticateControl()
+
+    expect(r.isControlUnlocked.value).toBe(false)
+    expect(r.authError.value).toContain('did not authorize')
+    expect(() => r.ensureSession()).toThrow('server-issued session')
+  })
+
+  it('does not unlock locally when Cloudflare verification fails', async () => {
+    mockGet.mockRejectedValue({ response: { data: { detail: 'token missing' } } })
+    const { getResult } = mountWithComposable()
+    const r = getResult()
+
+    await r.verifyCloudflareAuth()
+
+    expect(r.isControlUnlocked.value).toBe(false)
+    expect(r.session.value).toBeNull()
+    expect(r.authError.value).toBe('token missing')
   })
 })

@@ -142,7 +142,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T39 | x | Build footprint-safe coverage, connectors, capabilities, obstacle cost map, and bounded replan | V49, V50, I.api |
 | T40 | x | Build canonical admission snapshot and GPS degradation state machine | V45, V46, I.api, I.ws |
 | T41 | x | Build single-owner timestamped ToF acquisition and failure-rate readiness | V47, I.api, I.ws |
-| T42 | . | Make mission/manual operator mutations server-authoritative and fail-closed | V48, I.api, I.fe |
+| T42 | x | Make mission/manual operator mutations server-authoritative and fail-closed | V48, I.api, I.fe |
 | T43 | . | Build durable idempotent multi-zone job occurrences and truthful planning controls | V48, V53, I.api, I.fe |
 | T44 | . | Build canonical battery/SOC/energy reserve, return policy, history, and hardware mapping | V43, V45, V52, I.api, I.power |
 | T45 | . | Build real detector runtime, typed perception stream, semantic costs, and truthful AI console | V50, V51, I.api, I.ws, I.fe, I.perception |

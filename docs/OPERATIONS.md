@@ -284,6 +284,10 @@ watch the mission status contract instead of assuming `running` alone means the 
 - Any localization, GPS freshness, pause, abort, geofence, obstacle, tilt, critical battery, thermal, or mission exception
   hold commands zero drive and blade-off through the command gateway. If blade-off acknowledgement is not confirmed, the
   mission path escalates through the emergency latch.
+- Mission start/pause/resume/abort UI success is shown only after the lifecycle endpoint returns the requested canonical
+  `MissionStatus`; HTTP errors and mismatched responses are reconciled from the status endpoint and remain visible as
+  failures. Manual control never creates a browser-only unlock session: the backend must return `authorized=true` and a
+  server-issued session ID, including in Cloudflare Access mode.
 - Mission-start heading alignment is an explicit bootstrap step: the mower drives straight, polls the shared sensor manager,
   derives GPS course-over-ground from receiver course or actual coordinate deltas, then snaps the relative BNO085 yaw to
   that GPS movement vector before trusting IMU heading for waypoint turns.

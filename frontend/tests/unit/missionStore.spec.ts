@@ -12,7 +12,10 @@ const mockedApi = apiService as unknown as {
 }
 
 /** Puts the store into a "mission running" state so pause/resume guards pass. */
-function setActiveMission(store: ReturnType<typeof useMissionStore>, status: 'running' | 'paused' = 'running') {
+function setActiveMission(
+  store: ReturnType<typeof useMissionStore>,
+  status: 'running' | 'paused' = 'running'
+) {
   store.currentMission = {
     id: 'mission-123',
     name: 'Test Mission',
@@ -20,6 +23,17 @@ function setActiveMission(store: ReturnType<typeof useMissionStore>, status: 'ru
     created_at: '2025-01-01T00:00:00Z',
   }
   store.missionStatus = status
+}
+
+function serverStatus(status: 'idle' | 'running' | 'paused' | 'completed' | 'aborted' | 'failed') {
+  return {
+    mission_id: 'mission-123',
+    status,
+    current_waypoint_index: 0,
+    completion_percentage: 0,
+    total_waypoints: 1,
+    detail: null,
+  }
 }
 
 describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
@@ -41,7 +55,7 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
     it('sets missionStatus to "paused" after a successful API call', async () => {
       const store = useMissionStore()
       setActiveMission(store, 'running')
-      mockedApi.post.mockResolvedValueOnce({ data: {} })
+      mockedApi.post.mockResolvedValueOnce({ data: serverStatus('paused') })
 
       await store.pauseCurrentMission()
 
@@ -53,8 +67,9 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
       setActiveMission(store, 'running')
       mockedApi.post.mockRejectedValueOnce(new Error('Network error'))
 
-      // Must NOT throw — error should be absorbed and surfaced via statusDetail
-      await store.pauseCurrentMission()
+      mockedApi.get.mockResolvedValueOnce({ data: serverStatus('running') })
+
+      await expect(store.pauseCurrentMission()).rejects.toThrow('Network error')
 
       expect(store.missionStatus).toBe('running')
     })
@@ -64,28 +79,42 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
       setActiveMission(store, 'running')
       mockedApi.post.mockRejectedValueOnce(new Error('Network error'))
 
-      await store.pauseCurrentMission()
+      mockedApi.get.mockResolvedValueOnce({ data: serverStatus('running') })
 
-      expect(store.statusDetail).toBe('Failed to pause mission')
+      await expect(store.pauseCurrentMission()).rejects.toThrow('Network error')
+
+      expect(store.statusDetail).toBe('Network error')
     })
 
     it('clears statusDetail after a successful pause', async () => {
       const store = useMissionStore()
       setActiveMission(store, 'running')
       store.statusDetail = 'some previous error'
-      mockedApi.post.mockResolvedValueOnce({ data: {} })
+      mockedApi.post.mockResolvedValueOnce({ data: serverStatus('paused') })
 
       await store.pauseCurrentMission()
 
-      expect(store.statusDetail).toBe('Paused by operator')
+      expect(store.statusDetail).toBeNull()
     })
 
-    it('does nothing when there is no active mission', async () => {
+    it('rejects a 2xx response that does not confirm paused state', async () => {
+      const store = useMissionStore()
+      setActiveMission(store, 'running')
+      mockedApi.post.mockResolvedValueOnce({ data: serverStatus('running') })
+      mockedApi.get.mockResolvedValueOnce({ data: serverStatus('running') })
+
+      await expect(store.pauseCurrentMission()).rejects.toThrow(
+        "Server did not confirm mission state 'paused'"
+      )
+      expect(store.missionStatus).toBe('running')
+    })
+
+    it('rejects when there is no selected mission', async () => {
       const store = useMissionStore()
       store.currentMission = null
       store.missionStatus = 'idle'
 
-      await store.pauseCurrentMission()
+      await expect(store.pauseCurrentMission()).rejects.toThrow('No mission is selected')
 
       expect(mockedApi.post).not.toHaveBeenCalled()
       expect(store.missionStatus).toBe('idle')
@@ -99,7 +128,7 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
     it('sets missionStatus to "running" after a successful API call', async () => {
       const store = useMissionStore()
       setActiveMission(store, 'paused')
-      mockedApi.post.mockResolvedValueOnce({ data: {} })
+      mockedApi.post.mockResolvedValueOnce({ data: serverStatus('running') })
 
       await store.resumeCurrentMission()
 
@@ -111,8 +140,9 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
       setActiveMission(store, 'paused')
       mockedApi.post.mockRejectedValueOnce(new Error('Network error'))
 
-      // Must NOT throw — error should be absorbed and surfaced via statusDetail
-      await store.resumeCurrentMission()
+      mockedApi.get.mockResolvedValueOnce({ data: serverStatus('paused') })
+
+      await expect(store.resumeCurrentMission()).rejects.toThrow('Network error')
 
       expect(store.missionStatus).toBe('paused')
     })
@@ -122,28 +152,30 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
       setActiveMission(store, 'paused')
       mockedApi.post.mockRejectedValueOnce(new Error('Network error'))
 
-      await store.resumeCurrentMission()
+      mockedApi.get.mockResolvedValueOnce({ data: serverStatus('paused') })
 
-      expect(store.statusDetail).toBe('Failed to resume mission')
+      await expect(store.resumeCurrentMission()).rejects.toThrow('Network error')
+
+      expect(store.statusDetail).toBe('Network error')
     })
 
     it('clears statusDetail after a successful resume', async () => {
       const store = useMissionStore()
       setActiveMission(store, 'paused')
       store.statusDetail = 'some previous error'
-      mockedApi.post.mockResolvedValueOnce({ data: {} })
+      mockedApi.post.mockResolvedValueOnce({ data: serverStatus('running') })
 
       await store.resumeCurrentMission()
 
       expect(store.statusDetail).toBeNull()
     })
 
-    it('does nothing when there is no active mission', async () => {
+    it('rejects when there is no selected mission', async () => {
       const store = useMissionStore()
       store.currentMission = null
       store.missionStatus = 'idle'
 
-      await store.resumeCurrentMission()
+      await expect(store.resumeCurrentMission()).rejects.toThrow('No mission is selected')
 
       expect(mockedApi.post).not.toHaveBeenCalled()
       expect(store.missionStatus).toBe('idle')
@@ -157,7 +189,7 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
     it('sets missionStatus to "aborted" after a successful API call', async () => {
       const store = useMissionStore()
       setActiveMission(store, 'running')
-      mockedApi.post.mockResolvedValueOnce({ data: {} })
+      mockedApi.post.mockResolvedValueOnce({ data: serverStatus('aborted') })
 
       await store.abortCurrentMission()
 
@@ -167,7 +199,7 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
     it('clears currentMission after a successful abort', async () => {
       const store = useMissionStore()
       setActiveMission(store, 'running')
-      mockedApi.post.mockResolvedValueOnce({ data: {} })
+      mockedApi.post.mockResolvedValueOnce({ data: serverStatus('aborted') })
 
       await store.abortCurrentMission()
 
@@ -182,7 +214,7 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
     it('sets missionStatus to "running" after a successful API call', async () => {
       const store = useMissionStore()
       setActiveMission(store, 'idle')
-      mockedApi.post.mockResolvedValueOnce({ data: {} })
+      mockedApi.post.mockResolvedValueOnce({ data: serverStatus('running') })
 
       await store.startCurrentMission()
 
@@ -192,13 +224,13 @@ describe('Mission Store — optimistic mutation guard (ARCH-008)', () => {
     it('passes blade-off diagnostic mode through the mission start query', async () => {
       const store = useMissionStore()
       setActiveMission(store, 'idle')
-      mockedApi.post.mockResolvedValueOnce({ data: {} })
+      mockedApi.post.mockResolvedValueOnce({ data: serverStatus('running') })
 
       await store.startCurrentMission({ bladeOffDiagnostic: true })
 
       expect(mockedApi.post).toHaveBeenCalledWith(
         '/api/v2/missions/mission-123/start?blade_off_diagnostic=true',
-        {},
+        {}
       )
     })
   })
@@ -248,7 +280,9 @@ describe('Mission Store — CRUD actions (fetchMissions / updateMissionById / de
 
   it('selectMission sets waypoints from the mission', async () => {
     const store = useMissionStore()
-    mockedApi.get.mockResolvedValueOnce({ data: { status: 'idle', mission_id: 'm1', completion_percentage: 0, total_waypoints: 1 } })
+    mockedApi.get.mockResolvedValueOnce({
+      data: { status: 'idle', mission_id: 'm1', completion_percentage: 0, total_waypoints: 1 },
+    })
 
     await store.selectMission(sampleMission)
 
@@ -371,7 +405,7 @@ describe('Mission Store — CRUD actions (fetchMissions / updateMissionById / de
     wsInst.__emit('mission.deleted', { mission_id: 'm1' })
     await flushPromises()
 
-    expect(store.missions.find(m => m.id === 'm1')).toBeUndefined()
+    expect(store.missions.find((m) => m.id === 'm1')).toBeUndefined()
   })
 
   it('WS mission.deleted clears currentMission when it was active', async () => {

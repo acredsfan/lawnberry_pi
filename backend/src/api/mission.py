@@ -42,7 +42,7 @@ async def create_mission(
         _raise_mission_http_error(e)
 
 
-@router.post("/api/v2/missions/{mission_id}/start")
+@router.post("/api/v2/missions/{mission_id}/start", response_model=MissionStatus)
 async def start_mission(
     mission_id: str,
     blade_off_diagnostic: bool = Query(
@@ -54,19 +54,18 @@ async def start_mission(
     """Start a mission."""
     mission_service = runtime.mission_service
     try:
-        await mission_service.start_mission(
+        mission_status = await mission_service.start_mission(
             mission_id,
             blade_off_diagnostic=blade_off_diagnostic,
         )
-        return {
-            "status": "Mission started",
-            "blade_off_diagnostic": blade_off_diagnostic,
-        }
+        if mission_status.status != "running":
+            raise MissionStateError(mission_status.detail or "Mission start was not accepted.")
+        return mission_status
     except Exception as e:
         _raise_mission_http_error(e)
 
 
-@router.post("/api/v2/missions/{mission_id}/pause")
+@router.post("/api/v2/missions/{mission_id}/pause", response_model=MissionStatus)
 async def pause_mission(
     mission_id: str,
     runtime: RuntimeContext = Depends(get_runtime),
@@ -74,13 +73,15 @@ async def pause_mission(
     """Pause a mission."""
     mission_service = runtime.mission_service
     try:
-        await mission_service.pause_mission(mission_id)
-        return {"status": "Mission paused"}
+        mission_status = await mission_service.pause_mission(mission_id)
+        if mission_status.status != "paused":
+            raise MissionStateError(mission_status.detail or "Mission pause was not accepted.")
+        return mission_status
     except Exception as e:
         _raise_mission_http_error(e)
 
 
-@router.post("/api/v2/missions/{mission_id}/resume")
+@router.post("/api/v2/missions/{mission_id}/resume", response_model=MissionStatus)
 async def resume_mission(
     mission_id: str,
     runtime: RuntimeContext = Depends(get_runtime),
@@ -88,13 +89,15 @@ async def resume_mission(
     """Resume a paused mission."""
     mission_service = runtime.mission_service
     try:
-        await mission_service.resume_mission(mission_id)
-        return {"status": "Mission resumed"}
+        mission_status = await mission_service.resume_mission(mission_id)
+        if mission_status.status != "running":
+            raise MissionStateError(mission_status.detail or "Mission resume was not accepted.")
+        return mission_status
     except Exception as e:
         _raise_mission_http_error(e)
 
 
-@router.post("/api/v2/missions/{mission_id}/abort")
+@router.post("/api/v2/missions/{mission_id}/abort", response_model=MissionStatus)
 async def abort_mission(
     mission_id: str,
     runtime: RuntimeContext = Depends(get_runtime),
@@ -102,8 +105,10 @@ async def abort_mission(
     """Abort a mission."""
     mission_service = runtime.mission_service
     try:
-        await mission_service.abort_mission(mission_id)
-        return {"status": "Mission aborted"}
+        mission_status = await mission_service.abort_mission(mission_id)
+        if mission_status.status != "aborted":
+            raise MissionStateError(mission_status.detail or "Mission abort was not accepted.")
+        return mission_status
     except Exception as e:
         _raise_mission_http_error(e)
 

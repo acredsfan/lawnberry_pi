@@ -737,6 +737,7 @@ class MissionService:
             self._broadcast_diagnostics(mission_id),
             name=f"mission-diagnostics:{mission_id}",
         )
+        return await self.get_mission_status(mission_id)
 
     def _mission_completed_callback(self, mission_id: str):
         def callback(task: asyncio.Task):
@@ -818,7 +819,7 @@ class MissionService:
             self._persist_mission_status(mission_id)
             self._signal_terminal_state(mission_id)
             await self._broadcast_status(mission_id, status.detail)
-            return
+            return await self.get_mission_status(mission_id)
 
         status.status = MissionLifecycleStatus.PAUSED
         status.detail = None
@@ -838,6 +839,7 @@ class MissionService:
             new_state="paused",
             detail="Mission paused",
         ))
+        return await self.get_mission_status(mission_id)
 
     async def resume_mission(self, mission_id: str):
         import os
@@ -897,6 +899,7 @@ class MissionService:
             new_state="running",
             detail="Mission resumed",
         ))
+        return await self.get_mission_status(mission_id)
 
     async def abort_mission(self, mission_id: str):
         self._require_mission(mission_id)
@@ -948,6 +951,7 @@ class MissionService:
             new_state=final_status.value,
             detail=detail,
         ))
+        return await self.get_mission_status(mission_id)
 
     async def get_mission_status(self, mission_id: str) -> MissionStatus:
         mission = self._require_mission(mission_id)
