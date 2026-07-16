@@ -9,8 +9,8 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 
 ## §C — Constraints
 
-- Hardware: Raspberry Pi 5, wlan1 = external antenna (primary), wlan0 = internal (fallback)
-- WiFi: 5 GHz mesh "Link_IoT"; gateway varies by AP (192.168.4.1 / 192.168.50.1 / 192.168.86.1)
+- Hardware: Raspberry Pi 5, `wlan1` = external antenna (sole production client), `wlan0` = internal (disabled)
+- WiFi: dual-band eero mesh "Butters Read-Link"; gateway may vary by AP/network
 - Cloudflare tunnel token fixed in systemd unit; tunnel ID `cc06f475-a8e0-4418-a40d-1e3445d6cf8f`
 - Frontend served by Vite dev server on :3000 (proxies `/api/*` incl. WebSocket to :8081)
 - Backend FastAPI/uvicorn on :8081
@@ -28,7 +28,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | I.fe | Frontend | Vite dev server :3000, proxies `/api` to :8081 with `ws:true` |
 | I.api | Backend REST | FastAPI :8081 `/api/v2/*` |
 | I.ws | Backend WebSocket | `ws[s]://<origin>/api/v2/ws/telemetry` + `/api/v2/ws/control` |
-| I.wdog | WiFi watchdog | `/opt/wifi-watchdog`, config `/etc/wifi-watchdog/watchdog.yml` |
+| I.wdog | WiFi recovery | tracked `scripts/wlan1_usb_recovery.py`, `lawnberry-wifi-recovery.service`; legacy `/opt/wifi-watchdog` disabled |
 | I.ops | Pi runtime | systemd units, install scripts, build SHA, service health |
 | I.perception | Perception | camera frame-ID results, typed detections, semantic route costs |
 | I.power | Energy | battery/SOC truth, mission reserve, return/dock decisions |
@@ -127,6 +127,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | V86 | Navigation-task terminalization must acquire the mower-wide lifecycle lock, confirm that the completed task is still the mission's exact owned task, and win over stale pause/resume work after awaited hardware or power operations; a terminal mission may never be overwritten as paused or restarted from a stale transition |
 | V87 | Canonical and persisted mission status must report exactly 100 percent for `COMPLETED` while retaining the last valid zero-based waypoint index; persistence normalization must not reinterpret that index as an incomplete ratio |
 | V88 | Asynchronous lifecycle tests must await an explicit state, event, or owned task rather than a hard-coded count of `sleep(0)` scheduler turns, so adding a legitimate lock or delivery task cannot create timing-dependent false failures |
+| V90 | Production WiFi uses only external `wlan1` with `wlan1-primary`; recovery must distinguish missing USB, missing interface, association/IP failure, and upstream reachability, then use bounded cooldowns to touch only USB adapter `2357:0138`, its configured physical port/driver, and that NetworkManager profile; it must never reboot the Pi, restart NetworkManager globally, reset unrelated USB devices/ports, promote `wlan0`, or treat an upstream probe failure alone as radio loss |
 
 ---
 
@@ -184,6 +185,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T48 | x | Replace critical placeholder tests, run frontend tests in CI, fix OpenAPI IDs, and clean lint | V55, V56, I.api, I.fe, I.ops |
 | T49 | x | Update OpenAPI, hardware/runtime docs, structure overview, and qualification handoff | V43–V56, I.api, I.ops |
 | T50 | x | Repair verified Cloudflare bootstrap and auth retry/lockout behavior, preserve active camera-view demand, harden camera IPC/power recovery, deploy the canonical camera units, provision/validate a real local detector manifest plus ONNX artifact, keep live IMU health truth fail-closed, and serialize mission definition/lifecycle mutations | V42, V51, V57–V88, I.api, I.fe, I.perception, I.power |
+| T52 | x | Replace the legacy reboot-capable WiFi watchdog with tracked, USB-aware `wlan1` recovery; recover `2357:0138`, make `wlan1-primary` authoritative, disable `wlan0`, and prove bounded non-destructive recovery | V90, I.wdog, I.ops |
 
 ---
 
@@ -288,3 +290,4 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | B95 | 2026-07-15 | Mission completion set progress to 100 percent immediately before `_persist_mission_status` recomputed it from the last zero-based waypoint index, so canonical and stored completed status could fall below 100 percent (including 0 percent for a one-waypoint mission) | V87, T50 |
 | B96 | 2026-07-15 | A mission WebSocket regression assumed failure terminalization and delivery always completed in exactly three `sleep(0)` turns; serializing terminalization behind the lifecycle lock legitimately added a scheduling step and made the test fail despite correct eventual FAILED delivery | V88, T50 |
 | B97 | 2026-07-15 | Energy-return and restart-recovery tests either closed the callback's terminalization coroutine or forged persisted RUNNING state before the live cancellation callback finished, so they tested scheduler timing rather than the intended terminal and crash-recovery contracts | V88, T50 |
+| B99 | 2026-07-16 | Legacy `/opt/wifi-watchdog` conflated probe/radio failures, watched absent `wlan1`, and retained USB-reset/reboot authority; its reboot coincided with `2357:0138` failing enumeration on USB3, leaving only weak internal `wlan0` online under stale backup identity | V90, T52 |

@@ -149,9 +149,9 @@ This is the current startup and runtime contract after the port cleanup pass.
 - Use `3000` when running the frontend in normal local development or deployed mode.
 - Use `4173` only when working with preview-based Playwright/E2E runs.
 - If you find older port references, treat them as stale and verify them against the current runtime contract before using them.
-- On the mower, treat Wi-Fi failover as part of the runtime contract too: `wlan1` is the normal primary client link,
-  while `wlan0` must stay NetworkManager-managed so it can scan and take over via the on-device failover dispatcher if
-  the primary radio drops.
+- On the mower, `wlan1` is the sole production Wi-Fi client and `wlan0` remains unmanaged after commissioning. The bounded
+  `lawnberry-wifi-recovery.service` may recover only the external `2357:0138` adapter, its dedicated USB port, the `88x2bu`
+  driver, and `wlan1-primary`; it cannot reboot the host or promote the shielded internal radio.
 - Manual drive is now part of the same runtime contract: the UI should only enable the joystick when RoboHAT is actually
   controller-ready, and live hardware drive commands fail closed when fresh telemetry, usable position awareness, or ToF
   obstacle clearance is not available.

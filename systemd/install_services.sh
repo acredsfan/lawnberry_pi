@@ -25,6 +25,10 @@ cp "$SCRIPT_DIR/lawnberry-health.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-frontend.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-camera.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-remote-access.service" "$SYSTEMD_DIR/"
+cp "$SCRIPT_DIR/lawnberry-wifi-recovery.service" "$SYSTEMD_DIR/"
+install -m 0644 "$SCRIPT_DIR/99-lawnberry-88x2bu.conf" /etc/modprobe.d/
+install -m 0644 "$SCRIPT_DIR/99-lawnberry-wifi-usb.rules" /etc/udev/rules.d/
+install -m 0644 "$SCRIPT_DIR/90-lawnberry-wlan1-only.conf" /etc/NetworkManager/conf.d/
 # Install new certificate renewal units
 cp "$SCRIPT_DIR/lawnberry-cert-renewal.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/lawnberry-cert-renewal.timer" "$SYSTEMD_DIR/"
@@ -35,6 +39,18 @@ cp "$SCRIPT_DIR/lawnberry-backup.timer" "$SYSTEMD_DIR/"
 # which only slept forever and could therefore appear healthy without doing work.
 systemctl disable --now lawnberry-sensors.service 2>/dev/null || true
 rm -f "$SYSTEMD_DIR/lawnberry-sensors.service"
+
+# Retire the legacy generic watchdog. It could reboot the mower for an
+# upstream probe failure and cannot safely recover a missing USB interface.
+systemctl disable --now wifi-watchdog.service 2>/dev/null || true
+if [[ -f "$SYSTEMD_DIR/wifi-watchdog.service" && ! -L "$SYSTEMD_DIR/wifi-watchdog.service" ]]; then
+   install -m 0644 "$SYSTEMD_DIR/wifi-watchdog.service" \
+      "$SYSTEMD_DIR/wifi-watchdog.service.legacy-disabled"
+   rm -f "$SYSTEMD_DIR/wifi-watchdog.service"
+fi
+ln -sfn /dev/null "$SYSTEMD_DIR/wifi-watchdog.service"
+rm -f /etc/NetworkManager/dispatcher.d/90-wifi-failover
+rm -f /etc/udev/rules.d/100-manage-wlan0.rules
 
 # Set correct permissions
 chmod 644 "$SYSTEMD_DIR/lawnberry-"*.service
@@ -54,6 +70,7 @@ systemctl enable lawnberry-health.service
 systemctl enable lawnberry-frontend.service
 systemctl enable lawnberry-camera.service
 systemctl enable lawnberry-remote-access.service
+systemctl enable lawnberry-wifi-recovery.service
 systemctl enable lawnberry-cert-renewal.service
 systemctl enable lawnberry-cert-renewal.timer
 systemctl enable lawnberry-backup.service
@@ -77,6 +94,7 @@ echo "  sudo systemctl start lawnberry-health"
 echo "  sudo systemctl start lawnberry-frontend"
 echo "  sudo systemctl start lawnberry-camera"
 echo "  sudo systemctl start lawnberry-remote-access"
+echo "  sudo systemctl start lawnberry-wifi-recovery"
 echo "  sudo systemctl start lawnberry-cert-renewal.timer"
 echo "  sudo systemctl start lawnberry-backup.timer"
 echo ""
@@ -84,12 +102,14 @@ echo "To check service status:"
 echo "  sudo systemctl status lawnberry-backend"
 echo "  sudo systemctl status lawnberry-camera"
 echo "  sudo systemctl status lawnberry-remote-access"
+echo "  sudo systemctl status lawnberry-wifi-recovery"
 echo ""
 echo "To view logs:"
 echo "  sudo journalctl -u lawnberry-backend -f"
 echo "  sudo journalctl -u lawnberry-frontend -f"
 echo "  sudo journalctl -u lawnberry-camera -f"
 echo "  sudo journalctl -u lawnberry-remote-access -f"
+echo "  sudo journalctl -u lawnberry-wifi-recovery -f"
 echo "  sudo journalctl -u lawnberry-backup -f"
 echo ""
 echo "Services will automatically start on boot."

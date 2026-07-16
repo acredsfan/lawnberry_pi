@@ -18,30 +18,44 @@ Use these runtime defaults consistently when starting or validating the stack:
 
 This means `8081`/`3000` are the canonical backend/frontend ports for both local development and deployed operation. The preview server on `4173` is intentional and only used for preview/E2E flows.
 
-## On-device Wi-Fi failover
+## On-device Wi-Fi recovery
 
-On the mower, Wi-Fi is managed by NetworkManager with two radios:
+The mower has one production Wi-Fi client: the external high-gain USB radio `wlan1`, using the
+`wlan1-primary` NetworkManager profile on the dual-band `Butters Read-Link` eero mesh. The internal
+`wlan0` radio is shielded by the mower and solar panel, so it is deliberately unmanaged after
+commissioning and must not be promoted as a fallback.
 
-- `wlan1` is the current primary client radio and normally carries `wlan1-primary`
-- `wlan0` is kept managed as a standby/backup scan radio
+`/etc/NetworkManager/conf.d/90-lawnberry-wlan1-only.conf` makes that choice persistent. The retired
+`90-wifi-failover` dispatcher and `100-manage-wlan0.rules` udev override must remain absent.
 
-Operational notes:
+`lawnberry-wifi-recovery.service` observes local state only: USB enumeration, `wlan1`, NetworkManager
+association, IPv4 assignment, and a default route. It performs these bounded actions:
 
-- The built-in radio must remain managed by NetworkManager; on this Pi that is enforced with
-  `/etc/udev/rules.d/100-manage-wlan0.rules`
-- Backup NetworkManager profiles exist on `wlan0` for `Butters Read-Link`, `Link Outdoor`, and `Link_IoT`
-- `/etc/NetworkManager/dispatcher.d/90-wifi-failover` promotes the best visible backup profile on `wlan0` if
-  `wlan1` drops off Wi-Fi completely
-- Backup profiles intentionally keep `autoconnect=false` so they do not steal the active route during normal
-  operation; the dispatcher is what activates them on failure
+- missing `2357:0138`: cycle only USB hub `3`, port `1`, settle udev, and load `88x2bu`
+- enumerated adapter without `wlan1`: load the driver once, then use the same targeted USB cycle
+- disconnected/no IPv4/no route: activate only `wlan1-primary` on `wlan1`
+- healthy local route: take no action
+
+USB cycles have a five-minute cooldown and a persistent three-per-hour budget. The service cannot
+reboot the Pi, restart NetworkManager globally, reset another USB port, enable `wlan0`, or use an
+internet/DNS probe as evidence that the radio failed. The legacy `/opt/wifi-watchdog` service must
+remain disabled and masked.
+
+The `88x2bu` policy forces this adapter to USB2 mode even when physically connected to a USB3 port
+and disables driver and USB autosuspend. If the adapter is moved, identify its new dedicated port
+with `uhubctl` and update `LAWNBERRY_WIFI_USB_HUB`/`LAWNBERRY_WIFI_USB_PORT` in the unit before enabling
+recovery; never guess a port because the neighboring hub port carries GPS.
 
 Useful checks:
 
 ```bash
 nmcli -f DEVICE,TYPE,STATE,CONNECTION dev status
 nmcli -f NAME,DEVICE,AUTOCONNECT connection show
-nmcli -f SSID,SIGNAL,CHAN,FREQ dev wifi list ifname wlan0 --rescan yes
-journalctl -t wifi-failover -n 50 --no-pager
+lsusb -d 2357:0138
+ip -4 route show default dev wlan1
+systemctl status lawnberry-wifi-recovery.service
+journalctl -u lawnberry-wifi-recovery.service -n 50 --no-pager
+sudo cat /run/lawnberry-wifi-recovery/status.json
 ```
 
 ## Simulation vs hardware mode
