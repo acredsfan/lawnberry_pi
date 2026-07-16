@@ -10,12 +10,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 from backend.src.models.autonomy_qualification import (
+    QUALIFICATION_SCHEMA_VERSION,
     AutonomyQualificationRecord,
     AutonomyQualificationStageResult,
+    QualificationLevel,
     QualificationStageStatus,
 )
 from backend.src.services.autonomy_qualification_service import (
-    BLADE_ENABLED_REQUIRED_STAGES,
+    BLADE_OFF_DIAGNOSTIC_REQUIRED_STAGES,
+    FULL_BLADE_AUTONOMY_REQUIRED_STAGES,
+    SUPERVISED_BLADE_TEST_PREREQUISITE_STAGES,
 )
 
 NON_DESTRUCTIVE_STAGES = ("static_config", "service_neutral", "sensor_freshness")
@@ -194,7 +198,10 @@ def _record_matches_context(record: dict[str, Any], context: dict[str, Any]) -> 
         "sim_mode",
         "git_tree_dirty",
     )
-    return all(record.get(field) == context.get(field) for field in binding_fields)
+    return bool(
+        record.get("schema_version") == QUALIFICATION_SCHEMA_VERSION
+        and all(record.get(field) == context.get(field) for field in binding_fields)
+    )
 
 
 def _physical_stage_result(
@@ -233,7 +240,18 @@ def _physical_stage_result(
             started_at=started_at,
         )
     status = PHYSICAL_RESULT_VALUES[result_value]
-    prerequisite_ids = set(ALL_STAGES[: ALL_STAGES.index(stage_id)])
+    if stage_id == "supervised_blade_enabled":
+        prerequisite_ids = set(SUPERVISED_BLADE_TEST_PREREQUISITE_STAGES)
+    elif stage_id in SUPERVISED_BLADE_TEST_PREREQUISITE_STAGES:
+        prerequisite_ids = set(
+            SUPERVISED_BLADE_TEST_PREREQUISITE_STAGES[
+                : SUPERVISED_BLADE_TEST_PREREQUISITE_STAGES.index(stage_id)
+            ]
+        )
+        prerequisite_ids.discard("cleanup")
+    else:
+        # camera_ai_degradation is advisory evidence and has no safety authority.
+        prerequisite_ids = set(BLADE_OFF_DIAGNOSTIC_REQUIRED_STAGES)
     missing_prerequisites = sorted(prerequisite_ids - completed_stage_ids)
     if status == QualificationStageStatus.PASSED and missing_prerequisites:
         return _stage(
@@ -293,8 +311,7 @@ def run(args: argparse.Namespace) -> AutonomyQualificationRecord:
     ):
         for stage_payload in existing_record.get("stages") or []:
             stage = AutonomyQualificationStageResult.model_validate(stage_payload)
-            if stage.stage_id != "cleanup":
-                stages_by_id[stage.stage_id] = stage
+            stages_by_id[stage.stage_id] = stage
 
     cleanup_errors: list[str] = []
     try:
@@ -356,21 +373,33 @@ def run(args: argparse.Namespace) -> AutonomyQualificationRecord:
         for stage_id, stage in stages_by_id.items()
         if stage_id not in ordered_stage_ids
     )
-    required_stages_passed = all(
+    full_stages_passed = all(
         stages_by_id.get(stage_id) is not None
         and stages_by_id[stage_id].status == QualificationStageStatus.PASSED
-        for stage_id in BLADE_ENABLED_REQUIRED_STAGES
+        for stage_id in FULL_BLADE_AUTONOMY_REQUIRED_STAGES
     )
-    if required_stages_passed:
+    prerequisite_stages_passed = all(
+        stages_by_id.get(stage_id) is not None
+        and stages_by_id[stage_id].status == QualificationStageStatus.PASSED
+        for stage_id in SUPERVISED_BLADE_TEST_PREREQUISITE_STAGES
+    )
+    if full_stages_passed:
         overall = QualificationStageStatus.PASSED
+        qualification_level = QualificationLevel.FULL_BLADE_AUTONOMY
+    elif prerequisite_stages_passed:
+        overall = QualificationStageStatus.PASSED
+        qualification_level = QualificationLevel.SUPERVISED_BLADE_TEST_PREREQUISITE
     elif any(stage.status == QualificationStageStatus.FAILED for stage in stages):
         overall = QualificationStageStatus.FAILED
+        qualification_level = QualificationLevel.BLADE_OFF_DIAGNOSTIC
     else:
         overall = QualificationStageStatus.INTERRUPTED
+        qualification_level = QualificationLevel.BLADE_OFF_DIAGNOSTIC
 
     qualification = client.get("/api/v2/autonomy/qualification")
     context = qualification["context"]
     record = AutonomyQualificationRecord(
+        qualification_level=qualification_level,
         status=overall,
         commit_sha=context.get("commit_sha"),
         git_tree_dirty=bool(context.get("git_tree_dirty")),

@@ -23,6 +23,9 @@ from backend.src.services.mission_service import MissionService
 
 
 class _AllowQualification:
+    def assert_supervised_test_inactive(self) -> None:
+        return None
+
     def assert_current(self) -> None:
         return None
 
@@ -152,7 +155,10 @@ def test_scheduler_starts_only_after_all_admission_dependencies_are_wired():
     assert source.index("_jobs_service_singleton.set_mission_service") < scheduler_start
     assert source.index("_jobs_service_singleton.set_websocket_hub") < scheduler_start
     assert source.index("await _power_manager.start()") < scheduler_start
-    assert source.index("if power_manager_ready:") < scheduler_start
+    assert (
+        source.index("if power_manager_ready and startup_neutral_confirmed:")
+        < scheduler_start
+    )
 
 
 def test_scheduler_stops_before_power_and_motion_dependencies():

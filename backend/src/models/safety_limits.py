@@ -102,6 +102,28 @@ class SafetyLimits(BaseModel):
         le=2000,
         description="TTL for mission drive commands sent through the command gateway.",
     )
+    supervised_test_enabled: bool = Field(
+        default=False,
+        description=(
+            "Explicit local enable for supervised blade-test permit issuance. Disabled until "
+            "the operator approves physical bounds and test controls."
+        ),
+    )
+    supervised_test_permit_ttl_s: int = Field(
+        default=0,
+        ge=0,
+        description="Monotonic time allowed to activate a newly issued supervised-test permit.",
+    )
+    supervised_test_max_duration_s: int = Field(
+        default=0,
+        ge=0,
+        description="Maximum active lifetime of one supervised blade test.",
+    )
+    supervised_test_max_speed_mps: float = Field(
+        default=0.0,
+        ge=0,
+        description="Physical speed ceiling for qualification-only drive commands.",
+    )
     autonomous_braking_decel_mps2: float = Field(
         default=0.5,
         gt=0,
@@ -157,6 +179,20 @@ class SafetyLimits(BaseModel):
 
     @model_validator(mode="after")
     def validate_heading_bootstrap_budget(self):
+        if self.supervised_test_enabled:
+            if (
+                self.supervised_test_permit_ttl_s <= 0
+                or self.supervised_test_max_duration_s <= 0
+                or self.supervised_test_max_speed_mps <= 0
+            ):
+                raise ValueError(
+                    "enabled supervised testing requires positive permit TTL, duration, and speed bounds"
+                )
+            if self.supervised_test_max_speed_mps > self.bootstrap_speed_mps:
+                raise ValueError(
+                    "supervised_test_max_speed_mps cannot exceed the existing blade-off "
+                    "bootstrap speed ceiling"
+                )
         reserve_m = heading_bootstrap_stop_reserve_m(
             speed_mps=self.bootstrap_speed_mps,
             command_ttl_ms=self.autonomous_command_ttl_ms,

@@ -36,6 +36,12 @@ class _FakeQualificationService:
         exc.evaluation = SimpleNamespace(reason_codes=self.reason_codes)
         raise exc
 
+    def assert_supervised_test_inactive(self):
+        return None
+
+    def revoke_supervised_test_permit(self, reason_code: str):
+        self.revoked_reason = reason_code
+
 
 def _make_gw():
     """Return (gateway, safety_state, blade_state) using a mocked rest module."""

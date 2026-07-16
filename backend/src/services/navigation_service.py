@@ -1040,6 +1040,7 @@ class NavigationService:
             "position": pos,
             "last_gps_fix": self.navigation_state.last_gps_fix,
             "dead_reckoning_active": self.navigation_state.dead_reckoning_active,
+            "gps_degradation_state": self.navigation_state.gps_degradation_state,
             "heading": self.navigation_state.heading,
             "imu_valid": self.navigation_state.imu_valid,
             "imu_age_s": imu_age_s,

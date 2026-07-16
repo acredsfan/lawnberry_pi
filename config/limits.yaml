@@ -22,6 +22,11 @@ differential_drive_wheelbase_m: 0.30
 geofence_safety_allowance_m: 0.10
 autonomous_prediction_horizon_s: 1.0
 autonomous_command_ttl_ms: 350
+# Fail closed until Aaron explicitly approves mower-specific supervised-test bounds.
+supervised_test_enabled: false
+supervised_test_permit_ttl_s: 0
+supervised_test_max_duration_s: 0
+supervised_test_max_speed_mps: 0.0
 autonomous_braking_decel_mps2: 0.5
 bootstrap_speed_mps: 0.20
 bootstrap_min_travel_m: 0.25

@@ -276,6 +276,104 @@ describe('MissionPlannerView.vue', () => {
     expect(wrapper.text()).toContain('Store passing qualification evidence.')
   })
 
+  it('renders staged qualification truth without issuing permit or actuation requests', async () => {
+    const fallbackGet = mockedApi.get.getMockImplementation()
+    if (!fallbackGet) throw new Error('default API mock is unavailable')
+    mockedApi.get.mockImplementation((url: string) => {
+      if (url === '/api/v2/autonomy/qualification') {
+        return Promise.resolve({
+          data: {
+            ok: false,
+            reason_codes: ['SUPERVISED_BLADE_TEST_REQUIRED'],
+            prerequisite_ok: true,
+            prerequisite_reason_codes: [],
+            full_autonomy_ok: false,
+            full_autonomy_reason_codes: ['SUPERVISED_BLADE_TEST_REQUIRED'],
+            camera_ai_safety_role: 'advisory',
+            remediation: {
+              SUPERVISED_BLADE_TEST_REQUIRED: 'Capture accepted supervised blade evidence.',
+            },
+            record: {
+              schema_version: 2,
+              qualification_level: 'supervised_blade_test_prerequisite',
+              status: 'passed',
+              stages: [],
+            },
+            permit: {
+              state: 'issued',
+              remaining_seconds: 15,
+              max_speed_mps: 0.2,
+              max_duration_seconds: 20,
+            },
+          },
+        })
+      }
+      return fallbackGet(url)
+    })
+
+    const wrapper = mount(MissionPlannerView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Prerequisite evidenceAccepted')
+    expect(wrapper.text()).toContain('Supervised-test permitIssued')
+    expect(wrapper.text()).toContain('Supervised blade evidenceRequired')
+    expect(wrapper.text()).toContain('Full blade autonomyBlocked')
+    expect(wrapper.text()).toContain('Camera / AI safety role: Advisory only')
+    expect(mockedApi.post).not.toHaveBeenCalled()
+  })
+
+  it('retains a terminal permit error after a later status refresh', async () => {
+    const fallbackGet = mockedApi.get.getMockImplementation()
+    if (!fallbackGet) throw new Error('default API mock is unavailable')
+    let qualificationRequestCount = 0
+    mockedApi.get.mockImplementation((url: string) => {
+      if (url === '/api/v2/autonomy/qualification') {
+        qualificationRequestCount += 1
+        return Promise.resolve({
+          data: {
+            ok: false,
+            prerequisite_ok: true,
+            full_autonomy_ok: false,
+            camera_ai_safety_role: 'advisory',
+            remediation: {
+              SUPERVISED_TEST_PERMIT_EXPIRED: 'Review the mower before requesting a new permit.',
+            },
+            record: { schema_version: 2, stages: [] },
+            permit:
+              qualificationRequestCount === 1
+                ? {
+                    state: 'expired',
+                    terminal_reason_code: 'SUPERVISED_TEST_PERMIT_EXPIRED',
+                  }
+                : { state: 'absent' },
+          },
+        })
+      }
+      return fallbackGet(url)
+    })
+
+    const missionStore = useMissionStore()
+    missionStore.currentMission = {
+      id: 'mission-terminal-refresh',
+      name: 'Terminal refresh',
+      waypoints: [{ id: 'wp-1', lat: 51.5, lon: -0.09, blade_on: false, speed: 50 }],
+      created_at: '2026-07-16T00:00:00Z',
+    }
+    vi.spyOn(missionStore, 'startCurrentMission').mockRejectedValue(new Error('blocked'))
+
+    const wrapper = mount(MissionPlannerView)
+    await flushPromises()
+    const startButton = wrapper.findAll('button').find(btn => btn.text().includes('Start Mission'))
+    if (!startButton) throw new Error('Start Mission button not rendered')
+    await startButton.trigger('click')
+    await flushPromises()
+
+    expect(qualificationRequestCount).toBe(2)
+    expect(wrapper.text()).toContain('Retained qualification errors')
+    expect(wrapper.text()).toContain('SUPERVISED_TEST_PERMIT_EXPIRED')
+    expect(wrapper.text()).toContain('Review the mower before requesting a new permit.')
+  })
+
   it('starts the selected mission in blade-off diagnostic mode when checked', async () => {
     const wrapper = mount(MissionPlannerView)
     const missionStore = useMissionStore()

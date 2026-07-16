@@ -9,6 +9,7 @@ from scripts import run_autonomy_qualification as runner
 def _qualification_context(record: dict | None = None) -> dict:
     payload = {
         "context": {
+            "schema_version": 2,
             "commit_sha": "a1d01df07fe4bbb7868b951bd92758971afa9a48",
             "git_tree_dirty": False,
             "hardware_config_hash": "hardware-hash",

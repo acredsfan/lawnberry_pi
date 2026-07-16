@@ -368,6 +368,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v2/autonomy/qualification/supervised-test/blade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Supervised Test Blade */
+        post: operations["supervised_test_blade_api_v2_autonomy_qualification_supervised_test_blade_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/autonomy/qualification/supervised-test/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Supervised Test */
+        post: operations["complete_supervised_test_api_v2_autonomy_qualification_supervised_test_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/autonomy/qualification/supervised-test/drive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Supervised Test Drive */
+        post: operations["supervised_test_drive_api_v2_autonomy_qualification_supervised_test_drive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/autonomy/qualification/supervised-test/permit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Supervised Test Permit */
+        get: operations["get_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_permit_get"];
+        put?: never;
+        /** Issue Supervised Test Permit */
+        post: operations["issue_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_permit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/autonomy/qualification/supervised-test/permit/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Supervised Test Permit */
+        post: operations["activate_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_permit_activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/autonomy/qualification/supervised-test/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Supervised Test Permit */
+        post: operations["revoke_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v2/autonomy/readiness": {
         parameters: {
             query?: never;
@@ -2923,6 +3026,8 @@ export interface components {
              * @default unknown
              */
             pi_model: string;
+            /** @default blade_off_diagnostic */
+            qualification_level: components["schemas"]["QualificationLevel"];
             /** Record Id */
             record_id?: string;
             /** Robohat Firmware Version */
@@ -2931,7 +3036,7 @@ export interface components {
             runtime_identity_hash: string;
             /**
              * Schema Version
-             * @default 1
+             * @default 2
              */
             schema_version: number;
             /**
@@ -3820,6 +3925,12 @@ export interface components {
             running?: boolean | null;
         };
         /**
+         * QualificationLevel
+         * @description Evidence levels in increasing order of hazardous authority.
+         * @enum {string}
+         */
+        QualificationLevel: "blade_off_diagnostic" | "supervised_blade_test_prerequisite" | "full_blade_autonomy";
+        /**
          * QualificationStageStatus
          * @enum {string}
          */
@@ -3974,6 +4085,149 @@ export interface components {
             stddev_east_m: number | null;
             /** Stddev North M */
             stddev_north_m: number | null;
+        };
+        /** SupervisedTestBladeRequest */
+        SupervisedTestBladeRequest: {
+            /** Active */
+            active: boolean;
+            /**
+             * Permit Token
+             * Format: password
+             */
+            permit_token: string;
+        };
+        /** SupervisedTestCompleteRequest */
+        SupervisedTestCompleteRequest: {
+            /** Cleanup Confirmed */
+            cleanup_confirmed: boolean;
+            /**
+             * Permit Token
+             * Format: password
+             */
+            permit_token: string;
+        };
+        /** SupervisedTestDriveRequest */
+        SupervisedTestDriveRequest: {
+            /** Duration Ms */
+            duration_ms: number;
+            /** Left Normalized */
+            left_normalized: number;
+            /**
+             * Permit Token
+             * Format: password
+             */
+            permit_token: string;
+            /** Right Normalized */
+            right_normalized: number;
+        };
+        /** SupervisedTestPermitIssueRequest */
+        SupervisedTestPermitIssueRequest: {
+            /** Local Supervision Confirmed */
+            local_supervision_confirmed: boolean;
+            /** Operator Confirmed */
+            operator_confirmed: boolean;
+            /** Physical Intervention Mechanism */
+            physical_intervention_mechanism: string;
+        };
+        /** SupervisedTestPermitIssueResponse */
+        SupervisedTestPermitIssueResponse: {
+            /**
+             * Permit Token
+             * Format: password
+             */
+            readonly permit_token: string;
+            status: components["schemas"]["SupervisedTestPermitStatus"];
+        };
+        /**
+         * SupervisedTestPermitState
+         * @description Public, non-secret permit lifecycle state.
+         * @enum {string}
+         */
+        SupervisedTestPermitState: "absent" | "issued" | "active" | "completed" | "revoked" | "expired";
+        /**
+         * SupervisedTestPermitStatus
+         * @description Redacted permit status. The reusable bearer token is never returned here.
+         */
+        SupervisedTestPermitStatus: {
+            /** Activated At */
+            activated_at?: string | null;
+            /**
+             * Blade Enable Command Count
+             * @default 0
+             */
+            blade_enable_command_count: number;
+            /**
+             * Cleanup Confirmed
+             * @default false
+             */
+            cleanup_confirmed: boolean;
+            /**
+             * Drive Command Count
+             * @default 0
+             */
+            drive_command_count: number;
+            /** Expires At */
+            expires_at?: string | null;
+            /**
+             * Intervention Confirmed
+             * @default false
+             */
+            intervention_confirmed: boolean;
+            /** Issued At */
+            issued_at?: string | null;
+            /**
+             * Max Duration Seconds
+             * @default 0
+             */
+            max_duration_seconds: number;
+            /**
+             * Max Speed Mps
+             * @default 0
+             */
+            max_speed_mps: number;
+            /** Permit Id Hash */
+            permit_id_hash?: string | null;
+            /** Qualification Record Id */
+            qualification_record_id?: string | null;
+            /**
+             * Receipt Evidence Eligible
+             * @default false
+             */
+            receipt_evidence_eligible: boolean;
+            /** Receipt Id */
+            receipt_id?: string | null;
+            /**
+             * Remaining Seconds
+             * @default 0
+             */
+            remaining_seconds: number;
+            /**
+             * Stage Id
+             * @default supervised_blade_enabled
+             * @constant
+             */
+            stage_id: "supervised_blade_enabled";
+            /** @default absent */
+            state: components["schemas"]["SupervisedTestPermitState"];
+            /** Terminal Reason Code */
+            terminal_reason_code?: string | null;
+        };
+        /** SupervisedTestPermitTokenRequest */
+        SupervisedTestPermitTokenRequest: {
+            /**
+             * Permit Token
+             * Format: password
+             */
+            permit_token: string;
+        };
+        /** SupervisedTestRevokeRequest */
+        SupervisedTestRevokeRequest: {
+            /**
+             * Reason
+             * @default operator_requested
+             * @enum {string}
+             */
+            reason: "operator_requested" | "test_interrupted" | "unsafe_condition" | "cleanup_requested";
         };
         /** SystemInfoResponse */
         SystemInfoResponse: {
@@ -4841,6 +5095,224 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    supervised_test_blade_api_v2_autonomy_qualification_supervised_test_blade_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupervisedTestBladeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_supervised_test_api_v2_autonomy_qualification_supervised_test_complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupervisedTestCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupervisedTestPermitStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    supervised_test_drive_api_v2_autonomy_qualification_supervised_test_drive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupervisedTestDriveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_permit_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupervisedTestPermitStatus"];
+                };
+            };
+        };
+    };
+    issue_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_permit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupervisedTestPermitIssueRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupervisedTestPermitIssueResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_permit_activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupervisedTestPermitTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupervisedTestPermitStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupervisedTestRevokeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupervisedTestPermitStatus"];
                 };
             };
             /** @description Validation Error */

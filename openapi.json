@@ -135,6 +135,10 @@
             "title": "Pi Model",
             "type": "string"
           },
+          "qualification_level": {
+            "$ref": "#/components/schemas/QualificationLevel",
+            "default": "blade_off_diagnostic"
+          },
           "record_id": {
             "maxLength": 128,
             "minLength": 1,
@@ -158,7 +162,7 @@
             "type": "string"
           },
           "schema_version": {
-            "default": 1,
+            "default": 2,
             "title": "Schema Version",
             "type": "integer"
           },
@@ -2566,6 +2570,16 @@
         "title": "PowerSummary",
         "type": "object"
       },
+      "QualificationLevel": {
+        "description": "Evidence levels in increasing order of hazardous authority.",
+        "enum": [
+          "blade_off_diagnostic",
+          "supervised_blade_test_prerequisite",
+          "full_blade_autonomy"
+        ],
+        "title": "QualificationLevel",
+        "type": "string"
+      },
       "QualificationStageStatus": {
         "enum": [
           "passed",
@@ -2930,6 +2944,319 @@
           "creates_global_offset"
         ],
         "title": "StationaryRtkAverageResponse",
+        "type": "object"
+      },
+      "SupervisedTestBladeRequest": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "permit_token": {
+            "format": "password",
+            "maxLength": 512,
+            "minLength": 32,
+            "title": "Permit Token",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "permit_token",
+          "active"
+        ],
+        "title": "SupervisedTestBladeRequest",
+        "type": "object"
+      },
+      "SupervisedTestCompleteRequest": {
+        "properties": {
+          "cleanup_confirmed": {
+            "title": "Cleanup Confirmed",
+            "type": "boolean"
+          },
+          "permit_token": {
+            "format": "password",
+            "maxLength": 512,
+            "minLength": 32,
+            "title": "Permit Token",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "permit_token",
+          "cleanup_confirmed"
+        ],
+        "title": "SupervisedTestCompleteRequest",
+        "type": "object"
+      },
+      "SupervisedTestDriveRequest": {
+        "properties": {
+          "duration_ms": {
+            "maximum": 2000.0,
+            "minimum": 50.0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "left_normalized": {
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Left Normalized",
+            "type": "number"
+          },
+          "permit_token": {
+            "format": "password",
+            "maxLength": 512,
+            "minLength": 32,
+            "title": "Permit Token",
+            "type": "string",
+            "writeOnly": true
+          },
+          "right_normalized": {
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Right Normalized",
+            "type": "number"
+          }
+        },
+        "required": [
+          "permit_token",
+          "left_normalized",
+          "right_normalized",
+          "duration_ms"
+        ],
+        "title": "SupervisedTestDriveRequest",
+        "type": "object"
+      },
+      "SupervisedTestPermitIssueRequest": {
+        "properties": {
+          "local_supervision_confirmed": {
+            "title": "Local Supervision Confirmed",
+            "type": "boolean"
+          },
+          "operator_confirmed": {
+            "title": "Operator Confirmed",
+            "type": "boolean"
+          },
+          "physical_intervention_mechanism": {
+            "maxLength": 256,
+            "minLength": 8,
+            "title": "Physical Intervention Mechanism",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operator_confirmed",
+          "local_supervision_confirmed",
+          "physical_intervention_mechanism"
+        ],
+        "title": "SupervisedTestPermitIssueRequest",
+        "type": "object"
+      },
+      "SupervisedTestPermitIssueResponse": {
+        "properties": {
+          "permit_token": {
+            "format": "password",
+            "readOnly": true,
+            "title": "Permit Token",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SupervisedTestPermitStatus"
+          }
+        },
+        "required": [
+          "permit_token",
+          "status"
+        ],
+        "title": "SupervisedTestPermitIssueResponse",
+        "type": "object"
+      },
+      "SupervisedTestPermitState": {
+        "description": "Public, non-secret permit lifecycle state.",
+        "enum": [
+          "absent",
+          "issued",
+          "active",
+          "completed",
+          "revoked",
+          "expired"
+        ],
+        "title": "SupervisedTestPermitState",
+        "type": "string"
+      },
+      "SupervisedTestPermitStatus": {
+        "description": "Redacted permit status. The reusable bearer token is never returned here.",
+        "properties": {
+          "activated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "blade_enable_command_count": {
+            "default": 0,
+            "title": "Blade Enable Command Count",
+            "type": "integer"
+          },
+          "cleanup_confirmed": {
+            "default": false,
+            "title": "Cleanup Confirmed",
+            "type": "boolean"
+          },
+          "drive_command_count": {
+            "default": 0,
+            "title": "Drive Command Count",
+            "type": "integer"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "intervention_confirmed": {
+            "default": false,
+            "title": "Intervention Confirmed",
+            "type": "boolean"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "max_duration_seconds": {
+            "default": 0.0,
+            "title": "Max Duration Seconds",
+            "type": "number"
+          },
+          "max_speed_mps": {
+            "default": 0.0,
+            "title": "Max Speed Mps",
+            "type": "number"
+          },
+          "permit_id_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Permit Id Hash"
+          },
+          "qualification_record_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualification Record Id"
+          },
+          "receipt_evidence_eligible": {
+            "default": false,
+            "title": "Receipt Evidence Eligible",
+            "type": "boolean"
+          },
+          "receipt_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Id"
+          },
+          "remaining_seconds": {
+            "default": 0.0,
+            "title": "Remaining Seconds",
+            "type": "number"
+          },
+          "stage_id": {
+            "const": "supervised_blade_enabled",
+            "default": "supervised_blade_enabled",
+            "title": "Stage Id",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SupervisedTestPermitState",
+            "default": "absent"
+          },
+          "terminal_reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Reason Code"
+          }
+        },
+        "title": "SupervisedTestPermitStatus",
+        "type": "object"
+      },
+      "SupervisedTestPermitTokenRequest": {
+        "properties": {
+          "permit_token": {
+            "format": "password",
+            "maxLength": 512,
+            "minLength": 32,
+            "title": "Permit Token",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "permit_token"
+        ],
+        "title": "SupervisedTestPermitTokenRequest",
+        "type": "object"
+      },
+      "SupervisedTestRevokeRequest": {
+        "properties": {
+          "reason": {
+            "default": "operator_requested",
+            "enum": [
+              "operator_requested",
+              "test_interrupted",
+              "unsafe_condition",
+              "cleanup_requested"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "SupervisedTestRevokeRequest",
         "type": "object"
       },
       "SystemInfoResponse": {
@@ -4356,6 +4683,267 @@
           }
         },
         "summary": "Create Autonomy Qualification Evidence",
+        "tags": [
+          "autonomy"
+        ]
+      }
+    },
+    "/api/v2/autonomy/qualification/supervised-test/blade": {
+      "post": {
+        "operationId": "supervised_test_blade_api_v2_autonomy_qualification_supervised_test_blade_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupervisedTestBladeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Supervised Test Blade",
+        "tags": [
+          "autonomy"
+        ]
+      }
+    },
+    "/api/v2/autonomy/qualification/supervised-test/complete": {
+      "post": {
+        "operationId": "complete_supervised_test_api_v2_autonomy_qualification_supervised_test_complete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupervisedTestCompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupervisedTestPermitStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Supervised Test",
+        "tags": [
+          "autonomy"
+        ]
+      }
+    },
+    "/api/v2/autonomy/qualification/supervised-test/drive": {
+      "post": {
+        "operationId": "supervised_test_drive_api_v2_autonomy_qualification_supervised_test_drive_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupervisedTestDriveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Supervised Test Drive",
+        "tags": [
+          "autonomy"
+        ]
+      }
+    },
+    "/api/v2/autonomy/qualification/supervised-test/permit": {
+      "get": {
+        "operationId": "get_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_permit_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupervisedTestPermitStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Supervised Test Permit",
+        "tags": [
+          "autonomy"
+        ]
+      },
+      "post": {
+        "operationId": "issue_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_permit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupervisedTestPermitIssueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupervisedTestPermitIssueResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Issue Supervised Test Permit",
+        "tags": [
+          "autonomy"
+        ]
+      }
+    },
+    "/api/v2/autonomy/qualification/supervised-test/permit/activate": {
+      "post": {
+        "operationId": "activate_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_permit_activate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupervisedTestPermitTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupervisedTestPermitStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Supervised Test Permit",
+        "tags": [
+          "autonomy"
+        ]
+      }
+    },
+    "/api/v2/autonomy/qualification/supervised-test/revoke": {
+      "post": {
+        "operationId": "revoke_supervised_test_permit_api_v2_autonomy_qualification_supervised_test_revoke_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupervisedTestRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupervisedTestPermitStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Supervised Test Permit",
         "tags": [
           "autonomy"
         ]

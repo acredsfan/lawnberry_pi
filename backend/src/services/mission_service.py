@@ -93,6 +93,7 @@ class MissionService:
         self._lifecycle_lock = asyncio.Lock()
         self._mission_terminal_events: dict[str, asyncio.Event] = {}
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._qualification_service: Any | None = None
         # Planning intents for lazy waypoint generation: mission_id → intent dict
         self._planning_intents: dict[str, dict] = {}
 
@@ -103,6 +104,23 @@ class MissionService:
     def set_event_store(self, store: Any) -> None:
         """Attach an EventStore. run_id is set per-mission at start time."""
         self._event_store = store
+
+    @property
+    def lifecycle_lock(self) -> asyncio.Lock:
+        """One mower-wide lock shared by mission and supervised-test admission."""
+        return self._lifecycle_lock
+
+    def set_qualification_service(self, service: Any) -> None:
+        self._qualification_service = service
+
+    def assert_idle_for_supervised_test(self) -> None:
+        if any(
+            status.status in {MissionLifecycleStatus.RUNNING, MissionLifecycleStatus.PAUSED}
+            for status in self.mission_statuses.values()
+        ):
+            raise MissionConflictError(
+                "A supervised qualification permit requires the mower mission owner to be idle."
+            )
 
     def _new_run_id(self) -> str:
         import uuid
@@ -672,6 +690,14 @@ class MissionService:
 
         if _is_emergency_active():
             raise MissionStateError("Cannot start mission while emergency stop is active.")
+        if self._qualification_service is not None:
+            try:
+                self._qualification_service.assert_supervised_test_inactive()
+            except Exception as exc:
+                reason = getattr(exc, "reason_code", "SUPERVISED_TEST_PERMIT_ACTIVE")
+                raise MissionConflictError(
+                    f"Cannot start mission while supervised qualification owns the mower: {reason}"
+                ) from exc
 
         mission = self._require_mission(mission_id)
         status = self._require_status(mission_id)

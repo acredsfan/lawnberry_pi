@@ -127,6 +127,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | V86 | Navigation-task terminalization must acquire the mower-wide lifecycle lock, confirm that the completed task is still the mission's exact owned task, and win over stale pause/resume work after awaited hardware or power operations; a terminal mission may never be overwritten as paused or restarted from a stale transition |
 | V87 | Canonical and persisted mission status must report exactly 100 percent for `COMPLETED` while retaining the last valid zero-based waypoint index; persistence normalization must not reinterpret that index as an incomplete ratio |
 | V88 | Asynchronous lifecycle tests must await an explicit state, event, or owned task rather than a hard-coded count of `sleep(0)` scheduler turns, so adding a legitimate lock or delivery task cannot create timing-dependent false failures |
+| V89 | Blade qualification has two fail-closed levels: a current schema-v2 prerequisite record may authorize one local, authenticated, session/context-bound `supervised_blade_enabled` test permit only through `MotorCommandGateway` under explicitly approved speed, duration, and lease limits; ordinary blade commands, missions, and schedules require current artifact-backed supervised-stage evidence plus a confirmed permit cleanup receipt, while schema-v1, simulation, restart, expiry, reuse, concurrent ownership, context drift, safety faults, or unconfirmed commands revoke the permit and retain or command neutral drive plus blade off; advisory camera/AI evidence cannot replace or block independent safety gates |
 
 ---
 
@@ -184,6 +185,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T48 | x | Replace critical placeholder tests, run frontend tests in CI, fix OpenAPI IDs, and clean lint | V55, V56, I.api, I.fe, I.ops |
 | T49 | x | Update OpenAPI, hardware/runtime docs, structure overview, and qualification handoff | V43–V56, I.api, I.ops |
 | T50 | x | Repair verified Cloudflare bootstrap and auth retry/lockout behavior, preserve active camera-view demand, harden camera IPC/power recovery, deploy the canonical camera units, provision/validate a real local detector manifest plus ONNX artifact, keep live IMU health truth fail-closed, and serialize mission definition/lifecycle mutations | V42, V51, V57–V88, I.api, I.fe, I.perception, I.power |
+| T51 | x | Build schema-v2 two-phase blade qualification, a bounded one-test supervised permit, canonical gateway/lifecycle revocation, staged UI/API/runbook truth, and regression coverage | V23, V24, V26, V29, V44–V48, V53, V55, V74, V76, V82, V85, V89, I.api, I.fe, I.ws, I.ops |
 
 ---
 
@@ -288,3 +290,4 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | B95 | 2026-07-15 | Mission completion set progress to 100 percent immediately before `_persist_mission_status` recomputed it from the last zero-based waypoint index, so canonical and stored completed status could fall below 100 percent (including 0 percent for a one-waypoint mission) | V87, T50 |
 | B96 | 2026-07-15 | A mission WebSocket regression assumed failure terminalization and delivery always completed in exactly three `sleep(0)` turns; serializing terminalization behind the lifecycle lock legitimately added a scheduling step and made the test fail despite correct eventual FAILED delivery | V88, T50 |
 | B97 | 2026-07-15 | Energy-return and restart-recovery tests either closed the callback's terminalization coroutine or forged persisted RUNNING state before the live cancellation callback finished, so they tested scheduler timing rather than the intended terminal and crash-recovery contracts | V88, T50 |
+| B98 | 2026-07-16 | Full blade qualification omitted `supervised_blade_enabled`; adding it directly would deadlock the only canonical blade path behind the same full-qualification gate | V89, T51 |

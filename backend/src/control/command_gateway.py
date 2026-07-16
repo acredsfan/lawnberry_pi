@@ -53,6 +53,8 @@ class MotorCommandGateway:
         self._config_loader = config_loader
         self.__rest_module = _rest_module
         self._drive_timeout_task: Any = None
+        self._blade_timeout_task: Any = None
+        self._permit_timeout_task: Any = None
         # Observability: event store injected per-run.
         self._event_store: Any | None = None
         self._obs_run_id: str = ""
@@ -60,8 +62,11 @@ class MotorCommandGateway:
         self._watchdog: Any = None
         self._autonomy_context_provider: Any = None
         self._drive_lease_generation: int = 0
+        self._blade_lease_generation: int = 0
+        self._permit_lease_generation: int = 0
         self._blade_controller: Any | None = None
         self._qualification_service: Any | None = None
+        self._runtime_context: Any | None = None
 
     def _rest(self) -> Any:
         if self.__rest_module is not None:
@@ -88,6 +93,60 @@ class MotorCommandGateway:
 
     def set_qualification_service(self, service: Any) -> None:
         self._qualification_service = service
+
+    def set_runtime_context(self, runtime: Any) -> None:
+        """Attach canonical live-health owners after RuntimeContext construction."""
+        self._runtime_context = runtime
+
+    def assert_actuators_idle_for_supervised_test(self) -> None:
+        drive_lease_active = bool(
+            self._drive_timeout_task is not None and not self._drive_timeout_task.done()
+        )
+        try:
+            legacy_motion_active = bool(self._rest()._legacy_motors_active)
+        except Exception:
+            legacy_motion_active = True
+        if (
+            drive_lease_active
+            or legacy_motion_active
+            or bool(self._blade_state.get("active", False))
+        ):
+            raise RuntimeError("SUPERVISED_TEST_ACTUATORS_NOT_IDLE")
+
+    def arm_supervised_permit_deadline(self, remaining_seconds: float) -> None:
+        """Bind the in-memory permit deadline to canonical actuator cleanup."""
+        import asyncio
+
+        self.clear_supervised_permit_deadline()
+        self._permit_lease_generation += 1
+        generation = self._permit_lease_generation
+
+        async def _expire() -> None:
+            try:
+                await asyncio.sleep(max(0.0, float(remaining_seconds)))
+                if generation != self._permit_lease_generation:
+                    return
+                await self._neutralize_supervised("SUPERVISED_TEST_PERMIT_EXPIRED")
+            except asyncio.CancelledError:
+                pass
+
+        self._permit_timeout_task = asyncio.create_task(
+            _expire(),
+            name="supervised_qualification_permit_deadline",
+        )
+
+    def clear_supervised_permit_deadline(self) -> None:
+        import asyncio
+
+        self._permit_lease_generation += 1
+        task = self._permit_timeout_task
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:
+            current = None
+        if task is not None and task is not current and not task.done():
+            task.cancel()
+        self._permit_timeout_task = None
 
     def _get_blade_controller(self) -> Any:
         if self._blade_controller is not None:
@@ -191,6 +250,16 @@ class MotorCommandGateway:
             if blade_was_active:
                 hardware_confirmed = False
 
+        if self._qualification_service is not None:
+            revoke = getattr(
+                self._qualification_service,
+                "revoke_supervised_test_permit",
+                None,
+            )
+            if callable(revoke):
+                revoke("SUPERVISED_TEST_EMERGENCY_STOP")
+        self.clear_supervised_permit_deadline()
+
         return EmergencyOutcome(
             status=CommandStatus.EMERGENCY_LATCHED,
             audit_id=audit_id,
@@ -250,6 +319,15 @@ class MotorCommandGateway:
         if _robohat and getattr(getattr(_robohat, "status", None), "serial_connected", False):
             fw_ver = getattr(_robohat.status, "firmware_version", None)
             if fw_ver is None:
+                if cmd.source == "supervised_qualification":
+                    await self._neutralize_supervised("SUPERVISED_TEST_FIRMWARE_UNKNOWN")
+                    return DriveOutcome(
+                        status=CommandStatus.BLOCKED,
+                        audit_id=audit_id,
+                        status_reason="SUPERVISED_TEST_FIRMWARE_UNKNOWN",
+                        active_interlocks=["FIRMWARE_UNKNOWN"],
+                        watchdog_latency_ms=None,
+                    )
                 # Version not yet received — firmware is responsive (motor_controller_ok
                 # or watchdog_active confirms it), so allow through with a warning.
                 # The firmware outputs its version via UART on startup; if it hasn't
@@ -260,6 +338,10 @@ class MotorCommandGateway:
                     "Firmware version not yet received; allowing drive command through"
                 )
             elif fw_ver not in SUPPORTED_FIRMWARE_VERSIONS:
+                if cmd.source == "supervised_qualification":
+                    await self._neutralize_supervised(
+                        f"SUPERVISED_TEST_FIRMWARE_INCOMPATIBLE:{fw_ver}"
+                    )
                 return DriveOutcome(
                     status=CommandStatus.FIRMWARE_INCOMPATIBLE,
                     audit_id=str(uuid.uuid4()),
@@ -269,6 +351,35 @@ class MotorCommandGateway:
                 )
 
         motion_active = abs(float(cmd.left)) > 1e-6 or abs(float(cmd.right)) > 1e-6
+
+        if cmd.source == "supervised_qualification":
+            supervised_reason = await self._authorize_supervised_drive(cmd, motion_active)
+            if supervised_reason is not None:
+                await self._neutralize_supervised(supervised_reason)
+                return DriveOutcome(
+                    status=CommandStatus.BLOCKED,
+                    audit_id=audit_id,
+                    status_reason=supervised_reason,
+                    active_interlocks=[supervised_reason],
+                    watchdog_latency_ms=None,
+                )
+        elif motion_active and self._qualification_service is not None:
+            try:
+                assert_inactive = getattr(
+                    self._qualification_service,
+                    "assert_supervised_test_inactive",
+                    None,
+                )
+                if callable(assert_inactive):
+                    assert_inactive()
+            except Exception as exc:
+                return DriveOutcome(
+                    status=CommandStatus.BLOCKED,
+                    audit_id=audit_id,
+                    status_reason=getattr(exc, "reason_code", "SUPERVISED_TEST_PERMIT_ACTIVE"),
+                    active_interlocks=["SUPERVISED_TEST_PERMIT_ACTIVE"],
+                    watchdog_latency_ms=None,
+                )
 
         if self.is_emergency_active(request) and motion_active:
             if self._event_store is not None:
@@ -291,7 +402,7 @@ class MotorCommandGateway:
 
         manual_active_interlocks: list[str] = []
         mission_active_interlocks: list[str] = []
-        if not cmd.legacy and cmd.source == "mission":
+        if not cmd.legacy and cmd.source in {"mission", "supervised_qualification"}:
             mission_active_interlocks = await self._check_mission_drive_interlocks(cmd)
 
         if mission_active_interlocks:
@@ -307,6 +418,8 @@ class MotorCommandGateway:
                     interlocks=mission_active_interlocks,
                     source=cmd.source,
                 ))
+            if cmd.source == "supervised_qualification":
+                await self._neutralize_supervised(reason)
             return DriveOutcome(
                 status=CommandStatus.BLOCKED,
                 audit_id=audit_id,
@@ -389,7 +502,7 @@ class MotorCommandGateway:
                         watchdog_latency_ms=round(watchdog_latency, 2),
                     )
                 auto_stop_ms = cmd.duration_ms if cmd.duration_ms > 0 else 500
-                if cmd.source == "mission":
+                if cmd.source in {"mission", "supervised_qualification"}:
                     try:
                         _, limits = self._config_loader.get() if self._config_loader else (None, None)
                         auto_stop_ms = int(getattr(limits, "autonomous_command_ttl_ms", 350) or 350)
@@ -404,6 +517,10 @@ class MotorCommandGateway:
                             return
                         await robohat.send_motor_command(0.0, 0.0)
                         self._disarm_watchdog("drive")
+                        if cmd.source == "supervised_qualification":
+                            await self._neutralize_supervised(
+                                "SUPERVISED_TEST_COMMAND_LEASE_EXPIRED"
+                            )
                         logger.warning(
                             "%s drive lease expired (%d ms); motors stopped",
                             cmd.source,
@@ -414,6 +531,8 @@ class MotorCommandGateway:
 
                 self._drive_timeout_task = asyncio.create_task(_auto_stop())
 
+            if not success and cmd.source == "supervised_qualification":
+                await self._neutralize_supervised("SUPERVISED_TEST_DRIVE_ACK_FAILED")
             return DriveOutcome(
                 status=CommandStatus.ACCEPTED if success else CommandStatus.ACK_FAILED,
                 audit_id=audit_id,
@@ -424,6 +543,15 @@ class MotorCommandGateway:
                 watchdog_latency_ms=round(watchdog_latency, 2),
             )
 
+        if cmd.source == "supervised_qualification":
+            await self._neutralize_supervised("SUPERVISED_TEST_MOTOR_CONTROLLER_OFFLINE")
+            return DriveOutcome(
+                status=CommandStatus.BLOCKED,
+                audit_id=audit_id,
+                status_reason="SUPERVISED_TEST_MOTOR_CONTROLLER_OFFLINE",
+                active_interlocks=["MOTOR_CONTROLLER_OFFLINE"],
+                watchdog_latency_ms=None,
+            )
         if not motion_active:
             self._disarm_watchdog("drive")
         return DriveOutcome(
@@ -433,6 +561,121 @@ class MotorCommandGateway:
             active_interlocks=[],
             watchdog_latency_ms=0.0,
         )
+
+    async def _authorize_supervised_drive(
+        self,
+        cmd: DriveCommand,
+        motion_active: bool,
+    ) -> str | None:
+        context = cmd.qualification
+        if (
+            self._qualification_service is None
+            or context is None
+            or context.stage_id != "supervised_blade_enabled"
+            or not context.permit_token
+            or not context.operator_session_id
+        ):
+            return "SUPERVISED_TEST_COMMAND_SOURCE_INVALID"
+        try:
+            self._qualification_service.authorize_supervised_command(
+                permit_token=context.permit_token,
+                operator_session_id=context.operator_session_id,
+                command_type="drive" if motion_active else "cleanup",
+                left_normalized=cmd.left if motion_active else None,
+                right_normalized=cmd.right if motion_active else None,
+                duration_ms=cmd.duration_ms if motion_active else None,
+            )
+        except Exception as exc:
+            return getattr(exc, "reason_code", "SUPERVISED_TEST_PERMIT_INVALID")
+        if not motion_active:
+            return None
+        blockers = await self._supervised_runtime_blockers()
+        return blockers[0] if blockers else None
+
+    async def _supervised_runtime_blockers(self) -> list[str]:
+        runtime = self._runtime_context
+        if runtime is None:
+            return ["SUPERVISED_TEST_RUNTIME_UNAVAILABLE"]
+        try:
+            from ..models.autonomy_qualification import QualificationLevel
+            from ..services.autonomy_readiness_service import AutonomyReadinessService
+
+            report = await AutonomyReadinessService(runtime).evaluate(
+                require_blade=True,
+                required_qualification_level=(
+                    QualificationLevel.SUPERVISED_BLADE_TEST_PREREQUISITE
+                ),
+            )
+            blockers = list(report.blocking_reason_codes)
+        except Exception as exc:
+            logger.warning("Supervised-test readiness validation failed: %s", exc)
+            return ["SUPERVISED_TEST_LIVE_SAFETY_UNAVAILABLE"]
+
+        live_safety = getattr(runtime, "live_safety", None)
+        live_status = (
+            live_safety.status_dict()
+            if callable(getattr(live_safety, "status_dict", None))
+            else {}
+        )
+        limits = runtime.safety_limits
+        imu_max_age_s = max(
+            0.05,
+            float(getattr(limits, "autonomous_command_ttl_ms", 350)) / 1000.0,
+        )
+        tof_max_age_s = float(getattr(limits, "obstacle_stale_sample_timeout_s", 0.25))
+        for code, key, max_age_s in (
+            ("IMU_SAFETY_SAMPLE_STALE", "imu_sample_age_s", imu_max_age_s),
+            ("TOF_LEFT_STALE", "tof_left_sample_age_s", tof_max_age_s),
+            ("TOF_RIGHT_STALE", "tof_right_sample_age_s", tof_max_age_s),
+        ):
+            age = live_status.get(key)
+            if age is None or not math.isfinite(float(age)) or float(age) > max_age_s:
+                blockers.append(code)
+        blockers.extend(str(code) for code in live_status.get("active_faults") or [])
+
+        energy = getattr(runtime, "energy_service", None)
+        try:
+            state = energy.current_state() if energy is not None else None
+            if (
+                state is None
+                or not bool(getattr(state, "available", False))
+                or not bool(getattr(state, "fresh", False))
+                or getattr(state, "soc_percent", None) is None
+                or float(state.soc_percent) <= float(state.critical_soc_percent)
+                or getattr(state, "remaining_wh", None) is None
+                or float(state.remaining_wh) <= float(state.return_reserve_wh)
+            ):
+                blockers.append("SUPERVISED_TEST_ENERGY_RESERVE_UNAVAILABLE")
+        except Exception:
+            blockers.append("SUPERVISED_TEST_ENERGY_RESERVE_UNAVAILABLE")
+        return list(dict.fromkeys(blockers))
+
+    async def _neutralize_supervised(self, reason_code: str) -> None:
+        """Best-effort canonical cleanup for every terminal permit path."""
+        self._drive_lease_generation += 1
+        self._blade_lease_generation += 1
+        self.clear_supervised_permit_deadline()
+        self._blade_state["active"] = False
+        try:
+            if self._robohat is not None:
+                await self._robohat.send_motor_command(0.0, 0.0)
+        except Exception:
+            logger.exception("Supervised-test drive neutral acknowledgment failed")
+        try:
+            controller = self._get_blade_controller()
+            if await controller.initialize():
+                await controller.set_active(False, reason=reason_code)
+        except Exception:
+            logger.exception("Supervised-test blade-off acknowledgment failed")
+        self._disarm_watchdog("supervised_qualification")
+        if self._qualification_service is not None:
+            revoke = getattr(
+                self._qualification_service,
+                "revoke_supervised_test_permit",
+                None,
+            )
+            if callable(revoke):
+                revoke(reason_code)
 
     async def _check_manual_drive_interlocks(self, cmd: DriveCommand) -> list[str]:
         from datetime import datetime
@@ -517,6 +760,11 @@ class MotorCommandGateway:
 
         try:
             ctx = self._autonomy_context_provider(cmd)
+            if (
+                cmd.source == "supervised_qualification"
+                and ctx.get("gps_degradation_state") != "nominal"
+            ):
+                interlocks.append("localization_degraded")
             snapshot = ctx.get("snapshot")
             if snapshot is None or not getattr(snapshot, "valid", False):
                 interlocks.append("operating_area_unavailable")
@@ -653,15 +901,28 @@ class MotorCommandGateway:
         return "SAFETY_LOCKOUT"
 
     async def dispatch_blade(self, cmd: BladeCommand, request: Any = None) -> BladeOutcome:
+        import asyncio
         import uuid as _uuid
 
         audit_id = str(_uuid.uuid4())
+        supervised = cmd.source == "supervised_qualification"
 
         # Firmware preflight (Phase E)
         _robohat = self._robohat
         if _robohat and getattr(getattr(_robohat, "status", None), "serial_connected", False):
             fw_ver = getattr(_robohat.status, "firmware_version", None)
+            if supervised and fw_ver is None:
+                await self._neutralize_supervised("SUPERVISED_TEST_FIRMWARE_UNKNOWN")
+                return BladeOutcome(
+                    status=CommandStatus.BLOCKED,
+                    audit_id=audit_id,
+                    status_reason="SUPERVISED_TEST_FIRMWARE_UNKNOWN",
+                )
             if fw_ver is not None and fw_ver not in SUPPORTED_FIRMWARE_VERSIONS:
+                if supervised:
+                    await self._neutralize_supervised(
+                        f"SUPERVISED_TEST_FIRMWARE_INCOMPATIBLE:{fw_ver}"
+                    )
                 return BladeOutcome(
                     status=CommandStatus.FIRMWARE_INCOMPATIBLE,
                     audit_id=str(_uuid.uuid4()),
@@ -669,13 +930,19 @@ class MotorCommandGateway:
                 )
 
         if cmd.active:
-            if cmd.motors_active:
+            if cmd.motors_active and not (
+                supervised and bool(self._blade_state.get("active", False))
+            ):
+                if supervised:
+                    await self._neutralize_supervised("SUPERVISED_TEST_MOTORS_ACTIVE")
                 return BladeOutcome(
                     status=CommandStatus.BLOCKED,
                     audit_id=audit_id,
                     status_reason="motors_active",
                 )
             if self.is_emergency_active(request):
+                if supervised:
+                    await self._neutralize_supervised("SUPERVISED_TEST_EMERGENCY_STOP")
                 return BladeOutcome(
                     status=CommandStatus.BLOCKED,
                     audit_id=audit_id,
@@ -687,22 +954,74 @@ class MotorCommandGateway:
                     audit_id=audit_id,
                     status_reason="QUALIFICATION_SERVICE_UNAVAILABLE",
                 )
-            try:
-                self._qualification_service.assert_current()
-            except Exception as exc:
-                evaluation = getattr(exc, "evaluation", None)
-                reason_codes = getattr(evaluation, "reason_codes", None) or [
-                    "QUALIFICATION_EVIDENCE_MISSING"
-                ]
-                return BladeOutcome(
-                    status=CommandStatus.BLOCKED,
-                    audit_id=audit_id,
-                    status_reason=";".join(str(code) for code in reason_codes),
-                )
+            if supervised:
+                context = cmd.qualification
+                if (
+                    context is None
+                    or context.stage_id != "supervised_blade_enabled"
+                    or not context.permit_token
+                    or not context.operator_session_id
+                ):
+                    await self._neutralize_supervised(
+                        "SUPERVISED_TEST_COMMAND_SOURCE_INVALID"
+                    )
+                    return BladeOutcome(
+                        status=CommandStatus.BLOCKED,
+                        audit_id=audit_id,
+                        status_reason="SUPERVISED_TEST_COMMAND_SOURCE_INVALID",
+                    )
+                try:
+                    self._qualification_service.authorize_supervised_command(
+                        permit_token=context.permit_token,
+                        operator_session_id=context.operator_session_id,
+                        command_type="blade",
+                    )
+                except Exception as exc:
+                    reason = getattr(exc, "reason_code", "SUPERVISED_TEST_PERMIT_INVALID")
+                    await self._neutralize_supervised(reason)
+                    return BladeOutcome(
+                        status=CommandStatus.BLOCKED,
+                        audit_id=audit_id,
+                        status_reason=reason,
+                    )
+                blockers = await self._supervised_runtime_blockers()
+                blockers.extend(self._supervised_pose_blockers(cmd))
+                if blockers:
+                    reason = list(dict.fromkeys(blockers))[0]
+                    await self._neutralize_supervised(reason)
+                    return BladeOutcome(
+                        status=CommandStatus.BLOCKED,
+                        audit_id=audit_id,
+                        status_reason=reason,
+                    )
+            else:
+                try:
+                    assert_inactive = getattr(
+                        self._qualification_service,
+                        "assert_supervised_test_inactive",
+                        None,
+                    )
+                    if callable(assert_inactive):
+                        assert_inactive()
+                    self._qualification_service.assert_current()
+                except Exception as exc:
+                    evaluation = getattr(exc, "evaluation", None)
+                    reason_codes = getattr(evaluation, "reason_codes", None) or [
+                        getattr(exc, "reason_code", "QUALIFICATION_EVIDENCE_MISSING")
+                    ]
+                    return BladeOutcome(
+                        status=CommandStatus.BLOCKED,
+                        audit_id=audit_id,
+                        status_reason=";".join(str(code) for code in reason_codes),
+                    )
 
         try:
             controller = self._get_blade_controller()
             if not await controller.initialize():
+                if supervised:
+                    await self._neutralize_supervised(
+                        "SUPERVISED_TEST_BLADE_CONTROLLER_OFFLINE"
+                    )
                 return BladeOutcome(
                     status=CommandStatus.ACK_FAILED,
                     audit_id=audit_id,
@@ -717,8 +1036,48 @@ class MotorCommandGateway:
                 self._blade_state["active"] = bool(cmd.active)
                 if cmd.active:
                     self._arm_watchdog("blade")
+                    if supervised:
+                        self._blade_lease_generation += 1
+                        lease_generation = self._blade_lease_generation
+                        if self._blade_timeout_task and not self._blade_timeout_task.done():
+                            self._blade_timeout_task.cancel()
+                        try:
+                            _, limits = (
+                                self._config_loader.get()
+                                if self._config_loader
+                                else (None, None)
+                            )
+                            lease_ms = int(
+                                getattr(limits, "autonomous_command_ttl_ms", 350) or 350
+                            )
+                        except Exception:
+                            lease_ms = 350
+
+                        async def _blade_auto_stop() -> None:
+                            try:
+                                await asyncio.sleep(lease_ms / 1000.0)
+                                if lease_generation != self._blade_lease_generation:
+                                    return
+                                await self._neutralize_supervised(
+                                    "SUPERVISED_TEST_BLADE_LEASE_EXPIRED"
+                                )
+                                logger.warning(
+                                    "supervised blade lease expired (%d ms); blade stopped",
+                                    lease_ms,
+                                )
+                            except asyncio.CancelledError:
+                                pass
+
+                        self._blade_timeout_task = asyncio.create_task(_blade_auto_stop())
                 else:
+                    self._blade_lease_generation += 1
+                    if self._blade_timeout_task and not self._blade_timeout_task.done():
+                        self._blade_timeout_task.cancel()
                     self._disarm_watchdog("blade")
+            elif supervised:
+                await self._neutralize_supervised(
+                    result.reason_code or "SUPERVISED_TEST_BLADE_ACK_FAILED"
+                )
             return BladeOutcome(
                 status=CommandStatus.ACCEPTED if ok else CommandStatus.ACK_FAILED,
                 audit_id=audit_id,
@@ -726,11 +1085,39 @@ class MotorCommandGateway:
             )
         except Exception as exc:
             logger.warning("Blade service dispatch failed: %s", exc)
+            if supervised:
+                await self._neutralize_supervised("SUPERVISED_TEST_BLADE_CONTROLLER_OFFLINE")
             return BladeOutcome(
                 status=CommandStatus.ACK_FAILED,
                 audit_id=audit_id,
                 status_reason="BLADE_CONTROLLER_OFFLINE",
             )
+
+    def _supervised_pose_blockers(self, cmd: BladeCommand) -> list[str]:
+        if self._autonomy_context_provider is None:
+            return ["SUPERVISED_TEST_OPERATING_AREA_UNAVAILABLE"]
+        try:
+            context = self._autonomy_context_provider(cmd)
+            if context.get("gps_degradation_state") != "nominal":
+                return ["SUPERVISED_TEST_GPS_DEGRADED"]
+            snapshot = context.get("snapshot")
+            position = context.get("position")
+            if snapshot is None or not getattr(snapshot, "valid", False):
+                return ["SUPERVISED_TEST_OPERATING_AREA_UNAVAILABLE"]
+            snapshot.validate_ready_for_autonomy(
+                position=position,
+                last_gps_fix=context.get("last_gps_fix"),
+                dead_reckoning_active=bool(context.get("dead_reckoning_active", False)),
+                max_fix_age_s=float(context.get("max_fix_age_s", 2.0)),
+                max_accuracy_m=float(context.get("max_accuracy_m", 0.25)),
+                footprint_radius_m=float(context.get("footprint_radius_m", 0.35)),
+                fixed_allowance_m=float(context.get("fixed_allowance_m", 0.10)),
+            )
+            if bool(context.get("tof_blocked", False)):
+                return ["OBSTACLE_DETECTED"]
+            return []
+        except Exception as exc:
+            return [getattr(exc, "reason_code", "SUPERVISED_TEST_GEOFENCE_NOT_READY")]
 
     def reset_for_testing(self) -> None:
         from backend.src.core.robot_state_manager import get_robot_state_manager

@@ -6,6 +6,15 @@ from enum import Enum
 from typing import Any
 
 
+@dataclass(frozen=True)
+class SupervisedQualificationCommandContext:
+    """Bearer capability for the one schema-v2 supervised qualification stage."""
+
+    permit_token: str
+    operator_session_id: str
+    stage_id: str = "supervised_blade_enabled"
+
+
 @dataclass
 class DriveCommand:
     left: float
@@ -16,6 +25,7 @@ class DriveCommand:
     max_speed_limit: float = 0.8
     legacy: bool = False
     heading_bootstrap: bool = False
+    qualification: SupervisedQualificationCommandContext | None = None
 
 
 @dataclass
@@ -24,6 +34,7 @@ class BladeCommand:
     source: str          # "manual" | "mission"
     session_id: str | None = None
     motors_active: bool = False
+    qualification: SupervisedQualificationCommandContext | None = None
 
 
 @dataclass

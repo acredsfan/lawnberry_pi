@@ -247,14 +247,17 @@ curl http://localhost:8081/api/v2/system/info
 ### 3. Autonomy qualification gate
 
 Starting services and passing health checks does not qualify the mower for blade-enabled autonomous operation. The backend
-requires current physical qualification evidence before blade-capable mission or scheduler starts.
+uses qualification schema v2 with three explicit levels: `blade_off_diagnostic`,
+`supervised_blade_test_prerequisite`, and `full_blade_autonomy`. Ordinary blade activation, blade-capable mission starts,
+and scheduler dispatch require the final level with current, artifact-backed `supervised_blade_enabled` evidence and a matching
+server cleanup receipt.
 
 ```bash
 # Inspect the current gate state and blocker reasons.
 curl http://localhost:8081/api/v2/autonomy/readiness | jq
 curl http://localhost:8081/api/v2/autonomy/qualification | jq
 
-# Run only non-destructive evidence collection until hazardous stages are approved.
+# Run only non-destructive evidence collection until physical stages are approved.
 python scripts/run_autonomy_qualification.py --base-url http://127.0.0.1:8081 --output -
 ```
 
@@ -263,10 +266,42 @@ clean, RoboHAT firmware is visible, and the generated record matches the intende
 hardware config edit, safety limit edit, runtime identity change, or RoboHAT firmware change invalidates prior evidence and
 requires requalification.
 
+The tracked safety limits intentionally disable the one-purpose supervised-test capability:
+
+```yaml
+supervised_test_enabled: false
+supervised_test_permit_ttl_s: 0
+supervised_test_max_duration_s: 0
+supervised_test_max_speed_mps: 0.0
+```
+
+Leave these values unchanged until Aaron approves the actual mower, clear test area, intervention/blade-isolation method,
+operator controls, TTL, duration, and speed. The implementation must not supply guessed hazardous defaults. Enabling the
+feature requires positive bounds, and the supervised speed cannot exceed the existing blade-off bootstrap ceiling. Because
+these fields participate in `limits_hash`, configure the approved values before collecting the final prerequisite record and
+restart the backend after any edit.
+
+Startup always has no permit, neutral drive, and blade off; scheduler startup also waits for confirmed hardware-neutral/
+blade-off state and power readiness. Every permit endpoint requires a valid canonical operator session. Issue, activate,
+drive, blade, and complete additionally require a loopback/private/link-local source, while authenticated status and revoke
+remain remotely available for safe inspection/stop; `SIM_MODE=1` cannot issue a permit. Inspect the redacted state with
+`GET /api/v2/autonomy/qualification/supervised-test/permit`. All lifecycle routes are under
+`/api/v2/autonomy/qualification/supervised-test/`; see
+`docs/OPERATIONS.md#authenticated-permit-lifecycle-and-local-actuation` before attempting any physical stage. The reusable token is returned
+only on issuance, remains bound to that session and qualification context, must not be logged, and is cleared on restart.
+
 Aaron's current mower uses its verified master power cutoff as the independent intervention mechanism and does not have a
 dedicated E-stop. Other builds must identify and test their configured cutoff; test a dedicated E-stop only when installed.
 Physical stage passes are recorded one at a time with `--operator-confirmed`, `--stage-result`, an artifact registry ID, and
-`--physical-intervention`. The runner does not energize a physical stage automatically.
+`--physical-intervention`. The runner records evidence and attempts cleanup; it does not issue a permit or energize a physical
+stage automatically. Camera/AI remains advisory and cannot replace ToF, geofence, localization, live-safety, or gateway gates.
+
+Existing schema-v1 JSON records are preserved as history but fail closed with `QUALIFICATION_SCHEMA_MISMATCH`; never edit or
+repoint them to manufacture schema-v2 evidence. Requalify on the clean current context. For rollback, first command neutral and
+blade off, operate the verified physical cutoff, revoke any live permit while the current backend is responsive, deploy the
+selected clean commit, restart services, and confirm startup-neutral state. Do not downgrade merely to reuse older evidence.
+The full physical sequence, emergency recovery, receipt binding, and migration details are in
+`docs/OPERATIONS.md#two-phase-autonomy-qualification`.
 
 ### 4. Hardware Verification
 

@@ -13,7 +13,7 @@ from backend.src.models.autonomy_qualification import (
 )
 from backend.src.services import autonomy_qualification_service as qualification_module
 from backend.src.services.autonomy_qualification_service import (
-    BLADE_ENABLED_REQUIRED_STAGES,
+    FULL_BLADE_AUTONOMY_REQUIRED_STAGES,
     PHYSICAL_EVIDENCE_STAGES,
     AutonomyQualificationError,
     AutonomyQualificationService,
@@ -59,7 +59,7 @@ def _service(tmp_path, monkeypatch) -> AutonomyQualificationService:
     return AutonomyQualificationService(runtime, root_dir=tmp_path)
 
 
-def _stages(stage_ids: tuple[str, ...] = BLADE_ENABLED_REQUIRED_STAGES):
+def _stages(stage_ids: tuple[str, ...] = FULL_BLADE_AUTONOMY_REQUIRED_STAGES):
     return [
         AutonomyQualificationStageResult(
             stage_id=stage_id,
@@ -96,6 +96,43 @@ def _attach_physical_artifacts(
                 "operator_confirmed": True,
             },
         }
+        if stage.stage_id == "supervised_blade_enabled":
+            receipt_id = "supervised-cleanup-test"
+            receipts = service.receipts_dir
+            receipts.mkdir(parents=True, exist_ok=True)
+            context_binding = {
+                "schema_version": context.schema_version,
+                "commit_sha": context.commit_sha,
+                "git_tree_dirty": context.git_tree_dirty,
+                "hardware_config_hash": context.hardware_config_hash,
+                "limits_hash": context.limits_hash,
+                "runtime_identity_hash": context.runtime_identity_hash,
+                "sim_mode": context.sim_mode,
+                "robohat_firmware_version": context.robohat_firmware_version,
+            }
+            (receipts / f"{receipt_id}.json").write_text(
+                json.dumps(
+                    {
+                        "receipt_id": receipt_id,
+                        "qualification_stage_id": "supervised_blade_enabled",
+                        "context_binding": context_binding,
+                        "physical_intervention_mechanism_hash": "0" * 64,
+                        "cleanup_confirmed": True,
+                        "cleanup_confirmation": {
+                            "source": "motor_command_gateway",
+                            "drive_audit_id": "drive-audit",
+                            "drive_status": "accepted",
+                            "blade_audit_id": "blade-audit",
+                            "blade_status": "accepted",
+                        },
+                        "drive_command_count": 1,
+                        "blade_enable_command_count": 1,
+                        "eligible_for_stage_evidence": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            payload["metadata"]["supervised_test_receipt_id"] = receipt_id
         (registry / f"{artifact_id}.json").write_text(
             json.dumps(payload),
             encoding="utf-8",
@@ -159,10 +196,10 @@ def test_context_mismatch_invalidates_saved_evidence(tmp_path, monkeypatch):
 
 def test_failed_interrupted_or_missing_stage_blocks(tmp_path, monkeypatch):
     service = _service(tmp_path, monkeypatch)
-    stages = _stages(BLADE_ENABLED_REQUIRED_STAGES[:-2])
+    stages = _stages(FULL_BLADE_AUTONOMY_REQUIRED_STAGES[:-2])
     stages.append(
         AutonomyQualificationStageResult(
-            stage_id=BLADE_ENABLED_REQUIRED_STAGES[-2],
+            stage_id=FULL_BLADE_AUTONOMY_REQUIRED_STAGES[-2],
             status=QualificationStageStatus.INTERRUPTED,
             summary="operator cancelled",
         )
@@ -178,7 +215,7 @@ def test_failed_interrupted_or_missing_stage_blocks(tmp_path, monkeypatch):
     assert not evaluation.ok
     assert "QUALIFICATION_EVIDENCE_INTERRUPTED" in evaluation.reason_codes
     assert "QUALIFICATION_STAGE_INTERRUPTED" in evaluation.reason_codes
-    assert "QUALIFICATION_STAGE_MISSING" in evaluation.reason_codes
+    assert "SUPERVISED_BLADE_TEST_REQUIRED" in evaluation.reason_codes
 
 
 def test_passed_physical_record_cannot_be_saved_from_sim_or_dirty_tree(

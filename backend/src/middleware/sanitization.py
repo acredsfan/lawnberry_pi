@@ -24,6 +24,7 @@ SENSITIVE_KEYS: set[str] = {
     "token",
     "access_token",
     "refresh_token",
+    "permit_token",
     "api_key",
     "apikey",
     "encryption_key",
@@ -69,9 +70,13 @@ class SanitizationMiddleware(BaseHTTPMiddleware):
         self._max = max(1024, int(max_process_bytes))
         self._skip_response_redaction = ("/api/v2/settings/maps",)
         self._intentional_sensitive_response_keys = {
-            "/api/v2/auth/login": frozenset({"token", "access_token"}),
-            "/api/v2/auth/cloudflare": frozenset({"token", "access_token"}),
-            "/api/v2/auth/refresh": frozenset({"token", "access_token"}),
+            ("POST", "/api/v2/auth/login"): frozenset({"token", "access_token"}),
+            ("POST", "/api/v2/auth/cloudflare"): frozenset({"token", "access_token"}),
+            ("POST", "/api/v2/auth/refresh"): frozenset({"token", "access_token"}),
+            (
+                "POST",
+                "/api/v2/autonomy/qualification/supervised-test/permit",
+            ): frozenset({"permit_token"}),
         }
 
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -118,7 +123,7 @@ class SanitizationMiddleware(BaseHTTPMiddleware):
                 redacted = _redact(
                     parsed,
                     allowed_sensitive_keys=self._intentional_sensitive_response_keys.get(
-                        request.url.path, frozenset()
+                        (request.method.upper(), request.url.path), frozenset()
                     ),
                 )
                 headers = _strip_framing_headers(dict(response.headers))

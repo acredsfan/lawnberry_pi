@@ -415,7 +415,7 @@ def _extract_websocket_subprotocol_token(websocket: WebSocket) -> str | None:
     return None
 
 
-async def _require_session(request: Request) -> UserSession:
+async def require_session(request: Request) -> UserSession:
     token = _extract_bearer_token(request.headers.get("Authorization"))
     if not token:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -428,6 +428,10 @@ async def _require_session(request: Request) -> UserSession:
     if not session:
         raise HTTPException(status_code=401, detail="Unauthorized")
     return session
+
+
+# Transitional internal alias while existing router handlers migrate to the public dependency.
+_require_session = require_session
 
 
 async def _authorize_websocket(websocket: WebSocket) -> UserSession:

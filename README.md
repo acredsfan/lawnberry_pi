@@ -65,7 +65,14 @@ uv run python scripts/manage_hardware_config.py migrate-legacy --profile auto
 - ✅ **Hardware Integration**: Real sensor data streaming from Pi hardware
 - ✅ **Professional UI**: 1980s cyberpunk design with Orbitron fonts and neon effects
 - ✅ **Real-time Telemetry**: Live GPS, battery, IMU data at 5Hz via WebSocket
-- ⚠️ **Autonomy Qualification Required**: Blade-enabled manual/autonomous mission starts require current on-device qualification evidence; simulation does not count as physical qualification.
+- ⚠️ **Two-Phase Autonomy Qualification Required**: Schema-v2 separates
+  `blade_off_diagnostic`, `supervised_blade_test_prerequisite`, and `full_blade_autonomy`.
+  Ordinary blade commands, blade-capable missions, and schedules require the final level with current,
+  artifact-backed `supervised_blade_enabled` evidence. Simulation, replay, mocks, and a successful permit API
+  call do not count as physical evidence.
+- 🔒 **Supervised Blade Test Disabled by Default**: Permit issuance ships with `supervised_test_enabled: false`
+  and zero TTL, duration, and speed bounds. Aaron must approve mower-specific bounds and the physical test plan
+  before those values change or any blade-enabled test is attempted.
 
 ### Mission Planner
 - ✅ Interactive Mission Planner UI is available under the "Mission Planner" navigation item.
@@ -80,6 +87,8 @@ uv run python scripts/manage_hardware_config.py migrate-legacy --profile auto
 - GPS RTK Configuration: `docs/gps-ntrip-setup.md` (centimeter-level accuracy)
 - Hardware Integration: `docs/hardware-integration.md`
 - Operations Guide: `docs/OPERATIONS.md`
+- Two-phase qualification operations, emergency recovery, migration, and Aaron's physical checklist:
+  `docs/OPERATIONS.md#two-phase-autonomy-qualification`
 - Contributing Guide: `CONTRIBUTING.md` (includes TODO policy)
 - Feature Specifications: `spec/hardware.yaml` (canonical hardware baseline), `spec/agent_rules.md`
 - System Architecture: See `docs/code_structure_overview.md` for subsystem and callable-interface orientation

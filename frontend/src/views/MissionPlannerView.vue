@@ -18,14 +18,23 @@
             </select>
           </label>
           <button class="btn" :disabled="!mowerLatLng" @click="recenterToMower">Recenter</button>
-          <button class="btn btn-secondary" :disabled="!mowerLatLng" title="Click your mower's actual location in the satellite photo to align imagery" @click="missionMapRef?.startCalibration()">Align Satellite</button>
+          <button
+            class="btn btn-secondary"
+            :disabled="!mowerLatLng"
+            title="Click your mower's actual location in the satellite photo to align imagery"
+            @click="missionMapRef?.startCalibration()"
+          >
+            Align Satellite
+          </button>
           <button class="btn" :disabled="missionStore.waypoints.length === 0" @click="undoLastWaypoint">↩️ Undo last</button>
           <button class="btn btn-danger" :disabled="missionStore.waypoints.length === 0" @click="clearAllWaypoints">🗑️ Clear all</button>
           <button
             v-if="missionStore.pathTrace.length > 0"
             class="btn btn-secondary"
             @click="missionStore.clearTrace()"
-          >✕ Clear trace</button>
+          >
+            ✕ Clear trace
+          </button>
         </div>
         <div class="map-container">
           <MissionMap
@@ -44,7 +53,7 @@
         </div>
         <MissionWaypointList />
         <MissionControls
-          v-model:missionName="missionName"
+          v-model:mission-name="missionName"
           :creating-mission="creatingMission"
           :starting-mission="startingMission"
           :saving-changes="savingMissionChanges"
@@ -61,6 +70,11 @@
             <strong>Autonomy readiness</strong>
             <span :class="['readiness-state', readinessStateClass]">{{ readinessStateLabel }}</span>
           </div>
+          <QualificationStatusPanel
+            :qualification="qualificationEvidence"
+            :retained-terminal-errors="qualificationTerminalErrors"
+            :error="readinessError"
+          />
           <ul v-if="readinessRows.length" class="readiness-list">
             <li v-for="row in readinessRows" :key="row.code">
               <span class="readiness-code">{{ row.code }}</span>
@@ -70,7 +84,6 @@
           <p v-else-if="autonomyReadiness?.ready && qualificationEvidence?.ok" class="readiness-copy">
             Current qualification evidence is accepted for blade-capable starts.
           </p>
-          <p v-else-if="readinessError" class="readiness-copy readiness-error">{{ readinessError }}</p>
           <label class="diagnostic-toggle">
             <input
               v-model="bladeOffDiagnostic"
@@ -95,29 +108,19 @@ import MissionControls from '@/components/mission/MissionControls.vue'
 import MissionStatusPanel from '@/components/mission/MissionStatusPanel.vue'
 import MissionDebugPanel from '@/components/mission/MissionDebugPanel.vue'
 import MissionListPanel from '@/components/mission/MissionListPanel.vue'
+import QualificationStatusPanel from '@/components/mission/QualificationStatusPanel.vue'
 import { useMissionStore, type Waypoint } from '@/stores/mission'
 import { useMapStore } from '@/stores/map'
 import { useToastStore } from '@/stores/toast'
 import { useMowerTelemetry } from '@/composables/useMowerTelemetry'
 import { useMissionMapSettings } from '@/composables/useMissionMapSettings'
 import { useApiService } from '@/services/api'
-
-interface ReadinessCheck {
-  code: string
-  remediation?: string
-}
-
-interface AutonomyReadinessReport {
-  ready?: boolean
-  blocking_reason_codes?: string[]
-  checks?: ReadinessCheck[]
-}
-
-interface QualificationEvidence {
-  ok?: boolean
-  reason_codes?: string[]
-  remediation?: Record<string, string>
-}
+import {
+  collectQualificationTerminalErrors,
+  type AutonomyReadinessReport,
+  type QualificationEvidence,
+  type QualificationTerminalError,
+} from '@/types/autonomyQualification'
 
 const missionStore = useMissionStore()
 const mapStore = useMapStore()
@@ -155,6 +158,7 @@ const missionActionHint = ref('')
 const bladeOffDiagnostic = ref(false)
 const autonomyReadiness = ref<AutonomyReadinessReport | null>(null)
 const qualificationEvidence = ref<QualificationEvidence | null>(null)
+const qualificationTerminalErrors = ref<QualificationTerminalError[]>([])
 const readinessLoading = ref(false)
 const readinessError = ref('')
 
@@ -216,13 +220,24 @@ async function loadAutonomyGateStatus() {
       api.get('/api/v2/autonomy/readiness'),
       api.get('/api/v2/autonomy/qualification'),
     ])
-    autonomyReadiness.value = readiness.data
-    qualificationEvidence.value = qualification.data
+    autonomyReadiness.value = readiness.data as AutonomyReadinessReport
+    qualificationEvidence.value = qualification.data as QualificationEvidence
+    retainQualificationTerminalErrors(qualificationEvidence.value)
   } catch {
     readinessError.value = 'Autonomy gate status unavailable.'
   } finally {
     readinessLoading.value = false
   }
+}
+
+function retainQualificationTerminalErrors(qualification: QualificationEvidence | null) {
+  const retained = new Map(
+    qualificationTerminalErrors.value.map(error => [error.code, error]),
+  )
+  for (const error of collectQualificationTerminalErrors(qualification)) {
+    retained.set(error.code, error)
+  }
+  qualificationTerminalErrors.value = [...retained.values()].slice(-20)
 }
 
 async function createMission() {

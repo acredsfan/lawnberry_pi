@@ -67,6 +67,46 @@ def test_auth_exchange_preserves_issued_tokens_but_redacts_other_secrets(path):
     assert response.json()["password"] == "***REDACTED***"
 
 
+def test_supervised_permit_issue_preserves_token_only_on_exact_issue_route():
+    app = FastAPI()
+    register_sanitization_middleware(app)
+    path = "/api/v2/autonomy/qualification/supervised-test/permit"
+
+    @app.post(path)
+    def issue_permit():
+        return {
+            "permit_token": "one-time-supervised-capability",
+            "password": "must-never-leak",
+        }
+
+    @app.get(path)
+    def permit_status_must_remain_redacted():
+        return {"permit_token": "must-never-leak"}
+
+    response = TestClient(app).post(path)
+    status_response = TestClient(app).get(path)
+
+    assert response.status_code == 200
+    assert response.json()["permit_token"] == "one-time-supervised-capability"
+    assert response.json()["password"] == "***REDACTED***"
+    assert status_response.status_code == 200
+    assert status_response.json()["permit_token"] == "***REDACTED***"
+
+
+def test_supervised_permit_token_is_redacted_on_every_other_route():
+    app = FastAPI()
+    register_sanitization_middleware(app)
+
+    @app.get("/unexpected-permit-token")
+    def unexpected_permit_token():
+        return {"permit_token": "must-never-leak"}
+
+    response = TestClient(app).get("/unexpected-permit-token")
+
+    assert response.status_code == 200
+    assert response.json()["permit_token"] == "***REDACTED***"
+
+
 # ---------------------------------------------------------------------------
 # Content-Length correctness tests — these guard against the ASGI error
 # "Response content longer/shorter than Content-Length" that occurs when

@@ -730,11 +730,12 @@ class JobsService:
             if self._qualification_service is None:
                 raise _JobAdmissionBlocked("qualification service is unavailable")
             try:
+                self._qualification_service.assert_supervised_test_inactive()
                 self._qualification_service.assert_current()
             except Exception as exc:
                 evaluation = getattr(exc, "evaluation", None)
                 reason_codes = getattr(evaluation, "reason_codes", None) or [
-                    "QUALIFICATION_EVIDENCE_MISSING"
+                    getattr(exc, "reason_code", "QUALIFICATION_EVIDENCE_MISSING")
                 ]
                 reason = ", ".join(str(code) for code in reason_codes)
                 raise _JobAdmissionBlocked(

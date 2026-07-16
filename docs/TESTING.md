@@ -204,8 +204,8 @@ python -m py_compile robohat-rp2040-code/code.py
 
 ## 3c) Autonomy qualification gate regression slice
 
-For changes to qualification evidence, blade authorization, mission start, scheduler dispatch, WebSocket recovery, or the
-Wi-Fi watchdog regression tasks:
+For changes to schema-v2 qualification levels, supervised-test permits, blade authorization, mission start, scheduler
+dispatch, WebSocket recovery, or the Wi-Fi watchdog regression tasks:
 
 ```bash
 tmpdir=$(mktemp -d)
@@ -216,13 +216,19 @@ LAWN_SETTINGS_DIR="$tmpdir/config" \
 python -m pytest \
   tests/unit/test_autonomy_qualification_service.py \
   tests/unit/test_autonomy_qualification_runner.py \
+  tests/unit/test_supervised_qualification_permit.py \
+  tests/unit/test_two_phase_qualification_adversarial.py \
   tests/unit/test_autonomy_readiness_service.py \
   tests/unit/test_command_gateway.py \
+  tests/unit/test_sanitization_middleware.py \
   tests/unit/test_mission_service.py \
+  tests/unit/test_jobs_service_execution.py \
+  tests/unit/test_live_safety_coordinator.py \
   tests/integration/test_scheduled_mission_dispatch.py \
   tests/integration/test_wifi_watchdog_disabled_tiers.py \
+  tests/contract/test_supervised_qualification_api.py \
   tests/test_mission_api.py \
-  -o addopts='' -q -m "not hardware"
+  -o addopts='' -x -q -m "not hardware"
 
 SIM_MODE=1 LAWNBERRY_SKIP_HW_INIT=1 \
   python -m pytest \
@@ -245,6 +251,49 @@ npm test -- \
 npm run type-check
 npm run build
 ```
+
+This slice must prove all three typed evidence levels (`blade_off_diagnostic`,
+`supervised_blade_test_prerequisite`, and `full_blade_autonomy`), schema-v1 rejection, artifact/cleanup-receipt validation,
+one-permit concurrency, issuance/activation deadlines, single-session and single-use behavior, restart absence, context drift,
+speed/lease bounds, mission/scheduler denial, gateway enforcement, live-safety revocation, and startup/shutdown cleanup. Permit
+tests must use isolated fakes in `SIM_MODE=1`; they exercise authorization logic only and must never create physical evidence
+or open actuator hardware. API tests must prove authenticated status/revoke remain remotely available for safe inspection/stop
+while issue/activate/drive/blade/complete require local/LAN identity. They must also cover active-expiry gateway cleanup,
+independent drive/blade command leases, and scheduler startup denial until hardware-neutral/blade-off state plus power readiness
+are confirmed. OpenAPI generation must include the authenticated supervised-test status, issue, activate, drive, blade,
+complete, and revoke contracts.
+
+The camera stage remains advisory in this schema. Tests should prove camera degradation cannot weaken independent ToF,
+geofence, localization, live-safety, or gateway stops; they should not turn advisory detector availability into a blade
+qualification blocker.
+
+### Physical qualification test order (Aaron only)
+
+Automated green results are only the first of seven operational gates:
+
+1. **Software tests:** run the isolated backend/frontend/OpenAPI checks. No software test may issue physical commands or
+   register a physical pass.
+2. **Non-destructive on-device checks:** on the clean final commit in `SIM_MODE=0`, confirm config/limits/firmware identity,
+   service startup-neutral state, health truth, and the verified physical cutoff with wheels raised and blade power isolated.
+3. **Blade-off physical qualification:** perform wheels-raised drive/fail-safe, stationary RTK/geofence, blade-off boundary
+   bootstrap, straight-line/obstacle, and blade-off scheduler/WebUI recovery stages in the order documented in
+   `docs/OPERATIONS.md#ordered-physical-checklist-for-aaron`. Retain immutable artifacts for each result.
+4. **Supervised-test permit:** only after Aaron approves nonzero TTL/duration/speed bounds and the current schema-v2
+   prerequisite evaluates `prerequisite_ok=true`, request and activate one local authenticated permit. Polling must not extend
+   it; a restart, emergency, safety fault, session/context change, or interruption requires a new permit.
+5. **Supervised blade-enabled evidence:** Aaron performs the minimum approved test at the cutoff. Record pass, fail, or
+   interrupted independently of the API response. Confirm the status records at least one authorized drive and blade-enable
+   command, confirm neutral/blade-off cleanup, and bind the evidence-eligible server receipt ID to the
+   `supervised_blade_enabled` artifact.
+6. **Full qualification:** verify `full_autonomy_ok=true` in the unchanged commit/config/limits/runtime/firmware context.
+   Ordinary blade commands, missions, and schedules remain blocked until this succeeds.
+7. **Limited controlled mowing:** begin with one short supervised daylight mission. Unattended scheduling remains prohibited
+   until repeated controlled field runs and Aaron's separate explicit approval.
+
+For emergency/restart cases, physically confirm neutral drive and a stopped blade; an accepted cleanup request or watchdog
+lease is not physical proof. The evidence runner records operator-reviewed results and always attempts cleanup, but it never
+activates a permit or actuates the mower. Report every hardware stage separately from software pass counts and never describe
+simulation, replay, wheels-raised, or blade-off results as autonomous readiness.
 
 `tests/integration/test_wifi_watchdog_disabled_tiers.py` imports the installed `/opt/wifi-watchdog` package on the Pi and
 skips only when that runtime package is absent. It monkeypatches recovery commands, so it must not reboot, cycle interfaces,

@@ -444,6 +444,10 @@ async def lifespan(app: FastAPI):
     app.state.runtime.qualification_service = _qualification_service
     if hasattr(app.state.runtime.command_gateway, "set_qualification_service"):
         app.state.runtime.command_gateway.set_qualification_service(_qualification_service)
+    if hasattr(app.state.runtime.command_gateway, "set_runtime_context"):
+        app.state.runtime.command_gateway.set_runtime_context(app.state.runtime)
+    if hasattr(mission_service, "set_qualification_service"):
+        mission_service.set_qualification_service(_qualification_service)
     if hasattr(_jobs_service_singleton, "set_qualification_service"):
         _jobs_service_singleton.set_qualification_service(_qualification_service)
     try:
@@ -456,6 +460,47 @@ async def lifespan(app: FastAPI):
         _log.info("LiveSafetyCoordinator started")
     except Exception:
         _log.exception("LiveSafetyCoordinator startup failed")
+    startup_neutral_confirmed = os.getenv("SIM_MODE", "0") == "1"
+    if os.getenv("SIM_MODE", "0") != "1":
+        try:
+            from backend.src.control.commands import (
+                BladeCommand,
+                CommandStatus,
+                DriveCommand,
+                EmergencyTrigger,
+            )
+
+            drive_outcome = await app.state.runtime.command_gateway.dispatch_drive(
+                DriveCommand(left=0.0, right=0.0, source="startup", duration_ms=0)
+            )
+            blade_outcome = await app.state.runtime.command_gateway.dispatch_blade(
+                BladeCommand(active=False, source="startup")
+            )
+            startup_neutral_confirmed = bool(
+                drive_outcome.status == CommandStatus.ACCEPTED
+                and blade_outcome.status == CommandStatus.ACCEPTED
+            )
+            if not startup_neutral_confirmed:
+                await app.state.runtime.command_gateway.trigger_emergency(
+                    EmergencyTrigger(
+                        reason="STARTUP_NEUTRAL_UNCONFIRMED",
+                        source="safety_trigger",
+                    )
+                )
+        except Exception:
+            startup_neutral_confirmed = False
+            _log.exception("Startup neutral/blade-off confirmation failed closed")
+            try:
+                from backend.src.control.commands import EmergencyTrigger
+
+                await app.state.runtime.command_gateway.trigger_emergency(
+                    EmergencyTrigger(
+                        reason="STARTUP_NEUTRAL_UNCONFIRMED",
+                        source="safety_trigger",
+                    )
+                )
+            except Exception:
+                _log.exception("Startup emergency latch failed")
     # Wire MissionService and WebSocketHub into JobsService for scheduled dispatch.
     _jobs_service_singleton.set_mission_service(mission_service)
     _jobs_service_singleton.set_websocket_hub(websocket_hub)
@@ -526,14 +571,19 @@ async def lifespan(app: FastAPI):
     # A scheduled mission can require an immediate camera/AI wake. Activate the
     # scheduler only after every admission dependency, including PowerManager,
     # is running; otherwise a due occurrence can be durably consumed at boot.
-    if power_manager_ready:
+    if power_manager_ready and startup_neutral_confirmed:
         try:
             await _jobs_service_singleton.start_scheduler()
             _log.info("JobsService scheduler started")
         except Exception:
             _log.exception("JobsService scheduler startup failed")
     else:
-        _log.error("JobsService scheduler remains stopped: PowerManager unavailable")
+        _log.error(
+            "JobsService scheduler remains stopped: power_manager_ready=%s "
+            "startup_neutral_confirmed=%s",
+            power_manager_ready,
+            startup_neutral_confirmed,
+        )
 
     yield
     # Shutdown
@@ -544,6 +594,43 @@ async def lifespan(app: FastAPI):
         _log.info("JobsService scheduler and active jobs stopped")
     except Exception:
         _log.exception("JobsService scheduler shutdown failed")
+    from backend.src.control.commands import BladeCommand, CommandStatus, DriveCommand
+
+    drive_outcome = None
+    blade_outcome = None
+    try:
+        drive_outcome = await app.state.runtime.command_gateway.dispatch_drive(
+            DriveCommand(left=0.0, right=0.0, source="shutdown", duration_ms=0)
+        )
+    except Exception:
+        _log.exception("Shutdown drive-neutral command failed")
+    try:
+        blade_outcome = await app.state.runtime.command_gateway.dispatch_blade(
+            BladeCommand(active=False, source="shutdown")
+        )
+    except Exception:
+        _log.exception("Shutdown blade-off command failed")
+    try:
+        app.state.runtime.command_gateway.clear_supervised_permit_deadline()
+    except Exception:
+        _log.exception("Shutdown permit-deadline cleanup failed")
+    try:
+        app.state.runtime.qualification_service.shutdown()
+    except Exception:
+        _log.exception("Shutdown qualification permit revocation failed")
+    if (
+        drive_outcome is not None
+        and drive_outcome.status == CommandStatus.ACCEPTED
+        and blade_outcome is not None
+        and blade_outcome.status == CommandStatus.ACCEPTED
+    ):
+        _log.info("Shutdown confirmed drive neutral, blade off, and permit revocation")
+    else:
+        _log.error(
+            "Shutdown cleanup was not acknowledged: drive=%s blade=%s; permit revoked",
+            getattr(getattr(drive_outcome, "status", None), "value", "exception"),
+            getattr(getattr(blade_outcome, "status", None), "value", "exception"),
+        )
     try:
         if getattr(app.state, "live_safety", None):
             await app.state.live_safety.stop()

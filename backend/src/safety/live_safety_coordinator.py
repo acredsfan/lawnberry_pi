@@ -305,6 +305,22 @@ class LiveSafetyCoordinator:
                 await gateway.dispatch_blade(
                     BladeCommand(active=False, source="safety", motors_active=False)
                 )
+                qualification = getattr(self._runtime, "qualification_service", None)
+                if qualification is not None:
+                    revoke = getattr(
+                        qualification,
+                        "revoke_supervised_test_permit",
+                        None,
+                    )
+                    if callable(revoke):
+                        revoke(f"SUPERVISED_TEST_LIVE_SAFETY_FAULT:{reason}")
+                clear_deadline = getattr(
+                    gateway,
+                    "clear_supervised_permit_deadline",
+                    None,
+                )
+                if callable(clear_deadline):
+                    clear_deadline()
                 if "CRITICAL_BATTERY_STOP" in faults or "TILT_STOP" in faults:
                     await gateway.trigger_emergency(
                         EmergencyTrigger(reason=reason, source="safety_trigger")

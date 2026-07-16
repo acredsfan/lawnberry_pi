@@ -352,12 +352,14 @@ watch the mission status contract instead of assuming `running` alone means the 
   `GET /api/v2/missions/{mission_id}/status` is the authoritative mission lifecycle/detail surface.
 - `GET /api/v2/autonomy/readiness` also checks that the live safety loop and single ToF owner are running, each IMU/ToF
   sample is fresh, and each ToF side has at least five bounded-window acquisitions with no more than 25% failures
-  before reporting blade-enabled autonomy ready. It also requires current qualification evidence for blade-capable starts.
+  before reporting blade-enabled autonomy ready. Blade-capable starts also require current schema-v2
+  `full_blade_autonomy` evidence.
 - `GET /api/v2/health` keeps IMU transport and calibration truth distinct: an online BNO085 that reports
   `uncalibrated` is degraded and remains unusable for autonomous heading until valid calibration evidence returns.
-- `GET /api/v2/autonomy/qualification` evaluates the latest retained evidence against the current commit SHA, sanitized
-  hardware-config hash, safety-limits hash, runtime identity hash, and RoboHAT firmware version. Missing, stale, mismatched,
-  interrupted, failed, simulation, dirty-tree, or incomplete evidence returns explicit `QUALIFICATION_*` blocker codes.
+- `GET /api/v2/autonomy/qualification` evaluates typed blade-off, supervised-prerequisite, and full evidence against the
+  current commit SHA, sanitized hardware-config hash, safety-limits hash, runtime identity hash, and RoboHAT firmware version.
+  Missing, schema-v1, stale, mismatched, interrupted, failed, simulation, dirty-tree, or incomplete evidence returns explicit
+  fail-closed reason codes.
 - Legacy `POST /api/v2/control/start` returns `409` with `MISSION_EXECUTOR_REQUIRED`; use
   `POST /api/v2/missions/{mission_id}/start` so a real mission executor is created.
 - Blade-off diagnostics use the same mission start endpoint with
@@ -374,21 +376,55 @@ curl -s http://127.0.0.1:8081/api/v2/dashboard/telemetry | python -m json.tool
 curl -s http://127.0.0.1:8081/api/v2/autonomy/qualification | python -m json.tool
 ```
 
-## Autonomy qualification evidence
+## Two-phase autonomy qualification
 
-Blade-enabled manual blade commands, blade-enabled mission starts, and scheduled mission dispatch now fail closed unless the
-backend has current passing physical qualification evidence. The retained evidence lives under
-`verification_artifacts/autonomy-qualification/` and is safe to review: user-owned hardware config is hashed after secret
-key redaction, not logged or copied into the record.
+Schema v2 separates evidence from temporary test authority. Ordinary manual blade activation, blade-capable mission starts,
+and scheduled dispatch require current `full_blade_autonomy` evidence. The only pre-full-qualification blade path is one
+authenticated, local, session-bound supervised-test permit; it is not a general blade override and it cannot be inherited by
+a mission or schedule.
 
-Run only the non-destructive stages until Aaron is ready for a supervised physical stage:
+| Level | Meaning | Authority |
+| --- | --- | --- |
+| `blade_off_diagnostic` | Non-destructive configuration, neutral-service, and sensor checks. | Blade-off diagnostics only. |
+| `supervised_blade_test_prerequisite` | All required blade-off, wheels-raised, boundary, obstacle, shutdown, scheduler, and WebUI recovery evidence is current. | May qualify an operator to request one supervised-test permit; does not authorize an ordinary blade command or mission. |
+| `full_blade_autonomy` | Prerequisite evidence plus current artifact-backed `supervised_blade_enabled` evidence and a matching server cleanup receipt. | Satisfies the qualification portion of ordinary blade/mission/scheduler admission; all independent live readiness and safety gates still apply. |
+
+`GET /api/v2/autonomy/qualification` reports `requested_level`, `available_level`, `prerequisite_ok`,
+`full_autonomy_ok`, distinct reason-code lists, the redacted permit status, and `camera_ai_safety_role: "advisory"`.
+Camera degradation may be recorded as operational evidence, but camera/AI does not replace or weaken ToF, geofence,
+localization, live-safety, or gateway stops.
+
+Retained records live under `verification_artifacts/autonomy-qualification/`. Hardware configuration is hashed only after
+secret-key redaction. Never put credentials, raw reusable permit tokens, or private machine identity in notes, artifacts, or
+logs.
+
+### Disabled-by-default permit bounds
+
+The tracked limits intentionally ship fail closed:
+
+```yaml
+supervised_test_enabled: false
+supervised_test_permit_ttl_s: 0
+supervised_test_max_duration_s: 0
+supervised_test_max_speed_mps: 0.0
+```
+
+Do not replace these zeros with guessed values. Aaron must first approve the actual mower, test lane, cutoff/blade-isolation
+method, supervision controls, maximum issuance TTL, active duration, and speed. When enabled, every bound must be positive and
+the supervised speed cannot exceed the existing blade-off bootstrap speed ceiling. A limits edit changes `limits_hash`, so
+restart the backend and repeat the prerequisite evidence in that final approved context before requesting a permit.
+
+### Evidence runner: recording only
+
+Run only non-destructive collection until a physical stage is deliberately approved:
 
 ```bash
 sudo systemctl start lawnberry-camera.service lawnberry-backend.service
 python scripts/run_autonomy_qualification.py --base-url http://127.0.0.1:8081 --output -
 ```
 
-Store evidence only after reviewing the output and confirming the backend is a clean deployed commit on the mower:
+Store evidence only after confirming `SIM_MODE=0`, the intended clean commit, the final hardware/limits configuration, runtime
+identity, and RoboHAT firmware:
 
 ```bash
 python scripts/run_autonomy_qualification.py \
@@ -398,10 +434,10 @@ python scripts/run_autonomy_qualification.py \
   --notes "non-destructive qualification"
 ```
 
-Hazardous stages are intentionally staged. The runner never energizes them automatically. After a supervised checklist stage,
-register its retained artifact with metadata bound to the context returned by `GET /api/v2/autonomy/qualification`: exact
-`qualification_stage_id`, `commit_sha`, `hardware_config_hash`, `limits_hash`, `runtime_identity_hash`,
-`robohat_firmware_version`, `result: "passed"`, and `operator_confirmed: true`. Then record that one result:
+The runner never activates a permit and never energizes drive or blade hardware. For a physical stage, it only records the
+operator's explicit pass/fail/interrupted result and an existing retained artifact. Artifact metadata must match the current
+server context exactly: `qualification_stage_id`, `commit_sha`, `hardware_config_hash`, `limits_hash`,
+`runtime_identity_hash`, `robohat_firmware_version`, `result: "passed"`, and `operator_confirmed: true`.
 
 ```bash
 python scripts/run_autonomy_qualification.py \
@@ -414,31 +450,126 @@ python scripts/run_autonomy_qualification.py \
   --store
 ```
 
-By default the runner carries forward same-context stages from the latest immutable record; use `--fresh` to start a new
-sequence. A physical pass without prerequisite stages, an artifact ID, or the configured intervention mechanism is recorded
-as failed. The backend independently checks artifact metadata and current clean hardware context before accepting a fully
-passing record. Every run attempts cleanup in `finally` by posting neutral drive and blade-off commands through the backend
-owner APIs. If cleanup fails, treat the record as invalid and physically verify drive neutral plus blade off before further
-work.
+By default the runner carries forward same-context stages from the latest immutable schema-v2 record; use `--fresh` to begin
+a new sequence. It attempts neutral drive and blade-off cleanup through backend owner APIs in `finally`, but that software
+attempt is not proof that a physical actuator stopped. A cleanup error means interrupted/failed evidence and requires physical
+neutral/blade-off confirmation before further work.
 
-Preflight and emergency procedure:
+### Authenticated permit lifecycle and local actuation
 
-1. Confirm `git rev-parse HEAD` matches the intended deployed commit and `git status --short` is clean.
-2. Confirm `SIM_MODE=0`, `config/hardware.yaml`, `config/limits.yaml`, and RoboHAT firmware are the intended physical setup.
-3. Confirm the configured independent intervention mechanism is reachable and removes hazardous power. Aaron's current mower
-   uses its repeatedly verified master power cutoff; test a dedicated E-stop only on builds where one is installed.
-4. Keep the mower wheels raised for drive-polarity and timeout stages; keep the blade physically disabled until the blade
-   circuit test stage is explicitly approved.
-5. After any exception, cancellation, service restart, rollback, config edit, firmware change, or failed stage, rerun
-   qualification before enabling blade-capable operation.
+Use the canonical login/session from `docs/authentication-config.md`. Every endpoint below requires a valid, non-revoked
+operator session. Issue, activate, drive, blade, and complete additionally require a loopback, private, or link-local client
+address after the canonical proxy identity rules are applied. Status and revoke intentionally remain available to an
+authenticated remote operator so loss of LAN locality cannot prevent inspection or a safe stop. A public/remote request can
+never create, activate, or use the permit.
 
-Rollback:
+| Step | Endpoint | Request/response contract |
+| --- | --- | --- |
+| Inspect | `GET /api/v2/autonomy/qualification/supervised-test/permit` | Returns only redacted status metadata, including state (`absent`, `issued`, `active`, `completed`, `revoked`, or `expired`); polling never extends a deadline. |
+| Issue | `POST /api/v2/autonomy/qualification/supervised-test/permit` | Requires `operator_confirmed`, `local_supervision_confirmed`, and `physical_intervention_mechanism`. It succeeds only in hardware mode with current prerequisite evidence, full qualification not already current, approved nonzero limits, idle missions/actuators, and no existing permit. The bearer `permit_token` is returned once. |
+| Activate | `POST /api/v2/autonomy/qualification/supervised-test/permit/activate` | Requires the issued `permit_token` from the same authenticated session. Activation is one-use and starts the approved active-duration deadline. |
+| Bounded drive | `POST /api/v2/autonomy/qualification/supervised-test/drive` | Requires the active token plus `left_normalized`, `right_normalized`, and a `duration_ms` no longer than the command lease. Physical speed is bounded by the approved permit ceiling. |
+| Blade state | `POST /api/v2/autonomy/qualification/supervised-test/blade` | Requires the active token and explicit `active`. Dispatch still goes through `MotorCommandGateway` and all live admission checks. |
+| Complete | `POST /api/v2/autonomy/qualification/supervised-test/complete` | Requires the active token and `cleanup_confirmed`. The server first commands neutral and blade off through the gateway. A receipt is evidence-eligible only when the permit authorized at least one nonzero drive command and one blade-enable command and both cleanup commands were acknowledged. |
+| Revoke | `POST /api/v2/autonomy/qualification/supervised-test/revoke` | Requires any authenticated operator session and a short `reason`; neither local-network identity nor the permit token is required, so another operator can stop/revoke remotely. It commands neutral and blade off before revocation. |
 
-1. Command neutral drive and blade off, then use the configured master cutoff or installed dedicated E-stop before changing
-   code.
-2. Roll back to the selected commit and restart backend/frontend services.
-3. Treat all newer qualification evidence as invalid; commit changes intentionally invalidate the evidence hash.
-4. Re-run the non-destructive qualification stages before any blade-off motion, then repeat the staged physical checklist.
+Do not copy a permit token into logs or retained evidence. The permit-issue intervention description is retained only as a
+SHA-256 binding in the permit audit/receipt; status exposes only whether it was confirmed. The token is bound to the issuing session, prerequisite record, commit,
+clean-tree state, hardware configuration, safety limits, runtime identity, hardware mode, and RoboHAT firmware. Issuance and
+activation are serialized with the mower-wide mission lifecycle lock. A permit is memory-only: backend restart starts with no
+permit. Active expiry has a gateway deadline cleanup that requests neutral/blade off, while bounded per-command drive and blade
+leases independently expire stale output. Expiry, reuse, session/context drift, E-stop, live-safety fault, command timeout/NACK,
+controller loss, unconfirmed cleanup, shutdown, or emergency cleanup makes the permit terminal and requires explicit operator
+review plus a new permit.
+
+After a completed supervised run, retain a separate physical artifact for `supervised_blade_enabled`. Its registry metadata must
+include the returned `supervised_test_receipt_id` in addition to the normal context fields. The eligible receipt proves only that
+the bounded server path authorized both drive and blade-enable work and completed acknowledged cleanup; it does not prove that
+the blade test passed. Aaron still records the
+physical result. Full qualification rejects missing, mismatched, reused-context, or ineligible receipts.
+
+After the registry artifact exists, record the operator-reviewed stage result without passing the permit token to the runner:
+
+```bash
+python scripts/run_autonomy_qualification.py \
+  --stage supervised_blade_enabled \
+  --operator-confirmed \
+  --stage-result supervised_blade_enabled=passed \
+  --artifact-id supervised_blade_enabled=<verification-artifact-id> \
+  --physical-intervention "verified master power cutoff" \
+  --operator aaron \
+  --store
+```
+
+Use `failed` or `interrupted` instead of `passed` whenever that is the physical truth. The backend validates the referenced
+artifact and receipt; the runner cannot promote an API success into a pass.
+
+Qualification audit events record the schema/level, record ID, stage, reason codes, context hashes, redacted permit ID, permit
+lifecycle transition, acknowledgment/lease result, cleanup outcome, scheduler denial, and advisory camera role where relevant.
+They must not record the reusable permit token, NTRIP or Cloudflare credentials, API secrets, raw machine identity, or other
+operator secrets. Use the redacted status endpoint and reason codes for troubleshooting; do not increase log verbosity in a
+way that exposes request bodies carrying the token.
+
+### Emergency, interruption, and recovery
+
+1. Operate the verified master cutoff or installed dedicated E-stop whenever immediate physical intervention is needed.
+   Software must never claim that the physical cutoff operated.
+2. If the backend is responsive, issue the authenticated revoke request locally or remotely. It requests zero drive and blade
+   off through the gateway before invalidating the permit; do not delay physical intervention to make this request.
+3. Verify drive neutral and blade stopped physically. Treat any missing acknowledgment, process death, serial loss, or cleanup
+   error as unconfirmed even though command leases and the RoboHAT watchdog should independently expire output.
+4. Inspect the E-stop latch, live-safety reason codes, controller health, and redacted permit state. Clear a software E-stop
+   only after the physical cause is corrected and the area is safe.
+5. Restart, expiry, emergency, safety fault, config/limits/firmware change, context drift, or interruption always requires a
+   new permit and operator review. Never resume a hazardous stage or mission automatically.
+
+Scheduled jobs cannot issue, inherit, consume, or coexist with an issued/active supervised-test permit. Scheduler startup also
+requires confirmed hardware-neutral/blade-off state and power readiness. Dispatch remains blocked until current full
+qualification is accepted, and unattended use requires additional repeated field evidence plus Aaron's explicit approval.
+
+### Ordered physical checklist for Aaron
+
+Run every physical stage on the final clean commit with `SIM_MODE=0`, current `config/hardware.yaml`, final approved
+`config/limits.yaml`, the actual RoboHAT firmware, a clear work area, and the verified cutoff immediately reachable.
+
+1. **Configuration and service neutral:** verify the Pi profile, pins, serial/I2C/USB devices, firmware, blade backend,
+   cutoff, clean tree, and health/readiness APIs. With wheels raised and blade power isolated, prove start/restart/stop stays
+   neutral and blade off.
+2. **Wheels-raised drive and fail-safe:** confirm drive directions, bounded commands, lease expiry, API E-stop, backend
+   termination, serial loss, and the master cutoff. Retain acknowledgments and stopping evidence.
+3. **Stationary outdoor RTK/geofence:** keep drive and blade disabled; collect unique RTK-fixed samples and verify antenna/body
+   correction, safe boundary, exclusions, stationary drift, and loss-of-fix rejection.
+4. **Blade-off boundary bootstrap:** first wheels raised, then on clear ground with blade power disabled; verify low-speed COG
+   accumulation, bounded travel/straightness/radial envelope, confirmed stop, truthful UI state, and no duplicate admission.
+5. **Blade-off straight-line and obstacle test:** measure cross-track error and stop distance; test stale/lost ToF, obstacle
+   appearance, RTK loss, network loss, and backend/process failure.
+6. **Scheduler/WebUI recovery:** run only a blade-off multi-zone diagnostic occurrence. Verify exact-due dispatch, durable
+   ordered children, blade-off transit, pause/resume/cancel, restart/network recovery, and no duplicate, orphan, or unsafe
+   automatic restart.
+7. **Supervised blade-enabled test:** only after steps 1–6 pass, Aaron approves nonzero bounds, the schema-v2 prerequisite is
+   current, and one operator is stationed at the cutoff with no bystanders or pets. Use the minimum approved lane, speed, and
+   duration; verify blade acknowledgment, motion gating, obstacle/E-stop response, command expiry, and cleanup. Retain a
+   pass/fail/interrupted artifact plus the matching cleanup receipt; never infer a pass from the API response.
+8. **Limited controlled mowing:** only after the backend accepts current `full_blade_autonomy` evidence. Begin with one short,
+   supervised daylight mission inside the verified boundary. Do not approve unattended scheduling until repeated controlled
+   runs satisfy the separate acceptance decision.
+
+Software tests, simulation, replay, generated artifacts, wheels-raised testing, and blade-off testing prove narrower claims;
+none establishes autonomous, production, unattended, or scheduled-mowing readiness.
+
+### Schema-v1 migration and rollback
+
+- Schema-v1 records remain immutable historical evidence, but schema v2 returns `QUALIFICATION_SCHEMA_MISMATCH` and will not
+  reinterpret them as containing `supervised_blade_enabled` evidence. Do not edit an old JSON record or repoint `latest.json`
+  to bypass requalification; create a new schema-v2 record in the current context.
+- On migration/startup failure, leave the tracked permit settings disabled, confirm neutral/blade off, and keep autonomy
+  blocked. Permit state is never restored across a process restart.
+- Before rollback, command neutral/blade off, use the physical cutoff, and revoke any permit while the current backend is
+  responsive. Deploy the selected clean commit, restart services, and confirm startup-neutral state.
+- Evidence from the newer schema/context is not authorization for the older build. Older evidence is valid only under that
+  build's exact historical commit/config/limits/runtime/firmware contract. Never downgrade software merely to reuse evidence.
+- After either migration or rollback, repeat non-destructive checks and the applicable physical checklist before restoring
+  any blade-capable authority.
 
 ## AI
 - GET http://127.0.0.1:8081/api/v2/ai/status

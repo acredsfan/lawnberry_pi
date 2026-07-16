@@ -67,11 +67,17 @@ def _mission_status_running(mission_id: str) -> MissionStatus:
 
 
 class _AllowQualification:
+    def assert_supervised_test_inactive(self):
+        return None
+
     def assert_current(self):
         return None
 
 
 class _BlockQualification:
+    def assert_supervised_test_inactive(self):
+        return None
+
     def assert_current(self):
         exc = RuntimeError("qualification blocked")
         exc.evaluation = type(

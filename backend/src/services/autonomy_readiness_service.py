@@ -6,6 +6,7 @@ from typing import Any
 
 from ..hardware.pin_registry import build_pin_allocation_report
 from ..hardware.platform_profile import PlatformKind, detect_platform_profile
+from ..models.autonomy_qualification import QualificationLevel
 from ..models.hardware_config import BladeControllerType, HardwareConfig
 from .autonomy_qualification_service import AutonomyQualificationError
 
@@ -68,6 +69,9 @@ class AutonomyReadinessService:
         *,
         require_blade: bool = True,
         mission: Any | None = None,
+        required_qualification_level: QualificationLevel = (
+            QualificationLevel.FULL_BLADE_AUTONOMY
+        ),
     ) -> AutonomyReadinessReport:
         hardware: HardwareConfig = self._runtime.hardware_config
         checks: list[ReadinessCheck] = []
@@ -121,7 +125,13 @@ class AutonomyReadinessService:
                 )
             else:
                 try:
-                    evaluation = qualification.assert_current()
+                    if (
+                        required_qualification_level
+                        == QualificationLevel.SUPERVISED_BLADE_TEST_PREREQUISITE
+                    ):
+                        evaluation = qualification.assert_prerequisite_current()
+                    else:
+                        evaluation = qualification.assert_current()
                     checks.append(
                         ReadinessCheck(
                             code="QUALIFICATION_EVIDENCE_CURRENT",
