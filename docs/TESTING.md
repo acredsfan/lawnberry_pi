@@ -206,7 +206,7 @@ python -m py_compile robohat-rp2040-code/code.py
 ## 3c) Autonomy qualification gate regression slice
 
 For changes to schema-v2 qualification levels, supervised-test permits, blade authorization, mission start, scheduler
-dispatch, WebSocket recovery, or the Wi-Fi watchdog regression tasks:
+dispatch, WebSocket recovery, or Wi-Fi recovery regression tasks:
 
 ```bash
 tmpdir=$(mktemp -d)
@@ -296,10 +296,6 @@ For emergency/restart cases, physically confirm neutral drive and a stopped blad
 lease is not physical proof. The evidence runner records operator-reviewed results and always attempts cleanup, but it never
 activates a permit or actuates the mower. Report every hardware stage separately from software pass counts and never describe
 simulation, replay, wheels-raised, or blade-off results as autonomous readiness.
-
-`tests/integration/test_wifi_watchdog_disabled_tiers.py` imports the installed `/opt/wifi-watchdog` package on the Pi and
-skips only when that runtime package is absent. It monkeypatches recovery commands, so it must not reboot, cycle interfaces,
-or reset USB devices during automated tests.
 
 `tests/unit/test_wlan1_usb_recovery.py` is the production Wi-Fi recovery contract. It proves local-state classification,
 targeted `2357:0138` USB-port cycling, persistent cooldown/budget behavior, `wlan1-primary`-only reconnects, USB2/power
