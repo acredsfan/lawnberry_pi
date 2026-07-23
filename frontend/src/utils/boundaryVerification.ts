@@ -12,7 +12,7 @@ export function activeBoundaryVerificationPoint(
 export function latestBoundaryVerificationProblem(
   session: BoundaryVerificationSession | null | undefined
 ): BoundaryVerificationPoint | null {
-  if (!session) return null
+  if (!session || session.status === 'cancelled') return null
   return [...session.points].reverse().find((point) => PROBLEM_STATUSES.has(point.status)) ?? null
 }
 

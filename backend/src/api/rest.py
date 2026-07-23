@@ -29,6 +29,9 @@ from .routers.auth import _resolve_manual_session
 from .routers.planning import PlanningJobResponse
 from ..services.websocket_hub import websocket_hub
 from ..services.timezone_service import detect_system_timezone
+from ..services.boundary_verification import boundary_verification_service
+from ..services.geofence_buffer import clear_safe_boundary
+from ..services.parcel_boundary import BoundaryValidationError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -65,6 +68,13 @@ def _docs_root():
 
 def _require_bearer_auth(request: Request) -> None:
     telemetry._require_bearer_auth(request)
+
+
+def _invalidate_operating_area(runtime: RuntimeContext) -> None:
+    """Make autonomy reload geometry after a Maps boundary mutation."""
+    invalidate = getattr(getattr(runtime, "navigation", None), "invalidate_operating_area_snapshot", None)
+    if callable(invalidate):
+        invalidate()
 
 
 def get_settings_system(request: Request):
@@ -108,6 +118,31 @@ class Zone(BaseModel):
         elif self.exclusion_zone and self.zone_kind == "boundary":
             self.zone_kind = "exclusion"
         return self
+
+
+def _is_boundary_zone(zone: dict[str, Any] | None) -> bool:
+    if not zone:
+        return False
+    return (
+        str(zone.get("zone_kind") or "").lower() == "boundary"
+        and not bool(zone.get("exclusion_zone"))
+    )
+
+
+def _update_boundary_zone(repo: Any, zone: dict[str, Any], runtime: RuntimeContext) -> bool:
+    updated = repo.update_zone(zone)
+    if updated:
+        clear_safe_boundary()
+        _invalidate_operating_area(runtime)
+    return updated
+
+
+def _delete_boundary_zone(repo: Any, zone_id: str, runtime: RuntimeContext) -> bool:
+    deleted = repo.delete_zone(zone_id)
+    if deleted:
+        clear_safe_boundary()
+        _invalidate_operating_area(runtime)
+    return deleted
 
 
 _zones_last_modified: datetime = datetime.now(timezone.utc)
@@ -270,7 +305,20 @@ async def put_map_zone(zone_id: str, zone: Zone, runtime: RuntimeContext = Depen
     if existing is None:
         raise HTTPException(status_code=404, detail="Zone not found")
     zone_dict = zone.model_dump(mode="json")
-    updated = repo.update_zone(zone_dict)
+    is_boundary_change = (
+        _is_boundary_zone(existing)
+        or _is_boundary_zone(zone_dict)
+    )
+    if is_boundary_change:
+        try:
+            updated = await boundary_verification_service.apply_boundary_change(
+                runtime,
+                lambda: _update_boundary_zone(repo, zone_dict, runtime),
+            )
+        except BoundaryValidationError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    else:
+        updated = repo.update_zone(zone_dict)
     if not updated:
         raise HTTPException(status_code=404, detail="Zone not found")
     _zones_last_modified = datetime.now(timezone.utc)
@@ -298,7 +346,17 @@ async def delete_map_zone(zone_id: str, runtime: RuntimeContext = Depends(get_ru
         raise HTTPException(status_code=404, detail="Zone not found")
     # Load zone details before deletion so they can be recorded in the audit log
     zone_for_audit = repo.get_zone(zone_id)
-    deleted = repo.delete_zone(zone_id)
+    is_boundary = _is_boundary_zone(zone_for_audit)
+    if is_boundary:
+        try:
+            deleted = await boundary_verification_service.apply_boundary_change(
+                runtime,
+                lambda: _delete_boundary_zone(repo, zone_id, runtime),
+            )
+        except BoundaryValidationError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    else:
+        deleted = repo.delete_zone(zone_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Zone not found")
     _zones_last_modified = datetime.now(timezone.utc)

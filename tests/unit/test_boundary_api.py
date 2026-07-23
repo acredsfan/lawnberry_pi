@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -44,6 +45,7 @@ async def test_generate_safe_boundary_uses_current_persisted_boundary_zone(monke
         SimpleNamespace(
             map_repository=Repository(),
             safety_limits=SimpleNamespace(geofence_buffer_meters=0.15),
+            navigation=MagicMock(),
         ),
     )
 

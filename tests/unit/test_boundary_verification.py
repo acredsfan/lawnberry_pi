@@ -11,7 +11,11 @@ from backend.src.control.commands import CommandStatus
 from backend.src.models import NavigationMode, Position
 from backend.src.models.mission import Mission, MissionLifecycleStatus, MissionStatus
 from backend.src.models.sensor_data import GpsReading, ImuReading
-from backend.src.services.boundary_paths import MOWING_BOUNDARY_CONFIRMED, boundary_file
+from backend.src.services.boundary_paths import (
+    BOUNDARY_VERIFICATION_SESSION,
+    MOWING_BOUNDARY_CONFIRMED,
+    boundary_file,
+)
 from backend.src.services.boundary_verification import BoundaryVerificationService
 from backend.src.services.geofence_buffer import save_safe_boundary
 from backend.src.services.operating_area_service import load_operating_area_snapshot
@@ -525,3 +529,28 @@ async def test_async_heading_failure_remains_visible_after_target_clears(
     assert failed["target_index"] is None
     assert failed["points"][0]["status"] == "failed"
     assert failed["points"][0]["error"] == mission_status.detail
+
+
+@pytest.mark.asyncio
+async def test_cancel_discards_terminal_errors_and_persisted_session(tmp_path, monkeypatch):
+    """V92: cancellation must leave the next Maps edit in a clean idle state."""
+    points, snapshot = _prepare_area(tmp_path, monkeypatch)
+    runtime = _runtime(snapshot)
+    service = BoundaryVerificationService()
+    await _start_verification(service, points, runtime)
+    starting = await service.next_point(runtime)
+    mission_id = starting["active_mission_id"]
+    runtime.mission_service.statuses[mission_id].status = MissionLifecycleStatus.FAILED
+    runtime.mission_service.statuses[mission_id].detail = "HEADING_BOOTSTRAP_BUDGET_EXHAUSTED"
+    await service.status(runtime)
+
+    cancelled = await service.cancel(runtime)
+
+    assert cancelled == {
+        "status": "idle",
+        "points": [],
+        "target_index": None,
+        "active_mission_id": None,
+    }
+    assert not boundary_file(BOUNDARY_VERIFICATION_SESSION).exists()
+    assert await service.status(runtime) == cancelled

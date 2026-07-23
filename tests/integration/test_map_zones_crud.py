@@ -22,6 +22,8 @@ from backend.src.core import globals as _g
 from backend.src.core.runtime import RuntimeContext, get_runtime
 from backend.src.main import app
 from backend.src.repositories.map_repository import MapRepository
+from backend.src.services.boundary_paths import BOUNDARY_VERIFICATION_SESSION, boundary_file
+from backend.src.services.geofence_buffer import get_safe_boundary, save_safe_boundary
 
 BASE_URL = "http://test"
 
@@ -232,6 +234,93 @@ async def test_delete_zone_removes_only_targeted_zone():
         zones = list_resp.json()
         assert len(zones) == 1
         assert zones[0]["id"] == zone_b_id
+
+
+@pytest.mark.asyncio
+async def test_delete_boundary_clears_derived_safe_geometry_and_verification_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _override_runtime: RuntimeContext,
+):
+    """V92: no safe boundary or terminal verification state may outlive its source boundary."""
+    monkeypatch.setenv("LAWN_DATA_DIR", str(tmp_path))
+    boundary_id = str(uuid.uuid4())
+    points = _poly()
+    save_safe_boundary(points, buffer_meters=0.05)
+    verification_path = boundary_file(BOUNDARY_VERIFICATION_SESSION)
+    verification_path.write_text(
+        '{"status":"cancelled","points":[{"status":"failed"}],"target_index":null}',
+        encoding="utf-8",
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        created = await _post_zones(client, _zone_payload(boundary_id, "Old boundary"))
+        assert created.status_code == 200
+
+        deleted = await client.delete(f"/api/v2/map/zones/{boundary_id}")
+
+    assert deleted.status_code == 204
+    assert get_safe_boundary() is None
+    assert not verification_path.exists()
+    _override_runtime.navigation.invalidate_operating_area_snapshot.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_boundary_clears_derived_safe_geometry_and_verification_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _override_runtime: RuntimeContext,
+):
+    """V92: editing a saved boundary must invalidate its old safe operating area."""
+    monkeypatch.setenv("LAWN_DATA_DIR", str(tmp_path))
+    boundary_id = str(uuid.uuid4())
+    save_safe_boundary(_poly(), buffer_meters=0.05)
+    verification_path = boundary_file(BOUNDARY_VERIFICATION_SESSION)
+    verification_path.write_text('{"status":"complete","points":[]}', encoding="utf-8")
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        created = await _post_zones(client, _zone_payload(boundary_id, "Original boundary"))
+        assert created.status_code == 200
+
+        updated = await client.put(
+            f"/api/v2/map/zones/{boundary_id}",
+            json=_zone_payload(boundary_id, "Updated boundary", lat_offset=0.001),
+        )
+
+    assert updated.status_code == 200
+    assert get_safe_boundary() is None
+    assert not verification_path.exists()
+    _override_runtime.navigation.invalidate_operating_area_snapshot.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_boundary_rejects_an_active_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """V92: a boundary cannot disappear underneath an active blade-off leg."""
+    monkeypatch.setenv("LAWN_DATA_DIR", str(tmp_path))
+    boundary_id = str(uuid.uuid4())
+    safe = save_safe_boundary(_poly(), buffer_meters=0.05)
+    verification_path = boundary_file(BOUNDARY_VERIFICATION_SESSION)
+    verification_path.write_text(
+        '{"status":"active","points":[],"active_mission_id":null}', encoding="utf-8"
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
+        created = await _post_zones(client, _zone_payload(boundary_id, "Active boundary"))
+        assert created.status_code == 200
+
+        deleted = await client.delete(f"/api/v2/map/zones/{boundary_id}")
+        remaining = await client.get(f"/api/v2/map/zones/{boundary_id}")
+
+    assert deleted.status_code == 409
+    assert "Cancel boundary verification" in deleted.json()["detail"]
+    assert remaining.status_code == 200
+    assert get_safe_boundary() == safe
 
 
 @pytest.mark.asyncio

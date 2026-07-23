@@ -1000,6 +1000,20 @@ class NavigationService:
     def get_operating_area_snapshot(self) -> Any:
         return getattr(self, "_operating_area_snapshot", None) or self._load_operating_area_snapshot()
 
+    def invalidate_operating_area_snapshot(self) -> None:
+        """Forget derived operating geometry after its source boundary changes.
+
+        A Maps boundary edit/delete invalidates the generated safe boundary.  Do
+        not leave a previously cached valid snapshot available while the new
+        boundary is awaiting safe-area generation.
+        """
+        self._operating_area_snapshot = None
+        self.navigation_state.safety_boundaries = []
+        self.navigation_state.no_go_zones = []
+        self.navigation_state.operating_area_source = "unavailable"
+        self.navigation_state.operating_area_revision = None
+        self.navigation_state.operating_area_validity = "SAFE_BOUNDARY_REQUIRED"
+
     def _autonomy_context_for_gateway(self, cmd: Any) -> dict[str, Any]:
         snapshot = self.get_operating_area_snapshot()
         bootstrap_requested = bool(getattr(cmd, "heading_bootstrap", False))

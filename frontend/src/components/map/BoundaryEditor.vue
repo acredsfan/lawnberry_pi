@@ -13,7 +13,7 @@
         class="btn btn-sm" 
         :class="{ 'btn-primary': mode === 'boundary', 'btn-secondary': mode !== 'boundary' }"
         title="Draw or edit outer boundary"
-        @click="setMode('boundary')"
+        @click="beginBoundaryEdit"
       >
         🧭 Boundary
       </button>
@@ -82,9 +82,19 @@
       <button 
         v-if="currentPolygon.length > 0" 
         class="btn btn-sm btn-warning"
+        title="Discard this unsaved draft; it does not delete the saved boundary"
         @click="clearCurrent"
       >
-        🗑️ Clear
+        🗑️ Discard Draft
+      </button>
+      <button
+        v-if="mapStore.configuration?.boundary_zone"
+        class="btn btn-sm btn-danger"
+        :disabled="isVerificationActive"
+        title="Delete the saved boundary and its generated safe area"
+        @click="deleteSavedBoundary"
+      >
+        🗑️ Delete Saved Boundary
       </button>
     </div>
 
@@ -879,6 +889,19 @@ function setMode(newMode: 'view' | 'boundary' | 'exclusion' | 'mowing' | 'marker
   editingZoneId.value = null;
 }
 
+function beginBoundaryEdit() {
+  const boundary = mapStore.configuration?.boundary_zone;
+  mapStore.setEditMode('boundary');
+  if (!boundary) {
+    clearCurrent();
+    return;
+  }
+  currentPolygon.value = clonePolygon(boundary.polygon);
+  currentPolygonClosed.value = true;
+  editingZoneId.value = boundary.id;
+  hasUnsavedChanges.value = false;
+}
+
 function clearCurrent() {
   currentPolygon.value = [];
   hasUnsavedChanges.value = false;
@@ -1087,6 +1110,23 @@ async function deleteEditingZone() {
   }
 }
 
+async function deleteSavedBoundary() {
+  const boundary = mapStore.configuration?.boundary_zone;
+  if (!boundary) return;
+  if (!confirm('Delete the saved mowing boundary, its generated safe area, and its verification session?')) {
+    return;
+  }
+  try {
+    await mapStore.deleteZone(boundary.id);
+    clearCurrent();
+    mapStore.setEditMode('view');
+    toast.show('Saved boundary and derived verification data cleared', 'success', 3000);
+  } catch (err: any) {
+    const msg = mapStore.lastError || err?.response?.data?.detail || err?.message || 'Failed to delete boundary';
+    toast.show(msg, 'error', 4000);
+  }
+}
+
 async function saveChanges() {
   error.value = null;
   successMessage.value = null;
@@ -1257,13 +1297,7 @@ function onMarkerMoveEnd(markerId: string, e: any) {
 
 function onBoundaryClick() {
   if (mode.value !== 'view') return;
-  const bz = mapStore.configuration?.boundary_zone;
-  if (!bz) return;
-  currentPolygon.value = clonePolygon(bz.polygon);
-  editingZoneId.value = bz.id;
-  currentPolygonClosed.value = true;
-  hasUnsavedChanges.value = false;
-  mapStore.setEditMode('boundary');
+  beginBoundaryEdit();
 }
 
 function onExclusionClick(zoneId: string) {

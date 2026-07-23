@@ -256,7 +256,13 @@ async def generate_safe_boundary(
                     default_buffer_meters(),
                 )
             )
-        return save_safe_boundary(coordinates, buffer_meters=buffer_meters)
+        safe_boundary = save_safe_boundary(coordinates, buffer_meters=buffer_meters)
+        invalidate = getattr(
+            getattr(runtime, "navigation", None), "invalidate_operating_area_snapshot", None
+        )
+        if callable(invalidate):
+            invalidate()
+        return safe_boundary
     except BoundaryValidationError as exc:
         _raise_bad_request(exc)
 

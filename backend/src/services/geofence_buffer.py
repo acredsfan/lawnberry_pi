@@ -140,3 +140,12 @@ def get_safe_boundary() -> dict[str, Any] | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def clear_safe_boundary() -> None:
+    """Discard derived geometry when its confirmed source boundary is removed."""
+    path = boundary_file(MOWING_BOUNDARY_SAFE)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return

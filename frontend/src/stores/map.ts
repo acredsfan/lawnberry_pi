@@ -620,9 +620,14 @@ export const useMapStore = defineStore('map', () => {
 
   async function deleteZone(zoneId: string) {
     lastError.value = null;
+    const isBoundary = configuration.value?.boundary_zone?.id === zoneId;
     try {
       await deleteMapZone(zoneId);
       await _reloadZonesFromServer();
+      if (isBoundary) {
+        safeBoundary.value = null;
+        verificationStatus.value = null;
+      }
     } catch (e: any) {
       lastError.value = e?.response?.data?.detail || e?.message || 'Failed to delete zone';
       throw e;
@@ -644,7 +649,8 @@ export const useMapStore = defineStore('map', () => {
       safeBoundary.value = null;
     }
     try {
-      verificationStatus.value = await getBoundaryVerificationStatus();
+      const status = await getBoundaryVerificationStatus();
+      verificationStatus.value = status.status === 'cancelled' ? null : status;
     } catch {
       verificationStatus.value = null;
     }
@@ -698,7 +704,8 @@ export const useMapStore = defineStore('map', () => {
   }
 
   async function refreshVerificationStatus() {
-    verificationStatus.value = await getBoundaryVerificationStatus();
+    const status = await getBoundaryVerificationStatus();
+    verificationStatus.value = status.status === 'cancelled' ? null : status;
     return verificationStatus.value;
   }
 
@@ -718,7 +725,8 @@ export const useMapStore = defineStore('map', () => {
   }
 
   async function cancelVerification() {
-    verificationStatus.value = await cancelBoundaryVerification();
+    const status = await cancelBoundaryVerification();
+    verificationStatus.value = status.status === 'cancelled' ? null : status;
     return verificationStatus.value;
   }
 

@@ -7,6 +7,7 @@ import json
 import math
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import wraps
 from typing import Any
@@ -392,12 +393,53 @@ class BoundaryVerificationService:
             await self._abort_active_mission(session, runtime)
         finally:
             cleanup = await self._ensure_safe_idle(runtime, raise_on_failure=False)
-        session["status"] = "cancelled"
-        session["target_index"] = None
-        session["active_mission_id"] = None
-        session["cleanup"] = {**cleanup, "at": _now()}
-        session["updated_at"] = _now()
-        return self._write(session)
+        if not (cleanup["drive_stopped"] and cleanup["blade_off_confirmed"]):
+            raise BoundaryValidationError(
+                "Could not confirm zero drive and blade-off state; verification remains visible"
+            )
+        self._discard_persisted_session()
+        return self._idle_status()
+
+    @_serialized_mutation
+    async def invalidate_for_boundary_change(self, runtime: Any) -> dict[str, Any]:
+        """Discard terminal verification state before its source boundary is removed."""
+        session = await self._status_unlocked(runtime)
+        if session.get("status") == "active":
+            raise BoundaryValidationError(
+                "Cancel boundary verification before deleting its source boundary"
+            )
+        self._discard_persisted_session()
+        return self._idle_status()
+
+    @_serialized_mutation
+    async def apply_boundary_change(self, runtime: Any, mutation: Callable[[], Any]) -> Any:
+        """Apply one boundary mutation without racing a verification start.
+
+        Map persistence is synchronous, so holding the verification mutation
+        lock around it keeps a freshly started drive-to-confirm session from
+        being paired with geometry that has just changed.
+        """
+        session = await self._status_unlocked(runtime)
+        if session.get("status") == "active":
+            raise BoundaryValidationError(
+                "Cancel boundary verification before changing its source boundary"
+            )
+        result = mutation()
+        if result:
+            self._discard_persisted_session()
+        return result
+
+    @staticmethod
+    def _discard_persisted_session() -> None:
+        path = boundary_file(BOUNDARY_VERIFICATION_SESSION)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise BoundaryValidationError(
+                "Could not clear the terminal boundary verification session"
+            ) from exc
 
     async def _preflight(
         self,

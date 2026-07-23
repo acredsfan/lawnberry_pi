@@ -33,6 +33,7 @@ association, IPv4 assignment, and a default route. It performs these bounded act
 
 - missing `2357:0138`: cycle only USB hub `3`, port `1`, settle udev, and load `88x2bu`
 - enumerated adapter without `wlan1`: load the driver once, then use the same targeted USB cycle
+- NetworkManager already activating/deactivating `wlan1`: wait without issuing a competing activation
 - disconnected/no IPv4/no route: activate only `wlan1-primary` on `wlan1`
 - healthy local route: take no action
 
@@ -743,6 +744,19 @@ For best orientation accuracy, calibrate the IMU after installation:
   - When letting the Pi forward RTCM data, ensure `gps_ntrip_enabled: true` in `config/hardware.yaml` and update the `.env` file with the required `NTRIP_*` caster settings (host, mountpoint, credentials, serial device).
   - Restart the backend service after modifying `.env` so the connection is re-established.
 - Validate GPS health via GET /api/v2/sensors/health and /api/v2/fusion/state
+
+## Replacing a saved boundary
+
+On the Maps page, select **Boundary** to load the existing boundary with its editable blue point handles. **Discard
+Draft** only abandons unsaved edits; it never deletes the saved boundary. To start over with a smaller test area, select
+**Delete Saved Boundary** and confirm. That removes the old boundary, its generated safe area, and any completed or
+cancelled verification message. An in-progress verification must be cancelled first, so a blade-off leg cannot lose the
+area it was created to check.
+
+After deletion, select **Boundary**, click the map to make the smaller area, save it, and select **Generate Safe
+Boundary**. The generated safe area must be recreated before drive-to-confirm is available. This does not turn off
+obstacle avoidance: if the mower sees an obstacle inside its stopping clearance, it remains stopped until the path is
+clear.
 
 ## Boundary point verification
 

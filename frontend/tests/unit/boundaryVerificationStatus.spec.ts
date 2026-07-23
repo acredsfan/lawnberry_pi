@@ -35,6 +35,22 @@ describe('boundary verification status helpers', () => {
     expect(latestBoundaryVerificationProblem(value)).toEqual(failed)
   })
 
+  it('clears a failed point from the Maps UI after cancellation', () => {
+    const failed = {
+      index: 0,
+      reference: { latitude: 40, longitude: -75 },
+      approach: { latitude: 40.0001, longitude: -75 },
+      status: 'failed' as const,
+      mission_id: 'mission-1',
+      error: 'HEADING_BOOTSTRAP_BUDGET_EXHAUSTED',
+    }
+
+    expect(latestBoundaryVerificationProblem(session({
+      status: 'cancelled',
+      points: [failed],
+    }))).toBeNull()
+  })
+
   it('uses mission identity so a repeated blocker produces one new notice per attempt', () => {
     const first = {
       index: 0,
