@@ -23,7 +23,7 @@
     "@types/dompurify": "^3.0.5",
     "@vue-leaflet/vue-leaflet": "^0.10.1",
     "@vueuse/core": "^10.9.0",
-    "axios": "^1.16.0",
+    "axios": "^1.18.0",
     "chart.js": "^4.4.4",
     "compression": "^1.7.4",
     "dompurify": "^3.4.11",
