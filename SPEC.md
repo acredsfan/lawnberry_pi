@@ -131,6 +131,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | V90 | Production WiFi uses only external `wlan1` with `wlan1-primary`; recovery must distinguish missing USB, missing interface, association/IP failure, and upstream reachability, then use bounded cooldowns to touch only USB adapter `2357:0138`, its configured physical port/driver, and that NetworkManager profile; it must never reboot the Pi, restart NetworkManager globally, reset unrelated USB devices/ports, promote `wlan0`, or treat an upstream probe failure alone as radio loss |
 | V91 | While NetworkManager reports `wlan1` in a transitional device state (`40 <= GENERAL.STATE < 100` or `GENERAL.STATE == 110`), recovery must wait and must not issue a competing profile activation; it may activate `wlan1-primary` only after NetworkManager reports a disconnected or failed state, so recovery cannot cancel or race an in-flight association, secret exchange, or deactivation |
 | V92 | Selecting Maps boundary edit must retain the saved geometry as one stable editable draft; cancelling verification must remove its terminal error presentation, and changing or deleting a boundary must reject an active verification while removing its derived safe geometry, verification session, and cached authorization state |
+| V93 | Maps must clearly separate the imported parcel helper from the saved mowing boundary: deleting the saved boundary preserves the helper, and selected map-point controls may remove one draft vertex only while at least three points remain |
 
 ---
 
@@ -191,6 +192,7 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | T51 | x | Build schema-v2 two-phase blade qualification, a bounded one-test supervised permit, canonical gateway/lifecycle revocation, staged UI/API/runbook truth, and regression coverage | V23, V24, V26, V29, V44–V48, V53, V55, V74, V76, V82, V85, V89, I.api, I.fe, I.ws, I.ops |
 | T52 | x | Replace the legacy reboot-capable WiFi watchdog with tracked, USB-aware `wlan1` recovery; recover `2357:0138`, make `wlan1-primary` authoritative, disable `wlan0`, and prove bounded non-destructive recovery | V90, V91, I.wdog, I.ops |
 | T53 | x | Repair Maps boundary editing, cancellation cleanup, and source-boundary lifecycle cleanup | V92, I.api, I.fe |
+| T54 | x | Separate Maps parcel-helper and saved-boundary deletion, and restore selected-point deletion controls | V93, I.fe |
 
 ---
 
@@ -300,3 +302,4 @@ across WiFi roaming events and cloudflared restarts. No manual intervention need
 | B100 | 2026-07-16 | Recovery collapsed NetworkManager's activating states into disconnected and issued a second `connection up`; the competing activation canceled or raced the in-flight association and temporarily produced a false missing-secret failure even though the system profile retained its PSK | V91, T52 |
 | B101 | 2026-07-23 | Boundary edit mode discarded the saved draft, cancellation retained failed-point UI state, and boundary mutations left derived safe geometry/session/cache state available | V92, T53 |
 | B102 | 2026-07-23 | The new serialized boundary-mutation callback imported `Callable` from `typing`, violating the project's Python 3.11 lint rule | V92, T53 |
+| B103 | 2026-07-23 | Maps labelled the parcel-helper and saved-boundary delete paths too similarly, while vertex handles could move but not remove a selected point | V93, T54 |

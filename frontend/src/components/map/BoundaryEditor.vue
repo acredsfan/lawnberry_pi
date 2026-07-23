@@ -91,10 +91,10 @@
         v-if="mapStore.configuration?.boundary_zone"
         class="btn btn-sm btn-danger"
         :disabled="isVerificationActive"
-        title="Delete the saved boundary and its generated safe area"
+        title="Delete the green saved mowing boundary; the blue parcel helper remains"
         @click="deleteSavedBoundary"
       >
-        🗑️ Delete Saved Boundary
+        🗑️ Delete Saved Mowing Boundary
       </button>
     </div>
 
@@ -103,7 +103,7 @@
         Import Property Boundary
       </button>
       <button class="btn btn-sm btn-secondary" :disabled="!hasImportedBoundary" @click="clearImportedBoundary">
-        Clear Imported Boundary
+        Remove Parcel Helper Only
       </button>
       <button class="btn btn-sm btn-primary" :disabled="!hasImportedBoundary" @click="useImportedAsDraft">
         Use as Draft Mowing Area
@@ -242,6 +242,21 @@
         >
           🗑️ Delete
         </button>
+        <button
+          class="mini-btn mini-btn-danger"
+          :disabled="!canRemoveSelectedVertex"
+          :title="selectedVertexIndex == null
+            ? 'Select a blue point handle first'
+            : canRemoveSelectedVertex
+              ? 'Remove the selected point from this draft'
+              : 'A boundary needs at least three points'"
+          @click="removeSelectedVertex"
+        >
+          🗑️ Remove Point
+        </button>
+        <span v-if="selectedVertexIndex != null" class="vertex-selection-label">
+          Point {{ selectedVertexIndex + 1 }} selected
+        </span>
       </div>
 
       <div v-if="useGoogleMutant" class="provider-badge">
@@ -381,6 +396,7 @@
           :key="`vtx-${idx}`"
           :lat-lng="_applyDisplayOffset(pt.latitude, pt.longitude)"
           :draggable="true"
+          @click="selectVertex(idx)"
           @moveend="(e:any) => onVertexMoveEnd(idx, e)"
         />
 
@@ -471,6 +487,7 @@ import {
   removeDisplayTransform,
   type MapAlignmentProfile,
 } from '@/utils/mapDisplayTransform';
+import { removePolygonVertex } from '@/utils/polygonEditing';
 import {
   activeBoundaryVerificationPoint as findActiveVerificationPoint,
   boundaryVerificationFailureKey,
@@ -522,6 +539,7 @@ const error = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
 const currentPolygonClosed = ref(false);
 const editingZoneId = ref<string | null>(null);
+const selectedVertexIndex = ref<number | null>(null);
 const showImportBox = ref(false);
 const importText = ref('');
 const addressInput = ref('');
@@ -854,6 +872,9 @@ const showPolygonToolbar = computed(() => isPolygonMode.value && currentPolygon.
 const canUndoVertex = computed(() => currentPolygon.value.length > 0);
 const canClosePolygon = computed(() => isPolygonMode.value && currentPolygon.value.length >= 3 && !currentPolygonClosed.value);
 const canDeleteCurrent = computed(() => Boolean(editingZoneId.value) && (mode.value === 'mowing' || mode.value === 'exclusion'));
+const canRemoveSelectedVertex = computed(() => (
+  selectedVertexIndex.value != null && currentPolygon.value.length > 3
+));
 
 // Loading message based on current provider and style
 const loadingMessage = computed(() => {
@@ -887,6 +908,7 @@ function setMode(newMode: 'view' | 'boundary' | 'exclusion' | 'mowing' | 'marker
   currentPolygon.value = [];
   currentPolygonClosed.value = false;
   editingZoneId.value = null;
+  selectedVertexIndex.value = null;
 }
 
 function beginBoundaryEdit() {
@@ -899,6 +921,7 @@ function beginBoundaryEdit() {
   currentPolygon.value = clonePolygon(boundary.polygon);
   currentPolygonClosed.value = true;
   editingZoneId.value = boundary.id;
+  selectedVertexIndex.value = null;
   hasUnsavedChanges.value = false;
 }
 
@@ -907,6 +930,7 @@ function clearCurrent() {
   hasUnsavedChanges.value = false;
   currentPolygonClosed.value = false;
   editingZoneId.value = null;
+  selectedVertexIndex.value = null;
 }
 
 async function importBoundaryText() {
@@ -935,6 +959,7 @@ function useImportedAsDraft() {
   currentPolygon.value = coords.map(p => ({ latitude: p.latitude, longitude: p.longitude }));
   currentPolygonClosed.value = true;
   editingZoneId.value = mapStore.configuration?.boundary_zone?.id || null;
+  selectedVertexIndex.value = null;
   hasUnsavedChanges.value = true;
   mapStore.setEditMode('boundary');
   toast.show('Imported boundary copied as an unsaved draft', 'warning', 3500);
@@ -1073,6 +1098,7 @@ function undoLastVertex() {
   if (currentPolygon.value.length === 0) return;
   const next = currentPolygon.value.slice(0, -1);
   currentPolygon.value = next;
+  selectedVertexIndex.value = null;
   currentPolygonClosed.value = false;
   hasUnsavedChanges.value = next.length > 0;
 }
@@ -1113,14 +1139,14 @@ async function deleteEditingZone() {
 async function deleteSavedBoundary() {
   const boundary = mapStore.configuration?.boundary_zone;
   if (!boundary) return;
-  if (!confirm('Delete the saved mowing boundary, its generated safe area, and its verification session?')) {
+  if (!confirm('Delete the saved green mowing boundary? The blue parcel helper will remain.')) {
     return;
   }
   try {
     await mapStore.deleteZone(boundary.id);
     clearCurrent();
     mapStore.setEditMode('view');
-    toast.show('Saved boundary and derived verification data cleared', 'success', 3000);
+    toast.show('Saved mowing boundary deleted; parcel helper kept', 'success', 3000);
   } catch (err: any) {
     const msg = mapStore.lastError || err?.response?.data?.detail || err?.message || 'Failed to delete boundary';
     toast.show(msg, 'error', 4000);
@@ -1279,9 +1305,27 @@ function onVertexMoveEnd(idx: number, e: any) {
     const updated = [...currentPolygon.value];
     updated[idx] = pt;
     currentPolygon.value = updated;
+    selectedVertexIndex.value = idx;
     hasUnsavedChanges.value = true;
   } catch {
     // ignore
+  }
+}
+
+function selectVertex(idx: number) {
+  selectedVertexIndex.value = idx;
+}
+
+function removeSelectedVertex() {
+  if (selectedVertexIndex.value == null) return;
+  try {
+    const removedIndex = selectedVertexIndex.value;
+    currentPolygon.value = removePolygonVertex(currentPolygon.value, removedIndex);
+    selectedVertexIndex.value = Math.min(removedIndex, currentPolygon.value.length - 1);
+    hasUnsavedChanges.value = true;
+    toast.show('Boundary point removed. Save to keep this change.', 'info', 2500);
+  } catch (err: any) {
+    toast.show(err?.message || 'Unable to remove boundary point', 'warning', 2500);
   }
 }
 

@@ -374,6 +374,29 @@ describe('mapStore async zone actions', () => {
       expect(store.configuration?.exclusion_zones).toHaveLength(0)
       expect(store.configuration?.mowing_zones).toHaveLength(0)
     })
+
+    it('V93 deletes the saved boundary without clearing the imported parcel helper', async () => {
+      const store = useMapStore()
+      seedConfiguration(store)
+      store.configuration!.boundary_zone = makeLocalZone('saved-mowing-boundary', 'boundary')
+      store.importedBoundary = {
+        coordinates: [
+          { latitude: 40.0, longitude: -75.0 },
+          { latitude: 40.0, longitude: -74.9 },
+          { latitude: 39.9, longitude: -74.9 },
+        ],
+        helper_only: true,
+      }
+
+      mockDeleteMapZone.mockResolvedValue(undefined)
+      mockGetMapZones.mockResolvedValue([])
+
+      await store.deleteZone('saved-mowing-boundary')
+
+      expect(mockDeleteMapZone).toHaveBeenCalledWith('saved-mowing-boundary')
+      expect(store.configuration?.boundary_zone).toBeNull()
+      expect(store.importedBoundary?.coordinates).toHaveLength(3)
+    })
   })
 
   // ------------------------------------------------------------------ lastError cleared on success

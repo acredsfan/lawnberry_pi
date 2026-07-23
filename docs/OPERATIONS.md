@@ -747,11 +747,13 @@ For best orientation accuracy, calibrate the IMU after installation:
 
 ## Replacing a saved boundary
 
-On the Maps page, select **Boundary** to load the existing boundary with its editable blue point handles. **Discard
-Draft** only abandons unsaved edits; it never deletes the saved boundary. To start over with a smaller test area, select
-**Delete Saved Boundary** and confirm. That removes the old boundary, its generated safe area, and any completed or
-cancelled verification message. An in-progress verification must be cancelled first, so a blade-off leg cannot lose the
-area it was created to check.
+On the Maps page, select **Boundary** to load the existing boundary with its editable blue point handles. Click a point
+handle, then use **Remove Point** on the floating map controls to remove that draft point; the editor always keeps at
+least three points. **Discard Draft** only abandons unsaved edits; it never deletes the saved boundary. **Remove Parcel
+Helper Only** removes the blue dashed imported property helper, not the saved green mowing boundary. To start over with a
+smaller test area, select **Delete Saved Mowing Boundary** and confirm. That removes the old boundary, its generated safe
+area, and any completed or cancelled verification message while leaving the parcel helper alone. An in-progress
+verification must be cancelled first, so a blade-off leg cannot lose the area it was created to check.
 
 After deletion, select **Boundary**, click the map to make the smaller area, save it, and select **Generate Safe
 Boundary**. The generated safe area must be recreated before drive-to-confirm is available. This does not turn off
