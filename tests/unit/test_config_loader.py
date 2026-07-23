@@ -309,3 +309,43 @@ def test_get_config_loader_thread_safe():
 
     assert len(results) == 10
     assert all(inst is results[0] for inst in results)
+
+
+def test_config_loader_maps_imu_mode(tmp_path: Path):
+    """`imu.mode` must reach the model — an ignored key silently strands the driver
+    on the wrong UART transport (PS1 strap mismatch) with no error."""
+    (tmp_path / "hardware.yaml").write_text(
+        dedent(
+            """\
+            imu:
+              type: BNO085
+              port: /dev/ttyAMA4
+              mode: rvc
+            """
+        )
+    )
+    (tmp_path / "limits.yaml").write_text("")
+
+    loader = ConfigLoader(config_dir=str(tmp_path))
+    hardware, _limits = loader.load()
+
+    assert hardware.imu_port == "/dev/ttyAMA4"
+    assert hardware.imu_mode == "rvc"
+
+
+def test_config_loader_imu_mode_defaults_to_auto(tmp_path: Path):
+    (tmp_path / "hardware.yaml").write_text(
+        dedent(
+            """\
+            imu:
+              type: BNO085
+              port: /dev/ttyAMA4
+            """
+        )
+    )
+    (tmp_path / "limits.yaml").write_text("")
+
+    loader = ConfigLoader(config_dir=str(tmp_path))
+    hardware, _limits = loader.load()
+
+    assert hardware.imu_mode == "auto"

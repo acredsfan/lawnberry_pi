@@ -240,6 +240,7 @@ class ConfigLoader:
             "gps_usb_device",
             "imu_type",
             "imu_port",
+            "imu_mode",
             "imu_yaw_offset_degrees",
             "encoder_enabled",
             "tof_sensors",
@@ -303,6 +304,8 @@ class ConfigLoader:
                 mapped["imu_type"] = imu.get("type")
         if isinstance(imu, dict) and "port" in imu and "imu_port" not in mapped:
             mapped["imu_port"] = imu["port"]
+        if isinstance(imu, dict) and "mode" in imu and "imu_mode" not in mapped:
+            mapped["imu_mode"] = str(imu["mode"])
         if (
             isinstance(imu, dict)
             and "yaw_offset_degrees" in imu
@@ -413,6 +416,7 @@ class ConfigLoader:
             "imu",
             "imu_type",
             "imu_port",
+            "imu_mode",
             "imu_yaw_offset_degrees",
             "encoders",
             "encoder_enabled",
@@ -444,7 +448,7 @@ class ConfigLoader:
                 "antenna_offset_forward_m",
                 "antenna_offset_right_m",
             },
-            "imu": {"type", "port", "yaw_offset_degrees"},
+            "imu": {"type", "port", "mode", "yaw_offset_degrees"},
             "encoders": {"enabled"},
             "sensors": {"tof", "tof_config", "env_sensor", "power_monitor"},
             "sensors.tof_config": {

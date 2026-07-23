@@ -242,10 +242,16 @@ class TelemetryService:
                     if bme280:
                         environmental_cfg = bme280.model_dump(exclude_none=True)
 
-                    # IMU port from hardware config (overrides env var BNO085_PORT if set)
+                    # IMU port/transport from hardware config (port overrides env
+                    # var BNO085_PORT if set)
                     imu_port = getattr(hw_cfg, "imu_port", None)
-                    if imu_port:
-                        imu_cfg = {"port": imu_port}
+                    imu_mode = getattr(hw_cfg, "imu_mode", None)
+                    if imu_port or imu_mode:
+                        imu_cfg = {}
+                        if imu_port:
+                            imu_cfg["port"] = imu_port
+                        if imu_mode:
+                            imu_cfg["mode"] = imu_mode
                 except Exception:
                     pass
 

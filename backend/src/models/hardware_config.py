@@ -276,6 +276,14 @@ class HardwareConfig(StrictHardwareModel):
     imu_port: str | None = Field(
         default=None, description="Serial port for IMU (e.g. /dev/ttyAMA4)"
     )
+    imu_mode: str = Field(
+        default="auto",
+        description=(
+            "BNO085 UART transport: 'auto' (probe RVC then SHTP), 'rvc' (PS1 HIGH, "
+            "115200 baud), or 'shtp' (PS1 LOW, 3 Mbaud). The PS1 strap fixes this in "
+            "hardware; this setting only tells the driver which to expect."
+        ),
+    )
     imu_yaw_offset_degrees: float = Field(
         default=0.0,
         description=(

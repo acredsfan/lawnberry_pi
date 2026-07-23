@@ -146,7 +146,14 @@ The RoboHAT provides a serial API specifically for drive motor control. The back
 - Rotation vector and quaternion output
 - Compass heading with magnetic declination correction
 
-Note: On Raspberry Pi 5 the IMU is typically wired to UART4 on GPIO12 (TXD4) and GPIO13 (RXD4), exposed as `/dev/ttyAMA4`. The IMU plugin uses the Adafruit BNO08x UART driver and publishes quaternion, acceleration, and gyro to MQTT at `lawnberry/sensors/imu/data`.
+Note: On Raspberry Pi 5 the IMU is typically wired to UART4 on GPIO12 (TXD4) and GPIO13 (RXD4), exposed as `/dev/ttyAMA4`.
+
+The BNO085's **PS1 strap selects the UART protocol in hardware**: PS1 HIGH gives
+RVC (115,200 baud, 19-byte checksummed orientation frames at 100 Hz, parsed
+in-tree), PS1 LOW gives SHTP (3,000,000 baud, via the Adafruit BNO08x library).
+**RVC is recommended** — SHTP at 3 Mbaud is unreliable on this hardware. See
+[hardware-integration.md](hardware-integration.md#uart-mode-rvc-vs-shtp-the-ps1-strap)
+for the strap details, `imu.mode` config, and troubleshooting.
 
 Quick GPS smoke test (bounded, venv-enforced):
 

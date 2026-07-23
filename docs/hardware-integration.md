@@ -73,11 +73,67 @@ Verification steps:
 - Each response reports its actual source. When `prefer_battery: true`, missing Victron battery voltage stays unavailable instead of silently switching to INA3221; this keeps a disconnected preferred source from looking healthy. Other metrics follow their configured preference policy.
 
 ### IMU (BNO085)
-- Preferred: UART4 at 3,000,000 baud
 - Pi 5: /dev/ttyAMA4 → GPIO 12 (TXD4), GPIO 13 (RXD4)
 - Pi 4B: UART4 uses GPIO 24 (TXD4) and GPIO 21 (RXD4). This conflicts with the
   legacy Pi 5 blade GPIO 24 wiring, so the Pi 4B IBT-4 blade profile uses GPIO 26/27 instead.
   Verify with `dtoverlay=uart4` and `gpioinfo`.
+
+#### UART mode: RVC vs SHTP (the PS1 strap)
+
+The BNO085's **PS1 pin selects the UART protocol in hardware**. Software cannot
+change it — the strap decides, and the driver must match.
+
+| PS1 | Mode | Baud | Contents |
+|-----|------|------|----------|
+| **HIGH** | **RVC** (recommended) | 115,200 | 19-byte frame @ 100 Hz: yaw/pitch/roll + accel, per-frame checksum |
+| LOW (board default) | SHTP | 3,000,000 | Full fusion, gyro, magnetometer, calibration registers |
+
+**RVC is recommended for LawnBerry.** Navigation needs heading, tilt, and accel;
+it deliberately ignores the magnetometer (motor-current interference) and derives
+calibration status from stream uptime, so SHTP's extra data is unused. RVC also
+runs 26× slower, checksums every frame, and resynchronises after corruption —
+which matters on jumper wire next to brushed motors. It is parsed in-tree
+(`parse_rvc_frame` / `RvcStream`), with no third-party library.
+
+On the common Adafruit BNO08x breakouts (e.g. 4754) PS1 is a labelled solder
+jumper on the underside of the board; other vendors expose it as a header pin to
+tie to 3V3. Consult your board's silkscreen — pull PS1 to 3V3 for RVC.
+
+Set the transport in `config/hardware.yaml` under `imu.mode`:
+
+```yaml
+imu:
+  type: BNO085
+  port: /dev/ttyAMA4
+  mode: auto        # auto (default) | rvc | shtp
+```
+
+`auto` probes RVC first — that probe is passive, listening only, so it cannot
+disturb a sensor genuinely in SHTP mode — then falls back to SHTP. Set the mode
+explicitly to skip the ~1.5 s detection at startup.
+
+> [!WARNING]
+> **SHTP at 3 Mbaud is unreliable on this hardware.** The `adafruit_bno08x`
+> library desyncs against the live stream and crashes during its constructor's
+> `soft_reset()`, alternating between
+> `IndexError: list assignment index out of range` (`uart.py:118`, decoded SHTP
+> channel outside the valid 0–5 range) and
+> `RuntimeError: Unhandled UART control SHTP protocol`. Pre-aligning to a `0x7E`
+> frame boundary does not help — the library has no resync path. If you must run
+> SHTP, expect the IMU to be intermittently unavailable.
+
+**Diagnosing "no heading":**
+- `GET /api/v2/sensors/imu/status` → `imu_epoch_id: null` means **no transport
+  ever opened**. That UUID is assigned only after a successful open.
+- `initialized: true` is set unconditionally and is **not** evidence of success.
+  Check `imu_epoch_id` and `connected` instead.
+- Driver init warnings are emitted only at startup and are lost to journal
+  rotation on a long-running unit. `systemctl restart lawnberry-backend` to
+  regenerate them.
+- To confirm what the sensor is actually sending, stop the backend (it holds the
+  port exclusively) and sample the raw UART. Clean `0x7E`-delimited frames at
+  3,000,000 baud mean PS1 is LOW (SHTP); `0xAA 0xAA`-headed 19-byte frames at
+  115,200 mean PS1 is HIGH (RVC). Noise at every baud means power or wiring.
 
 **IMU heading formula** (from `backend/src/services/navigation_service.py`):
 ```
