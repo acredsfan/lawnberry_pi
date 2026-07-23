@@ -196,6 +196,7 @@ python -m pytest \
   tests/unit/test_config_loader.py \
   tests/unit/test_ibt4_blade_driver.py \
   tests/unit/test_command_gateway.py \
+  tests/unit/test_wlan1_usb_recovery.py \
   tests/integration/test_scheduled_mission_dispatch.py \
   tests/integration/test_wifi_watchdog_disabled_tiers.py \
   -x -q -m "not hardware"
@@ -224,6 +225,7 @@ python -m pytest \
   tests/unit/test_mission_service.py \
   tests/unit/test_jobs_service_execution.py \
   tests/unit/test_live_safety_coordinator.py \
+  tests/unit/test_wlan1_usb_recovery.py \
   tests/integration/test_scheduled_mission_dispatch.py \
   tests/integration/test_wifi_watchdog_disabled_tiers.py \
   tests/contract/test_supervised_qualification_api.py \
@@ -298,6 +300,12 @@ simulation, replay, wheels-raised, or blade-off results as autonomous readiness.
 `tests/integration/test_wifi_watchdog_disabled_tiers.py` imports the installed `/opt/wifi-watchdog` package on the Pi and
 skips only when that runtime package is absent. It monkeypatches recovery commands, so it must not reboot, cycle interfaces,
 or reset USB devices during automated tests.
+
+`tests/unit/test_wlan1_usb_recovery.py` is the production Wi-Fi recovery contract. It proves local-state classification,
+targeted `2357:0138` USB-port cycling, persistent cooldown/budget behavior, `wlan1-primary`-only reconnects, USB2/power
+policy, and the absence of host reboot or global NetworkManager restart paths. The older
+`tests/integration/test_wifi_watchdog_disabled_tiers.py` remains a regression test for the installed legacy package while
+that package exists, but `wifi-watchdog.service` is disabled and is not the production recovery owner.
 
 `tests/unit/test_jwt_manager.py` is the PyJWT 2.13 compatibility contract: HS256 round-trip, expiration, invalid signature,
 algorithm allow-list, and fail-closed missing/blank signing secret. `tests/contract/test_health_endpoints.py` intentionally

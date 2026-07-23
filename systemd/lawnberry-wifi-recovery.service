@@ -1,0 +1,40 @@
+[Unit]
+Description=LawnBerry external WiFi USB recovery
+Documentation=file:/home/pi/lawnberry/docs/OPERATIONS.md
+After=NetworkManager.service systemd-udevd.service
+Wants=NetworkManager.service
+Conflicts=wifi-watchdog.service
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/pi/lawnberry
+ExecStart=/usr/bin/python3 /home/pi/lawnberry/scripts/wlan1_usb_recovery.py
+Restart=always
+RestartSec=10
+RuntimeDirectory=lawnberry-wifi-recovery
+RuntimeDirectoryMode=0750
+StateDirectory=lawnberry-wifi-recovery
+StateDirectoryMode=0750
+Environment=LAWNBERRY_WIFI_INTERFACE=wlan1
+Environment=LAWNBERRY_WIFI_PROFILE=wlan1-primary
+Environment=LAWNBERRY_WIFI_USB_ID=2357:0138
+Environment=LAWNBERRY_WIFI_USB_HUB=3
+Environment=LAWNBERRY_WIFI_USB_PORT=1
+Environment=LAWNBERRY_WIFI_DRIVER=88x2bu
+Environment=LAWNBERRY_WIFI_CHECK_SECONDS=15
+Environment=LAWNBERRY_WIFI_CONNECT_COOLDOWN_SECONDS=30
+Environment=LAWNBERRY_WIFI_USB_COOLDOWN_SECONDS=300
+Environment=LAWNBERRY_WIFI_MAX_USB_CYCLES_PER_HOUR=3
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/run/lawnberry-wifi-recovery /var/lib/lawnberry-wifi-recovery
+
+[Install]
+WantedBy=multi-user.target
