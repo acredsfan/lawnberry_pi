@@ -199,3 +199,103 @@ class TestDriverModeConfig:
         from backend.src.drivers.sensors.bno085_driver import BNO085Driver
 
         assert BNO085Driver({})._mode is None
+
+
+class _FakeSerial:
+    """Minimal pyserial stand-in that replays a fixed byte buffer once."""
+
+    def __init__(self, payload: bytes = b""):
+        self._payload = bytearray(payload)
+        self.is_open = True
+
+    @property
+    def in_waiting(self) -> int:
+        return len(self._payload)
+
+    def read(self, n: int) -> bytes:
+        out = bytes(self._payload[:n])
+        del self._payload[:n]
+        return out
+
+    def reset_input_buffer(self) -> None:
+        self._payload.clear()
+
+    def close(self) -> None:
+        self.is_open = False
+
+
+class TestInitRobustness:
+    """Init/read must never hang on an unresponsive sensor, and must self-heal
+    after a cold-boot power-on race."""
+
+    _MOD = "backend.src.drivers.sensors.bno085_driver"
+
+    def _driver(self, monkeypatch, **cfg):
+        import backend.src.drivers.sensors.bno085_driver as mod
+
+        # These tests run under SIM_MODE=1; force the hardware path.
+        monkeypatch.setattr(mod, "is_simulation_mode", lambda: False)
+        return mod.BNO085Driver(cfg)
+
+    async def test_initialize_does_not_hang_when_opens_block(self, monkeypatch):
+        import time as _time
+
+        driver = self._driver(monkeypatch, mode="auto", open_timeout_s=0.2)
+
+        def blocking_open():
+            _time.sleep(0.6)  # longer than open_timeout_s
+            return object()
+
+        monkeypatch.setattr(driver, "_open_rvc", blocking_open)
+        monkeypatch.setattr(driver, "_open_shtp", blocking_open)
+
+        start = _time.monotonic()
+        await driver.initialize()
+        elapsed = _time.monotonic() - start
+
+        assert driver._mode is None
+        assert driver.initialized is True
+        # Two candidates x 0.2s ceiling; far below the 1.2s a non-bounded open
+        # would take. Generous upper bound absorbs scheduling jitter.
+        assert elapsed < 0.9
+        assert "exceeded" in (driver._last_open_error or "")
+
+    async def test_lazy_reinit_recovers_after_boot_miss(self, monkeypatch):
+        driver = self._driver(
+            monkeypatch, mode="rvc", open_timeout_s=1.0, reinit_interval_s=0.0
+        )
+        calls = {"n": 0}
+
+        def open_rvc():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("no valid RVC frame (sensor still settling)")
+            return _FakeSerial(build_rvc_frame(yaw_deg=42.0))
+
+        monkeypatch.setattr(driver, "_open_rvc", open_rvc)
+
+        await driver.initialize()
+        assert driver._mode is None  # boot miss
+
+        reading = await driver._hw_read()  # throttle=0 -> retries immediately
+        assert driver._mode == "rvc"
+        assert reading is not None
+        assert reading["yaw"] == pytest.approx(42.0, abs=0.02)
+
+    async def test_lazy_reinit_is_throttled(self, monkeypatch):
+        driver = self._driver(
+            monkeypatch, mode="rvc", open_timeout_s=1.0, reinit_interval_s=999.0
+        )
+        calls = {"n": 0}
+
+        def open_rvc():
+            calls["n"] += 1
+            raise RuntimeError("still not ready")
+
+        monkeypatch.setattr(driver, "_open_rvc", open_rvc)
+
+        await driver.initialize()
+        await driver._hw_read()
+        n_after_first = calls["n"]
+        await driver._hw_read()  # within interval -> must not attempt again
+        assert calls["n"] == n_after_first

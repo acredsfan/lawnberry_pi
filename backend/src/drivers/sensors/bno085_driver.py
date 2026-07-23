@@ -192,6 +192,14 @@ class BNO085DriverConfig:
     # At 100 Hz a frame arrives every 10 ms; 1.5 s tolerates a mid-frame start
     # plus the sensor's power-on settling.
     rvc_probe_timeout: float = 1.5
+    # Hard ceiling on a single transport-open attempt. A blocking open (notably
+    # the SHTP soft_reset, which can stall against an unsettled sensor at cold
+    # boot) is abandoned after this so init and reads never hang. Must exceed
+    # rvc_probe_timeout.
+    open_timeout_s: float = 6.0
+    # When no transport is open, retry opening at most this often (seconds), so a
+    # sensor that was not yet streaming at boot self-heals without a restart.
+    reinit_interval_s: float = 15.0
 
 
 def _tracked_bno08x_uart_class(base_cls: type, game_report_id: int) -> type:
@@ -322,12 +330,16 @@ class BNO085Driver(HardwareDriver):
             read_timeout=float(cfg.get("read_timeout", 1.0)),
             mode=str(cfg.get("mode", os.environ.get("BNO085_MODE", "auto"))),
             rvc_baudrate=int(cfg.get("rvc_baudrate", _RVC_BAUD)),
+            open_timeout_s=float(cfg.get("open_timeout_s", 6.0)),
+            reinit_interval_s=float(cfg.get("reinit_interval_s", 15.0)),
         )
         self._serial = None
         self._bno = None  # adafruit_bno08x BNO08X_UART instance
         self._rvc_serial = None  # pyserial handle when running in RVC mode
         self._rvc_stream = RvcStream()
         self._mode: str | None = None  # set once a transport opens successfully
+        self._last_open_error: str | None = None
+        self._last_reinit_attempt: float | None = None
         self._lock = asyncio.Lock()  # serialize all hardware access
         self._last_orientation: dict[str, Any] | None = None
         self._last_read_ts: float | None = None
@@ -350,43 +362,86 @@ class BNO085Driver(HardwareDriver):
             return
 
         self._reset_imu_session()
-        loop = asyncio.get_running_loop()
-        mode = (self._cfg.mode or "auto").lower()
-        errors: list[str] = []
-
-        # RVC is probed first in "auto" because it is passive: it only listens
-        # for auto-streamed frames and never writes to the sensor, so a failed
-        # probe cannot disturb a device that is actually in SHTP mode. Opening
-        # SHTP, by contrast, issues a soft reset.
-        for candidate in (("rvc", "shtp") if mode == "auto" else (mode,)):
-            try:
-                if candidate == "rvc":
-                    self._rvc_serial = await loop.run_in_executor(
-                        _BNO085_EXECUTOR, self._open_rvc
-                    )
-                else:
-                    self._bno = await loop.run_in_executor(_BNO085_EXECUTOR, self._open_shtp)
-                self._mode = candidate
-                self._imu_epoch_id = uuid.uuid4().hex
-                logger.info(
-                    "BNO085 %s initialized on %s @ %d baud",
-                    candidate.upper(),
-                    self._cfg.port,
-                    self._cfg.rvc_baudrate if candidate == "rvc" else self._cfg.baudrate,
-                )
+        for candidate in self._candidate_modes():
+            if await self._open_bounded(candidate):
                 break
-            except Exception as exc:
-                errors.append(f"{candidate}: {exc}")
-                self._close_transports()
 
         if self._mode is None:
             logger.warning(
                 "BNO085: init failed on %s (%s). IMU will report uncalibrated. "
                 "Check the PS1 strap — HIGH selects RVC @115200, LOW selects SHTP @3M.",
                 self._cfg.port,
-                "; ".join(errors),
+                self._last_open_error or "no transport opened",
             )
         self.initialized = True
+
+    def _candidate_modes(self) -> tuple[str, ...]:
+        """Transports to try, in order. 'auto' probes RVC (passive) before SHTP."""
+        mode = (self._cfg.mode or "auto").lower()
+        return ("rvc", "shtp") if mode == "auto" else (mode,)
+
+    async def _open_bounded(self, candidate: str) -> bool:
+        """Open one transport with a hard wall-clock ceiling.
+
+        Returns True and latches ``_mode`` on success. On failure — including a
+        blocking open that exceeds ``open_timeout_s`` — records the reason and
+        returns False so the caller can try the next candidate or give up. This
+        is what guarantees init and reads can never hang on an unresponsive
+        sensor; the abandoned executor thread finishes harmlessly in the
+        background.
+        """
+        loop = asyncio.get_running_loop()
+        opener = self._open_rvc if candidate == "rvc" else self._open_shtp
+        try:
+            handle = await asyncio.wait_for(
+                loop.run_in_executor(_BNO085_EXECUTOR, opener),
+                timeout=self._cfg.open_timeout_s,
+            )
+        except TimeoutError:
+            self._last_open_error = (
+                f"{candidate}: open exceeded {self._cfg.open_timeout_s:.1f}s"
+            )
+            self._close_transports()
+            return False
+        except Exception as exc:
+            self._last_open_error = f"{candidate}: {exc}"
+            self._close_transports()
+            return False
+
+        if candidate == "rvc":
+            self._rvc_serial = handle
+        else:
+            self._bno = handle
+        self._mode = candidate
+        self._imu_epoch_id = uuid.uuid4().hex
+        logger.info(
+            "BNO085 %s initialized on %s @ %d baud",
+            candidate.upper(),
+            self._cfg.port,
+            self._cfg.rvc_baudrate if candidate == "rvc" else self._cfg.baudrate,
+        )
+        return True
+
+    async def _maybe_reinit(self) -> None:
+        """Throttled attempt to open a transport when none is currently active.
+
+        Lets a sensor that was not yet streaming at boot (a cold-boot power-on
+        race) recover on its own, without a service restart. Caller must hold
+        ``self._lock``.
+        """
+        now = time.monotonic()
+        if (
+            self._last_reinit_attempt is not None
+            and (now - self._last_reinit_attempt) < self._cfg.reinit_interval_s
+        ):
+            return
+        self._last_reinit_attempt = now
+        for candidate in self._candidate_modes():
+            if await self._open_bounded(candidate):
+                logger.info(
+                    "BNO085 recovered on %s via %s", self._cfg.port, candidate.upper()
+                )
+                return
 
     def _open_rvc(self):
         """Open the port at RVC baud and verify real frames arrive (blocking).
@@ -573,10 +628,15 @@ class BNO085Driver(HardwareDriver):
         Uses the dedicated ``_BNO085_EXECUTOR`` so a slow/stuck read never
         exhausts the global asyncio thread pool.
         """
-        if self._mode is None:
-            return self._stale_or_placeholder()
-
         async with self._lock:
+            if self._mode is None:
+                # No transport — a cold-boot race may have missed a sensor that
+                # is streaming now. Retry (throttled), then serve a placeholder
+                # for this cycle either way.
+                await self._maybe_reinit()
+                if self._mode is None:
+                    return self._stale_or_placeholder()
+
             try:
                 loop = asyncio.get_running_loop()
                 if self._mode == "rvc":

@@ -330,7 +330,11 @@ async def test_bno085_driver_hardware_epoch_changes_and_clears_cache_on_reinit(m
     import backend.src.drivers.sensors.bno085_driver as driver_module
 
     monkeypatch.setattr(driver_module, "is_simulation_mode", lambda: False)
-    drv = driver_module.BNO085Driver({})
+    # Pin SHTP so the transport under test is deterministic. Under the default
+    # "auto" the driver would probe the real RVC-mode sensor first (pyserial
+    # opens the port non-exclusively, so it succeeds even while the backend
+    # holds it) and never reach the patched _open_shtp.
+    drv = driver_module.BNO085Driver({"mode": "shtp"})
     states_at_open = []
 
     def fake_open_shtp():
