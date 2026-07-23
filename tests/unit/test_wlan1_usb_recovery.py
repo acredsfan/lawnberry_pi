@@ -34,6 +34,17 @@ class FakeRunner:
         (Observation(True, True, True, False, False), RecoveryState.NO_IPV4),
         (Observation(True, True, True, True, False), RecoveryState.NO_DEFAULT_ROUTE),
         (Observation(True, True, True, True, True), RecoveryState.HEALTHY),
+        (
+            Observation(
+                True,
+                True,
+                False,
+                False,
+                False,
+                networkmanager_transitioning=True,
+            ),
+            RecoveryState.NETWORKMANAGER_TRANSITIONING,
+        ),
     ],
 )
 def test_v90_classifies_local_radio_states(
@@ -80,6 +91,33 @@ def test_v90_observation_never_probes_upstream_connectivity() -> None:
 
     assert collect_observation(config, runner).state is RecoveryState.HEALTHY
     assert not any(call[0] in {"ping", "curl", "getent"} for call in runner.calls)
+
+
+@pytest.mark.parametrize(
+    "nm_state",
+    ["70 (connecting (getting IP configuration))", "110 (deactivating)"],
+)
+def test_v91_observation_preserves_networkmanager_transition(nm_state: str) -> None:
+    config = RecoveryConfig()
+    runner = FakeRunner(
+        {
+            ("lsusb", "-d", config.usb_id): CommandResult(0, "adapter", ""),
+            ("ip", "link", "show", "dev", config.interface): CommandResult(0, "wlan1", ""),
+            (
+                "nmcli",
+                "-g",
+                "GENERAL.STATE",
+                "device",
+                "show",
+                config.interface,
+            ): CommandResult(0, nm_state, ""),
+        }
+    )
+
+    observation = collect_observation(config, runner)
+
+    assert observation.networkmanager_transitioning is True
+    assert observation.state is RecoveryState.NETWORKMANAGER_TRANSITIONING
 
 
 def test_v90_missing_usb_cycles_only_configured_wifi_port_with_cooldown(
@@ -158,6 +196,26 @@ def test_v90_healthy_radio_takes_no_action() -> None:
     decision = controller.recover(Observation(True, True, True, True, True), now=4_000.0)
 
     assert decision.action == "none"
+    assert runner.calls == []
+
+
+def test_v91_networkmanager_activation_in_progress_takes_no_action() -> None:
+    runner = FakeRunner()
+    controller = RecoveryController(RecoveryConfig(), runner)
+
+    decision = controller.recover(
+        Observation(
+            True,
+            True,
+            False,
+            False,
+            False,
+            networkmanager_transitioning=True,
+        ),
+        now=4_500.0,
+    )
+
+    assert decision.action == "wait_for_networkmanager"
     assert runner.calls == []
 
 

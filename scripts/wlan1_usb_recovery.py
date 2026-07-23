@@ -107,6 +107,7 @@ class RecoveryConfig:
 class RecoveryState(str, Enum):
     USB_MISSING = "usb_missing"
     INTERFACE_MISSING = "interface_missing"
+    NETWORKMANAGER_TRANSITIONING = "networkmanager_transitioning"
     DISCONNECTED = "disconnected"
     NO_IPV4 = "no_ipv4"
     NO_DEFAULT_ROUTE = "no_default_route"
@@ -120,6 +121,7 @@ class Observation:
     networkmanager_connected: bool
     ipv4_present: bool
     default_route_present: bool
+    networkmanager_transitioning: bool = False
 
     @property
     def state(self) -> RecoveryState:
@@ -127,6 +129,8 @@ class Observation:
             return RecoveryState.USB_MISSING
         if not self.interface_present:
             return RecoveryState.INTERFACE_MISSING
+        if self.networkmanager_transitioning:
+            return RecoveryState.NETWORKMANAGER_TRANSITIONING
         if not self.networkmanager_connected:
             return RecoveryState.DISCONNECTED
         if not self.ipv4_present:
@@ -147,6 +151,13 @@ class RecoveryDecision:
 def _command_ok(runner: Runner, args: tuple[str, ...], timeout_s: float = 5.0) -> bool:
     result = runner.run(args, timeout_s)
     return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _networkmanager_state_code(output: str) -> int | None:
+    try:
+        return int(output.strip().split(maxsplit=1)[0])
+    except (IndexError, ValueError):
+        return None
 
 
 def collect_observation(config: RecoveryConfig, runner: Runner) -> Observation:
@@ -172,7 +183,13 @@ def collect_observation(config: RecoveryConfig, runner: Runner) -> Observation:
         ),
         5.0,
     )
-    connected = nm_state.returncode == 0 and nm_state.stdout.strip().startswith("100")
+    nm_state_code = (
+        _networkmanager_state_code(nm_state.stdout) if nm_state.returncode == 0 else None
+    )
+    connected = nm_state_code == 100
+    transitioning = nm_state_code is not None and (
+        40 <= nm_state_code < 100 or nm_state_code == 110
+    )
     ipv4_present = _command_ok(
         runner,
         (
@@ -190,7 +207,14 @@ def collect_observation(config: RecoveryConfig, runner: Runner) -> Observation:
         runner,
         ("ip", "-4", "route", "show", "default", "dev", config.interface),
     )
-    return Observation(True, True, connected, ipv4_present, default_route_present)
+    return Observation(
+        True,
+        True,
+        connected,
+        ipv4_present,
+        default_route_present,
+        networkmanager_transitioning=transitioning,
+    )
 
 
 class RecoveryController:
@@ -297,6 +321,9 @@ class RecoveryController:
         if state is RecoveryState.HEALTHY:
             self._interface_missing_count = 0
             return RecoveryDecision(state, "none", None)
+        if state is RecoveryState.NETWORKMANAGER_TRANSITIONING:
+            self._interface_missing_count = 0
+            return RecoveryDecision(state, "wait_for_networkmanager", None)
         if state is RecoveryState.USB_MISSING:
             self._interface_missing_count = 0
             return self._cycle_usb_port(state, now)
@@ -330,6 +357,7 @@ def _write_status(
         "usb_present": observation.usb_present,
         "interface_present": observation.interface_present,
         "networkmanager_connected": observation.networkmanager_connected,
+        "networkmanager_transitioning": observation.networkmanager_transitioning,
         "ipv4_present": observation.ipv4_present,
         "default_route_present": observation.default_route_present,
         "action": decision.action,
