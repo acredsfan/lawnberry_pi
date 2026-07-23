@@ -33,6 +33,64 @@ from ..base import HardwareDriver
 logger = logging.getLogger(__name__)
 
 
+# --------------------------------------------------------------------------
+# UBX receiver configuration — enable NMEA-GST
+# --------------------------------------------------------------------------
+# GST carries the receiver's own per-axis 1-sigma position error. The F9P does
+# not emit it by default; enabling it turns the driver's reported accuracy from
+# a fix-type heuristic into a real measured covariance (see ``_parse_gst``).
+#
+# CFG-MSGOUT-NMEA_ID_GST_* configuration keys (u-blox ZED-F9P interface
+# description; values confirmed against the SparkFun u-blox library). Each sets
+# the message output rate on one interface; 1 = every navigation epoch.
+_UBX_CFG_MSGOUT_NMEA_GST_I2C = 0x209100D3
+_UBX_CFG_MSGOUT_NMEA_GST_UART1 = 0x209100D4
+_UBX_CFG_MSGOUT_NMEA_GST_UART2 = 0x209100D5
+_UBX_CFG_MSGOUT_NMEA_GST_USB = 0x209100D6
+_UBX_CFG_MSGOUT_NMEA_GST_SPI = 0x209100D7
+
+# Persist to all layers: RAM (1) | BBR (2) | Flash (4). Writing every layer
+# makes the setting survive power cycles, and re-sending it on each reopen keeps
+# it self-correcting after a factory reset or a swapped receiver.
+_UBX_LAYER_PERSIST = 0x07
+
+
+def build_ubx_cfg_valset(key: int, value: int, layers: int, value_bytes: int = 1) -> bytes:
+    """Encode a single-item UBX-CFG-VALSET (0x06 0x8A) message.
+
+    Pure function: header, little-endian key, value, and the two-byte Fletcher
+    checksum. ``value_bytes`` is the width of the config item's value (GST rate
+    is U1 = 1 byte).
+    """
+    payload = (
+        bytes([0x00, layers & 0xFF, 0x00, 0x00])  # version, layers, reserved
+        + key.to_bytes(4, "little")
+        + value.to_bytes(value_bytes, "little")
+    )
+    body = bytes([0x06, 0x8A]) + len(payload).to_bytes(2, "little") + payload
+    ck_a = ck_b = 0
+    for b in body:
+        ck_a = (ck_a + b) & 0xFF
+        ck_b = (ck_b + ck_a) & 0xFF
+    return b"\xb5\x62" + body + bytes([ck_a, ck_b])
+
+
+def build_enable_gst_message(mode: GpsMode) -> bytes | None:
+    """Build the CFG-VALSET that enables NMEA-GST for the given GPS interface.
+
+    Returns ``None`` for modes that do not use the CFG-VALSET key-value
+    interface (Neo-8M), so callers can skip configuration cleanly.
+    """
+    key_by_mode = {
+        GpsMode.F9P_USB: _UBX_CFG_MSGOUT_NMEA_GST_USB,
+        GpsMode.F9P_UART: _UBX_CFG_MSGOUT_NMEA_GST_UART1,
+    }
+    key = key_by_mode.get(mode)
+    if key is None:
+        return None
+    return build_ubx_cfg_valset(key, value=1, layers=_UBX_LAYER_PERSIST)
+
+
 @dataclass
 class GPSDriverConfig:
     mode: GpsMode = GpsMode.F9P_USB
@@ -66,6 +124,9 @@ class GPSDriver(HardwareDriver):
         self._sim_counter: int = 0
         # Real hardware handles (lazy)
         self._serial = None
+        # Whether NMEA-GST has been enabled on the current serial handle. Reset
+        # on every reopen so a fresh receiver is (re)configured.
+        self._receiver_configured = False
         self._serial_reopen_count = 0
         self._open_attempt_count = 0
         self._read_lock_contention_count = 0
@@ -238,6 +299,26 @@ class GPSDriver(HardwareDriver):
             return None
         return self._last_read.model_copy(update={"cached": True})
 
+    def _configure_receiver(self) -> None:
+        """Enable NMEA-GST on the open receiver (best-effort, non-fatal).
+
+        Called with a valid ``self._serial`` and the read lock held. Neo-8M and
+        any receiver without the CFG-VALSET interface are skipped silently.
+        """
+        msg = build_enable_gst_message(self.cfg.mode)
+        if msg is None or self._serial is None:
+            return
+        try:
+            self._serial.write(msg)
+            self._serial.flush()
+            logger.info(
+                "GPS: enabled NMEA-GST on %s (%s) for measured position variance",
+                getattr(self._serial, "port", "?"),
+                self.cfg.mode.value,
+            )
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            logger.warning("GPS: failed to enable NMEA-GST: %s", exc)
+
     def _recycle_stale_serial(self) -> bool:
         """Close a silent reader so the next owner poll can reacquire the GPS stream."""
         if self._serial is None or self._last_read_ts is None:
@@ -255,6 +336,7 @@ class GPSDriver(HardwareDriver):
             self._last_read_error = reason
             return False
         self._serial = None
+        self._receiver_configured = False
         try:
             serial_handle.close()
         except Exception:
@@ -396,6 +478,13 @@ class GPSDriver(HardwareDriver):
                 # If not opened, keep last reading
                 if self._serial is None:
                     return self._cached_last_read()
+
+            # Enable NMEA-GST once per open so the receiver reports measured
+            # position variance instead of a fix-type heuristic. Best-effort:
+            # a config failure must never interrupt reading.
+            if not self._receiver_configured:
+                self._configure_receiver()
+                self._receiver_configured = True
 
             # Read NMEA lines for a short window and parse
             # Allow a bit more time on first acquisition

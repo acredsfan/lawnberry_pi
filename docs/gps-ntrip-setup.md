@@ -29,6 +29,18 @@ This guide provides complete instructions for configuring the u-blox ZED-F9P GPS
 - **Float RTK**: Processing corrections (0.5-2 meters)
 - **Fixed RTK**: Full RTK lock (0.02-0.05 meters) ✅ **Target accuracy**
 
+### Reported Accuracy (NMEA-GST)
+
+The backend reports **measured** horizontal accuracy (1-sigma), not a value
+inferred from the fix type. On startup the GPS driver enables the receiver's
+NMEA-GST sentence (`CFG-MSGOUT-NMEA_ID_GST_*`, persisted to RAM+BBR+Flash) and
+computes accuracy as `sqrt(sd_lat² + sd_lon²)` from it (`_parse_gst`). The
+message is selected by interface — USB (`0x209100D6`) or UART1 (`0x209100D4`) —
+and re-sent on every reconnect, so it self-heals after a factory reset or a
+swapped receiver. If GST is unavailable (e.g. Neo-8M), the driver falls back to
+a conservative fix-type heuristic. Waypoint arrival tolerances key off this
+accuracy, so an honest measurement matters. No manual u-center step is required.
+
 ## Prerequisites
 
 ### Required Information
