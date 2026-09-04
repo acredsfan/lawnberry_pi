@@ -8,7 +8,8 @@ on:
 
 jobs:
   drift-check:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, self-hosted-linux-lawnberry]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

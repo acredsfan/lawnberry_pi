@@ -3,7 +3,8 @@ on: [pull_request]
 
 jobs:
   guard:
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, self-hosted-linux-lawnberry]
     steps:
       - uses: actions/checkout@v4
         with:

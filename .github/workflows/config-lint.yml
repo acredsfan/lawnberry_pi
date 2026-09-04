@@ -2,7 +2,8 @@ name: config-lint
 on: [pull_request]
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, self-hosted-linux-lawnberry]
     steps:
       - uses: actions/checkout@v4
       - uses: ibiqlik/action-yamllint@v3

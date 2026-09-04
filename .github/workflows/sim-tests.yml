@@ -1,9 +1,13 @@
 name: sim-tests
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
   sim:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, self-hosted-linux-lawnberry]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,11 +39,11 @@ jobs:
         if: steps.changes.outputs.relevant != 'true'
         run: echo "No simulation-relevant implementation, test, runtime-config, specification, firmware, or dependency changes."
 
-      - name: Set up Python 3.11
+      - name: Set up Python 3.13
         if: steps.changes.outputs.relevant == 'true'
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Set up uv
         if: steps.changes.outputs.relevant == 'true'

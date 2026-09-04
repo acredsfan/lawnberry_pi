@@ -1,9 +1,13 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
   backend-ci:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, self-hosted-linux-lawnberry]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,11 +45,11 @@ jobs:
         if: steps.changes.outputs.relevant != 'true'
         run: echo "No backend, test, runtime-config, specification, firmware, or dependency changes; backend CI is not applicable."
 
-      - name: Set up Python 3.11
+      - name: Set up Python 3.13
         if: steps.changes.outputs.relevant == 'true'
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Set up uv
         if: steps.changes.outputs.relevant == 'true'
@@ -81,7 +85,8 @@ jobs:
         run: uv run pytest -q
 
   openapi-schema:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, self-hosted-linux-lawnberry]
     needs: backend-ci
     steps:
       - uses: actions/checkout@v4
@@ -114,11 +119,11 @@ jobs:
         if: steps.changes.outputs.relevant != 'true'
         run: echo "No API implementation, schema generator, dependency, or snapshot changes; OpenAPI comparison is not applicable."
 
-      - name: Set up Python 3.11
+      - name: Set up Python 3.13
         if: steps.changes.outputs.relevant == 'true'
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Set up uv
         if: steps.changes.outputs.relevant == 'true'
