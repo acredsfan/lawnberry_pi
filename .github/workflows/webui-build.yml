@@ -2,7 +2,8 @@ name: webui-build
 on: [pull_request]
 jobs:
   build-ui:
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, self-hosted-linux-lawnberry]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,6 +20,23 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+      - name: Smoke production server
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORT=39091 BACKEND_URL=http://127.0.0.1:9 \
+            node server.mjs >/tmp/lawnberry-frontend-smoke.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for _attempt in {1..20}; do
+            if curl -fsS http://127.0.0.1:39091/maps >/dev/null; then
+              exit 0
+            fi
+            sleep 0.25
+          done
+          cat /tmp/lawnberry-frontend-smoke.log
+          exit 1
       # E2E tests are not run here:
       # 1. The previous step tried `uv venv` without installing uv (`setup-uv`
       #    was missing), so it failed at `uv: command not found`.

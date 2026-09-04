@@ -114,11 +114,15 @@ async def test_post_drive_command_blocks_when_obstacle_detected(monkeypatch):
     transport = httpx.ASGITransport(app=app)
     monkeypatch.setenv("SIM_MODE", "0")
 
-    from backend.src.core.config_loader import ConfigLoader
     from backend.src.core.runtime import get_runtime
     from backend.src.core.state_manager import AppState
+    from backend.src.models.safety_limits import SafetyLimits
 
-    _, safety = ConfigLoader().get()
+    runtime = app.dependency_overrides[get_runtime]()
+    safety = SafetyLimits()
+    runtime.command_gateway._config_loader = SimpleNamespace(
+        get=lambda: (runtime.hardware_config, safety)
+    )
     obstacle_distance_mm = safety.tof_obstacle_distance_meters * 1000 * 0.5
     telemetry = {
         "source": "hardware",
@@ -142,7 +146,6 @@ async def test_post_drive_command_blocks_when_obstacle_detected(monkeypatch):
         send_motor_command=fake_send_motor_command,
     )
 
-    runtime = app.dependency_overrides[get_runtime]()
     runtime.command_gateway._robohat = fake_robohat
     monkeypatch.setattr(AppState.get_instance(), "last_telemetry", telemetry)
     monkeypatch.setattr(robohat_module, "get_robohat_service", lambda: fake_robohat)

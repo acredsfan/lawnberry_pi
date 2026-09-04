@@ -221,11 +221,11 @@ class TestTelemetryPerformance:
             await mock_websocket_hub.subscribe(client_id, "telemetry")
         
         # Run high-frequency telemetry for a period
-        start_time = time.time()
+        start_time = time.perf_counter()
         iteration_count = 0
         error_count = 0
         
-        while time.time() - start_time < 2.0:  # Run for 2 seconds
+        while time.perf_counter() - start_time < 2.0:  # Run for 2 seconds
             try:
                 telemetry_data = await mock_websocket_hub._generate_telemetry()
                 await mock_websocket_hub._broadcast_telemetry_topics(telemetry_data)
@@ -455,7 +455,7 @@ class TestTelemetryLatency:
         received_messages = []
         
         async def capture_messages(message):
-            timestamp = time.time()
+            timestamp = time.perf_counter()
             received_messages.append((timestamp, json.loads(message)))
         
         mock_ws.send_text.side_effect = capture_messages
@@ -468,7 +468,7 @@ class TestTelemetryLatency:
         latencies = []
         
         for _ in range(10):
-            send_time = time.time()
+            send_time = time.perf_counter()
             
             # Simulate telemetry generation and broadcast
             telemetry_data = await hub._generate_telemetry()
@@ -523,11 +523,11 @@ class TestTelemetryThroughput:
             await hub.subscribe(client_id, "telemetry")
         
         # Measure throughput over time
-        start_time = time.time()
+        start_time = time.perf_counter()
         message_count = 0
         test_duration = 1.0  # 1 second test
         
-        while time.time() - start_time < test_duration:
+        while time.perf_counter() - start_time < test_duration:
             telemetry_data = await hub._generate_telemetry()
             await hub._broadcast_telemetry_topics(telemetry_data)
             message_count += client_count  # Each client receives a message
@@ -535,7 +535,7 @@ class TestTelemetryThroughput:
             # Small delay to prevent overwhelming
             await asyncio.sleep(0.001)
         
-        actual_duration = time.time() - start_time
+        actual_duration = time.perf_counter() - start_time
         throughput = message_count / actual_duration
         
         throughput_summary = (
@@ -572,16 +572,18 @@ async def test_pi4_graceful_performance_degradation(device_model, monkeypatch):
     # For TDD purposes, we're just verifying the test structure works
     telemetry_samples = []
     sample_count = 10
-    start_time = time.time()
+    sample_times = []
     
-    for _ in range(sample_count):
+    for sample_index in range(sample_count):
         # Simulate telemetry generation (would call actual telemetry service)
         telemetry = {"timestamp": time.time(), "device": device_model}
         telemetry_samples.append(telemetry)
-        await asyncio.sleep(0.5)  # 2 Hz = 500ms interval for Pi 4B
-    
-    elapsed = time.time() - start_time
-    actual_cadence = sample_count / elapsed
+        sample_times.append(time.perf_counter())
+        if sample_index < sample_count - 1:
+            await asyncio.sleep(0.5)  # 2 Hz = 500ms interval for Pi 4B
+
+    elapsed = sample_times[-1] - sample_times[0]
+    actual_cadence = (sample_count - 1) / elapsed
     
     # Pi 4B should run at 2 Hz (± 0.5 Hz tolerance)
     assert 1.5 <= actual_cadence <= 2.5, (
@@ -694,15 +696,17 @@ async def test_pi5_performance_baseline(monkeypatch):
     # Generate telemetry samples
     telemetry_samples = []
     sample_count = 10
-    start_time = time.time()
+    sample_times = []
     
-    for _ in range(sample_count):
+    for sample_index in range(sample_count):
         telemetry = {"timestamp": time.time(), "device": "pi5"}
         telemetry_samples.append(telemetry)
-        await asyncio.sleep(0.2)  # 5 Hz = 200ms interval
-    
-    elapsed = time.time() - start_time
-    actual_cadence = sample_count / elapsed
+        sample_times.append(time.perf_counter())
+        if sample_index < sample_count - 1:
+            await asyncio.sleep(0.2)  # 5 Hz = 200ms interval
+
+    elapsed = sample_times[-1] - sample_times[0]
+    actual_cadence = (sample_count - 1) / elapsed
     
     # Pi 5 should run at 5 Hz (± 1 Hz tolerance)
     assert 4.0 <= actual_cadence <= 6.0, (

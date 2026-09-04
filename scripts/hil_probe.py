@@ -17,7 +17,7 @@ import math
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -25,7 +25,7 @@ def _bool_env(name: str, default: bool = False) -> bool:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def probe_once(client, base_url: str) -> dict:
@@ -62,7 +62,7 @@ def probe_once(client, base_url: str) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="LawnBerry HIL probe to CSV")
-    parser.add_argument("--duration", type=int, default=30, help="Duration seconds")
+    parser.add_argument("--duration", type=float, default=30.0, help="Duration seconds")
     parser.add_argument(
         "--out",
         type=str,
@@ -86,7 +86,6 @@ def main() -> int:
     # Guard rails
     REAL_HW = _bool_env("REAL_HW", False)
     RUN_ENABLE = _bool_env("RUN_ENABLE", False)
-    SIM_MODE = _bool_env("SIM_MODE", True)
 
     if REAL_HW and not RUN_ENABLE:
         print("WARNING: REAL_HW=1 but RUN_ENABLE!=1; proceeding read-only", file=sys.stderr)
@@ -95,7 +94,16 @@ def main() -> int:
     import httpx
 
     client = httpx.Client()
-    fields = ["timestamp", "safety_state", "watchdog_ms", "overall_status", "cpu_usage", "mem_mb"]
+    fields = [
+        "timestamp",
+        "sample_index",
+        "monotonic_elapsed_s",
+        "safety_state",
+        "watchdog_ms",
+        "overall_status",
+        "cpu_usage",
+        "mem_mb",
+    ]
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -103,11 +111,16 @@ def main() -> int:
         duration = max(0.1, float(args.duration))
         interval = max(0.05, float(args.interval))
         samples = max(1, math.ceil(duration / interval) + 1)
-        for _ in range(samples):
+        probe_started = time.monotonic()
+        for sample_index in range(samples):
+            sample_started = time.monotonic()
             row = probe_once(client, args.base_url)
+            row["sample_index"] = sample_index
+            row["monotonic_elapsed_s"] = sample_started - probe_started
             writer.writerow(row)
             f.flush()
-            time.sleep(interval)
+            if sample_index < samples - 1:
+                time.sleep(interval)
 
     print(f"Wrote {args.out}")
     return 0

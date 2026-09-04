@@ -2,13 +2,14 @@ name: dep-audit
 on: [pull_request]
 jobs:
   python-audit:
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, self-hosted-linux-lawnberry]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
       - uses: astral-sh/setup-uv@v3
       - name: Export third-party dependencies to requirements.txt
         run: >-
@@ -20,7 +21,8 @@ jobs:
         run: python -m pip_audit -r requirements.txt
 
   node-audit:
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, self-hosted-linux-lawnberry]
     defaults: { run: { working-directory: frontend } }
     steps:
       - uses: actions/checkout@v4

@@ -7,7 +7,8 @@ on:
     - cron: "0 3 * * 1"
 jobs:
   analyze:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, self-hosted-linux-lawnberry]
     permissions:
       actions: read
       contents: read
@@ -19,6 +20,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Node.js for JavaScript analysis
+        if: matrix.language == 'javascript'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
