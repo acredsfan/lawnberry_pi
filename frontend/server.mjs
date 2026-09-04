@@ -7,6 +7,7 @@ import express from 'express'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import compression from 'compression'
+import { rateLimit } from 'express-rate-limit'
 import morgan from 'morgan'
 import { createProxyMiddleware } from 'http-proxy-middleware'
 import { isIP } from 'node:net'
@@ -58,11 +59,21 @@ app.use((req, _res, next) => {
   next()
 })
 
+// Bound explicit sendFile routes separately from the static middleware. This
+// protects disk access even when an upstream proxy or LAN client repeatedly
+// requests uncached SPA paths.
+const staticFileLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+})
+
 // Serve branding assets (e.g., LawnBerryPi_Pin.png) so they are available to the UI
 const brandingDir = path.resolve(__dirname, '../branding')
 app.use('/branding', express.static(brandingDir, { maxAge: '30d' }))
 // Back-compat: expose the primary mower pin at the root path expected by the editor
-app.get('/LawnBerryPi_Pin.png', (_req, res) => {
+app.get('/LawnBerryPi_Pin.png', staticFileLimiter, (_req, res) => {
   res.sendFile(path.join(brandingDir, 'LawnBerryPi_Pin.png'))
 })
 
@@ -138,7 +149,7 @@ const distDir = path.resolve(__dirname, 'dist')
 app.use(express.static(distDir, { maxAge: '1d', index: 'index.html' }))
 
 // SPA fallback: serve index.html for any non-API route
-app.get('/{*splat}', (req, res) => {
+app.get('/{*splat}', staticFileLimiter, (req, res) => {
   // Avoid intercepting proxied routes
   if (req.path.startsWith('/api') || req.path.startsWith('/ws')) {
     return res.status(404).send('Not Found')

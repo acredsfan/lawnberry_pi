@@ -28,6 +28,7 @@
     "compression": "^1.7.4",
     "dompurify": "^3.4.13",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
     "http-proxy-middleware": "^3.0.7",
     "leaflet": "^1.9.4",
     "leaflet.gridlayer.googlemutant": "^0.13.5",
