@@ -128,9 +128,14 @@ frontend/dist-ssr/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+.claude/settings.local.json
 *.swp
 *.swo
 *~
+
+# Local agent/tool state. ForgeMind databases are already covered by *.db;
+# its downloaded embedding model cache must also remain machine-local.
+.forgemind/embeddings_cache/
 
 # =============================================================
 # OS files
@@ -159,6 +164,7 @@ config/network.json
 config/system.json
 config/default.json
 config/ai_detector.json
+config/surface_segmenter.json
 models/*.onnx
 
 # =============================================================
