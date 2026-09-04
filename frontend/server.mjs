@@ -138,7 +138,7 @@ const distDir = path.resolve(__dirname, 'dist')
 app.use(express.static(distDir, { maxAge: '1d', index: 'index.html' }))
 
 // SPA fallback: serve index.html for any non-API route
-app.get('*', (req, res) => {
+app.get('/{*splat}', (req, res) => {
   // Avoid intercepting proxied routes
   if (req.path.startsWith('/api') || req.path.startsWith('/ws')) {
     return res.status(404).send('Not Found')
