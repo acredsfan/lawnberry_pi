@@ -2,7 +2,8 @@ from pathlib import Path
 
 import yaml
 
-WORKFLOW_DIR = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
 RUNNER_LABELS = {
     "self-hosted",
     "Linux",
@@ -61,3 +62,7 @@ def test_setup_python_steps_target_python_313() -> None:
         assert str(step.get("with", {}).get("python-version")) == "3.13", (
             f"{path_name}:{job_name} must test the supported Python version"
         )
+
+
+def test_uv_default_python_is_313() -> None:
+    assert (REPO_ROOT / ".python-version").read_text(encoding="utf-8").strip() == "3.13"

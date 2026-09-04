@@ -88,7 +88,9 @@ Exports the FastAPI OpenAPI schema to a JSON file.
 ## hil_probe.py
 
 Hardware-in-loop probe: verifies hardware peripherals are accessible
-(requires `RUN_HW_TESTS=1` and real hardware).
+(requires `RUN_HW_TESTS=1` and real hardware). Its CSV keeps a UTC wall-clock
+timestamp for log correlation plus `sample_index` and `monotonic_elapsed_s` for
+ordering and duration measurements that remain valid across NTP clock steps.
 
 ## init_database.py
 
