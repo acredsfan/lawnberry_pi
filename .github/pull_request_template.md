@@ -9,8 +9,11 @@
 
 - [ ] **Agent Evidence (Required for backend/frontend/systemd code changes)**
   - [ ] Used **Semble** for code discovery (`semble-search` / `semble-find_related`)
+  - [ ] **Semble unavailable**; used `rg`/`git` discovery and documented the fallback
   - [ ] Used **Pi-control** for runtime/service/hardware evidence
+  - [ ] **Pi-control unavailable**; used direct SSH/API/systemd evidence and documented the fallback
   - [ ] Used **ForgeMind** for task context/memory (`forgemind-session_start` and related calls)
+  - [ ] **ForgeMind unavailable**; documented the gap and used scoped project notes
   - [ ] Added verification evidence (commands/tool calls + key output) in PR description
 
 - [ ] **Docs Updated**

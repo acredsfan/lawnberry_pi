@@ -46,16 +46,16 @@ jobs:
           BODY=$(python -c 'import json, os; from pathlib import Path; event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text()); print(event.get("pull_request", {}).get("body", ""))')
 
           fail=0
-          echo "$BODY" | grep -Eiq -- '- \[[xX]\] Used \*\*Semble\*\* for code discovery' || {
-            echo "Missing checked Semble evidence box in PR template."
+          echo "$BODY" | grep -Eiq -- '- \[[xX]\] (Used \*\*Semble\*\* for code discovery|\*\*Semble unavailable\*\*; used `rg`/`git` discovery and documented the fallback)' || {
+            echo "Missing checked Semble use or explicit fallback evidence box."
             fail=1
           }
-          echo "$BODY" | grep -Eiq -- '- \[[xX]\] Used \*\*Pi-control\*\* for runtime/service/hardware evidence' || {
-            echo "Missing checked Pi-control evidence box in PR template."
+          echo "$BODY" | grep -Eiq -- '- \[[xX]\] (Used \*\*Pi-control\*\* for runtime/service/hardware evidence|\*\*Pi-control unavailable\*\*; used direct SSH/API/systemd evidence and documented the fallback)' || {
+            echo "Missing checked Pi-control use or explicit fallback evidence box."
             fail=1
           }
-          echo "$BODY" | grep -Eiq -- '- \[[xX]\] Used \*\*ForgeMind\*\* for task context/memory' || {
-            echo "Missing checked ForgeMind evidence box in PR template."
+          echo "$BODY" | grep -Eiq -- '- \[[xX]\] (Used \*\*ForgeMind\*\* for task context/memory|\*\*ForgeMind unavailable\*\*; documented the gap and used scoped project notes)' || {
+            echo "Missing checked ForgeMind use or explicit fallback evidence box."
             fail=1
           }
           echo "$BODY" | grep -Eiq -- '- \[[xX]\] Added verification evidence' || {
