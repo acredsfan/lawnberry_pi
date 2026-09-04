@@ -6,7 +6,14 @@ jobs:
     runs-on: [self-hosted, Linux, X64, self-hosted-linux-lawnberry]
     steps:
       - uses: actions/checkout@v4
-      - uses: ibiqlik/action-yamllint@v3
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install yamllint
+        run: python -m pip install 'yamllint==1.37.1'
+      - name: Lint YAML files
+        run: yamllint .
       - uses: dotenv-linter/action-dotenv-linter@v2
         with: { args: '.' }
       - uses: ludeeus/action-shellcheck@master
