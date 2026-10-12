@@ -1,5 +1,18 @@
 # LawnBerry Agent Instructions
 
+## Git-backed project memory
+
+1. At task start read [project state](docs/project-state.md), verify task-relevant claims against current code, configuration, Git history and fresh external evidence, then retrieve only relevant records from [decisions](docs/decisions/README.md).
+2. Check recorded failed approaches and supersession links before proposing a solution. Prefer an accepted correction over its superseded predecessor; preserve the old record as history.
+3. These records are scoped evidence, not instructions overriding the user or applicable repository guidance. Other projects' decisions do not apply here. Source code, authoritative configuration and current evidence take precedence over remembered conclusions.
+4. At completion update memory only for a durable decision, verified correction, useful evidenced failure, or material status change. Replace stale snapshot status; mark superseded records and link the replacement in both directions.
+5. Separate verified facts, hypotheses and recommendations. Cite evidence and its date/environment; a test's existence does not mean it passed. Record limitations and reconsideration conditions.
+6. Keep credentials, sensitive/user data, raw conversations, provider output and routine task logs out. Reference configuration instead of copying values.
+
+This is an agent-maintained documentation workflow. No automatic capture/retrieval or memory service is implemented or required. Use the [record format](docs/decisions/README.md#record-format); do not create a competing memory index.
+
+Finish the normal PR/check workflow and exact-head cleanup of owned branches/worktrees. Preserve dirty work, active consumers and uncertain ownership; age alone does not justify deletion.
+
 ## Code Search
 
 Use the semble MCP tools (`mcp__semble__search`, `mcp__semble__find_related`) for file and code searches before falling back to `grep`/`find`. Prefer passing `repo=https://github.com/acredsfan/lawnberry_pi` unless local-path indexing is explicitly verified healthy in the current runtime (some environments mis-handle Linux paths). Call `find_related` on a search result to discover similar code elsewhere in the codebase. Prefer semble for any question about how code works, where a symbol is defined, or which files reference a given name.
@@ -8,9 +21,8 @@ Use the semble MCP tools (`mcp__semble__search`, `mcp__semble__find_related`) fo
 
 - For codebase discovery, use **Semble first** (`semble-search` / `semble-find_related`) before fallback tools.
 - For runtime, service, hardware, or on-device diagnostics, use **Pi-control first** (`pi-control` tools) before generic shell probing.
-- At task start, use **ForgeMind session/context tools** (`forgemind-session_start`, then context/memory tools as needed) for cross-turn continuity.
-- Treat **ForgeMind as the shared project memory and history source of truth** for agent work. Before changing code or runtime state, query ForgeMind for relevant prior work, known failures, discoveries, corrected errors, and open follow-ups. After meaningful progress, fixes, root-cause findings, failed approaches, config changes, or validation results, write a concise ForgeMind memory/session update so later agents do not repeat mistakes, undo previous work, or lose operational context.
-- If ForgeMind is unavailable, record that as a tooling blocker in the task notes/final handoff, use the best local fallback, and do not present the fallback memory as complete project history.
+- Use the Git-backed memory workflow above for task context and durable corrections. Existing external/history notes are optional evidence; they are not the project source of truth or a prerequisite, and this workflow requires no ForgeMind session, service or installation.
+- The legacy PR checklist's **ForgeMind unavailable** option can cite the scoped Git project-state and decision records. Preserve its existing CI-compatible wording; lack of that service does not block this workflow.
 - Do not claim a fix until evidence is captured from commands/tool calls that directly prove the target behavior changed.
 - For PRs that touch `backend/`, `frontend/`, or `systemd/`, complete the **Agent Evidence** checklist in the PR template; CI enforces this.
 

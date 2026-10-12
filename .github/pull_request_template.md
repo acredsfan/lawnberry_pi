@@ -7,6 +7,10 @@
 
 ## Checklist
 
+Project memory follows [AGENTS.md](../AGENTS.md#git-backed-project-memory). The
+legacy ForgeMind fallback checkbox below may cite Git-tracked project state and
+decision records; it does not require installing or using a memory service.
+
 - [ ] **Agent Evidence (Required for backend/frontend/systemd code changes)**
   - [ ] Used **Semble** for code discovery (`semble-search` / `semble-find_related`)
   - [ ] **Semble unavailable**; used `rg`/`git` discovery and documented the fallback

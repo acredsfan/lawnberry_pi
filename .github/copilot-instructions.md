@@ -45,8 +45,8 @@ tail -f /home/pi/lawnberry/backend/backend.log
 
 - Use **Semble** (`semble-search`, `semble-find_related`) as the first choice for code discovery.
 - Use **Pi-control** tools first for runtime/service/hardware state checks.
-- Use **ForgeMind** session/context tools at task start when available.
-- Treat **ForgeMind as the shared source of truth for project memory/history**: query it before changing code or runtime state, and write back concise updates for meaningful fixes, discoveries, failed approaches, corrected errors, config changes, and validation results. If ForgeMind is unavailable, state that explicitly and avoid treating local fallback notes as complete history.
+- Follow the [Git-backed project memory workflow](../AGENTS.md#git-backed-project-memory): read the current snapshot, retrieve relevant decisions/failures, verify current evidence, and update only durable verified knowledge or material status changes.
+- External/history notes are optional evidence, not authoritative memory or a service prerequisite. The legacy PR checklist's **ForgeMind unavailable** option can cite scoped Git records; no installation or session lifecycle is required.
 - Before final handoff, include direct evidence from tool/command output that proves the reported behavior changed.
 - For changes under `backend/`, `frontend/`, or `systemd/`, complete the PR template **Agent Evidence** checklist; CI rejects PRs missing it.
 
