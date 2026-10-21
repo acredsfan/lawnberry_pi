@@ -4,6 +4,10 @@
 > coding conventions, documentation drift policy, and secrets handling.
 > This file adds Claude Code-specific guidance that goes beyond AGENTS.md.
 
+For task continuity use the manual [Git-backed memory workflow](AGENTS.md#git-backed-project-memory),
+[current project state](docs/project-state.md) and [scoped decisions](docs/decisions/README.md).
+Historical failure notes below require current reproduction; they are not permission to ignore a failing check.
+
 ---
 
 ## Tools
@@ -116,9 +120,11 @@ cd frontend && npm run type-check     # TypeScript check
 cd frontend && npm run build          # Build validation
 ```
 
-### Known Pre-Existing Failures to Ignore
+### Historical failure notes — reverify before excluding
 
-These are **not regressions** — do not spend time fixing them:
+The table preserves older failure reports, not current test status. Reproduce
+task-relevant failures with the current test inventory and environment before
+classifying them; this history does not authorize ignoring a failing check.
 
 | File | Reason |
 |------|--------|
@@ -131,7 +137,8 @@ These are **not regressions** — do not spend time fixing them:
 | `tests/unit/test_hardware_selftest.py` | File does not exist (requires `RUN_HW_TESTS=1`) |
 | `tests/unit/test_auth_security_levels_unit.py` (2) | Skipped when `google-auth` not installed |
 
-All other unit and integration tests should pass. `test_sensor_cli_format.py` passes on its own; it only caused a collection error before the typer fix.
+No current pass is established by this table. Check current test markers and
+collection paths; even a formerly isolated pass requires fresh verification.
 
 ---
 

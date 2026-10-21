@@ -1,5 +1,9 @@
 # LawnBerry Pi v2 🌱🤖
 
+Contributor recovery: [agent workflow](AGENTS.md), [dated project state](docs/project-state.md)
+and [decisions/lessons](docs/decisions/README.md). Verify relevant claims against
+current sources; this is a manual Git-backed workflow.
+
 **Professional Autonomous Mowing System with 1980s Cyberpunk Interface**
 
 Target platform: Raspberry Pi OS Lite Bookworm (64-bit) on Raspberry Pi 5 (16 GB) with Python 3.11.x, with graceful degradation validated on Raspberry Pi 4B (4–8 GB).
